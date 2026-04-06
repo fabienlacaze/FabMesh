@@ -1728,15 +1728,20 @@
       });
     }
 
-    // Convert
-    document.getElementById('btn-convert').onclick = async () => {
-      if (!selectedMesh) return;
-      try {
-        const r = await window.meshyAPI.exportMesh({ sourcePath: selectedMesh.path, targetFormat: document.getElementById('convert-format').value });
-        showLog('Converted: ' + r.filename, 'success');
-        await refreshActiveGallery();
-      } catch(e) { showLog('Error: ' + (e.error||e.message), 'error'); }
-    };
+    // Convert (legacy button - removed in favor of universal export modal)
+    const btnConvertEl = document.getElementById('btn-convert');
+    if (btnConvertEl) {
+      btnConvertEl.onclick = async () => {
+        if (!selectedMesh) return;
+        try {
+          const fmtEl = document.getElementById('convert-format');
+          const fmt = fmtEl ? fmtEl.value : 'glb';
+          const r = await window.meshyAPI.exportMesh({ sourcePath: selectedMesh.path, targetFormat: fmt });
+          showLog('Converted: ' + r.filename, 'success');
+          await refreshActiveGallery();
+        } catch(e) { showLog('Error: ' + (e.error||e.message), 'error'); }
+      };
+    }
 
     // Export to Unreal button
     const btnUnreal = document.getElementById('btn-export-unreal');
@@ -2942,10 +2947,10 @@
       }
     }
 
-    document.getElementById('btn-export-global').addEventListener('click', openExportModal);
-    document.getElementById('export-modal-cancel').addEventListener('click', () => document.getElementById('export-modal').classList.add('hidden'));
-    document.getElementById('export-modal-close').addEventListener('click', () => document.getElementById('export-modal').classList.add('hidden'));
-    document.getElementById('export-modal-go').addEventListener('click', (e) => {
+    document.getElementById('btn-export-global')?.addEventListener('click', openExportModal);
+    document.getElementById('export-modal-cancel')?.addEventListener('click', () => document.getElementById('export-modal').classList.add('hidden'));
+    document.getElementById('export-modal-close')?.addEventListener('click', () => document.getElementById('export-modal').classList.add('hidden'));
+    document.getElementById('export-modal-go')?.addEventListener('click', (e) => {
       const ctx = e.currentTarget.dataset.ctx || 'mesh';
       performExport(ctx);
     });
