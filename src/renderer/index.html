@@ -2523,12 +2523,12 @@
       const imgViewer = document.getElementById('image-viewer');
       const canvas = document.getElementById('three-canvas');
       const emptyMesh = document.getElementById('viewer-empty');
+      const vtb = document.getElementById('viewer-toolbar');
       if (tabId === 'tab-image') {
         imgViewer.classList.remove('hidden');
         canvas.style.display = 'none';
         if (emptyMesh) emptyMesh.style.display = 'none';
-        // Hide 3D viewer toolbar (Reset/Wire/PBR/Grid/Light) — irrelevant for images
-        const vtb = document.getElementById('viewer-toolbar');
+        // Hide 3D viewer toolbar — irrelevant for images
         if (vtb) vtb.style.display = 'none';
         // Hide mesh-only sections (export, auto-rig, etc.)
         const exportSec = document.getElementById('export-section');
@@ -2542,10 +2542,12 @@
           document.getElementById('image-viewer-empty').style.display = 'block';
         }
       } else {
-        // Both tab-3d and tab-rig: show 3D viewer
+        // Both tab-3d and tab-rig: show 3D viewer + toolbar
         imgViewer.classList.add('hidden');
         canvas.style.display = '';
         if (emptyMesh && !currentModel) emptyMesh.style.display = '';
+        // Show 3D viewer toolbar (Reset/Wire/PBR/Grid/Light)
+        if (vtb) vtb.style.display = '';
         // Show export section in 3D tab only (not rig tab — has its own export)
         const exportSec = document.getElementById('export-section');
         if (exportSec) {
