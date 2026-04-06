@@ -62,7 +62,7 @@
           <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
           <span class="toolbar-separator"></span>
           <span class="toolbar-label">Light</span>
-          <input type="range" id="light-slider" min="0" max="1000" value="120" class="toolbar-slider" title="Light intensity">
+          <input type="range" id="light-slider" min="0" max="1000" value="240" class="toolbar-slider" title="Light intensity">
           <span id="mesh-info" class="mesh-info"></span>
         </div>
       </main>
@@ -204,6 +204,10 @@
                   <option value="10000" selected>10K</option>
                   <option value="50000">50K</option>
                   <option value="100000">100K</option>
+                  <option value="200000">200K</option>
+                  <option value="300000">300K</option>
+                  <option value="400000">400K</option>
+                  <option value="500000">500K</option>
                 </select>
               </div>
               <div class="adv-check-row">
@@ -363,8 +367,8 @@
     controls.target.set(0, 0.5, 0);
     controls.update();
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.84));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.4);
     dirLight.position.set(5, 8, 5);
     dirLight.castShadow = true;
     scene.add(dirLight);
@@ -1553,11 +1557,13 @@
       const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
       const imageEngine = document.getElementById('image-engine').value;
       const btn = document.getElementById('btn-refine-image');
-      btn.disabled = true; btn.textContent = 'Refining...';
+      btn.disabled = false; // Don't lock — runs as a background job
 
-      document.getElementById('generation-status').classList.remove('hidden');
-      resetProgress();
-      startProgressAnimation(90, numImages * 30000, `Refining ${numImages} images...`);
+      // Add to job queue
+      const refineJob = addJob(`Refine: ${numImages} images`, imageEngine);
+      refineJob.step = 'Refining images...';
+      refineJob.progress = 10;
+      renderJobs();
 
       const grid = document.getElementById('image-grid');
       const gridItems = document.getElementById('image-grid-items');
@@ -1566,15 +1572,13 @@
 
       const result = await window.meshyAPI.generateImages({ prompt: refinedPrompt, numImages, projectName: meshName, engine: imageEngine });
 
-      stopProgress();
       if (!result.success || !result.images?.length) {
-        showProgressError('Refine failed');
+        completeJob(refineJob.id, false);
         showLog(result.error || 'No images', 'error');
-        btn.disabled = false; btn.textContent = 'Refine Image';
         return;
       }
 
-      setProgress(100, `${result.images.length} refined images!`);
+      completeJob(refineJob.id, true);
       const safePrompt = refinedPrompt.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       gridItems.innerHTML = result.images.map(img =>
         `<div class="grid-img-wrapper"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
@@ -1585,7 +1589,6 @@
 
       if (currentTab === 'tab-image') refreshGalleryImages();
       window.meshyAPI.flashTaskbar();
-      btn.disabled = false; btn.textContent = 'Refine Image';
       document.getElementById('img-refine-input').value = '';
     });
 
