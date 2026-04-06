@@ -418,13 +418,22 @@
     }
 
     function fitCamera(model) {
+      // Recenter model: pivot at center-bottom (X=0, Y=0 at bottom, Z=0)
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
+      // Shift so center-bottom is at origin
+      model.position.x -= center.x;
+      model.position.y -= box.min.y;
+      model.position.z -= center.z;
+
+      // Recompute after shift
+      const newBox = new THREE.Box3().setFromObject(model);
+      const newCenter = newBox.getCenter(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
       const dist = maxDim / (2 * Math.tan(camera.fov * Math.PI / 360)) * 1.8;
-      camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
-      controls.target.copy(center);
+      camera.position.set(dist * 0.7, newCenter.y + dist * 0.5, dist * 0.7);
+      controls.target.copy(newCenter);
       controls.update();
 
       let verts = 0, faces = 0;
