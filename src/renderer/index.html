@@ -537,7 +537,7 @@
         <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
           <canvas id="clone-canvas" style="cursor: none; background: #000; position: absolute; left: 0; top: 0;"></canvas>
           <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
-          <div id="clone-source-marker" style="position: fixed; pointer-events: none; width: 14px; height: 14px; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.3); display: none; z-index: 1000; transform: translate(-50%, -50%);"></div>
+          <div id="clone-source-marker" style="position: fixed; pointer-events: none; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.15); display: none; z-index: 999; box-sizing: border-box;"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
@@ -2799,6 +2799,34 @@
         cur.style.left = (e.clientX - displaySize / 2) + 'px';
         cur.style.top = (e.clientY - displaySize / 2) + 'px';
         cur.style.display = 'block';
+
+        // Source preview circle: follows the brush with the constant offset (Photoshop-style)
+        const src = document.getElementById('clone-source-marker');
+        if (!src) return;
+        if (!cloneState.sourcePoint) {
+          src.style.display = 'none';
+          return;
+        }
+        // Compute source position in canvas coords
+        let sx, sy;
+        if (cloneState.offset) {
+          // After first paint: source = (current_dst + offset)
+          const p = getCanvasCoords(e);
+          sx = p.x + cloneState.offset.dx;
+          sy = p.y + cloneState.offset.dy;
+        } else {
+          // Before first paint: show a fixed marker on the source point
+          sx = cloneState.sourcePoint.x;
+          sy = cloneState.sourcePoint.y;
+        }
+        // Convert canvas-space (sx, sy) -> screen-space (center of source circle)
+        const screenX = rect.left + sx * scaleX;
+        const screenY = rect.top + sy * scaleX;
+        src.style.width = displaySize + 'px';
+        src.style.height = displaySize + 'px';
+        src.style.left = (screenX - displaySize / 2) + 'px';
+        src.style.top = (screenY - displaySize / 2) + 'px';
+        src.style.display = 'block';
       }
       // Bind enter/leave on the CONTAINER so they work even if canvas is clipped
       cloneContainer.addEventListener('mouseenter', (e) => updateBrushCursor(e));
@@ -2809,20 +2837,10 @@
       // Container-level mousemove updates the cursor too (canvas may not catch it)
       cloneContainer.addEventListener('mousemove', updateBrushCursor);
 
-      // Update source marker position when source point is set
+      // Source marker is updated dynamically in updateBrushCursor (follows mouse)
       function updateSourceMarker() {
-        const m = document.getElementById('clone-source-marker');
-        if (!m) return;
-        if (!cloneState.sourcePoint) {
-          m.style.display = 'none';
-          return;
-        }
-        const rect = cloneCanvas.getBoundingClientRect();
-        const scaleX = rect.width / cloneCanvas.width;
-        const scaleY = rect.height / cloneCanvas.height;
-        m.style.left = (rect.left + cloneState.sourcePoint.x * scaleX) + 'px';
-        m.style.top = (rect.top + cloneState.sourcePoint.y * scaleY) + 'px';
-        m.style.display = 'block';
+        // Force a redraw at the current mouse position next frame
+        // (no-op here - real update happens in updateBrushCursor)
       }
 
       window.addEventListener('mouseup', (e) => {
