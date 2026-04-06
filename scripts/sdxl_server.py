@@ -6,49 +6,103 @@ to avoid 5-10s reload per call.
 Listens on 127.0.0.1:5555 via simple HTTP/JSON.
 
 Endpoints:
-  GET  /ping              - health check
+  GET  /ping              - health check + model status
+  GET  /status            - detailed model + GPU status
   POST /img2img           - { input, prompt, output, strength }
   POST /inpaint           - { input, target, prompt, output, dilate }
   POST /shutdown          - graceful exit
+  POST /unload            - free a specific model from VRAM
 """
 import os
 import sys
 import json
 import time
+import gc
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
 
+# Faster startup: only import what we need at top
 import torch
 from PIL import Image, ImageFilter
 import numpy as np
 
+# ========== CONFIG ==========
 HOST = '127.0.0.1'
 PORT = 5555
+SDXL_TURBO_MODEL = "stabilityai/sdxl-turbo"
+SDXL_INPAINT_MODEL = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+CLIPSEG_MODEL = "CIDAS/clipseg-rd64-refined"
 
-# Global pipelines (lazy loaded)
-_img2img_pipe = None
-_inpaint_pipe = None
-_clipseg_model = None
-_clipseg_processor = None
-_load_lock = threading.Lock()
+# Reserve 5% VRAM for OS / display
+GPU_MEMORY_FRACTION = 0.95
 
 
-def log(msg):
-    print(f"[SDXL-SERVER] {msg}", flush=True)
+# ========== STATE ==========
+class ModelState:
+    """Holds all loaded models and their locks."""
+    def __init__(self):
+        self.img2img_pipe = None
+        self.inpaint_pipe = None
+        self.clipseg_model = None
+        self.clipseg_processor = None
+        self.load_lock = threading.RLock()    # Reentrant - same thread can load multiple
+        self.inference_lock = threading.Lock()  # Serialize GPU calls
+        self.last_use = {}                     # model_name -> timestamp
+
+
+state = ModelState()
+
+
+def log(msg, level='info'):
+    prefix = {'info': '[SDXL]', 'err': '[SDXL ERR]', 'warn': '[SDXL WARN]'}.get(level, '[SDXL]')
+    print(f"{prefix} {msg}", flush=True)
+
+
+def vram_used_gb():
+    if not torch.cuda.is_available():
+        return 0.0
+    return torch.cuda.memory_allocated() / 1024**3
+
+
+def vram_total_gb():
+    if not torch.cuda.is_available():
+        return 0.0
+    return torch.cuda.get_device_properties(0).total_memory / 1024**3
+
+
+def free_vram():
+    """Aggressive VRAM cleanup."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
+# ========== MODEL LOADING ==========
+def _set_memory_fraction():
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION, 0)
+        except Exception as e:
+            log(f"Could not set memory fraction: {e}", 'warn')
 
 
 def load_img2img():
-    global _img2img_pipe
-    if _img2img_pipe is not None:
-        return _img2img_pipe
-    with _load_lock:
-        if _img2img_pipe is not None:
-            return _img2img_pipe
-        log("Loading SDXL Turbo img2img...")
+    """Lazy-load SDXL Turbo img2img pipeline."""
+    if state.img2img_pipe is not None:
+        state.last_use['img2img'] = time.time()
+        return state.img2img_pipe
+
+    with state.load_lock:
+        if state.img2img_pipe is not None:
+            return state.img2img_pipe
+        log(f"Loading {SDXL_TURBO_MODEL}...")
+        _set_memory_fraction()
         from diffusers import StableDiffusionXLImg2ImgPipeline
+        t0 = time.time()
         pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
-            "stabilityai/sdxl-turbo",
+            SDXL_TURBO_MODEL,
             torch_dtype=torch.float16,
             variant="fp16",
             use_safetensors=True,
@@ -56,175 +110,317 @@ def load_img2img():
         pipe.to("cuda")
         pipe.enable_attention_slicing()
         pipe.enable_vae_tiling()
-        _img2img_pipe = pipe
-        log(f"SDXL Turbo loaded ({torch.cuda.memory_allocated()/1024**3:.1f} GB VRAM)")
-    return _img2img_pipe
+        # Disable safety checker if present (we're local single user)
+        if hasattr(pipe, 'safety_checker'):
+            pipe.safety_checker = None
+        state.img2img_pipe = pipe
+        state.last_use['img2img'] = time.time()
+        log(f"img2img loaded in {time.time()-t0:.1f}s ({vram_used_gb():.1f} GB VRAM)")
+    return state.img2img_pipe
 
 
 def load_inpaint():
-    global _inpaint_pipe, _clipseg_model, _clipseg_processor
-    if _inpaint_pipe is not None and _clipseg_model is not None:
-        return _inpaint_pipe
-    with _load_lock:
-        if _clipseg_model is None:
-            log("Loading CLIPSeg...")
+    """Lazy-load SDXL Inpainting + CLIPSeg."""
+    if state.inpaint_pipe is not None and state.clipseg_model is not None:
+        state.last_use['inpaint'] = time.time()
+        return state.inpaint_pipe
+
+    with state.load_lock:
+        # CLIPSeg first (small model, ~400 MB)
+        if state.clipseg_model is None:
+            log(f"Loading {CLIPSEG_MODEL}...")
             from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
-            _clipseg_processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
-            _clipseg_model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
-            _clipseg_model.to("cuda")
-            _clipseg_model.eval()
-            log("CLIPSeg loaded")
-        if _inpaint_pipe is None:
-            log("Loading SDXL Inpainting...")
+            t0 = time.time()
+            state.clipseg_processor = CLIPSegProcessor.from_pretrained(CLIPSEG_MODEL)
+            state.clipseg_model = CLIPSegForImageSegmentation.from_pretrained(CLIPSEG_MODEL)
+            state.clipseg_model.to("cuda")
+            state.clipseg_model.eval()
+            log(f"CLIPSeg loaded in {time.time()-t0:.1f}s")
+
+        # SDXL Inpainting (large model, ~6 GB)
+        if state.inpaint_pipe is None:
+            log(f"Loading {SDXL_INPAINT_MODEL}...")
+            _set_memory_fraction()
             from diffusers import StableDiffusionXLInpaintPipeline
+            t0 = time.time()
             pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
-                "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
+                SDXL_INPAINT_MODEL,
                 torch_dtype=torch.float16,
                 variant="fp16",
             )
             pipe.to("cuda")
             pipe.enable_attention_slicing()
             pipe.enable_vae_tiling()
-            _inpaint_pipe = pipe
-            log(f"SDXL Inpainting loaded ({torch.cuda.memory_allocated()/1024**3:.1f} GB VRAM)")
-    return _inpaint_pipe
+            if hasattr(pipe, 'safety_checker'):
+                pipe.safety_checker = None
+            state.inpaint_pipe = pipe
+            state.last_use['inpaint'] = time.time()
+            log(f"Inpaint loaded in {time.time()-t0:.1f}s ({vram_used_gb():.1f} GB VRAM)")
+    return state.inpaint_pipe
 
 
-_inference_lock = threading.Lock()
+def unload_model(name):
+    """Free a model from VRAM. name in ('img2img', 'inpaint', 'clipseg')."""
+    with state.load_lock:
+        before = vram_used_gb()
+        if name == 'img2img' and state.img2img_pipe is not None:
+            del state.img2img_pipe
+            state.img2img_pipe = None
+        elif name == 'inpaint' and state.inpaint_pipe is not None:
+            del state.inpaint_pipe
+            state.inpaint_pipe = None
+        elif name == 'clipseg' and state.clipseg_model is not None:
+            del state.clipseg_model
+            del state.clipseg_processor
+            state.clipseg_model = None
+            state.clipseg_processor = None
+        free_vram()
+        log(f"Unloaded {name} - VRAM {before:.1f} -> {vram_used_gb():.1f} GB")
 
 
-def do_img2img(input_path, prompt, output_path, strength):
-    pipe = load_img2img()
-    # Serialize inference: single GPU, parallel calls cause OOM/garbage
-    with _inference_lock:
-        img = Image.open(input_path).convert("RGB")
-        w, h = img.size
-        if w < h:
-            new_w, new_h = 1024, int(h * 1024 / w)
+# ========== IMAGE HELPERS ==========
+def resize_for_sdxl(img, max_dim=1024, snap_to_8=True):
+    """Resize keeping aspect ratio so longer side = max_dim, dimensions multiple of 8."""
+    w, h = img.size
+    if max(w, h) > max_dim:
+        if w >= h:
+            new_w, new_h = max_dim, int(h * max_dim / w)
         else:
-            new_h, new_w = 1024, int(w * 1024 / h)
-        new_w = (new_w // 8) * 8
-        new_h = (new_h // 8) * 8
-        img = img.resize((new_w, new_h), Image.LANCZOS)
-
-        enhanced = f"{prompt}, high quality, detailed"
-        s = float(strength)
-        steps = max(2, int(round(4 / s)))
-        t0 = time.time()
-        result = pipe(
-            prompt=enhanced,
-            image=img,
-            strength=s,
-            num_inference_steps=steps,
-            guidance_scale=0.0,
-        ).images[0]
-        result.save(output_path)
-        log(f"img2img done in {time.time()-t0:.1f}s -> {output_path}")
-        return {"ok": True, "output": output_path}
+            new_h, new_w = max_dim, int(w * max_dim / h)
+    else:
+        new_w, new_h = w, h
+    if snap_to_8:
+        new_w = max(8, (new_w // 8) * 8)
+        new_h = max(8, (new_h // 8) * 8)
+    return img.resize((new_w, new_h), Image.LANCZOS), (new_w, new_h)
 
 
-def do_inpaint(input_path, target_text, prompt, output_path, dilate):
-    pipe = load_inpaint()
-    with _inference_lock:
-        img = Image.open(input_path).convert("RGB")
-        orig_w, orig_h = img.size
-        max_dim = 1024
-        if max(orig_w, orig_h) > max_dim:
-            if orig_w > orig_h:
-                work_w, work_h = max_dim, int(orig_h * max_dim / orig_w)
-            else:
-                work_h, work_w = max_dim, int(orig_w * max_dim / orig_h)
-        else:
-            work_w, work_h = orig_w, orig_h
-        work_w = (work_w // 8) * 8
-        work_h = (work_h // 8) * 8
-        img_work = img.resize((work_w, work_h), Image.LANCZOS)
-
-        t0 = time.time()
-        inputs = _clipseg_processor(text=[target_text], images=[img_work], padding=True, return_tensors="pt")
-        inputs = {k: v.to("cuda") for k, v in inputs.items()}
-        with torch.no_grad():
-            seg_out = _clipseg_model(**inputs)
-        mask = torch.sigmoid(seg_out.logits).squeeze().cpu().numpy()
-        mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize((work_w, work_h), Image.BILINEAR)
-        binary = (np.array(mask_img) > 100).astype(np.uint8) * 255
-        mask_binary = Image.fromarray(binary, mode="L")
-        if dilate > 0:
-            mask_binary = mask_binary.filter(ImageFilter.MaxFilter(int(dilate) * 2 + 1))
-        mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
-
-        coverage = (np.array(mask_binary) > 128).mean() * 100
-        if coverage < 0.5:
-            return {"ok": False, "error": f"Target '{target_text}' not found"}
-
+def save_debug_mask(output_path, mask_img):
+    """Save mask in .debug/ subfolder so it doesn't appear in the gallery."""
+    try:
         debug_dir = os.path.join(os.path.dirname(output_path), ".debug")
         os.makedirs(debug_dir, exist_ok=True)
-        debug_mask = os.path.join(debug_dir, os.path.basename(output_path).replace(".png", "_mask.png").replace(".jpg", "_mask.png"))
-        mask_binary.save(debug_mask)
-
-        inpaint_prompt = (prompt or "").strip()
-        is_removal = inpaint_prompt.lower() in ("", "remove", "delete", "none", "nothing", "empty", "gone")
-        if is_removal:
-            inpaint_prompt = "continuation of the surrounding area, same background, seamless"
-            negative_prompt = f"{target_text}, any object, duplicate, artifact, blurry, distorted"
-        else:
-            negative_prompt = f"blurry, distorted, duplicate, {target_text}"
-
-        result = pipe(
-            prompt=inpaint_prompt,
-            negative_prompt=negative_prompt,
-            image=img_work,
-            mask_image=mask_binary,
-            num_inference_steps=40,
-            guidance_scale=8.5,
-            strength=0.99,
-            height=work_h,
-            width=work_w,
-        ).images[0]
-
-        if (work_w, work_h) != (orig_w, orig_h):
-            result = result.resize((orig_w, orig_h), Image.LANCZOS)
-        result.save(output_path)
-        log(f"inpaint done in {time.time()-t0:.1f}s -> {output_path}")
-        return {"ok": True, "output": output_path}
+        base = os.path.basename(output_path)
+        name = base.rsplit('.', 1)[0] + '_mask.png'
+        path = os.path.join(debug_dir, name)
+        mask_img.save(path)
+        return path
+    except Exception:
+        return None
 
 
+# ========== INFERENCE ==========
+def do_img2img(input_path, prompt, output_path, strength=0.55):
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+
+    pipe = load_img2img()
+    state.last_use['img2img'] = time.time()
+
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            img, (w, h) = resize_for_sdxl(img, max_dim=1024)
+
+            enhanced = f"{prompt}, high quality, detailed"
+            s = max(0.1, min(1.0, float(strength)))
+            # SDXL Turbo: total_steps must be >= 1/strength
+            steps = max(2, int(round(4 / s)))
+
+            t0 = time.time()
+            with torch.inference_mode():
+                result = pipe(
+                    prompt=enhanced,
+                    image=img,
+                    strength=s,
+                    num_inference_steps=steps,
+                    guidance_scale=0.0,
+                ).images[0]
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            result.save(output_path)
+            elapsed = time.time() - t0
+            log(f"img2img done in {elapsed:.1f}s ({steps} steps, {w}x{h}) -> {output_path}")
+            return {"ok": True, "output": output_path, "time": elapsed, "size": [w, h]}
+        except Exception as e:
+            log(f"img2img error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
+def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    if not target_text or not target_text.strip():
+        return {"ok": False, "error": "target_text required"}
+
+    pipe = load_inpaint()
+    state.last_use['inpaint'] = time.time()
+
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            orig_size = img.size
+            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+
+            t0 = time.time()
+
+            # === Step 1: CLIPSeg segmentation ===
+            inputs = state.clipseg_processor(
+                text=[target_text.strip()],
+                images=[img_work],
+                padding=True,
+                return_tensors="pt"
+            )
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+            with torch.inference_mode():
+                seg_out = state.clipseg_model(**inputs)
+
+            mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
+            mask_prob = 1 / (1 + np.exp(-mask_logits))  # sigmoid
+            mask_uint8 = (mask_prob * 255).astype(np.uint8)
+
+            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.BILINEAR)
+            mask_arr = np.array(mask_img)
+            binary = (mask_arr > 100).astype(np.uint8) * 255
+            mask_binary = Image.fromarray(binary, mode="L")
+
+            # Dilate mask for context blending
+            d = max(0, int(dilate))
+            if d > 0:
+                mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
+            mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
+
+            coverage = (np.array(mask_binary) > 128).mean() * 100
+            if coverage < 0.5:
+                return {"ok": False, "error": f"Target '{target_text}' not detected (coverage {coverage:.1f}%)"}
+            if coverage > 80:
+                log(f"WARNING: mask covers {coverage:.0f}% of image", 'warn')
+
+            save_debug_mask(output_path, mask_binary)
+
+            # === Step 2: SDXL Inpainting ===
+            inpaint_prompt = (prompt or "").strip()
+            removal_keywords = ("", "remove", "delete", "none", "nothing", "empty", "gone")
+            is_removal = inpaint_prompt.lower() in removal_keywords
+
+            if is_removal:
+                inpaint_prompt = "continuation of the surrounding area, same background, seamless"
+                negative_prompt = f"{target_text}, any object, duplicate, artifact, blurry, distorted, deformed"
+            else:
+                negative_prompt = f"blurry, distorted, duplicate, deformed, low quality, {target_text}"
+
+            with torch.inference_mode():
+                result = pipe(
+                    prompt=inpaint_prompt,
+                    negative_prompt=negative_prompt,
+                    image=img_work,
+                    mask_image=mask_binary,
+                    num_inference_steps=40,
+                    guidance_scale=8.5,
+                    strength=0.99,
+                    height=work_h,
+                    width=work_w,
+                ).images[0]
+
+            # Restore original resolution if needed
+            if (work_w, work_h) != orig_size:
+                result = result.resize(orig_size, Image.LANCZOS)
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            result.save(output_path)
+
+            elapsed = time.time() - t0
+            log(f"inpaint done in {elapsed:.1f}s ({coverage:.0f}% mask) -> {output_path}")
+            return {
+                "ok": True,
+                "output": output_path,
+                "time": elapsed,
+                "mask_coverage": round(coverage, 1)
+            }
+        except Exception as e:
+            log(f"inpaint error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
+# ========== HTTP HANDLER ==========
 class Handler(BaseHTTPRequestHandler):
+    # Suppress default request logging
     def log_message(self, format, *args):
-        pass  # Suppress default HTTP logs
+        pass
 
     def _json_response(self, code, data):
-        body = json.dumps(data).encode('utf-8')
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # client gone
 
     def do_GET(self):
         if self.path == '/ping':
-            self._json_response(200, {"ok": True, "status": "ready"})
+            self._json_response(200, {
+                "ok": True,
+                "status": "ready",
+                "models": {
+                    "img2img": state.img2img_pipe is not None,
+                    "inpaint": state.inpaint_pipe is not None,
+                    "clipseg": state.clipseg_model is not None,
+                },
+                "vram_gb": round(vram_used_gb(), 2),
+            })
+        elif self.path == '/status':
+            self._json_response(200, {
+                "ok": True,
+                "models_loaded": {
+                    "img2img": state.img2img_pipe is not None,
+                    "inpaint": state.inpaint_pipe is not None,
+                    "clipseg": state.clipseg_model is not None,
+                },
+                "last_use": state.last_use,
+                "vram_used_gb": round(vram_used_gb(), 2),
+                "vram_total_gb": round(vram_total_gb(), 2),
+                "vram_free_gb": round(vram_total_gb() - vram_used_gb(), 2),
+            })
         else:
             self._json_response(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):
-        length = int(self.headers.get('Content-Length', 0))
         try:
-            data = json.loads(self.rfile.read(length).decode('utf-8'))
+            length = int(self.headers.get('Content-Length', 0))
+            if length == 0:
+                data = {}
+            else:
+                raw = self.rfile.read(length)
+                data = json.loads(raw.decode('utf-8'))
         except Exception as e:
             self._json_response(400, {"ok": False, "error": f"bad json: {e}"})
             return
 
         try:
             if self.path == '/img2img':
+                if 'input' not in data or 'output' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output"})
+                    return
                 result = do_img2img(
                     data['input'],
-                    data['prompt'],
+                    data.get('prompt', ''),
                     data['output'],
                     data.get('strength', 0.55),
                 )
-                self._json_response(200, result)
+                self._json_response(200 if result.get('ok') else 500, result)
+
             elif self.path == '/inpaint':
+                if 'input' not in data or 'output' not in data or 'target' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output/target"})
+                    return
                 result = do_inpaint(
                     data['input'],
                     data['target'],
@@ -232,44 +428,62 @@ class Handler(BaseHTTPRequestHandler):
                     data['output'],
                     data.get('dilate', 15),
                 )
-                self._json_response(200, result)
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/unload':
+                model_name = data.get('model', '')
+                if model_name in ('img2img', 'inpaint', 'clipseg'):
+                    unload_model(model_name)
+                    self._json_response(200, {"ok": True, "vram_gb": round(vram_used_gb(), 2)})
+                else:
+                    self._json_response(400, {"ok": False, "error": "model must be img2img/inpaint/clipseg"})
+
             elif self.path == '/shutdown':
                 self._json_response(200, {"ok": True, "bye": True})
                 log("Shutdown requested")
-                threading.Thread(target=lambda: (time.sleep(0.3), os._exit(0))).start()
+                threading.Thread(target=lambda: (time.sleep(0.3), os._exit(0)), daemon=True).start()
+
             else:
                 self._json_response(404, {"ok": False, "error": "not found"})
+
         except Exception as e:
-            import traceback
+            log(f"handler error: {e}", 'err')
             traceback.print_exc()
             self._json_response(500, {"ok": False, "error": str(e)})
 
 
+# ========== STARTUP ==========
 def preload_models():
     """Preload only img2img model (most common). Inpaint loads on demand."""
     try:
-        log("Preloading img2img model...")
+        log("Preloading SDXL Turbo img2img...")
         load_img2img()
-        log("MODELS READY - SDXL Turbo img2img loaded (inpaint on demand)")
+        log("MODELS READY - img2img loaded (inpaint on first use)")
     except Exception as e:
-        log(f"Preload error: {e}")
-        import traceback
+        log(f"Preload failed: {e}", 'err')
         traceback.print_exc()
 
 
 def main():
-    log(f"Starting SDXL server on http://{HOST}:{PORT}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    log("Server ready (loading models in background...)")
-    sys.stdout.flush()
+    log(f"Starting on http://{HOST}:{PORT}")
+    log(f"Python {sys.version.split()[0]} | torch {torch.__version__}")
+    if torch.cuda.is_available():
+        log(f"GPU: {torch.cuda.get_device_name(0)} ({vram_total_gb():.1f} GB)")
+    else:
+        log("WARNING: No CUDA GPU detected", 'warn')
 
-    # Preload models in background thread so first call is instant
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    log("HTTP server listening (loading models in background...)")
+
+    # Preload in background so first call is instant
     threading.Thread(target=preload_models, daemon=True).start()
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        log("Stopped")
+        log("Stopped (Ctrl+C)")
+    finally:
+        free_vram()
 
 
 if __name__ == "__main__":

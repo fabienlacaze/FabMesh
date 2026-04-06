@@ -99,7 +99,10 @@
           <!-- IMAGE CREATE -->
           <div id="img-create" class="imgsubtab-content active">
             <div class="action-section">
-              <label>Describe what to generate</label>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <label style="margin:0;">Describe what to generate</label>
+                <button id="btn-unrealize" class="small-btn" title="Optimize prompt for Unreal Engine RTS unit" style="font-size:14px; padding:2px 6px;">&#9876;</button>
+              </div>
               <textarea id="prompt-input" placeholder="A medieval tavern, an orc sword, a fantasy house..." rows="3"></textarea>
             </div>
 
@@ -1933,6 +1936,25 @@
         });
       });
     });
+
+    // Unrealize button: enriches prompt for Unreal Engine RTS units
+    const btnUnrealize = document.getElementById('btn-unrealize');
+    if (btnUnrealize) {
+      btnUnrealize.addEventListener('click', () => {
+        const ta = document.getElementById('prompt-input');
+        const raw = ta.value.trim();
+        if (!raw) { showLog('Type a description first', 'error'); return; }
+        // Skip if already enriched
+        if (raw.includes('RTS unit') || raw.includes('game asset')) {
+          showLog('Prompt already optimized', 'info');
+          return;
+        }
+        // Append RTS unit keywords for Unreal/game export
+        const enriched = `${raw}, single isolated 3D character, full body, T-pose neutral stance, RTS unit game asset, Unreal Engine ready, plain white background, even studio lighting, no shadows, no other characters, centered, isometric three-quarter view, clean silhouette, low-poly to mid-poly stylized, vibrant colors, no text, no UI`;
+        ta.value = enriched;
+        showLog('Prompt optimized for Unreal RTS unit', 'success');
+      });
+    }
 
     // Gallery search filter
     const gallerySearch = document.getElementById('gallery-search');
