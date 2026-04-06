@@ -198,7 +198,6 @@
                   <span id="inpaint-dilate-val">15px</span>
                 </div>
                 <button id="btn-inpaint" class="refine-btn" disabled>Auto Inpaint</button>
-                <button id="btn-draw-mask" class="secondary-btn" style="margin-top: 6px; width: 100%;" title="Draw on the image to mask an area to remove">&#9999; Draw mask manually</button>
               </div>
 
               <!-- TOOLS: quick actions -->
@@ -206,6 +205,7 @@
                 <p class="refine-hint">Quick image operations.</p>
                 <button id="btn-remove-bg" class="secondary-btn">Remove background</button>
                 <button id="btn-clone-stamp" class="secondary-btn" title="Clone Stamp tool (L) - Ctrl+click to set source, then paint to clone">&#128203; Clone Stamp</button>
+                <button id="btn-draw-mask" class="secondary-btn" title="Draw a mask on the image to mark an area to remove">&#9999; Draw mask manually</button>
               </div>
             </div>
           </div>
@@ -530,7 +530,9 @@
           <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
         </div>
         <div id="clone-canvas-container" style="position: relative; flex: 1; display: flex; justify-content: center; align-items: center; overflow: auto; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
-          <canvas id="clone-canvas" style="cursor: crosshair; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5);"></canvas>
+          <canvas id="clone-canvas" style="cursor: none; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5);"></canvas>
+          <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; mix-blend-mode: difference; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); display: none; z-index: 1000;"></div>
+          <div id="clone-source-marker" style="position: fixed; pointer-events: none; width: 12px; height: 12px; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.3); display: none; z-index: 1000; transform: translate(-50%, -50%);"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
@@ -2562,6 +2564,14 @@
       undoStack: [],
       brushSize: 50,
       hardness: 50,
+      // Zoom & pan view state
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      isPanning: false,
+      panStart: null,
+      baseW: 0,
+      baseH: 0,
     };
 
     function openCloneStamp() {
@@ -2581,8 +2591,12 @@
         h = Math.round(h * scale);
         cloneCanvas.width = img.width;
         cloneCanvas.height = img.height;
-        cloneCanvas.style.width = w + 'px';
-        cloneCanvas.style.height = h + 'px';
+        cloneState.baseW = w;
+        cloneState.baseH = h;
+        cloneState.zoom = 1;
+        cloneState.panX = 0;
+        cloneState.panY = 0;
+        applyCloneView();
         cloneCtx.drawImage(img, 0, 0);
         cloneState.sourceImageData = cloneCtx.getImageData(0, 0, img.width, img.height);
         cloneState.sourcePoint = null;
@@ -2590,8 +2604,18 @@
         cloneState.undoStack = [];
         cloneState.lastPoint = null;
         document.getElementById('clone-status').textContent = 'No source point set - Ctrl+click to set source';
+        const sm = document.getElementById('clone-source-marker');
+        if (sm) sm.style.display = 'none';
       };
       img.src = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+
+    function applyCloneView() {
+      const w = cloneState.baseW * cloneState.zoom;
+      const h = cloneState.baseH * cloneState.zoom;
+      cloneCanvas.style.width = w + 'px';
+      cloneCanvas.style.height = h + 'px';
+      cloneCanvas.style.transform = `translate(${cloneState.panX}px, ${cloneState.panY}px)`;
     }
 
     function getCanvasCoords(evt) {
@@ -2657,13 +2681,50 @@
     }
 
     if (cloneCanvas) {
+      // Disable right-click context menu inside canvas (we use right-click for pan)
+      cloneCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      // Right-click drag to pan
       cloneCanvas.addEventListener('mousedown', (e) => {
+        if (e.button === 2) {
+          // Right-click: start panning
+          e.preventDefault();
+          cloneState.isPanning = true;
+          cloneState.panStart = { x: e.clientX - cloneState.panX, y: e.clientY - cloneState.panY };
+          cloneCanvas.style.cursor = 'grabbing';
+          return;
+        }
+      }, true);
+
+      // Wheel = zoom (centered on mouse position)
+      const cloneContainer = document.getElementById('clone-canvas-container');
+      cloneContainer.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = cloneCanvas.getBoundingClientRect();
+        // Mouse position relative to canvas top-left in display pixels
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const oldZoom = cloneState.zoom;
+        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+        const newZoom = Math.max(0.1, Math.min(10, oldZoom * factor));
+        const ratio = newZoom / oldZoom;
+        // Adjust pan so the point under the cursor stays under the cursor
+        cloneState.panX = cloneState.panX - (mx * (ratio - 1));
+        cloneState.panY = cloneState.panY - (my * (ratio - 1));
+        cloneState.zoom = newZoom;
+        applyCloneView();
+        updateSourceMarker();
+      }, { passive: false });
+
+      cloneCanvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // only left button for stamping
         const p = getCanvasCoords(e);
         if (e.ctrlKey || e.metaKey) {
           // Set source point
           cloneState.sourcePoint = p;
           cloneState.offset = null;
           document.getElementById('clone-status').textContent = `Source set at (${p.x}, ${p.y}) - now click & drag to clone`;
+          updateSourceMarker();
           return;
         }
         if (!cloneState.sourcePoint) {
@@ -2682,6 +2743,8 @@
       });
 
       cloneCanvas.addEventListener('mousemove', (e) => {
+        // Always update brush cursor position + size
+        updateBrushCursor(e);
         if (!cloneState.isDown) return;
         const p = getCanvasCoords(e);
         // Interpolate between last and current point for smooth strokes
@@ -2699,6 +2762,42 @@
         }
         cloneState.lastPoint = p;
       });
+
+      // Brush cursor: white circle that follows the mouse, sized to match the brush
+      function updateBrushCursor(e) {
+        const cur = document.getElementById('clone-brush-cursor');
+        if (!cur) return;
+        const rect = cloneCanvas.getBoundingClientRect();
+        // Brush size is in canvas (image) pixels — convert to display pixels
+        const scaleX = rect.width / cloneCanvas.width;
+        const displaySize = cloneState.brushSize * scaleX;
+        cur.style.width = displaySize + 'px';
+        cur.style.height = displaySize + 'px';
+        cur.style.left = (e.clientX - displaySize / 2) + 'px';
+        cur.style.top = (e.clientY - displaySize / 2) + 'px';
+        cur.style.display = 'block';
+      }
+      cloneCanvas.addEventListener('mouseenter', (e) => updateBrushCursor(e));
+      cloneCanvas.addEventListener('mouseleave', () => {
+        const cur = document.getElementById('clone-brush-cursor');
+        if (cur) cur.style.display = 'none';
+      });
+
+      // Update source marker position when source point is set
+      function updateSourceMarker() {
+        const m = document.getElementById('clone-source-marker');
+        if (!m) return;
+        if (!cloneState.sourcePoint) {
+          m.style.display = 'none';
+          return;
+        }
+        const rect = cloneCanvas.getBoundingClientRect();
+        const scaleX = rect.width / cloneCanvas.width;
+        const scaleY = rect.height / cloneCanvas.height;
+        m.style.left = (rect.left + cloneState.sourcePoint.x * scaleX) + 'px';
+        m.style.top = (rect.top + cloneState.sourcePoint.y * scaleY) + 'px';
+        m.style.display = 'block';
+      }
 
       window.addEventListener('mouseup', () => {
         cloneState.isDown = false;
