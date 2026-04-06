@@ -417,6 +417,44 @@
       } catch(e) {}
     }
 
+    // Capture mesh with white bg, front view, centered — for Hunyuan3D refine
+    function captureMeshFrontView(size) {
+      if (!currentModel) return null;
+      const tmpRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+      tmpRenderer.setSize(size, size);
+      tmpRenderer.setClearColor(0xffffff, 1);
+
+      const tmpScene = new THREE.Scene();
+      tmpScene.background = new THREE.Color(0xffffff);
+      tmpScene.add(new THREE.AmbientLight(0xffffff, 1.5));
+      const dir = new THREE.DirectionalLight(0xffffff, 2.0);
+      dir.position.set(5, 8, 5);
+      tmpScene.add(dir);
+      const dir2 = new THREE.DirectionalLight(0xffffff, 1.0);
+      dir2.position.set(-5, 3, -5);
+      tmpScene.add(dir2);
+
+      const clone = currentModel.clone(true);
+      tmpScene.add(clone);
+
+      const box = new THREE.Box3().setFromObject(clone);
+      const s = box.getSize(new THREE.Vector3());
+      const c = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(s.x, s.y, s.z);
+
+      const cam = new THREE.PerspectiveCamera(35, 1, 0.1, 1000);
+      const dist = maxDim / (2 * Math.tan(cam.fov * Math.PI / 360)) * 1.6;
+      // Front-ish view (slight angle for 3D appeal)
+      cam.position.set(c.x + dist * 0.3, c.y + dist * 0.2, c.z + dist);
+      cam.lookAt(c);
+
+      tmpRenderer.render(tmpScene, cam);
+      const dataUrl = tmpRenderer.domElement.toDataURL('image/png');
+      tmpRenderer.dispose();
+      tmpScene.clear();
+      return dataUrl;
+    }
+
     function fitCamera(model) {
       // Recenter model: pivot at center-bottom (X=0, Y=0 at bottom, Z=0)
       const box = new THREE.Box3().setFromObject(model);
@@ -1747,9 +1785,8 @@
       try {
         const meshName = (selectedMesh.filename.replace(/\.[^.]+$/, '').replace(/_hunyuan_\d+$/, '')) || 'mesh';
 
-        // Step 1: Capture screenshot of current mesh
-        renderer.render(scene, camera);
-        const dataUrl = renderer.domElement.toDataURL('image/png');
+        // Step 1: Offscreen capture at 1024x1024 with white bg, front view
+        const dataUrl = captureMeshFrontView(1024);
         const screenshotPath = await window.meshyAPI.saveScreenshot({
           dataUrl,
           projectName: meshName + '_refined'
