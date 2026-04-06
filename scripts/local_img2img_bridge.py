@@ -1,6 +1,7 @@
 """
 FabMesh Local Image-to-Image Bridge
-Uses Instruct-Pix2Pix for instruction-based image editing.
+Uses SDXL Turbo img2img for image modification.
+Note: better at modifying (color, style, details) than removing objects.
 Usage: python local_img2img_bridge.py <input_image> <prompt> <output_image> [strength]
 """
 import sys
@@ -10,57 +11,45 @@ from PIL import Image
 
 
 def img2img(input_path, prompt, output_path, strength=0.55):
-    from diffusers import StableDiffusionInstructPix2PixPipeline, EulerAncestralDiscreteScheduler
+    from diffusers import StableDiffusionXLImg2ImgPipeline
 
-    print("IMG2IMG: Loading Instruct-Pix2Pix pipeline...", flush=True)
-    pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-        "timbrooks/instruct-pix2pix",
+    print("IMG2IMG: Loading SDXL Turbo img2img pipeline...", flush=True)
+    pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+        "stabilityai/sdxl-turbo",
         torch_dtype=torch.float16,
-        safety_checker=None,
+        variant="fp16",
+        use_safetensors=True,
     )
-    pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
     pipe.to("cuda")
     print(f"IMG2IMG: On GPU ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
 
-    # Load image
+    # Load image - keep original aspect
     img = Image.open(input_path).convert("RGB")
-    # Resize to fit in 768 max (pix2pix works best around 512-768)
     w, h = img.size
-    max_dim = 768
-    if max(w, h) > max_dim:
-        if w > h:
-            new_w, new_h = max_dim, int(h * max_dim / w)
-        else:
-            new_h, new_w = max_dim, int(w * max_dim / h)
+    if w < h:
+        new_w = 1024
+        new_h = int(h * 1024 / w)
     else:
-        new_w, new_h = w, h
-    # Round to multiple of 8
+        new_h = 1024
+        new_w = int(w * 1024 / h)
     new_w = (new_w // 8) * 8
     new_h = (new_h // 8) * 8
     img = img.resize((new_w, new_h), Image.LANCZOS)
     print(f"IMG2IMG: Input resized to {new_w}x{new_h}", flush=True)
 
-    # Instruct-Pix2Pix recommended values from the paper:
-    # image_guidance_scale: 1.0 - 2.0 (default 1.5)
-    # guidance_scale: 5.0 - 10.0 (default 7.5)
-    # Strength slider interpolates between "stay close to image" and "follow instruction strongly"
+    enhanced_prompt = f"{prompt}, high quality, detailed"
+
+    # SDXL Turbo: num_inference_steps * strength must be >= 1
     s = float(strength)
-    # Safer ranges to avoid artifacts/duplications
-    image_guidance = 2.0 - s * 0.8  # 0.3 -> 1.76, 0.95 -> 1.24
-    text_guidance = 6.0 + s * 4.0   # 0.3 -> 7.2, 0.95 -> 9.8
-
-    print(f"IMG2IMG: text_guidance={text_guidance:.1f}, image_guidance={image_guidance:.1f}", flush=True)
+    steps = max(2, int(round(4 / s)))
+    print(f"IMG2IMG: strength={s}, steps={steps}", flush=True)
     result = pipe(
-        prompt=prompt,
+        prompt=enhanced_prompt,
         image=img,
-        num_inference_steps=50,
-        image_guidance_scale=image_guidance,
-        guidance_scale=text_guidance,
+        strength=s,
+        num_inference_steps=steps,
+        guidance_scale=0.0,
     ).images[0]
-
-    # Resize back if needed
-    if (new_w, new_h) != (w, h):
-        result = result.resize((w, h), Image.LANCZOS)
 
     result.save(output_path)
     print(f"IMG2IMG_SUCCESS: {os.path.getsize(output_path)} bytes", flush=True)
