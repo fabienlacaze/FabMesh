@@ -292,6 +292,40 @@ body {
   flex-shrink: 0;
 }
 
+#hover-preview {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  pointer-events: none;
+  display: none;
+}
+
+#hover-preview img {
+  width: 200px;
+  height: 200px;
+  object-fit: contain;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  display: block;
+}
+
+#hover-preview .hp-info {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  text-align: center;
+}
+
+#hover-preview .hp-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
 .mesh-item-details {
   flex: 1;
   min-width: 0;

@@ -275,6 +275,15 @@
     </div>
 
     <!-- Confirm Modal -->
+    <!-- Hover preview popup -->
+    <div id="hover-preview">
+      <img id="hover-preview-img" />
+      <div class="hp-info">
+        <div class="hp-name" id="hover-preview-name"></div>
+        <div id="hover-preview-meta"></div>
+      </div>
+    </div>
+
     <!-- Lightbox -->
     <div id="lightbox" class="modal hidden" onclick="this.classList.add('hidden')">
       <img id="lightbox-img" />
@@ -539,7 +548,8 @@
             const act = selectedMesh?.filename === m.filename ? 'active' : '';
             const vLabel = vi === 0 ? 'latest' : `v${items.length - 1 - vi}`;
             const thumbHtml = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '';
-            html += `<div class="mesh-item mesh-child ${act}" onclick="window._selectMesh(${m.idx})">
+            const hoverData = `data-thumb="${m.thumb || ''}" data-name="${vLabel} - ${m.filename}" data-meta="${ds} | ${ss} | ${m.format}"`;
+            html += `<div class="mesh-item mesh-child ${act}" onclick="window._selectMesh(${m.idx})" ${hoverData}>
               <div class="mesh-item-with-thumb">${thumbHtml}<div class="mesh-item-details">
               <div class="mesh-item-row"><div class="mesh-item-name"><span class="version-tag">${vLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
               <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span><span class="mesh-item-format">${m.format}</span></div>
@@ -559,7 +569,8 @@
         const act = selectedMesh?.filename === m.filename ? 'active' : '';
         const name = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
         const thumbHtml2 = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '';
-        html += `<div class="mesh-item ${act}" onclick="window._selectMesh(${m.idx})">
+        const hoverData2 = `data-thumb="${m.thumb || ''}" data-name="${name}" data-meta="${ds} | ${ss} | ${m.format}"`;
+        html += `<div class="mesh-item ${act}" onclick="window._selectMesh(${m.idx})" ${hoverData2}>
           <div class="mesh-item-with-thumb">${thumbHtml2}<div class="mesh-item-details">
           <div class="mesh-item-row"><div class="mesh-item-name">${name}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
           <div class="mesh-item-info"><span>${ds}</span><span class="mesh-item-format">${m.format}</span></div>
@@ -1303,6 +1314,39 @@
     });
 
     let lastImagePrompt = '';
+
+    // Hover preview popup for mesh items (delay 1s)
+    let hoverTimer = null;
+    document.addEventListener('mouseover', (e) => {
+      const item = e.target.closest('.mesh-item[data-thumb]');
+      if (!item) return;
+      const thumb = item.dataset.thumb;
+      if (!thumb) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        const popup = document.getElementById('hover-preview');
+        document.getElementById('hover-preview-img').src = thumb;
+        document.getElementById('hover-preview-name').textContent = item.dataset.name || '';
+        document.getElementById('hover-preview-meta').textContent = item.dataset.meta || '';
+        // Position to the right of the gallery panel
+        const rect = item.getBoundingClientRect();
+        popup.style.display = 'block';
+        const popupRect = popup.getBoundingClientRect();
+        let left = rect.right + 10;
+        let top = rect.top - 50;
+        if (left + popupRect.width > window.innerWidth) left = rect.left - popupRect.width - 10;
+        if (top < 10) top = 10;
+        if (top + popupRect.height > window.innerHeight) top = window.innerHeight - popupRect.height - 10;
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+      }, 1000);
+    });
+    document.addEventListener('mouseout', (e) => {
+      const item = e.target.closest('.mesh-item[data-thumb]');
+      if (!item) return;
+      clearTimeout(hoverTimer);
+      document.getElementById('hover-preview').style.display = 'none';
+    });
 
     // Open lightbox on image click
     window._openLightbox = (imgSrc) => {
