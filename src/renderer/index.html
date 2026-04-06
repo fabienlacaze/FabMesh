@@ -534,10 +534,10 @@
           <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
           <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
         </div>
-        <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; display: flex; justify-content: center; align-items: center; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%; contain: strict;">
-          <canvas id="clone-canvas" style="cursor: none; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5); position: absolute; transform-origin: 0 0; left: 50%; top: 50%;"></canvas>
-          <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; mix-blend-mode: difference; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); display: none; z-index: 1000;"></div>
-          <div id="clone-source-marker" style="position: fixed; pointer-events: none; width: 12px; height: 12px; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.3); display: none; z-index: 1000; transform: translate(-50%, -50%);"></div>
+        <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
+          <canvas id="clone-canvas" style="cursor: none; background: #000; position: absolute; left: 0; top: 0;"></canvas>
+          <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
+          <div id="clone-source-marker" style="position: fixed; pointer-events: none; width: 14px; height: 14px; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.3); display: none; z-index: 1000; transform: translate(-50%, -50%);"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
@@ -2618,12 +2618,17 @@
     function applyCloneView() {
       const w = cloneState.baseW * cloneState.zoom;
       const h = cloneState.baseH * cloneState.zoom;
+      const container = document.getElementById('clone-canvas-container');
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      // Center the canvas in the container, then add pan offset
+      const left = (cw - w) / 2 + cloneState.panX;
+      const top = (ch - h) / 2 + cloneState.panY;
       cloneCanvas.style.width = w + 'px';
       cloneCanvas.style.height = h + 'px';
-      // Center on container then offset by pan
-      const tx = -w / 2 + cloneState.panX;
-      const ty = -h / 2 + cloneState.panY;
-      cloneCanvas.style.transform = `translate(${tx}px, ${ty}px)`;
+      cloneCanvas.style.left = left + 'px';
+      cloneCanvas.style.top = top + 'px';
+      cloneCanvas.style.transform = '';
     }
 
     function getCanvasCoords(evt) {
@@ -2787,19 +2792,22 @@
         if (!cur) return;
         const rect = cloneCanvas.getBoundingClientRect();
         // Brush size is in canvas (image) pixels — convert to display pixels
-        const scaleX = rect.width / cloneCanvas.width;
-        const displaySize = cloneState.brushSize * scaleX;
+        const scaleX = rect.width / cloneCanvas.width || 1;
+        const displaySize = Math.max(4, cloneState.brushSize * scaleX);
         cur.style.width = displaySize + 'px';
         cur.style.height = displaySize + 'px';
         cur.style.left = (e.clientX - displaySize / 2) + 'px';
         cur.style.top = (e.clientY - displaySize / 2) + 'px';
         cur.style.display = 'block';
       }
-      cloneCanvas.addEventListener('mouseenter', (e) => updateBrushCursor(e));
-      cloneCanvas.addEventListener('mouseleave', () => {
+      // Bind enter/leave on the CONTAINER so they work even if canvas is clipped
+      cloneContainer.addEventListener('mouseenter', (e) => updateBrushCursor(e));
+      cloneContainer.addEventListener('mouseleave', () => {
         const cur = document.getElementById('clone-brush-cursor');
         if (cur) cur.style.display = 'none';
       });
+      // Container-level mousemove updates the cursor too (canvas may not catch it)
+      cloneContainer.addEventListener('mousemove', updateBrushCursor);
 
       // Update source marker position when source point is set
       function updateSourceMarker() {
