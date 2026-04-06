@@ -638,21 +638,28 @@ body {
 
 /* Action Panel */
 #action-panel {
-  width: 320px;
-  min-width: 180px;
-  max-width: 500px;
+  width: 360px;
+  min-width: 220px;
+  max-width: 540px;
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   display: flex;
-  flex-direction: column;
-  overflow-y: auto;
+  flex-direction: row;
+  overflow: hidden;
   resize: horizontal;
   direction: rtl;
 }
 
 #action-panel > * {
   direction: ltr;
+}
+
+#action-panel-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 /* Responsive: small windows */
@@ -670,21 +677,26 @@ body {
 /* Tabs */
 #tab-bar {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  border-right: 1px solid var(--border);
   flex-shrink: 0;
+  background: var(--bg-primary);
+  width: 48px;
 }
 
 .tab {
-  flex: 1;
-  padding: 10px 12px;
+  padding: 14px 6px;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-right: 2px solid transparent;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
 }
 
 .tab:hover {
@@ -694,7 +706,8 @@ body {
 
 .tab.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  border-right-color: var(--accent);
+  background: var(--bg-secondary);
 }
 
 .tab-content {

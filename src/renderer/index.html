@@ -62,11 +62,12 @@
       </main>
 
       <aside id="action-panel">
-        <!-- Tabs -->
+        <!-- Vertical Tabs -->
         <div id="tab-bar">
           <button class="tab active" data-tab="tab-image">Image</button>
           <button class="tab" data-tab="tab-3d">3D</button>
         </div>
+        <div id="action-panel-content">
 
         <!-- ============ TAB: IMAGE ============ -->
         <div id="tab-image" class="tab-content active">
@@ -134,6 +135,7 @@
               <div id="img-refine-preview">
                 <img id="img-refine-thumb" class="selected-thumb" />
               </div>
+              <button id="btn-remove-bg" class="secondary-btn" style="margin: 8px 12px;">Remove background</button>
               <div class="refine-input-area">
                 <textarea id="img-refine-input" placeholder="What to change? Ex: add more snow on the roof, make the door bigger..." rows="3"></textarea>
                 <button id="btn-refine-image" class="refine-btn" disabled>Refine Image</button>
@@ -270,6 +272,7 @@
           </div>
 
           <!-- Advanced Blender section removed -->
+        </div>
         </div>
       </aside>
     </div>
@@ -1466,6 +1469,26 @@
     });
 
     // ========== IMAGE REFINE ==========
+    // Remove background button
+    document.getElementById('btn-remove-bg').addEventListener('click', async () => {
+      if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
+      const btn = document.getElementById('btn-remove-bg');
+      btn.disabled = true; btn.textContent = 'Removing background...';
+      const result = await window.meshyAPI.removeBackground(selectedImagePath);
+      btn.disabled = false; btn.textContent = 'Remove background';
+      if (result.success) {
+        // Reload the image (cache bust)
+        const newSrc = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+        document.getElementById('img-refine-thumb').src = newSrc;
+        document.querySelectorAll('.grid-img').forEach(i => {
+          if (i.dataset.path === selectedImagePath) i.src = newSrc;
+        });
+        showLog('Background removed!', 'success');
+      } else {
+        showLog('Failed: ' + (result.error || ''), 'error');
+      }
+    });
+
     document.getElementById('img-refine-input').addEventListener('input', (e) => {
       document.getElementById('btn-refine-image').disabled = !e.target.value.trim();
     });

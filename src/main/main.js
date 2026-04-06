@@ -106,6 +106,16 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 
 // Show file in explorer
+ipcMain.handle('remove-background', async (event, imagePath) => {
+  return new Promise((resolve) => {
+    const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
+    execFile('python', [script, imagePath], { timeout: 60000 }, (error, stdout, stderr) => {
+      if (error) resolve({ success: false, error: error.message });
+      else resolve({ success: true });
+    });
+  });
+});
+
 ipcMain.handle('save-thumbnail', (event, { meshPath, dataUrl }) => {
   const thumbPath = meshPath.replace(/\.[^.]+$/, '_thumb.png');
   const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
