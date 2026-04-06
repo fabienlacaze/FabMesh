@@ -1,0 +1,24 @@
+Generate a complete Blender Python script that creates: "jiamerais une maison pour les orc"
+
+CRITICAL RULES - follow them exactly:
+- Output ONLY the Python code, no markdown, no backticks, no explanations
+- Start with: import bpy, import bmesh, import math, from mathutils import Vector
+- Clear the scene first: bpy.ops.object.select_all(action='SELECT') then bpy.ops.object.delete(use_global=False)
+- Build detailed 3D geometry using Blender Python API (bpy.ops.mesh, bmesh, etc.)
+- Apply realistic materials using Principled BSDF nodes
+- Use multiple objects, bevels, and details to make it look good
+- At the end, export with this exact code:
+
+output_path = "C:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/meshes/sword_1775403153080.glb"
+if output_path.endswith('.glb') or output_path.endswith('.gltf'):
+    fmt = 'GLB' if output_path.endswith('.glb') else 'GLTF_SEPARATE'
+    bpy.ops.export_scene.gltf(filepath=output_path, export_format=fmt)
+elif output_path.endswith('.obj'):
+    bpy.ops.wm.obj_export(filepath=output_path)
+elif output_path.endswith('.fbx'):
+    bpy.ops.export_scene.fbx(filepath=output_path)
+elif output_path.endswith('.stl'):
+    bpy.ops.export_mesh.stl(filepath=output_path)
+print("FABMESH_SUCCESS")
+
+Output ONLY valid Python code. No text before or after.

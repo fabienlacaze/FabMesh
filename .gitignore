@@ -1,0 +1,33 @@
+node_modules/
+meshes/
+images/
+history/
+previews/
+scripts/_*.py
+config.json
+*.glb
+*.fbx
+*.obj
+*.stl
+*.pyc
+__pycache__/
+build/
+dist/
+*.egg-info/
+*.egg
+.cache/
+
+# External models (too big for git)
+TripoSR/
+Hunyuan3D-2/
+stable-fast-3d/
+TripoSG/
+
+# WSL
+wsl_run.sh
+
+# Temp
+*.log
+test_*.png
+test_*.glb
+cuda-keyring_1.1-1_all.deb

@@ -1,0 +1,1780 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' file: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:; connect-src 'self' file: blob:">
+  <title>FabMesh</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div class="header-left">
+        <h1>FabMesh</h1>
+        <span class="subtitle">3D Mesh Generator</span>
+      </div>
+      <div class="header-right">
+        <button id="btn-import" class="header-btn" title="Import mesh">Import</button>
+      </div>
+    </header>
+
+    <div id="main-layout">
+      <aside id="gallery-panel">
+        <div class="panel-header">
+          <h2 id="gallery-title">Gallery</h2>
+          <button id="btn-open-folder" class="small-btn" title="Open folder">&#128193;</button>
+          <button id="btn-refresh" class="small-btn" title="Refresh">&#8635;</button>
+        </div>
+        <div id="mesh-list"></div>
+      </aside>
+
+      <main id="viewer-panel">
+        <div id="viewer-container">
+          <canvas id="three-canvas"></canvas>
+          <div id="viewer-empty">
+            <p>No mesh loaded</p>
+            <p class="hint">Generate a mesh or select one from the gallery</p>
+          </div>
+          <div id="drop-overlay" class="hidden">
+            <div class="drop-message">Drop mesh file here</div>
+          </div>
+          <div id="viewer-loading" class="hidden">
+            <div class="spinner"></div>
+            <p id="loading-text">Generating...</p>
+          </div>
+        </div>
+        <!-- Jobs overlay -->
+        <div id="jobs-panel" class="hidden">
+          <div id="jobs-list"></div>
+        </div>
+
+        <div id="viewer-toolbar">
+          <button id="btn-reset-camera" class="toolbar-btn" title="Reset camera">Reset</button>
+          <button id="btn-wireframe" class="toolbar-btn" title="Toggle wireframe">Wire</button>
+          <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
+          <span id="mesh-info" class="mesh-info"></span>
+        </div>
+      </main>
+
+      <aside id="action-panel">
+        <!-- Tabs -->
+        <div id="tab-bar">
+          <button class="tab active" data-tab="tab-image">Image</button>
+          <button class="tab" data-tab="tab-3d">3D</button>
+        </div>
+
+        <!-- ============ TAB: IMAGE ============ -->
+        <div id="tab-image" class="tab-content active">
+          <!-- Sub-tabs: Create | Refine -->
+          <div id="img-subtab-bar">
+            <button class="img-subtab active" data-imgsubtab="img-create">Create</button>
+            <button class="img-subtab" data-imgsubtab="img-refine-tab">Refine</button>
+          </div>
+
+          <!-- IMAGE CREATE -->
+          <div id="img-create" class="imgsubtab-content active">
+            <div class="action-section">
+              <label>Describe what to generate</label>
+              <textarea id="prompt-input" placeholder="A medieval tavern, an orc sword, a fantasy house..." rows="3"></textarea>
+            </div>
+
+            <div class="action-row">
+              <label>Name</label>
+              <input type="text" id="mesh-name" placeholder="my_mesh" value="mesh">
+            </div>
+
+            <div class="action-row">
+              <label>Engine</label>
+              <select id="image-engine">
+                <option value="pollinations">Pollinations (cloud, free)</option>
+                <option value="local-sd">Local GPU (Stable Diffusion)</option>
+              </select>
+            </div>
+
+            <div class="action-row">
+              <label>Count</label>
+              <select id="num-images">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+                <option value="6">6</option>
+                <option value="8">8</option>
+              </select>
+            </div>
+
+            <button id="btn-gen-images" class="primary-btn">Generate Images</button>
+
+            <!-- Advanced Image settings -->
+            <details class="advanced-details">
+              <summary>Advanced</summary>
+              <div class="advanced-content">
+                <div class="adv-check-row">
+                  <input type="checkbox" id="chk-multi-view" />
+                  <label for="chk-multi-view">Multi-view (front, side, back)</label>
+                </div>
+                <div class="adv-check-row">
+                  <input type="checkbox" id="chk-img-build-stages" />
+                  <label for="chk-img-build-stages">Construction stages (3 images)</label>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- IMAGE REFINE -->
+          <div id="img-refine-tab" class="imgsubtab-content">
+            <div id="img-refine-empty" class="action-section">
+              <p class="hint-text">Generate or select an image first.</p>
+            </div>
+            <div id="img-refine-content" class="hidden">
+              <div id="img-refine-preview">
+                <img id="img-refine-thumb" class="selected-thumb" />
+              </div>
+              <div class="refine-input-area">
+                <textarea id="img-refine-input" placeholder="What to change? Ex: add more snow on the roof, make the door bigger..." rows="3"></textarea>
+                <button id="btn-refine-image" class="refine-btn" disabled>Refine Image</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shared: image grid + send to 3D -->
+          <div id="image-grid" class="hidden">
+            <div class="section-label-row">
+              <label class="section-label">Reference image</label>
+              <button id="btn-clear-ref" class="clear-ref-btn hidden" onclick="window._clearRefImage()">&#10005; Clear</button>
+            </div>
+            <div id="image-grid-items" class="img-results-grid"></div>
+            <button id="btn-send-to-3d" class="convert-btn hidden">Send to 3D tab</button>
+          </div>
+        </div>
+
+        <!-- ============ TAB: 3D ============ -->
+        <div id="tab-3d" class="tab-content">
+          <!-- Sub-tabs: Create | Refine -->
+          <div id="subtab-bar">
+            <button class="subtab active" data-subtab="subtab-create">Create</button>
+            <button class="subtab" data-subtab="subtab-refine">Refine</button>
+          </div>
+
+          <!-- SUB-TAB: CREATE -->
+          <div id="subtab-create" class="subtab-content active">
+          <!-- Reference image selection -->
+          <div class="ref-image-section">
+            <label class="section-label">Reference image</label>
+            <div id="selected-image-preview" class="hidden">
+              <img id="selected-image-thumb" class="selected-thumb" />
+              <button class="change-btn" onclick="document.getElementById('selected-image-preview').classList.add('hidden'); document.getElementById('no-image-hint').classList.remove('hidden');">Change</button>
+            </div>
+            <div id="no-image-hint" class="ref-image-buttons">
+              <button id="btn-pick-from-gallery" class="secondary-btn">From Gallery</button>
+              <button id="btn-import-image" class="secondary-btn">Import File</button>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <label>Engine</label>
+            <select id="ai3d-engine">
+              <option value="hunyuan">Hunyuan3D Local (best)</option>
+              <option value="local">TripoSR Local (fast)</option>
+              <option value="trellis">TRELLIS Cloud</option>
+            </select>
+          </div>
+
+          <button id="btn-generate" class="primary-btn" disabled>Generate 3D</button>
+
+          <!-- Advanced 3D settings -->
+          <details class="advanced-details">
+            <summary>Advanced</summary>
+            <div class="advanced-content">
+              <div class="action-row">
+                <label>Max triangles</label>
+                <select id="max-tris">
+                  <option value="0">No limit</option>
+                  <option value="1000">1K (low-poly)</option>
+                  <option value="5000">5K</option>
+                  <option value="10000" selected>10K</option>
+                  <option value="50000">50K</option>
+                  <option value="100000">100K</option>
+                </select>
+              </div>
+              <div class="adv-check-row">
+                <input type="checkbox" id="chk-build-stages" />
+                <label for="chk-build-stages">Construction stages (3 versions)</label>
+              </div>
+            </div>
+          </details>
+
+          <!-- Build Stages progress (shown during generation) -->
+          <div id="build-progress" class="hidden">
+            <div class="build-stage" id="bs-0"><span class="bs-dot">-</span> Construction Site</div>
+            <div class="build-stage" id="bs-1"><span class="bs-dot">-</span> Under Construction</div>
+            <div class="build-stage" id="bs-2"><span class="bs-dot">-</span> Complete</div>
+          </div>
+          <button id="btn-convert-to-3d" class="convert-btn hidden">Convert to 3D</button>
+          </div><!-- end subtab-create -->
+
+          <!-- SUB-TAB: REFINE -->
+          <div id="subtab-refine" class="subtab-content">
+            <div id="refine-empty" class="action-section">
+              <p class="hint-text">Generate or select a mesh first, then refine it here.</p>
+            </div>
+
+            <div id="refine-content" class="hidden">
+              <div class="refine-project-header">
+                <span id="project-name-display">--</span>
+                <span id="project-version-badge">v0</span>
+              </div>
+
+              <div class="refine-input-area">
+                <textarea id="refine-input" placeholder="Describe what to change..." rows="3"></textarea>
+                <button id="btn-refine" class="refine-btn">Refine</button>
+              </div>
+
+              <div class="timeline-section">
+                <div class="timeline-header">
+                  <span>History</span>
+                  <div class="timeline-nav">
+                    <button id="btn-prev-version" class="nav-btn" disabled>&larr;</button>
+                    <button id="btn-next-version" class="nav-btn" disabled>&rarr;</button>
+                  </div>
+                </div>
+                <div id="version-list" class="timeline"></div>
+              </div>
+            </div>
+          </div><!-- end subtab-refine -->
+        </div><!-- end tab-3d -->
+
+        <!-- ============ SHARED ============ -->
+        <div id="generation-status" class="hidden"></div>
+
+        <div id="output-log" class="output-log hidden">
+          <pre id="log-content"></pre>
+          <button id="btn-clear-log" class="log-close">x</button>
+        </div>
+
+        <div class="bottom-tools">
+          <div class="action-section" id="export-section" style="display:none">
+            <div class="export-row">
+              <select id="convert-format">
+                <option value="glb">GLB</option>
+                <option value="obj">OBJ</option>
+                <option value="fbx">FBX</option>
+                <option value="stl">STL</option>
+              </select>
+              <button id="btn-convert" class="secondary-btn">Convert</button>
+            </div>
+          </div>
+
+          <!-- Advanced Blender section removed -->
+        </div>
+      </aside>
+    </div>
+
+    <!-- Confirm Modal -->
+    <!-- Lightbox -->
+    <div id="lightbox" class="modal hidden" onclick="this.classList.add('hidden')">
+      <img id="lightbox-img" />
+      <button id="lightbox-close" onclick="document.getElementById('lightbox').classList.add('hidden')">&#10005;</button>
+    </div>
+
+    <div id="confirm-modal" class="modal hidden">
+      <div class="modal-content confirm-dialog">
+        <p id="confirm-message">Are you sure?</p>
+        <div class="confirm-buttons">
+          <button id="confirm-yes" class="confirm-yes-btn">Delete</button>
+          <button id="confirm-no" class="confirm-no-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Settings</h2>
+        <div class="setting-row">
+          <label>Blender Path</label>
+          <div class="setting-value">
+            <span id="blender-path-display">Not set</span>
+            <button id="btn-browse-blender" class="secondary-btn">Browse</button>
+          </div>
+        </div>
+        <button id="btn-close-settings" class="secondary-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./lib/three.module.js",
+      "three/addons/": "./lib/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+    import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ========== THREE.JS VIEWER ==========
+    let scene, camera, renderer, controls, gridHelper, currentModel;
+    let isWireframe = false, isGridVisible = true;
+
+    const canvas = document.getElementById('three-canvas');
+    const container = document.getElementById('viewer-container');
+
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x0f0f1a);
+    renderer.shadowMap.enabled = true;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+    camera.position.set(3, 2.5, 3);
+
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.target.set(0, 0.5, 0);
+    controls.update();
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(5, 8, 5);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+    const fill = new THREE.DirectionalLight(0x8888ff, 0.3);
+    fill.position.set(-3, 2, -3);
+    scene.add(fill);
+
+    gridHelper = new THREE.GridHelper(10, 20, 0x2a2a4a, 0x1a1a2e);
+    scene.add(gridHelper);
+
+    function resize() {
+      const w = container.clientWidth, h = container.clientHeight;
+      if (w === 0 || h === 0) return;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    }
+    window.addEventListener('resize', resize);
+    new ResizeObserver(resize).observe(container);
+    resize();
+
+    (function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+
+    function clearModel() {
+      if (currentModel) {
+        scene.remove(currentModel);
+        currentModel.traverse(c => {
+          if (c.geometry) c.geometry.dispose();
+          if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose());
+        });
+        currentModel = null;
+      }
+    }
+
+    function fitCamera(model) {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const dist = maxDim / (2 * Math.tan(camera.fov * Math.PI / 360)) * 1.8;
+      camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
+      controls.target.copy(center);
+      controls.update();
+
+      let verts = 0, faces = 0;
+      model.traverse(c => {
+        if (c.isMesh && c.geometry) {
+          verts += c.geometry.attributes.position?.count || 0;
+          faces += c.geometry.index ? c.geometry.index.count / 3 : (c.geometry.attributes.position?.count || 0) / 3;
+        }
+      });
+      document.getElementById('mesh-info').textContent =
+        `${verts.toLocaleString()} verts | ${Math.round(faces).toLocaleString()} faces | ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;
+    }
+
+    async function loadMeshFromBuffer(buffer, format, filePath) {
+      clearModel();
+      document.getElementById('viewer-empty').classList.add('hidden');
+      format = format.toLowerCase();
+
+      if (format === 'glb' || format === 'gltf') {
+        const loader = new GLTFLoader();
+        // Use Blob URL so Three.js can properly decode embedded textures
+        const blob = new Blob([buffer], { type: 'model/gltf-binary' });
+        const blobUrl = URL.createObjectURL(blob);
+        let gltf;
+        try {
+          gltf = await new Promise((res, rej) => loader.load(blobUrl, res, undefined, rej));
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+        currentModel = gltf.scene;
+        currentModel.traverse(c => { if (c.isMesh) { c.castShadow = true; if (isWireframe) c.material.wireframe = true; } });
+        scene.add(currentModel);
+        fitCamera(currentModel);
+      } else if (format === 'obj') {
+        const loader = new OBJLoader();
+        const obj = loader.parse(new TextDecoder().decode(buffer));
+        currentModel = obj;
+        const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.6, metalness: 0.2 });
+        currentModel.traverse(c => { if (c.isMesh) { c.material = mat; c.castShadow = true; } });
+        scene.add(currentModel);
+        fitCamera(currentModel);
+      } else if (format === 'fbx') {
+        // FBX: load from URL to properly resolve embedded textures
+        const loader = new FBXLoader();
+        const url = filePath ? await window.meshyAPI.getMeshLocalUrl(filePath) : null;
+        let group;
+        if (url) {
+          group = await new Promise((res, rej) => {
+            loader.load(url, res, undefined, rej);
+          });
+        } else {
+          group = loader.parse(buffer);
+        }
+        currentModel = group;
+        currentModel.traverse(c => {
+          if (c.isMesh) {
+            c.castShadow = true;
+            if (isWireframe && c.material) (Array.isArray(c.material)?c.material:[c.material]).forEach(m => m.wireframe = isWireframe);
+          }
+        });
+        scene.add(currentModel);
+        fitCamera(currentModel);
+      } else if (format === 'stl') {
+        const loader = new STLLoader();
+        const geo = loader.parse(buffer);
+        const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.6, metalness: 0.2 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.castShadow = true;
+        currentModel = new THREE.Group();
+        currentModel.add(mesh);
+        scene.add(currentModel);
+        fitCamera(currentModel);
+      }
+    }
+
+    // ========== GALLERY ==========
+    let meshList = [], selectedMesh = null;
+    let collapsedProjects = {}; // track collapsed state per project
+
+    async function refreshGallery() {
+      meshList = await window.meshyAPI.listMeshes();
+      const projects = await window.meshyAPI.listProjects();
+      const el = document.getElementById('mesh-list');
+      if (!meshList.length) { el.innerHTML = '<div class="gallery-empty">No meshes yet.</div>'; return; }
+
+      // Build a map: projectName -> versions from history
+      const projMap = {};
+      for (const p of projects) {
+        const vData = await window.meshyAPI.getVersions(p.name);
+        if (vData && vData.versions.length > 0) projMap[p.name] = vData;
+      }
+
+      // Group meshes by project name
+      const groups = {};
+      const ungrouped = [];
+      for (let i = 0; i < meshList.length; i++) {
+        const m = meshList[i];
+        const projName = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
+        if (projMap[projName]) {
+          if (!groups[projName]) groups[projName] = [];
+          groups[projName].push({ ...m, idx: i });
+        } else {
+          ungrouped.push({ ...m, idx: i });
+        }
+      }
+
+      let html = '';
+
+      // Render grouped projects as trees
+      for (const [name, items] of Object.entries(groups)) {
+        const collapsed = collapsedProjects[name] ?? false;
+        const vData = projMap[name];
+        const vCount = vData ? vData.versions.length : items.length;
+        const chevron = collapsed ? '&#9654;' : '&#9660;';
+
+        html += `<div class="gallery-project">
+          <div class="gallery-project-header" onclick="window._toggleProject('${name}')">
+            <span class="gallery-chevron">${chevron}</span>
+            <span class="gallery-project-name">${name}</span>
+            <span class="gallery-version-count">${vCount}v</span>
+          </div>`;
+
+        if (!collapsed) {
+          html += '<div class="gallery-children">';
+          // Sort by date newest first
+          items.sort((a, b) => new Date(b.created) - new Date(a.created));
+          items.forEach((m, vi) => {
+            const d = new Date(m.created);
+            const ds = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+            const ss = m.size < 1024 ? m.size+' B' : m.size < 1048576 ? (m.size/1024).toFixed(1)+' KB' : (m.size/1048576).toFixed(1)+' MB';
+            const act = selectedMesh?.filename === m.filename ? 'active' : '';
+            const vLabel = vi === 0 ? 'latest' : `v${items.length - 1 - vi}`;
+            html += `<div class="mesh-item mesh-child ${act}" onclick="window._selectMesh(${m.idx})">
+              <div class="mesh-item-row"><div class="mesh-item-name"><span class="version-tag">${vLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
+              <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span><span class="mesh-item-format">${m.format}</span></div>
+            </div>`;
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+
+      // Render ungrouped meshes
+      for (const m of ungrouped) {
+        const d = new Date(m.created);
+        const ds = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+        const ss = m.size < 1024 ? m.size+' B' : m.size < 1048576 ? (m.size/1024).toFixed(1)+' KB' : (m.size/1048576).toFixed(1)+' MB';
+        const act = selectedMesh?.filename === m.filename ? 'active' : '';
+        const name = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
+        html += `<div class="mesh-item ${act}" onclick="window._selectMesh(${m.idx})">
+          <div class="mesh-item-row"><div class="mesh-item-name">${name}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
+          <div class="mesh-item-info"><span>${ds}</span><span class="mesh-item-format">${m.format}</span></div>
+          <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span></div>
+        </div>`;
+      }
+
+      el.innerHTML = html;
+    }
+
+    window._toggleProject = (name) => {
+      collapsedProjects[name] = !collapsedProjects[name];
+      if (currentTab === 'tab-image') {
+        refreshGalleryImages();
+      } else {
+        refreshGallery();
+      }
+    };
+
+    window._selectMesh = async (i) => {
+      selectedMesh = meshList[i];
+      refreshGallery();
+      document.getElementById('export-section').style.display = 'block';
+      const buf = await window.meshyAPI.readMeshFile(selectedMesh.path);
+      if (buf) await loadMeshFromBuffer(buf, selectedMesh.format, selectedMesh.path);
+
+      // Extract project name from filename (remove _timestamp.ext)
+      const projName = selectedMesh.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
+      const vData = await window.meshyAPI.getVersions(projName);
+      if (vData && vData.versions.length > 0) {
+        currentProject = projName;
+
+        // Find which version matches this mesh file
+        const matchIdx = vData.versions.findIndex(v => {
+          const vMeshBase = v.meshFile.replace(/^v\d+_/, '');
+          return selectedMesh.filename === vMeshBase || selectedMesh.filename.endsWith(vMeshBase);
+        });
+        if (matchIdx >= 0 && matchIdx !== vData.currentVersion) {
+          // Revert to the clicked version
+          const revertResult = await window.meshyAPI.revertToVersion({ projectName: projName, versionNum: matchIdx });
+          if (revertResult.success) {
+            currentVersionData = revertResult.versionData;
+            updateVersionUI(revertResult.versionData);
+          } else {
+            updateVersionUI(vData);
+          }
+        } else {
+          updateVersionUI(vData);
+        }
+
+        document.getElementById('refine-empty').classList.add('hidden');
+        document.getElementById('refine-content').classList.remove('hidden');
+        document.getElementById('project-name-display').textContent = projName;
+        switchTab('tab-3d'); document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+      } else {
+        // No project history — create one for this imported mesh
+        currentProject = projName;
+        currentVersionData = null;
+        document.getElementById('refine-empty').classList.add('hidden');
+        document.getElementById('refine-content').classList.remove('hidden');
+        document.getElementById('project-name-display').textContent = projName;
+        document.getElementById('project-version-badge').textContent = 'imported';
+        document.getElementById('version-list').innerHTML = '<div class="tl-item active"><div class="tl-dot-col"><div class="tl-dot"></div></div><div class="tl-content"><div class="tl-version">Imported</div><div class="tl-prompt">Original imported mesh</div></div></div>';
+        document.getElementById('btn-prev-version').disabled = true;
+        document.getElementById('btn-next-version').disabled = true;
+        switchTab('tab-3d'); document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+      }
+    };
+
+    window._deleteMesh = async (i) => {
+      const name = meshList[i].filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
+      if (!await customConfirm('Delete "' + name + '" ?')) return;
+      await window.meshyAPI.deleteMesh(meshList[i].filename);
+      if (selectedMesh?.filename === meshList[i].filename) {
+        selectedMesh = null;
+        document.getElementById('export-section').style.display = 'none';
+        clearModel();
+        document.getElementById('viewer-empty').classList.remove('hidden');
+        document.getElementById('mesh-info').textContent = '';
+      }
+      await refreshGallery();
+      // Refresh version history if we're in the same project
+      if (currentProject) {
+        const vData = await window.meshyAPI.getVersions(currentProject);
+        if (vData && vData.versions.length > 0) {
+          currentVersionData = vData;
+          updateVersionUI(vData);
+        } else {
+          // Project has no more versions
+          currentProject = null;
+          currentVersionData = null;
+          document.getElementById('refine-empty').classList.remove('hidden');
+          document.getElementById('refine-content').classList.add('hidden');
+        }
+      }
+    };
+
+    // ========== APP LOGIC ==========
+    function formatSize(b) { return b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
+
+    function customConfirm(message) {
+      return new Promise(resolve => {
+        const modal = document.getElementById('confirm-modal');
+        document.getElementById('confirm-message').textContent = message;
+        modal.classList.remove('hidden');
+        const yesBtn = document.getElementById('confirm-yes');
+        const noBtn = document.getElementById('confirm-no');
+        function cleanup() {
+          modal.classList.add('hidden');
+          yesBtn.removeEventListener('click', onYes);
+          noBtn.removeEventListener('click', onNo);
+          modal.removeEventListener('click', onBackdrop);
+        }
+        function onYes() { cleanup(); resolve(true); }
+        function onNo() { cleanup(); resolve(false); }
+        function onBackdrop(e) { if (e.target === modal) { cleanup(); resolve(false); } }
+        yesBtn.addEventListener('click', onYes);
+        noBtn.addEventListener('click', onNo);
+        modal.addEventListener('click', onBackdrop);
+      });
+    }
+
+    // Progress system
+    let progressInterval = null;
+    let currentProgress = 0;
+    let targetProgress = 0;
+
+    function setProgress(percent, label) {
+      targetProgress = percent;
+      // Update active job
+      if (activeJobId) {
+        const job = activeJobs.find(j => j.id === activeJobId);
+        if (job) {
+          job.progress = percent;
+          if (label) job.step = label;
+          renderJobs();
+        }
+      }
+    }
+
+    function startProgressAnimation(targetPercent, durationMs, label) {
+      if (label) setProgress(currentProgress, label);
+      const startPercent = currentProgress;
+      const startTime = Date.now();
+      if (progressInterval) clearInterval(progressInterval);
+      progressInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const ratio = Math.min(elapsed / durationMs, 1);
+        let pct;
+        if (ratio < 1) {
+          pct = startPercent + (targetPercent - startPercent) * ratio * 0.9;
+        } else {
+          const extra = (elapsed - durationMs) / 1000 * 0.5;
+          pct = startPercent + (targetPercent - startPercent) * 0.9 + Math.min(extra, (targetPercent - startPercent) * 0.09);
+        }
+        currentProgress = Math.min(pct, targetPercent - 0.5);
+        setProgress(currentProgress, null);
+      }, 500);
+    }
+
+    function stopProgress() {
+      if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+    }
+
+    function showProgressError(label) {
+      stopProgress();
+      setProgress(currentProgress, label || 'Error');
+    }
+
+    function setSteps(activeIdx) {
+      // Steps now shown in job panel, no separate element needed
+    }
+
+    function resetProgress() {
+      stopProgress();
+      currentProgress = 0;
+      setProgress(0, 'Starting...');
+    }
+
+    function showLog(text, type) {
+      document.getElementById('output-log').classList.remove('hidden');
+      const c = document.getElementById('log-content');
+      c.textContent = text;
+      c.style.color = type === 'error' ? '#f87171' : type === 'success' ? '#4ade80' : '#8892b0';
+    }
+
+    const config = await window.meshyAPI.getConfig();
+    const bpd = document.getElementById('blender-path-display');
+    bpd.textContent = config.blenderPath || 'Not set';
+    bpd.style.color = config.blenderPath ? '#4ade80' : '#f87171';
+
+    // Define gallery click handlers before first render
+    window._selectGalleryImage = window._selectGalleryImage || function() {};
+    await refreshGalleryImages(); // Start with image gallery since Image tab is active
+
+    // Generate button
+    document.getElementById('btn-generate').addEventListener('click', async () => {
+      const prompt = document.getElementById('prompt-input').value.trim();
+      const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
+      const format = document.getElementById('export-format')?.value || 'glb';
+
+      // In Image-to-3D mode, we need an image, not a prompt
+      if (currentMethod === 'ai3d') {
+        if (!selectedImagePath) {
+          showLog('Select an image first in the Image tab.', 'error');
+          switchTab('tab-image');
+          return;
+        }
+      } else if (!prompt) {
+        showLog('Please describe the 3D object you want to create.', 'error');
+        return;
+      }
+
+      // Route to Build Stages method
+      if (currentMethod === 'build') {
+        const btn = document.getElementById('btn-generate');
+        const loader = document.getElementById('viewer-loading');
+        btn.disabled = true;
+        btn.textContent = 'Building 3 stages...';
+        loader.classList.remove('hidden');
+        document.getElementById('loading-text').textContent = 'Generating Stage 1...';
+        document.getElementById('generation-status').classList.remove('hidden');
+        resetProgress();
+        startProgressAnimation(90, 300000, 'Stage 1: Construction Site...');
+
+        // Show build progress
+        const bp = document.getElementById('build-progress');
+        bp.classList.remove('hidden');
+        [0,1,2].forEach(i => { const el = document.getElementById('bs-'+i); el.className = 'build-stage'; el.querySelector('.bs-dot').textContent = '-'; });
+
+        // Listen for stage progress
+        const stageHandler = (e, data) => {
+          const { stage, label } = data;
+          // Mark current as active
+          for (let j = 0; j < 3; j++) {
+            const el = document.getElementById('bs-'+j);
+            if (j < stage) { el.className = 'build-stage done'; el.querySelector('.bs-dot').textContent = '\u2713'; }
+            else if (j === stage) { el.className = 'build-stage active'; el.querySelector('.bs-dot').textContent = '..'; }
+          }
+          currentProgress = (stage / 3) * 90;
+          setProgress(currentProgress, label);
+          document.getElementById('loading-text').textContent = label;
+        };
+        require('electron')?.ipcRenderer?.on('build-stage-progress', stageHandler);
+        // Also use the preload API
+        window.meshyAPI.onBuildStageProgress((data) => {
+          const { stage, label } = data;
+          for (let j = 0; j < 3; j++) {
+            const el = document.getElementById('bs-'+j);
+            if (j < stage) { el.className = 'build-stage done'; el.querySelector('.bs-dot').textContent = '\u2713'; }
+            else if (j === stage) { el.className = 'build-stage active'; el.querySelector('.bs-dot').textContent = '..'; }
+          }
+          currentProgress = (stage / 3) * 90;
+          setProgress(currentProgress, label);
+          document.getElementById('loading-text').textContent = label;
+        });
+
+        const engine3d = document.getElementById('ai3d-engine').value;
+        const result = await window.meshyAPI.generateBuildStages({ prompt, outputName: meshName, engine: engine3d });
+
+        if (!result.success) {
+          showProgressError('Build stages failed');
+          showLog(result.error, 'error');
+          btn.disabled = false; btn.textContent = '\u25B6 Generate 3D Mesh'; loader.classList.add('hidden');
+          return;
+        }
+
+        // Mark all stages
+        result.stages.forEach((s, i) => {
+          const el = document.getElementById('bs-'+i);
+          el.className = s.success ? 'build-stage done' : 'build-stage error';
+          el.querySelector('.bs-dot').textContent = s.success ? '\u2713' : '!';
+        });
+
+        stopProgress(); setProgress(100, 'All 3 stages done!');
+
+        // Load the last successful stage
+        const lastOk = [...result.stages].reverse().find(s => s.success);
+        if (lastOk) {
+          const buffer = await window.meshyAPI.readMeshFile(lastOk.meshPath);
+          if (buffer) {
+            await loadMeshFromBuffer(buffer, format, lastOk.meshPath);
+            document.getElementById('export-section').style.display = 'block';
+            selectedMesh = { path: lastOk.meshPath, filename: lastOk.meshFilename, format: format.toUpperCase() };
+          }
+        }
+
+        await refreshGallery();
+        const okCount = result.stages.filter(s => s.success).length;
+        showLog(`Build stages done! ${okCount}/3 stages generated successfully.`, okCount === 3 ? 'success' : 'error');
+        window.meshyAPI.flashTaskbar();
+        btn.disabled = false; btn.textContent = '\u25B6 Generate 3D Mesh'; loader.classList.add('hidden');
+        return;
+      }
+
+      // Route to Image-to-3D method
+      if (currentMethod === 'ai3d') {
+        const engine = document.getElementById('ai3d-engine').value;
+
+        // Check GPU capacity for local engines
+        if (!await checkCapacityAndConfirm(engine)) return;
+
+        const btn = document.getElementById('btn-generate');
+        btn.disabled = false; // Keep enabled for parallel jobs
+        const loader = document.getElementById('viewer-loading');
+        loader.classList.remove('hidden');
+        document.getElementById('generation-status').classList.remove('hidden');
+        resetProgress();
+
+        const engineName = { hunyuan: 'Hunyuan3D', local: 'TripoSR', trellis: 'TRELLIS Cloud' }[engine];
+        const job = addJob(`${meshName} (${engineName})`, engine);
+        document.getElementById('loading-text').textContent = `${engineName} converting to 3D...`;
+        startProgressAnimation(90, engine === 'local' ? 60000 : 180000, `${engineName} generating mesh...`);
+
+        if (engine === 'both') {
+          const [r1, r2] = await Promise.allSettled([
+            window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine: 'triposg', targetFaces: 50000 }),
+            window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine: 'trellis', textureSize: 1024 })
+          ]);
+          stopProgress(); setProgress(100, 'Done!');
+          const successes = [r1, r2].filter(r => r.status === 'fulfilled' && r.value.success).map(r => r.value);
+          if (successes.length) {
+            const last = successes[successes.length - 1];
+            const buffer = await window.meshyAPI.readMeshFile(last.meshPath);
+            if (buffer) { await loadMeshFromBuffer(buffer, 'glb', last.meshPath); selectedMesh = { path: last.meshPath, filename: last.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
+          }
+          await refreshGallery();
+          showLog(`${successes.length}/2 engines succeeded.`, successes.length > 0 ? 'success' : 'error');
+        } else {
+          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: 50000 });
+          if (!r3d.success) {
+            showProgressError(`${engineName} failed`);
+            showLog(r3d.error || 'Failed', 'error');
+            completeJob(job.id, false);
+            btn.textContent = 'Generate 3D'; loader.classList.add('hidden');
+            return;
+          }
+          stopProgress(); setProgress(100, 'Done!');
+          const buffer = await window.meshyAPI.readMeshFile(r3d.meshPath);
+          if (buffer) { await loadMeshFromBuffer(buffer, 'glb', r3d.meshPath); selectedMesh = { path: r3d.meshPath, filename: r3d.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
+          await refreshGallery();
+          showLog('Success! ' + r3d.meshFilename + ' (' + formatSize(r3d.size) + ')', 'success');
+        }
+
+        completeJob(job.id, true);
+        window.meshyAPI.flashTaskbar();
+        btn.textContent = 'Generate 3D'; loader.classList.add('hidden');
+        return;
+      }
+
+      document.getElementById('generation-status').classList.remove('hidden');
+      resetProgress();
+      const isOpus = (document.getElementById('ai-model')?.value || document.getElementById('ai-model-blender')?.value || 'opus') === 'opus';
+      startProgressAnimation(55, isOpus ? 90000 : 40000, 'AI writing Blender script...');
+      document.getElementById('loading-text').textContent = 'AI is writing Blender script...';
+
+      const aiModel = (document.getElementById('ai-model')?.value || document.getElementById('ai-model-blender')?.value || 'opus');
+      const maxTris = parseInt(document.getElementById('max-tris').value) || 0;
+      const result = await window.meshyAPI.generateFromPrompt({ prompt, outputName: meshName, format, model: aiModel, maxTris });
+
+      if (!result.success) {
+        showProgressError('Generation failed');
+        showLog(result.error, 'error');
+        btn.disabled = false; btn.textContent = '\u25B6 Generate 3D Mesh'; loader.classList.add('hidden');
+        return;
+      }
+
+      stopProgress(); currentProgress = 60;
+      startProgressAnimation(90, 15000, 'Blender rendering...');
+      document.getElementById('loading-text').textContent = 'Loading mesh...';
+
+      stopProgress(); currentProgress = 90;
+      startProgressAnimation(98, 3000, 'Loading in viewer...');
+
+      const buffer = await window.meshyAPI.readMeshFile(result.meshPath);
+      if (buffer) {
+        await loadMeshFromBuffer(buffer, format);
+        document.getElementById('export-section').style.display = 'block';
+        selectedMesh = { path: result.meshPath, filename: result.meshFilename, format: format.toUpperCase() };
+      }
+
+      stopProgress();
+      setProgress(100, 'Done!');
+      await refreshGallery();
+      showLog('Success! Created: ' + result.meshFilename + ' (' + formatSize(result.size) + ')', 'success');
+      window.meshyAPI.flashTaskbar();
+      btn.disabled = false; btn.textContent = '\u25B6 Generate 3D Mesh'; loader.classList.add('hidden');
+
+      // Activate refine tab
+      currentProject = meshName;
+      if (result.versionData) updateVersionUI(result.versionData);
+      document.getElementById('refine-empty').classList.add('hidden');
+      document.getElementById('refine-content').classList.remove('hidden');
+      document.getElementById('project-name-display').textContent = meshName;
+      // Auto-switch to refine tab
+      switchTab('tab-3d'); document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+    });
+
+    // Blender script runner removed (using AI 3D pipeline now)
+
+    // Settings removed (no longer using Blender)
+    document.getElementById('btn-browse-blender').onclick = async () => {
+      const p = await window.meshyAPI.setBlenderPath();
+      if (p) { bpd.textContent = p; bpd.style.color = '#4ade80'; }
+    };
+    document.getElementById('btn-open-folder').addEventListener('click', () => {
+      if (currentTab === 'tab-image') {
+        window.meshyAPI.openImagesFolder();
+      } else {
+        window.meshyAPI.openMeshesFolder();
+      }
+    });
+
+    // Import mesh button
+    document.getElementById('btn-import').onclick = async () => {
+      const result = await window.meshyAPI.importMesh();
+      if (result) {
+        await refreshGallery();
+        const buf = await window.meshyAPI.readMeshFile(result.meshPath);
+        if (buf) {
+          await loadMeshFromBuffer(buf, result.format, result.meshPath);
+          document.getElementById('export-section').style.display = 'block';
+          selectedMesh = { path: result.meshPath, filename: result.meshFilename, format: result.format.toUpperCase() };
+        }
+        showLog('Imported: ' + result.meshFilename, 'success');
+      }
+    };
+
+    // Drag & drop on viewer
+    const viewerContainer = document.getElementById('viewer-container');
+    const dropOverlay = document.getElementById('drop-overlay');
+    let dragCounter = 0;
+
+    viewerContainer.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      dropOverlay.classList.remove('hidden');
+    });
+
+    viewerContainer.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) { dragCounter = 0; dropOverlay.classList.add('hidden'); }
+    });
+
+    viewerContainer.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+
+    viewerContainer.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      dropOverlay.classList.add('hidden');
+
+      const files = Array.from(e.dataTransfer.files);
+      const meshFile = files.find(f => /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f.name));
+      if (!meshFile) { showLog('Unsupported file format. Use GLB, OBJ, FBX, or STL.', 'error'); return; }
+
+      const result = await window.meshyAPI.copyMeshToProject(meshFile.path);
+      if (result) {
+        await refreshGallery();
+        const buf = await window.meshyAPI.readMeshFile(result.meshPath);
+        if (buf) {
+          await loadMeshFromBuffer(buf, result.format, result.meshPath);
+          document.getElementById('export-section').style.display = 'block';
+          selectedMesh = { path: result.meshPath, filename: result.meshFilename, format: result.format.toUpperCase() };
+        }
+        showLog('Imported: ' + result.meshFilename, 'success');
+      }
+    });
+    document.getElementById('btn-refresh').onclick = () => { currentTab === 'tab-image' ? refreshGalleryImages() : refreshGallery(); };
+
+    // Viewer toolbar
+    document.getElementById('btn-reset-camera').onclick = () => { if (currentModel) fitCamera(currentModel); else { camera.position.set(3,2.5,3); controls.target.set(0,0.5,0); controls.update(); } };
+    document.getElementById('btn-wireframe').onclick = function() {
+      isWireframe = !isWireframe;
+      this.classList.toggle('active', isWireframe);
+      if (currentModel) currentModel.traverse(c => { if (c.isMesh) (Array.isArray(c.material)?c.material:[c.material]).forEach(m => m.wireframe = isWireframe); });
+    };
+    document.getElementById('btn-grid').onclick = function() {
+      isGridVisible = !isGridVisible;
+      this.classList.toggle('active', isGridVisible);
+      gridHelper.visible = isGridVisible;
+    };
+
+    // Convert
+    document.getElementById('btn-convert').onclick = async () => {
+      if (!selectedMesh) return;
+      try {
+        const r = await window.meshyAPI.exportMesh({ sourcePath: selectedMesh.path, targetFormat: document.getElementById('convert-format').value });
+        showLog('Converted: ' + r.filename, 'success');
+        await refreshGallery();
+      } catch(e) { showLog('Error: ' + (e.error||e.message), 'error'); }
+    };
+
+    document.getElementById('btn-clear-log').onclick = () => document.getElementById('output-log').classList.add('hidden');
+
+    // Ctrl+Enter to generate
+    document.getElementById('prompt-input').onkeydown = e => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); document.getElementById('btn-generate').click(); } };
+
+    // ========== METHOD SELECTOR ==========
+    let currentMethod = 'ai3d';
+    document.querySelectorAll('.method-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentMethod = btn.dataset.method;
+        document.querySelectorAll('.method-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.method-options').forEach(o => o.classList.add('hidden'));
+        const optId = { ai3d: 'ai3d-options', build: 'build-options', blender: 'blender-options' }[currentMethod];
+        if (optId) document.getElementById(optId).classList.remove('hidden');
+      });
+    });
+
+    // Build stage progress listener
+    window.meshyAPI.onAI3DProgress((msg) => {
+      // handled below
+    });
+
+    // AI 3D progress listener
+    window.meshyAPI.onAI3DProgress((msg) => {
+      if (msg.includes('IMAGE_GENERATED')) {
+        const parts = msg.split(':');
+        const idx = parseInt(parts[1]);
+        const imgPath = parts.slice(2).join(':');
+        // Update grid placeholder with actual image
+        const gridItems = document.getElementById('image-grid-items');
+        const placeholders = gridItems.querySelectorAll('.grid-img-loading');
+        if (placeholders[idx]) {
+          const img = document.createElement('img');
+          img.className = 'grid-img';
+          img.src = 'file:///' + imgPath.replace(/\\/g, '/');
+          img.dataset.path = imgPath;
+          img.onclick = function() { window._selectRefImage(this); };
+          placeholders[idx].replaceWith(img);
+        }
+        currentProgress = 20 + idx * 15;
+        setProgress(currentProgress, `Image ${idx + 1}/4 generated`);
+      }
+      else if (msg.includes('STEP2_START')) setProgress(40, 'Connecting to TRELLIS...');
+      else if (msg.includes('STEP2_PROGRESS')) { currentProgress = Math.min(currentProgress + 10, 85); setProgress(currentProgress, msg.split(': ')[1] || 'Processing...'); }
+      else if (msg.includes('STEP2_DONE')) setProgress(95, 'Mesh extracted!');
+      // Hunyuan3D progress — update both progress bar AND active job
+      else if (msg.includes('HUNYUAN3D: Loading shape')) { setSteps(0); stopProgress(); setProgress(5, 'Loading shape model...'); startProgressAnimation(20, 15000, 'Loading shape...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=5;j.step='Loading shape model...';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D: Generating 3D shape')) { setSteps(0); stopProgress(); setProgress(20, 'Generating shape...'); startProgressAnimation(50, 30000, 'Generating shape...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=20;j.step='Generating shape...';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D: Shape done')) { setSteps(1); stopProgress(); setProgress(50, 'Shape complete!'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=50;j.step='Shape complete!';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D: Loading texture')) { setSteps(1); stopProgress(); setProgress(55, 'Loading texture model...'); startProgressAnimation(65, 15000, 'Loading texture...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=55;j.step='Loading texture model...';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D: Painting textures')) { setSteps(2); stopProgress(); setProgress(65, 'Painting textures...'); startProgressAnimation(95, 60000, 'Painting textures...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=65;j.step='Painting textures...';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D: Total time')) { setSteps(3); stopProgress(); setProgress(98, 'Exporting...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=98;j.step='Exporting...';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D_SUCCESS')) { setSteps(3); stopProgress(); setProgress(100, 'Done!'); }
+    });
+
+    // ========== GALLERY: IMAGE MODE ==========
+    async function refreshGalleryImages() {
+      const allFolders = await window.meshyAPI.listImageFolders();
+      const el = document.getElementById('mesh-list');
+      const folders = allFolders.filter(f => f.count > 0);
+      if (!folders.length) { el.innerHTML = '<div class="gallery-empty">No images yet.<br>Generate some in the Image tab.</div>'; return; }
+
+      el.innerHTML = folders.map((f, fi) => {
+        const name = f.name.replace(/_\d+$/, '');
+        const date = new Date(f.created);
+        const ds = date.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+        const collapsed = collapsedProjects['img_' + f.name] ?? false;
+        const chevron = collapsed ? '&#9654;' : '&#9660;';
+
+        let html = `<div class="gallery-project">
+          <div class="gallery-project-header" onclick="window._toggleProject('img_${f.name}')">
+            <span class="gallery-chevron">${chevron}</span>
+            <span class="gallery-project-name">${name}</span>
+            <span class="gallery-version-count">${f.count} img</span>
+            <button class="del-btn" onclick="event.stopPropagation(); window._deleteImageFolder('${f.path.replace(/\\/g, '/')}', '${f.name}')">x</button>
+          </div>`;
+
+        if (!collapsed) {
+          html += '<div class="gallery-children gallery-img-children">';
+          const safePrompt = (f.prompt || '').replace(/'/g, "\\'");
+          f.images.forEach((img, i) => {
+            const imgSrc = 'file:///' + img.replace(/\\/g, '/');
+            const imgPathSafe = img.replace(/\\/g, '/');
+            html += `<div class="gallery-thumb-wrapper"><img class="gallery-thumb" src="${imgSrc}" onclick="window._selectGalleryImage('${imgPathSafe}', '${safePrompt}')" /><button class="gallery-thumb-del" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>`;
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+        return html;
+      }).join('');
+    }
+
+    // Defined here so it's available when gallery renders
+    window._selectGalleryImage = (imgPath, prompt) => {
+      selectedImagePath = imgPath;
+      if (prompt) {
+        lastImagePrompt = prompt;
+        document.getElementById('prompt-input').value = prompt;
+      }
+      const grid = document.getElementById('image-grid');
+      const gridItems = document.getElementById('image-grid-items');
+      grid.classList.remove('hidden');
+      gridItems.innerHTML = `<img class="grid-img selected" src="file:///${imgPath}" data-path="${imgPath}" style="grid-column:1/-1; max-height:180px; object-fit:contain; cursor:pointer;" onclick="window._openLightbox(this.src)" />`;
+      document.getElementById('btn-send-to-3d').classList.remove('hidden');
+      showImageRefine(imgPath, prompt);
+      // Switch to refine sub-tab
+      document.querySelector('#img-subtab-bar .img-subtab[data-imgsubtab="img-refine-tab"]').click();
+    };
+
+    // 3D tab: From Gallery button — switch to Image tab
+    document.getElementById('btn-pick-from-gallery').onclick = () => switchTab('tab-image');
+
+    // 3D tab: Import File button
+    document.getElementById('btn-import-image').onclick = async () => {
+      const imgPath = await window.meshyAPI.importImage();
+      if (imgPath) {
+        selectedImagePath = imgPath;
+        document.getElementById('selected-image-thumb').src = 'file:///' + imgPath.replace(/\\/g, '/');
+        document.getElementById('selected-image-preview').classList.remove('hidden');
+        document.getElementById('no-image-hint').classList.add('hidden');
+        document.getElementById('btn-generate').disabled = false;
+      }
+    };
+
+    // Delete single image, remove empty folder
+    window._deleteImage = async (imgPath, folderName) => {
+      if (!await customConfirm('Delete this image?')) return;
+      await window.meshyAPI.deleteFile(imgPath);
+      // Check if folder is now empty, if so delete it
+      const folders = await window.meshyAPI.listImageFolders();
+      const folder = folders.find(f => f.name === folderName);
+      if (folder && folder.count === 0) {
+        await window.meshyAPI.deleteImageFolder(folder.path);
+      }
+      refreshGalleryImages();
+    };
+
+    // Delete image folder
+    window._deleteImageFolder = async (folderPath, name) => {
+      if (!await customConfirm('Delete "' + name.replace(/_\d+$/, '') + '" images?')) return;
+      await window.meshyAPI.deleteImageFolder(folderPath);
+      refreshGalleryImages();
+    };
+
+    // ========== IMAGE SUB-TABS ==========
+    document.querySelectorAll('#img-subtab-bar .img-subtab').forEach(t => t.addEventListener('click', () => {
+      document.querySelectorAll('#img-subtab-bar .img-subtab').forEach(s => s.classList.toggle('active', s.dataset.imgsubtab === t.dataset.imgsubtab));
+      document.querySelectorAll('.imgsubtab-content').forEach(c => c.classList.toggle('active', c.id === t.dataset.imgsubtab));
+    }));
+
+    function showImageRefine(imgPath, prompt) {
+      document.getElementById('img-refine-empty').classList.add('hidden');
+      document.getElementById('img-refine-content').classList.remove('hidden');
+      document.getElementById('img-refine-thumb').src = 'file:///' + imgPath.replace(/\\/g, '/');
+      if (prompt) lastImagePrompt = prompt;
+    }
+
+    // ========== IMAGE TAB ==========
+    let selectedImagePath = null;
+
+    // Generate Images button
+    document.getElementById('btn-gen-images').addEventListener('click', async () => {
+      const prompt = document.getElementById('prompt-input').value.trim();
+      if (!prompt) { showLog('Describe what to generate.', 'error'); return; }
+      const numImages = parseInt(document.getElementById('num-images').value) || 4;
+      const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
+      const btn = document.getElementById('btn-gen-images');
+      const imageEngine = document.getElementById('image-engine').value;
+
+      // Check capacity for local image generation
+      if (!await checkCapacityAndConfirm(imageEngine)) return;
+
+      const imgJob = addJob(`${numImages} images (${imageEngine})`, imageEngine);
+      btn.disabled = false; // Keep enabled for parallel
+
+      document.getElementById('generation-status').classList.remove('hidden');
+      resetProgress();
+      startProgressAnimation(90, numImages * 30000, `Generating ${numImages} images...`);
+
+      const grid = document.getElementById('image-grid');
+      const gridItems = document.getElementById('image-grid-items');
+      grid.classList.remove('hidden');
+      gridItems.innerHTML = Array(numImages).fill('<div class="grid-img-loading">...</div>').join('');
+      document.getElementById('btn-send-to-3d').classList.add('hidden');
+
+      const result = await window.meshyAPI.generateImages({ prompt, numImages, projectName: meshName, engine: imageEngine });
+
+      stopProgress();
+      if (!result.success || !result.images?.length) {
+        showProgressError('Failed');
+        showLog(result.error || 'No images', 'error');
+        completeJob(imgJob.id, false);
+        btn.disabled = false; btn.textContent = 'Generate Images';
+        return;
+      }
+
+      completeJob(imgJob.id, true);
+      setProgress(100, `${result.images.length} images ready!`);
+      lastImagePrompt = prompt;
+      const safePrompt = prompt.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      gridItems.innerHTML = result.images.map(img =>
+        `<div class="grid-img-wrapper"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
+      ).join('');
+
+      // Auto-select first
+      const first = gridItems.querySelector('.grid-img');
+      if (first) window._pickImage(first);
+
+      await refreshImageHistory();
+      window.meshyAPI.flashTaskbar();
+      btn.disabled = false; btn.textContent = 'Generate Images';
+    });
+
+    let lastImagePrompt = '';
+
+    // Open lightbox on image click
+    window._openLightbox = (imgSrc) => {
+      document.getElementById('lightbox-img').src = imgSrc;
+      document.getElementById('lightbox').classList.remove('hidden');
+    };
+
+    // Clear reference image
+    window._clearRefImage = () => {
+      selectedImagePath = null;
+      document.getElementById('image-grid').classList.add('hidden');
+      document.getElementById('btn-send-to-3d').classList.add('hidden');
+      document.getElementById('btn-clear-ref').classList.add('hidden');
+      document.getElementById('selected-image-preview').classList.add('hidden');
+      document.getElementById('no-image-hint').classList.remove('hidden');
+      document.getElementById('btn-generate').disabled = true;
+    };
+
+    window._pickImage = (el) => {
+      // If already selected, open lightbox
+      if (el.classList.contains('selected')) {
+        window._openLightbox(el.src);
+        return;
+      }
+      document.querySelectorAll('#image-grid-items .grid-img').forEach(i => i.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedImagePath = el.dataset.path;
+      document.getElementById('btn-send-to-3d').classList.remove('hidden');
+      document.getElementById('btn-clear-ref').classList.remove('hidden');
+      showImageRefine(el.dataset.path, lastImagePrompt);
+    };
+
+    // Send to 3D tab button
+    document.getElementById('btn-send-to-3d').addEventListener('click', () => {
+      if (!selectedImagePath) return;
+      document.getElementById('selected-image-thumb').src = 'file:///' + selectedImagePath.replace(/\\/g, '/');
+      document.getElementById('selected-image-preview').classList.remove('hidden');
+      document.getElementById('no-image-hint').classList.add('hidden');
+      document.getElementById('btn-generate').disabled = false;
+      switchTab('tab-3d');
+      document.querySelector('.subtab[data-subtab="subtab-create"]').click();
+    });
+
+    async function refreshImageHistory() {
+      const folders = await window.meshyAPI.listImageFolders();
+      const el = document.getElementById('img-history-list');
+      if (!folders.length) { el.innerHTML = '<div class="gallery-empty">No images yet.</div>'; return; }
+
+      el.innerHTML = folders.map((f, fi) => {
+        const name = f.name.replace(/_\d+$/, '');
+        const date = new Date(f.created);
+        const ds = date.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+        return `<div class="img-history-group">
+          <div class="img-history-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
+            <span class="img-history-name">${name}</span>
+            <span>${ds}</span>
+            <span class="img-history-count">${f.count}</span>
+          </div>
+          <div class="img-history-thumbs">
+            ${f.images.map(img =>
+              `<img class="img-history-thumb" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" onclick="window._previewImage('${img.replace(/\\/g, '/')}')" />`
+            ).join('')}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // Preview an image full-size in the viewer area and offer Convert to 3D
+    window._previewImage = async (imgPath) => {
+      // Show image in viewer as a plane or just switch to the image tab with selection
+      document.getElementById('img-tab-grid').classList.remove('hidden');
+      document.getElementById('img-tab-grid-items').innerHTML =
+        `<img class="grid-img selected" src="file:///${imgPath}" style="grid-column: 1/-1; max-height:200px; object-fit:contain;" data-path="${imgPath}" />`;
+      // Auto-set as selected for Convert to 3D in the New tab
+      window._selectedPreviewImage = imgPath;
+    };
+
+    // Generate Images button in Images tab
+    document.getElementById('btn-gen-images').addEventListener('click', async () => {
+      const prompt = document.getElementById('img-prompt').value.trim();
+      if (!prompt) { showLog('Describe what to generate.', 'error'); return; }
+      const count = parseInt(document.getElementById('img-count').value) || 4;
+      const btn = document.getElementById('btn-gen-images');
+      btn.disabled = true; btn.textContent = `Generating ${count} images...`;
+
+      document.getElementById('generation-status').classList.remove('hidden');
+      resetProgress();
+      startProgressAnimation(90, count * 30000, `Generating ${count} images...`);
+
+      const grid = document.getElementById('img-tab-grid');
+      const gridItems = document.getElementById('img-tab-grid-items');
+      grid.classList.remove('hidden');
+      gridItems.innerHTML = Array(count).fill('<div class="grid-img-loading">...</div>').join('');
+
+      const result = await window.meshyAPI.generateImages({ prompt, numImages: count, projectName: prompt.slice(0, 20).replace(/[^a-zA-Z0-9]/g, '_') });
+
+      stopProgress();
+      if (!result.success || !result.images?.length) {
+        showProgressError('Failed');
+        showLog(result.error || 'No images', 'error');
+        btn.disabled = false; btn.textContent = 'Generate Images';
+        return;
+      }
+
+      setProgress(100, `${result.images.length} images generated!`);
+      gridItems.innerHTML = result.images.map(img =>
+        `<img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="this.parentElement.querySelectorAll('.grid-img').forEach(i=>i.classList.remove('selected')); this.classList.add('selected'); window._selectedPreviewImage='${img.replace(/\\/g, '/')}';" />`
+      ).join('');
+
+      // Auto-select first
+      const first = gridItems.querySelector('.grid-img');
+      if (first) first.click();
+
+      await refreshImageHistory();
+      window.meshyAPI.flashTaskbar();
+      btn.disabled = false; btn.textContent = 'Generate Images';
+    });
+
+    // ========== IMAGE REFINE ==========
+    document.getElementById('img-refine-input').addEventListener('input', (e) => {
+      document.getElementById('btn-refine-image').disabled = !e.target.value.trim();
+    });
+
+    document.getElementById('btn-refine-image').addEventListener('click', async () => {
+      const modification = document.getElementById('img-refine-input').value.trim();
+      if (!modification) { showLog('Describe what to change.', 'error'); return; }
+
+      const basePrompt = lastImagePrompt || document.getElementById('prompt-input').value.trim() || 'object';
+      const refinedPrompt = `${basePrompt}, ${modification}`;
+      document.getElementById('prompt-input').value = refinedPrompt;
+      lastImagePrompt = refinedPrompt;
+
+      const numImages = parseInt(document.getElementById('num-images').value) || 4;
+      const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
+      const imageEngine = document.getElementById('image-engine').value;
+      const btn = document.getElementById('btn-refine-image');
+      btn.disabled = true; btn.textContent = 'Refining...';
+
+      document.getElementById('generation-status').classList.remove('hidden');
+      resetProgress();
+      startProgressAnimation(90, numImages * 30000, `Refining ${numImages} images...`);
+
+      const grid = document.getElementById('image-grid');
+      const gridItems = document.getElementById('image-grid-items');
+      grid.classList.remove('hidden');
+      gridItems.innerHTML = Array(numImages).fill('<div class="grid-img-loading">...</div>').join('');
+
+      const result = await window.meshyAPI.generateImages({ prompt: refinedPrompt, numImages, projectName: meshName, engine: imageEngine });
+
+      stopProgress();
+      if (!result.success || !result.images?.length) {
+        showProgressError('Refine failed');
+        showLog(result.error || 'No images', 'error');
+        btn.disabled = false; btn.textContent = 'Refine Image';
+        return;
+      }
+
+      setProgress(100, `${result.images.length} refined images!`);
+      const safePrompt = refinedPrompt.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      gridItems.innerHTML = result.images.map(img =>
+        `<div class="grid-img-wrapper"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
+      ).join('');
+
+      const first = gridItems.querySelector('.grid-img');
+      if (first) window._pickImage(first);
+
+      if (currentTab === 'tab-image') refreshGalleryImages();
+      window.meshyAPI.flashTaskbar();
+      btn.disabled = false; btn.textContent = 'Refine Image';
+      document.getElementById('img-refine-input').value = '';
+    });
+
+    // ========== TABS ==========
+    let currentTab = 'tab-image';
+    function switchTab(tabId) {
+      currentTab = tabId;
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === tabId));
+      // Switch gallery view based on tab — expand all groups
+      const title = document.getElementById('gallery-title');
+      try {
+        if (tabId === 'tab-image') {
+          title.textContent = 'Images';
+          Object.keys(collapsedProjects).forEach(k => { if (k.startsWith('img_')) collapsedProjects[k] = false; });
+          refreshGalleryImages();
+        } else {
+          title.textContent = '3D Meshes';
+          Object.keys(collapsedProjects).forEach(k => { if (!k.startsWith('img_')) collapsedProjects[k] = false; });
+          refreshGallery();
+        }
+      } catch(e) { console.error('Gallery refresh error:', e); }
+    }
+    document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+    // Sub-tab switching (Create / Refine inside 3D)
+    document.querySelectorAll('.subtab').forEach(t => t.addEventListener('click', () => {
+      document.querySelectorAll('.subtab').forEach(s => s.classList.toggle('active', s.dataset.subtab === t.dataset.subtab));
+      document.querySelectorAll('.subtab-content').forEach(c => c.classList.toggle('active', c.id === t.dataset.subtab));
+    }));
+
+    // ========== REFINE + VERSIONS ==========
+    let currentProject = null;
+    let currentVersionData = null;
+
+    function updateVersionUI(data) {
+      currentVersionData = data;
+      document.getElementById('project-version-badge').textContent = `v${data.currentVersion}`;
+
+      document.getElementById('btn-prev-version').disabled = data.currentVersion <= 0;
+      document.getElementById('btn-next-version').disabled = data.currentVersion >= data.versions.length - 1;
+
+      // Render timeline (newest first)
+      const list = document.getElementById('version-list');
+      const reversed = [...data.versions].reverse();
+      list.innerHTML = reversed.map((v, ri) => {
+        const i = data.versions.length - 1 - ri;
+        const active = i === data.currentVersion ? 'active' : '';
+        const promptShort = v.prompt.replace(/^\[Refine\] /, '');
+        const isRefine = v.prompt.startsWith('[Refine]');
+        const label = i === 0 ? 'Original' : `v${i}`;
+        return `<div class="tl-item ${active}" onclick="window._goToVersion(${i})">
+          <div class="tl-dot-col">
+            <div class="tl-dot"></div>
+            ${ri < reversed.length - 1 ? '<div class="tl-line"></div>' : ''}
+          </div>
+          <div class="tl-content">
+            <div class="tl-version">${label}<button class="tl-copy" onclick="event.stopPropagation(); navigator.clipboard.writeText('${promptShort.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1000)" title="Copy prompt">Copy</button></div>
+            <div class="tl-prompt">${promptShort.length > 45 ? promptShort.slice(0,45)+'...' : promptShort}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    window._goToVersion = async (vNum) => {
+      if (!currentProject || !currentVersionData) return;
+      const result = await window.meshyAPI.revertToVersion({ projectName: currentProject, versionNum: vNum });
+      if (!result.success) { showLog(result.error, 'error'); return; }
+      currentVersionData = result.versionData;
+      updateVersionUI(result.versionData);
+      const fmt = result.format || 'glb';
+      const buf = await window.meshyAPI.readMeshFile(result.meshPath);
+      if (buf) {
+        await loadMeshFromBuffer(buf, fmt, result.meshPath);
+        selectedMesh = { path: result.meshPath, filename: result.meshFile, format: fmt.toUpperCase() };
+        document.getElementById('export-section').style.display = 'block';
+      }
+      await refreshGallery();
+      showLog('Version v' + vNum, 'success');
+    };
+
+    document.getElementById('btn-prev-version').onclick = () => {
+      if (currentVersionData && currentVersionData.currentVersion > 0)
+        window._goToVersion(currentVersionData.currentVersion - 1);
+    };
+    document.getElementById('btn-next-version').onclick = () => {
+      if (currentVersionData && currentVersionData.currentVersion < currentVersionData.versions.length - 1)
+        window._goToVersion(currentVersionData.currentVersion + 1);
+    };
+
+    // Refine button
+    document.getElementById('btn-refine').addEventListener('click', async () => {
+      const modification = document.getElementById('refine-input').value.trim();
+      if (!modification) { showLog('Describe what to change.', 'error'); return; }
+      if (!currentProject) { showLog('Select a mesh first.', 'error'); return; }
+
+      // If no version data yet (imported mesh), create a project
+      if (!currentVersionData && selectedMesh) {
+        const vData = await window.meshyAPI.createProjectFromMesh({
+          projectName: currentProject,
+          meshPath: selectedMesh.path,
+          meshFilename: selectedMesh.filename,
+          format: selectedMesh.format.toLowerCase()
+        });
+        currentVersionData = vData;
+        updateVersionUI(vData);
+      }
+
+      const format = document.getElementById('export-format').value;
+      const btn = document.getElementById('btn-refine');
+      const loader = document.getElementById('viewer-loading');
+      btn.disabled = true; btn.textContent = 'Capturing + Refining...';
+      loader.classList.remove('hidden');
+      document.getElementById('loading-text').textContent = 'Capturing screenshot...';
+
+      // Capture canvas screenshot
+      let screenshotPath = null;
+      try {
+        renderer.render(scene, camera); // force a render
+        const dataUrl = renderer.domElement.toDataURL('image/png');
+        screenshotPath = await window.meshyAPI.saveScreenshot({ dataUrl, projectName: currentProject });
+      } catch(e) {
+        console.warn('Screenshot capture failed, continuing without it:', e);
+      }
+
+      document.getElementById('generation-status').classList.remove('hidden');
+      resetProgress();
+      const isOpus = (document.getElementById('ai-model')?.value || document.getElementById('ai-model-blender')?.value || 'opus') === 'opus';
+      startProgressAnimation(55, isOpus ? 180000 : 60000, 'AI analyzing + modifying script...');
+      document.getElementById('loading-text').textContent = 'AI is refining...';
+
+      const aiModel = (document.getElementById('ai-model')?.value || document.getElementById('ai-model-blender')?.value || 'opus');
+      const result = await window.meshyAPI.refineMesh({ projectName: currentProject, modification, format, screenshotPath, model: aiModel });
+
+      if (!result.success) {
+        showProgressError('Refine failed');
+        showLog(result.error, 'error');
+        btn.disabled = false; btn.textContent = 'Refine'; loader.classList.add('hidden');
+        return;
+      }
+
+      stopProgress(); currentProgress = 60;
+      startProgressAnimation(90, 15000, 'Blender rendering...');
+
+      stopProgress(); currentProgress = 90;
+      startProgressAnimation(98, 3000, 'Loading refined mesh...');
+      document.getElementById('loading-text').textContent = 'Loading...';
+
+      const buffer = await window.meshyAPI.readMeshFile(result.meshPath);
+      if (buffer) {
+        await loadMeshFromBuffer(buffer, format);
+        selectedMesh = { path: result.meshPath, filename: result.meshFilename, format: format.toUpperCase() };
+      }
+
+      stopProgress();
+      setProgress(100, 'Done!');
+      await refreshGallery();
+      if (result.versionData) updateVersionUI(result.versionData);
+      showLog('Refined! v' + result.versionData.currentVersion + ' - ' + result.meshFilename + ' (' + formatSize(result.size) + ')', 'success');
+      window.meshyAPI.flashTaskbar();
+      btn.disabled = false; btn.textContent = 'Refine'; loader.classList.add('hidden');
+      document.getElementById('refine-input').value = '';
+    });
+
+    // Ctrl+Enter in refine field
+    document.getElementById('refine-input').onkeydown = e => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); document.getElementById('btn-refine').click(); } };
+
+    // ========== PARALLEL JOBS SYSTEM ==========
+    const VRAM_COSTS = { 'hunyuan': 5, 'local-sd': 6, 'local': 2, 'triposg': 0, 'trellis': 0, 'pollinations': 0 };
+    const TOTAL_VRAM = 16;
+    let activeJobs = [];
+    let jobIdCounter = 0;
+    let activeJobId = null;
+    const jobQueue = []; // { job, callback }
+
+    function getUsedVRAM() {
+      return activeJobs.filter(j => j.status === 'running' && VRAM_COSTS[j.type] > 0)
+        .reduce((s, j) => s + (VRAM_COSTS[j.type] || 0), 0);
+    }
+
+    function addJob(name, type) {
+      const job = { id: ++jobIdCounter, name, type, status: 'running', startTime: Date.now(), progress: 0, step: '' };
+      activeJobs.push(job);
+      activeJobId = job.id;
+      renderJobs();
+      return job;
+    }
+
+    // Add a job to the queue if VRAM is full, returns { job, queued }
+    function addJobOrQueue(name, type, callback) {
+      const needed = VRAM_COSTS[type] || 0;
+      const used = getUsedVRAM();
+
+      if (needed === 0 || used + needed <= TOTAL_VRAM - 2) {
+        // Enough VRAM, run immediately
+        const job = addJob(name, type);
+        return { job, queued: false };
+      } else {
+        // Queue it
+        const job = { id: ++jobIdCounter, name, type, status: 'waiting', startTime: Date.now(), progress: 0, step: 'In queue...' };
+        activeJobs.push(job);
+        jobQueue.push({ job, callback });
+        renderJobs();
+        return { job, queued: true };
+      }
+    }
+
+    function processQueue() {
+      if (jobQueue.length === 0) return;
+      const used = getUsedVRAM();
+      for (let i = 0; i < jobQueue.length; i++) {
+        const { job, callback } = jobQueue[i];
+        const needed = VRAM_COSTS[job.type] || 0;
+        if (needed === 0 || used + needed <= TOTAL_VRAM - 2) {
+          jobQueue.splice(i, 1);
+          job.status = 'running';
+          job.startTime = Date.now();
+          job.step = 'Starting...';
+          activeJobId = job.id;
+          renderJobs();
+          callback(job);
+          return;
+        }
+      }
+    }
+
+    function updateJob(jobId, progress, step) {
+      const job = activeJobs.find(j => j.id === jobId);
+      if (job) {
+        if (progress !== undefined) job.progress = progress;
+        if (step) job.step = step;
+        renderJobs();
+      }
+    }
+
+    function completeJob(jobId, success) {
+      const job = activeJobs.find(j => j.id === jobId);
+      if (job) {
+        job.status = success ? 'done' : 'error';
+        job.progress = success ? 100 : job.progress;
+        renderJobs();
+        // Process queue after job completes
+        setTimeout(processQueue, 500);
+        setTimeout(() => { activeJobs = activeJobs.filter(j => j.id !== jobId); renderJobs(); }, 8000);
+      }
+    }
+
+    function renderJobs() {
+      const panel = document.getElementById('jobs-panel');
+      const list = document.getElementById('jobs-list');
+      if (activeJobs.length === 0) { panel.classList.add('hidden'); return; }
+      panel.classList.remove('hidden');
+      list.innerHTML = activeJobs.map(j => {
+        const elapsed = Math.floor((Date.now() - j.startTime) / 1000);
+        const min = Math.floor(elapsed / 60);
+        const sec = elapsed % 60;
+        const timeStr = min > 0 ? `${min}m${sec.toString().padStart(2,'0')}s` : `${sec}s`;
+        const icon = j.status === 'running' ? '<div class="job-spinner"></div>' : j.status === 'waiting' ? '<span class="job-done-icon" style="color:var(--warning)">&#9202;</span>' : j.status === 'done' ? '<span class="job-done-icon" style="color:var(--success)">&#10003;</span>' : '<span class="job-done-icon" style="color:var(--error)">&#10007;</span>';
+        const pct = Math.round(j.progress);
+        const focused = j.id === activeJobId ? 'focused' : '';
+        const cancelBtn = (j.status === 'running' || j.status === 'waiting') ? `<button class="job-cancel" onclick="event.stopPropagation(); window._cancelJob(${j.id})">&#10005;</button>` : '';
+        return `<div class="job-item ${j.status} ${focused}" onclick="window._focusJob(${j.id})">
+          ${icon}
+          <div class="job-detail">
+            <div class="job-detail-top">
+              <span class="job-name">${j.name}</span>
+              <span class="job-time">${timeStr}${cancelBtn}</span>
+            </div>
+            <div class="job-bar"><div class="job-bar-fill" style="width:${pct}%"></div></div>
+            <div class="job-detail-top" style="margin-top:2px">
+              <span class="job-status">${j.step || j.status}</span>
+              <span class="job-percent">${pct}%</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // Cancel a running or waiting job
+    window._cancelJob = async (jobId) => {
+      if (!await customConfirm('Cancel this generation?')) return;
+      const job = activeJobs.find(j => j.id === jobId);
+      if (job) {
+        // Remove from queue if waiting
+        const qIdx = jobQueue.findIndex(q => q.job.id === jobId);
+        if (qIdx >= 0) jobQueue.splice(qIdx, 1);
+        job.status = 'error';
+        job.step = 'Cancelled';
+        job.progress = 0;
+        renderJobs();
+        processQueue(); // Try to start a queued job
+        setTimeout(() => { activeJobs = activeJobs.filter(j => j.id !== jobId); renderJobs(); }, 3000);
+      }
+    };
+
+    // Click on a job to focus it and sync the progress bar
+    window._focusJob = (jobId) => {
+      const job = activeJobs.find(j => j.id === jobId);
+      if (!job) return;
+      activeJobId = jobId;
+
+      // Sync main progress bar with this job
+      stopProgress();
+      setProgress(job.progress, job.step || job.status);
+      document.getElementById('generation-status').classList.remove('hidden');
+
+      // Switch to the right tab
+      if (job.type === 'pollinations' || job.type === 'local-sd') {
+        switchTab('tab-image');
+      } else {
+        switchTab('tab-3d');
+      }
+
+      renderJobs();
+    };
+
+    // Update job timers
+    setInterval(() => { if (activeJobs.some(j => j.status === 'running')) renderJobs(); }, 1000);
+
+    const MAX_LOCAL_JOBS = 3;
+    const MAX_CLOUD_JOBS = 6;
+
+    async function checkCapacityAndConfirm(engineType) {
+      const vramNeeded = VRAM_COSTS[engineType] || 0;
+      const isCloud = vramNeeded === 0;
+      const runningJobs = activeJobs.filter(j => j.status === 'running');
+      const runningLocalJobs = runningJobs.filter(j => VRAM_COSTS[j.type] > 0);
+      const runningCloudJobs = runningJobs.filter(j => !VRAM_COSTS[j.type]);
+
+      // Check job count limits
+      if (!isCloud && runningLocalJobs.length >= MAX_LOCAL_JOBS) {
+        return await customConfirm(`${runningLocalJobs.length} local jobs already running (max ${MAX_LOCAL_JOBS}).\n\nContinue anyway?`);
+      }
+      if (isCloud && runningCloudJobs.length >= MAX_CLOUD_JOBS) {
+        return await customConfirm(`${runningCloudJobs.length} cloud jobs already running (max ${MAX_CLOUD_JOBS}).\n\nContinue anyway?`);
+      }
+
+      // Check VRAM for local jobs
+      if (!isCloud) {
+        const gpu = await window.meshyAPI.checkGPU();
+        const usedByJobs = runningLocalJobs.reduce((sum, j) => sum + (VRAM_COSTS[j.type] || 0), 0);
+        const availableVRAM = gpu.freeGB - usedByJobs;
+
+        if (availableVRAM < vramNeeded) {
+          return await customConfirm(
+            `GPU may not have enough VRAM!\n\n` +
+            `Available: ~${availableVRAM.toFixed(1)} GB\n` +
+            `Needed: ~${vramNeeded} GB\n` +
+            `Running local jobs: ${runningLocalJobs.length}\n\n` +
+            `Continue anyway?`
+          );
+        }
+      }
+      return true;
+    }
+
+    console.log('FabMesh initialized OK');
+  </script>
+</body>
+</html>

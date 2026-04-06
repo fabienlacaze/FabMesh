@@ -1,0 +1,17 @@
+{
+  "name": "fabmesh",
+  "version": "1.0.0",
+  "description": "FabMesh - 3D mesh generator using Claude Code + Blender",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "set ELECTRON_RUN_AS_NODE= && electron .",
+    "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",
+    "launch": "start.bat"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}
