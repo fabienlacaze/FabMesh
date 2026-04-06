@@ -145,6 +145,7 @@
               <div id="img-refine-preview">
                 <img id="img-refine-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               </div>
+              <button id="btn-send-to-3d" class="convert-btn">Send to 3D tab &#8594;</button>
 
               <!-- Method tabs -->
               <div class="refine-method-tabs">
@@ -186,14 +187,13 @@
             </div>
           </div>
 
-          <!-- Shared: image grid + send to 3D -->
+          <!-- Shared: image grid -->
           <div id="image-grid" class="hidden">
             <div class="section-label-row">
               <label class="section-label">Reference image</label>
               <button id="btn-clear-ref" class="clear-ref-btn hidden" onclick="window._clearRefImage()">&#10005; Clear</button>
             </div>
             <div id="image-grid-items" class="img-results-grid"></div>
-            <button id="btn-send-to-3d" class="convert-btn hidden">Send to 3D tab</button>
           </div>
         </div>
 
