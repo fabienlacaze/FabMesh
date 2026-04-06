@@ -201,17 +201,24 @@ body {
 
 /* Gallery Panel */
 #gallery-panel {
-  width: 220px;
-  min-width: 100px;
-  max-width: 400px;
+  width: 280px;
+  min-width: 160px;
+  max-width: 460px;
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
   resize: horizontal;
-  overflow-x: auto;
+}
+
+#gallery-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .panel-header {
@@ -638,15 +645,15 @@ body {
 
 /* Action Panel */
 #action-panel {
-  width: 360px;
-  min-width: 220px;
-  max-width: 540px;
+  width: 320px;
+  min-width: 200px;
+  max-width: 500px;
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   display: flex;
-  flex-direction: row;
-  overflow: hidden;
+  flex-direction: column;
+  overflow-y: auto;
   resize: horizontal;
   direction: rtl;
 }
@@ -656,10 +663,8 @@ body {
 }
 
 #action-panel-content {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
 }
 
 /* Responsive: small windows */
@@ -681,33 +686,43 @@ body {
   border-right: 1px solid var(--border);
   flex-shrink: 0;
   background: var(--bg-primary);
-  width: 48px;
+  width: 56px;
+  padding-top: 8px;
+  gap: 4px;
 }
 
 .tab {
-  padding: 14px 6px;
-  background: none;
-  border: none;
-  border-right: 2px solid transparent;
+  padding: 24px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-right: 3px solid transparent;
+  border-radius: 6px 0 0 6px;
+  margin-left: 4px;
+  margin-right: -1px;
   color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
   writing-mode: vertical-rl;
   text-orientation: mixed;
   transform: rotate(180deg);
+  letter-spacing: 1px;
+  min-height: 80px;
 }
 
 .tab:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: var(--bg-hover);
+  border-color: var(--text-muted);
 }
 
 .tab.active {
-  color: var(--accent);
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  border-color: var(--accent);
   border-right-color: var(--accent);
-  background: var(--bg-secondary);
+  box-shadow: 0 2px 8px rgba(233,69,96,0.3);
 }
 
 .tab-content {

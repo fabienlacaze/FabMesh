@@ -21,12 +21,18 @@
 
     <div id="main-layout">
       <aside id="gallery-panel">
-        <div class="panel-header">
-          <h2 id="gallery-title">Gallery</h2>
-          <button id="btn-open-folder" class="small-btn" title="Open folder">&#128193;</button>
-          <button id="btn-refresh" class="small-btn" title="Refresh">&#8635;</button>
+        <div id="tab-bar">
+          <button class="tab active" data-tab="tab-image">Image</button>
+          <button class="tab" data-tab="tab-3d">3D</button>
         </div>
-        <div id="mesh-list"></div>
+        <div id="gallery-content">
+          <div class="panel-header">
+            <h2 id="gallery-title">Gallery</h2>
+            <button id="btn-open-folder" class="small-btn" title="Open folder">&#128193;</button>
+            <button id="btn-refresh" class="small-btn" title="Refresh">&#8635;</button>
+          </div>
+          <div id="mesh-list"></div>
+        </div>
       </aside>
 
       <main id="viewer-panel">
@@ -62,11 +68,6 @@
       </main>
 
       <aside id="action-panel">
-        <!-- Vertical Tabs -->
-        <div id="tab-bar">
-          <button class="tab active" data-tab="tab-image">Image</button>
-          <button class="tab" data-tab="tab-3d">3D</button>
-        </div>
         <div id="action-panel-content">
 
         <!-- ============ TAB: IMAGE ============ -->
@@ -1630,38 +1631,34 @@
     };
 
     // Refine button
-    // Refine Hunyuan3D mesh by regenerating with modified prompt
+    // Refine Hunyuan3D mesh: capture screenshot of current mesh + use as new reference
     async function refineHunyuanMesh(modification) {
       const btn = document.getElementById('btn-refine');
       btn.disabled = true; btn.textContent = 'Refining...';
       const loader = document.getElementById('viewer-loading');
       loader.classList.remove('hidden');
-      document.getElementById('loading-text').textContent = 'Regenerating image...';
+      document.getElementById('loading-text').textContent = 'Capturing mesh...';
 
       try {
-        // Step 1: Get base prompt (from lastImagePrompt or fallback)
-        const basePrompt = lastImagePrompt || 'object';
-        const newPrompt = `${basePrompt}, ${modification}`;
         const meshName = (selectedMesh.filename.replace(/\.[^.]+$/, '').replace(/_hunyuan_\d+$/, '')) || 'mesh';
 
-        // Step 2: Generate new image
-        const job = addJob(`Refine: ${meshName}`, 'pollinations');
-        const imgResult = await window.meshyAPI.generateImages({
-          prompt: newPrompt, numImages: 1, projectName: meshName + '_refined', engine: 'pollinations'
+        // Step 1: Capture screenshot of current mesh
+        renderer.render(scene, camera);
+        const dataUrl = renderer.domElement.toDataURL('image/png');
+        const screenshotPath = await window.meshyAPI.saveScreenshot({
+          dataUrl,
+          projectName: meshName + '_refined'
         });
-        if (!imgResult.success || !imgResult.images?.length) {
-          completeJob(job.id, false);
-          throw new Error('Image generation failed');
-        }
 
-        const newImagePath = imgResult.images[0];
+        if (!screenshotPath) throw new Error('Screenshot failed');
+
         document.getElementById('loading-text').textContent = 'Generating refined 3D mesh...';
 
-        // Step 3: Run Hunyuan3D on the new image
-        updateJob(job.id, 30, 'Generating shape...');
+        // Step 2: Run Hunyuan3D on the screenshot
+        const job = addJob(`Refine: ${meshName}`, 'hunyuan');
         const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
         const r3d = await window.meshyAPI.imageTo3D({
-          imagePath: newImagePath,
+          imagePath: screenshotPath,
           outputName: meshName,
           engine: 'hunyuan',
           targetFaces: maxTris || 50000
@@ -1672,7 +1669,7 @@
           throw new Error(r3d.error || '3D generation failed');
         }
 
-        // Step 4: Load the new mesh
+        // Step 3: Load the new mesh
         const buf = await window.meshyAPI.readMeshFile(r3d.meshPath);
         if (buf) {
           await loadMeshFromBuffer(buf, 'glb', r3d.meshPath);
@@ -1680,12 +1677,9 @@
           saveMeshThumbnail(r3d.meshPath);
         }
 
-        lastImagePrompt = newPrompt;
-        document.getElementById('prompt-input').value = newPrompt;
-
         completeJob(job.id, true);
         await refreshGallery();
-        showLog('Refined! ' + r3d.meshFilename, 'success');
+        showLog('Refined from mesh capture! ' + r3d.meshFilename, 'success');
         window.meshyAPI.flashTaskbar();
       } catch (e) {
         showLog('Refine failed: ' + e.message, 'error');
