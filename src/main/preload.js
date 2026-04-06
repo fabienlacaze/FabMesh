@@ -34,5 +34,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   showInExplorer: (filePath) => ipcRenderer.invoke('show-in-explorer', filePath),
   deleteImageFolder: (folderPath) => ipcRenderer.invoke('delete-image-folder', folderPath),
   importImage: () => ipcRenderer.invoke('import-image'),
-  deleteFile: (filePath) => ipcRenderer.invoke('delete-file', filePath)
+  deleteFile: (filePath) => ipcRenderer.invoke('delete-file', filePath),
+  saveThumbnail: (opts) => ipcRenderer.invoke('save-thumbnail', opts),
+  getThumbnail: (meshPath) => ipcRenderer.invoke('get-thumbnail', meshPath)
 });

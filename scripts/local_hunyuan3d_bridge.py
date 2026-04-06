@@ -1,7 +1,7 @@
 """
 FabMesh Local Hunyuan3D-2 Bridge
 Shape: Windows GPU directly
-Texture: WSL (custom_rasterizer compiled there)
+Texture: WSL Ubuntu (custom_rasterizer)
 Usage: python local_hunyuan3d_bridge.py <image_path> <output_glb_path>
 """
 import sys
@@ -31,13 +31,11 @@ def generate_3d(image_path, output_path):
     try:
         meshes = shape_pipe(image=img, octree_resolution=256, num_inference_steps=30)
         mesh = meshes[0]
-        shape_time = time.time() - start
-        print(f"HUNYUAN3D: Shape done in {shape_time:.0f}s", flush=True)
+        print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s", flush=True)
 
-        # Save shape as OBJ for WSL texturing
+        # Save shape as OBJ for WSL texturing + GLB as fallback
         shape_obj = output_path.replace('.glb', '_shape.obj')
         mesh.export(shape_obj)
-        # Also save GLB as fallback
         mesh.export(output_path)
         print(f"HUNYUAN3D: Shape saved ({os.path.getsize(output_path)} bytes)", flush=True)
 
@@ -47,7 +45,7 @@ def generate_3d(image_path, output_path):
         print(f"HUNYUAN3D_ERROR: Shape failed: {type(e).__name__}: {e}", flush=True)
         return False
 
-    # Step 2: Texture in WSL
+    # Step 2: Texture via WSL
     print("HUNYUAN3D: Painting textures via WSL...", flush=True)
 
     def to_wsl(p):
@@ -59,48 +57,44 @@ def generate_3d(image_path, output_path):
     wsl_image = to_wsl(image_path)
     wsl_shape = to_wsl(shape_obj)
     wsl_output = to_wsl(output_path)
-    hunyuan_path = to_wsl(HUNYUAN_DIR)
+    hunyuan_wsl = to_wsl(HUNYUAN_DIR)
 
-    tex_script = f'''
-import sys, os, torch
-sys.path.insert(0, "{hunyuan_path}")
-os.environ["HF_TOKEN"] = "{os.environ.get("HF_TOKEN", "")}"
-from huggingface_hub import login
-login(token="{os.environ.get("HF_TOKEN", "")}")
-from hy3dgen.texgen import Hunyuan3DPaintPipeline
+    # Write texgen script
+    tex_script_path = os.path.join(os.path.dirname(__file__), '_texgen_run.py')
+    with open(tex_script_path, 'w', encoding='utf-8') as f:
+        f.write(f'''import sys, os, torch, trimesh
+sys.path.insert(0, "{hunyuan_wsl}")
 from PIL import Image
-import trimesh
+from hy3dgen.texgen import Hunyuan3DPaintPipeline
 
 print("TEXGEN: Loading model...", flush=True)
 pipe = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")
-pipe.to("cuda")
-print(f"TEXGEN: On GPU ({{torch.cuda.memory_allocated()/1024**3:.1f}} GB)", flush=True)
+pipe.enable_model_cpu_offload()
+print("TEXGEN: Model ready", flush=True)
 
 mesh = trimesh.load("{wsl_shape}")
 img = Image.open("{wsl_image}")
-print("TEXGEN: Painting...", flush=True)
+print(f"TEXGEN: Mesh {{len(mesh.vertices)}} verts, painting...", flush=True)
+
 textured = pipe(mesh, image=img)
 textured.export("{wsl_output}")
-print(f"TEXGEN_SUCCESS: {{os.path.getsize('{wsl_output}')}} bytes", flush=True)
-'''
+sz = os.path.getsize("{wsl_output}")
+print(f"TEXGEN_SUCCESS: {{sz}} bytes", flush=True)
+''')
 
-    script_path = os.path.join(os.path.dirname(__file__), '_texgen.py')
-    with open(script_path, 'w', encoding='utf-8') as f:
-        f.write(tex_script)
-
-    wsl_script = to_wsl(script_path)
+    wsl_script = to_wsl(tex_script_path)
 
     try:
         proc = subprocess.Popen(
             ['wsl', '-d', 'Ubuntu', '--', 'bash', '-c',
              f'export PATH=/usr/local/cuda-12.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && '
              f'export CUDA_HOME=/usr/local/cuda-12.8 && '
-             f'export ATTN_BACKEND=sdpa && '
              f'cd ~/TRELLIS.2 && source .venv/bin/activate && '
              f'python3 {wsl_script}'],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace'
         )
 
+        texgen_success = False
         for line in proc.stdout:
             line = line.strip()
             if line:
@@ -108,14 +102,24 @@ print(f"TEXGEN_SUCCESS: {{os.path.getsize('{wsl_output}')}} bytes", flush=True)
                     print(line, flush=True)
                 except:
                     pass
+                if 'TEXGEN_SUCCESS' in line:
+                    texgen_success = True
 
         proc.wait()
-        os.unlink(script_path)
+        os.unlink(tex_script_path)
 
-        if 'TEXGEN_SUCCESS' in open(output_path + '.log', 'w').write('') or os.path.getsize(output_path) > 100000:
+        if texgen_success:
             print("HUNYUAN3D: Textured mesh ready!", flush=True)
+        else:
+            print("HUNYUAN3D: Texturing failed, using shape only", flush=True)
     except Exception as tex_err:
-        print(f"HUNYUAN3D: Texturing skipped ({tex_err}), using shape only", flush=True)
+        print(f"HUNYUAN3D: Texturing skipped ({tex_err})", flush=True)
+
+    # Cleanup shape OBJ
+    try:
+        os.unlink(shape_obj)
+    except:
+        pass
 
     elapsed = time.time() - start
     size = os.path.getsize(output_path)

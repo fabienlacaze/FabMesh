@@ -103,8 +103,6 @@
               </select>
             </div>
 
-            <button id="btn-gen-images" class="primary-btn">Generate Images</button>
-
             <!-- Advanced Image settings -->
             <details class="advanced-details">
               <summary>Advanced</summary>
@@ -119,6 +117,8 @@
                 </div>
               </div>
             </details>
+
+            <button id="btn-gen-images" class="primary-btn">Generate Images</button>
           </div>
 
           <!-- IMAGE REFINE -->
@@ -180,8 +180,6 @@
             </select>
           </div>
 
-          <button id="btn-generate" class="primary-btn" disabled>Generate 3D</button>
-
           <!-- Advanced 3D settings -->
           <details class="advanced-details">
             <summary>Advanced</summary>
@@ -203,6 +201,8 @@
               </div>
             </div>
           </details>
+
+          <button id="btn-generate" class="primary-btn" disabled>Generate 3D</button>
 
           <!-- Build Stages progress (shown during generation) -->
           <div id="build-progress" class="hidden">
@@ -380,6 +380,18 @@
         });
         currentModel = null;
       }
+    }
+
+    // Auto-save thumbnail after loading a mesh
+    async function saveMeshThumbnail(meshPath) {
+      if (!meshPath || !currentModel) return;
+      // Wait for render
+      await new Promise(r => setTimeout(r, 500));
+      renderer.render(scene, camera);
+      const dataUrl = renderer.domElement.toDataURL('image/png');
+      try {
+        await window.meshyAPI.saveThumbnail({ meshPath, dataUrl });
+      } catch(e) {}
     }
 
     function fitCamera(model) {

@@ -106,6 +106,21 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 
 // Show file in explorer
+ipcMain.handle('save-thumbnail', (event, { meshPath, dataUrl }) => {
+  const thumbPath = meshPath.replace(/\.[^.]+$/, '_thumb.png');
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+  fs.writeFileSync(thumbPath, base64, 'base64');
+  return thumbPath;
+});
+
+ipcMain.handle('get-thumbnail', (event, meshPath) => {
+  const thumbPath = meshPath.replace(/\.[^.]+$/, '_thumb.png');
+  if (fs.existsSync(thumbPath)) {
+    return 'file:///' + thumbPath.replace(/\\/g, '/');
+  }
+  return null;
+});
+
 ipcMain.handle('show-in-explorer', (event, filePath) => {
   shell.showItemInFolder(filePath);
 });
