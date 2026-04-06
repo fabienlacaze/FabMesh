@@ -87,6 +87,26 @@ from mathutils import Vector
 
 print("AUTORIG: ===== START =====", flush=True)
 
+def vertex_bbox(mesh_obj):
+    """Compute bbox from world-transformed vertices (more reliable than bound_box)."""
+    bpy.context.view_layer.update()
+    mw = mesh_obj.matrix_world
+    verts = mesh_obj.data.vertices
+    if len(verts) == 0:
+        return Vector((0,0,0)), Vector((0,0,0))
+    first = mw @ verts[0].co
+    mn = Vector((first.x, first.y, first.z))
+    mx = Vector((first.x, first.y, first.z))
+    for v in verts:
+        wv = mw @ v.co
+        if wv.x < mn.x: mn.x = wv.x
+        if wv.y < mn.y: mn.y = wv.y
+        if wv.z < mn.z: mn.z = wv.z
+        if wv.x > mx.x: mx.x = wv.x
+        if wv.y > mx.y: mx.y = wv.y
+        if wv.z > mx.z: mx.z = wv.z
+    return mn, mx
+
 # ===== Step 1: Clear scene =====
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
@@ -133,13 +153,11 @@ new_mesh.select_set(True)
 bpy.context.view_layer.objects.active = new_mesh
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-# Compute new mesh bbox
-bbox = [new_mesh.matrix_world @ Vector(c) for c in new_mesh.bound_box]
-nm_min = Vector((min(v.x for v in bbox), min(v.y for v in bbox), min(v.z for v in bbox)))
-nm_max = Vector((max(v.x for v in bbox), max(v.y for v in bbox), max(v.z for v in bbox)))
+# Compute new mesh bbox from actual vertices (more reliable than bound_box)
+nm_min, nm_max = vertex_bbox(new_mesh)
 nm_size = nm_max - nm_min
 nm_center = (nm_min + nm_max) / 2
-print(f"AUTORIG: new mesh bbox size={{tuple(nm_size)}} center={{tuple(nm_center)}}", flush=True)
+print(f"AUTORIG: new mesh verts={{len(new_mesh.data.vertices)}} bbox size={{tuple(nm_size)}} center={{tuple(nm_center)}}", flush=True)
 
 # Detect new mesh up axis
 nm_up_idx = max(range(3), key=lambda i: nm_size[i])
@@ -176,17 +194,17 @@ for tm in template_meshes:
 bpy.context.view_layer.objects.active = template_armature
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-# Compute template bbox
+# Compute template bbox from actual vertices
 if template_meshes:
-    bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
+    t_min, t_max = vertex_bbox(template_meshes[0])
 else:
     bb = []
     for b in template_armature.data.bones:
         bb.append(template_armature.matrix_world @ b.head_local)
         bb.append(template_armature.matrix_world @ b.tail_local)
+    t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
+    t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
 
-t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
-t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
 t_size = t_max - t_min
 t_center = (t_min + t_max) / 2
 t_up_idx = max(range(3), key=lambda i: t_size[i])
@@ -208,9 +226,7 @@ if t_up_idx != nm_up_idx:
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
     # Recompute bbox after rotation
     if template_meshes:
-        bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
-        t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
-        t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
+        t_min, t_max = vertex_bbox(template_meshes[0])
         t_size = t_max - t_min
         t_center = (t_min + t_max) / 2
 

@@ -534,8 +534,8 @@
           <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
           <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
         </div>
-        <div id="clone-canvas-container" style="position: relative; flex: 1; display: flex; justify-content: center; align-items: center; overflow: auto; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
-          <canvas id="clone-canvas" style="cursor: none; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5);"></canvas>
+        <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; display: flex; justify-content: center; align-items: center; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%; contain: strict;">
+          <canvas id="clone-canvas" style="cursor: none; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5); position: absolute; transform-origin: 0 0; left: 50%; top: 50%;"></canvas>
           <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; mix-blend-mode: difference; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); display: none; z-index: 1000;"></div>
           <div id="clone-source-marker" style="position: fixed; pointer-events: none; width: 12px; height: 12px; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.3); display: none; z-index: 1000; transform: translate(-50%, -50%);"></div>
         </div>
@@ -2620,7 +2620,10 @@
       const h = cloneState.baseH * cloneState.zoom;
       cloneCanvas.style.width = w + 'px';
       cloneCanvas.style.height = h + 'px';
-      cloneCanvas.style.transform = `translate(${cloneState.panX}px, ${cloneState.panY}px)`;
+      // Center on container then offset by pan
+      const tx = -w / 2 + cloneState.panX;
+      const ty = -h / 2 + cloneState.panY;
+      cloneCanvas.style.transform = `translate(${tx}px, ${ty}px)`;
     }
 
     function getCanvasCoords(evt) {
@@ -2892,6 +2895,15 @@
     const btnCloneStamp = document.getElementById('btn-clone-stamp');
     if (btnCloneStamp) {
       btnCloneStamp.addEventListener('click', openCloneStamp);
+    }
+
+    // Wire the Draw Mask button (placeholder - opens Clone Stamp for now)
+    const btnDrawMask = document.getElementById('btn-draw-mask');
+    if (btnDrawMask) {
+      btnDrawMask.addEventListener('click', () => {
+        showLog('Draw mask: not yet implemented, opening Clone Stamp instead', 'info');
+        openCloneStamp();
+      });
     }
 
     // ========== UNIVERSAL EXPORT MODAL ==========
