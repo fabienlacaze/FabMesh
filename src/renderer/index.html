@@ -136,7 +136,7 @@
             </div>
             <div id="img-refine-content" class="hidden">
               <div id="img-refine-preview">
-                <img id="img-refine-thumb" class="selected-thumb" />
+                <img id="img-refine-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               </div>
               <div id="img-versions" class="hidden" style="margin: 8px 12px;">
                 <label class="section-label">History</label>
@@ -175,7 +175,7 @@
           <div class="ref-image-section">
             <label class="section-label">Reference image</label>
             <div id="selected-image-preview" class="hidden">
-              <img id="selected-image-thumb" class="selected-thumb" />
+              <img id="selected-image-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               <button class="change-btn" onclick="document.getElementById('selected-image-preview').classList.add('hidden'); document.getElementById('no-image-hint').classList.remove('hidden');">Change</button>
             </div>
             <div id="no-image-hint" class="ref-image-buttons">
