@@ -1,0 +1,46 @@
+{
+  "name": "ue5_octopod",
+  "description": "Eight-legged creature for UE5 (spider, crab, scorpion variant)",
+  "up_axis": "Z",
+  "scale_unit": "cm",
+  "default_height_cm": 25,
+  "notes": "Custom skeleton for octopod creatures.",
+  "bones": [
+    { "name": "root",          "head": [0, 0, 0],     "tail": [0, 5, 0],    "parent": null },
+    { "name": "body",          "head": [0, 0, 12],    "tail": [0, 5, 12],   "parent": "root" },
+    { "name": "head",          "head": [0, 5, 12],    "tail": [0, 12, 14],  "parent": "body" },
+    { "name": "abdomen",       "head": [0, 0, 12],    "tail": [0, -10, 10], "parent": "body" },
+
+    { "name": "l1_femur",      "head": [5, 4, 11],    "tail": [12, 8, 8],   "parent": "body" },
+    { "name": "l1_tibia",      "head": [12, 8, 8],    "tail": [18, 12, 4],  "parent": "l1_femur" },
+    { "name": "l1_tarsus",     "head": [18, 12, 4],   "tail": [22, 14, 0],  "parent": "l1_tibia" },
+
+    { "name": "r1_femur",      "head": [-5, 4, 11],   "tail": [-12, 8, 8],  "parent": "body" },
+    { "name": "r1_tibia",      "head": [-12, 8, 8],   "tail": [-18, 12, 4], "parent": "r1_femur" },
+    { "name": "r1_tarsus",     "head": [-18, 12, 4],  "tail": [-22, 14, 0], "parent": "r1_tibia" },
+
+    { "name": "l2_femur",      "head": [5, 1.5, 11],  "tail": [13, 2, 8],   "parent": "body" },
+    { "name": "l2_tibia",      "head": [13, 2, 8],    "tail": [19, 2, 4],   "parent": "l2_femur" },
+    { "name": "l2_tarsus",     "head": [19, 2, 4],    "tail": [24, 2, 0],   "parent": "l2_tibia" },
+
+    { "name": "r2_femur",      "head": [-5, 1.5, 11], "tail": [-13, 2, 8],  "parent": "body" },
+    { "name": "r2_tibia",      "head": [-13, 2, 8],   "tail": [-19, 2, 4],  "parent": "r2_femur" },
+    { "name": "r2_tarsus",     "head": [-19, 2, 4],   "tail": [-24, 2, 0],  "parent": "r2_tibia" },
+
+    { "name": "l3_femur",      "head": [5, -1.5, 11], "tail": [13, -2, 8],  "parent": "body" },
+    { "name": "l3_tibia",      "head": [13, -2, 8],   "tail": [19, -2, 4],  "parent": "l3_femur" },
+    { "name": "l3_tarsus",     "head": [19, -2, 4],   "tail": [24, -2, 0],  "parent": "l3_tibia" },
+
+    { "name": "r3_femur",      "head": [-5, -1.5, 11],"tail": [-13, -2, 8], "parent": "body" },
+    { "name": "r3_tibia",      "head": [-13, -2, 8],  "tail": [-19, -2, 4], "parent": "r3_femur" },
+    { "name": "r3_tarsus",     "head": [-19, -2, 4],  "tail": [-24, -2, 0], "parent": "r3_tibia" },
+
+    { "name": "l4_femur",      "head": [5, -4, 11],   "tail": [12, -8, 8],  "parent": "body" },
+    { "name": "l4_tibia",      "head": [12, -8, 8],   "tail": [18, -12, 4], "parent": "l4_femur" },
+    { "name": "l4_tarsus",     "head": [18, -12, 4],  "tail": [22, -14, 0], "parent": "l4_tibia" },
+
+    { "name": "r4_femur",      "head": [-5, -4, 11],  "tail": [-12, -8, 8], "parent": "body" },
+    { "name": "r4_tibia",      "head": [-12, -8, 8],  "tail": [-18, -12, 4],"parent": "r4_femur" },
+    { "name": "r4_tarsus",     "head": [-18, -12, 4], "tail": [-22, -14, 0],"parent": "r4_tibia" }
+  ]
+}

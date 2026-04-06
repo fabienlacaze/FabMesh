@@ -355,6 +355,17 @@
               <button id="btn-convert" class="secondary-btn">Convert</button>
             </div>
             <button id="btn-export-unreal" class="secondary-btn" style="margin-top: 6px; width: 100%;" title="Export FBX scaled for Unreal Engine (cm units, Y-up)">Export to Unreal (FBX)</button>
+
+            <div style="margin-top: 8px; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px;">
+              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">AUTO-RIG (Beta)</div>
+              <select id="rig-template" style="width: 100%; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px; margin-bottom: 6px;">
+                <option value="ue5_mannequin">Humanoid (UE5 Mannequin)</option>
+                <option value="ue5_quadruped">Quadruped (4 legs)</option>
+                <option value="ue5_hexapod">Hexapod (6 legs)</option>
+                <option value="ue5_octopod">Octopod (8 legs)</option>
+              </select>
+              <button id="btn-auto-rig" class="secondary-btn" style="width: 100%;" title="Auto-rig the mesh with the selected skeleton template (UE5 compatible)">Generate Rig</button>
+            </div>
           </div>
           <button id="btn-copy-mesh-prompt-bottom" class="secondary-btn hidden" style="margin: 6px 12px 0; padding: 6px 8px; font-size: 11px;">Copy mesh prompt</button>
 
@@ -530,14 +541,34 @@
     })();
 
     function clearModel() {
-      if (currentModel) {
-        scene.remove(currentModel);
-        currentModel.traverse(c => {
+      // Robust cleanup: remove ALL meshes from scene (in case of orphans from race conditions)
+      const toRemove = [];
+      scene.traverse(c => {
+        if (c.isMesh || c.isGroup) {
+          // Don't remove built-in helpers (grid, lights)
+          if (c === gridHelper) return;
+          if (c.parent === scene && c !== gridHelper && !c.isLight) {
+            toRemove.push(c);
+          }
+        }
+      });
+      toRemove.forEach(obj => {
+        scene.remove(obj);
+        obj.traverse(c => {
           if (c.geometry) c.geometry.dispose();
-          if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose());
+          if (c.material) {
+            const mats = Array.isArray(c.material) ? c.material : [c.material];
+            mats.forEach(m => {
+              // Dispose all textures
+              ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap'].forEach(k => {
+                if (m[k]) m[k].dispose();
+              });
+              m.dispose();
+            });
+          }
         });
-        currentModel = null;
-      }
+      });
+      currentModel = null;
     }
 
     // Auto-save thumbnail after loading a mesh
@@ -799,11 +830,16 @@
       }
     };
 
+    let _meshLoadId = 0;
     window._selectMesh = async (i) => {
       // Capture a stable reference (not dependent on meshList index which may shift)
       const target = meshList[i];
       if (!target) { console.warn('_selectMesh: index out of range', i); return; }
+      // Cancel any in-flight load by bumping the loadId
+      const myLoadId = ++_meshLoadId;
       selectedMesh = target;
+      // Clear immediately to remove any stale mesh
+      clearModel();
       refreshGallery();
       document.getElementById('export-section').style.display = 'block';
 
@@ -825,8 +861,12 @@
       }
 
       const buf = await API.readMeshFile(target.path);
+      // If user clicked another mesh while we were loading, abort
+      if (myLoadId !== _meshLoadId) { console.log('Mesh load cancelled (newer click)'); return; }
       if (buf) {
         await loadMeshFromBuffer(buf, target.format, target.path);
+        // Check again after async load
+        if (myLoadId !== _meshLoadId) { clearModel(); return; }
         saveMeshThumbnail(target.path);
       } else {
         showLog('Could not read mesh file', 'error');
@@ -1446,6 +1486,39 @@
           await refreshGallery();
         } else {
           showLog('Export failed: ' + (r?.error || 'unknown'), 'error');
+        }
+      };
+    }
+
+    // Auto-Rig button
+    const btnRig = document.getElementById('btn-auto-rig');
+    if (btnRig) {
+      btnRig.onclick = async () => {
+        if (!selectedMesh) { showLog('Select a mesh first', 'error'); return; }
+        const templateName = document.getElementById('rig-template').value;
+        const job = addJob(`Auto-Rig: ${templateName}`, 'rig', selectedMesh.thumb || selectedMesh.path);
+        job.step = 'Rigging via Blender...';
+        job.progress = 20;
+        renderJobs();
+        btnRig.disabled = true;
+        btnRig.textContent = 'Rigging...';
+        try {
+          const r = await API.autoRig({ meshPath: selectedMesh.path, templateName });
+          if (r?.success) {
+            completeJob(job.id, true);
+            showLog('Rigged FBX: ' + r.filename + ' (' + formatSize(r.size) + ')', 'success');
+            API.showNotification({ title: 'FabMesh - Rig Ready', body: r.filename });
+            await refreshGallery();
+          } else {
+            completeJob(job.id, false);
+            showLog('Auto-Rig failed: ' + (r?.error || 'unknown'), 'error');
+          }
+        } catch (e) {
+          completeJob(job.id, false);
+          showLog('Auto-Rig error: ' + e.message, 'error');
+        } finally {
+          btnRig.disabled = false;
+          btnRig.textContent = 'Generate Rig';
         }
       };
     }

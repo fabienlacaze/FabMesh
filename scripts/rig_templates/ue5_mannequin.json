@@ -1,0 +1,40 @@
+{
+  "name": "ue5_mannequin",
+  "description": "Unreal Engine 5 Mannequin skeleton (compatible with all UE5 humanoid animations)",
+  "up_axis": "Z",
+  "scale_unit": "cm",
+  "default_height_cm": 180,
+  "notes": "Bone naming follows UE5 SK_Mannequin convention. Compatible with Manny/Quinn animations and Mixamo retargeting.",
+  "bones": [
+    { "name": "root",            "head": [0, 0, 0],     "tail": [0, 10, 0],    "parent": null },
+    { "name": "pelvis",          "head": [0, 0, 95],    "tail": [0, 0, 105],   "parent": "root" },
+    { "name": "spine_01",        "head": [0, 0, 105],   "tail": [0, 0, 115],   "parent": "pelvis" },
+    { "name": "spine_02",        "head": [0, 0, 115],   "tail": [0, 0, 125],   "parent": "spine_01" },
+    { "name": "spine_03",        "head": [0, 0, 125],   "tail": [0, 0, 135],   "parent": "spine_02" },
+    { "name": "spine_04",        "head": [0, 0, 135],   "tail": [0, 0, 145],   "parent": "spine_03" },
+    { "name": "spine_05",        "head": [0, 0, 145],   "tail": [0, 0, 155],   "parent": "spine_04" },
+    { "name": "neck_01",         "head": [0, 0, 155],   "tail": [0, 0, 162],   "parent": "spine_05" },
+    { "name": "neck_02",         "head": [0, 0, 162],   "tail": [0, 0, 168],   "parent": "neck_01" },
+    { "name": "head",            "head": [0, 0, 168],   "tail": [0, 0, 180],   "parent": "neck_02" },
+
+    { "name": "clavicle_l",      "head": [3, 0, 152],   "tail": [16, 0, 150],  "parent": "spine_05" },
+    { "name": "upperarm_l",      "head": [16, 0, 150],  "tail": [44, 0, 130],  "parent": "clavicle_l" },
+    { "name": "lowerarm_l",      "head": [44, 0, 130],  "tail": [70, 0, 110],  "parent": "upperarm_l" },
+    { "name": "hand_l",          "head": [70, 0, 110],  "tail": [82, 0, 102],  "parent": "lowerarm_l" },
+
+    { "name": "clavicle_r",      "head": [-3, 0, 152],  "tail": [-16, 0, 150], "parent": "spine_05" },
+    { "name": "upperarm_r",      "head": [-16, 0, 150], "tail": [-44, 0, 130], "parent": "clavicle_r" },
+    { "name": "lowerarm_r",      "head": [-44, 0, 130], "tail": [-70, 0, 110], "parent": "upperarm_r" },
+    { "name": "hand_r",          "head": [-70, 0, 110], "tail": [-82, 0, 102], "parent": "lowerarm_r" },
+
+    { "name": "thigh_l",         "head": [10, 0, 95],   "tail": [10, 0, 50],   "parent": "pelvis" },
+    { "name": "calf_l",          "head": [10, 0, 50],   "tail": [10, 0, 10],   "parent": "thigh_l" },
+    { "name": "foot_l",          "head": [10, 0, 10],   "tail": [10, 12, 0],   "parent": "calf_l" },
+    { "name": "ball_l",          "head": [10, 12, 0],   "tail": [10, 18, 0],   "parent": "foot_l" },
+
+    { "name": "thigh_r",         "head": [-10, 0, 95],  "tail": [-10, 0, 50],  "parent": "pelvis" },
+    { "name": "calf_r",          "head": [-10, 0, 50],  "tail": [-10, 0, 10],  "parent": "thigh_r" },
+    { "name": "foot_r",          "head": [-10, 0, 10],  "tail": [-10, 12, 0],  "parent": "calf_r" },
+    { "name": "ball_r",          "head": [-10, 12, 0],  "tail": [-10, 18, 0],  "parent": "foot_r" }
+  ]
+}

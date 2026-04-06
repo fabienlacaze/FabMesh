@@ -1,0 +1,40 @@
+{
+  "name": "ue5_hexapod",
+  "description": "Six-legged creature for UE5 (insect, beetle, scarab, scorpion)",
+  "up_axis": "Z",
+  "scale_unit": "cm",
+  "default_height_cm": 30,
+  "notes": "Custom skeleton for hexapod creatures. Compatible with UE5 ControlRig or generic skeletal animation.",
+  "bones": [
+    { "name": "root",          "head": [0, 0, 0],     "tail": [0, 5, 0],    "parent": null },
+    { "name": "thorax",        "head": [0, 0, 15],    "tail": [0, 5, 15],   "parent": "root" },
+    { "name": "head",          "head": [0, 5, 15],    "tail": [0, 12, 17],  "parent": "thorax" },
+    { "name": "abdomen_01",    "head": [0, 0, 15],    "tail": [0, -8, 14],  "parent": "thorax" },
+    { "name": "abdomen_02",    "head": [0, -8, 14],   "tail": [0, -15, 12], "parent": "abdomen_01" },
+    { "name": "abdomen_03",    "head": [0, -15, 12],  "tail": [0, -22, 10], "parent": "abdomen_02" },
+
+    { "name": "fl_coxa",       "head": [5, 3, 13],    "tail": [10, 5, 12],  "parent": "thorax" },
+    { "name": "fl_femur",      "head": [10, 5, 12],   "tail": [18, 8, 8],   "parent": "fl_coxa" },
+    { "name": "fl_tibia",      "head": [18, 8, 8],    "tail": [22, 10, 0],  "parent": "fl_femur" },
+
+    { "name": "fr_coxa",       "head": [-5, 3, 13],   "tail": [-10, 5, 12], "parent": "thorax" },
+    { "name": "fr_femur",      "head": [-10, 5, 12],  "tail": [-18, 8, 8],  "parent": "fr_coxa" },
+    { "name": "fr_tibia",      "head": [-18, 8, 8],   "tail": [-22, 10, 0], "parent": "fr_femur" },
+
+    { "name": "ml_coxa",       "head": [5, 0, 13],    "tail": [11, 0, 12],  "parent": "thorax" },
+    { "name": "ml_femur",      "head": [11, 0, 12],   "tail": [20, 0, 8],   "parent": "ml_coxa" },
+    { "name": "ml_tibia",      "head": [20, 0, 8],    "tail": [25, 0, 0],   "parent": "ml_femur" },
+
+    { "name": "mr_coxa",       "head": [-5, 0, 13],   "tail": [-11, 0, 12], "parent": "thorax" },
+    { "name": "mr_femur",      "head": [-11, 0, 12],  "tail": [-20, 0, 8],  "parent": "mr_coxa" },
+    { "name": "mr_tibia",      "head": [-20, 0, 8],   "tail": [-25, 0, 0],  "parent": "mr_femur" },
+
+    { "name": "bl_coxa",       "head": [5, -3, 13],   "tail": [10, -5, 12], "parent": "thorax" },
+    { "name": "bl_femur",      "head": [10, -5, 12],  "tail": [18, -8, 8],  "parent": "bl_coxa" },
+    { "name": "bl_tibia",      "head": [18, -8, 8],   "tail": [22, -10, 0], "parent": "bl_femur" },
+
+    { "name": "br_coxa",       "head": [-5, -3, 13],  "tail": [-10, -5, 12],"parent": "thorax" },
+    { "name": "br_femur",      "head": [-10, -5, 12], "tail": [-18, -8, 8], "parent": "br_coxa" },
+    { "name": "br_tibia",      "head": [-18, -8, 8],  "tail": [-22, -10, 0],"parent": "br_femur" }
+  ]
+}

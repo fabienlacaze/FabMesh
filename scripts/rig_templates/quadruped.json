@@ -1,0 +1,31 @@
+{
+  "name": "quadruped",
+  "description": "Four-legged creature (wolf, dog, cat, horse)",
+  "up_axis": "Y",
+  "bones": [
+    { "name": "root",         "head": [0.00, 0.00, 0.00], "tail": [0.00, 0.05, 0.00], "parent": null },
+    { "name": "spine_hips",   "head": [0.00, 0.50, -0.30], "tail": [0.00, 0.55, -0.10], "parent": "root" },
+    { "name": "spine_mid",    "head": [0.00, 0.55, -0.10], "tail": [0.00, 0.55, 0.10], "parent": "spine_hips" },
+    { "name": "spine_chest",  "head": [0.00, 0.55, 0.10], "tail": [0.00, 0.55, 0.30], "parent": "spine_mid" },
+    { "name": "neck",         "head": [0.00, 0.55, 0.30], "tail": [0.00, 0.65, 0.40], "parent": "spine_chest" },
+    { "name": "head",         "head": [0.00, 0.65, 0.40], "tail": [0.00, 0.70, 0.50], "parent": "neck" },
+    { "name": "tail_01",      "head": [0.00, 0.50, -0.30], "tail": [0.00, 0.45, -0.40], "parent": "spine_hips" },
+    { "name": "tail_02",      "head": [0.00, 0.45, -0.40], "tail": [0.00, 0.40, -0.50], "parent": "tail_01" },
+
+    { "name": "fl_thigh",     "head": [0.10, 0.55, 0.25], "tail": [0.12, 0.30, 0.20], "parent": "spine_chest" },
+    { "name": "fl_calf",      "head": [0.12, 0.30, 0.20], "tail": [0.12, 0.10, 0.25], "parent": "fl_thigh" },
+    { "name": "fl_foot",      "head": [0.12, 0.10, 0.25], "tail": [0.12, 0.00, 0.30], "parent": "fl_calf" },
+
+    { "name": "fr_thigh",     "head": [-0.10, 0.55, 0.25], "tail": [-0.12, 0.30, 0.20], "parent": "spine_chest" },
+    { "name": "fr_calf",      "head": [-0.12, 0.30, 0.20], "tail": [-0.12, 0.10, 0.25], "parent": "fr_thigh" },
+    { "name": "fr_foot",      "head": [-0.12, 0.10, 0.25], "tail": [-0.12, 0.00, 0.30], "parent": "fr_calf" },
+
+    { "name": "bl_thigh",     "head": [0.10, 0.50, -0.25], "tail": [0.12, 0.30, -0.20], "parent": "spine_hips" },
+    { "name": "bl_calf",      "head": [0.12, 0.30, -0.20], "tail": [0.12, 0.10, -0.25], "parent": "bl_thigh" },
+    { "name": "bl_foot",      "head": [0.12, 0.10, -0.25], "tail": [0.12, 0.00, -0.30], "parent": "bl_calf" },
+
+    { "name": "br_thigh",     "head": [-0.10, 0.50, -0.25], "tail": [-0.12, 0.30, -0.20], "parent": "spine_hips" },
+    { "name": "br_calf",      "head": [-0.12, 0.30, -0.20], "tail": [-0.12, 0.10, -0.25], "parent": "br_thigh" },
+    { "name": "br_foot",      "head": [-0.12, 0.10, -0.25], "tail": [-0.12, 0.00, -0.30], "parent": "br_calf" }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "hexapod",
+  "description": "Six-legged creature (insect, beetle, scarab)",
+  "up_axis": "Y",
+  "bones": [
+    { "name": "root",        "head": [0.00, 0.00, 0.00], "tail": [0.00, 0.05, 0.00], "parent": null },
+    { "name": "thorax",      "head": [0.00, 0.30, 0.00], "tail": [0.00, 0.30, 0.10], "parent": "root" },
+    { "name": "head",        "head": [0.00, 0.30, 0.10], "tail": [0.00, 0.30, 0.20], "parent": "thorax" },
+    { "name": "abdomen",     "head": [0.00, 0.30, 0.00], "tail": [0.00, 0.30, -0.20], "parent": "thorax" },
+
+    { "name": "fl_femur",    "head": [0.10, 0.30, 0.05], "tail": [0.20, 0.20, 0.05], "parent": "thorax" },
+    { "name": "fl_tibia",    "head": [0.20, 0.20, 0.05], "tail": [0.25, 0.05, 0.05], "parent": "fl_femur" },
+    { "name": "fl_tarsus",   "head": [0.25, 0.05, 0.05], "tail": [0.27, 0.00, 0.05], "parent": "fl_tibia" },
+
+    { "name": "fr_femur",    "head": [-0.10, 0.30, 0.05], "tail": [-0.20, 0.20, 0.05], "parent": "thorax" },
+    { "name": "fr_tibia",    "head": [-0.20, 0.20, 0.05], "tail": [-0.25, 0.05, 0.05], "parent": "fr_femur" },
+    { "name": "fr_tarsus",   "head": [-0.25, 0.05, 0.05], "tail": [-0.27, 0.00, 0.05], "parent": "fr_tibia" },
+
+    { "name": "ml_femur",    "head": [0.10, 0.30, 0.00], "tail": [0.22, 0.20, 0.00], "parent": "thorax" },
+    { "name": "ml_tibia",    "head": [0.22, 0.20, 0.00], "tail": [0.28, 0.05, 0.00], "parent": "ml_femur" },
+    { "name": "ml_tarsus",   "head": [0.28, 0.05, 0.00], "tail": [0.30, 0.00, 0.00], "parent": "ml_tibia" },
+
+    { "name": "mr_femur",    "head": [-0.10, 0.30, 0.00], "tail": [-0.22, 0.20, 0.00], "parent": "thorax" },
+    { "name": "mr_tibia",    "head": [-0.22, 0.20, 0.00], "tail": [-0.28, 0.05, 0.00], "parent": "mr_femur" },
+    { "name": "mr_tarsus",   "head": [-0.28, 0.05, 0.00], "tail": [-0.30, 0.00, 0.00], "parent": "mr_tibia" },
+
+    { "name": "bl_femur",    "head": [0.10, 0.30, -0.05], "tail": [0.20, 0.20, -0.10], "parent": "thorax" },
+    { "name": "bl_tibia",    "head": [0.20, 0.20, -0.10], "tail": [0.25, 0.05, -0.15], "parent": "bl_femur" },
+    { "name": "bl_tarsus",   "head": [0.25, 0.05, -0.15], "tail": [0.27, 0.00, -0.18], "parent": "bl_tibia" },
+
+    { "name": "br_femur",    "head": [-0.10, 0.30, -0.05], "tail": [-0.20, 0.20, -0.10], "parent": "thorax" },
+    { "name": "br_tibia",    "head": [-0.20, 0.20, -0.10], "tail": [-0.25, 0.05, -0.15], "parent": "br_femur" },
+    { "name": "br_tarsus",   "head": [-0.25, 0.05, -0.15], "tail": [-0.27, 0.00, -0.18], "parent": "br_tibia" }
+  ]
+}

@@ -315,6 +315,58 @@ ipcMain.handle('cancel-job', (event, jobId) => {
   return false;
 });
 
+// Auto-rigging: applies a skeleton template to a mesh and exports rigged FBX
+ipcMain.handle('auto-rig', async (event, { meshPath, templateName }) => {
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) {
+      return { success: false, error: 'Mesh not found' };
+    }
+    if (!isPathAllowed(meshPath)) {
+      return { success: false, error: 'Mesh path not allowed' };
+    }
+
+    const config = loadConfig();
+    if (!config.blenderPath || !fs.existsSync(config.blenderPath)) {
+      return { success: false, error: 'Blender not configured (Settings)' };
+    }
+
+    const validTemplates = ['ue5_mannequin', 'ue5_quadruped', 'ue5_hexapod', 'ue5_octopod', 'humanoid', 'quadruped', 'hexapod'];
+    if (!validTemplates.includes(templateName)) {
+      return { success: false, error: 'Invalid template name' };
+    }
+
+    const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const outputFbx = path.join(MESHES_DIR, `${baseName}_rigged_${templateName}.fbx`);
+
+    const script = path.join(__dirname, '..', '..', 'scripts', 'auto_rig_bridge.py');
+
+    return await new Promise((resolve) => {
+      const proc = execFile('python', [script, meshPath, templateName, outputFbx, config.blenderPath], {
+        timeout: 300000,
+        maxBuffer: 50 * 1024 * 1024
+      }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({ success: false, error: error.message, stdout, stderr });
+        } else if (fs.existsSync(outputFbx)) {
+          const stats = fs.statSync(outputFbx);
+          resolve({ success: true, path: outputFbx, filename: path.basename(outputFbx), size: stats.size });
+        } else {
+          resolve({ success: false, error: 'Output FBX not created', stdout, stderr });
+        }
+      });
+      proc.stdout?.on('data', d => {
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
+      });
+      proc.stderr?.on('data', d => {
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+      });
+      proc.on('error', e => resolve({ success: false, error: e.message }));
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Show Windows native notification
 const { Notification } = require('electron');
 ipcMain.handle('show-notification', (event, { title, body }) => {

@@ -1,0 +1,28 @@
+{
+  "name": "humanoid",
+  "description": "Standard biped humanoid skeleton (orcs, soldiers, humans)",
+  "up_axis": "Y",
+  "bones": [
+    { "name": "root",          "head": [0.00, 0.00, 0.00], "tail": [0.00, 0.10, 0.00], "parent": null },
+    { "name": "hips",          "head": [0.00, 0.55, 0.00], "tail": [0.00, 0.65, 0.00], "parent": "root" },
+    { "name": "spine_01",      "head": [0.00, 0.65, 0.00], "tail": [0.00, 0.75, 0.00], "parent": "hips" },
+    { "name": "spine_02",      "head": [0.00, 0.75, 0.00], "tail": [0.00, 0.85, 0.00], "parent": "spine_01" },
+    { "name": "spine_03",      "head": [0.00, 0.85, 0.00], "tail": [0.00, 0.92, 0.00], "parent": "spine_02" },
+    { "name": "neck",          "head": [0.00, 0.92, 0.00], "tail": [0.00, 0.97, 0.00], "parent": "spine_03" },
+    { "name": "head",          "head": [0.00, 0.97, 0.00], "tail": [0.00, 1.00, 0.00], "parent": "neck" },
+    { "name": "clavicle_l",    "head": [0.02, 0.90, 0.00], "tail": [0.10, 0.90, 0.00], "parent": "spine_03" },
+    { "name": "upperarm_l",    "head": [0.10, 0.90, 0.00], "tail": [0.20, 0.75, 0.00], "parent": "clavicle_l" },
+    { "name": "lowerarm_l",    "head": [0.20, 0.75, 0.00], "tail": [0.28, 0.60, 0.00], "parent": "upperarm_l" },
+    { "name": "hand_l",        "head": [0.28, 0.60, 0.00], "tail": [0.32, 0.55, 0.00], "parent": "lowerarm_l" },
+    { "name": "clavicle_r",    "head": [-0.02, 0.90, 0.00], "tail": [-0.10, 0.90, 0.00], "parent": "spine_03" },
+    { "name": "upperarm_r",    "head": [-0.10, 0.90, 0.00], "tail": [-0.20, 0.75, 0.00], "parent": "clavicle_r" },
+    { "name": "lowerarm_r",    "head": [-0.20, 0.75, 0.00], "tail": [-0.28, 0.60, 0.00], "parent": "upperarm_r" },
+    { "name": "hand_r",        "head": [-0.28, 0.60, 0.00], "tail": [-0.32, 0.55, 0.00], "parent": "lowerarm_r" },
+    { "name": "thigh_l",       "head": [0.08, 0.55, 0.00], "tail": [0.08, 0.30, 0.00], "parent": "hips" },
+    { "name": "calf_l",        "head": [0.08, 0.30, 0.00], "tail": [0.08, 0.05, 0.00], "parent": "thigh_l" },
+    { "name": "foot_l",        "head": [0.08, 0.05, 0.00], "tail": [0.08, 0.00, 0.10], "parent": "calf_l" },
+    { "name": "thigh_r",       "head": [-0.08, 0.55, 0.00], "tail": [-0.08, 0.30, 0.00], "parent": "hips" },
+    { "name": "calf_r",        "head": [-0.08, 0.30, 0.00], "tail": [-0.08, 0.05, 0.00], "parent": "thigh_r" },
+    { "name": "foot_r",        "head": [-0.08, 0.05, 0.00], "tail": [-0.08, 0.00, 0.10], "parent": "calf_r" }
+  ]
+}

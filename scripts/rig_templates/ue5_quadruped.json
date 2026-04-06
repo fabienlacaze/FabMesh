@@ -1,0 +1,41 @@
+{
+  "name": "ue5_quadruped",
+  "description": "Standard UE5-compatible quadruped (wolf, dog, horse, cat) - 30 bones",
+  "up_axis": "Z",
+  "scale_unit": "cm",
+  "default_height_cm": 80,
+  "notes": "Compatible with UE5 quadruped animation packs (Quixel Megascans Animals, Animal Variety Pack)",
+  "bones": [
+    { "name": "root",          "head": [0, 0, 0],     "tail": [0, 5, 0],    "parent": null },
+    { "name": "pelvis",        "head": [0, -30, 50],  "tail": [0, -20, 55], "parent": "root" },
+    { "name": "spine_01",      "head": [0, -20, 55],  "tail": [0, -10, 58], "parent": "pelvis" },
+    { "name": "spine_02",      "head": [0, -10, 58],  "tail": [0, 0, 60],   "parent": "spine_01" },
+    { "name": "spine_03",      "head": [0, 0, 60],    "tail": [0, 10, 60],  "parent": "spine_02" },
+    { "name": "spine_04",      "head": [0, 10, 60],   "tail": [0, 20, 60],  "parent": "spine_03" },
+    { "name": "neck_01",       "head": [0, 20, 60],   "tail": [0, 28, 65],  "parent": "spine_04" },
+    { "name": "neck_02",       "head": [0, 28, 65],   "tail": [0, 35, 70],  "parent": "neck_01" },
+    { "name": "head",          "head": [0, 35, 70],   "tail": [0, 45, 72],  "parent": "neck_02" },
+    { "name": "jaw",           "head": [0, 42, 68],   "tail": [0, 48, 66],  "parent": "head" },
+
+    { "name": "tail_01",       "head": [0, -30, 50],  "tail": [0, -38, 48], "parent": "pelvis" },
+    { "name": "tail_02",       "head": [0, -38, 48],  "tail": [0, -45, 45], "parent": "tail_01" },
+    { "name": "tail_03",       "head": [0, -45, 45],  "tail": [0, -52, 42], "parent": "tail_02" },
+    { "name": "tail_04",       "head": [0, -52, 42],  "tail": [0, -58, 38], "parent": "tail_03" },
+
+    { "name": "fl_thigh",      "head": [10, 18, 58],  "tail": [10, 18, 35], "parent": "spine_04" },
+    { "name": "fl_calf",       "head": [10, 18, 35],  "tail": [10, 22, 15], "parent": "fl_thigh" },
+    { "name": "fl_foot",       "head": [10, 22, 15],  "tail": [10, 28, 0],  "parent": "fl_calf" },
+
+    { "name": "fr_thigh",      "head": [-10, 18, 58], "tail": [-10, 18, 35],"parent": "spine_04" },
+    { "name": "fr_calf",       "head": [-10, 18, 35], "tail": [-10, 22, 15],"parent": "fr_thigh" },
+    { "name": "fr_foot",       "head": [-10, 22, 15], "tail": [-10, 28, 0], "parent": "fr_calf" },
+
+    { "name": "bl_thigh",      "head": [10, -25, 50], "tail": [10, -25, 30],"parent": "pelvis" },
+    { "name": "bl_calf",       "head": [10, -25, 30], "tail": [10, -20, 12],"parent": "bl_thigh" },
+    { "name": "bl_foot",       "head": [10, -20, 12], "tail": [10, -15, 0], "parent": "bl_calf" },
+
+    { "name": "br_thigh",      "head": [-10, -25, 50],"tail": [-10, -25, 30],"parent": "pelvis" },
+    { "name": "br_calf",       "head": [-10, -25, 30],"tail": [-10, -20, 12],"parent": "br_thigh" },
+    { "name": "br_foot",       "head": [-10, -20, 12],"tail": [-10, -15, 0],"parent": "br_calf" }
+  ]
+}
