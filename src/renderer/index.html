@@ -1796,7 +1796,7 @@
     };
 
     // Refine button
-    // Refine Hunyuan3D mesh: capture screenshot of current mesh + use as new reference
+    // Refine Hunyuan3D mesh: capture screenshot → img2img modification → new Hunyuan3D
     async function refineHunyuanMesh(modification) {
       const btn = document.getElementById('btn-refine');
       btn.disabled = true; btn.textContent = 'Refining...';
@@ -1813,16 +1813,34 @@
           dataUrl,
           projectName: meshName + '_refined'
         });
-
         if (!screenshotPath) throw new Error('Screenshot failed');
 
-        document.getElementById('loading-text').textContent = 'Generating refined 3D mesh...';
-
-        // Step 2: Run Hunyuan3D on the screenshot
         const job = addJob(`Refine: ${meshName}`, 'hunyuan', screenshotPath);
+
+        // Step 2: If modification text is provided, apply img2img first
+        let imgForMesh = screenshotPath;
+        if (modification && modification.trim().length > 0) {
+          job.step = 'Modifying image with AI...';
+          job.progress = 10;
+          renderJobs();
+          document.getElementById('loading-text').textContent = 'Modifying image...';
+          const imgResult = await window.meshyAPI.img2img({ imagePath: screenshotPath, prompt: modification });
+          if (imgResult.success && imgResult.newPath) {
+            imgForMesh = imgResult.newPath;
+          } else {
+            console.warn('img2img failed, using original capture:', imgResult.error);
+          }
+        }
+
+        document.getElementById('loading-text').textContent = 'Generating refined 3D mesh...';
+        job.step = 'Starting Hunyuan3D...';
+        job.progress = 20;
+        renderJobs();
+
+        // Step 3: Run Hunyuan3D on the (possibly modified) screenshot
         const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
         const r3d = await window.meshyAPI.imageTo3D({
-          imagePath: screenshotPath,
+          imagePath: imgForMesh,
           outputName: meshName,
           engine: 'hunyuan',
           targetFaces: maxTris || 50000
