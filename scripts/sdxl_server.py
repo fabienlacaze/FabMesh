@@ -90,101 +90,103 @@ def load_inpaint():
     return _inpaint_pipe
 
 
+_inference_lock = threading.Lock()
+
+
 def do_img2img(input_path, prompt, output_path, strength):
     pipe = load_img2img()
+    # Serialize inference: single GPU, parallel calls cause OOM/garbage
+    with _inference_lock:
+        img = Image.open(input_path).convert("RGB")
+        w, h = img.size
+        if w < h:
+            new_w, new_h = 1024, int(h * 1024 / w)
+        else:
+            new_h, new_w = 1024, int(w * 1024 / h)
+        new_w = (new_w // 8) * 8
+        new_h = (new_h // 8) * 8
+        img = img.resize((new_w, new_h), Image.LANCZOS)
 
-    img = Image.open(input_path).convert("RGB")
-    w, h = img.size
-    if w < h:
-        new_w, new_h = 1024, int(h * 1024 / w)
-    else:
-        new_h, new_w = 1024, int(w * 1024 / h)
-    new_w = (new_w // 8) * 8
-    new_h = (new_h // 8) * 8
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-
-    enhanced = f"{prompt}, high quality, detailed"
-    s = float(strength)
-    steps = max(2, int(round(4 / s)))
-    t0 = time.time()
-    result = pipe(
-        prompt=enhanced,
-        image=img,
-        strength=s,
-        num_inference_steps=steps,
-        guidance_scale=0.0,
-    ).images[0]
-    result.save(output_path)
-    log(f"img2img done in {time.time()-t0:.1f}s -> {output_path}")
-    return {"ok": True, "output": output_path}
+        enhanced = f"{prompt}, high quality, detailed"
+        s = float(strength)
+        steps = max(2, int(round(4 / s)))
+        t0 = time.time()
+        result = pipe(
+            prompt=enhanced,
+            image=img,
+            strength=s,
+            num_inference_steps=steps,
+            guidance_scale=0.0,
+        ).images[0]
+        result.save(output_path)
+        log(f"img2img done in {time.time()-t0:.1f}s -> {output_path}")
+        return {"ok": True, "output": output_path}
 
 
 def do_inpaint(input_path, target_text, prompt, output_path, dilate):
     pipe = load_inpaint()
-
-    img = Image.open(input_path).convert("RGB")
-    orig_w, orig_h = img.size
-    max_dim = 1024
-    if max(orig_w, orig_h) > max_dim:
-        if orig_w > orig_h:
-            work_w, work_h = max_dim, int(orig_h * max_dim / orig_w)
+    with _inference_lock:
+        img = Image.open(input_path).convert("RGB")
+        orig_w, orig_h = img.size
+        max_dim = 1024
+        if max(orig_w, orig_h) > max_dim:
+            if orig_w > orig_h:
+                work_w, work_h = max_dim, int(orig_h * max_dim / orig_w)
+            else:
+                work_h, work_w = max_dim, int(orig_w * max_dim / orig_h)
         else:
-            work_h, work_w = max_dim, int(orig_w * max_dim / orig_h)
-    else:
-        work_w, work_h = orig_w, orig_h
-    work_w = (work_w // 8) * 8
-    work_h = (work_h // 8) * 8
-    img_work = img.resize((work_w, work_h), Image.LANCZOS)
+            work_w, work_h = orig_w, orig_h
+        work_w = (work_w // 8) * 8
+        work_h = (work_h // 8) * 8
+        img_work = img.resize((work_w, work_h), Image.LANCZOS)
 
-    # Segment
-    t0 = time.time()
-    inputs = _clipseg_processor(text=[target_text], images=[img_work], padding=True, return_tensors="pt")
-    inputs = {k: v.to("cuda") for k, v in inputs.items()}
-    with torch.no_grad():
-        seg_out = _clipseg_model(**inputs)
-    mask = torch.sigmoid(seg_out.logits).squeeze().cpu().numpy()
-    mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize((work_w, work_h), Image.BILINEAR)
-    binary = (np.array(mask_img) > 100).astype(np.uint8) * 255
-    mask_binary = Image.fromarray(binary, mode="L")
-    if dilate > 0:
-        mask_binary = mask_binary.filter(ImageFilter.MaxFilter(int(dilate) * 2 + 1))
-    mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
+        t0 = time.time()
+        inputs = _clipseg_processor(text=[target_text], images=[img_work], padding=True, return_tensors="pt")
+        inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        with torch.no_grad():
+            seg_out = _clipseg_model(**inputs)
+        mask = torch.sigmoid(seg_out.logits).squeeze().cpu().numpy()
+        mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize((work_w, work_h), Image.BILINEAR)
+        binary = (np.array(mask_img) > 100).astype(np.uint8) * 255
+        mask_binary = Image.fromarray(binary, mode="L")
+        if dilate > 0:
+            mask_binary = mask_binary.filter(ImageFilter.MaxFilter(int(dilate) * 2 + 1))
+        mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
 
-    coverage = (np.array(mask_binary) > 128).mean() * 100
-    if coverage < 0.5:
-        return {"ok": False, "error": f"Target '{target_text}' not found"}
+        coverage = (np.array(mask_binary) > 128).mean() * 100
+        if coverage < 0.5:
+            return {"ok": False, "error": f"Target '{target_text}' not found"}
 
-    # Save debug mask
-    debug_dir = os.path.join(os.path.dirname(output_path), ".debug")
-    os.makedirs(debug_dir, exist_ok=True)
-    debug_mask = os.path.join(debug_dir, os.path.basename(output_path).replace(".png", "_mask.png").replace(".jpg", "_mask.png"))
-    mask_binary.save(debug_mask)
+        debug_dir = os.path.join(os.path.dirname(output_path), ".debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        debug_mask = os.path.join(debug_dir, os.path.basename(output_path).replace(".png", "_mask.png").replace(".jpg", "_mask.png"))
+        mask_binary.save(debug_mask)
 
-    inpaint_prompt = (prompt or "").strip()
-    is_removal = inpaint_prompt.lower() in ("", "remove", "delete", "none", "nothing", "empty", "gone")
-    if is_removal:
-        inpaint_prompt = "continuation of the surrounding area, same background, seamless"
-        negative_prompt = f"{target_text}, any object, duplicate, artifact, blurry, distorted"
-    else:
-        negative_prompt = f"blurry, distorted, duplicate, {target_text}"
+        inpaint_prompt = (prompt or "").strip()
+        is_removal = inpaint_prompt.lower() in ("", "remove", "delete", "none", "nothing", "empty", "gone")
+        if is_removal:
+            inpaint_prompt = "continuation of the surrounding area, same background, seamless"
+            negative_prompt = f"{target_text}, any object, duplicate, artifact, blurry, distorted"
+        else:
+            negative_prompt = f"blurry, distorted, duplicate, {target_text}"
 
-    result = pipe(
-        prompt=inpaint_prompt,
-        negative_prompt=negative_prompt,
-        image=img_work,
-        mask_image=mask_binary,
-        num_inference_steps=40,
-        guidance_scale=8.5,
-        strength=0.99,
-        height=work_h,
-        width=work_w,
-    ).images[0]
+        result = pipe(
+            prompt=inpaint_prompt,
+            negative_prompt=negative_prompt,
+            image=img_work,
+            mask_image=mask_binary,
+            num_inference_steps=40,
+            guidance_scale=8.5,
+            strength=0.99,
+            height=work_h,
+            width=work_w,
+        ).images[0]
 
-    if (work_w, work_h) != (orig_w, orig_h):
-        result = result.resize((orig_w, orig_h), Image.LANCZOS)
-    result.save(output_path)
-    log(f"inpaint done in {time.time()-t0:.1f}s -> {output_path}")
-    return {"ok": True, "output": output_path}
+        if (work_w, work_h) != (orig_w, orig_h):
+            result = result.resize((orig_w, orig_h), Image.LANCZOS)
+        result.save(output_path)
+        log(f"inpaint done in {time.time()-t0:.1f}s -> {output_path}")
+        return {"ok": True, "output": output_path}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -244,13 +246,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def preload_models():
-    """Preload models in background after server starts."""
+    """Preload only img2img model (most common). Inpaint loads on demand."""
     try:
         log("Preloading img2img model...")
         load_img2img()
-        log("Preloading inpaint model...")
-        load_inpaint()
-        log("MODELS READY - all SDXL models in VRAM")
+        log("MODELS READY - SDXL Turbo img2img loaded (inpaint on demand)")
     except Exception as e:
         log(f"Preload error: {e}")
         import traceback
