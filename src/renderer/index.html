@@ -1470,23 +1470,37 @@
     });
 
     // ========== IMAGE REFINE ==========
-    // Remove background button
+    // Remove background button (runs in background as a job)
     document.getElementById('btn-remove-bg').addEventListener('click', async () => {
       if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
-      const btn = document.getElementById('btn-remove-bg');
-      btn.disabled = true; btn.textContent = 'Removing background...';
-      const result = await window.meshyAPI.removeBackground(selectedImagePath);
-      btn.disabled = false; btn.textContent = 'Remove background';
-      if (result.success) {
-        // Reload the image (cache bust)
-        const newSrc = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
-        document.getElementById('img-refine-thumb').src = newSrc;
-        document.querySelectorAll('.grid-img').forEach(i => {
-          if (i.dataset.path === selectedImagePath) i.src = newSrc;
-        });
-        showLog('Background removed!', 'success');
-      } else {
-        showLog('Failed: ' + (result.error || ''), 'error');
+      const imgPath = selectedImagePath;
+      const imgName = imgPath.split(/[/\\]/).pop();
+      const job = addJob(`Remove BG: ${imgName}`, 'rembg');
+      job.step = 'Removing background...';
+      job.progress = 30;
+      renderJobs();
+
+      try {
+        const result = await window.meshyAPI.removeBackground(imgPath);
+        if (result.success) {
+          const newSrc = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+          if (selectedImagePath === imgPath) {
+            document.getElementById('img-refine-thumb').src = newSrc;
+          }
+          document.querySelectorAll('.grid-img').forEach(i => {
+            if (i.dataset.path === imgPath) i.src = newSrc;
+          });
+          // Refresh gallery thumbnails
+          if (currentTab === 'tab-image') refreshGalleryImages();
+          completeJob(job.id, true);
+          showLog('Background removed!', 'success');
+        } else {
+          completeJob(job.id, false);
+          showLog('Failed: ' + (result.error || ''), 'error');
+        }
+      } catch (e) {
+        completeJob(job.id, false);
+        showLog('Failed: ' + e.message, 'error');
       }
     });
 
