@@ -1183,7 +1183,6 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
     }
 
     // CLOUD: Pollinations
-    const images = [];
     // Quality 1=Fast, 2=Medium, 3=High (default), 4=Ultra
     const qualityConfig = {
       1: { model: 'turbo',   width: 1024, height: 1024, enhance: false, suffix: '' },
@@ -1193,45 +1192,77 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
     };
     const q = qualityConfig[quality || 3] || qualityConfig[3];
     const optimizedPrompt = `${prompt}${q.suffix}, single object centered on plain white background, product shot, no text, no watermark`;
+    const total = numImages || 4;
 
-    for (let i = 0; i < (numImages || 4); i++) {
+    // PARALLEL: download all images at once to a temp folder, then atomically move
+    // This avoids the race where partial images appear in the gallery during generation
+    const tempDir = path.join(imagesDir, '.tmp_' + timestamp);
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    const downloadOne = async (i) => {
       const seed = timestamp + i;
       const encoded = encodeURIComponent(optimizedPrompt);
       const enhanceParam = q.enhance ? '&enhance=true' : '';
       const url = `https://image.pollinations.ai/prompt/${encoded}?model=${q.model}&width=${q.width}&height=${q.height}&nologo=true${enhanceParam}&seed=${seed}`;
-      // Unique filename per run to avoid overwrites
-      const imgPath = path.join(imagesDir, `ref_${timestamp}_${i}.png`);
+      const tempPath = path.join(tempDir, `ref_${timestamp}_${i}.png`);
+      const https = require('https');
+
+      const followGet = (u, depth = 0) => new Promise((resolve, reject) => {
+        if (depth > 5) return reject(new Error('Too many redirects'));
+        const req = https.get(u, { headers: { 'User-Agent': 'FabMesh/1.0' }, timeout: 180000 }, (resp) => {
+          if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+            return followGet(resp.headers.location, depth + 1).then(resolve).catch(reject);
+          }
+          if (resp.statusCode !== 200) {
+            return reject(new Error(`HTTP ${resp.statusCode}`));
+          }
+          const chunks = [];
+          resp.on('data', c => chunks.push(c));
+          resp.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            if (buf.length < 1000) return reject(new Error('Response too small'));
+            try {
+              fs.writeFileSync(tempPath, buf);
+              resolve(tempPath);
+            } catch (e) { reject(e); }
+          });
+          resp.on('error', reject);
+        });
+        req.on('error', reject);
+        req.on('timeout', () => req.destroy(new Error('timeout')));
+      });
 
       try {
-        const https = require('https');
-        await new Promise((resolve, reject) => {
-          const req = https.get(url, { headers: { 'User-Agent': 'FabMesh/1.0' }, timeout: 120000 }, (resp) => {
-            if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
-              https.get(resp.headers.location, { headers: { 'User-Agent': 'FabMesh/1.0' } }, (resp2) => {
-                const chunks = [];
-                resp2.on('data', c => chunks.push(c));
-                resp2.on('end', () => { fs.writeFileSync(imgPath, Buffer.concat(chunks)); resolve(); });
-                resp2.on('error', reject);
-              });
-              return;
-            }
-            const chunks = [];
-            resp.on('data', c => chunks.push(c));
-            resp.on('end', () => { fs.writeFileSync(imgPath, Buffer.concat(chunks)); resolve(); });
-            resp.on('error', reject);
-          });
-          req.on('error', reject);
-        });
-        if (fs.existsSync(imgPath) && fs.statSync(imgPath).size > 1000) {
-          images.push(imgPath);
-          if (mainWindow) mainWindow.webContents.send('ai3d-progress', `IMAGE_GENERATED:${i}:${imgPath}`);
-        }
+        const path_ok = await followGet(url);
+        return { ok: true, path: path_ok, idx: i };
       } catch (e) {
         console.error(`Image ${i} failed:`, e.message);
+        return { ok: false, error: e.message, idx: i };
+      }
+    };
+
+    // Launch all downloads in parallel
+    const results = await Promise.all(Array.from({ length: total }, (_, i) => downloadOne(i)));
+
+    // Atomically move successful images from temp to final dir
+    const images = [];
+    for (const r of results) {
+      if (r.ok && fs.existsSync(r.path)) {
+        const finalPath = path.join(imagesDir, path.basename(r.path));
+        try {
+          fs.renameSync(r.path, finalPath);
+          images.push(finalPath);
+          if (mainWindow) mainWindow.webContents.send('ai3d-progress', `IMAGE_GENERATED:${r.idx}:${finalPath}`);
+        } catch (e) {
+          console.error('Move failed:', e.message);
+        }
       }
     }
 
-    return { success: true, images };
+    // Cleanup temp dir
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) {}
+
+    return { success: images.length > 0, images };
   } catch (err) {
     return { success: false, error: err.error || err.message };
   }
