@@ -2524,12 +2524,18 @@
       const canvas = document.getElementById('three-canvas');
       const emptyMesh = document.getElementById('viewer-empty');
       const vtb = document.getElementById('viewer-toolbar');
+      // Floating action buttons: only the right one for the active tab
+      const btnTo3D = document.getElementById('btn-send-to-3d');
+      const btnToRig = document.getElementById('btn-send-to-rig');
       if (tabId === 'tab-image') {
         imgViewer.classList.remove('hidden');
         canvas.style.display = 'none';
         if (emptyMesh) emptyMesh.style.display = 'none';
         // Hide 3D viewer toolbar — irrelevant for images
         if (vtb) vtb.style.display = 'none';
+        // Show "Send to 3D" only if an image is selected
+        if (btnTo3D) btnTo3D.classList.toggle('hidden', !selectedImagePath);
+        if (btnToRig) btnToRig.classList.add('hidden');
         // Hide mesh-only sections (export, auto-rig, etc.)
         const exportSec = document.getElementById('export-section');
         if (exportSec) exportSec.style.display = 'none';
@@ -2548,6 +2554,15 @@
         if (emptyMesh && !currentModel) emptyMesh.style.display = '';
         // Show 3D viewer toolbar (Reset/Wire/PBR/Grid/Light)
         if (vtb) vtb.style.display = '';
+        // Floating buttons: tab-3d shows "Send to Rig", tab-rig shows neither
+        if (btnTo3D) btnTo3D.classList.add('hidden');
+        if (btnToRig) {
+          if (tabId === 'tab-3d' && selectedMesh) {
+            btnToRig.classList.remove('hidden');
+          } else {
+            btnToRig.classList.add('hidden');
+          }
+        }
         // Show export section in 3D tab only (not rig tab — has its own export)
         const exportSec = document.getElementById('export-section');
         if (exportSec) {
