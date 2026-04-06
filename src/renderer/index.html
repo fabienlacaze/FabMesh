@@ -438,17 +438,19 @@
 
           <button id="btn-rig-generate" class="primary-btn" style="margin-top: 12px;">Generate Rig</button>
 
-          <div id="rig-post-section" class="action-section hidden" style="margin-top: 12px;">
-            <label class="section-label">POST-PROCESS</label>
-            <button id="btn-rig-test-anim" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Test animation (Idle / Walk / Run)</button>
-            <select id="rig-test-anim-select" style="width: 100%; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; margin-bottom: 4px;">
-              <option value="idle">Idle</option>
-              <option value="walk">Walk</option>
-              <option value="run">Run</option>
-            </select>
-            <button id="btn-rig-edit-blender" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Edit bones in Blender</button>
-            <button id="btn-rig-reskin" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Re-skin only</button>
-          </div>
+          <details id="rig-post-section" class="advanced-details hidden">
+            <summary>Post-process</summary>
+            <div class="advanced-content">
+              <button id="btn-rig-test-anim" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Test animation (Idle / Walk / Run)</button>
+              <select id="rig-test-anim-select" style="width: 100%; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; margin-bottom: 4px;">
+                <option value="idle">Idle</option>
+                <option value="walk">Walk</option>
+                <option value="run">Run</option>
+              </select>
+              <button id="btn-rig-edit-blender" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Edit bones in Blender</button>
+              <button id="btn-rig-reskin" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Re-skin only</button>
+            </div>
+          </details>
 
           <div class="action-section" style="margin-top: 12px;">
             <label class="section-label">EXPORT</label>
