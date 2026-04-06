@@ -354,6 +354,8 @@
             </div>
           </div>
 
+          <!-- CREATE SECTION: shown when source is a static mesh -->
+          <div id="rig-create-section">
           <div class="action-section">
             <label class="section-label">TEMPLATE</label>
             <select id="rig-tab-template" style="width: 100%; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
@@ -426,6 +428,7 @@
           </details>
 
           <button id="btn-rig-generate" class="primary-btn" style="margin-top: 12px;">Generate Rig</button>
+          </div><!-- end rig-create-section -->
 
           <details id="rig-post-section" class="advanced-details hidden">
             <summary>Post-process</summary>
@@ -1869,11 +1872,26 @@
     // Update source mesh info display
     function updateRigSourceInfo() {
       const el = document.getElementById('rig-source-info');
+      const createSec = document.getElementById('rig-create-section');
+      const postSec = document.getElementById('rig-post-section');
       if (!el) return;
       if (selectedMesh) {
         el.innerHTML = `<strong>${selectedMesh.filename}</strong><br><span style="font-size: 11px; color: var(--text-muted);">${selectedMesh.format} - ${formatSize(selectedMesh.size)}</span>`;
+        // Detect if the selected mesh is a rig (skeletal mesh)
+        const isRigged = /_rigged_/i.test(selectedMesh.filename) || selectedMesh.isRigged;
+        if (isRigged) {
+          // Already a rig: show post-process (test anim, edit, re-skin), hide create
+          if (createSec) createSec.style.display = 'none';
+          if (postSec) postSec.classList.remove('hidden');
+        } else {
+          // Static mesh: show create section, hide post-process
+          if (createSec) createSec.style.display = '';
+          if (postSec) postSec.classList.add('hidden');
+        }
       } else {
         el.innerHTML = 'No mesh selected. Click a mesh in the gallery.';
+        if (createSec) createSec.style.display = '';
+        if (postSec) postSec.classList.add('hidden');
       }
     }
 
