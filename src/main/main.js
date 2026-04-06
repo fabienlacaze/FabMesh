@@ -145,27 +145,64 @@ ipcMain.handle('revert-image', (event, { imagePath, versionPath }) => {
   return true;
 });
 
+// Upload image to a temporary public host (catbox.moe - free, anonymous)
+async function uploadToCatbox(imagePath) {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const imgBuffer = fs.readFileSync(imagePath);
+    const boundary = '----FabMesh' + Date.now();
+    const filename = path.basename(imagePath);
+
+    let body = '';
+    body += `--${boundary}\r\n`;
+    body += `Content-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n`;
+    body += `--${boundary}\r\n`;
+    body += `Content-Disposition: form-data; name="fileToUpload"; filename="${filename}"\r\n`;
+    body += `Content-Type: image/png\r\n\r\n`;
+
+    const head = Buffer.from(body, 'utf-8');
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8');
+    const fullBody = Buffer.concat([head, imgBuffer, tail]);
+
+    const req = https.request({
+      hostname: 'catbox.moe',
+      path: '/user/api.php',
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': fullBody.length,
+        'User-Agent': 'FabMesh/1.0'
+      },
+      timeout: 60000
+    }, (resp) => {
+      const chunks = [];
+      resp.on('data', c => chunks.push(c));
+      resp.on('end', () => {
+        const url = Buffer.concat(chunks).toString('utf-8').trim();
+        if (url.startsWith('https://')) resolve(url);
+        else reject(new Error('Upload failed: ' + url));
+      });
+    });
+    req.on('error', reject);
+    req.write(fullBody);
+    req.end();
+  });
+}
+
 // Img2img: regenerate image with kontext model using existing image as reference
 ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
   try {
-    // Backup current image
     backupImage(imagePath);
 
-    // Start a tiny HTTP server to expose the image
-    const http = require('http');
-    const imgBuffer = fs.readFileSync(imagePath);
-    const server = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'image/png' });
-      res.end(imgBuffer);
-    });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    const port = server.address().port;
-    const localUrl = `http://127.0.0.1:${port}/img.png`;
+    // Upload image to catbox.moe to get a public URL
+    const publicUrl = await uploadToCatbox(imagePath);
+    console.log('Uploaded to:', publicUrl);
 
     // Use kontext via Pollinations
     const https = require('https');
+    const http = require('http');
     const enc = encodeURIComponent(prompt);
-    const url = `https://image.pollinations.ai/prompt/${enc}?model=kontext&image=${encodeURIComponent(localUrl)}&nologo=true&width=1024&height=1024`;
+    const url = `https://image.pollinations.ai/prompt/${enc}?model=kontext&image=${encodeURIComponent(publicUrl)}&nologo=true&width=1024&height=1024`;
 
     await new Promise((resolve, reject) => {
       const followRedirect = (u, depth) => {
@@ -188,7 +225,6 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
       followRedirect(url, 0);
     });
 
-    server.close();
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
