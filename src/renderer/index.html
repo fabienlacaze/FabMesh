@@ -1031,9 +1031,12 @@
         saveMeshThumbnail(target.path);
         // Refresh rig tab source info if visible
         if (typeof updateRigSourceInfo === 'function') updateRigSourceInfo();
-        // Show "Send to Rig" green button at bottom of 3D tab
+        // Show "Send to Rig" only when in 3D tab (not when already in Rig tab)
         const sendRigBtn = document.getElementById('btn-send-to-rig');
-        if (sendRigBtn) sendRigBtn.classList.remove('hidden');
+        if (sendRigBtn) {
+          if (currentTab === 'tab-3d') sendRigBtn.classList.remove('hidden');
+          else sendRigBtn.classList.add('hidden');
+        }
       } else {
         showLog('Could not read mesh file', 'error');
         return;
