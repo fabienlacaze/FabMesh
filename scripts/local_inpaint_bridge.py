@@ -93,18 +93,27 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
     pipe.to("cuda")
     print(f"INPAINT: Model loaded ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
 
-    # If prompt is "remove" type, use a generic background prompt
+    # Detect "remove" intent
     inpaint_prompt = prompt.strip()
-    if inpaint_prompt.lower() in ("", "remove", "delete", "none", "nothing"):
-        inpaint_prompt = "seamless background, matching surroundings, clean"
+    is_removal = inpaint_prompt.lower() in ("", "remove", "delete", "none", "nothing", "empty", "gone")
 
-    print(f"INPAINT: Generating with prompt '{inpaint_prompt}'...", flush=True)
+    if is_removal:
+        # For removal: describe the surrounding context explicitly
+        # + strong negative prompt targeting the removed object
+        inpaint_prompt = f"continuation of the surrounding area, same background, nothing here, seamless"
+        negative_prompt = f"{target_text}, any object, duplicate, artifact, blurry, distorted"
+        print(f"INPAINT: Removal mode - negative='{target_text}'", flush=True)
+    else:
+        negative_prompt = f"blurry, distorted, duplicate, {target_text}"
+        print(f"INPAINT: Replace mode - prompt='{inpaint_prompt}'", flush=True)
+
     result = pipe(
         prompt=inpaint_prompt,
+        negative_prompt=negative_prompt,
         image=img_work,
         mask_image=mask_binary,
-        num_inference_steps=30,
-        guidance_scale=7.5,
+        num_inference_steps=40,
+        guidance_scale=8.5,
         strength=0.99,
         height=work_h,
         width=work_w,
