@@ -464,6 +464,11 @@
                   <span class="lm-label">Left knee</span>
                   <span class="lm-status">not set</span>
                 </button>
+                <button class="lm-btn" data-lm="ankle_l" data-color="#5577ee">
+                  <span class="lm-color" style="background:#5577ee"></span>
+                  <span class="lm-label">Left ankle</span>
+                  <span class="lm-status">not set</span>
+                </button>
                 <button class="lm-btn" data-lm="foot_l" data-color="#4444ff">
                   <span class="lm-color" style="background:#4444ff"></span>
                   <span class="lm-label">Left foot</span>
@@ -472,6 +477,11 @@
                 <button class="lm-btn" data-lm="knee_r" data-color="#6688cc">
                   <span class="lm-color" style="background:#6688cc"></span>
                   <span class="lm-label">Right knee</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="ankle_r" data-color="#4466bb">
+                  <span class="lm-color" style="background:#4466bb"></span>
+                  <span class="lm-label">Right ankle</span>
                   <span class="lm-status">not set</span>
                 </button>
                 <button class="lm-btn" data-lm="foot_r" data-color="#4477ff">
@@ -2110,8 +2120,8 @@
             finger_l_thumb: 0xaaff44, finger_l_index: 0xccff66,
             hand_r: 0x44aa44, elbow_r: 0x66cc66,
             finger_r_thumb: 0x88cc44, finger_r_index: 0xaacc66,
-            foot_l: 0x4444ff, knee_l: 0x88aaff,
-            foot_r: 0x4477ff, knee_r: 0x6688cc,
+            foot_l: 0x4444ff, knee_l: 0x88aaff, ankle_l: 0x5577ee,
+            foot_r: 0x4477ff, knee_r: 0x6688cc, ankle_r: 0x4466bb,
             hips: 0xffaa00,
           };
           for (const k in data) {
@@ -2167,13 +2177,15 @@
         hips: 0xffaa00,
       };
 
-      let head, neck, hand_l, hand_r, elbow_l, elbow_r, foot_l, foot_r, knee_l, knee_r, hips;
+      let head, neck, hand_l, hand_r, elbow_l, elbow_r, foot_l, foot_r, knee_l, knee_r, ankle_l, ankle_r, hips;
       let finger_l_thumb, finger_l_index, finger_r_thumb, finger_r_index;
       if (upAxis === 'y') {
         head   = { x: center.x, y: max.y * 0.97, z: center.z };
         neck   = { x: center.x, y: max.y * 0.88, z: center.z };
         foot_l = { x: center.x + size.x * 0.15, y: min.y + size.y * 0.02, z: center.z };
         foot_r = { x: center.x - size.x * 0.15, y: min.y + size.y * 0.02, z: center.z };
+        ankle_l= { x: center.x + size.x * 0.15, y: min.y + size.y * 0.07, z: center.z };
+        ankle_r= { x: center.x - size.x * 0.15, y: min.y + size.y * 0.07, z: center.z };
         knee_l = { x: center.x + size.x * 0.15, y: min.y + size.y * 0.27, z: center.z };
         knee_r = { x: center.x - size.x * 0.15, y: min.y + size.y * 0.27, z: center.z };
         hand_l = { x: max.x * 0.93, y: center.y, z: center.z };
@@ -2190,6 +2202,8 @@
         neck   = { x: center.x, y: center.y, z: max.z * 0.88 };
         foot_l = { x: center.x + size.x * 0.15, y: center.y, z: min.z + size.z * 0.02 };
         foot_r = { x: center.x - size.x * 0.15, y: center.y, z: min.z + size.z * 0.02 };
+        ankle_l= { x: center.x + size.x * 0.15, y: center.y, z: min.z + size.z * 0.07 };
+        ankle_r= { x: center.x - size.x * 0.15, y: center.y, z: min.z + size.z * 0.07 };
         knee_l = { x: center.x + size.x * 0.15, y: center.y, z: min.z + size.z * 0.27 };
         knee_r = { x: center.x - size.x * 0.15, y: center.y, z: min.z + size.z * 0.27 };
         hand_l = { x: max.x * 0.93, y: center.y, z: center.z };
@@ -2206,6 +2220,8 @@
         neck   = { x: max.x * 0.88, y: center.y, z: center.z };
         foot_l = { x: min.x + size.x * 0.02, y: center.y + size.y * 0.15, z: center.z };
         foot_r = { x: min.x + size.x * 0.02, y: center.y - size.y * 0.15, z: center.z };
+        ankle_l= { x: min.x + size.x * 0.07, y: center.y + size.y * 0.15, z: center.z };
+        ankle_r= { x: min.x + size.x * 0.07, y: center.y - size.y * 0.15, z: center.z };
         knee_l = { x: min.x + size.x * 0.27, y: center.y + size.y * 0.15, z: center.z };
         knee_r = { x: min.x + size.x * 0.27, y: center.y - size.y * 0.15, z: center.z };
         hand_l = { x: center.x, y: max.y * 0.93, z: center.z };
@@ -2219,7 +2235,7 @@
         finger_r_index = { x: center.x, y: min.y * 1.02, z: center.z };
       }
 
-      const all = { head, neck, hand_l, elbow_l, finger_l_thumb, finger_l_index, hand_r, elbow_r, finger_r_thumb, finger_r_index, foot_l, knee_l, foot_r, knee_r, hips };
+      const all = { head, neck, hand_l, elbow_l, finger_l_thumb, finger_l_index, hand_r, elbow_r, finger_r_thumb, finger_r_index, foot_l, ankle_l, knee_l, foot_r, ankle_r, knee_r, hips };
       for (const k in all) {
         rigLandmarks[k] = [all[k].x, all[k].y, all[k].z];
         placeLandmarkMarker(k, all[k], colorMap[k]);
@@ -2380,8 +2396,8 @@
       finger_l_thumb: 'Left thumb', finger_l_index: 'Left index',
       hand_r: 'Right hand', elbow_r: 'Right elbow',
       finger_r_thumb: 'Right thumb', finger_r_index: 'Right index',
-      foot_l: 'Left foot', knee_l: 'Left knee',
-      foot_r: 'Right foot', knee_r: 'Right knee',
+      foot_l: 'Left foot', knee_l: 'Left knee', ankle_l: 'Left ankle',
+      foot_r: 'Right foot', knee_r: 'Right knee', ankle_r: 'Right ankle',
       hips: 'Hips',
     };
 
