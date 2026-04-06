@@ -1935,17 +1935,23 @@
       list.innerHTML = reversed.map((v, ri) => {
         const i = data.versions.length - 1 - ri;
         const active = i === data.currentVersion ? 'active' : '';
-        const promptShort = v.prompt.replace(/^\[Refine\] /, '');
-        const isRefine = v.prompt.startsWith('[Refine]');
+        const rawPrompt = (v.prompt || '').replace(/^\[Refine\] /, '');
+        // Skip [Imported] tag and file path — no real prompt to copy
+        const isImported = rawPrompt.startsWith('[Imported]');
+        const promptShort = isImported ? '' : rawPrompt;
         const label = i === 0 ? 'Original' : `v${i}`;
+        const copyBtn = promptShort
+          ? `<button class="tl-copy" onclick="event.stopPropagation(); navigator.clipboard.writeText(this.dataset.prompt); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1000)" data-prompt="${escapeHtml(promptShort)}" title="Copy prompt">Copy</button>`
+          : '';
+        const displayText = isImported ? rawPrompt : (promptShort.length > 45 ? promptShort.slice(0,45)+'...' : promptShort);
         return `<div class="tl-item ${active}" onclick="window._goToVersion(${i})">
           <div class="tl-dot-col">
             <div class="tl-dot"></div>
             ${ri < reversed.length - 1 ? '<div class="tl-line"></div>' : ''}
           </div>
           <div class="tl-content">
-            <div class="tl-version">${label}<button class="tl-copy" onclick="event.stopPropagation(); navigator.clipboard.writeText('${promptShort.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1000)" title="Copy prompt">Copy</button></div>
-            <div class="tl-prompt">${promptShort.length > 45 ? promptShort.slice(0,45)+'...' : promptShort}</div>
+            <div class="tl-version">${label}${copyBtn}</div>
+            <div class="tl-prompt">${escapeHtml(displayText)}</div>
           </div>
         </div>`;
       }).join('');
