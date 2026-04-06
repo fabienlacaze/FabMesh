@@ -29,7 +29,16 @@ def generate_3d(image_path, output_path, max_faces=0):
     print("HUNYUAN3D: Generating 3D shape...", flush=True)
     start = time.time()
     try:
-        meshes = shape_pipe(image=img, octree_resolution=256, num_inference_steps=30)
+        # Map max_faces to octree_resolution for faster generation
+        res_map = {1000: 128, 5000: 192, 10000: 256, 50000: 384, 100000: 512}
+        octree_res = 256
+        if max_faces > 0:
+            for faces, res in sorted(res_map.items()):
+                if max_faces <= faces:
+                    octree_res = res
+                    break
+        print(f"HUNYUAN3D: Using octree_resolution={octree_res} for max {max_faces} faces", flush=True)
+        meshes = shape_pipe(image=img, octree_resolution=octree_res, num_inference_steps=30)
         mesh = meshes[0]
         print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s", flush=True)
 
@@ -42,7 +51,10 @@ def generate_3d(image_path, output_path, max_faces=0):
         tri_mesh = trimesh.load(shape_obj)
         if max_faces > 0 and len(tri_mesh.faces) > max_faces:
             print(f"HUNYUAN3D: Decimating {len(tri_mesh.faces)} -> {max_faces} faces...", flush=True)
-            tri_mesh = tri_mesh.simplify_quadric_decimation(max_faces)
+            import fast_simplification
+            ratio = max_faces / len(tri_mesh.faces)
+            verts, faces = fast_simplification.simplify(tri_mesh.vertices, tri_mesh.faces, target_reduction=1.0 - ratio)
+            tri_mesh = trimesh.Trimesh(vertices=verts, faces=faces)
             tri_mesh.export(shape_obj)
             tri_mesh.export(output_path)
             print(f"HUNYUAN3D: Decimated to {len(tri_mesh.faces)} faces", flush=True)

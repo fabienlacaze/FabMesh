@@ -1127,11 +1127,11 @@
 
         if (!collapsed) {
           html += '<div class="gallery-children gallery-img-children">';
-          const safePrompt = (f.prompt || '').replace(/'/g, "\\'");
+          const b64Prompt = btoa(unescape(encodeURIComponent(f.prompt || '')));
           f.images.forEach((img, i) => {
             const imgSrc = 'file:///' + img.replace(/\\/g, '/');
             const imgPathSafe = img.replace(/\\/g, '/');
-            html += `<div class="gallery-thumb-wrapper"><img class="gallery-thumb" src="${imgSrc}" onclick="window._selectGalleryImage('${imgPathSafe}', '${safePrompt}')" /><button class="gallery-thumb-del" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>`;
+            html += `<div class="gallery-thumb-wrapper"><img class="gallery-thumb" src="${imgSrc}" data-path="${imgPathSafe}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage(this.dataset.path, decodeURIComponent(escape(atob(this.dataset.prompt))))" /><button class="gallery-thumb-del" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>`;
           });
           html += '</div>';
         }

@@ -734,7 +734,8 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
 });
 
 // --- Image-to-3D: supports TRELLIS and TripoSG ---
-ipcMain.handle('image-to-3d', async (event, { imagePath, outputName, textureSize, engine, targetFaces }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine, targetFaces }) => {
+  let imagePath = _imagePath;
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
@@ -754,9 +755,31 @@ ipcMain.handle('image-to-3d', async (event, { imagePath, outputName, textureSize
     };
     const args = argsMap[engine] || argsMap['local'];
 
-    console.log('IMAGE-TO-3D args:', JSON.stringify(args));
+    // Fix truncated image path (known bug: last char gets cut)
+    if (!fs.existsSync(imagePath)) {
+      const fixes = ['g', 'ng', 'png', 'pg', 'jpg', 'peg'];
+      for (const fix of fixes) {
+        if (fs.existsSync(imagePath + fix)) {
+          imagePath = imagePath + fix;
+          break;
+        }
+      }
+      if (!fs.existsSync(imagePath)) {
+        return { success: false, error: `Image not found: ${imagePath}` };
+      }
+    }
+    // Rebuild args with fixed path
+    const fixedArgsMap = {
+      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0)],
+      'local': [bridgeScript, imagePath, meshPath, '512'],
+      'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)]
+    };
+    const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['local'];
+
+    console.log('IMAGE-TO-3D fixedArgs:', JSON.stringify(fixedArgs));
+    fs.writeFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `imagePath: ${imagePath}\nfixedArgs: ${JSON.stringify(fixedArgs)}\n`);
     const result = await new Promise((resolve, reject) => {
-      const proc = execFile('python', args, {
+      const proc = execFile('python', fixedArgs, {
         timeout: 600000,
         maxBuffer: 10 * 1024 * 1024
       }, (error, stdout, stderr) => {
@@ -770,7 +793,9 @@ ipcMain.handle('image-to-3d', async (event, { imagePath, outputName, textureSize
 
     return { success: true, ...result };
   } catch (err) {
-    return { success: false, error: err.error || err.message, stdout: err.stdout, stderr: err.stderr };
+    const errMsg = err.error || err.message || String(err);
+    fs.appendFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `\nERROR: ${errMsg}\nstdout: ${err.stdout || ''}\nstderr: ${err.stderr || ''}\n`);
+    return { success: false, error: errMsg, stdout: err.stdout, stderr: err.stderr };
   }
 });
 
