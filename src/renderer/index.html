@@ -33,6 +33,7 @@
           </div>
           <div id="mesh-list"></div>
         </div>
+        <div class="resize-handle-right" id="gallery-resize"></div>
       </aside>
 
       <main id="viewer-panel">
@@ -68,6 +69,7 @@
       </main>
 
       <aside id="action-panel">
+        <div class="resize-handle-left" id="action-resize"></div>
         <div id="action-panel-content">
 
         <!-- ============ TAB: IMAGE ============ -->
@@ -1354,6 +1356,38 @@
     });
 
     let lastImagePrompt = '';
+
+    // Resize handles for gallery + action panels
+    function setupResize(handleId, panelId, fromLeft) {
+      const handle = document.getElementById(handleId);
+      const panel = document.getElementById(panelId);
+      let startX, startWidth;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        handle.classList.add('active');
+        startX = e.clientX;
+        startWidth = panel.offsetWidth;
+        document.body.style.cursor = 'ew-resize';
+        const onMove = (ev) => {
+          const delta = ev.clientX - startX;
+          const newWidth = fromLeft ? startWidth + delta : startWidth - delta;
+          const min = parseInt(getComputedStyle(panel).minWidth) || 160;
+          const max = parseInt(getComputedStyle(panel).maxWidth) || 600;
+          panel.style.width = Math.max(min, Math.min(max, newWidth)) + 'px';
+          if (renderer) onResize();
+        };
+        const onUp = () => {
+          handle.classList.remove('active');
+          document.body.style.cursor = '';
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    }
+    setupResize('gallery-resize', 'gallery-panel', true);
+    setupResize('action-resize', 'action-panel', false);
 
     // Hover preview popup for mesh items (delay 1s)
     let hoverTimer = null;

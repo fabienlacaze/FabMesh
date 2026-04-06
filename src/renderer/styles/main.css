@@ -210,7 +210,69 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  resize: horizontal;
+  position: relative;
+}
+
+/* Resize handle for gallery (right edge, centered) */
+.resize-handle-right {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 100;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.resize-handle-right::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 50px;
+  background: var(--border);
+  border-radius: 2px;
+  transition: all 0.15s;
+}
+
+.resize-handle-right:hover::before,
+.resize-handle-right.active::before {
+  background: var(--accent);
+  height: 80px;
+}
+
+.resize-handle-left {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 100;
+  background: transparent;
+}
+
+.resize-handle-left::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 50px;
+  background: var(--border);
+  border-radius: 2px;
+  transition: all 0.15s;
+}
+
+.resize-handle-left:hover::before,
+.resize-handle-left.active::before {
+  background: var(--accent);
+  height: 80px;
 }
 
 #gallery-content {
@@ -670,12 +732,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  resize: horizontal;
-  direction: rtl;
-}
-
-#action-panel > * {
-  direction: ltr;
+  position: relative;
 }
 
 #action-panel-content {
