@@ -880,7 +880,8 @@
           await refreshGallery();
           showLog(`${successes.length}/2 engines succeeded.`, successes.length > 0 ? 'success' : 'error');
         } else {
-          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: 50000 });
+          const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
+          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: maxTris || 50000 });
           if (!r3d.success) {
             showProgressError(`${engineName} failed`);
             showLog(r3d.error || 'Failed', 'error');

@@ -12,7 +12,7 @@ import subprocess
 HUNYUAN_DIR = os.path.join(os.path.dirname(__file__), '..', 'Hunyuan3D-2')
 sys.path.insert(0, HUNYUAN_DIR)
 
-def generate_3d(image_path, output_path):
+def generate_3d(image_path, output_path, max_faces=0):
     import torch
     from PIL import Image
     from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
@@ -33,10 +33,22 @@ def generate_3d(image_path, output_path):
         mesh = meshes[0]
         print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s", flush=True)
 
-        # Save shape as OBJ for WSL texturing + GLB as fallback
+        # Save shape as OBJ
         shape_obj = output_path.replace('.glb', '_shape.obj')
         mesh.export(shape_obj)
-        mesh.export(output_path)
+
+        # Decimate with trimesh if needed
+        import trimesh
+        tri_mesh = trimesh.load(shape_obj)
+        if max_faces > 0 and len(tri_mesh.faces) > max_faces:
+            print(f"HUNYUAN3D: Decimating {len(tri_mesh.faces)} -> {max_faces} faces...", flush=True)
+            tri_mesh = tri_mesh.simplify_quadric_decimation(max_faces)
+            tri_mesh.export(shape_obj)
+            tri_mesh.export(output_path)
+            print(f"HUNYUAN3D: Decimated to {len(tri_mesh.faces)} faces", flush=True)
+        else:
+            mesh.export(output_path)
+
         print(f"HUNYUAN3D: Shape saved ({os.path.getsize(output_path)} bytes)", flush=True)
 
         del shape_pipe
@@ -73,6 +85,11 @@ pipe.enable_model_cpu_offload()
 print("TEXGEN: Model ready", flush=True)
 
 mesh = trimesh.load("{wsl_shape}")
+target = {max_faces if max_faces > 0 else 50000}
+if len(mesh.faces) > target:
+    print(f"TEXGEN: Decimating {{len(mesh.faces)}} -> {{target}} faces...", flush=True)
+    mesh = mesh.simplify_quadric_decimation(target)
+    print(f"TEXGEN: Decimated to {{len(mesh.faces)}} faces", flush=True)
 img = Image.open("{wsl_image}")
 print(f"TEXGEN: Mesh {{len(mesh.vertices)}} verts, painting...", flush=True)
 
@@ -129,7 +146,8 @@ print(f"TEXGEN_SUCCESS: {{sz}} bytes", flush=True)
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python local_hunyuan3d_bridge.py <image_path> <output_glb_path>")
+        print("Usage: python local_hunyuan3d_bridge.py <image_path> <output_glb_path> [max_faces]")
         sys.exit(1)
-    success = generate_3d(sys.argv[1], sys.argv[2])
+    max_faces = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    success = generate_3d(sys.argv[1], sys.argv[2], max_faces)
     sys.exit(0 if success else 1)

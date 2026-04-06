@@ -748,7 +748,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath, outputName, textureSize
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['local'];
 
     const argsMap = {
-      'hunyuan': [bridgeScript, imagePath, meshPath],
+      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0)],
       'local': [bridgeScript, imagePath, meshPath, '512'],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)]
     };
