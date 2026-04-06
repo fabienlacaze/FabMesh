@@ -52,6 +52,7 @@
         <div id="viewer-toolbar">
           <button id="btn-reset-camera" class="toolbar-btn" title="Reset camera">Reset</button>
           <button id="btn-wireframe" class="toolbar-btn" title="Toggle wireframe">Wire</button>
+          <button id="btn-matcap" class="toolbar-btn" title="Toggle matcap/PBR">PBR</button>
           <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
           <span class="toolbar-separator"></span>
           <span class="toolbar-label">Light</span>
@@ -557,10 +558,13 @@
         const ss = m.size < 1024 ? m.size+' B' : m.size < 1048576 ? (m.size/1024).toFixed(1)+' KB' : (m.size/1048576).toFixed(1)+' MB';
         const act = selectedMesh?.filename === m.filename ? 'active' : '';
         const name = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
+        const thumbHtml2 = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '';
         html += `<div class="mesh-item ${act}" onclick="window._selectMesh(${m.idx})">
+          <div class="mesh-item-with-thumb">${thumbHtml2}<div class="mesh-item-details">
           <div class="mesh-item-row"><div class="mesh-item-name">${name}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
           <div class="mesh-item-info"><span>${ds}</span><span class="mesh-item-format">${m.format}</span></div>
           <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span></div>
+          </div></div>
         </div>`;
       }
 
@@ -1045,6 +1049,27 @@
       isGridVisible = !isGridVisible;
       this.classList.toggle('active', isGridVisible);
       gridHelper.visible = isGridVisible;
+    };
+
+    // PBR/Matcap toggle
+    let isPBR = true;
+    document.getElementById('btn-matcap').onclick = function() {
+      isPBR = !isPBR;
+      this.classList.toggle('active', !isPBR);
+      this.textContent = isPBR ? 'PBR' : 'Solid';
+      if (currentModel) {
+        const matcapMat = new THREE.MeshNormalMaterial();
+        currentModel.traverse(c => {
+          if (c.isMesh) {
+            if (!isPBR) {
+              c._origMat = c.material;
+              c.material = matcapMat;
+            } else if (c._origMat) {
+              c.material = c._origMat;
+            }
+          }
+        });
+      }
     };
 
     // Light slider
