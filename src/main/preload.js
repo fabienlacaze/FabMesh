@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
   exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
   autoRig: (opts) => ipcRenderer.invoke('auto-rig', opts),
+  listRigTemplates: () => ipcRenderer.invoke('list-rig-templates'),
   cancelJob: (jobId) => ipcRenderer.invoke('cancel-job', jobId),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),

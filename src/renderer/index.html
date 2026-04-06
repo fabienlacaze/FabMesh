@@ -23,6 +23,7 @@
         <div id="tab-bar">
           <button class="tab active" data-tab="tab-image">Image</button>
           <button class="tab" data-tab="tab-3d">3D</button>
+          <button class="tab" data-tab="tab-rig">Rig</button>
         </div>
         <div id="gallery-content">
           <div class="gallery-toolbar">
@@ -334,6 +335,115 @@
             </div>
           </div><!-- end subtab-refine -->
         </div><!-- end tab-3d -->
+
+        <!-- ============ TAB: RIG ============ -->
+        <div id="tab-rig" class="tab-content">
+          <div class="action-section">
+            <label class="section-label">SOURCE MESH</label>
+            <div id="rig-source-info" class="hint-text" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px;">
+              No mesh selected. Click a mesh in the gallery.
+            </div>
+          </div>
+
+          <div class="action-section">
+            <label class="section-label">TEMPLATE</label>
+            <select id="rig-tab-template" style="width: 100%; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
+              <option value="orc_m1_skeletal_mesh">Orc M1 (custom FBX)</option>
+              <option value="ue5_mannequin">Humanoid (UE5 Mannequin)</option>
+              <option value="ue5_quadruped">Quadruped (4 legs)</option>
+              <option value="ue5_hexapod">Hexapod (6 legs)</option>
+              <option value="ue5_octopod">Octopod (8 legs)</option>
+            </select>
+          </div>
+
+          <details class="advanced-details" open>
+            <summary>Pre-process</summary>
+            <div class="advanced-content">
+              <div class="adv-check-row">
+                <input type="checkbox" id="rig-auto-tpose" checked />
+                <label for="rig-auto-tpose">Auto T-pose detection</label>
+              </div>
+              <div class="adv-check-row">
+                <input type="checkbox" id="rig-auto-center" checked />
+                <label for="rig-auto-center">Auto-center on origin</label>
+              </div>
+              <div class="action-row">
+                <label>Scale (cm)</label>
+                <input type="number" id="rig-scale" value="180" min="10" max="500" style="width: 70px; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;" />
+              </div>
+            </div>
+          </details>
+
+          <details class="advanced-details">
+            <summary>Landmarks (5 points - optional)</summary>
+            <div class="advanced-content">
+              <p class="hint-text" style="margin: 4px 0 8px 0;">Click in the 3D viewer to place landmarks. Improves rig accuracy on non-standard proportions.</p>
+              <div class="adv-check-row">
+                <input type="checkbox" id="rig-use-landmarks" />
+                <label for="rig-use-landmarks">Enable landmark mode</label>
+              </div>
+              <div id="rig-landmark-list" style="font-size: 11px; padding: 6px; background: var(--bg-primary); border-radius: 4px; margin-top: 6px;">
+                <div data-lm="head" class="rig-lm-row"><span class="rig-lm-name">Head</span> <span class="rig-lm-status">not set</span></div>
+                <div data-lm="hand_l" class="rig-lm-row"><span class="rig-lm-name">Left hand</span> <span class="rig-lm-status">not set</span></div>
+                <div data-lm="hand_r" class="rig-lm-row"><span class="rig-lm-name">Right hand</span> <span class="rig-lm-status">not set</span></div>
+                <div data-lm="foot_l" class="rig-lm-row"><span class="rig-lm-name">Left foot</span> <span class="rig-lm-status">not set</span></div>
+                <div data-lm="foot_r" class="rig-lm-row"><span class="rig-lm-name">Right foot</span> <span class="rig-lm-status">not set</span></div>
+              </div>
+              <button id="btn-rig-clear-landmarks" class="secondary-btn" style="margin-top: 6px; width: 100%; font-size: 11px; padding: 4px;">Clear landmarks</button>
+            </div>
+          </details>
+
+          <details class="advanced-details">
+            <summary>Skinning</summary>
+            <div class="advanced-content">
+              <div class="action-row">
+                <label>Method</label>
+                <select id="rig-skin-method" style="flex:1; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
+                  <option value="auto">Blender Auto Weights (fast)</option>
+                  <option value="heat">Heat Diffusion (better)</option>
+                  <option value="voxel">Voxel Weights (complex)</option>
+                </select>
+              </div>
+              <div class="action-row">
+                <label>Smoothing</label>
+                <input type="range" id="rig-skin-smooth" min="0" max="10" value="3" style="flex:1; accent-color: var(--accent);" />
+                <span id="rig-skin-smooth-val" style="min-width: 20px; text-align: right;">3</span>
+              </div>
+              <div class="adv-check-row">
+                <input type="checkbox" id="rig-mirror-x" checked />
+                <label for="rig-mirror-x">Mirror weights (X axis)</label>
+              </div>
+            </div>
+          </details>
+
+          <button id="btn-rig-generate" class="primary-btn" style="margin-top: 12px;">Generate Rig</button>
+
+          <div id="rig-post-section" class="action-section hidden" style="margin-top: 12px;">
+            <label class="section-label">POST-PROCESS</label>
+            <button id="btn-rig-test-anim" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Test animation (Idle / Walk / Run)</button>
+            <select id="rig-test-anim-select" style="width: 100%; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; margin-bottom: 4px;">
+              <option value="idle">Idle</option>
+              <option value="walk">Walk</option>
+              <option value="run">Run</option>
+            </select>
+            <button id="btn-rig-edit-blender" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Edit bones in Blender</button>
+            <button id="btn-rig-reskin" class="secondary-btn" style="width: 100%; margin-bottom: 4px;">Re-skin only</button>
+          </div>
+
+          <div class="action-section" style="margin-top: 12px;">
+            <label class="section-label">EXPORT</label>
+            <select id="rig-export-format" style="width: 100%; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; margin-bottom: 6px;">
+              <option value="fbx_ue5">FBX (UE5 ready)</option>
+              <option value="fbx_generic">FBX (generic)</option>
+              <option value="glb">GLB</option>
+            </select>
+            <div class="adv-check-row">
+              <input type="checkbox" id="rig-embed-textures" checked />
+              <label for="rig-embed-textures">Embed textures</label>
+            </div>
+            <button id="btn-rig-export" class="secondary-btn" style="width: 100%; margin-top: 6px;">Export Rigged FBX</button>
+          </div>
+        </div><!-- end tab-rig -->
 
         <!-- ============ SHARED ============ -->
         <div id="generation-status" class="hidden"></div>
@@ -895,6 +1005,8 @@
         // Check again after async load
         if (myLoadId !== _meshLoadId) { clearModel(); return; }
         saveMeshThumbnail(target.path);
+        // Refresh rig tab source info if visible
+        if (typeof updateRigSourceInfo === 'function') updateRigSourceInfo();
       } else {
         showLog('Could not read mesh file', 'error');
         return;
@@ -1547,6 +1659,106 @@
         } finally {
           btnRig.disabled = false;
           btnRig.textContent = 'Generate Rig';
+        }
+      };
+    }
+
+    // ========== RIG TAB ==========
+    // Populate template dropdowns from registry
+    async function loadRigTemplates() {
+      try {
+        const data = await API.listRigTemplates();
+        const fillSelect = (selectId) => {
+          const sel = document.getElementById(selectId);
+          if (!sel) return;
+          sel.innerHTML = '';
+          // Custom SKM templates first
+          if (data.skm && data.skm.length > 0) {
+            const grp = document.createElement('optgroup');
+            grp.label = 'Custom SKM (from your project)';
+            data.skm.forEach(t => {
+              const opt = document.createElement('option');
+              opt.value = t.id;
+              opt.textContent = t.name;
+              grp.appendChild(opt);
+            });
+            sel.appendChild(grp);
+          }
+          // Generic templates
+          if (data.generic && data.generic.length > 0) {
+            const grp2 = document.createElement('optgroup');
+            grp2.label = 'Generic templates';
+            data.generic.forEach(t => {
+              const opt = document.createElement('option');
+              opt.value = t.id;
+              opt.textContent = t.name;
+              grp2.appendChild(opt);
+            });
+            sel.appendChild(grp2);
+          }
+        };
+        fillSelect('rig-tab-template');
+        fillSelect('rig-template'); // also update old dropdown if present
+      } catch (e) {
+        console.error('loadRigTemplates failed:', e);
+      }
+    }
+    loadRigTemplates();
+
+    // Update source mesh info display
+    function updateRigSourceInfo() {
+      const el = document.getElementById('rig-source-info');
+      if (!el) return;
+      if (selectedMesh) {
+        el.innerHTML = `<strong>${selectedMesh.filename}</strong><br><span style="font-size: 11px; color: var(--text-muted);">${selectedMesh.format} - ${formatSize(selectedMesh.size)}</span>`;
+      } else {
+        el.innerHTML = 'No mesh selected. Click a mesh in the gallery.';
+      }
+    }
+
+    // Skinning smoothing slider live value
+    const skinSmoothSlider = document.getElementById('rig-skin-smooth');
+    if (skinSmoothSlider) {
+      skinSmoothSlider.addEventListener('input', e => {
+        const v = document.getElementById('rig-skin-smooth-val');
+        if (v) v.textContent = e.target.value;
+      });
+    }
+
+    // Generate Rig button (in tab-rig)
+    const btnRigGen = document.getElementById('btn-rig-generate');
+    if (btnRigGen) {
+      btnRigGen.onclick = async () => {
+        if (!selectedMesh) {
+          showLog('Select a mesh in the gallery first', 'error');
+          return;
+        }
+        const templateName = document.getElementById('rig-tab-template').value;
+        const job = addJob(`Rig: ${templateName}`, 'rig', selectedMesh.thumb || selectedMesh.path);
+        job.step = 'Building rig in Blender...';
+        job.progress = 20;
+        renderJobs();
+        btnRigGen.disabled = true;
+        btnRigGen.textContent = 'Rigging...';
+        try {
+          const r = await API.autoRig({ meshPath: selectedMesh.path, templateName });
+          if (r?.success) {
+            completeJob(job.id, true);
+            showLog('Rigged FBX created: ' + r.filename, 'success');
+            API.showNotification({ title: 'FabMesh - Rig Ready', body: r.filename });
+            await refreshActiveGallery();
+            // Show post-process section
+            document.getElementById('rig-post-section')?.classList.remove('hidden');
+          } else {
+            completeJob(job.id, false);
+            showLog('Rig failed: ' + (r?.error || 'unknown'), 'error');
+          }
+        } catch (e) {
+          completeJob(job.id, false);
+          showLog('Rig error: ' + e.message, 'error');
+        } finally {
+          btnRigGen.disabled = false;
+          btnRigGen.textContent = 'Generate Rig';
         }
       };
     }
@@ -2261,12 +2473,19 @@
           document.getElementById('image-viewer-empty').style.display = 'block';
         }
       } else {
+        // Both tab-3d and tab-rig: show 3D viewer
         imgViewer.classList.add('hidden');
         canvas.style.display = '';
         if (emptyMesh && !currentModel) emptyMesh.style.display = '';
-        // Show export section back if a mesh was selected
+        // Show export section in 3D tab only (not rig tab — has its own export)
         const exportSec = document.getElementById('export-section');
-        if (exportSec && selectedMesh) exportSec.style.display = 'block';
+        if (exportSec) {
+          exportSec.style.display = (tabId === 'tab-3d' && selectedMesh) ? 'block' : 'none';
+        }
+        // Update rig source info when entering rig tab
+        if (tabId === 'tab-rig' && typeof updateRigSourceInfo === 'function') {
+          updateRigSourceInfo();
+        }
       }
 
       // Switch gallery view based on tab — expand all groups
@@ -2277,6 +2496,7 @@
           Object.keys(collapsedProjects).forEach(k => { if (k.startsWith('img_')) collapsedProjects[k] = false; });
           refreshGalleryImages();
         } else {
+          // Both tab-3d and tab-rig show meshes
           title.textContent = '3D Meshes';
           Object.keys(collapsedProjects).forEach(k => { if (!k.startsWith('img_')) collapsedProjects[k] = false; });
           refreshGallery();

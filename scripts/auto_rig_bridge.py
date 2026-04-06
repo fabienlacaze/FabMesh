@@ -28,20 +28,41 @@ TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "rig_templates")
 
 
 def load_template(name):
-    """Load a template - prefer FBX over JSON if both exist."""
-    fbx_path = os.path.join(TEMPLATES_DIR, f"{name}.fbx")
-    if os.path.exists(fbx_path):
-        return {"type": "fbx", "path": fbx_path, "name": name}
-    fbx_path_upper = os.path.join(TEMPLATES_DIR, f"{name}.FBX")
-    if os.path.exists(fbx_path_upper):
-        return {"type": "fbx", "path": fbx_path_upper, "name": name}
+    """Load a template - search in skm/<name>/, then root, then JSON fallback."""
+    # 1) Try the SKM registry
+    registry_path = os.path.join(TEMPLATES_DIR, "skm", "registry.json")
+    if os.path.exists(registry_path):
+        try:
+            with open(registry_path, "r", encoding="utf-8") as f:
+                reg = json.load(f)
+            for t in reg.get("skm_templates", []):
+                if t.get("id") == name:
+                    fbx_path = os.path.join(TEMPLATES_DIR, t["fbx"])
+                    if os.path.exists(fbx_path):
+                        return {"type": "fbx", "path": fbx_path, "name": name, "registry": t}
+            for t in reg.get("generic_templates", []):
+                if t.get("id") == name:
+                    json_path = os.path.join(TEMPLATES_DIR, t["json"])
+                    if os.path.exists(json_path):
+                        with open(json_path, "r", encoding="utf-8") as jf:
+                            data = json.load(jf)
+                        data["type"] = "json"
+                        return data
+        except Exception as e:
+            print(f"AUTORIG: registry parse error: {e}", flush=True)
+
+    # 2) Direct file lookup in TEMPLATES_DIR root
+    for ext in (".fbx", ".FBX"):
+        p = os.path.join(TEMPLATES_DIR, f"{name}{ext}")
+        if os.path.exists(p):
+            return {"type": "fbx", "path": p, "name": name}
     json_path = os.path.join(TEMPLATES_DIR, f"{name}.json")
     if os.path.exists(json_path):
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         data["type"] = "json"
         return data
-    raise FileNotFoundError(f"Template not found: {name} (.fbx or .json)")
+    raise FileNotFoundError(f"Template not found: {name}")
 
 
 def build_fbx_template_script(mesh_path, template_fbx_path, output_fbx):

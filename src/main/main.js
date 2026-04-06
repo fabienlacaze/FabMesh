@@ -357,6 +357,22 @@ ipcMain.handle('cancel-job', (event, jobId) => {
   return false;
 });
 
+// List available SKM templates (custom FBX) and generic templates from registry
+ipcMain.handle('list-rig-templates', () => {
+  try {
+    const registryPath = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'skm', 'registry.json');
+    if (!fs.existsSync(registryPath)) return { skm: [], generic: [] };
+    const data = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+    return {
+      skm: data.skm_templates || [],
+      generic: data.generic_templates || []
+    };
+  } catch (e) {
+    console.error('list-rig-templates failed:', e);
+    return { skm: [], generic: [] };
+  }
+});
+
 // Auto-rigging: applies a skeleton template to a mesh and exports rigged FBX
 ipcMain.handle('auto-rig', async (event, { meshPath, templateName }) => {
   try {
@@ -372,8 +388,8 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName }) => {
       return { success: false, error: 'Blender not configured (Settings)' };
     }
 
-    const validTemplates = ['ue5_mannequin', 'ue5_quadruped', 'ue5_hexapod', 'ue5_octopod', 'humanoid', 'quadruped', 'hexapod'];
-    if (!validTemplates.includes(templateName)) {
+    // Validate template name (allow alphanum + underscore + hyphen only)
+    if (!templateName || !/^[a-z0-9_-]+$/i.test(templateName)) {
       return { success: false, error: 'Invalid template name' };
     }
 

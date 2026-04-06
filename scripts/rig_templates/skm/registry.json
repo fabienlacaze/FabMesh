@@ -1,0 +1,19 @@
+{
+  "skm_templates": [
+    {
+      "id": "orc_m1",
+      "name": "Orc M1 (warrior)",
+      "category": "humanoid",
+      "fbx": "skm/orc_m1/SKM_Orc_M1.FBX",
+      "animations_dir": "animations/orc_m1",
+      "default_height_cm": 180,
+      "description": "Male orc warrior - 65 bones - UE5 compatible"
+    }
+  ],
+  "generic_templates": [
+    { "id": "ue5_mannequin", "name": "Humanoid (generic)",   "category": "humanoid",  "json": "ue5_mannequin.json" },
+    { "id": "ue5_quadruped", "name": "Quadruped (4 legs)",   "category": "quadruped", "json": "ue5_quadruped.json" },
+    { "id": "ue5_hexapod",   "name": "Hexapod (6 legs)",     "category": "hexapod",   "json": "ue5_hexapod.json" },
+    { "id": "ue5_octopod",   "name": "Octopod (8 legs)",     "category": "octopod",   "json": "ue5_octopod.json" }
+  ]
+}
