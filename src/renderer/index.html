@@ -219,17 +219,6 @@
             <div id="image-grid-items" class="img-results-grid"></div>
           </div>
 
-          <!-- Image export section (bottom of image tab) -->
-          <div id="image-export-section" class="action-section export-section-bottom hidden">
-            <label class="section-label">EXPORT</label>
-            <select id="image-export-format">
-              <option value="png" selected>PNG (lossless)</option>
-              <option value="jpg">JPG (smaller)</option>
-              <option value="webp">WebP</option>
-            </select>
-            <button id="btn-image-export" class="secondary-btn">Save Image As...</button>
-            <button id="btn-image-open-folder" class="secondary-btn">Open in Explorer</button>
-          </div>
         </div>
 
         <!-- ============ TAB: 3D ============ -->
@@ -452,19 +441,6 @@
             </div>
           </details>
 
-          <div class="action-section" style="margin-top: 12px;">
-            <label class="section-label">EXPORT</label>
-            <select id="rig-export-format" style="width: 100%; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; margin-bottom: 6px;">
-              <option value="fbx_ue5">FBX (UE5 ready)</option>
-              <option value="fbx_generic">FBX (generic)</option>
-              <option value="glb">GLB</option>
-            </select>
-            <div class="adv-check-row">
-              <input type="checkbox" id="rig-embed-textures" checked />
-              <label for="rig-embed-textures">Embed textures</label>
-            </div>
-            <button id="btn-rig-export" class="secondary-btn" style="width: 100%; margin-top: 6px;">Export Rigged FBX</button>
-          </div>
         </div><!-- end tab-rig -->
 
         <!-- ============ SHARED ============ -->
@@ -476,21 +452,8 @@
         </div>
 
         <div class="bottom-tools">
-          <!-- 3D Export section: Convert + Export to Unreal (only visible in tab-3d) -->
-          <div class="action-section export-section-bottom" id="export-section" style="display:none">
-            <label class="section-label">EXPORT</label>
-            <div class="export-row">
-              <select id="convert-format">
-                <option value="glb" selected>GLB</option>
-                <option value="obj">OBJ</option>
-                <option value="fbx">FBX</option>
-                <option value="stl">STL</option>
-                <option value="ply">PLY</option>
-              </select>
-              <button id="btn-convert" class="secondary-btn">Save As...</button>
-            </div>
-            <button id="btn-export-unreal" class="secondary-btn" style="margin-top: 6px; width: 100%;" title="Export FBX scaled for Unreal Engine (cm units, Y-up)">Export to Unreal (FBX)</button>
-          </div>
+          <!-- legacy export-section kept for backward compat (hidden) -->
+          <div id="export-section" style="display:none"></div>
         </div>
         </div>
       </aside>
@@ -506,10 +469,40 @@
       </div>
     </div>
 
+    <!-- Global Export floating button (bottom-right of the entire app) -->
+    <button id="btn-export-global" class="big-action-btn green hidden" style="position: fixed; bottom: 16px; right: 16px; z-index: 100; padding: 12px 24px; font-size: 14px;">Export &#9166;</button>
+
     <!-- Lightbox -->
     <div id="lightbox" class="modal hidden" onclick="this.classList.add('hidden')">
       <img id="lightbox-img" />
       <button id="lightbox-close" onclick="document.getElementById('lightbox').classList.add('hidden')">&#10005;</button>
+    </div>
+
+    <!-- Universal Export Modal -->
+    <div id="export-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 480px; padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 id="export-modal-title" style="margin:0;">Export</h3>
+          <button id="export-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div id="export-modal-source" style="font-size: 11px; color: var(--text-muted); padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px;">--</div>
+
+        <div class="action-row">
+          <label>Format</label>
+          <select id="export-modal-format" style="flex:1;">
+            <!-- populated dynamically -->
+          </select>
+        </div>
+
+        <div id="export-modal-options" style="display: flex; flex-direction: column; gap: 8px;">
+          <!-- options injected per context -->
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top: 8px;">
+          <button id="export-modal-cancel" class="secondary-btn">Cancel</button>
+          <button id="export-modal-go" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Export</button>
+        </div>
+      </div>
     </div>
 
     <!-- Clone Stamp Modal -->
@@ -2779,6 +2772,184 @@
       btnCloneStamp.addEventListener('click', openCloneStamp);
     }
 
+    // ========== UNIVERSAL EXPORT MODAL ==========
+    // Configurations per context: image / 3d / rig
+    const exportConfigs = {
+      image: {
+        title: 'Export Image',
+        formats: [
+          { value: 'png', label: 'PNG (lossless)' },
+          { value: 'jpg', label: 'JPG (smaller)' },
+          { value: 'webp', label: 'WebP' },
+        ],
+        options: [
+          { type: 'check', id: 'opt-img-original', label: 'Keep original resolution', default: true },
+          { type: 'select', id: 'opt-img-resize', label: 'Resize',
+            choices: [['none','No resize'], ['1024','1024 px'], ['2048','2048 px'], ['4096','4096 px']],
+            default: 'none' },
+        ],
+        getSource: () => selectedImagePath,
+        getSourceLabel: () => selectedImagePath ? selectedImagePath.split(/[/\\]/).pop() : 'No image selected',
+      },
+      mesh: {
+        title: 'Export 3D Mesh',
+        formats: [
+          { value: 'glb', label: 'GLB (web/Three.js)' },
+          { value: 'gltf', label: 'GLTF + textures' },
+          { value: 'fbx', label: 'FBX (Autodesk)' },
+          { value: 'obj', label: 'OBJ (universal)' },
+          { value: 'stl', label: 'STL (3D printing)' },
+          { value: 'ply', label: 'PLY (point cloud)' },
+          { value: 'fbx_unreal', label: 'FBX for Unreal Engine (cm + Y-up)' },
+        ],
+        options: [
+          { type: 'check', id: 'opt-mesh-textures', label: 'Embed textures', default: true },
+          { type: 'check', id: 'opt-mesh-y-up', label: 'Y-up axis (game engines)', default: true },
+        ],
+        getSource: () => selectedMesh?.path,
+        getSourceLabel: () => selectedMesh ? selectedMesh.filename : 'No mesh selected',
+      },
+      rig: {
+        title: 'Export Rigged Model',
+        formats: [
+          { value: 'fbx_ue5', label: 'FBX for UE5 (cm + Y-up + bones)' },
+          { value: 'fbx_generic', label: 'FBX (generic)' },
+          { value: 'glb', label: 'GLB (with skeleton)' },
+        ],
+        options: [
+          { type: 'check', id: 'opt-rig-textures', label: 'Embed textures', default: true },
+          { type: 'check', id: 'opt-rig-anim', label: 'Bake animations (if any)', default: false },
+        ],
+        getSource: () => selectedMesh?.path,
+        getSourceLabel: () => selectedMesh ? selectedMesh.filename : 'No rigged mesh selected',
+      },
+    };
+
+    function getExportContext() {
+      if (currentTab === 'tab-image') return 'image';
+      if (currentTab === 'tab-rig') return 'rig';
+      return 'mesh';
+    }
+
+    function refreshExportButton() {
+      const btn = document.getElementById('btn-export-global');
+      if (!btn) return;
+      const ctx = getExportContext();
+      const cfg = exportConfigs[ctx];
+      const src = cfg.getSource();
+      btn.classList.toggle('hidden', !src);
+    }
+
+    function openExportModal() {
+      const ctx = getExportContext();
+      const cfg = exportConfigs[ctx];
+      const src = cfg.getSource();
+      if (!src) {
+        showLog(cfg.getSourceLabel(), 'error');
+        return;
+      }
+      // Title + source label
+      document.getElementById('export-modal-title').textContent = cfg.title;
+      document.getElementById('export-modal-source').textContent = cfg.getSourceLabel();
+
+      // Format select
+      const fmtSel = document.getElementById('export-modal-format');
+      fmtSel.innerHTML = '';
+      cfg.formats.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f.value;
+        opt.textContent = f.label;
+        fmtSel.appendChild(opt);
+      });
+
+      // Options
+      const optsContainer = document.getElementById('export-modal-options');
+      optsContainer.innerHTML = '';
+      cfg.options.forEach(o => {
+        if (o.type === 'check') {
+          const row = document.createElement('div');
+          row.className = 'adv-check-row';
+          row.innerHTML = `<input type="checkbox" id="${o.id}" ${o.default ? 'checked' : ''} /><label for="${o.id}">${o.label}</label>`;
+          optsContainer.appendChild(row);
+        } else if (o.type === 'select') {
+          const row = document.createElement('div');
+          row.className = 'action-row';
+          let html = `<label>${o.label}</label><select id="${o.id}" style="flex:1;">`;
+          o.choices.forEach(([v, l]) => {
+            html += `<option value="${v}" ${v === o.default ? 'selected' : ''}>${l}</option>`;
+          });
+          html += '</select>';
+          row.innerHTML = html;
+          optsContainer.appendChild(row);
+        }
+      });
+
+      // Store context for the Go button
+      document.getElementById('export-modal-go').dataset.ctx = ctx;
+      document.getElementById('export-modal').classList.remove('hidden');
+    }
+
+    async function performExport(ctx) {
+      const cfg = exportConfigs[ctx];
+      const src = cfg.getSource();
+      if (!src) return;
+      const fmt = document.getElementById('export-modal-format').value;
+      // Read all options into a dict
+      const opts = {};
+      cfg.options.forEach(o => {
+        const el = document.getElementById(o.id);
+        if (!el) return;
+        opts[o.id] = (o.type === 'check') ? el.checked : el.value;
+      });
+
+      try {
+        let result;
+        if (ctx === 'image') {
+          // For images we just save the displayed image as a copy
+          // (resize if requested would need a Python op; for now copy as-is for png)
+          result = await API.saveImageAs?.({ basePath: src, format: fmt, ...opts });
+          if (!result) {
+            // Fallback: just open the explorer at source
+            await API.showInExplorer(src);
+            showLog('Opened in explorer (Save As not yet wired for images)', 'info');
+            document.getElementById('export-modal').classList.add('hidden');
+            return;
+          }
+        } else if (ctx === 'mesh') {
+          if (fmt === 'fbx_unreal') {
+            result = await API.exportToUnreal({ sourcePath: src });
+          } else {
+            result = await window.meshyAPI.exportMesh({ sourcePath: src, targetFormat: fmt });
+            if (result) result = { success: true, ...result };
+          }
+        } else if (ctx === 'rig') {
+          // For rigs, we just convert via exportMesh (FBX/GLB)
+          const targetFormat = fmt === 'glb' ? 'glb' : 'fbx';
+          result = await window.meshyAPI.exportMesh({ sourcePath: src, targetFormat });
+          if (result) result = { success: true, ...result };
+        }
+
+        if (result?.success) {
+          showLog('Exported: ' + (result.filename || result.path || 'OK'), 'success');
+          API.showNotification?.({ title: 'FabMesh', body: 'Export ready: ' + (result.filename || '') });
+          await refreshActiveGallery();
+          document.getElementById('export-modal').classList.add('hidden');
+        } else {
+          showLog('Export failed: ' + (result?.error || 'unknown'), 'error');
+        }
+      } catch (e) {
+        showLog('Export error: ' + (e.error || e.message || e), 'error');
+      }
+    }
+
+    document.getElementById('btn-export-global').addEventListener('click', openExportModal);
+    document.getElementById('export-modal-cancel').addEventListener('click', () => document.getElementById('export-modal').classList.add('hidden'));
+    document.getElementById('export-modal-close').addEventListener('click', () => document.getElementById('export-modal').classList.add('hidden'));
+    document.getElementById('export-modal-go').addEventListener('click', (e) => {
+      const ctx = e.currentTarget.dataset.ctx || 'mesh';
+      performExport(ctx);
+    });
+
     document.getElementById('btn-inpaint').addEventListener('click', async () => {
       if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
       const target = document.getElementById('inpaint-target').value.trim();
@@ -2912,6 +3083,8 @@
         if (emptyMesh && !currentModel) emptyMesh.style.display = '';
         // Show 3D viewer toolbar (Reset/Wire/PBR/Grid/Light)
         if (vtb) vtb.style.display = '';
+        // Refresh global export button visibility based on new context
+        if (typeof refreshExportButton === 'function') refreshExportButton();
         // Floating buttons: tab-3d shows "Send to Rig", tab-rig shows neither
         if (btnTo3D) btnTo3D.classList.add('hidden');
         if (btnToRig) {

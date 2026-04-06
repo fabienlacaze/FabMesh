@@ -66,16 +66,19 @@ def load_template(name):
 
 
 def build_fbx_template_script(mesh_path, template_fbx_path, output_fbx):
-    """Generate Blender script that uses an existing FBX skeletal mesh as template.
+    """Generate Blender script that uses an existing FBX as rig template.
 
-    Strategy (refactored to track objects by NAME, not by snapshot):
-    1. Import the template FBX FIRST, tag all its objects
-    2. Import the new mesh
-    3. The non-tagged objects are the new mesh
-    4. Scale/align template armature to match new mesh bbox
-    5. Delete template's mesh objects
-    6. Parent new mesh to template armature with ARMATURE_AUTO weights
-    7. Export
+    Pipeline:
+    1. Clear scene
+    2. Import the new mesh, remember its objects in a set
+    3. Import template FBX
+    4. Anything in the scene that's NOT in the original set is template
+    5. Find new_mesh + template_armature + template_meshes
+    6. Compute bbox of new mesh and template mesh
+    7. Scale/translate template armature so it matches new mesh
+    8. Delete template meshes (keep only armature)
+    9. Parent new mesh to armature with ARMATURE_AUTO
+    10. Export selection
     """
     return f'''
 import bpy
@@ -84,49 +87,12 @@ from mathutils import Vector
 
 print("AUTORIG: ===== START =====", flush=True)
 
-# ========== CLEAR SCENE ==========
+# ===== Step 1: Clear scene =====
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
 print("AUTORIG: scene cleared", flush=True)
 
-# ========== IMPORT TEMPLATE FBX FIRST (so we can tag its objects) ==========
-template_path = {json.dumps(template_fbx_path.replace(chr(92), "/"))}
-print(f"AUTORIG: Importing TEMPLATE first: {{template_path}}", flush=True)
-bpy.ops.import_scene.fbx(filepath=template_path)
-
-# Tag all template objects with a custom marker
-template_armature = None
-template_meshes = []
-for o in list(bpy.context.scene.objects):
-    o["_fabmesh_template"] = True
-    if o.type == 'ARMATURE':
-        template_armature = o
-    elif o.type == 'MESH':
-        template_meshes.append(o)
-
-if not template_armature:
-    raise RuntimeError(f"Template FBX has no ARMATURE: {{template_path}}")
-
-print(f"AUTORIG: template loaded - armature='{{template_armature.name}}' bones={{len(template_armature.data.bones)}} meshes={{len(template_meshes)}}", flush=True)
-
-# Compute template bbox from its first mesh (or from armature bones if no mesh)
-if template_meshes:
-    bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
-else:
-    bb = []
-    for b in template_armature.data.bones:
-        bb.append(template_armature.matrix_world @ b.head_local)
-        bb.append(template_armature.matrix_world @ b.tail_local)
-
-t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
-t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
-t_size = t_max - t_min
-t_center = (t_min + t_max) / 2
-t_height = max(t_size.x, t_size.y, t_size.z)
-t_up_idx = [t_size.x, t_size.y, t_size.z].index(t_height)
-print(f"AUTORIG: template bbox size={{tuple(t_size)}} center={{tuple(t_center)}} up=Z[{{t_up_idx}}]", flush=True)
-
-# ========== IMPORT NEW MESH (to be rigged) ==========
+# ===== Step 2: Import the NEW mesh (to be rigged) =====
 new_mesh_path = {json.dumps(mesh_path.replace(chr(92), "/"))}
 ext = new_mesh_path.rsplit('.', 1)[-1].lower()
 print(f"AUTORIG: Importing NEW mesh: {{new_mesh_path}}", flush=True)
@@ -139,14 +105,18 @@ elif ext == 'obj':
     bpy.ops.wm.obj_import(filepath=new_mesh_path)
 elif ext == 'stl':
     bpy.ops.import_mesh.stl(filepath=new_mesh_path)
+else:
+    raise ValueError(f"Unsupported format: {{ext}}")
 
-# Find new mesh objects (those WITHOUT the template marker)
-new_meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH' and not o.get("_fabmesh_template")]
+# Snapshot of object names BEFORE template import
+new_obj_names = set(o.name for o in bpy.context.scene.objects)
+print(f"AUTORIG: after new mesh import, {{len(new_obj_names)}} objects: {{list(new_obj_names)}}", flush=True)
+
+# Find and join all mesh objects from the new import
+new_meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH']
 if not new_meshes:
-    raise RuntimeError("No mesh found in new mesh import (or all were tagged as template)")
-print(f"AUTORIG: new meshes imported: {{[o.name for o in new_meshes]}}", flush=True)
+    raise RuntimeError("No mesh found in new import")
 
-# Join all if multiple
 if len(new_meshes) > 1:
     bpy.ops.object.select_all(action='DESELECT')
     for o in new_meshes:
@@ -155,108 +125,98 @@ if len(new_meshes) > 1:
     bpy.ops.object.join()
 new_mesh = bpy.context.view_layer.objects.active or new_meshes[0]
 new_mesh.name = "FabMeshTarget"
+print(f"AUTORIG: joined new mesh into '{{new_mesh.name}}'", flush=True)
 
-# Apply transforms
+# Apply transforms on new mesh
 bpy.ops.object.select_all(action='DESELECT')
 new_mesh.select_set(True)
 bpy.context.view_layer.objects.active = new_mesh
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-# Compute new mesh bbox in world space
+# Compute new mesh bbox
 bbox = [new_mesh.matrix_world @ Vector(c) for c in new_mesh.bound_box]
 nm_min = Vector((min(v.x for v in bbox), min(v.y for v in bbox), min(v.z for v in bbox)))
 nm_max = Vector((max(v.x for v in bbox), max(v.y for v in bbox), max(v.z for v in bbox)))
 nm_size = nm_max - nm_min
 nm_center = (nm_min + nm_max) / 2
-print(f"AUTORIG: new mesh bbox size {{tuple(nm_size)}}, center {{tuple(nm_center)}}", flush=True)
+print(f"AUTORIG: new mesh bbox size={{tuple(nm_size)}} center={{tuple(nm_center)}}", flush=True)
 
-# Detect new mesh up axis (tallest dim)
-nm_up_idx = 0
-nm_max_dim = nm_size[0]
-for i in range(1, 3):
-    if nm_size[i] > nm_max_dim:
-        nm_max_dim = nm_size[i]
-        nm_up_idx = i
+# Detect new mesh up axis
+nm_up_idx = max(range(3), key=lambda i: nm_size[i])
 print(f"AUTORIG: new mesh up axis = {{['X','Y','Z'][nm_up_idx]}}", flush=True)
 
-# ========== IMPORT TEMPLATE FBX ==========
+# Update snapshot to include the joined object
+existing_before_template = set(o.name for o in bpy.context.scene.objects)
+
+# ===== Step 3: Import TEMPLATE FBX =====
 template_path = {json.dumps(template_fbx_path.replace(chr(92), "/"))}
-print(f"AUTORIG: Importing template {{template_path}}", flush=True)
+print(f"AUTORIG: Importing template FBX: {{template_path}}", flush=True)
 bpy.ops.import_scene.fbx(filepath=template_path)
 
-# Identify armature and template mesh imported
-template_meshes = []
+# New objects = template objects (set diff)
+template_objs = [o for o in bpy.context.scene.objects if o.name not in existing_before_template]
 template_armature = None
-for o in bpy.context.scene.objects:
+template_meshes = []
+for o in template_objs:
     if o.type == 'ARMATURE':
         template_armature = o
-    elif o.type == 'MESH' and o is not new_mesh:
+    elif o.type == 'MESH':
         template_meshes.append(o)
 
+print(f"AUTORIG: template objects: {{[(o.name, o.type) for o in template_objs]}}", flush=True)
 if not template_armature:
-    raise RuntimeError("Template FBX has no armature")
-print(f"AUTORIG: Found template armature '{{template_armature.name}}' with {{len(template_armature.data.bones)}} bones", flush=True)
+    raise RuntimeError(f"Template FBX has no ARMATURE: {{template_path}}")
+print(f"AUTORIG: armature='{{template_armature.name}}' bones={{len(template_armature.data.bones)}} meshes={{len(template_meshes)}}", flush=True)
 
-# Compute template mesh bbox (use the first template mesh which is the body)
-if template_meshes:
-    tmpl_mesh = template_meshes[0]
-    t_bbox = [tmpl_mesh.matrix_world @ Vector(c) for c in tmpl_mesh.bound_box]
-else:
-    # Fallback: use armature bbox via head/tail of bones
-    print("AUTORIG: No template mesh, using armature bone positions for bbox", flush=True)
-    pts = []
-    for b in template_armature.data.bones:
-        pts.append(template_armature.matrix_world @ b.head_local)
-        pts.append(template_armature.matrix_world @ b.tail_local)
-    t_bbox = pts
-
-t_min = Vector((min(v.x for v in t_bbox), min(v.y for v in t_bbox), min(v.z for v in t_bbox)))
-t_max = Vector((max(v.x for v in t_bbox), max(v.y for v in t_bbox), max(v.z for v in t_bbox)))
-t_size = t_max - t_min
-t_center = (t_min + t_max) / 2
-print(f"AUTORIG: template bbox size {{tuple(t_size)}}, center {{tuple(t_center)}}", flush=True)
-
-# Detect template up axis
-t_up_idx = 0
-t_max_dim = t_size[0]
-for i in range(1, 3):
-    if t_size[i] > t_max_dim:
-        t_max_dim = t_size[i]
-        t_up_idx = i
-print(f"AUTORIG: template up axis = {{['X','Y','Z'][t_up_idx]}}", flush=True)
-
-# ========== ALIGN TEMPLATE ARMATURE TO NEW MESH ==========
-# Step 1: rotate template if up axes differ
+# ===== Step 4: Apply transforms on the template (so scale 1, rotation 0) =====
 bpy.ops.object.select_all(action='DESELECT')
 template_armature.select_set(True)
 for tm in template_meshes:
     tm.select_set(True)
 bpy.context.view_layer.objects.active = template_armature
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
+# Compute template bbox
+if template_meshes:
+    bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
+else:
+    bb = []
+    for b in template_armature.data.bones:
+        bb.append(template_armature.matrix_world @ b.head_local)
+        bb.append(template_armature.matrix_world @ b.tail_local)
+
+t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
+t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
+t_size = t_max - t_min
+t_center = (t_min + t_max) / 2
+t_up_idx = max(range(3), key=lambda i: t_size[i])
+print(f"AUTORIG: template bbox size={{tuple(t_size)}} center={{tuple(t_center)}} up={{['X','Y','Z'][t_up_idx]}}", flush=True)
+
+# ===== Step 5: Rotate template if up axes differ =====
 if t_up_idx != nm_up_idx:
-    # Need to rotate. Common case: template Z-up (UE) -> mesh Y-up (Hunyuan3D)
+    bpy.ops.object.select_all(action='DESELECT')
+    template_armature.select_set(True)
+    for tm in template_meshes:
+        tm.select_set(True)
+    bpy.context.view_layer.objects.active = template_armature
     if t_up_idx == 2 and nm_up_idx == 1:
-        # Z-up to Y-up: rotate -90deg around X
-        print("AUTORIG: Rotating template -90deg X (Z-up -> Y-up)", flush=True)
+        print("AUTORIG: rotate template -90deg X (Z-up -> Y-up)", flush=True)
         bpy.ops.transform.rotate(value=-math.pi/2, orient_axis='X')
     elif t_up_idx == 1 and nm_up_idx == 2:
-        # Y-up to Z-up
-        print("AUTORIG: Rotating template +90deg X (Y-up -> Z-up)", flush=True)
+        print("AUTORIG: rotate template +90deg X (Y-up -> Z-up)", flush=True)
         bpy.ops.transform.rotate(value=math.pi/2, orient_axis='X')
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+    # Recompute bbox after rotation
+    if template_meshes:
+        bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
+        t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
+        t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
+        t_size = t_max - t_min
+        t_center = (t_min + t_max) / 2
 
-# Recompute template bbox after rotation
-if template_meshes:
-    tmpl_mesh = template_meshes[0]
-    t_bbox = [tmpl_mesh.matrix_world @ Vector(c) for c in tmpl_mesh.bound_box]
-    t_min = Vector((min(v.x for v in t_bbox), min(v.y for v in t_bbox), min(v.z for v in t_bbox)))
-    t_max = Vector((max(v.x for v in t_bbox), max(v.y for v in t_bbox), max(v.z for v in t_bbox)))
-    t_size = t_max - t_min
-    t_center = (t_min + t_max) / 2
-
-# Step 2: scale template to match new mesh height (use up axis dimension)
+# ===== Step 6: Scale template to match new mesh height =====
 height_ratio = nm_size[nm_up_idx] / max(t_size[nm_up_idx], 0.0001)
-print(f"AUTORIG: Scaling template by {{height_ratio:.3f}}", flush=True)
+print(f"AUTORIG: scale template by {{height_ratio:.3f}}", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
 template_armature.select_set(True)
 for tm in template_meshes:
@@ -265,42 +225,58 @@ bpy.context.view_layer.objects.active = template_armature
 bpy.ops.transform.resize(value=(height_ratio, height_ratio, height_ratio))
 bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
-# Step 3: translate template so its bbox center matches new mesh center
+# Recompute template bbox + center after scale
 if template_meshes:
-    tmpl_mesh = template_meshes[0]
-    t_bbox = [tmpl_mesh.matrix_world @ Vector(c) for c in tmpl_mesh.bound_box]
-    t_min = Vector((min(v.x for v in t_bbox), min(v.y for v in t_bbox), min(v.z for v in t_bbox)))
-    t_max = Vector((max(v.x for v in t_bbox), max(v.y for v in t_bbox), max(v.z for v in t_bbox)))
+    bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
+    t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
+    t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
     t_center = (t_min + t_max) / 2
 
+# ===== Step 7: Translate template so bbox centers match =====
 offset = nm_center - t_center
-print(f"AUTORIG: Translating template by {{tuple(offset)}}", flush=True)
+print(f"AUTORIG: translate template by {{tuple(offset)}}", flush=True)
+template_armature.location = template_armature.location + offset
+for tm in template_meshes:
+    tm.location = tm.location + offset
+# Apply
 bpy.ops.object.select_all(action='DESELECT')
 template_armature.select_set(True)
-bpy.context.view_layer.objects.active = template_armature
-template_armature.location = template_armature.location + offset
-
-# ========== DELETE TEMPLATE MESHES (we only need armature) ==========
-print(f"AUTORIG: Deleting {{len(template_meshes)}} template mesh(es)", flush=True)
 for tm in template_meshes:
+    tm.select_set(True)
+bpy.context.view_layer.objects.active = template_armature
+bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+
+# ===== Step 8: Delete template meshes (keep only armature) =====
+print(f"AUTORIG: deleting {{len(template_meshes)}} template mesh(es)", flush=True)
+for tm in list(template_meshes):
     bpy.data.objects.remove(tm, do_unlink=True)
 
-# ========== PARENT NEW MESH TO TEMPLATE ARMATURE WITH AUTO WEIGHTS ==========
-print("AUTORIG: Parenting new mesh to template armature with auto weights...", flush=True)
+# ===== Step 9: Parent new mesh to armature with auto weights =====
+print("AUTORIG: parenting new mesh to armature (ARMATURE_AUTO)...", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
 new_mesh.select_set(True)
 template_armature.select_set(True)
 bpy.context.view_layer.objects.active = template_armature
-bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+try:
+    bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+    print("AUTORIG: parent_set ARMATURE_AUTO succeeded", flush=True)
+except Exception as e:
+    print(f"AUTORIG: parent_set failed: {{e}}, trying ARMATURE_NAME", flush=True)
+    bpy.ops.object.parent_set(type='ARMATURE_NAME')
 
-# ========== EXPORT AS FBX ==========
+# Verify the new mesh has an armature modifier
+has_arm_mod = any(m.type == 'ARMATURE' for m in new_mesh.modifiers)
+print(f"AUTORIG: new mesh has ARMATURE modifier: {{has_arm_mod}}", flush=True)
+
+# ===== Step 10: Export =====
 output_fbx = {json.dumps(output_fbx.replace(chr(92), "/"))}
-print(f"AUTORIG: Exporting to {{output_fbx}}", flush=True)
-
+print(f"AUTORIG: exporting to {{output_fbx}}", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
 new_mesh.select_set(True)
 template_armature.select_set(True)
 bpy.context.view_layer.objects.active = template_armature
+
+print(f"AUTORIG: selected for export: {{[o.name for o in bpy.context.selected_objects]}}", flush=True)
 
 bpy.ops.export_scene.fbx(
     filepath=output_fbx,
@@ -318,7 +294,9 @@ bpy.ops.export_scene.fbx(
     embed_textures=True,
 )
 
-print(f"AUTORIG_SUCCESS: {{output_fbx}}", flush=True)
+import os
+sz = os.path.getsize(output_fbx) if os.path.exists(output_fbx) else 0
+print(f"AUTORIG_SUCCESS: {{output_fbx}} ({{sz}} bytes)", flush=True)
 '''
 
 
