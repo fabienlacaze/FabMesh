@@ -243,11 +243,29 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response(500, {"ok": False, "error": str(e)})
 
 
+def preload_models():
+    """Preload models in background after server starts."""
+    try:
+        log("Preloading img2img model...")
+        load_img2img()
+        log("Preloading inpaint model...")
+        load_inpaint()
+        log("All models preloaded - server fully ready")
+    except Exception as e:
+        log(f"Preload error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     log(f"Starting SDXL server on http://{HOST}:{PORT}")
     server = HTTPServer((HOST, PORT), Handler)
-    log("Server ready (models will load on first request)")
+    log("Server ready (loading models in background...)")
     sys.stdout.flush()
+
+    # Preload models in background thread so first call is instant
+    threading.Thread(target=preload_models, daemon=True).start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
