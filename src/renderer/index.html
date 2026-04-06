@@ -1664,7 +1664,7 @@
     }
 
     // ========== RIG TAB ==========
-    // Populate template dropdowns from registry
+    // Populate template dropdowns from registry, grouped by category
     async function loadRigTemplates() {
       try {
         const data = await API.listRigTemplates();
@@ -1672,19 +1672,39 @@
           const sel = document.getElementById(selectId);
           if (!sel) return;
           sel.innerHTML = '';
-          // Custom SKM templates first
+
+          // Group SKM templates by category
           if (data.skm && data.skm.length > 0) {
-            const grp = document.createElement('optgroup');
-            grp.label = 'Custom SKM (from your project)';
+            const byCat = {};
             data.skm.forEach(t => {
-              const opt = document.createElement('option');
-              opt.value = t.id;
-              opt.textContent = t.name;
-              grp.appendChild(opt);
+              const cat = t.category || 'other';
+              if (!byCat[cat]) byCat[cat] = [];
+              byCat[cat].push(t);
             });
-            sel.appendChild(grp);
+            const catLabels = {
+              humanoid: 'Humanoid (custom SKM)',
+              quadruped: 'Quadruped (custom SKM)',
+              hexapod: 'Hexapod (custom SKM)',
+              octopod: 'Octopod (custom SKM)',
+              other: 'Other (custom SKM)'
+            };
+            // Sort: humanoid first, then quad, hex, oct, other
+            const order = ['humanoid', 'quadruped', 'hexapod', 'octopod', 'other'];
+            order.forEach(cat => {
+              if (!byCat[cat]) return;
+              const grp = document.createElement('optgroup');
+              grp.label = catLabels[cat];
+              byCat[cat].forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = t.name;
+                grp.appendChild(opt);
+              });
+              sel.appendChild(grp);
+            });
           }
-          // Generic templates
+
+          // Generic fallback templates
           if (data.generic && data.generic.length > 0) {
             const grp2 = document.createElement('optgroup');
             grp2.label = 'Generic templates';
@@ -1698,7 +1718,7 @@
           }
         };
         fillSelect('rig-tab-template');
-        fillSelect('rig-template'); // also update old dropdown if present
+        fillSelect('rig-template');
       } catch (e) {
         console.error('loadRigTemplates failed:', e);
       }
