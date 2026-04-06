@@ -913,23 +913,6 @@
     window._selectGalleryImage = window._selectGalleryImage || function() {};
     await refreshGalleryImages(); // Start with image gallery since Image tab is active
 
-    // On startup: auto-select the latest image and show it in the viewer
-    try {
-      const folders = await window.meshyAPI.listImageFolders();
-      if (folders && folders.length > 0 && folders[0].images && folders[0].images.length > 0) {
-        const latestImg = folders[0].images[0]; // already sorted newest first
-        const latestPrompt = folders[0].prompt || '';
-        // Trigger tab switch to image and load viewer
-        switchTab('tab-image');
-        window._selectGalleryImage(latestImg.replace(/\\/g, '/'), latestPrompt);
-      } else {
-        switchTab('tab-image');
-      }
-    } catch(e) {
-      console.warn('Could not auto-load latest image:', e);
-      switchTab('tab-image');
-    }
-
     // Generate button
     document.getElementById('btn-generate').addEventListener('click', async () => {
       const prompt = document.getElementById('prompt-input').value.trim();
@@ -2351,6 +2334,22 @@
       }
       return true;
     }
+
+    // Auto-load latest image on startup
+    (async () => {
+      try {
+        const folders = await window.meshyAPI.listImageFolders();
+        if (folders && folders.length > 0 && folders[0].images && folders[0].images.length > 0) {
+          const latestImg = folders[0].images[0];
+          const latestPrompt = folders[0].prompt || '';
+          window._selectGalleryImage(latestImg.replace(/\\/g, '/'), latestPrompt);
+          // Force viewer refresh
+          switchTab('tab-image');
+        }
+      } catch(e) {
+        console.warn('Auto-load latest image failed:', e);
+      }
+    })();
 
     console.log('FabMesh initialized OK');
   </script>
