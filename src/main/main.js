@@ -1002,12 +1002,14 @@ ipcMain.handle('list-meshes', () => {
     .filter(f => /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f))
     .map(f => {
       const stats = fs.statSync(path.join(MESHES_DIR, f));
+      const thumbPath = path.join(MESHES_DIR, f.replace(/\.[^.]+$/, '_thumb.png'));
       return {
         filename: f,
         path: path.join(MESHES_DIR, f),
         size: stats.size,
         created: stats.birthtime,
-        format: path.extname(f).slice(1).toUpperCase()
+        format: path.extname(f).slice(1).toUpperCase(),
+        thumb: fs.existsSync(thumbPath) ? 'file:///' + thumbPath.replace(/\\/g, '/') : null
       };
     })
     .sort((a, b) => new Date(b.created) - new Date(a.created));

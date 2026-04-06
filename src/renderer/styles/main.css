@@ -202,14 +202,16 @@ body {
 /* Gallery Panel */
 #gallery-panel {
   width: 220px;
-  min-width: 140px;
-  max-width: 260px;
+  min-width: 100px;
+  max-width: 400px;
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  resize: horizontal;
+  overflow-x: auto;
 }
 
 .panel-header {
@@ -274,6 +276,25 @@ body {
   margin-top: 2px;
   display: flex;
   justify-content: space-between;
+}
+
+.mesh-item-with-thumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mesh-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.mesh-item-details {
+  flex: 1;
+  min-width: 0;
 }
 
 .mesh-item-tris {
@@ -584,14 +605,20 @@ body {
 /* Action Panel */
 #action-panel {
   width: 320px;
-  min-width: 220px;
-  max-width: 380px;
+  min-width: 180px;
+  max-width: 500px;
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  resize: horizontal;
+  direction: rtl;
+}
+
+#action-panel > * {
+  direction: ltr;
 }
 
 /* Responsive: small windows */

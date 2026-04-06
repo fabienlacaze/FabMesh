@@ -537,9 +537,12 @@
             const ss = m.size < 1024 ? m.size+' B' : m.size < 1048576 ? (m.size/1024).toFixed(1)+' KB' : (m.size/1048576).toFixed(1)+' MB';
             const act = selectedMesh?.filename === m.filename ? 'active' : '';
             const vLabel = vi === 0 ? 'latest' : `v${items.length - 1 - vi}`;
+            const thumbHtml = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '';
             html += `<div class="mesh-item mesh-child ${act}" onclick="window._selectMesh(${m.idx})">
+              <div class="mesh-item-with-thumb">${thumbHtml}<div class="mesh-item-details">
               <div class="mesh-item-row"><div class="mesh-item-name"><span class="version-tag">${vLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
               <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span><span class="mesh-item-format">${m.format}</span></div>
+              </div></div>
             </div>`;
           });
           html += '</div>';
@@ -578,7 +581,10 @@
       refreshGallery();
       document.getElementById('export-section').style.display = 'block';
       const buf = await window.meshyAPI.readMeshFile(selectedMesh.path);
-      if (buf) await loadMeshFromBuffer(buf, selectedMesh.format, selectedMesh.path);
+      if (buf) {
+        await loadMeshFromBuffer(buf, selectedMesh.format, selectedMesh.path);
+        saveMeshThumbnail(selectedMesh.path);
+      }
 
       // Extract project name from filename (remove _timestamp.ext)
       const projName = selectedMesh.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
