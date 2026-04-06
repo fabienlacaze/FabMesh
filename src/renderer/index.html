@@ -139,6 +139,11 @@
                 <img id="img-refine-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               </div>
               <button id="btn-remove-bg" class="secondary-btn" style="margin: 8px 12px;">Remove background</button>
+              <div style="margin: 8px 12px; display: flex; align-items: center; gap: 8px;">
+                <label style="font-size: 11px; color: var(--text-muted); min-width: 60px;">Strength</label>
+                <input type="range" id="refine-strength" min="30" max="95" value="55" style="flex:1; accent-color: var(--accent);" />
+                <span id="refine-strength-val" style="font-size: 11px; color: var(--text-secondary); min-width: 30px; text-align: right;">55%</span>
+              </div>
               <div class="refine-input-area">
                 <textarea id="img-refine-input" placeholder="What to change? Ex: add more snow on the roof, make the door bigger..." rows="3"></textarea>
                 <button id="btn-refine-image" class="refine-btn" disabled>Refine Image</button>
@@ -1653,6 +1658,10 @@
       document.getElementById('btn-refine-image').disabled = !e.target.value.trim();
     });
 
+    document.getElementById('refine-strength').addEventListener('input', (e) => {
+      document.getElementById('refine-strength-val').textContent = e.target.value + '%';
+    });
+
     document.getElementById('btn-refine-image').addEventListener('click', async () => {
       const modification = document.getElementById('img-refine-input').value.trim();
       if (!modification) { showLog('Describe what to change.', 'error'); return; }
@@ -1664,7 +1673,8 @@
       refineJob.progress = 20;
       renderJobs();
 
-      const result = await window.meshyAPI.img2img({ imagePath: selectedImagePath, prompt: modification });
+      const strength = parseInt(document.getElementById('refine-strength')?.value || '55') / 100;
+      const result = await window.meshyAPI.img2img({ imagePath: selectedImagePath, prompt: modification, strength });
 
       if (!result.success) {
         completeJob(refineJob.id, false);
