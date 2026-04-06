@@ -301,6 +301,11 @@ FOOT_R_NAMES = ['foot_r', 'RightFoot', 'mixamorig:RightFoot', 'ankle_r']
 HEAD_NAMES = ['head', 'Head', 'mixamorig:Head']
 NECK_NAMES = ['neck', 'neck_01', 'Neck', 'mixamorig:Neck']
 HIPS_NAMES = ['pelvis', 'hips', 'Hips', 'mixamorig:Hips', 'root_pelvis']
+# Finger root bones (we aim the finger chain at the fingertip landmark)
+THUMB_L_NAMES = ['thumb_01_l', 'thumb_l', 'LeftHandThumb1', 'mixamorig:LeftHandThumb1']
+THUMB_R_NAMES = ['thumb_01_r', 'thumb_r', 'RightHandThumb1', 'mixamorig:RightHandThumb1']
+INDEX_L_NAMES = ['index_01_l', 'index_l', 'LeftHandIndex1', 'mixamorig:LeftHandIndex1']
+INDEX_R_NAMES = ['index_01_r', 'index_r', 'RightHandIndex1', 'mixamorig:RightHandIndex1']
 
 def find_edit_bone(names):
     for n in names:
@@ -413,6 +418,16 @@ if LANDMARKS:
         aim_chain_at(NECK_NAMES, LANDMARKS['neck'])
     if 'head' in LANDMARKS:
         aim_chain_at(HEAD_NAMES, LANDMARKS['head'])
+
+    # Fingers (thumb + index per hand)
+    if 'finger_l_thumb' in LANDMARKS:
+        aim_chain_at(THUMB_L_NAMES, LANDMARKS['finger_l_thumb'])
+    if 'finger_l_index' in LANDMARKS:
+        aim_chain_at(INDEX_L_NAMES, LANDMARKS['finger_l_index'])
+    if 'finger_r_thumb' in LANDMARKS:
+        aim_chain_at(THUMB_R_NAMES, LANDMARKS['finger_r_thumb'])
+    if 'finger_r_index' in LANDMARKS:
+        aim_chain_at(INDEX_R_NAMES, LANDMARKS['finger_r_index'])
 
     bpy.ops.object.mode_set(mode='OBJECT')
     print("AUTORIG: bone positioning from landmarks done", flush=True)
