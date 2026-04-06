@@ -2405,29 +2405,27 @@
       document.body.appendChild(lmTooltip);
     }
 
-    // Visual reference: humanoid silhouette + colored dot per landmark
-    // Coordinates are normalized (0-100) on a 100x180 SVG.
-    // Front-view T-pose silhouette.
+    // Visual reference: detailed humanoid silhouette + colored dot per landmark
+    // Coordinates are normalized on a 200x300 SVG (front view, A-pose).
     const LM_SVG_POINTS = {
-      head:           [50, 12],
-      neck:           [50, 22],
-      // Arms (T-pose, viewer's left = subject's right)
-      hand_l:         [12, 60],  // subject's left hand on viewer's left
-      elbow_l:        [25, 55],
-      finger_l_thumb: [8, 58],
-      finger_l_index: [7, 62],
-      hand_r:         [88, 60],
-      elbow_r:        [75, 55],
-      finger_r_thumb: [92, 58],
-      finger_r_index: [93, 62],
-      hips:           [50, 90],
-      // Legs
-      knee_l:         [40, 130],
-      ankle_l:        [38, 165],
-      foot_l:         [38, 172],
-      knee_r:         [60, 130],
-      ankle_r:        [62, 165],
-      foot_r:         [62, 172],
+      head:           [100, 28],   // crown
+      neck:           [100, 60],   // base of neck
+      // Subject's LEFT side appears on viewer's LEFT (mirror convention)
+      hand_l:         [38, 175],
+      elbow_l:        [56, 138],
+      finger_l_thumb: [30, 178],
+      finger_l_index: [32, 188],
+      hand_r:         [162, 175],
+      elbow_r:        [144, 138],
+      finger_r_thumb: [170, 178],
+      finger_r_index: [168, 188],
+      hips:           [100, 158],
+      knee_l:         [82, 220],
+      ankle_l:        [80, 268],
+      foot_l:         [80, 282],
+      knee_r:         [118, 220],
+      ankle_r:        [120, 268],
+      foot_r:         [120, 282],
     };
     const LM_COLORS_HEX = {
       head: '#ff4444', neck: '#ff8844',
@@ -2454,34 +2452,133 @@
       if (!pt) return '';
       const [px, py] = pt;
       const color = LM_COLORS_HEX[name] || '#ffffff';
-      // Simple humanoid silhouette in T-pose (front view)
+      // Detailed humanoid silhouette (front view, A-pose)
+      // 200x300 viewBox, line color #888 with dark fills
       return `
         <div style="text-align:center;">
-          <div style="font-size: 11px; font-weight: 700; color: ${color}; margin-bottom: 4px;">${LM_DISPLAY_NAMES[name] || name}</div>
-          <svg width="100" height="180" viewBox="0 0 100 180" style="display:block;">
-            <!-- Head -->
-            <circle cx="50" cy="14" r="10" fill="none" stroke="#666" stroke-width="1.5"/>
+          <div style="font-size: 12px; font-weight: 700; color: ${color}; margin-bottom: 6px;">${LM_DISPLAY_NAMES[name] || name}</div>
+          <svg width="160" height="240" viewBox="0 0 200 300" style="display:block;">
+            <defs>
+              <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/>
+              </linearGradient>
+            </defs>
+
+            <!-- ===== BODY FILL (background shape) ===== -->
+            <path d="
+              M 100 8
+              C 116 8, 124 22, 124 38
+              C 124 50, 116 60, 100 60
+              C 84 60, 76 50, 76 38
+              C 76 22, 84 8, 100 8
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+
             <!-- Neck -->
-            <line x1="50" y1="24" x2="50" y2="30" stroke="#666" stroke-width="1.5"/>
-            <!-- Torso -->
-            <path d="M 30 30 L 70 30 L 65 90 L 35 90 Z" fill="none" stroke="#666" stroke-width="1.5"/>
-            <!-- Arms (T-pose, horizontal) -->
-            <line x1="30" y1="35" x2="10" y2="62" stroke="#666" stroke-width="1.5"/>
-            <line x1="70" y1="35" x2="90" y2="62" stroke="#666" stroke-width="1.5"/>
-            <!-- Hands -->
-            <circle cx="10" cy="62" r="3" fill="none" stroke="#666" stroke-width="1.5"/>
-            <circle cx="90" cy="62" r="3" fill="none" stroke="#666" stroke-width="1.5"/>
-            <!-- Hips -->
-            <line x1="35" y1="90" x2="65" y2="90" stroke="#666" stroke-width="1.5"/>
-            <!-- Legs -->
-            <line x1="40" y1="90" x2="38" y2="170" stroke="#666" stroke-width="1.5"/>
-            <line x1="60" y1="90" x2="62" y2="170" stroke="#666" stroke-width="1.5"/>
-            <!-- Feet -->
-            <line x1="34" y1="172" x2="44" y2="172" stroke="#666" stroke-width="2"/>
-            <line x1="58" y1="172" x2="68" y2="172" stroke="#666" stroke-width="2"/>
-            <!-- Highlighted landmark -->
-            <circle cx="${px}" cy="${py}" r="4.5" fill="${color}" stroke="white" stroke-width="1.5">
-              <animate attributeName="r" values="4.5;6;4.5" dur="1s" repeatCount="indefinite"/>
+            <path d="M 90 58 L 90 74 L 110 74 L 110 58 Z" fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+
+            <!-- Shoulders + torso (V-shape) -->
+            <path d="
+              M 70 78
+              C 60 80, 56 90, 58 100
+              L 64 130
+              L 70 158
+              L 130 158
+              L 136 130
+              L 142 100
+              C 144 90, 140 80, 130 78
+              C 120 76, 110 75, 100 75
+              C 90 75, 80 76, 70 78
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+
+            <!-- Pelvis / hips -->
+            <path d="
+              M 70 158
+              L 64 178
+              L 78 198
+              L 100 200
+              L 122 198
+              L 136 178
+              L 130 158
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+
+            <!-- Left arm (subject's left = viewer's LEFT) - A-pose -->
+            <path d="
+              M 70 80
+              C 60 90, 54 110, 56 138
+              L 38 175
+              L 30 178
+              L 32 188
+              L 42 188
+              L 48 180
+              L 56 138
+              C 58 110, 64 90, 70 80
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+            <!-- Left elbow joint -->
+            <circle cx="56" cy="138" r="3" fill="none" stroke="#888" stroke-width="1"/>
+            <!-- Left wrist -->
+            <circle cx="38" cy="175" r="2" fill="none" stroke="#888" stroke-width="1"/>
+
+            <!-- Right arm -->
+            <path d="
+              M 130 80
+              C 140 90, 146 110, 144 138
+              L 162 175
+              L 170 178
+              L 168 188
+              L 158 188
+              L 152 180
+              L 144 138
+              C 142 110, 136 90, 130 80
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+            <circle cx="144" cy="138" r="3" fill="none" stroke="#888" stroke-width="1"/>
+            <circle cx="162" cy="175" r="2" fill="none" stroke="#888" stroke-width="1"/>
+
+            <!-- Left leg (viewer's LEFT = subject's left) -->
+            <path d="
+              M 78 198
+              L 74 235
+              L 82 270
+              L 75 282
+              L 90 282
+              L 92 270
+              L 88 235
+              L 92 200
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+            <!-- Knee -->
+            <circle cx="82" cy="220" r="3" fill="none" stroke="#888" stroke-width="1"/>
+            <!-- Ankle -->
+            <circle cx="80" cy="268" r="2" fill="none" stroke="#888" stroke-width="1"/>
+
+            <!-- Right leg -->
+            <path d="
+              M 122 198
+              L 126 235
+              L 118 270
+              L 125 282
+              L 110 282
+              L 108 270
+              L 112 235
+              L 108 200
+              Z
+            " fill="url(#bodyGrad)" stroke="#888" stroke-width="1.5"/>
+            <circle cx="118" cy="220" r="3" fill="none" stroke="#888" stroke-width="1"/>
+            <circle cx="120" cy="268" r="2" fill="none" stroke="#888" stroke-width="1"/>
+
+            <!-- Center spine line (subtle) -->
+            <line x1="100" y1="78" x2="100" y2="158" stroke="#555" stroke-width="0.5" stroke-dasharray="2,2"/>
+
+            <!-- ===== HIGHLIGHTED LANDMARK ===== -->
+            <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+            <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2">
+              <animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/>
+              <animate attributeName="fill-opacity" values="1;0.6;1" dur="1.2s" repeatCount="indefinite"/>
             </circle>
           </svg>
         </div>
