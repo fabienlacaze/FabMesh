@@ -21,6 +21,9 @@ def img2img(input_path, prompt, output_path, strength=0.55):
         use_safetensors=True,
     )
     pipe.to("cuda")
+    # Memory optim
+    pipe.enable_attention_slicing()
+    pipe.enable_vae_tiling()
     print(f"IMG2IMG: On GPU ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
 
     # Load image - keep original aspect
@@ -52,6 +55,14 @@ def img2img(input_path, prompt, output_path, strength=0.55):
     ).images[0]
 
     result.save(output_path)
+
+    # Free GPU/RAM
+    del pipe, result, img
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
     print(f"IMG2IMG_SUCCESS: {os.path.getsize(output_path)} bytes", flush=True)
     return True
 

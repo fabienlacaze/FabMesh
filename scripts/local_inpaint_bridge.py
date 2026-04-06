@@ -91,6 +91,8 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
         variant="fp16",
     )
     pipe.to("cuda")
+    pipe.enable_attention_slicing()
+    pipe.enable_vae_tiling()
     print(f"INPAINT: Model loaded ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
 
     # Detect "remove" intent
@@ -124,6 +126,14 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
         result = result.resize((orig_w, orig_h), Image.LANCZOS)
 
     result.save(output_path)
+
+    # Free GPU/RAM
+    del pipe, result, mask_binary, img_work
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
     print(f"INPAINT_SUCCESS: {os.path.getsize(output_path)} bytes", flush=True)
     return True
 

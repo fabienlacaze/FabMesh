@@ -389,7 +389,7 @@
     const container = document.getElementById('viewer-container');
 
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setClearColor(0x0f0f1a);
     renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -429,16 +429,27 @@
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      needsRender = true;
     }
     window.addEventListener('resize', resize);
     new ResizeObserver(resize).observe(container);
     resize();
 
-    (function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    })();
+    // Event-driven render: only when camera/scene changes
+    let needsRender = true;
+    let rafId = null;
+    function requestRender() { needsRender = true; }
+    function renderLoop() {
+      rafId = requestAnimationFrame(renderLoop);
+      if (needsRender) {
+        controls.update();
+        renderer.render(scene, camera);
+        needsRender = false;
+      }
+    }
+    controls.addEventListener('change', requestRender);
+    window.addEventListener('resize', requestRender);
+    renderLoop();
 
     function clearModel() {
       if (currentModel) {
@@ -529,6 +540,7 @@
       });
       document.getElementById('mesh-info').textContent =
         `${verts.toLocaleString()} verts | ${Math.round(faces).toLocaleString()} faces | ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;
+      requestRender();
     }
 
     async function loadMeshFromBuffer(buffer, format, filePath) {
@@ -1241,6 +1253,7 @@
       const val = this.value / 100;
       dirLight.intensity = val;
       scene.children.forEach(c => { if (c.isAmbientLight) c.intensity = val * 0.35; });
+      needsRender = true;
     };
 
     // Convert
