@@ -866,15 +866,16 @@
       const projects = projectsResult || [];
       const el = document.getElementById('mesh-list');
 
-      // Filter by current tab: tab-3d shows only static meshes, tab-rig shows only rigs
-      // A mesh is "rigged" only if its filename contains the marker _rigged_ added by auto-rig.
-      // We do NOT use ".fbx" alone because Convert/Export-to-Unreal also produce .fbx files.
+      // Filter by current tab:
+      //   tab-3d shows only static (non-rigged) meshes
+      //   tab-rig shows BOTH static (to pick a source) AND rigged (results)
       const isRiggedFile = (f) => /_rigged_/i.test(f);
       let filtered;
-      if (currentTab === 'tab-rig') {
-        filtered = allMeshes.filter(m => isRiggedFile(m.filename));
-      } else {
+      if (currentTab === 'tab-3d') {
         filtered = allMeshes.filter(m => !isRiggedFile(m.filename));
+      } else {
+        // tab-rig and others: show everything
+        filtered = allMeshes;
       }
       meshList = filtered;
       if (!meshList.length) {
@@ -2530,6 +2531,9 @@
         imgViewer.classList.remove('hidden');
         canvas.style.display = 'none';
         if (emptyMesh) emptyMesh.style.display = 'none';
+        // Hide 3D viewer toolbar (Reset/Wire/PBR/Grid/Light) — irrelevant for images
+        const vtb = document.getElementById('viewer-toolbar');
+        if (vtb) vtb.style.display = 'none';
         // Hide mesh-only sections (export, auto-rig, etc.)
         const exportSec = document.getElementById('export-section');
         if (exportSec) exportSec.style.display = 'none';
