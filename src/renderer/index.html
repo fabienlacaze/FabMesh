@@ -544,7 +544,7 @@
       // Robust cleanup: remove ALL meshes from scene (in case of orphans from race conditions)
       const toRemove = [];
       scene.traverse(c => {
-        if (c.isMesh || c.isGroup) {
+        if (c.isMesh || c.isGroup || c.name === 'SkeletonHelper' || c.type === 'SkeletonHelper') {
           // Don't remove built-in helpers (grid, lights)
           if (c === gridHelper) return;
           if (c.parent === scene && c !== gridHelper && !c.isLight) {
@@ -697,14 +697,24 @@
           group = loader.parse(buffer);
         }
         currentModel = group;
+        let hasArmature = false;
         currentModel.traverse(c => {
           if (c.isMesh) {
             c.castShadow = false;
             c.receiveShadow = false;
             if (isWireframe && c.material) (Array.isArray(c.material)?c.material:[c.material]).forEach(m => m.wireframe = isWireframe);
           }
+          if (c.isBone || c.isSkinnedMesh) hasArmature = true;
         });
         scene.add(currentModel);
+        // If the FBX has bones, add a SkeletonHelper to visualize them
+        if (hasArmature) {
+          const skelHelper = new THREE.SkeletonHelper(currentModel);
+          skelHelper.material.linewidth = 2;
+          skelHelper.material.color = new THREE.Color(0xff4488);
+          skelHelper.name = 'SkeletonHelper';
+          scene.add(skelHelper);
+        }
         fitCamera(currentModel);
       } else if (format === 'stl') {
         const loader = new STLLoader();
