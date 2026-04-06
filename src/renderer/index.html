@@ -2135,6 +2135,8 @@
         canvas.style.cursor = 'grabbing';
         // Hint that the dragged marker is the active one
         hitMarker.mesh.material.opacity = 1.0;
+        // Disable orbit controls so the camera doesn't rotate while dragging
+        if (controls) controls.enabled = false;
         evt.stopPropagation();
         evt.preventDefault();
       }
@@ -2153,13 +2155,12 @@
 
     function handleViewerMouseUp(evt) {
       if (_draggingMarker) {
-        // Persist the new position
-        try {
-          _draggingMarker.mesh.material.opacity = 0.85;
-        } catch (e) {}
+        try { _draggingMarker.mesh.material.opacity = 0.85; } catch (e) {}
         saveLandmarksForCurrentMesh();
         _draggingMarker = null;
         canvas.style.cursor = '';
+        // Re-enable orbit controls
+        if (controls) controls.enabled = true;
         evt.stopPropagation();
         evt.preventDefault();
       }
@@ -2175,6 +2176,7 @@
         saveLandmarksForCurrentMesh();
         _draggingMarker = null;
         canvas.style.cursor = '';
+        if (controls) controls.enabled = true;
       }
     });
 
