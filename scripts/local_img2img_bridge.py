@@ -12,9 +12,10 @@ from PIL import Image
 def img2img(input_path, prompt, output_path, strength=0.55):
     from diffusers import StableDiffusionXLImg2ImgPipeline
 
-    print("IMG2IMG: Loading SDXL base img2img pipeline...", flush=True)
+    # Use SDXL Turbo (already cached, much faster)
+    print("IMG2IMG: Loading SDXL Turbo img2img pipeline...", flush=True)
     pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
+        "stabilityai/sdxl-turbo",
         torch_dtype=torch.float16,
         variant="fp16",
         use_safetensors=True,
@@ -41,13 +42,17 @@ def img2img(input_path, prompt, output_path, strength=0.55):
     # Keep it simple - don't over-enhance the prompt
     enhanced_prompt = f"{prompt}, high quality, detailed"
 
-    print(f"IMG2IMG: Generating with strength={strength}...", flush=True)
+    # SDXL Turbo: strength affects num_inference_steps
+    # num_inference_steps * strength must be >= 1
+    s = float(strength)
+    steps = max(2, int(round(4 / s)))
+    print(f"IMG2IMG: Generating with strength={s}, steps={steps}...", flush=True)
     result = pipe(
         prompt=enhanced_prompt,
         image=img,
-        strength=float(strength),
-        num_inference_steps=40,
-        guidance_scale=8.0,
+        strength=s,
+        num_inference_steps=steps,
+        guidance_scale=0.0,
     ).images[0]
 
     result.save(output_path)
