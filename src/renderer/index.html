@@ -899,7 +899,7 @@
         resetProgress();
 
         const engineName = { hunyuan: 'Hunyuan3D', local: 'TripoSR', trellis: 'TRELLIS Cloud' }[engine];
-        const job = addJob(`${meshName} (${engineName})`, engine);
+        const job = addJob(`${meshName} (${engineName})`, engine, selectedImagePath);
         document.getElementById('loading-text').textContent = `${engineName} converting to 3D...`;
         startProgressAnimation(90, engine === 'local' ? 60000 : 180000, `${engineName} generating mesh...`);
 
@@ -1414,13 +1414,13 @@
       popup.style.top = top + 'px';
     }
     document.addEventListener('mouseover', (e) => {
-      const item = e.target.closest('.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb]');
+      const item = e.target.closest('.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb], .job-item[data-thumb]');
       if (!item) return;
       clearTimeout(hoverTimer);
       hoverTimer = setTimeout(() => showHoverPreview(item), 1000);
     });
     document.addEventListener('mouseout', (e) => {
-      const item = e.target.closest('.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb]');
+      const item = e.target.closest('.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb], .job-item[data-thumb]');
       if (!item) return;
       clearTimeout(hoverTimer);
       document.getElementById('hover-preview').style.display = 'none';
@@ -1549,7 +1549,7 @@
       if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
       const imgPath = selectedImagePath;
       const imgName = imgPath.split(/[/\\]/).pop();
-      const job = addJob(`Remove BG: ${imgName}`, 'rembg');
+      const job = addJob(`Remove BG: ${imgName}`, 'rembg', imgPath);
       job.step = 'Removing background...';
       job.progress = 30;
       renderJobs();
@@ -1588,7 +1588,7 @@
       if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
 
       // Use img2img to MODIFY the existing image instead of regenerating
-      const refineJob = addJob(`Refine image (img2img)`, 'pollinations');
+      const refineJob = addJob(`Refine image (img2img)`, 'pollinations', selectedImagePath);
       refineJob.step = 'Modifying image...';
       refineJob.progress = 20;
       renderJobs();
@@ -1753,7 +1753,7 @@
         document.getElementById('loading-text').textContent = 'Generating refined 3D mesh...';
 
         // Step 2: Run Hunyuan3D on the screenshot
-        const job = addJob(`Refine: ${meshName}`, 'hunyuan');
+        const job = addJob(`Refine: ${meshName}`, 'hunyuan', screenshotPath);
         const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
         const r3d = await window.meshyAPI.imageTo3D({
           imagePath: screenshotPath,
@@ -1886,8 +1886,8 @@
         .reduce((s, j) => s + (VRAM_COSTS[j.type] || 0), 0);
     }
 
-    function addJob(name, type) {
-      const job = { id: ++jobIdCounter, name, type, status: 'running', startTime: Date.now(), progress: 0, step: '' };
+    function addJob(name, type, sourceImage) {
+      const job = { id: ++jobIdCounter, name, type, status: 'running', startTime: Date.now(), progress: 0, step: '', sourceImage: sourceImage || null };
       activeJobs.push(job);
       activeJobId = job.id;
       renderJobs();
@@ -1967,7 +1967,11 @@
         const pct = Math.round(j.progress);
         const focused = j.id === activeJobId ? 'focused' : '';
         const cancelBtn = (j.status === 'running' || j.status === 'waiting') ? `<button class="job-cancel" onclick="event.stopPropagation(); window._cancelJob(${j.id})">&#10005;</button>` : '';
-        return `<div class="job-item ${j.status} ${focused}" onclick="window._focusJob(${j.id})">
+        const srcImg = j.sourceImage ? 'file:///' + j.sourceImage.replace(/\\/g, '/') : '';
+        const thumbHtml = srcImg ? `<img class="job-thumb" src="${srcImg}" />` : '';
+        const hoverData = srcImg ? `data-thumb="${srcImg}" data-name="${j.name}" data-meta="${j.step || j.status}"` : '';
+        return `<div class="job-item ${j.status} ${focused}" onclick="window._focusJob(${j.id})" ${hoverData}>
+          ${thumbHtml}
           ${icon}
           <div class="job-detail">
             <div class="job-detail-top">

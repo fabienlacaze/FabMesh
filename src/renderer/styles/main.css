@@ -631,6 +631,16 @@ body {
 .job-item.waiting .job-bar-fill { background: var(--warning); }
 .job-item.waiting { opacity: 0.7; }
 
+.job-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-primary);
+}
+
 .job-cancel {
   background: none;
   border: none;
