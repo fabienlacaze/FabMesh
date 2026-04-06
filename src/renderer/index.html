@@ -908,14 +908,23 @@
       }, 4000);
     }
 
-    const config = await window.meshyAPI.getConfig();
+    let config = { blenderPath: null };
+    try {
+      config = await window.meshyAPI.getConfig() || config;
+    } catch(e) { console.warn('getConfig failed:', e); }
     const bpd = document.getElementById('blender-path-display');
-    bpd.textContent = config.blenderPath || 'Not set';
-    bpd.style.color = config.blenderPath ? '#4ade80' : '#f87171';
+    if (bpd) {
+      bpd.textContent = config.blenderPath || 'Not set';
+      bpd.style.color = config.blenderPath ? '#4ade80' : '#f87171';
+    }
 
     // Define gallery click handlers before first render
     window._selectGalleryImage = window._selectGalleryImage || function() {};
-    await refreshGalleryImages(); // Start with image gallery since Image tab is active
+    try {
+      await refreshGalleryImages();
+    } catch(e) {
+      console.error('Initial gallery refresh failed:', e);
+    }
 
     // Generate button
     document.getElementById('btn-generate').addEventListener('click', async () => {
