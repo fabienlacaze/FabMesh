@@ -40,20 +40,20 @@ def img2img(input_path, prompt, output_path, strength=0.55):
     img = img.resize((new_w, new_h), Image.LANCZOS)
     print(f"IMG2IMG: Input resized to {new_w}x{new_h}", flush=True)
 
-    # Instruct-Pix2Pix takes direct instructions like "remove the hat"
-    # Strength controls image_guidance_scale inversely:
-    # low strength = stick to image, high strength = follow instruction more
+    # Instruct-Pix2Pix recommended values from the paper:
+    # image_guidance_scale: 1.0 - 2.0 (default 1.5)
+    # guidance_scale: 5.0 - 10.0 (default 7.5)
+    # Strength slider interpolates between "stay close to image" and "follow instruction strongly"
     s = float(strength)
-    # Map strength 0.3-0.95 to image_guidance 2.5-1.0 (inverted)
-    # Higher text_guidance = follow instruction more
-    image_guidance = 2.5 - s * 1.5  # 0.3 -> 2.05, 0.95 -> 1.075
-    text_guidance = 5.0 + s * 10.0  # 0.3 -> 8.0, 0.95 -> 14.5
+    # Safer ranges to avoid artifacts/duplications
+    image_guidance = 2.0 - s * 0.8  # 0.3 -> 1.76, 0.95 -> 1.24
+    text_guidance = 6.0 + s * 4.0   # 0.3 -> 7.2, 0.95 -> 9.8
 
-    print(f"IMG2IMG: Generating with text_guidance={text_guidance:.1f}, image_guidance={image_guidance:.1f}...", flush=True)
+    print(f"IMG2IMG: text_guidance={text_guidance:.1f}, image_guidance={image_guidance:.1f}", flush=True)
     result = pipe(
         prompt=prompt,
         image=img,
-        num_inference_steps=30,
+        num_inference_steps=50,
         image_guidance_scale=image_guidance,
         guidance_scale=text_guidance,
     ).images[0]
