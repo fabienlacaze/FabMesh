@@ -1343,9 +1343,12 @@ ipcMain.handle('list-image-folders', () => {
       const dir = path.join(IMAGES_DIR, d);
       const imgs = fs.readdirSync(dir)
         .filter(f => /\.(png|jpg|jpeg)$/i.test(f))
+        // Exclude debug/auxiliary files (masks, temp files)
+        .filter(f => !f.includes('_mask') && !f.startsWith('.') && !f.startsWith('_'))
         .map(f => {
           const fp = path.join(dir, f);
-          return { path: fp, created: fs.statSync(fp).birthtime, mtime: fs.statSync(fp).mtime };
+          const st = fs.statSync(fp);
+          return { path: fp, created: st.birthtime, mtime: st.mtime, size: st.size };
         })
         .sort((a, b) => new Date(b.created) - new Date(a.created));
       const promptFile = path.join(dir, 'prompt.txt');

@@ -71,8 +71,11 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
         print("INPAINT_ERROR: Mask empty - target not found in image", flush=True)
         sys.exit(1)
 
-    # Save mask for debugging
-    debug_mask = output_path.replace(".png", "_mask.png").replace(".jpg", "_mask.png")
+    # Save mask in .debug/ subfolder so it doesn't clutter the gallery
+    debug_dir = os.path.join(os.path.dirname(output_path), ".debug")
+    os.makedirs(debug_dir, exist_ok=True)
+    debug_name = os.path.basename(output_path).replace(".png", "_mask.png").replace(".jpg", "_mask.png")
+    debug_mask = os.path.join(debug_dir, debug_name)
     mask_binary.save(debug_mask)
     print(f"INPAINT: Debug mask saved to {debug_mask}", flush=True)
 
