@@ -2,7 +2,7 @@
   "skm_templates": [
     {
       "id": "orc_m1",
-      "name": "Orc M1 (warrior)",
+      "name": "Orc M1",
       "category": "humanoid",
       "fbx": "skm/SKM_Orc_M1.FBX",
       "animations_dir": "animations/orc_m1",
@@ -11,7 +11,7 @@
     },
     {
       "id": "spider",
-      "name": "Spider (octopod)",
+      "name": "Spider",
       "category": "octopod",
       "fbx": "skm/SKM_Spider.FBX",
       "animations_dir": null,
@@ -20,36 +20,36 @@
     },
     {
       "id": "deer_doe",
-      "name": "Deer / Doe (quadruped)",
+      "name": "Deer / Doe",
       "category": "quadruped",
       "fbx": "skm/SK_DeerDoe.FBX",
       "animations_dir": "animations/Deer",
       "default_height_cm": 120,
-      "description": "Female deer - quadruped with idle/walk anims"
+      "description": "Female deer with idle/walk anims"
     },
     {
       "id": "fox",
-      "name": "Fox (quadruped)",
+      "name": "Fox",
       "category": "quadruped",
       "fbx": "skm/SK_Fox.FBX",
       "animations_dir": null,
       "default_height_cm": 50,
-      "description": "Fox - small quadruped"
+      "description": "Small fox"
     },
     {
       "id": "pig",
-      "name": "Pig (quadruped)",
+      "name": "Pig",
       "category": "quadruped",
       "fbx": "skm/SK_Pig.FBX",
       "animations_dir": null,
       "default_height_cm": 90,
-      "description": "Pig - quadruped"
+      "description": "Pig"
     }
   ],
   "generic_templates": [
-    { "id": "ue5_mannequin", "name": "Humanoid (generic)",   "category": "humanoid",  "json": "ue5_mannequin.json" },
-    { "id": "ue5_quadruped", "name": "Quadruped (generic)",  "category": "quadruped", "json": "ue5_quadruped.json" },
-    { "id": "ue5_hexapod",   "name": "Hexapod (generic)",    "category": "hexapod",   "json": "ue5_hexapod.json" },
-    { "id": "ue5_octopod",   "name": "Octopod (generic)",    "category": "octopod",   "json": "ue5_octopod.json" }
+    { "id": "ue5_mannequin", "name": "Humanoid",   "category": "humanoid",  "json": "ue5_mannequin.json" },
+    { "id": "ue5_quadruped", "name": "Quadruped",  "category": "quadruped", "json": "ue5_quadruped.json" },
+    { "id": "ue5_hexapod",   "name": "Hexapod",    "category": "hexapod",   "json": "ue5_hexapod.json" },
+    { "id": "ue5_octopod",   "name": "Octopod",    "category": "octopod",   "json": "ue5_octopod.json" }
   ]
 }

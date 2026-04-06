@@ -210,6 +210,18 @@
             </div>
             <div id="image-grid-items" class="img-results-grid"></div>
           </div>
+
+          <!-- Image export section (bottom of image tab) -->
+          <div id="image-export-section" class="action-section export-section-bottom hidden">
+            <label class="section-label">EXPORT</label>
+            <select id="image-export-format">
+              <option value="png" selected>PNG (lossless)</option>
+              <option value="jpg">JPG (smaller)</option>
+              <option value="webp">WebP</option>
+            </select>
+            <button id="btn-image-export" class="secondary-btn">Save Image As...</button>
+            <button id="btn-image-open-folder" class="secondary-btn">Open in Explorer</button>
+          </div>
         </div>
 
         <!-- ============ TAB: 3D ============ -->
@@ -454,32 +466,21 @@
         </div>
 
         <div class="bottom-tools">
-          <div class="action-section" id="export-section" style="display:none">
+          <!-- 3D Export section: Convert + Export to Unreal (only visible in tab-3d) -->
+          <div class="action-section export-section-bottom" id="export-section" style="display:none">
+            <label class="section-label">EXPORT</label>
             <div class="export-row">
               <select id="convert-format">
-                <option value="glb">GLB</option>
+                <option value="glb" selected>GLB</option>
                 <option value="obj">OBJ</option>
                 <option value="fbx">FBX</option>
                 <option value="stl">STL</option>
+                <option value="ply">PLY</option>
               </select>
-              <button id="btn-convert" class="secondary-btn">Convert</button>
+              <button id="btn-convert" class="secondary-btn">Save As...</button>
             </div>
             <button id="btn-export-unreal" class="secondary-btn" style="margin-top: 6px; width: 100%;" title="Export FBX scaled for Unreal Engine (cm units, Y-up)">Export to Unreal (FBX)</button>
-
-            <div style="margin-top: 8px; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">AUTO-RIG (Beta)</div>
-              <select id="rig-template" style="width: 100%; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px; margin-bottom: 6px;">
-                <option value="ue5_mannequin">Humanoid (UE5 Mannequin)</option>
-                <option value="ue5_quadruped">Quadruped (4 legs)</option>
-                <option value="ue5_hexapod">Hexapod (6 legs)</option>
-                <option value="ue5_octopod">Octopod (8 legs)</option>
-              </select>
-              <button id="btn-auto-rig" class="secondary-btn" style="width: 100%;" title="Auto-rig the mesh with the selected skeleton template (UE5 compatible)">Generate Rig</button>
-            </div>
           </div>
-          <button id="btn-copy-mesh-prompt-bottom" class="secondary-btn hidden" style="margin: 6px 12px 0; padding: 6px 8px; font-size: 11px;">Copy mesh prompt</button>
-
-          <!-- Advanced Blender section removed -->
         </div>
         </div>
       </aside>
@@ -1055,7 +1056,11 @@
         document.getElementById('refine-empty').classList.add('hidden');
         document.getElementById('refine-content').classList.remove('hidden');
         document.getElementById('project-name-display').textContent = projName;
-        switchTab('tab-3d'); document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+        // Only auto-switch to 3D tab if we're in image tab; stay if in 3D or Rig
+        if (currentTab !== 'tab-3d' && currentTab !== 'tab-rig') {
+          switchTab('tab-3d');
+          document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+        }
       } else {
         // No project history — create one for this imported mesh
         currentProject = projName;
@@ -1067,7 +1072,10 @@
         document.getElementById('version-list').innerHTML = '<div class="tl-item active"><div class="tl-dot-col"><div class="tl-dot"></div></div><div class="tl-content"><div class="tl-version">Imported</div><div class="tl-prompt">Original imported mesh</div></div></div>';
         document.getElementById('btn-prev-version').disabled = true;
         document.getElementById('btn-next-version').disabled = true;
-        switchTab('tab-3d'); document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+        if (currentTab !== 'tab-3d' && currentTab !== 'tab-rig') {
+          switchTab('tab-3d');
+          document.querySelector('.subtab[data-subtab="subtab-refine"]').click();
+        }
       }
     };
 
@@ -1698,11 +1706,11 @@
               byCat[cat].push(t);
             });
             const catLabels = {
-              humanoid: 'Humanoid (custom SKM)',
-              quadruped: 'Quadruped (custom SKM)',
-              hexapod: 'Hexapod (custom SKM)',
-              octopod: 'Octopod (custom SKM)',
-              other: 'Other (custom SKM)'
+              humanoid: 'Humanoid',
+              quadruped: 'Quadruped',
+              hexapod: 'Hexapod',
+              octopod: 'Octopod',
+              other: 'Other'
             };
             // Sort: humanoid first, then quad, hex, oct, other
             const order = ['humanoid', 'quadruped', 'hexapod', 'octopod', 'other'];
@@ -1723,7 +1731,7 @@
           // Generic fallback templates
           if (data.generic && data.generic.length > 0) {
             const grp2 = document.createElement('optgroup');
-            grp2.label = 'Generic templates';
+            grp2.label = 'Generic';
             data.generic.forEach(t => {
               const opt = document.createElement('option');
               opt.value = t.id;
