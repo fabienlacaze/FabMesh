@@ -1197,7 +1197,8 @@
           f.images.forEach((img, i) => {
             const imgSrc = 'file:///' + img.replace(/\\/g, '/');
             const imgPathSafe = img.replace(/\\/g, '/');
-            html += `<div class="gallery-thumb-wrapper"><img class="gallery-thumb" src="${imgSrc}" data-path="${imgPathSafe}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage(this.dataset.path, decodeURIComponent(escape(atob(this.dataset.prompt))))" /><button class="gallery-thumb-del" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>`;
+            const badge = i === 0 ? '<span class="thumb-badge latest">LATEST</span>' : `<span class="thumb-badge ver">v${f.images.length - 1 - i}</span>`;
+            html += `<div class="gallery-thumb-wrapper">${badge}<img class="gallery-thumb" src="${imgSrc}" data-path="${imgPathSafe}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage(this.dataset.path, decodeURIComponent(escape(atob(this.dataset.prompt))))" /><button class="gallery-thumb-del" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>`;
           });
           html += '</div>';
         }

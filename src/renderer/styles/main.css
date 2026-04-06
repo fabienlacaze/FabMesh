@@ -1828,6 +1828,28 @@ select option {
   position: relative;
 }
 
+.thumb-badge {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 2px 4px;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.thumb-badge.latest {
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  color: white;
+}
+
+.thumb-badge.ver {
+  background: rgba(0,0,0,0.7);
+  color: var(--text-secondary);
+}
+
 .gallery-thumb-del {
   position: absolute;
   top: 2px;

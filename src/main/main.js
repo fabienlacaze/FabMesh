@@ -716,10 +716,19 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
   try {
     const timestamp = Date.now();
     const safeName = (projectName || 'gen').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const imagesDir = path.join(IMAGES_DIR, `${safeName}_${timestamp}`);
+    // Group by project name (no timestamp suffix) - all images for same project go in same folder
+    const imagesDir = path.join(IMAGES_DIR, safeName);
     fs.mkdirSync(imagesDir, { recursive: true });
 
-    // Save prompt to file for later retrieval
+    // Save prompt history (append to prompts.json)
+    const promptsFile = path.join(imagesDir, 'prompts.json');
+    let promptsHistory = [];
+    if (fs.existsSync(promptsFile)) {
+      try { promptsHistory = JSON.parse(fs.readFileSync(promptsFile, 'utf-8')); } catch(e) {}
+    }
+    promptsHistory.push({ prompt, timestamp });
+    fs.writeFileSync(promptsFile, JSON.stringify(promptsHistory, null, 2));
+    // Latest prompt also in prompt.txt for backward compat
     fs.writeFileSync(path.join(imagesDir, 'prompt.txt'), prompt, 'utf-8');
 
     // LOCAL GPU: Stable Diffusion
@@ -747,7 +756,8 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       const seed = timestamp + i;
       const encoded = encodeURIComponent(optimizedPrompt);
       const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${seed}`;
-      const imgPath = path.join(imagesDir, `ref_${i}.png`);
+      // Unique filename per run to avoid overwrites
+      const imgPath = path.join(imagesDir, `ref_${timestamp}_${i}.png`);
 
       try {
         const https = require('https');
@@ -1155,15 +1165,24 @@ ipcMain.handle('list-image-folders', () => {
     .filter(d => fs.statSync(path.join(IMAGES_DIR, d)).isDirectory())
     .map(d => {
       const dir = path.join(IMAGES_DIR, d);
-      const imgs = fs.readdirSync(dir).filter(f => /\.(png|jpg|jpeg)$/i.test(f));
+      const imgs = fs.readdirSync(dir)
+        .filter(f => /\.(png|jpg|jpeg)$/i.test(f))
+        .map(f => {
+          const fp = path.join(dir, f);
+          return { path: fp, created: fs.statSync(fp).birthtime, mtime: fs.statSync(fp).mtime };
+        })
+        .sort((a, b) => new Date(b.created) - new Date(a.created));
       const promptFile = path.join(dir, 'prompt.txt');
       const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf-8').trim() : '';
+      // Get latest folder mtime from latest image
+      const latestTime = imgs.length > 0 ? imgs[0].created : fs.statSync(dir).birthtime;
       return {
         name: d,
         path: dir,
-        images: imgs.map(f => path.join(dir, f)),
+        images: imgs.map(i => i.path),
+        imagesData: imgs,
         count: imgs.length,
-        created: fs.statSync(dir).birthtime,
+        created: latestTime,
         prompt
       };
     })
