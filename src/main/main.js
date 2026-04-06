@@ -327,25 +327,33 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
 
 ipcMain.handle('remove-background', async (event, imagePath) => {
   return new Promise((resolve) => {
-    // Save current as a new version (creates new file in folder)
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
     const base = path.basename(imagePath, ext);
     const timestamp = Date.now();
     const newImagePath = path.join(dir, `${base}_nobg_${timestamp}${ext}`);
+    const cleanup = () => { try { if (fs.existsSync(newImagePath)) fs.unlinkSync(newImagePath); } catch(e) {} };
 
-    // Copy original to new path then process the new one
-    fs.copyFileSync(imagePath, newImagePath);
+    try {
+      fs.copyFileSync(imagePath, newImagePath);
+    } catch(e) {
+      resolve({ success: false, error: 'Could not copy source: ' + e.message });
+      return;
+    }
+
     const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
-    execFile('python', [script, newImagePath], { timeout: 60000 }, (error, stdout, stderr) => {
+    const proc = execFile('python', [script, newImagePath], { timeout: 60000 }, (error, stdout, stderr) => {
       if (error) {
-        // Cleanup on error
-        try { fs.unlinkSync(newImagePath); } catch(e) {}
-        resolve({ success: false, error: error.message });
+        cleanup();
+        resolve({ success: false, error: error.message, stderr });
       } else {
         resolve({ success: true, newPath: newImagePath });
       }
     });
+    proc.stderr?.on('data', d => {
+      if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+    });
+    proc.on('error', err => { cleanup(); resolve({ success: false, error: err.message }); });
   });
 });
 
@@ -1485,13 +1493,15 @@ elif fmt == 'stl':
   fs.writeFileSync(tmpScript, exportScript);
 
   return new Promise((resolve, reject) => {
-    execFile(config.blenderPath, ['--background', '--python', tmpScript], {
+    const cleanup = () => { try { if (fs.existsSync(tmpScript)) fs.unlinkSync(tmpScript); } catch(e) {} };
+    const proc = execFile(config.blenderPath, ['--background', '--python', tmpScript], {
       timeout: 60000
     }, (error, stdout, stderr) => {
-      fs.unlinkSync(tmpScript);
+      cleanup();
       if (error) reject({ error: error.message, stderr });
       else if (!fs.existsSync(outputPath)) reject({ error: 'Export failed' });
       else resolve({ path: outputPath, filename: path.basename(outputPath) });
     });
+    proc.on('error', err => { cleanup(); reject({ error: err.message }); });
   });
 });
