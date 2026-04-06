@@ -2037,12 +2037,15 @@
           </div>
         </div>`;
       }).join('');
-      // Insert jobs HTML before any toasts
+      // Insert jobs HTML at the top of list (before any toasts)
       const tmp = document.createElement('div');
       tmp.innerHTML = html;
-      while (tmp.firstChild) {
-        list.insertBefore(tmp.firstChild, list.firstChild);
-      }
+      const firstToast = list.querySelector('.toast-success, .toast-error, .toast-info');
+      const children = Array.from(tmp.children);
+      children.forEach(c => {
+        if (firstToast) list.insertBefore(c, firstToast);
+        else list.appendChild(c);
+      });
     }
 
     // Cancel a running or waiting job
