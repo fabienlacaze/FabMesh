@@ -197,6 +197,25 @@ async function uploadToCatbox(imagePath) {
   });
 }
 
+// Track active Python processes for cancellation
+const activeProcs = new Map(); // jobId -> proc
+ipcMain.handle('cancel-job', (event, jobId) => {
+  const proc = activeProcs.get(jobId);
+  if (proc) {
+    try {
+      // Windows: must kill child tree
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], () => {});
+      } else {
+        proc.kill('SIGTERM');
+      }
+    } catch(e) {}
+    activeProcs.delete(jobId);
+    return true;
+  }
+  return false;
+});
+
 // Show Windows native notification
 const { Notification } = require('electron');
 ipcMain.handle('show-notification', (event, { title, body }) => {
@@ -1094,7 +1113,7 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
 });
 
 // --- Image-to-3D: supports TRELLIS and TripoSG ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine, targetFaces, effort }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine, targetFaces, effort, jobId }) => {
   let imagePath = _imagePath;
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1147,6 +1166,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
         timeout: 600000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
+        if (jobId) activeProcs.delete(jobId);
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
         if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created (Python did not produce output)', stdout, stderr }); return; }
         const stats = fs.statSync(meshPath);
@@ -1154,6 +1174,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
         try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout });
       });
+      if (jobId) activeProcs.set(jobId, proc);
       const flushStdout = () => {
         if (stdoutBuf && mainWindow) {
           mainWindow.webContents.send('ai3d-progress', stdoutBuf);

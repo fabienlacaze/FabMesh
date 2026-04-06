@@ -1175,7 +1175,7 @@
         } else {
           const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
           const effort = parseInt(document.getElementById('effort-slider')?.value) || 2;
-          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: maxTris || 50000, effort });
+          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: maxTris || 50000, effort, jobId: job.id });
           if (!r3d.success) {
             showProgressError(`${engineName} failed`);
             showLog(r3d.error || 'Failed', 'error');
@@ -2467,9 +2467,11 @@
 
     // Cancel a running or waiting job
     window._cancelJob = async (jobId) => {
-      if (!await customConfirm('Cancel this generation?')) return;
+      if (!await customConfirm('Cancel this generation? (will kill Python process)')) return;
       const job = activeJobs.find(j => j.id === jobId);
       if (job) {
+        // Try to actually kill the Python process
+        try { await API.cancelJob(jobId); } catch(e) {}
         // Remove from queue if waiting
         const qIdx = jobQueue.findIndex(q => q.job.id === jobId);
         if (qIdx >= 0) jobQueue.splice(qIdx, 1);
@@ -2477,7 +2479,7 @@
         job.step = 'Cancelled';
         job.progress = 0;
         renderJobs();
-        processQueue(); // Try to start a queued job
+        processQueue();
         setTimeout(() => { activeJobs = activeJobs.filter(j => j.id !== jobId); renderJobs(); }, 3000);
       }
     };
