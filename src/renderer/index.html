@@ -609,15 +609,20 @@
       controls.target.copy(newCenter);
       controls.update();
 
-      let verts = 0, faces = 0;
+      let verts = 0, faces = 0, tris = 0;
       model.traverse(c => {
         if (c.isMesh && c.geometry) {
-          verts += c.geometry.attributes.position?.count || 0;
-          faces += c.geometry.index ? c.geometry.index.count / 3 : (c.geometry.attributes.position?.count || 0) / 3;
+          const vCount = c.geometry.attributes.position?.count || 0;
+          verts += vCount;
+          // Faces: indexed = index.count/3, non-indexed = position.count/3
+          const fCount = c.geometry.index ? c.geometry.index.count / 3 : vCount / 3;
+          faces += fCount;
+          // Triangles: same as faces for triangulated meshes (BufferGeometry is always triangles)
+          tris += fCount;
         }
       });
       document.getElementById('mesh-info').textContent =
-        `${verts.toLocaleString()} verts | ${Math.round(faces).toLocaleString()} faces | ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;
+        `${verts.toLocaleString()} verts | ${Math.round(faces).toLocaleString()} faces | ${Math.round(tris).toLocaleString()} tris | ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;
     }
 
     async function loadMeshFromBuffer(buffer, format, filePath) {
