@@ -138,10 +138,6 @@
               <div id="img-refine-preview">
                 <img id="img-refine-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               </div>
-              <div id="img-versions" class="hidden" style="margin: 8px 12px;">
-                <label class="section-label">History</label>
-                <div id="img-versions-list"></div>
-              </div>
               <button id="btn-remove-bg" class="secondary-btn" style="margin: 8px 12px;">Remove background</button>
               <div class="refine-input-area">
                 <textarea id="img-refine-input" placeholder="What to change? Ex: add more snow on the roof, make the door bigger..." rows="3"></textarea>
@@ -1279,40 +1275,11 @@
       document.querySelectorAll('.imgsubtab-content').forEach(c => c.classList.toggle('active', c.id === t.dataset.imgsubtab));
     }));
 
-    async function showImageRefine(imgPath, prompt) {
+    function showImageRefine(imgPath, prompt) {
       document.getElementById('img-refine-empty').classList.add('hidden');
       document.getElementById('img-refine-content').classList.remove('hidden');
       document.getElementById('img-refine-thumb').src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
       if (prompt) lastImagePrompt = prompt;
-
-      // Load image version history
-      const versions = await window.meshyAPI.listImageVersions(imgPath);
-      const versionsDiv = document.getElementById('img-versions');
-      const list = document.getElementById('img-versions-list');
-      if (versions.length === 0) {
-        versionsDiv.classList.add('hidden');
-      } else {
-        versionsDiv.classList.remove('hidden');
-        list.innerHTML = versions.map((v, vi) => {
-          const src = 'file:///' + v.path.replace(/\\/g, '/');
-          const fname = v.path.split(/[/\\]/).pop();
-          return `<div class="img-version-wrap" data-thumb="${src}" data-name="Version ${vi + 1}" data-meta="${fname}"><img class="img-version-thumb" src="${src}" title="Click to revert" data-version="${v.path.replace(/\\/g, '/')}" data-current="${imgPath.replace(/\\/g, '/')}" /></div>`;
-        }).join('');
-        list.querySelectorAll('.img-version-thumb').forEach(t => {
-          t.onclick = async () => {
-            if (!await customConfirm('Revert to this version? Current image will be saved as a new version.')) return;
-            await window.meshyAPI.revertImage({ imagePath: t.dataset.current, versionPath: t.dataset.version });
-            showImageRefine(t.dataset.current, lastImagePrompt);
-            // Refresh the image in the grid
-            const newSrc = 'file:///' + t.dataset.current + '?t=' + Date.now();
-            document.querySelectorAll('.grid-img').forEach(i => {
-              if (i.dataset.path === t.dataset.current) i.src = newSrc;
-            });
-            if (currentTab === 'tab-image') refreshGalleryImages();
-            showLog('Reverted!', 'success');
-          };
-        });
-      }
     }
 
     // ========== IMAGE TAB ==========
