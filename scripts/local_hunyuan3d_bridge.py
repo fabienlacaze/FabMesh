@@ -65,6 +65,9 @@ def generate_3d(image_path, output_path, max_faces=0):
 
         del shape_pipe
         torch.cuda.empty_cache()
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
     except Exception as e:
         print(f"HUNYUAN3D_ERROR: Shape failed: {type(e).__name__}: {e}", flush=True)
         return False
@@ -83,33 +86,36 @@ def generate_3d(image_path, output_path, max_faces=0):
     wsl_output = to_wsl(output_path)
     hunyuan_wsl = to_wsl(HUNYUAN_DIR)
 
-    # Write texgen script
+    # Write texgen script - use json.dumps for safe string escaping
+    import json
+    target_val = max_faces if max_faces > 0 else 50000
     tex_script_path = os.path.join(os.path.dirname(__file__), '_texgen_run.py')
     with open(tex_script_path, 'w', encoding='utf-8') as f:
-        f.write(f'''import sys, os, torch, trimesh
-sys.path.insert(0, "{hunyuan_wsl}")
-from PIL import Image
-from hy3dgen.texgen import Hunyuan3DPaintPipeline
-
-print("TEXGEN: Loading model...", flush=True)
-pipe = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")
-pipe.enable_model_cpu_offload()
-print("TEXGEN: Model ready", flush=True)
-
-mesh = trimesh.load("{wsl_shape}")
-target = {max_faces if max_faces > 0 else 50000}
-if len(mesh.faces) > target:
-    print(f"TEXGEN: Decimating {{len(mesh.faces)}} -> {{target}} faces...", flush=True)
-    mesh = mesh.simplify_quadric_decimation(target)
-    print(f"TEXGEN: Decimated to {{len(mesh.faces)}} faces", flush=True)
-img = Image.open("{wsl_image}")
-print(f"TEXGEN: Mesh {{len(mesh.vertices)}} verts, painting...", flush=True)
-
-textured = pipe(mesh, image=img)
-textured.export("{wsl_output}")
-sz = os.path.getsize("{wsl_output}")
-print(f"TEXGEN_SUCCESS: {{sz}} bytes", flush=True)
-''')
+        f.write(
+            "import sys, os, torch, trimesh\n"
+            f"sys.path.insert(0, {json.dumps(hunyuan_wsl)})\n"
+            "from PIL import Image\n"
+            "from hy3dgen.texgen import Hunyuan3DPaintPipeline\n"
+            "\n"
+            'print("TEXGEN: Loading model...", flush=True)\n'
+            'pipe = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")\n'
+            "pipe.enable_model_cpu_offload()\n"
+            'print("TEXGEN: Model ready", flush=True)\n'
+            "\n"
+            f"mesh = trimesh.load({json.dumps(wsl_shape)})\n"
+            f"target = {target_val}\n"
+            "if len(mesh.faces) > target:\n"
+            '    print(f"TEXGEN: Decimating {len(mesh.faces)} -> {target} faces...", flush=True)\n'
+            "    mesh = mesh.simplify_quadric_decimation(target)\n"
+            '    print(f"TEXGEN: Decimated to {len(mesh.faces)} faces", flush=True)\n'
+            f"img = Image.open({json.dumps(wsl_image)})\n"
+            'print(f"TEXGEN: Mesh {len(mesh.vertices)} verts, painting...", flush=True)\n'
+            "\n"
+            "textured = pipe(mesh, image=img)\n"
+            f"textured.export({json.dumps(wsl_output)})\n"
+            f"sz = os.path.getsize({json.dumps(wsl_output)})\n"
+            'print(f"TEXGEN_SUCCESS: {sz} bytes", flush=True)\n'
+        )
 
     wsl_script = to_wsl(tex_script_path)
 

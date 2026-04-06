@@ -28,6 +28,10 @@ wsl_run.sh
 
 # Temp
 *.log
+last_error.log
 test_*.png
 test_*.glb
 cuda-keyring_1.1-1_all.deb
+scripts/_*.py
+scripts/export_*.py
+scripts/_prompt_*.txt

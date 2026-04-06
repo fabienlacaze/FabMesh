@@ -55,6 +55,13 @@ def generate_3d(image_path, output_path, resolution=512):
     mesh = meshes[0]
     mesh.export(output_path)
 
+    # Free GPU and RAM
+    del model, scene_codes, meshes, mesh
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
     size = os.path.getsize(output_path)
     print(f"LOCAL_TRIPOSR_SUCCESS: {output_path} ({size} bytes)")
     sys.stdout.flush()

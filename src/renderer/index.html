@@ -391,7 +391,7 @@
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setClearColor(0x0f0f1a);
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
 
@@ -408,8 +408,14 @@
     scene.add(new THREE.AmbientLight(0xffffff, 3.5));
     const dirLight = new THREE.DirectionalLight(0xffffff, 10);
     dirLight.position.set(5, 8, 5);
-    dirLight.castShadow = true;
     scene.add(dirLight);
+    // Back light to fill the dark sides (no shadows)
+    const backLight = new THREE.DirectionalLight(0xffffff, 6);
+    backLight.position.set(-5, 3, -5);
+    scene.add(backLight);
+    const topLight = new THREE.DirectionalLight(0xffffff, 4);
+    topLight.position.set(0, 10, 0);
+    scene.add(topLight);
     const fill = new THREE.DirectionalLight(0x8888ff, 0.3);
     fill.position.set(-3, 2, -3);
     scene.add(fill);
@@ -542,7 +548,7 @@
           URL.revokeObjectURL(blobUrl);
         }
         currentModel = gltf.scene;
-        currentModel.traverse(c => { if (c.isMesh) { c.castShadow = true; if (isWireframe) c.material.wireframe = true; } });
+        currentModel.traverse(c => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = false; if (isWireframe) c.material.wireframe = true; } });
         scene.add(currentModel);
         fitCamera(currentModel);
       } else if (format === 'obj') {
@@ -550,7 +556,7 @@
         const obj = loader.parse(new TextDecoder().decode(buffer));
         currentModel = obj;
         const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.6, metalness: 0.2 });
-        currentModel.traverse(c => { if (c.isMesh) { c.material = mat; c.castShadow = true; } });
+        currentModel.traverse(c => { if (c.isMesh) { c.material = mat; c.castShadow = false; c.receiveShadow = false; } });
         scene.add(currentModel);
         fitCamera(currentModel);
       } else if (format === 'fbx') {
@@ -568,7 +574,8 @@
         currentModel = group;
         currentModel.traverse(c => {
           if (c.isMesh) {
-            c.castShadow = true;
+            c.castShadow = false;
+            c.receiveShadow = false;
             if (isWireframe && c.material) (Array.isArray(c.material)?c.material:[c.material]).forEach(m => m.wireframe = isWireframe);
           }
         });
@@ -579,7 +586,8 @@
         const geo = loader.parse(buffer);
         const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.6, metalness: 0.2 });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.castShadow = true;
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
         currentModel = new THREE.Group();
         currentModel.add(mesh);
         scene.add(currentModel);
@@ -853,7 +861,7 @@
         if (newPct > currentProgress) {
           setProgress(newPct, null);
         }
-      }, 100);
+      }, 500);
     }
 
     function stopProgress() {

@@ -201,7 +201,7 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
     const script = path.join(__dirname, '..', '..', 'scripts', 'local_inpaint_bridge.py');
     return new Promise((resolve) => {
       const proc = execFile('python', [script, imagePath, targetText, prompt || '', newImagePath, String(dilate || 15)], {
-        timeout: 300000, maxBuffer: 10 * 1024 * 1024
+        timeout: 300000, maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) {
           resolve({ success: false, error: error.message, stdout, stderr });
@@ -234,7 +234,7 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
     const script = path.join(__dirname, '..', '..', 'scripts', 'local_img2img_bridge.py');
     const localResult = await new Promise((resolve) => {
       const proc = execFile('python', [script, imagePath, prompt, newImagePath, String(strength || 0.55)], {
-        timeout: 300000, maxBuffer: 10 * 1024 * 1024
+        timeout: 300000, maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) resolve({ success: false, error: error.message, stdout, stderr });
         else if (fs.existsSync(newImagePath)) resolve({ success: true });
@@ -432,7 +432,7 @@ function callClaude(claudePath, aiModel, prompt) {
 async function runBlenderWithRetry(config, scriptPath, meshPath, scriptContent, claudePath, aiModel) {
   const runBlender = () => new Promise((resolve, reject) => {
     execFile(config.blenderPath, ['--background', '--python', scriptPath], {
-      timeout: 120000, maxBuffer: 10 * 1024 * 1024
+      timeout: 120000, maxBuffer: 50 * 1024 * 1024
     }, (error, stdout, stderr) => {
       if (error) { reject({ error: error.message, stdout, stderr }); return; }
       if (!fs.existsSync(meshPath)) { reject({ error: 'Mesh not created', stdout, stderr }); return; }
@@ -868,7 +868,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 
       try {
         await new Promise((resolve, reject) => {
-          execFile('python', args, { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+          execFile('python', args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
             if (error) { reject({ error: error.message, stdout, stderr }); return; }
             if (!fs.existsSync(meshPath)) { reject({ error: 'Mesh not created' }); return; }
             resolve();
@@ -912,7 +912,7 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_image_bridge.py');
       const result = await new Promise((resolve, reject) => {
         const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4)], {
-          timeout: 600000, maxBuffer: 10 * 1024 * 1024
+          timeout: 600000, maxBuffer: 50 * 1024 * 1024
         }, (error, stdout, stderr) => {
           if (error) { reject({ error: error.message, stdout, stderr }); return; }
           // Collect generated images
@@ -1018,14 +1018,29 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     const result = await new Promise((resolve, reject) => {
       const proc = execFile('python', fixedArgs, {
         timeout: 600000,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
         if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created', stdout, stderr }); return; }
         const stats = fs.statSync(meshPath);
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, stdout });
       });
-      proc.stdout.on('data', d => { if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString()); });
+      // Throttled stdout forwarding to prevent IPC flooding
+      let stdoutBuf = '';
+      let lastSent = 0;
+      const flushStdout = () => {
+        if (stdoutBuf && mainWindow) {
+          mainWindow.webContents.send('ai3d-progress', stdoutBuf);
+          stdoutBuf = '';
+          lastSent = Date.now();
+        }
+      };
+      proc.stdout.on('data', d => {
+        stdoutBuf += d.toString();
+        const now = Date.now();
+        if (now - lastSent > 200) flushStdout();
+      });
+      proc.stdout.on('end', flushStdout);
     });
 
     return { success: true, ...result };
@@ -1048,7 +1063,7 @@ ipcMain.handle('image-to-3d-trellis', async (event, { imagePath, outputName, tex
     const result = await new Promise((resolve, reject) => {
       const proc = execFile('python', [bridgeScript, imagePath, meshPath, String(textureSize || 1024)], {
         timeout: 600000,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
         if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created', stdout, stderr }); return; }
@@ -1076,7 +1091,7 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
     const result = await new Promise((resolve, reject) => {
       execFile('python', [bridgeScript, imagePath, meshPath], {
         timeout: 300000,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) {
           reject({ error: error.message, stdout, stderr });
@@ -1207,7 +1222,7 @@ ipcMain.handle('run-blender-script', async (event, { scriptContent, outputName, 
     const args = ['--background', '--python', scriptPath];
     const proc = execFile(config.blenderPath, args, {
       timeout: 120000,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 50 * 1024 * 1024
     }, (error, stdout, stderr) => {
       if (error) {
         reject({ error: error.message, stdout, stderr });
@@ -1311,7 +1326,18 @@ ipcMain.handle('import-image', async () => {
   return result.filePaths[0];
 });
 
+// Security: only allow deletion inside managed directories
+function isPathAllowed(p) {
+  const real = path.resolve(p);
+  const allowed = [MESHES_DIR, IMAGES_DIR, SCRIPTS_DIR, HISTORY_DIR].map(d => path.resolve(d));
+  return allowed.some(d => real === d || real.startsWith(d + path.sep));
+}
+
 ipcMain.handle('delete-file', (event, filePath) => {
+  if (!isPathAllowed(filePath)) {
+    console.warn('delete-file: blocked path outside allowed dirs:', filePath);
+    return false;
+  }
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
     return true;
@@ -1320,6 +1346,10 @@ ipcMain.handle('delete-file', (event, filePath) => {
 });
 
 ipcMain.handle('delete-image-folder', (event, folderPath) => {
+  if (!isPathAllowed(folderPath)) {
+    console.warn('delete-image-folder: blocked path outside allowed dirs:', folderPath);
+    return false;
+  }
   if (fs.existsSync(folderPath)) {
     fs.rmSync(folderPath, { recursive: true, force: true });
     return true;
@@ -1384,7 +1414,12 @@ ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat }) => {
   const config = loadConfig();
   if (!config.blenderPath) throw new Error('Blender path not configured');
 
-  const baseName = path.basename(sourcePath, path.extname(sourcePath));
+  // Validate inputs against injection
+  const validFormats = ['glb', 'gltf', 'obj', 'fbx', 'stl'];
+  if (!validFormats.includes(targetFormat)) throw new Error('Invalid target format');
+  if (!isPathAllowed(sourcePath)) throw new Error('Source path not allowed');
+
+  const baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
   const outputPath = path.join(MESHES_DIR, `${baseName}.${targetFormat}`);
 
   const exportScript = `
