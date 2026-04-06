@@ -81,6 +81,7 @@
             <option value="right">Right</option>
             <option value="top">Top</option>
             <option value="bottom">Bottom</option>
+            <option value="iso">Iso (3/4)</option>
           </select>
           <button id="btn-wireframe" class="toolbar-btn" title="Toggle wireframe">Wire</button>
           <button id="btn-matcap" class="toolbar-btn" title="Toggle matcap/PBR">PBR</button>
@@ -398,6 +399,10 @@
             <summary>Landmarks (click on mesh to place)</summary>
             <div class="advanced-content">
               <p class="hint-text" style="margin: 4px 0 8px 0;">Click a button below, then click on the 3D mesh where that body part is.</p>
+              <div style="display:flex; gap:4px; margin-bottom: 8px;">
+                <button id="btn-rig-auto-landmarks-top" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Auto-detect</button>
+                <button id="btn-rig-clear-landmarks-top" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Clear all</button>
+              </div>
               <div id="rig-landmark-list" style="display: flex; flex-direction: column; gap: 4px;">
                 <button class="lm-btn" data-lm="head" data-color="#ff4444">
                   <span class="lm-color" style="background:#ff4444"></span>
@@ -474,10 +479,6 @@
                   <span class="lm-label">Right foot</span>
                   <span class="lm-status">not set</span>
                 </button>
-              </div>
-              <div style="display:flex; gap:4px; margin-top: 8px;">
-                <button id="btn-rig-auto-landmarks" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Auto-detect</button>
-                <button id="btn-rig-clear-landmarks" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Clear all</button>
               </div>
             </div>
           </details>
@@ -1895,37 +1896,35 @@
     }
 
     // Camera view orientation selector
+    // Rotates around the current target without translating it.
+    // Keeps the current zoom (distance from target).
     const camViewSelect = document.getElementById('cam-view');
     if (camViewSelect) {
       camViewSelect.addEventListener('change', (e) => {
         const view = e.target.value;
         if (!view) return;
-        // Compute target = current model center, distance from current bbox
-        const target = new THREE.Vector3(0, 0, 0);
-        let dist = 3;
-        if (currentModel) {
-          const box = new THREE.Box3().setFromObject(currentModel);
-          box.getCenter(target);
-          const size = box.getSize(new THREE.Vector3());
-          const maxDim = Math.max(size.x, size.y, size.z);
-          dist = maxDim / (2 * Math.tan(camera.fov * Math.PI / 360)) * 1.6;
-        }
-        const offset = { x: 0, y: 0, z: 0 };
+        // Use current target + current distance (no recentering!)
+        const target = controls.target.clone();
+        const dist = camera.position.distanceTo(target);
+        const offset = new THREE.Vector3();
         switch (view) {
-          case 'front':  offset.z = dist; break;
-          case 'back':   offset.z = -dist; break;
-          case 'right':  offset.x = dist; break;
-          case 'left':   offset.x = -dist; break;
-          case 'top':    offset.y = dist; break;
-          case 'bottom': offset.y = -dist; break;
+          case 'front':  offset.set(0, 0, dist); break;
+          case 'back':   offset.set(0, 0, -dist); break;
+          case 'right':  offset.set(dist, 0, 0); break;
+          case 'left':   offset.set(-dist, 0, 0); break;
+          case 'top':    offset.set(0, dist, 0); break;
+          case 'bottom': offset.set(0, -dist, 0); break;
+          case 'iso':    {
+            const d = dist / Math.sqrt(3);
+            offset.set(d, d, d);
+            break;
+          }
         }
-        camera.position.set(target.x + offset.x, target.y + offset.y, target.z + offset.z);
-        camera.up.set(0, 1, 0); // reset up
+        camera.position.copy(target).add(offset);
+        camera.up.set(0, 1, 0);
         if (view === 'top') camera.up.set(0, 0, -1);
         if (view === 'bottom') camera.up.set(0, 0, 1);
-        controls.target.copy(target);
         controls.update();
-        // Reset the dropdown so user can pick the same view again
         e.target.value = '';
       });
     }
@@ -2418,6 +2417,8 @@
 
     document.getElementById('btn-rig-clear-landmarks')?.addEventListener('click', clearAllLandmarks);
     document.getElementById('btn-rig-auto-landmarks')?.addEventListener('click', autoDetectLandmarks);
+    document.getElementById('btn-rig-clear-landmarks-top')?.addEventListener('click', clearAllLandmarks);
+    document.getElementById('btn-rig-auto-landmarks-top')?.addEventListener('click', autoDetectLandmarks);
 
     // ========== RIG TAB ==========
     // Populate template dropdowns from registry, grouped by category
