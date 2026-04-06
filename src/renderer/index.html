@@ -555,7 +555,7 @@
             const ss = m.size < 1024 ? m.size+' B' : m.size < 1048576 ? (m.size/1024).toFixed(1)+' KB' : (m.size/1048576).toFixed(1)+' MB';
             const act = selectedMesh?.filename === m.filename ? 'active' : '';
             const vLabel = vi === 0 ? 'latest' : `v${items.length - 1 - vi}`;
-            const thumbHtml = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '';
+            const thumbHtml = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '<div class="mesh-thumb-placeholder">&#9633;</div>';
             const hoverData = `data-thumb="${m.thumb || ''}" data-name="${vLabel} - ${m.filename}" data-meta="${ds} | ${ss} | ${m.format}"`;
             html += `<div class="mesh-item mesh-child ${act}" onclick="window._selectMesh(${m.idx})" ${hoverData}>
               <div class="mesh-item-with-thumb">${thumbHtml}<div class="mesh-item-details">
@@ -576,7 +576,7 @@
         const ss = m.size < 1024 ? m.size+' B' : m.size < 1048576 ? (m.size/1024).toFixed(1)+' KB' : (m.size/1048576).toFixed(1)+' MB';
         const act = selectedMesh?.filename === m.filename ? 'active' : '';
         const name = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
-        const thumbHtml2 = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '';
+        const thumbHtml2 = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '<div class="mesh-thumb-placeholder">&#9633;</div>';
         const hoverData2 = `data-thumb="${m.thumb || ''}" data-name="${name}" data-meta="${ds} | ${ss} | ${m.format}"`;
         html += `<div class="mesh-item ${act}" onclick="window._selectMesh(${m.idx})" ${hoverData2}>
           <div class="mesh-item-with-thumb">${thumbHtml2}<div class="mesh-item-details">
