@@ -274,100 +274,110 @@ for tm in list(template_meshes):
 template_meshes = []
 
 # ===== Step 8b: Convert T-pose to A-pose by editing bone positions =====
-# Most generated meshes are in A-pose (arms down ~45deg), but the
-# template skeleton is in T-pose (arms horizontal). We rotate the
-# arm bones in EDIT mode so they match the mesh's actual geometry.
+# Goal: rotate arm chains DOWN (toward -Z) and slightly leg chains
+# inward, so they match the mesh's actual A-pose.
 print("AUTORIG: converting skeleton to A-pose...", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
 template_armature.select_set(True)
 bpy.context.view_layer.objects.active = template_armature
 bpy.ops.object.mode_set(mode='EDIT')
 
-# Bone name patterns to detect (covers Orc M1, UE Mannequin, Mixamo, Mixamo:...)
-arm_bone_patterns = [
-    ('upperarm_l', 'lowerarm_l', 'hand_l'),
-    ('upperarm_r', 'lowerarm_r', 'hand_r'),
-    ('Left_Shoulder', 'Left_Elbow', 'Left_Wrist'),
-    ('Right_Shoulder', 'Right_Elbow', 'Right_Wrist'),
-    ('LeftArm', 'LeftForeArm', 'LeftHand'),
-    ('RightArm', 'RightForeArm', 'RightHand'),
-    ('mixamorig:LeftArm', 'mixamorig:LeftForeArm', 'mixamorig:LeftHand'),
-    ('mixamorig:RightArm', 'mixamorig:RightForeArm', 'mixamorig:RightHand'),
-]
-
 import math as _m
+from mathutils import Vector as _Vec
 
 def find_bone_ci(name):
-    """Case-insensitive bone find."""
     target = name.lower()
     for b in template_armature.data.edit_bones:
         if b.name.lower() == target:
             return b
     return None
 
-def rotate_bone_chain(upper_name, lower_name, hand_name, angle_deg, side):
-    """Rotate the upper arm down by angle_deg and propagate to children.
-    side: 'L' or 'R' (mirrors X for right side)
-    """
-    upper = find_bone_ci(upper_name)
-    lower = find_bone_ci(lower_name)
-    hand = find_bone_ci(hand_name)
-    if not upper:
-        return False
-    print(f"AUTORIG: A-pose rotate {{upper.name}} ({{angle_deg}}deg)", flush=True)
-
-    # Pivot = upper bone head
-    pivot = upper.head.copy()
-    # Rotation around Y axis (horizontal arm -> diagonal down)
-    # For left side, negative angle pushes arm down; right side is mirrored
-    rad = _m.radians(angle_deg)
-    if side == 'R':
-        rad = -rad
-
-    # Build a rotation matrix around Y axis at pivot
-    from mathutils import Matrix
-    rot = Matrix.Rotation(rad, 4, 'Y')
-
-    def transform_point(p):
-        return rot @ (p - pivot) + pivot
-
-    # Apply to all bones in chain (upper, lower, hand and any children)
-    chain = []
-    for b in (upper, lower, hand):
-        if b:
-            chain.append(b)
-    # Walk children too (fingers etc.)
-    def collect_children(b, out):
+def collect_chain(root_bone):
+    """Return root + all descendants."""
+    out = [root_bone]
+    def walk(b):
         for c in b.children:
             out.append(c)
-            collect_children(c, out)
-    extra = []
-    if upper:
-        collect_children(upper, extra)
-    for b in extra:
-        if b not in chain:
-            chain.append(b)
+            walk(c)
+    walk(root_bone)
+    return out
 
-    for b in chain:
-        b.head = transform_point(b.head)
-        b.tail = transform_point(b.tail)
+def rotate_chain_toward(root_bone, target_dir, blend=1.0):
+    """Rotate the entire chain so the root bone points toward target_dir.
+    target_dir is a world-space unit vector.
+    blend (0-1) interpolates between current direction and target."""
+    if not root_bone:
+        return False
+    pivot = root_bone.head.copy()
+    cur_dir = (root_bone.tail - root_bone.head).normalized()
+    tgt = target_dir.normalized()
+    # If blend < 1, slerp between cur_dir and tgt
+    if blend < 1.0:
+        tgt = (cur_dir * (1 - blend) + tgt * blend).normalized()
+    # Build rotation that maps cur_dir -> tgt
+    axis = cur_dir.cross(tgt)
+    if axis.length < 1e-6:
+        return False  # already aligned (or opposite)
+    axis.normalize()
+    angle = _m.acos(max(-1, min(1, cur_dir.dot(tgt))))
+    from mathutils import Matrix
+    rot = Matrix.Rotation(angle, 4, axis)
+
+    def transform(p):
+        return rot @ (p - pivot) + pivot
+
+    for b in collect_chain(root_bone):
+        b.head = transform(b.head)
+        b.tail = transform(b.tail)
     return True
 
-# Try each pattern (only first match per side will work)
-A_POSE_ANGLE = 35  # degrees - typical A-pose
-done_l = done_r = False
-for pattern in arm_bone_patterns:
-    upper, lower, hand = pattern
-    # Detect side from name
-    name_lower = upper.lower()
-    if 'left' in name_lower or '_l' in name_lower or name_lower.endswith('l'):
-        if not done_l:
-            done_l = rotate_bone_chain(upper, lower, hand, A_POSE_ANGLE, 'L')
-    elif 'right' in name_lower or '_r' in name_lower or name_lower.endswith('r'):
-        if not done_r:
-            done_r = rotate_bone_chain(upper, lower, hand, A_POSE_ANGLE, 'R')
+# Find arms and legs by common names
+arm_l_names = ['upperarm_l', 'LeftArm', 'mixamorig:LeftArm', 'Left_Shoulder', 'shoulder_l']
+arm_r_names = ['upperarm_r', 'RightArm', 'mixamorig:RightArm', 'Right_Shoulder', 'shoulder_r']
+leg_l_names = ['thigh_l', 'LeftUpLeg', 'mixamorig:LeftUpLeg', 'Left_Hip', 'leg_l', 'upperleg_l']
+leg_r_names = ['thigh_r', 'RightUpLeg', 'mixamorig:RightUpLeg', 'Right_Hip', 'leg_r', 'upperleg_r']
 
-print(f"AUTORIG: A-pose conversion: left={{done_l}} right={{done_r}}", flush=True)
+def find_first(names):
+    for n in names:
+        b = find_bone_ci(n)
+        if b:
+            return b
+    return None
+
+arm_l = find_first(arm_l_names)
+arm_r = find_first(arm_r_names)
+leg_l = find_first(leg_l_names)
+leg_r = find_first(leg_r_names)
+
+# A-pose direction: arms down-and-out at ~35 deg from vertical
+# Z is up, X is left/right, Y is forward/back
+# Left arm: pointing toward (+X, 0, -Z) at 35deg from Z-axis
+A_DEG = 35
+sin_a = _m.sin(_m.radians(A_DEG))
+cos_a = _m.cos(_m.radians(A_DEG))
+
+if arm_l:
+    print(f"AUTORIG: A-pose left arm: {{arm_l.name}}", flush=True)
+    # Direction: +X * sin(35), -Z * cos(35) -> arm goes outward+down
+    rotate_chain_toward(arm_l, _Vec((sin_a, 0, -cos_a)))
+if arm_r:
+    print(f"AUTORIG: A-pose right arm: {{arm_r.name}}", flush=True)
+    rotate_chain_toward(arm_r, _Vec((-sin_a, 0, -cos_a)))
+
+# Legs: keep them mostly straight down, just slight inward angle (~5 deg)
+LEG_DEG = 5
+leg_sin = _m.sin(_m.radians(LEG_DEG))
+leg_cos = _m.cos(_m.radians(LEG_DEG))
+
+if leg_l:
+    print(f"AUTORIG: A-pose left leg: {{leg_l.name}}", flush=True)
+    # Slight inward (toward -X for left), mostly down
+    rotate_chain_toward(leg_l, _Vec((-leg_sin, 0, -leg_cos)))
+if leg_r:
+    print(f"AUTORIG: A-pose right leg: {{leg_r.name}}", flush=True)
+    rotate_chain_toward(leg_r, _Vec((leg_sin, 0, -leg_cos)))
+
+print(f"AUTORIG: A-pose done: arms L={{arm_l is not None}} R={{arm_r is not None}} legs L={{leg_l is not None}} R={{leg_r is not None}}", flush=True)
 
 bpy.ops.object.mode_set(mode='OBJECT')
 
