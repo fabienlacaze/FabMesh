@@ -761,12 +761,27 @@
       const ungrouped = [];
       for (let i = 0; i < meshList.length; i++) {
         const m = meshList[i];
-        const projName = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
-        if (projMap[projName]) {
-          if (!groups[projName]) groups[projName] = [];
-          groups[projName].push({ ...m, idx: i });
+        // Strip _rigged_<template> suffix and other variants to find parent project
+        let baseName = m.filename
+          .replace(/\.[^.]+$/, '')
+          .replace(/_rigged_[a-z0-9_]+$/i, '')
+          .replace(/_unreal$/i, '')
+          .replace(/_shape$/i, '')
+          .replace(/_thumb$/i, '')
+          .replace(/_\d+$/, '');
+        if (projMap[baseName]) {
+          if (!groups[baseName]) groups[baseName] = [];
+          groups[baseName].push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
         } else {
-          ungrouped.push({ ...m, idx: i });
+          // Try to find by stem (file name minus extension, minus timestamp)
+          // Useful for orphan rigs whose parent was deleted
+          const stem = m.filename.replace(/\.[^.]+$/, '').replace(/_rigged_[a-z0-9_]+$/i, '').replace(/_\d+$/, '');
+          if (projMap[stem]) {
+            if (!groups[stem]) groups[stem] = [];
+            groups[stem].push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
+          } else {
+            ungrouped.push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
+          }
         }
       }
 
@@ -797,10 +812,11 @@
             const act = selectedMesh?.filename === m.filename ? 'active' : '';
             const vLabel = vi === 0 ? 'latest' : `v${items.length - 1 - vi}`;
             const thumbHtml = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '<div class="mesh-thumb-placeholder">&#9633;</div>';
+            const typeBadge = m.isRigged ? '<span class="type-badge skm">SKM</span>' : '<span class="type-badge mesh">MESH</span>';
             const hoverData = `data-thumb="${m.thumb || ''}" data-name="${vLabel} - ${m.filename}" data-meta="${ds} | ${ss} | ${m.format}"`;
             html += `<div class="mesh-item mesh-child ${act}" onclick="window._selectMesh(${m.idx})" ${hoverData}>
               <div class="mesh-item-with-thumb">${thumbHtml}<div class="mesh-item-details">
-              <div class="mesh-item-row"><div class="mesh-item-name"><span class="version-tag">${vLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
+              <div class="mesh-item-row"><div class="mesh-item-name">${typeBadge}<span class="version-tag">${vLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
               <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span><span class="mesh-item-format">${m.format}</span></div>
               </div></div>
             </div>`;
@@ -818,10 +834,11 @@
         const act = selectedMesh?.filename === m.filename ? 'active' : '';
         const name = m.filename.replace(/\.[^.]+$/, '').replace(/_\d+$/, '');
         const thumbHtml2 = m.thumb ? `<img class="mesh-thumb" src="${m.thumb}" />` : '<div class="mesh-thumb-placeholder">&#9633;</div>';
+        const typeBadge2 = m.isRigged ? '<span class="type-badge skm">SKM</span>' : '<span class="type-badge mesh">MESH</span>';
         const hoverData2 = `data-thumb="${m.thumb || ''}" data-name="${name}" data-meta="${ds} | ${ss} | ${m.format}"`;
         html += `<div class="mesh-item ${act}" onclick="window._selectMesh(${m.idx})" ${hoverData2}>
           <div class="mesh-item-with-thumb">${thumbHtml2}<div class="mesh-item-details">
-          <div class="mesh-item-row"><div class="mesh-item-name">${name}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
+          <div class="mesh-item-row"><div class="mesh-item-name">${typeBadge2} ${name}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteMesh(${m.idx})">x</button></div>
           <div class="mesh-item-info"><span>${ds}</span><span class="mesh-item-format">${m.format}</span></div>
           <div class="mesh-item-info"><span>${ss}</span><span class="mesh-item-tris">~${m.size > 1048576 ? Math.round(m.size/50/1000)+'K' : Math.round(m.size/50)} tris</span></div>
           </div></div>
