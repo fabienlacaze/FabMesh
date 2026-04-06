@@ -2689,23 +2689,25 @@
     }
 
     if (cloneCanvas) {
-      // Disable right-click context menu inside canvas (we use right-click for pan)
-      cloneCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+      // Use the CONTAINER as the event target so mouse always works
+      // (canvas may be partially clipped by container's overflow:hidden)
+      const cloneContainer = document.getElementById('clone-canvas-container');
 
-      // Right-click drag to pan
-      cloneCanvas.addEventListener('mousedown', (e) => {
+      // Disable right-click context menu (we use right-click for pan)
+      cloneContainer.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      // Right-click drag to pan (capture phase to win over other handlers)
+      cloneContainer.addEventListener('mousedown', (e) => {
         if (e.button === 2) {
-          // Right-click: start panning
           e.preventDefault();
           cloneState.isPanning = true;
           cloneState.panStart = { x: e.clientX - cloneState.panX, y: e.clientY - cloneState.panY };
-          cloneCanvas.style.cursor = 'grabbing';
+          cloneContainer.style.cursor = 'grabbing';
           return;
         }
       }, true);
 
       // Wheel = zoom (centered on mouse position)
-      const cloneContainer = document.getElementById('clone-canvas-container');
       cloneContainer.addEventListener('wheel', (e) => {
         e.preventDefault();
         const rect = cloneCanvas.getBoundingClientRect();

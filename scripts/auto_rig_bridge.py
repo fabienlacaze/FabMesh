@@ -143,15 +143,27 @@ if len(new_meshes) > 1:
         o.select_set(True)
     bpy.context.view_layer.objects.active = new_meshes[0]
     bpy.ops.object.join()
-new_mesh = bpy.context.view_layer.objects.active or new_meshes[0]
+
+# Re-fetch mesh from scene by type filter (the previous reference may be stale)
+new_meshes_after = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+if not new_meshes_after:
+    raise RuntimeError("After join, no mesh found in scene")
+new_mesh = new_meshes_after[0]
 new_mesh.name = "FabMeshTarget"
-print(f"AUTORIG: joined new mesh into '{{new_mesh.name}}'", flush=True)
+print(f"AUTORIG: joined new mesh into '{{new_mesh.name}}' (data={{new_mesh.data is not None}}, verts={{len(new_mesh.data.vertices) if new_mesh.data else 0}})", flush=True)
+
+# Force view layer update so derived data is current
+bpy.context.view_layer.update()
 
 # Apply transforms on new mesh
 bpy.ops.object.select_all(action='DESELECT')
 new_mesh.select_set(True)
 bpy.context.view_layer.objects.active = new_mesh
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+# Re-fetch again after transform_apply (defensive: bpy refs can become stale)
+new_meshes_after2 = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+new_mesh = new_meshes_after2[0]
 
 # Compute new mesh bbox from actual vertices (more reliable than bound_box)
 nm_min, nm_max = vertex_bbox(new_mesh)
@@ -563,18 +575,24 @@ def main():
             timeout=300,
         )
 
-        # Forward Blender output (filter noise)
+        # Forward Blender output (broader filter to catch Python errors)
+        keywords = ("AUTORIG", "Error", "ERROR", "Traceback", "  File ", "Exception", "raise ", "ValueError", "TypeError", "AttributeError", "RuntimeError")
         for line in result.stdout.splitlines():
-            if "AUTORIG" in line or "Error" in line or "ERROR" in line:
+            if any(k in line for k in keywords):
                 print(line, flush=True)
 
         if result.returncode != 0:
             print(f"AUTORIG_ERROR: Blender exited with code {result.returncode}")
-            print(result.stderr[-2000:] if result.stderr else "")
+            print("=== STDERR (tail) ===")
+            print(result.stderr[-2000:] if result.stderr else "(empty)")
             sys.exit(1)
 
         if not os.path.exists(output_fbx):
             print("AUTORIG_ERROR: Output FBX not created")
+            print("=== STDOUT (tail) ===")
+            print(result.stdout[-2000:] if result.stdout else "(empty)")
+            print("=== STDERR (tail) ===")
+            print(result.stderr[-2000:] if result.stderr else "(empty)")
             sys.exit(1)
 
         size = os.path.getsize(output_fbx)
