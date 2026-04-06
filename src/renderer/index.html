@@ -404,81 +404,66 @@
                 <button id="btn-rig-clear-landmarks-top" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Clear all</button>
               </div>
               <div id="rig-landmark-list" style="display: flex; flex-direction: column; gap: 4px;">
-                <button class="lm-btn" data-lm="head" data-color="#ff4444">
-                  <span class="lm-color" style="background:#ff4444"></span><span class="lm-label">Head</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="neck" data-color="#ff8844">
-                  <span class="lm-color" style="background:#ff8844"></span><span class="lm-label">Neck</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="spine_top" data-color="#ff6622">
-                  <span class="lm-color" style="background:#ff6622"></span><span class="lm-label">Upper spine</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="spine_mid" data-color="#cc5511">
-                  <span class="lm-color" style="background:#cc5511"></span><span class="lm-label">Mid spine</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="clavicle_l" data-color="#22ddaa">
-                  <span class="lm-color" style="background:#22ddaa"></span><span class="lm-label">Left clavicle</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="shoulder_l" data-color="#22cc88">
-                  <span class="lm-color" style="background:#22cc88"></span><span class="lm-label">Left shoulder</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="elbow_l" data-color="#88ff88">
-                  <span class="lm-color" style="background:#88ff88"></span><span class="lm-label">Left elbow</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="hand_l" data-color="#44ff44">
-                  <span class="lm-color" style="background:#44ff44"></span><span class="lm-label">Left wrist</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="finger_l_thumb" data-color="#aaff44">
-                  <span class="lm-color" style="background:#aaff44"></span><span class="lm-label">Left thumb tip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="finger_l_index" data-color="#ccff66">
-                  <span class="lm-color" style="background:#ccff66"></span><span class="lm-label">Left index tip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="clavicle_r" data-color="#11bb88">
-                  <span class="lm-color" style="background:#11bb88"></span><span class="lm-label">Right clavicle</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="shoulder_r" data-color="#11aa66">
-                  <span class="lm-color" style="background:#11aa66"></span><span class="lm-label">Right shoulder</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="elbow_r" data-color="#66cc66">
-                  <span class="lm-color" style="background:#66cc66"></span><span class="lm-label">Right elbow</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="hand_r" data-color="#44aa44">
-                  <span class="lm-color" style="background:#44aa44"></span><span class="lm-label">Right wrist</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="finger_r_thumb" data-color="#88cc44">
-                  <span class="lm-color" style="background:#88cc44"></span><span class="lm-label">Right thumb tip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="finger_r_index" data-color="#aacc66">
-                  <span class="lm-color" style="background:#aacc66"></span><span class="lm-label">Right index tip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="hips" data-color="#ffaa00">
-                  <span class="lm-color" style="background:#ffaa00"></span><span class="lm-label">Hips center</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="hip_l" data-color="#ffcc00">
-                  <span class="lm-color" style="background:#ffcc00"></span><span class="lm-label">Left hip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="knee_l" data-color="#88aaff">
-                  <span class="lm-color" style="background:#88aaff"></span><span class="lm-label">Left knee</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="ankle_l" data-color="#5577ee">
-                  <span class="lm-color" style="background:#5577ee"></span><span class="lm-label">Left ankle</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="foot_l" data-color="#4444ff">
-                  <span class="lm-color" style="background:#4444ff"></span><span class="lm-label">Left foot tip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="hip_r" data-color="#dd9900">
-                  <span class="lm-color" style="background:#dd9900"></span><span class="lm-label">Right hip</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="knee_r" data-color="#6688cc">
-                  <span class="lm-color" style="background:#6688cc"></span><span class="lm-label">Right knee</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="ankle_r" data-color="#4466bb">
-                  <span class="lm-color" style="background:#4466bb"></span><span class="lm-label">Right ankle</span><span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="foot_r" data-color="#4477ff">
-                  <span class="lm-color" style="background:#4477ff"></span><span class="lm-label">Right foot tip</span><span class="lm-status">not set</span>
-                </button>
+                <details class="lm-cat" open>
+                  <summary>Head &amp; Spine</summary>
+                  <div class="lm-cat-content">
+                    <button class="lm-btn" data-lm="head" data-color="#ff4444"><span class="lm-color" style="background:#ff4444"></span><span class="lm-label">Head</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="neck" data-color="#ff8844"><span class="lm-color" style="background:#ff8844"></span><span class="lm-label">Neck</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="spine_top" data-color="#ff6622"><span class="lm-color" style="background:#ff6622"></span><span class="lm-label">Upper spine</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="spine_mid" data-color="#cc5511"><span class="lm-color" style="background:#cc5511"></span><span class="lm-label">Mid spine</span><span class="lm-status">not set</span></button>
+                  </div>
+                </details>
+
+                <details class="lm-cat">
+                  <summary>Left arm</summary>
+                  <div class="lm-cat-content">
+                    <button class="lm-btn" data-lm="clavicle_l" data-color="#22ddaa"><span class="lm-color" style="background:#22ddaa"></span><span class="lm-label">Clavicle</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="shoulder_l" data-color="#22cc88"><span class="lm-color" style="background:#22cc88"></span><span class="lm-label">Shoulder</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="elbow_l" data-color="#88ff88"><span class="lm-color" style="background:#88ff88"></span><span class="lm-label">Elbow</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="hand_l" data-color="#44ff44"><span class="lm-color" style="background:#44ff44"></span><span class="lm-label">Wrist</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="finger_l_thumb" data-color="#aaff44"><span class="lm-color" style="background:#aaff44"></span><span class="lm-label">Thumb tip</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="finger_l_index" data-color="#ccff66"><span class="lm-color" style="background:#ccff66"></span><span class="lm-label">Index tip</span><span class="lm-status">not set</span></button>
+                  </div>
+                </details>
+
+                <details class="lm-cat">
+                  <summary>Right arm</summary>
+                  <div class="lm-cat-content">
+                    <button class="lm-btn" data-lm="clavicle_r" data-color="#11bb88"><span class="lm-color" style="background:#11bb88"></span><span class="lm-label">Clavicle</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="shoulder_r" data-color="#11aa66"><span class="lm-color" style="background:#11aa66"></span><span class="lm-label">Shoulder</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="elbow_r" data-color="#66cc66"><span class="lm-color" style="background:#66cc66"></span><span class="lm-label">Elbow</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="hand_r" data-color="#44aa44"><span class="lm-color" style="background:#44aa44"></span><span class="lm-label">Wrist</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="finger_r_thumb" data-color="#88cc44"><span class="lm-color" style="background:#88cc44"></span><span class="lm-label">Thumb tip</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="finger_r_index" data-color="#aacc66"><span class="lm-color" style="background:#aacc66"></span><span class="lm-label">Index tip</span><span class="lm-status">not set</span></button>
+                  </div>
+                </details>
+
+                <details class="lm-cat">
+                  <summary>Hips</summary>
+                  <div class="lm-cat-content">
+                    <button class="lm-btn" data-lm="hips" data-color="#ffaa00"><span class="lm-color" style="background:#ffaa00"></span><span class="lm-label">Hips center</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="hip_l" data-color="#ffcc00"><span class="lm-color" style="background:#ffcc00"></span><span class="lm-label">Left hip</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="hip_r" data-color="#dd9900"><span class="lm-color" style="background:#dd9900"></span><span class="lm-label">Right hip</span><span class="lm-status">not set</span></button>
+                  </div>
+                </details>
+
+                <details class="lm-cat">
+                  <summary>Left leg</summary>
+                  <div class="lm-cat-content">
+                    <button class="lm-btn" data-lm="knee_l" data-color="#88aaff"><span class="lm-color" style="background:#88aaff"></span><span class="lm-label">Knee</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="ankle_l" data-color="#5577ee"><span class="lm-color" style="background:#5577ee"></span><span class="lm-label">Ankle</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="foot_l" data-color="#4444ff"><span class="lm-color" style="background:#4444ff"></span><span class="lm-label">Foot tip</span><span class="lm-status">not set</span></button>
+                  </div>
+                </details>
+
+                <details class="lm-cat">
+                  <summary>Right leg</summary>
+                  <div class="lm-cat-content">
+                    <button class="lm-btn" data-lm="knee_r" data-color="#6688cc"><span class="lm-color" style="background:#6688cc"></span><span class="lm-label">Knee</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="ankle_r" data-color="#4466bb"><span class="lm-color" style="background:#4466bb"></span><span class="lm-label">Ankle</span><span class="lm-status">not set</span></button>
+                    <button class="lm-btn" data-lm="foot_r" data-color="#4477ff"><span class="lm-color" style="background:#4477ff"></span><span class="lm-label">Foot tip</span><span class="lm-status">not set</span></button>
+                  </div>
+                </details>
               </div>
             </div>
           </details>
@@ -1998,6 +1983,175 @@
       };
     }
 
+    // ========== LANDMARK SCHEMAS PER SKM CATEGORY ==========
+    // Each schema defines: groups -> landmarks (name, label, color, front svg pos, side svg pos)
+    // The UI is rebuilt from this when the user changes the template.
+    const LANDMARK_SCHEMAS = {
+      humanoid: {
+        groups: [
+          { name: 'Head & Spine', items: [
+            { id: 'head',       label: 'Head',         color: '#ff4444', front: [100, 28], side: [100, 28] },
+            { id: 'neck',       label: 'Neck',         color: '#ff8844', front: [100, 60], side: [102, 60] },
+            { id: 'spine_top',  label: 'Upper spine',  color: '#ff6622', front: [100, 80], side: [98, 80] },
+            { id: 'spine_mid',  label: 'Mid spine',    color: '#cc5511', front: [100, 120], side: [95, 120] },
+          ]},
+          { name: 'Left arm', items: [
+            { id: 'clavicle_l',     label: 'Clavicle',  color: '#22ddaa', front: [85, 78], side: [100, 78] },
+            { id: 'shoulder_l',     label: 'Shoulder',  color: '#22cc88', front: [70, 82], side: [100, 82] },
+            { id: 'elbow_l',        label: 'Elbow',     color: '#88ff88', front: [56, 138], side: [108, 138] },
+            { id: 'hand_l',         label: 'Wrist',     color: '#44ff44', front: [38, 175], side: [112, 175] },
+            { id: 'finger_l_thumb', label: 'Thumb tip', color: '#aaff44', front: [30, 178], side: [120, 178] },
+            { id: 'finger_l_index', label: 'Index tip', color: '#ccff66', front: [32, 188], side: [122, 188] },
+          ]},
+          { name: 'Right arm', items: [
+            { id: 'clavicle_r',     label: 'Clavicle',  color: '#11bb88', front: [115, 78], side: [100, 78] },
+            { id: 'shoulder_r',     label: 'Shoulder',  color: '#11aa66', front: [130, 82], side: [100, 82] },
+            { id: 'elbow_r',        label: 'Elbow',     color: '#66cc66', front: [144, 138], side: [108, 138] },
+            { id: 'hand_r',         label: 'Wrist',     color: '#44aa44', front: [162, 175], side: [112, 175] },
+            { id: 'finger_r_thumb', label: 'Thumb tip', color: '#88cc44', front: [170, 178], side: [120, 178] },
+            { id: 'finger_r_index', label: 'Index tip', color: '#aacc66', front: [168, 188], side: [122, 188] },
+          ]},
+          { name: 'Hips', items: [
+            { id: 'hips',  label: 'Hips center', color: '#ffaa00', front: [100, 178], side: [100, 178] },
+            { id: 'hip_l', label: 'Left hip',    color: '#ffcc00', front: [85, 192],  side: [100, 192] },
+            { id: 'hip_r', label: 'Right hip',   color: '#dd9900', front: [115, 192], side: [100, 192] },
+          ]},
+          { name: 'Left leg', items: [
+            { id: 'knee_l',  label: 'Knee',     color: '#88aaff', front: [82, 220], side: [102, 220] },
+            { id: 'ankle_l', label: 'Ankle',    color: '#5577ee', front: [80, 268], side: [98, 268] },
+            { id: 'foot_l',  label: 'Foot tip', color: '#4444ff', front: [80, 282], side: [112, 282] },
+          ]},
+          { name: 'Right leg', items: [
+            { id: 'knee_r',  label: 'Knee',     color: '#6688cc', front: [118, 220], side: [102, 220] },
+            { id: 'ankle_r', label: 'Ankle',    color: '#4466bb', front: [120, 268], side: [98, 268] },
+            { id: 'foot_r',  label: 'Foot tip', color: '#4477ff', front: [120, 282], side: [112, 282] },
+          ]},
+        ],
+        silhouette: 'humanoid',
+      },
+
+      quadruped: {
+        groups: [
+          { name: 'Head & Spine', items: [
+            { id: 'head',      label: 'Head',     color: '#ff4444', front: [60, 70],  side: [180, 80] },
+            { id: 'neck',      label: 'Neck',     color: '#ff8844', front: [85, 90],  side: [150, 100] },
+            { id: 'spine_top', label: 'Withers',  color: '#ff6622', front: [100, 100], side: [120, 110] },
+            { id: 'spine_mid', label: 'Mid back', color: '#cc5511', front: [100, 110], side: [80, 110] },
+            { id: 'tail',      label: 'Tail base', color: '#dd5500', front: [100, 120], side: [40, 130] },
+          ]},
+          { name: 'Front legs', items: [
+            { id: 'fl_shoulder_l', label: 'Left shoulder',  color: '#22cc88', front: [85, 110], side: [140, 130] },
+            { id: 'fl_elbow_l',    label: 'Left elbow',     color: '#88ff88', front: [85, 150], side: [140, 170] },
+            { id: 'fl_paw_l',      label: 'Left paw',       color: '#44ff44', front: [85, 200], side: [140, 220] },
+            { id: 'fl_shoulder_r', label: 'Right shoulder', color: '#11aa66', front: [115, 110], side: [140, 130] },
+            { id: 'fl_elbow_r',    label: 'Right elbow',    color: '#66cc66', front: [115, 150], side: [140, 170] },
+            { id: 'fl_paw_r',      label: 'Right paw',      color: '#44aa44', front: [115, 200], side: [140, 220] },
+          ]},
+          { name: 'Back legs', items: [
+            { id: 'bl_hip_l',  label: 'Left hip',   color: '#ffcc00', front: [85, 130],  side: [70, 130] },
+            { id: 'bl_knee_l', label: 'Left knee',  color: '#88aaff', front: [85, 170],  side: [60, 170] },
+            { id: 'bl_paw_l',  label: 'Left paw',   color: '#4444ff', front: [85, 220],  side: [60, 220] },
+            { id: 'bl_hip_r',  label: 'Right hip',  color: '#dd9900', front: [115, 130], side: [70, 130] },
+            { id: 'bl_knee_r', label: 'Right knee', color: '#6688cc', front: [115, 170], side: [60, 170] },
+            { id: 'bl_paw_r',  label: 'Right paw',  color: '#4477ff', front: [115, 220], side: [60, 220] },
+          ]},
+        ],
+        silhouette: 'quadruped',
+      },
+
+      hexapod: {
+        groups: [
+          { name: 'Body', items: [
+            { id: 'head',    label: 'Head',         color: '#ff4444', front: [100, 50],  side: [160, 80] },
+            { id: 'thorax',  label: 'Thorax',       color: '#ff6622', front: [100, 100], side: [110, 110] },
+            { id: 'abdomen', label: 'Abdomen',      color: '#dd5500', front: [100, 160], side: [50, 130] },
+          ]},
+          { name: 'Front legs', items: [
+            { id: 'leg1_l_tip', label: 'Left front foot',  color: '#44ff44', front: [40, 150], side: [180, 200] },
+            { id: 'leg1_r_tip', label: 'Right front foot', color: '#44aa44', front: [160, 150], side: [180, 200] },
+          ]},
+          { name: 'Middle legs', items: [
+            { id: 'leg2_l_tip', label: 'Left middle foot',  color: '#aaff44', front: [40, 200], side: [120, 220] },
+            { id: 'leg2_r_tip', label: 'Right middle foot', color: '#88cc44', front: [160, 200], side: [120, 220] },
+          ]},
+          { name: 'Back legs', items: [
+            { id: 'leg3_l_tip', label: 'Left back foot',  color: '#4444ff', front: [40, 250], side: [60, 200] },
+            { id: 'leg3_r_tip', label: 'Right back foot', color: '#4477ff', front: [160, 250], side: [60, 200] },
+          ]},
+        ],
+        silhouette: 'hexapod',
+      },
+
+      octopod: {
+        groups: [
+          { name: 'Body', items: [
+            { id: 'head',    label: 'Head/Cephalothorax', color: '#ff4444', front: [100, 80], side: [120, 100] },
+            { id: 'abdomen', label: 'Abdomen',            color: '#dd5500', front: [100, 140], side: [60, 120] },
+          ]},
+          { name: 'Left legs (L1-L4)', items: [
+            { id: 'leg_l1_tip', label: 'L1 (front)',  color: '#88ff88', front: [30, 110], side: [180, 200] },
+            { id: 'leg_l2_tip', label: 'L2',          color: '#66cc66', front: [25, 150], side: [150, 220] },
+            { id: 'leg_l3_tip', label: 'L3',          color: '#44ff44', front: [25, 190], side: [80, 220] },
+            { id: 'leg_l4_tip', label: 'L4 (back)',   color: '#22cc88', front: [30, 230], side: [40, 200] },
+          ]},
+          { name: 'Right legs (R1-R4)', items: [
+            { id: 'leg_r1_tip', label: 'R1 (front)',  color: '#88aaff', front: [170, 110], side: [180, 200] },
+            { id: 'leg_r2_tip', label: 'R2',          color: '#5577ee', front: [175, 150], side: [150, 220] },
+            { id: 'leg_r3_tip', label: 'R3',          color: '#4444ff', front: [175, 190], side: [80, 220] },
+            { id: 'leg_r4_tip', label: 'R4 (back)',   color: '#11aaee', front: [170, 230], side: [40, 200] },
+          ]},
+        ],
+        silhouette: 'octopod',
+      },
+    };
+
+    // Get the active schema based on the current template selection
+    function getCurrentSchema() {
+      const tplSel = document.getElementById('rig-tab-template');
+      if (!tplSel || !tplSel.value) return LANDMARK_SCHEMAS.humanoid;
+      // Try to detect category from registry data
+      // We assume id contains 'quad', 'hex', 'oct' or default to humanoid
+      const v = tplSel.value.toLowerCase();
+      if (v.includes('quad') || v.includes('deer') || v.includes('fox') || v.includes('pig') || v.includes('wolf')) return LANDMARK_SCHEMAS.quadruped;
+      if (v.includes('hex')) return LANDMARK_SCHEMAS.hexapod;
+      if (v.includes('oct') || v.includes('spider')) return LANDMARK_SCHEMAS.octopod;
+      return LANDMARK_SCHEMAS.humanoid;
+    }
+
+    // Build the landmark list HTML from a schema
+    function buildLandmarkListFromSchema(schema) {
+      const container = document.getElementById('rig-landmark-list');
+      if (!container) return;
+      let html = '';
+      schema.groups.forEach((group, gi) => {
+        html += `<details class="lm-cat" ${gi === 0 ? 'open' : ''}>
+          <summary>${group.name}</summary>
+          <div class="lm-cat-content">`;
+        group.items.forEach(item => {
+          html += `<button class="lm-btn" data-lm="${item.id}" data-color="${item.color}">
+            <span class="lm-color" style="background:${item.color}"></span>
+            <span class="lm-label">${item.label}</span>
+            <span class="lm-status">not set</span>
+          </button>`;
+        });
+        html += `</div></details>`;
+      });
+      container.innerHTML = html;
+      // Re-bind handlers (the buttons are now fresh)
+      bindLandmarkButtons();
+    }
+
+    // Flat lookup by id from current schema
+    function getLandmarkSpec(id) {
+      const schema = getCurrentSchema();
+      for (const g of schema.groups) {
+        for (const item of g.items) {
+          if (item.id === id) return item;
+        }
+      }
+      return null;
+    }
+
     // ========== RIG TAB - LANDMARKS SYSTEM ==========
     // Stores landmarks for the currently selected mesh, in WORLD-space coords
     let rigLandmarks = {}; // { head: [x,y,z], hand_l: [x,y,z], ... }
@@ -2360,39 +2514,46 @@
       }
     });
 
-    // Wire landmark buttons (click to arm + hover to highlight marker)
-    document.querySelectorAll('.lm-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (activeLandmarkBtn === btn) {
-          btn.classList.remove('active');
-          activeLandmarkBtn = null;
-          canvas.style.cursor = '';
-          return;
-        }
-        if (activeLandmarkBtn) activeLandmarkBtn.classList.remove('active');
-        activeLandmarkBtn = btn;
-        btn.classList.add('active');
-        canvas.style.cursor = 'crosshair';
-        showLog('Click on the mesh to place: ' + btn.querySelector('.lm-label').textContent, 'info');
+    // Bind handlers on all current .lm-btn (called on init AND after rebuild)
+    function bindLandmarkButtons() {
+      document.querySelectorAll('.lm-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (activeLandmarkBtn === btn) {
+            btn.classList.remove('active');
+            activeLandmarkBtn = null;
+            canvas.style.cursor = '';
+            return;
+          }
+          if (activeLandmarkBtn) activeLandmarkBtn.classList.remove('active');
+          activeLandmarkBtn = btn;
+          btn.classList.add('active');
+          canvas.style.cursor = 'crosshair';
+          showLog('Click on the mesh to place: ' + btn.querySelector('.lm-label').textContent, 'info');
+        });
+        btn.addEventListener('mouseenter', (e) => {
+          const name = btn.dataset.lm;
+          if (rigLandmarks[name]) setLandmarkHighlight(name, true);
+          const rect = btn.getBoundingClientRect();
+          showLandmarkHelp(name, rect.left - 280, rect.top);
+        });
+        btn.addEventListener('mouseleave', () => {
+          const name = btn.dataset.lm;
+          if (rigLandmarks[name]) setLandmarkHighlight(name, false);
+          hideLandmarkHelp();
+        });
       });
-      // Hover row -> highlight the corresponding 3D marker + show help SVG
-      btn.addEventListener('mouseenter', (e) => {
-        const name = btn.dataset.lm;
-        if (rigLandmarks[name]) setLandmarkHighlight(name, true);
-        // Show silhouette help to the LEFT of the button
-        const rect = btn.getBoundingClientRect();
-        showLandmarkHelp(name, rect.left - 130, rect.top);
-      });
-      btn.addEventListener('mousemove', (e) => {
-        // Keep the help anchored to the button (don't follow mouse)
-      });
-      btn.addEventListener('mouseleave', () => {
-        const name = btn.dataset.lm;
-        if (rigLandmarks[name]) setLandmarkHighlight(name, false);
-        hideLandmarkHelp();
-      });
+      // Refresh status after rebind
+      updateLandmarkBtnUI();
+    }
+    bindLandmarkButtons();
+
+    // Rebuild landmark list when template changes
+    document.getElementById('rig-tab-template')?.addEventListener('change', () => {
+      buildLandmarkListFromSchema(getCurrentSchema());
     });
+    // Initial build
+    setTimeout(() => buildLandmarkListFromSchema(getCurrentSchema()), 200);
 
     // Tooltip element for hovering markers in viewer
     let lmTooltip = document.getElementById('lm-tooltip');
@@ -2568,19 +2729,144 @@
       `;
     }
 
+    // Quadruped silhouette (front + side views, 200x300)
+    function buildSilhouetteQuadFront(px, py, color) {
+      return `
+        <svg width="120" height="180" viewBox="0 0 200 300" style="display:block;">
+          <defs><linearGradient id="qF" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/></linearGradient></defs>
+          <!-- Body (front view = oval chest, head visible) -->
+          <ellipse cx="100" cy="115" rx="35" ry="40" fill="url(#qF)" stroke="#888" stroke-width="1.5"/>
+          <!-- Head/snout -->
+          <ellipse cx="100" cy="65" rx="20" ry="22" fill="url(#qF)" stroke="#888" stroke-width="1.5"/>
+          <!-- Front legs -->
+          <path d="M 80 145 L 80 220 L 95 220 L 95 150 Z" fill="url(#qF)" stroke="#888" stroke-width="1.5"/>
+          <path d="M 105 150 L 105 220 L 120 220 L 120 145 Z" fill="url(#qF)" stroke="#888" stroke-width="1.5"/>
+          <!-- Back legs (visible behind front) -->
+          <path d="M 75 150 L 80 220 L 90 220 L 90 145 Z" fill="url(#qF)" stroke="#666" stroke-width="1" opacity="0.7"/>
+          <path d="M 110 145 L 110 220 L 125 220 L 125 150 Z" fill="url(#qF)" stroke="#666" stroke-width="1" opacity="0.7"/>
+          <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+          <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2"><animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/></circle>
+        </svg>`;
+    }
+    function buildSilhouetteQuadSide(px, py, color) {
+      return `
+        <svg width="180" height="180" viewBox="0 0 200 300" style="display:block;">
+          <defs><linearGradient id="qS" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/></linearGradient></defs>
+          <!-- Body (side view = elongated horizontal) -->
+          <ellipse cx="100" cy="115" rx="65" ry="22" fill="url(#qS)" stroke="#888" stroke-width="1.5"/>
+          <!-- Neck -->
+          <path d="M 155 105 L 165 90 L 180 95 L 175 110 L 158 115 Z" fill="url(#qS)" stroke="#888" stroke-width="1.5"/>
+          <!-- Head/snout -->
+          <ellipse cx="180" cy="80" rx="18" ry="14" fill="url(#qS)" stroke="#888" stroke-width="1.5"/>
+          <!-- Tail -->
+          <path d="M 35 110 Q 20 100 15 90" fill="none" stroke="#888" stroke-width="3" stroke-linecap="round"/>
+          <!-- Front leg -->
+          <path d="M 145 130 L 140 220 L 150 220 L 155 135 Z" fill="url(#qS)" stroke="#888" stroke-width="1.5"/>
+          <!-- Back leg -->
+          <path d="M 60 130 L 55 220 L 65 220 L 70 135 Z" fill="url(#qS)" stroke="#888" stroke-width="1.5"/>
+          <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+          <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2"><animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/></circle>
+        </svg>`;
+    }
+
+    // Hexapod silhouette (insect, top + side views)
+    function buildSilhouetteHexFront(px, py, color) {
+      return `
+        <svg width="160" height="180" viewBox="0 0 200 300" style="display:block;">
+          <defs><linearGradient id="hF" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/></linearGradient></defs>
+          <!-- Body segments (top view) -->
+          <ellipse cx="100" cy="50" rx="25" ry="22" fill="url(#hF)" stroke="#888" stroke-width="1.5"/>
+          <ellipse cx="100" cy="100" rx="32" ry="28" fill="url(#hF)" stroke="#888" stroke-width="1.5"/>
+          <ellipse cx="100" cy="170" rx="28" ry="40" fill="url(#hF)" stroke="#888" stroke-width="1.5"/>
+          <!-- Six legs -->
+          <line x1="80" y1="90" x2="40" y2="120" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="90" x2="160" y2="120" stroke="#888" stroke-width="2"/>
+          <line x1="80" y1="105" x2="35" y2="160" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="105" x2="165" y2="160" stroke="#888" stroke-width="2"/>
+          <line x1="80" y1="115" x2="40" y2="200" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="115" x2="160" y2="200" stroke="#888" stroke-width="2"/>
+          <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+          <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2"><animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/></circle>
+        </svg>`;
+    }
+    function buildSilhouetteHexSide(px, py, color) {
+      return `
+        <svg width="180" height="180" viewBox="0 0 200 300" style="display:block;">
+          <defs><linearGradient id="hS" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/></linearGradient></defs>
+          <ellipse cx="50" cy="120" rx="40" ry="20" fill="url(#hS)" stroke="#888" stroke-width="1.5"/>
+          <ellipse cx="110" cy="115" rx="30" ry="22" fill="url(#hS)" stroke="#888" stroke-width="1.5"/>
+          <ellipse cx="160" cy="105" rx="22" ry="18" fill="url(#hS)" stroke="#888" stroke-width="1.5"/>
+          <line x1="160" y1="120" x2="180" y2="200" stroke="#888" stroke-width="2"/>
+          <line x1="115" y1="135" x2="120" y2="220" stroke="#888" stroke-width="2"/>
+          <line x1="65" y1="135" x2="60" y2="200" stroke="#888" stroke-width="2"/>
+          <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+          <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2"><animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/></circle>
+        </svg>`;
+    }
+
+    // Octopod (spider) silhouette
+    function buildSilhouetteOctFront(px, py, color) {
+      return `
+        <svg width="160" height="180" viewBox="0 0 200 300" style="display:block;">
+          <defs><linearGradient id="oF" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/></linearGradient></defs>
+          <ellipse cx="100" cy="80" rx="35" ry="30" fill="url(#oF)" stroke="#888" stroke-width="1.5"/>
+          <ellipse cx="100" cy="140" rx="40" ry="35" fill="url(#oF)" stroke="#888" stroke-width="1.5"/>
+          <!-- 8 legs (4 left, 4 right) -->
+          <line x1="80" y1="85" x2="30" y2="100" stroke="#888" stroke-width="2"/>
+          <line x1="80" y1="100" x2="20" y2="140" stroke="#888" stroke-width="2"/>
+          <line x1="80" y1="115" x2="20" y2="180" stroke="#888" stroke-width="2"/>
+          <line x1="80" y1="130" x2="30" y2="220" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="85" x2="170" y2="100" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="100" x2="180" y2="140" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="115" x2="180" y2="180" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="130" x2="170" y2="220" stroke="#888" stroke-width="2"/>
+          <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+          <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2"><animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/></circle>
+        </svg>`;
+    }
+    function buildSilhouetteOctSide(px, py, color) {
+      return `
+        <svg width="180" height="180" viewBox="0 0 200 300" style="display:block;">
+          <defs><linearGradient id="oS" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a3a4a" stop-opacity="0.4"/><stop offset="100%" stop-color="#1a1a28" stop-opacity="0.4"/></linearGradient></defs>
+          <ellipse cx="60" cy="120" rx="40" ry="30" fill="url(#oS)" stroke="#888" stroke-width="1.5"/>
+          <ellipse cx="130" cy="105" rx="35" ry="28" fill="url(#oS)" stroke="#888" stroke-width="1.5"/>
+          <line x1="100" y1="130" x2="40" y2="200" stroke="#888" stroke-width="2"/>
+          <line x1="120" y1="130" x2="80" y2="220" stroke="#888" stroke-width="2"/>
+          <line x1="140" y1="125" x2="150" y2="220" stroke="#888" stroke-width="2"/>
+          <line x1="155" y1="115" x2="180" y2="200" stroke="#888" stroke-width="2"/>
+          <circle cx="${px}" cy="${py}" r="9" fill="${color}" fill-opacity="0.3"/>
+          <circle cx="${px}" cy="${py}" r="6" fill="${color}" stroke="white" stroke-width="2"><animate attributeName="r" values="6;8;6" dur="1.2s" repeatCount="indefinite"/></circle>
+        </svg>`;
+    }
+
     function buildLandmarkHelpSVG(name) {
-      const ptF = LM_SVG_POINTS[name];
-      const ptS = LM_SVG_POINTS_SIDE[name];
-      if (!ptF) return '';
-      const color = LM_COLORS_HEX[name] || '#ffffff';
-      const frontSVG = buildSilhouetteFront(ptF[0], ptF[1], color);
-      const sideSVG = ptS ? buildSilhouetteSide(ptS[0], ptS[1], color) : '';
+      const spec = getLandmarkSpec(name);
+      if (!spec) return '';
+      const schema = getCurrentSchema();
+      const sil = schema.silhouette;
+      const color = spec.color;
+      const ptF = spec.front;
+      const ptS = spec.side;
+      let frontSVG = '', sideSVG = '';
+      if (sil === 'humanoid') {
+        frontSVG = buildSilhouetteFront(ptF[0], ptF[1], color);
+        sideSVG = buildSilhouetteSide(ptS[0], ptS[1], color);
+      } else if (sil === 'quadruped') {
+        frontSVG = buildSilhouetteQuadFront(ptF[0], ptF[1], color);
+        sideSVG = buildSilhouetteQuadSide(ptS[0], ptS[1], color);
+      } else if (sil === 'hexapod') {
+        frontSVG = buildSilhouetteHexFront(ptF[0], ptF[1], color);
+        sideSVG = buildSilhouetteHexSide(ptS[0], ptS[1], color);
+      } else if (sil === 'octopod') {
+        frontSVG = buildSilhouetteOctFront(ptF[0], ptF[1], color);
+        sideSVG = buildSilhouetteOctSide(ptS[0], ptS[1], color);
+      }
       return `
         <div style="text-align:center;">
-          <div style="font-size: 13px; font-weight: 700; color: ${color}; margin-bottom: 6px;">${LM_DISPLAY_NAMES[name] || name}</div>
+          <div style="font-size: 13px; font-weight: 700; color: ${color}; margin-bottom: 6px;">${spec.label}</div>
           <div style="display: flex; gap: 8px; align-items: flex-start;">
             <div style="text-align:center;">
-              <div style="font-size: 9px; color: var(--text-muted); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">Front</div>
+              <div style="font-size: 9px; color: var(--text-muted); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">${sil === 'quadruped' || sil === 'hexapod' || sil === 'octopod' ? 'Top' : 'Front'}</div>
               ${frontSVG}
             </div>
             ${sideSVG ? `<div style="text-align:center;">
