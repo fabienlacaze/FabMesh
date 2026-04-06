@@ -2092,11 +2092,18 @@
       saveLandmarksForCurrentMesh();
     }
 
-    function clearAllLandmarks() {
+    function clearLandmarksInMemory() {
+      // In-memory only: doesn't touch the saved file. Used when switching
+      // meshes (we then load the saved file for the new mesh).
       rigLandmarks = {};
       clearLandmarkMarkers();
       activeLandmarkBtn = null;
       updateLandmarkBtnUI();
+    }
+
+    function clearAllLandmarks() {
+      // Full clear: also deletes the saved file (user clicked Clear all)
+      clearLandmarksInMemory();
       saveLandmarksForCurrentMesh();
     }
 
@@ -2109,7 +2116,7 @@
     }
 
     async function loadLandmarksForCurrentMesh() {
-      clearAllLandmarks();
+      clearLandmarksInMemory();
       if (!selectedMesh) return;
       try {
         const data = await API.loadLandmarks?.({ meshPath: selectedMesh.path });
@@ -2371,14 +2378,21 @@
         canvas.style.cursor = 'crosshair';
         showLog('Click on the mesh to place: ' + btn.querySelector('.lm-label').textContent, 'info');
       });
-      // Hover row -> highlight the corresponding 3D marker
-      btn.addEventListener('mouseenter', () => {
+      // Hover row -> highlight the corresponding 3D marker + show help SVG
+      btn.addEventListener('mouseenter', (e) => {
         const name = btn.dataset.lm;
         if (rigLandmarks[name]) setLandmarkHighlight(name, true);
+        // Show silhouette help to the LEFT of the button
+        const rect = btn.getBoundingClientRect();
+        showLandmarkHelp(name, rect.left - 130, rect.top);
+      });
+      btn.addEventListener('mousemove', (e) => {
+        // Keep the help anchored to the button (don't follow mouse)
       });
       btn.addEventListener('mouseleave', () => {
         const name = btn.dataset.lm;
         if (rigLandmarks[name]) setLandmarkHighlight(name, false);
+        hideLandmarkHelp();
       });
     });
 
@@ -2389,6 +2403,99 @@
       lmTooltip.id = 'lm-tooltip';
       lmTooltip.style.cssText = 'position: fixed; pointer-events: none; background: rgba(0,0,0,0.85); color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; z-index: 9999; display: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.5);';
       document.body.appendChild(lmTooltip);
+    }
+
+    // Visual reference: humanoid silhouette + colored dot per landmark
+    // Coordinates are normalized (0-100) on a 100x180 SVG.
+    // Front-view T-pose silhouette.
+    const LM_SVG_POINTS = {
+      head:           [50, 12],
+      neck:           [50, 22],
+      // Arms (T-pose, viewer's left = subject's right)
+      hand_l:         [12, 60],  // subject's left hand on viewer's left
+      elbow_l:        [25, 55],
+      finger_l_thumb: [8, 58],
+      finger_l_index: [7, 62],
+      hand_r:         [88, 60],
+      elbow_r:        [75, 55],
+      finger_r_thumb: [92, 58],
+      finger_r_index: [93, 62],
+      hips:           [50, 90],
+      // Legs
+      knee_l:         [40, 130],
+      ankle_l:        [38, 165],
+      foot_l:         [38, 172],
+      knee_r:         [60, 130],
+      ankle_r:        [62, 165],
+      foot_r:         [62, 172],
+    };
+    const LM_COLORS_HEX = {
+      head: '#ff4444', neck: '#ff8844',
+      hand_l: '#44ff44', elbow_l: '#88ff88',
+      finger_l_thumb: '#aaff44', finger_l_index: '#ccff66',
+      hand_r: '#44aa44', elbow_r: '#66cc66',
+      finger_r_thumb: '#88cc44', finger_r_index: '#aacc66',
+      foot_l: '#4444ff', knee_l: '#88aaff', ankle_l: '#5577ee',
+      foot_r: '#4477ff', knee_r: '#6688cc', ankle_r: '#4466bb',
+      hips: '#ffaa00',
+    };
+
+    // Big tooltip with humanoid silhouette + dot, shown when hovering a lm-btn
+    let lmHelpTooltip = document.getElementById('lm-help-tooltip');
+    if (!lmHelpTooltip) {
+      lmHelpTooltip = document.createElement('div');
+      lmHelpTooltip.id = 'lm-help-tooltip';
+      lmHelpTooltip.style.cssText = 'position: fixed; pointer-events: none; background: rgba(15,15,30,0.97); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; z-index: 10000; display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.6);';
+      document.body.appendChild(lmHelpTooltip);
+    }
+
+    function buildLandmarkHelpSVG(name) {
+      const pt = LM_SVG_POINTS[name];
+      if (!pt) return '';
+      const [px, py] = pt;
+      const color = LM_COLORS_HEX[name] || '#ffffff';
+      // Simple humanoid silhouette in T-pose (front view)
+      return `
+        <div style="text-align:center;">
+          <div style="font-size: 11px; font-weight: 700; color: ${color}; margin-bottom: 4px;">${LM_DISPLAY_NAMES[name] || name}</div>
+          <svg width="100" height="180" viewBox="0 0 100 180" style="display:block;">
+            <!-- Head -->
+            <circle cx="50" cy="14" r="10" fill="none" stroke="#666" stroke-width="1.5"/>
+            <!-- Neck -->
+            <line x1="50" y1="24" x2="50" y2="30" stroke="#666" stroke-width="1.5"/>
+            <!-- Torso -->
+            <path d="M 30 30 L 70 30 L 65 90 L 35 90 Z" fill="none" stroke="#666" stroke-width="1.5"/>
+            <!-- Arms (T-pose, horizontal) -->
+            <line x1="30" y1="35" x2="10" y2="62" stroke="#666" stroke-width="1.5"/>
+            <line x1="70" y1="35" x2="90" y2="62" stroke="#666" stroke-width="1.5"/>
+            <!-- Hands -->
+            <circle cx="10" cy="62" r="3" fill="none" stroke="#666" stroke-width="1.5"/>
+            <circle cx="90" cy="62" r="3" fill="none" stroke="#666" stroke-width="1.5"/>
+            <!-- Hips -->
+            <line x1="35" y1="90" x2="65" y2="90" stroke="#666" stroke-width="1.5"/>
+            <!-- Legs -->
+            <line x1="40" y1="90" x2="38" y2="170" stroke="#666" stroke-width="1.5"/>
+            <line x1="60" y1="90" x2="62" y2="170" stroke="#666" stroke-width="1.5"/>
+            <!-- Feet -->
+            <line x1="34" y1="172" x2="44" y2="172" stroke="#666" stroke-width="2"/>
+            <line x1="58" y1="172" x2="68" y2="172" stroke="#666" stroke-width="2"/>
+            <!-- Highlighted landmark -->
+            <circle cx="${px}" cy="${py}" r="4.5" fill="${color}" stroke="white" stroke-width="1.5">
+              <animate attributeName="r" values="4.5;6;4.5" dur="1s" repeatCount="indefinite"/>
+            </circle>
+          </svg>
+        </div>
+      `;
+    }
+
+    function showLandmarkHelp(name, x, y) {
+      lmHelpTooltip.innerHTML = buildLandmarkHelpSVG(name);
+      lmHelpTooltip.style.left = (x + 16) + 'px';
+      lmHelpTooltip.style.top = Math.max(10, y - 90) + 'px';
+      lmHelpTooltip.style.display = 'block';
+    }
+    function hideLandmarkHelp() {
+      lmHelpTooltip.style.display = 'none';
     }
     const LM_DISPLAY_NAMES = {
       head: 'Head', neck: 'Neck',
