@@ -761,9 +761,18 @@
     let currentProgress = 0;
     let targetProgress = 0;
 
-    function setProgress(percent, label) {
+    function setProgress(percent, label, allowRewind) {
+      // Never go backwards unless explicitly allowed (reset)
+      if (!allowRewind && percent < currentProgress) {
+        // Just update the label if provided
+        if (label && activeJobId) {
+          const job = activeJobs.find(j => j.id === activeJobId);
+          if (job) { job.step = label; renderJobs(); }
+        }
+        return;
+      }
+      currentProgress = percent;
       targetProgress = percent;
-      // Update active job
       if (activeJobId) {
         const job = activeJobs.find(j => j.id === activeJobId);
         if (job) {
@@ -775,7 +784,18 @@
     }
 
     function startProgressAnimation(targetPercent, durationMs, label) {
-      if (label) setProgress(currentProgress, label);
+      // Don't animate backwards
+      if (targetPercent <= currentProgress) {
+        if (label && activeJobId) {
+          const job = activeJobs.find(j => j.id === activeJobId);
+          if (job) { job.step = label; renderJobs(); }
+        }
+        return;
+      }
+      if (label && activeJobId) {
+        const job = activeJobs.find(j => j.id === activeJobId);
+        if (job) { job.step = label; renderJobs(); }
+      }
       const startPercent = currentProgress;
       const startTime = Date.now();
       if (progressInterval) clearInterval(progressInterval);
@@ -789,8 +809,10 @@
           const extra = (elapsed - durationMs) / 1000 * 0.5;
           pct = startPercent + (targetPercent - startPercent) * 0.9 + Math.min(extra, (targetPercent - startPercent) * 0.09);
         }
-        currentProgress = Math.min(pct, targetPercent - 0.5);
-        setProgress(currentProgress, null);
+        const newPct = Math.min(pct, targetPercent - 0.5);
+        if (newPct > currentProgress) {
+          setProgress(newPct, null);
+        }
       }, 100);
     }
 
@@ -810,7 +832,7 @@
     function resetProgress() {
       stopProgress();
       currentProgress = 0;
-      setProgress(0, 'Starting...');
+      setProgress(0, 'Starting...', true);
     }
 
     function showLog(text, type) {
