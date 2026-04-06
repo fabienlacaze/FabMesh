@@ -429,14 +429,12 @@
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      needsRender = true;
     }
     window.addEventListener('resize', resize);
     new ResizeObserver(resize).observe(container);
     resize();
 
     // Render loop (keep simple and reliable)
-    function requestRender() { /* no-op, loop always runs */ }
     (function animate() {
       requestAnimationFrame(animate);
       controls.update();
@@ -532,7 +530,6 @@
       });
       document.getElementById('mesh-info').textContent =
         `${verts.toLocaleString()} verts | ${Math.round(faces).toLocaleString()} faces | ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`;
-      requestRender();
     }
 
     async function loadMeshFromBuffer(buffer, format, filePath) {
@@ -1254,7 +1251,6 @@
       const val = this.value / 100;
       dirLight.intensity = val;
       scene.children.forEach(c => { if (c.isAmbientLight) c.intensity = val * 0.35; });
-      needsRender = true;
     };
 
     // Convert
