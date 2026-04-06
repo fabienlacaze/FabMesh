@@ -931,6 +931,96 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.refine-method-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.refine-method-btn {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.refine-method-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.refine-method-btn.active {
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  border-color: var(--accent);
+  color: white;
+}
+
+.refine-method-content {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.refine-method-content.hidden {
+  display: none;
+}
+
+.refine-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 2px 0;
+  line-height: 1.4;
+}
+
+.refine-method-content input[type="text"],
+.refine-method-content textarea {
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.refine-method-content input[type="text"]:focus,
+.refine-method-content textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slider-row label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 55px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.slider-row span {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 35px;
+  text-align: right;
+}
+
 #img-versions-list {
   display: flex;
   gap: 4px;

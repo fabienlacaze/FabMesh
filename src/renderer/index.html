@@ -138,29 +138,43 @@
               <div id="img-refine-preview">
                 <img id="img-refine-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               </div>
-              <button id="btn-remove-bg" class="secondary-btn" style="margin: 8px 12px;">Remove background</button>
-              <div style="margin: 8px 12px; display: flex; align-items: center; gap: 8px;">
-                <label style="font-size: 11px; color: var(--text-muted); min-width: 60px;">Strength</label>
-                <input type="range" id="refine-strength" min="30" max="95" value="55" style="flex:1; accent-color: var(--accent);" />
-                <span id="refine-strength-val" style="font-size: 11px; color: var(--text-secondary); min-width: 30px; text-align: right;">55%</span>
+
+              <!-- Method tabs -->
+              <div class="refine-method-tabs">
+                <button class="refine-method-btn active" data-method="modify">Modify</button>
+                <button class="refine-method-btn" data-method="replace">Replace</button>
+                <button class="refine-method-btn" data-method="tools">Tools</button>
               </div>
 
-              <details style="margin: 8px 12px;">
-                <summary style="font-size: 12px; color: var(--text-secondary); cursor: pointer; padding: 4px 0;">Inpaint (remove/replace object)</summary>
-                <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
-                  <input type="text" id="inpaint-target" placeholder="What to target (e.g. hat, background)" style="padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px;" />
-                  <input type="text" id="inpaint-replace" placeholder="Replace with (empty = remove)" style="padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px;" />
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <label style="font-size: 10px; color: var(--text-muted); min-width: 60px;">Padding</label>
-                    <input type="range" id="inpaint-dilate" min="0" max="40" value="15" style="flex:1; accent-color: var(--accent);" />
-                    <span id="inpaint-dilate-val" style="font-size: 10px; color: var(--text-secondary); min-width: 30px; text-align: right;">15px</span>
-                  </div>
-                  <button id="btn-inpaint" class="secondary-btn">Auto Inpaint</button>
+              <!-- MODIFY: img2img with strength -->
+              <div class="refine-method-content" data-method-content="modify">
+                <p class="refine-hint">Change style, colors, details. Keeps composition.</p>
+                <textarea id="img-refine-input" placeholder="Ex: make it red, add more details, anime style..." rows="3"></textarea>
+                <div class="slider-row">
+                  <label>Strength</label>
+                  <input type="range" id="refine-strength" min="30" max="95" value="55" />
+                  <span id="refine-strength-val">55%</span>
                 </div>
-              </details>
-              <div class="refine-input-area">
-                <textarea id="img-refine-input" placeholder="What to change? Ex: add more snow on the roof, make the door bigger..." rows="3"></textarea>
-                <button id="btn-refine-image" class="refine-btn" disabled>Refine Image</button>
+                <button id="btn-refine-image" class="refine-btn" disabled>Modify Image</button>
+              </div>
+
+              <!-- REPLACE: inpainting -->
+              <div class="refine-method-content hidden" data-method-content="replace">
+                <p class="refine-hint">Remove or replace a specific object (auto-detected).</p>
+                <input type="text" id="inpaint-target" placeholder="Target (e.g. hat, background, shirt)" />
+                <input type="text" id="inpaint-replace" placeholder="Replace with (empty = remove)" />
+                <div class="slider-row">
+                  <label>Padding</label>
+                  <input type="range" id="inpaint-dilate" min="0" max="40" value="15" />
+                  <span id="inpaint-dilate-val">15px</span>
+                </div>
+                <button id="btn-inpaint" class="refine-btn">Auto Inpaint</button>
+              </div>
+
+              <!-- TOOLS: quick actions -->
+              <div class="refine-method-content hidden" data-method-content="tools">
+                <p class="refine-hint">Quick image operations.</p>
+                <button id="btn-remove-bg" class="secondary-btn">Remove background</button>
               </div>
             </div>
           </div>
@@ -1679,6 +1693,17 @@
 
     document.getElementById('refine-strength').addEventListener('input', (e) => {
       document.getElementById('refine-strength-val').textContent = e.target.value + '%';
+    });
+
+    // Refine method tabs (Modify/Replace/Tools)
+    document.querySelectorAll('.refine-method-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const method = btn.dataset.method;
+        document.querySelectorAll('.refine-method-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.refine-method-content').forEach(c => {
+          c.classList.toggle('hidden', c.dataset.methodContent !== method);
+        });
+      });
     });
 
     document.getElementById('inpaint-dilate').addEventListener('input', (e) => {
