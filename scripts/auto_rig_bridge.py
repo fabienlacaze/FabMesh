@@ -68,28 +68,68 @@ def load_template(name):
 def build_fbx_template_script(mesh_path, template_fbx_path, output_fbx):
     """Generate Blender script that uses an existing FBX skeletal mesh as template.
 
-    Strategy:
-    1. Import the new mesh (the one to rig)
-    2. Import the template FBX (which has its own mesh + armature + skin weights)
-    3. Compute bbox of new mesh and bbox of template mesh
-    4. Scale + position the template armature to match the new mesh
-    5. Delete the template mesh (we only want its armature)
-    6. Parent the new mesh to the (now scaled) template armature with auto weights
-    7. Export the result as FBX
+    Strategy (refactored to track objects by NAME, not by snapshot):
+    1. Import the template FBX FIRST, tag all its objects
+    2. Import the new mesh
+    3. The non-tagged objects are the new mesh
+    4. Scale/align template armature to match new mesh bbox
+    5. Delete template's mesh objects
+    6. Parent new mesh to template armature with ARMATURE_AUTO weights
+    7. Export
     """
     return f'''
 import bpy
 import math
 from mathutils import Vector
 
+print("AUTORIG: ===== START =====", flush=True)
+
 # ========== CLEAR SCENE ==========
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
+print("AUTORIG: scene cleared", flush=True)
+
+# ========== IMPORT TEMPLATE FBX FIRST (so we can tag its objects) ==========
+template_path = {json.dumps(template_fbx_path.replace(chr(92), "/"))}
+print(f"AUTORIG: Importing TEMPLATE first: {{template_path}}", flush=True)
+bpy.ops.import_scene.fbx(filepath=template_path)
+
+# Tag all template objects with a custom marker
+template_armature = None
+template_meshes = []
+for o in list(bpy.context.scene.objects):
+    o["_fabmesh_template"] = True
+    if o.type == 'ARMATURE':
+        template_armature = o
+    elif o.type == 'MESH':
+        template_meshes.append(o)
+
+if not template_armature:
+    raise RuntimeError(f"Template FBX has no ARMATURE: {{template_path}}")
+
+print(f"AUTORIG: template loaded - armature='{{template_armature.name}}' bones={{len(template_armature.data.bones)}} meshes={{len(template_meshes)}}", flush=True)
+
+# Compute template bbox from its first mesh (or from armature bones if no mesh)
+if template_meshes:
+    bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
+else:
+    bb = []
+    for b in template_armature.data.bones:
+        bb.append(template_armature.matrix_world @ b.head_local)
+        bb.append(template_armature.matrix_world @ b.tail_local)
+
+t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
+t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
+t_size = t_max - t_min
+t_center = (t_min + t_max) / 2
+t_height = max(t_size.x, t_size.y, t_size.z)
+t_up_idx = [t_size.x, t_size.y, t_size.z].index(t_height)
+print(f"AUTORIG: template bbox size={{tuple(t_size)}} center={{tuple(t_center)}} up=Z[{{t_up_idx}}]", flush=True)
 
 # ========== IMPORT NEW MESH (to be rigged) ==========
 new_mesh_path = {json.dumps(mesh_path.replace(chr(92), "/"))}
 ext = new_mesh_path.rsplit('.', 1)[-1].lower()
-print(f"AUTORIG: Importing new mesh {{new_mesh_path}}", flush=True)
+print(f"AUTORIG: Importing NEW mesh: {{new_mesh_path}}", flush=True)
 
 if ext in ('glb', 'gltf'):
     bpy.ops.import_scene.gltf(filepath=new_mesh_path)
@@ -100,9 +140,11 @@ elif ext == 'obj':
 elif ext == 'stl':
     bpy.ops.import_mesh.stl(filepath=new_mesh_path)
 
-new_meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+# Find new mesh objects (those WITHOUT the template marker)
+new_meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH' and not o.get("_fabmesh_template")]
 if not new_meshes:
-    raise RuntimeError("No mesh found in new mesh import")
+    raise RuntimeError("No mesh found in new mesh import (or all were tagged as template)")
+print(f"AUTORIG: new meshes imported: {{[o.name for o in new_meshes]}}", flush=True)
 
 # Join all if multiple
 if len(new_meshes) > 1:

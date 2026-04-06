@@ -197,13 +197,15 @@
                   <input type="range" id="inpaint-dilate" min="0" max="40" value="15" />
                   <span id="inpaint-dilate-val">15px</span>
                 </div>
-                <button id="btn-inpaint" class="refine-btn">Auto Inpaint</button>
+                <button id="btn-inpaint" class="refine-btn" disabled>Auto Inpaint</button>
+                <button id="btn-draw-mask" class="secondary-btn" style="margin-top: 6px; width: 100%;" title="Draw on the image to mask an area to remove">&#9999; Draw mask manually</button>
               </div>
 
               <!-- TOOLS: quick actions -->
               <div class="refine-method-content hidden" data-method-content="tools">
                 <p class="refine-hint">Quick image operations.</p>
                 <button id="btn-remove-bg" class="secondary-btn">Remove background</button>
+                <button id="btn-clone-stamp" class="secondary-btn" title="Clone Stamp tool (L) - Ctrl+click to set source, then paint to clone">&#128203; Clone Stamp</button>
               </div>
             </div>
           </div>
@@ -506,6 +508,43 @@
     <div id="lightbox" class="modal hidden" onclick="this.classList.add('hidden')">
       <img id="lightbox-img" />
       <button id="lightbox-close" onclick="document.getElementById('lightbox').classList.add('hidden')">&#10005;</button>
+    </div>
+
+    <!-- Clone Stamp Modal -->
+    <div id="clone-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Clone Stamp</h3>
+          <button id="clone-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Ctrl+Click</strong> to set source point &nbsp;|&nbsp;
+          <strong>Click & drag</strong> to clone &nbsp;|&nbsp;
+          <strong>Z</strong> to undo
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px;">Brush:
+            <input type="range" id="clone-brush-size" min="5" max="200" value="50" style="vertical-align:middle;" />
+            <span id="clone-brush-val" style="min-width:30px;">50</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px;">Hardness:
+            <input type="range" id="clone-hardness" min="0" max="100" value="50" style="vertical-align:middle;" />
+            <span id="clone-hardness-val" style="min-width:30px;">50</span>
+          </label>
+          <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
+          <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
+        </div>
+        <div id="clone-canvas-container" style="position: relative; flex: 1; display: flex; justify-content: center; align-items: center; overflow: auto; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
+          <canvas id="clone-canvas" style="cursor: crosshair; background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5);"></canvas>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
+          <div style="display:flex; gap:8px;">
+            <button id="clone-cancel" class="secondary-btn">Cancel</button>
+            <button id="clone-save" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Save as new version</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="confirm-modal" class="modal hidden">
@@ -1861,7 +1900,8 @@
             completeJob(job.id, true);
             showLog('Rigged FBX created: ' + r.filename, 'success');
             API.showNotification({ title: 'FabMesh - Rig Ready', body: r.filename });
-            await refreshActiveGallery();
+            // Refresh + auto-select the new rigged FBX
+            await refreshAndSelectMesh(r.path);
             // Show post-process section
             document.getElementById('rig-post-section')?.classList.remove('hidden');
           } else {
@@ -1888,6 +1928,21 @@
         }
       } catch (e) {
         console.error('refreshActiveGallery failed:', e);
+      }
+    }
+
+    // Helper: refresh gallery + auto-select a mesh by its path
+    async function refreshAndSelectMesh(meshPath) {
+      if (!meshPath) { await refreshActiveGallery(); return; }
+      await refreshActiveGallery();
+      // Normalize path for comparison (Windows backslashes vs forward)
+      const normalize = (p) => p.replace(/\\/g, '/').toLowerCase();
+      const targetNorm = normalize(meshPath);
+      const idx = meshList.findIndex(m => normalize(m.path) === targetNorm);
+      if (idx >= 0 && window._selectMesh) {
+        await window._selectMesh(idx);
+      } else {
+        console.warn('refreshAndSelectMesh: mesh not found in list:', meshPath);
       }
     }
 
@@ -2482,6 +2537,245 @@
     document.getElementById('inpaint-dilate').addEventListener('input', (e) => {
       document.getElementById('inpaint-dilate-val').textContent = e.target.value + 'px';
     });
+
+    // Disable Auto Inpaint button if target is empty
+    const inpaintTargetInput = document.getElementById('inpaint-target');
+    const btnInpaintEl = document.getElementById('btn-inpaint');
+    if (inpaintTargetInput && btnInpaintEl) {
+      const updateInpaintBtn = () => {
+        btnInpaintEl.disabled = !inpaintTargetInput.value.trim();
+      };
+      inpaintTargetInput.addEventListener('input', updateInpaintBtn);
+      updateInpaintBtn();
+    }
+
+    // ========== CLONE STAMP MODAL ==========
+    const cloneModal = document.getElementById('clone-modal');
+    const cloneCanvas = document.getElementById('clone-canvas');
+    const cloneCtx = cloneCanvas?.getContext('2d', { willReadFrequently: true });
+    let cloneState = {
+      sourcePoint: null,    // {x,y} in canvas coords
+      sourceImageData: null,
+      isDown: false,
+      lastPoint: null,
+      offset: null,         // {dx,dy} from source to first stamp
+      undoStack: [],
+      brushSize: 50,
+      hardness: 50,
+    };
+
+    function openCloneStamp() {
+      if (!selectedImagePath) {
+        showLog('Select an image first', 'error');
+        return;
+      }
+      cloneModal.classList.remove('hidden');
+      const img = new Image();
+      img.onload = () => {
+        // Fit canvas to image with reasonable max size
+        const maxW = window.innerWidth * 0.85;
+        const maxH = window.innerHeight * 0.65;
+        let w = img.width, h = img.height;
+        const scale = Math.min(maxW / w, maxH / h, 1);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        cloneCanvas.width = img.width;
+        cloneCanvas.height = img.height;
+        cloneCanvas.style.width = w + 'px';
+        cloneCanvas.style.height = h + 'px';
+        cloneCtx.drawImage(img, 0, 0);
+        cloneState.sourceImageData = cloneCtx.getImageData(0, 0, img.width, img.height);
+        cloneState.sourcePoint = null;
+        cloneState.offset = null;
+        cloneState.undoStack = [];
+        cloneState.lastPoint = null;
+        document.getElementById('clone-status').textContent = 'No source point set - Ctrl+click to set source';
+      };
+      img.src = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+
+    function getCanvasCoords(evt) {
+      const rect = cloneCanvas.getBoundingClientRect();
+      const scaleX = cloneCanvas.width / rect.width;
+      const scaleY = cloneCanvas.height / rect.height;
+      return {
+        x: Math.round((evt.clientX - rect.left) * scaleX),
+        y: Math.round((evt.clientY - rect.top) * scaleY),
+      };
+    }
+
+    function pushUndo() {
+      try {
+        cloneState.undoStack.push(cloneCtx.getImageData(0, 0, cloneCanvas.width, cloneCanvas.height));
+        if (cloneState.undoStack.length > 20) cloneState.undoStack.shift();
+      } catch (e) {}
+    }
+
+    function cloneStampPaint(x, y) {
+      if (!cloneState.sourcePoint || !cloneState.sourceImageData) return;
+      const r = cloneState.brushSize / 2;
+      const hardness = cloneState.hardness / 100;
+      const sx0 = x + cloneState.offset.dx;
+      const sy0 = y + cloneState.offset.dy;
+      // Read source pixels from cached imageData
+      const src = cloneState.sourceImageData;
+      const dst = cloneCtx.getImageData(
+        Math.max(0, x - r), Math.max(0, y - r),
+        Math.min(cloneCanvas.width - Math.max(0, x - r), r * 2),
+        Math.min(cloneCanvas.height - Math.max(0, y - r), r * 2)
+      );
+      const dW = dst.width;
+      const dH = dst.height;
+      const ox = Math.max(0, x - r);
+      const oy = Math.max(0, y - r);
+
+      for (let py = 0; py < dH; py++) {
+        for (let px = 0; px < dW; px++) {
+          const dx = (ox + px) - x;
+          const dy = (oy + py) - y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > r) continue;
+          // Soft brush: 1 at center, 0 at edge, hardness controls falloff
+          const t = dist / r;
+          let a = 1 - t * t;
+          a *= hardness + (1 - hardness) * (1 - t);
+          if (a <= 0) continue;
+
+          const sxi = (ox + px) + cloneState.offset.dx;
+          const syi = (oy + py) + cloneState.offset.dy;
+          if (sxi < 0 || syi < 0 || sxi >= src.width || syi >= src.height) continue;
+
+          const sIdx = (syi * src.width + sxi) * 4;
+          const dIdx = (py * dW + px) * 4;
+          dst.data[dIdx]     = dst.data[dIdx]     * (1 - a) + src.data[sIdx]     * a;
+          dst.data[dIdx + 1] = dst.data[dIdx + 1] * (1 - a) + src.data[sIdx + 1] * a;
+          dst.data[dIdx + 2] = dst.data[dIdx + 2] * (1 - a) + src.data[sIdx + 2] * a;
+          dst.data[dIdx + 3] = 255;
+        }
+      }
+      cloneCtx.putImageData(dst, ox, oy);
+    }
+
+    if (cloneCanvas) {
+      cloneCanvas.addEventListener('mousedown', (e) => {
+        const p = getCanvasCoords(e);
+        if (e.ctrlKey || e.metaKey) {
+          // Set source point
+          cloneState.sourcePoint = p;
+          cloneState.offset = null;
+          document.getElementById('clone-status').textContent = `Source set at (${p.x}, ${p.y}) - now click & drag to clone`;
+          return;
+        }
+        if (!cloneState.sourcePoint) {
+          showLog('Set source first with Ctrl+Click', 'error');
+          return;
+        }
+        // First stamp: compute offset from source point
+        cloneState.offset = {
+          dx: cloneState.sourcePoint.x - p.x,
+          dy: cloneState.sourcePoint.y - p.y,
+        };
+        pushUndo();
+        cloneState.isDown = true;
+        cloneState.lastPoint = p;
+        cloneStampPaint(p.x, p.y);
+      });
+
+      cloneCanvas.addEventListener('mousemove', (e) => {
+        if (!cloneState.isDown) return;
+        const p = getCanvasCoords(e);
+        // Interpolate between last and current point for smooth strokes
+        const dx = p.x - cloneState.lastPoint.x;
+        const dy = p.y - cloneState.lastPoint.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const step = Math.max(1, cloneState.brushSize / 4);
+        const steps = Math.ceil(dist / step);
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          cloneStampPaint(
+            Math.round(cloneState.lastPoint.x + dx * t),
+            Math.round(cloneState.lastPoint.y + dy * t)
+          );
+        }
+        cloneState.lastPoint = p;
+      });
+
+      window.addEventListener('mouseup', () => {
+        cloneState.isDown = false;
+      });
+
+      // Brush size slider
+      const brushSlider = document.getElementById('clone-brush-size');
+      brushSlider.addEventListener('input', (e) => {
+        cloneState.brushSize = parseInt(e.target.value);
+        document.getElementById('clone-brush-val').textContent = e.target.value;
+      });
+      const hardSlider = document.getElementById('clone-hardness');
+      hardSlider.addEventListener('input', (e) => {
+        cloneState.hardness = parseInt(e.target.value);
+        document.getElementById('clone-hardness-val').textContent = e.target.value;
+      });
+
+      // Undo
+      const undoFn = () => {
+        if (cloneState.undoStack.length > 0) {
+          const last = cloneState.undoStack.pop();
+          cloneCtx.putImageData(last, 0, 0);
+        }
+      };
+      document.getElementById('clone-undo').addEventListener('click', undoFn);
+
+      // Keyboard shortcuts (Z for undo)
+      document.addEventListener('keydown', (e) => {
+        if (cloneModal.classList.contains('hidden')) return;
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          undoFn();
+        } else if (e.key === 'Escape') {
+          cloneModal.classList.add('hidden');
+        }
+      });
+
+      document.getElementById('clone-reset').addEventListener('click', () => {
+        if (cloneState.sourceImageData) {
+          cloneCtx.putImageData(cloneState.sourceImageData, 0, 0);
+          cloneState.undoStack = [];
+        }
+      });
+
+      document.getElementById('clone-cancel').addEventListener('click', () => cloneModal.classList.add('hidden'));
+      document.getElementById('clone-modal-close').addEventListener('click', () => cloneModal.classList.add('hidden'));
+
+      // Save the cloned result as a new image version
+      document.getElementById('clone-save').addEventListener('click', async () => {
+        if (!selectedImagePath) return;
+        const dataUrl = cloneCanvas.toDataURL('image/png');
+        const job = addJob('Clone Stamp save', 'clone', selectedImagePath);
+        job.progress = 50;
+        renderJobs();
+        try {
+          const result = await API.saveImageDataUrl({ basePath: selectedImagePath, dataUrl, suffix: 'cloned' });
+          if (result?.success) {
+            completeJob(job.id, true);
+            showLog('Cloned image saved: ' + result.filename, 'success');
+            cloneModal.classList.add('hidden');
+            await refreshActiveGallery();
+          } else {
+            completeJob(job.id, false);
+            showLog('Save failed: ' + (result?.error || 'unknown'), 'error');
+          }
+        } catch (e) {
+          completeJob(job.id, false);
+          showLog('Save error: ' + e.message, 'error');
+        }
+      });
+    }
+
+    // Wire the Clone Stamp button
+    const btnCloneStamp = document.getElementById('btn-clone-stamp');
+    if (btnCloneStamp) {
+      btnCloneStamp.addEventListener('click', openCloneStamp);
+    }
 
     document.getElementById('btn-inpaint').addEventListener('click', async () => {
       if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }

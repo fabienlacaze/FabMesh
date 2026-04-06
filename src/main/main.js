@@ -357,6 +357,67 @@ ipcMain.handle('cancel-job', (event, jobId) => {
   return false;
 });
 
+// Save a PNG dataUrl as a new versioned image next to basePath
+ipcMain.handle('save-image-data-url', (event, { basePath, dataUrl, suffix }) => {
+  try {
+    if (!basePath || !dataUrl) return { success: false, error: 'Missing args' };
+    if (!isPathAllowed(basePath)) return { success: false, error: 'Path not allowed' };
+    const dir = path.dirname(basePath);
+    const ext = '.png';
+    const base = path.basename(basePath, path.extname(basePath));
+    const ts = Date.now();
+    const outPath = path.join(dir, `${base}_${suffix || 'edit'}_${ts}${ext}`);
+    const b64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+    fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
+    return { success: true, path: outPath, filename: path.basename(outPath) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Image adjustments (auto_levels, auto_contrast)
+ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
+  try {
+    if (!imagePath || !fs.existsSync(imagePath)) {
+      return { success: false, error: 'Image not found' };
+    }
+    if (!isPathAllowed(imagePath)) {
+      return { success: false, error: 'Path not allowed' };
+    }
+    const validOps = ['auto_levels', 'auto_contrast'];
+    if (!validOps.includes(operation)) {
+      return { success: false, error: 'Invalid operation' };
+    }
+
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const ts = Date.now();
+    const newImagePath = path.join(dir, `${base}_${operation}_${ts}${ext}`);
+
+    const script = path.join(__dirname, '..', '..', 'scripts', 'image_adjust_bridge.py');
+
+    return await new Promise((resolve) => {
+      const proc = execFile('python', [script, operation, imagePath, newImagePath], {
+        timeout: 60000,
+        maxBuffer: 10 * 1024 * 1024
+      }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({ success: false, error: error.message, stderr });
+        } else if (fs.existsSync(newImagePath)) {
+          resolve({ success: true, newPath: newImagePath });
+        } else {
+          resolve({ success: false, error: 'Output not created', stdout, stderr });
+        }
+      });
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+      proc.on('error', e => resolve({ success: false, error: e.message }));
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // List available SKM templates (custom FBX) and generic templates from registry
 ipcMain.handle('list-rig-templates', () => {
   try {
