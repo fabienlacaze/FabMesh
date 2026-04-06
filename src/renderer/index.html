@@ -395,9 +395,19 @@
                   <span class="lm-label">Head</span>
                   <span class="lm-status">not set</span>
                 </button>
+                <button class="lm-btn" data-lm="neck" data-color="#ff8844">
+                  <span class="lm-color" style="background:#ff8844"></span>
+                  <span class="lm-label">Neck</span>
+                  <span class="lm-status">not set</span>
+                </button>
                 <button class="lm-btn" data-lm="hand_l" data-color="#44ff44">
                   <span class="lm-color" style="background:#44ff44"></span>
                   <span class="lm-label">Left hand</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="elbow_l" data-color="#88ff88">
+                  <span class="lm-color" style="background:#88ff88"></span>
+                  <span class="lm-label">Left elbow</span>
                   <span class="lm-status">not set</span>
                 </button>
                 <button class="lm-btn" data-lm="hand_r" data-color="#44aa44">
@@ -405,19 +415,34 @@
                   <span class="lm-label">Right hand</span>
                   <span class="lm-status">not set</span>
                 </button>
-                <button class="lm-btn" data-lm="foot_l" data-color="#4444ff">
-                  <span class="lm-color" style="background:#4444ff"></span>
-                  <span class="lm-label">Left foot</span>
-                  <span class="lm-status">not set</span>
-                </button>
-                <button class="lm-btn" data-lm="foot_r" data-color="#4477ff">
-                  <span class="lm-color" style="background:#4477ff"></span>
-                  <span class="lm-label">Right foot</span>
+                <button class="lm-btn" data-lm="elbow_r" data-color="#66cc66">
+                  <span class="lm-color" style="background:#66cc66"></span>
+                  <span class="lm-label">Right elbow</span>
                   <span class="lm-status">not set</span>
                 </button>
                 <button class="lm-btn" data-lm="hips" data-color="#ffaa00">
                   <span class="lm-color" style="background:#ffaa00"></span>
                   <span class="lm-label">Hips</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="knee_l" data-color="#88aaff">
+                  <span class="lm-color" style="background:#88aaff"></span>
+                  <span class="lm-label">Left knee</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="foot_l" data-color="#4444ff">
+                  <span class="lm-color" style="background:#4444ff"></span>
+                  <span class="lm-label">Left foot</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="knee_r" data-color="#6688cc">
+                  <span class="lm-color" style="background:#6688cc"></span>
+                  <span class="lm-label">Right knee</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="foot_r" data-color="#4477ff">
+                  <span class="lm-color" style="background:#4477ff"></span>
+                  <span class="lm-label">Right foot</span>
                   <span class="lm-status">not set</span>
                 </button>
               </div>
@@ -1950,10 +1975,13 @@
       try {
         const data = await API.loadLandmarks?.({ meshPath: selectedMesh.path });
         if (data && typeof data === 'object') {
-          // Recreate markers
           const colorMap = {
-            head: 0xff4444, hand_l: 0x44ff44, hand_r: 0x44aa44,
-            foot_l: 0x4444ff, foot_r: 0x4477ff, hips: 0xffaa00
+            head: 0xff4444, neck: 0xff8844,
+            hand_l: 0x44ff44, elbow_l: 0x88ff88,
+            hand_r: 0x44aa44, elbow_r: 0x66cc66,
+            foot_l: 0x4444ff, knee_l: 0x88aaff,
+            foot_r: 0x4477ff, knee_r: 0x6688cc,
+            hips: 0xffaa00,
           };
           for (const k in data) {
             const p = data[k];
@@ -1983,38 +2011,56 @@
       if (size.z > size.y && size.z > size.x) upAxis = 'z';
       else if (size.x > size.y && size.x > size.z) upAxis = 'x';
 
-      // For Y-up (typical Hunyuan3D/glTF) or Z-up (UE)
       const colorMap = {
-        head: 0xff4444, hand_l: 0x44ff44, hand_r: 0x44aa44,
-        foot_l: 0x4444ff, foot_r: 0x4477ff, hips: 0xffaa00
+        head: 0xff4444, neck: 0xff8844,
+        hand_l: 0x44ff44, elbow_l: 0x88ff88,
+        hand_r: 0x44aa44, elbow_r: 0x66cc66,
+        foot_l: 0x4444ff, knee_l: 0x88aaff,
+        foot_r: 0x4477ff, knee_r: 0x6688cc,
+        hips: 0xffaa00,
       };
 
-      let head, hand_l, hand_r, foot_l, foot_r, hips;
+      let head, neck, hand_l, hand_r, elbow_l, elbow_r, foot_l, foot_r, knee_l, knee_r, hips;
       if (upAxis === 'y') {
         head   = { x: center.x, y: max.y * 0.97, z: center.z };
-        foot_l = { x: center.x + size.x * 0.15, y: min.y * 0.97 + size.y * 0.02, z: center.z };
-        foot_r = { x: center.x - size.x * 0.15, y: min.y * 0.97 + size.y * 0.02, z: center.z };
+        neck   = { x: center.x, y: max.y * 0.88, z: center.z };
+        foot_l = { x: center.x + size.x * 0.15, y: min.y + size.y * 0.02, z: center.z };
+        foot_r = { x: center.x - size.x * 0.15, y: min.y + size.y * 0.02, z: center.z };
+        knee_l = { x: center.x + size.x * 0.15, y: min.y + size.y * 0.27, z: center.z };
+        knee_r = { x: center.x - size.x * 0.15, y: min.y + size.y * 0.27, z: center.z };
         hand_l = { x: max.x * 0.93, y: center.y, z: center.z };
         hand_r = { x: min.x * 0.93, y: center.y, z: center.z };
+        elbow_l= { x: center.x + size.x * 0.32, y: center.y + size.y * 0.05, z: center.z };
+        elbow_r= { x: center.x - size.x * 0.32, y: center.y + size.y * 0.05, z: center.z };
         hips   = { x: center.x, y: min.y + size.y * 0.55, z: center.z };
       } else if (upAxis === 'z') {
         head   = { x: center.x, y: center.y, z: max.z * 0.97 };
-        foot_l = { x: center.x + size.x * 0.15, y: center.y, z: min.z * 0.97 + size.z * 0.02 };
-        foot_r = { x: center.x - size.x * 0.15, y: center.y, z: min.z * 0.97 + size.z * 0.02 };
+        neck   = { x: center.x, y: center.y, z: max.z * 0.88 };
+        foot_l = { x: center.x + size.x * 0.15, y: center.y, z: min.z + size.z * 0.02 };
+        foot_r = { x: center.x - size.x * 0.15, y: center.y, z: min.z + size.z * 0.02 };
+        knee_l = { x: center.x + size.x * 0.15, y: center.y, z: min.z + size.z * 0.27 };
+        knee_r = { x: center.x - size.x * 0.15, y: center.y, z: min.z + size.z * 0.27 };
         hand_l = { x: max.x * 0.93, y: center.y, z: center.z };
         hand_r = { x: min.x * 0.93, y: center.y, z: center.z };
+        elbow_l= { x: center.x + size.x * 0.32, y: center.y, z: center.z + size.z * 0.05 };
+        elbow_r= { x: center.x - size.x * 0.32, y: center.y, z: center.z + size.z * 0.05 };
         hips   = { x: center.x, y: center.y, z: min.z + size.z * 0.55 };
       } else {
         // X-up (rare)
         head   = { x: max.x * 0.97, y: center.y, z: center.z };
-        foot_l = { x: min.x, y: center.y + size.y * 0.15, z: center.z };
-        foot_r = { x: min.x, y: center.y - size.y * 0.15, z: center.z };
+        neck   = { x: max.x * 0.88, y: center.y, z: center.z };
+        foot_l = { x: min.x + size.x * 0.02, y: center.y + size.y * 0.15, z: center.z };
+        foot_r = { x: min.x + size.x * 0.02, y: center.y - size.y * 0.15, z: center.z };
+        knee_l = { x: min.x + size.x * 0.27, y: center.y + size.y * 0.15, z: center.z };
+        knee_r = { x: min.x + size.x * 0.27, y: center.y - size.y * 0.15, z: center.z };
         hand_l = { x: center.x, y: max.y * 0.93, z: center.z };
         hand_r = { x: center.x, y: min.y * 0.93, z: center.z };
+        elbow_l= { x: center.x, y: center.y + size.y * 0.32, z: center.z };
+        elbow_r= { x: center.x, y: center.y - size.y * 0.32, z: center.z };
         hips   = { x: min.x + size.x * 0.55, y: center.y, z: center.z };
       }
 
-      const all = { head, hand_l, hand_r, foot_l, foot_r, hips };
+      const all = { head, neck, hand_l, elbow_l, hand_r, elbow_r, foot_l, knee_l, foot_r, knee_r, hips };
       for (const k in all) {
         rigLandmarks[k] = [all[k].x, all[k].y, all[k].z];
         placeLandmarkMarker(k, all[k], colorMap[k]);
@@ -2024,36 +2070,113 @@
       showLog('Auto-detected 6 landmarks (adjust manually if needed)', 'info');
     }
 
-    // Raycast: when in landmark-arm mode and user clicks on the canvas, find the
-    // hit point on the current mesh and store it as the active landmark
+    // Raycast for landmark placement + drag
     const _raycaster = new THREE.Raycaster();
     const _ndc = new THREE.Vector2();
-    function handleViewerClickForLandmark(evt) {
-      if (!activeLandmarkBtn || !currentModel) return;
-      // Don't trigger on right-click (orbit)
-      if (evt.button !== 0) return;
+    let _draggingMarker = null; // { name, mesh, color }
+
+    function getNDC(evt) {
       const rect = canvas.getBoundingClientRect();
-      _ndc.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
-      _ndc.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
+      return [
+        ((evt.clientX - rect.left) / rect.width) * 2 - 1,
+        -((evt.clientY - rect.top) / rect.height) * 2 + 1
+      ];
+    }
+
+    function raycastMesh(evt) {
+      if (!currentModel) return null;
+      const [x, y] = getNDC(evt);
+      _ndc.set(x, y);
       _raycaster.setFromCamera(_ndc, camera);
       const meshes = [];
       currentModel.traverse(c => { if (c.isMesh) meshes.push(c); });
       const hits = _raycaster.intersectObjects(meshes, true);
-      if (hits.length === 0) return;
-      const hit = hits[0].point;
-      const name = activeLandmarkBtn.dataset.lm;
-      const color = parseInt(activeLandmarkBtn.dataset.color.replace('#', ''), 16);
-      setLandmark(name, hit, color);
-      // Disarm
-      activeLandmarkBtn.classList.remove('active');
-      activeLandmarkBtn = null;
-      canvas.style.cursor = '';
-      // Stop event so OrbitControls doesn't process it
+      return hits.length > 0 ? hits[0].point : null;
+    }
+
+    function raycastMarkers(evt) {
+      const markers = Object.entries(landmarkMarkers).map(([name, m]) => ({ name, mesh: m }));
+      if (markers.length === 0) return null;
+      const [x, y] = getNDC(evt);
+      _ndc.set(x, y);
+      _raycaster.setFromCamera(_ndc, camera);
+      const meshObjs = markers.map(m => m.mesh).filter(Boolean);
+      const hits = _raycaster.intersectObjects(meshObjs, false);
+      if (hits.length === 0) return null;
+      // Find which name corresponds to the hit object
+      for (const m of markers) {
+        if (m.mesh === hits[0].object) return m;
+      }
+      return null;
+    }
+
+    function handleViewerMouseDown(evt) {
+      if (!currentModel || evt.button !== 0) return;
+
+      // Priority 1: armed button -> place new landmark
+      if (activeLandmarkBtn) {
+        const hit = raycastMesh(evt);
+        if (!hit) return;
+        const name = activeLandmarkBtn.dataset.lm;
+        const color = parseInt(activeLandmarkBtn.dataset.color.replace('#', ''), 16);
+        setLandmark(name, hit, color);
+        activeLandmarkBtn.classList.remove('active');
+        activeLandmarkBtn = null;
+        canvas.style.cursor = '';
+        evt.stopPropagation();
+        evt.preventDefault();
+        return;
+      }
+
+      // Priority 2: clicked on an existing marker -> start drag
+      const hitMarker = raycastMarkers(evt);
+      if (hitMarker) {
+        _draggingMarker = hitMarker;
+        canvas.style.cursor = 'grabbing';
+        // Hint that the dragged marker is the active one
+        hitMarker.mesh.material.opacity = 1.0;
+        evt.stopPropagation();
+        evt.preventDefault();
+      }
+    }
+
+    function handleViewerMouseMove(evt) {
+      if (!_draggingMarker) return;
+      const hit = raycastMesh(evt);
+      if (!hit) return;
+      // Move the marker to the new position on the mesh surface
+      _draggingMarker.mesh.position.set(hit.x, hit.y, hit.z);
+      rigLandmarks[_draggingMarker.name] = [hit.x, hit.y, hit.z];
       evt.stopPropagation();
       evt.preventDefault();
     }
-    // Bind in capture phase so we win over OrbitControls
-    canvas.addEventListener('mousedown', handleViewerClickForLandmark, true);
+
+    function handleViewerMouseUp(evt) {
+      if (_draggingMarker) {
+        // Persist the new position
+        try {
+          _draggingMarker.mesh.material.opacity = 0.85;
+        } catch (e) {}
+        saveLandmarksForCurrentMesh();
+        _draggingMarker = null;
+        canvas.style.cursor = '';
+        evt.stopPropagation();
+        evt.preventDefault();
+      }
+    }
+
+    canvas.addEventListener('mousedown', handleViewerMouseDown, true);
+    canvas.addEventListener('mousemove', handleViewerMouseMove, true);
+    canvas.addEventListener('mouseup', handleViewerMouseUp, true);
+    // Window-level mouseup as safety net
+    window.addEventListener('mouseup', () => {
+      if (_draggingMarker) {
+        try { _draggingMarker.mesh.material.opacity = 0.85; } catch (e) {}
+        saveLandmarksForCurrentMesh();
+        _draggingMarker = null;
+        canvas.style.cursor = '';
+      }
+    });
 
     // Wire landmark buttons
     document.querySelectorAll('.lm-btn').forEach(btn => {

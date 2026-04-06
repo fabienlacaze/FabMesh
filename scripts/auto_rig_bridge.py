@@ -288,13 +288,18 @@ bpy.context.view_layer.objects.active = template_armature
 # Bone name patterns (case-insensitive)
 ARM_L_NAMES = ['upperarm_l', 'LeftArm', 'mixamorig:LeftArm', 'Left_Shoulder', 'shoulder_l']
 ARM_R_NAMES = ['upperarm_r', 'RightArm', 'mixamorig:RightArm', 'Right_Shoulder', 'shoulder_r']
+LOWER_ARM_L_NAMES = ['lowerarm_l', 'LeftForeArm', 'mixamorig:LeftForeArm', 'forearm_l', 'elbow_l']
+LOWER_ARM_R_NAMES = ['lowerarm_r', 'RightForeArm', 'mixamorig:RightForeArm', 'forearm_r', 'elbow_r']
 HAND_L_NAMES = ['hand_l', 'LeftHand', 'mixamorig:LeftHand', 'wrist_l']
 HAND_R_NAMES = ['hand_r', 'RightHand', 'mixamorig:RightHand', 'wrist_r']
 LEG_L_NAMES = ['thigh_l', 'LeftUpLeg', 'mixamorig:LeftUpLeg', 'leg_l', 'upperleg_l']
 LEG_R_NAMES = ['thigh_r', 'RightUpLeg', 'mixamorig:RightUpLeg', 'leg_r', 'upperleg_r']
+CALF_L_NAMES = ['calf_l', 'LeftLeg', 'mixamorig:LeftLeg', 'shin_l', 'lowerleg_l', 'knee_l']
+CALF_R_NAMES = ['calf_r', 'RightLeg', 'mixamorig:RightLeg', 'shin_r', 'lowerleg_r', 'knee_r']
 FOOT_L_NAMES = ['foot_l', 'LeftFoot', 'mixamorig:LeftFoot', 'ankle_l']
 FOOT_R_NAMES = ['foot_r', 'RightFoot', 'mixamorig:RightFoot', 'ankle_r']
 HEAD_NAMES = ['head', 'Head', 'mixamorig:Head']
+NECK_NAMES = ['neck', 'neck_01', 'Neck', 'mixamorig:Neck']
 HIPS_NAMES = ['pelvis', 'hips', 'Hips', 'mixamorig:Hips', 'root_pelvis']
 
 def find_edit_bone(names):
@@ -366,17 +371,46 @@ if LANDMARKS:
         print(f"AUTORIG: aimed {{root.name}} -> {{tuple(target)}} ok={{ok}}", flush=True)
         return ok
 
-    # Arms: aim shoulder chain at the hand landmark
-    if 'hand_l' in LANDMARKS:
+    # Two-pass aiming for arms/legs:
+    # 1) Upper bone aims toward the joint landmark (elbow/knee)
+    # 2) Lower bone aims toward the end landmark (hand/foot)
+    # If joint not provided, fall back to aiming the upper at the end.
+
+    # Left arm
+    if 'elbow_l' in LANDMARKS:
+        aim_chain_at(ARM_L_NAMES, LANDMARKS['elbow_l'])
+        if 'hand_l' in LANDMARKS:
+            aim_chain_at(LOWER_ARM_L_NAMES, LANDMARKS['hand_l'])
+    elif 'hand_l' in LANDMARKS:
         aim_chain_at(ARM_L_NAMES, LANDMARKS['hand_l'])
-    if 'hand_r' in LANDMARKS:
+
+    # Right arm
+    if 'elbow_r' in LANDMARKS:
+        aim_chain_at(ARM_R_NAMES, LANDMARKS['elbow_r'])
+        if 'hand_r' in LANDMARKS:
+            aim_chain_at(LOWER_ARM_R_NAMES, LANDMARKS['hand_r'])
+    elif 'hand_r' in LANDMARKS:
         aim_chain_at(ARM_R_NAMES, LANDMARKS['hand_r'])
-    # Legs: aim thigh chain at the foot landmark
-    if 'foot_l' in LANDMARKS:
+
+    # Left leg
+    if 'knee_l' in LANDMARKS:
+        aim_chain_at(LEG_L_NAMES, LANDMARKS['knee_l'])
+        if 'foot_l' in LANDMARKS:
+            aim_chain_at(CALF_L_NAMES, LANDMARKS['foot_l'])
+    elif 'foot_l' in LANDMARKS:
         aim_chain_at(LEG_L_NAMES, LANDMARKS['foot_l'])
-    if 'foot_r' in LANDMARKS:
+
+    # Right leg
+    if 'knee_r' in LANDMARKS:
+        aim_chain_at(LEG_R_NAMES, LANDMARKS['knee_r'])
+        if 'foot_r' in LANDMARKS:
+            aim_chain_at(CALF_R_NAMES, LANDMARKS['foot_r'])
+    elif 'foot_r' in LANDMARKS:
         aim_chain_at(LEG_R_NAMES, LANDMARKS['foot_r'])
-    # Head: aim head bone toward the head landmark
+
+    # Neck + head
+    if 'neck' in LANDMARKS:
+        aim_chain_at(NECK_NAMES, LANDMARKS['neck'])
     if 'head' in LANDMARKS:
         aim_chain_at(HEAD_NAMES, LANDMARKS['head'])
 
