@@ -222,6 +222,10 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
       proc.stdout?.on('data', d => {
         if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
       });
+      proc.stderr?.on('data', d => {
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+      });
+      proc.on('error', e => resolve({ success: false, error: e.message }));
     });
   } catch (e) {
     return { success: false, error: e.message };
@@ -251,6 +255,10 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
       proc.stdout?.on('data', d => {
         if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
       });
+      proc.stderr?.on('data', d => {
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+      });
+      proc.on('error', e => resolve({ success: false, error: e.message }));
     });
 
     if (localResult.success) {
@@ -1024,18 +1032,18 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     console.log('IMAGE-TO-3D fixedArgs:', JSON.stringify(fixedArgs));
     fs.writeFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `imagePath: ${imagePath}\nfixedArgs: ${JSON.stringify(fixedArgs)}\n`);
     const result = await new Promise((resolve, reject) => {
+      let stdoutBuf = '';
+      let stderrBuf = '';
+      let lastSent = 0;
       const proc = execFile('python', fixedArgs, {
         timeout: 600000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
-        if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created', stdout, stderr }); return; }
+        if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created (Python did not produce output)', stdout, stderr }); return; }
         const stats = fs.statSync(meshPath);
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, stdout });
       });
-      // Throttled stdout forwarding to prevent IPC flooding
-      let stdoutBuf = '';
-      let lastSent = 0;
       const flushStdout = () => {
         if (stdoutBuf && mainWindow) {
           mainWindow.webContents.send('ai3d-progress', stdoutBuf);
@@ -1043,12 +1051,22 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
           lastSent = Date.now();
         }
       };
-      proc.stdout.on('data', d => {
+      proc.stdout?.on('data', d => {
         stdoutBuf += d.toString();
         const now = Date.now();
         if (now - lastSent > 200) flushStdout();
       });
-      proc.stdout.on('end', flushStdout);
+      proc.stdout?.on('end', flushStdout);
+      // Forward stderr too - Python errors were silently ignored!
+      proc.stderr?.on('data', d => {
+        const s = d.toString();
+        stderrBuf += s;
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + s);
+      });
+      proc.on('error', err => {
+        console.error('image-to-3d process error:', err);
+        reject({ error: err.message, stdout: stdoutBuf, stderr: stderrBuf });
+      });
     });
 
     return { success: true, ...result };

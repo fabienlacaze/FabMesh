@@ -382,6 +382,28 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     // ========== THREE.JS VIEWER ==========
+    // ========== SAFE API WRAPPER ==========
+    // Wraps all window.meshyAPI.* calls with try/catch to prevent silent
+    // failures from breaking the entire init chain (ReferenceError, etc.).
+    window.safeAPI = new Proxy({}, {
+      get(_, method) {
+        return async (...args) => {
+          try {
+            if (!window.meshyAPI || typeof window.meshyAPI[method] !== 'function') {
+              console.error(`[safeAPI] Missing method: ${method}`);
+              return null;
+            }
+            return await window.meshyAPI[method](...args);
+          } catch (e) {
+            console.error(`[safeAPI] ${method} failed:`, e);
+            return null;
+          }
+        };
+      }
+    });
+    // Shortcut
+    const API = window.safeAPI;
+
     let scene, camera, renderer, controls, gridHelper, currentModel;
     let isWireframe = false, isGridVisible = true;
 
@@ -700,13 +722,19 @@
     };
 
     window._selectMesh = async (i) => {
-      selectedMesh = meshList[i];
+      // Capture a stable reference (not dependent on meshList index which may shift)
+      const target = meshList[i];
+      if (!target) { console.warn('_selectMesh: index out of range', i); return; }
+      selectedMesh = target;
       refreshGallery();
       document.getElementById('export-section').style.display = 'block';
-      const buf = await window.meshyAPI.readMeshFile(selectedMesh.path);
+      const buf = await API.readMeshFile(target.path);
       if (buf) {
-        await loadMeshFromBuffer(buf, selectedMesh.format, selectedMesh.path);
-        saveMeshThumbnail(selectedMesh.path);
+        await loadMeshFromBuffer(buf, target.format, target.path);
+        saveMeshThumbnail(target.path);
+      } else {
+        showLog('Could not read mesh file', 'error');
+        return;
       }
 
       // Extract project name from filename (remove _timestamp.ext)
@@ -905,10 +933,8 @@
       }, 4000);
     }
 
-    let config = { blenderPath: null };
-    try {
-      config = await window.meshyAPI.getConfig() || config;
-    } catch(e) { console.warn('getConfig failed:', e); }
+    // Initial config + first gallery render (fully protected)
+    const config = (await API.getConfig()) || { blenderPath: null };
     const bpd = document.getElementById('blender-path-display');
     if (bpd) {
       bpd.textContent = config.blenderPath || 'Not set';
@@ -917,11 +943,7 @@
 
     // Define gallery click handlers before first render
     window._selectGalleryImage = window._selectGalleryImage || function() {};
-    try {
-      await refreshGalleryImages();
-    } catch(e) {
-      console.error('Initial gallery refresh failed:', e);
-    }
+    try { await refreshGalleryImages(); } catch(e) { console.error('Initial gallery refresh failed:', e); }
 
     // Generate button
     document.getElementById('btn-generate').addEventListener('click', async () => {
