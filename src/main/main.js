@@ -203,9 +203,14 @@ app.whenReady().then(() => {
 });
 app.on('window-all-closed', () => {
   stopSdxlServer();
+  // Free WSL memory (~10-20 GB held by Hunyuan3D texgen)
+  try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
   app.quit();
 });
-app.on('before-quit', () => stopSdxlServer());
+app.on('before-quit', () => {
+  stopSdxlServer();
+  try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
+});
 
 // Show file in explorer
 // Image history: backup current image before modifying
