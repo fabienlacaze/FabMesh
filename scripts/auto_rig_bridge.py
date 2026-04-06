@@ -273,113 +273,86 @@ for tm in list(template_meshes):
     bpy.data.objects.remove(tm, do_unlink=True)
 template_meshes = []
 
-# ===== Step 8b: Convert T-pose to A-pose by editing bone positions =====
-# Goal: rotate arm chains DOWN (toward -Z) and slightly leg chains
-# inward, so they match the mesh's actual A-pose.
-print("AUTORIG: converting skeleton to A-pose...", flush=True)
+# ===== Step 8b: Convert T-pose to A-pose via Pose mode =====
+# Use Pose mode + apply pose as rest pose. This is the most reliable
+# method because Blender handles all the math and bone roll properly.
+print("AUTORIG: converting skeleton to A-pose (pose mode)...", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
 template_armature.select_set(True)
 bpy.context.view_layer.objects.active = template_armature
-bpy.ops.object.mode_set(mode='EDIT')
 
 import math as _m
-from mathutils import Vector as _Vec
+from mathutils import Euler
 
-def find_bone_ci(name):
+def find_pose_bone_ci(name):
     target = name.lower()
-    for b in template_armature.data.edit_bones:
+    for b in template_armature.pose.bones:
         if b.name.lower() == target:
             return b
     return None
 
-def collect_chain(root_bone):
-    """Return root + all descendants."""
-    out = [root_bone]
-    def walk(b):
-        for c in b.children:
-            out.append(c)
-            walk(c)
-    walk(root_bone)
-    return out
+# Map of bone -> rotation in degrees around the GLOBAL Z axis (Blender world)
+# For A-pose orc:
+#   left arm: rotate -35 deg around the world Y axis at the bone (down-out)
+#   right arm: +35 deg
+# We do this in Pose mode so Blender computes rest delta correctly.
 
-def rotate_chain_toward(root_bone, target_dir, blend=1.0):
-    """Rotate the entire chain so the root bone points toward target_dir.
-    target_dir is a world-space unit vector.
-    blend (0-1) interpolates between current direction and target."""
-    if not root_bone:
-        return False
-    pivot = root_bone.head.copy()
-    cur_dir = (root_bone.tail - root_bone.head).normalized()
-    tgt = target_dir.normalized()
-    # If blend < 1, slerp between cur_dir and tgt
-    if blend < 1.0:
-        tgt = (cur_dir * (1 - blend) + tgt * blend).normalized()
-    # Build rotation that maps cur_dir -> tgt
-    axis = cur_dir.cross(tgt)
-    if axis.length < 1e-6:
-        return False  # already aligned (or opposite)
-    axis.normalize()
-    angle = _m.acos(max(-1, min(1, cur_dir.dot(tgt))))
-    from mathutils import Matrix
-    rot = Matrix.Rotation(angle, 4, axis)
+bpy.ops.object.mode_set(mode='POSE')
 
-    def transform(p):
-        return rot @ (p - pivot) + pivot
+# Clear any existing pose
+bpy.ops.pose.select_all(action='SELECT')
+bpy.ops.pose.transforms_clear()
 
-    for b in collect_chain(root_bone):
-        b.head = transform(b.head)
-        b.tail = transform(b.tail)
-    return True
-
-# Find arms and legs by common names
 arm_l_names = ['upperarm_l', 'LeftArm', 'mixamorig:LeftArm', 'Left_Shoulder', 'shoulder_l']
 arm_r_names = ['upperarm_r', 'RightArm', 'mixamorig:RightArm', 'Right_Shoulder', 'shoulder_r']
 leg_l_names = ['thigh_l', 'LeftUpLeg', 'mixamorig:LeftUpLeg', 'Left_Hip', 'leg_l', 'upperleg_l']
 leg_r_names = ['thigh_r', 'RightUpLeg', 'mixamorig:RightUpLeg', 'Right_Hip', 'leg_r', 'upperleg_r']
 
-def find_first(names):
+def find_first_pose(names):
     for n in names:
-        b = find_bone_ci(n)
+        b = find_pose_bone_ci(n)
         if b:
             return b
     return None
 
-arm_l = find_first(arm_l_names)
-arm_r = find_first(arm_r_names)
-leg_l = find_first(leg_l_names)
-leg_r = find_first(leg_r_names)
+arm_l = find_first_pose(arm_l_names)
+arm_r = find_first_pose(arm_r_names)
+leg_l = find_first_pose(leg_l_names)
+leg_r = find_first_pose(leg_r_names)
 
-# A-pose direction: arms down-and-out at ~35 deg from vertical
-# Z is up, X is left/right, Y is forward/back
-# Left arm: pointing toward (+X, 0, -Z) at 35deg from Z-axis
+def rotate_pose_bone_global(pose_bone, axis, angle_deg):
+    """Apply a global-space rotation to a pose bone."""
+    if not pose_bone:
+        return False
+    from mathutils import Matrix, Vector
+    rot_mat = Matrix.Rotation(_m.radians(angle_deg), 4, axis)
+    # Apply in armature space (works regardless of bone roll/orientation)
+    pose_bone.matrix = rot_mat @ pose_bone.matrix
+    bpy.context.view_layer.update()
+    return True
+
+# Rotate arms 35 deg around global Y to push down (left arm: -Y, right: +Y)
+# Actually we want around X to push down toward -Z: rotate around Y/X depending
+# on initial orientation. Try Y first.
 A_DEG = 35
-sin_a = _m.sin(_m.radians(A_DEG))
-cos_a = _m.cos(_m.radians(A_DEG))
-
 if arm_l:
-    print(f"AUTORIG: A-pose left arm: {{arm_l.name}}", flush=True)
-    # Direction: +X * sin(35), -Z * cos(35) -> arm goes outward+down
-    rotate_chain_toward(arm_l, _Vec((sin_a, 0, -cos_a)))
+    print(f"AUTORIG: A-pose left arm pose: {{arm_l.name}}", flush=True)
+    rotate_pose_bone_global(arm_l, 'Y', -A_DEG)
 if arm_r:
-    print(f"AUTORIG: A-pose right arm: {{arm_r.name}}", flush=True)
-    rotate_chain_toward(arm_r, _Vec((-sin_a, 0, -cos_a)))
+    print(f"AUTORIG: A-pose right arm pose: {{arm_r.name}}", flush=True)
+    rotate_pose_bone_global(arm_r, 'Y', A_DEG)
 
-# Legs: keep them mostly straight down, just slight inward angle (~5 deg)
-LEG_DEG = 5
-leg_sin = _m.sin(_m.radians(LEG_DEG))
-leg_cos = _m.cos(_m.radians(LEG_DEG))
-
-if leg_l:
-    print(f"AUTORIG: A-pose left leg: {{leg_l.name}}", flush=True)
-    # Slight inward (toward -X for left), mostly down
-    rotate_chain_toward(leg_l, _Vec((-leg_sin, 0, -leg_cos)))
-if leg_r:
-    print(f"AUTORIG: A-pose right leg: {{leg_r.name}}", flush=True)
-    rotate_chain_toward(leg_r, _Vec((leg_sin, 0, -leg_cos)))
-
-print(f"AUTORIG: A-pose done: arms L={{arm_l is not None}} R={{arm_r is not None}} legs L={{leg_l is not None}} R={{leg_r is not None}}", flush=True)
+# Apply pose as rest pose (bakes the pose into the armature rest position)
+bpy.ops.pose.select_all(action='SELECT')
+try:
+    bpy.ops.pose.armature_apply(selected=False)
+    print("AUTORIG: pose applied as rest pose", flush=True)
+except Exception as e:
+    print(f"AUTORIG: armature_apply failed: {{e}}", flush=True)
 
 bpy.ops.object.mode_set(mode='OBJECT')
+
+print(f"AUTORIG: A-pose done", flush=True)
 
 # ===== Step 9: Parent new mesh to armature with auto weights =====
 print("AUTORIG: parenting new mesh to armature (ARMATURE_AUTO)...", flush=True)
