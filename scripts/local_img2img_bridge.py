@@ -12,9 +12,9 @@ from PIL import Image
 def img2img(input_path, prompt, output_path, strength=0.55):
     from diffusers import StableDiffusionXLImg2ImgPipeline
 
-    print("IMG2IMG: Loading SDXL img2img pipeline...", flush=True)
+    print("IMG2IMG: Loading SDXL base img2img pipeline...", flush=True)
     pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-xl-refiner-1.0",
+        "stabilityai/stable-diffusion-xl-base-1.0",
         torch_dtype=torch.float16,
         variant="fp16",
         use_safetensors=True,
@@ -22,21 +22,32 @@ def img2img(input_path, prompt, output_path, strength=0.55):
     pipe.to("cuda")
     print(f"IMG2IMG: On GPU ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
 
-    # Load and resize image to 1024x1024 (SDXL expects this)
+    # Load image - keep original aspect for better quality
     img = Image.open(input_path).convert("RGB")
-    img = img.resize((1024, 1024), Image.LANCZOS)
-    print(f"IMG2IMG: Input image loaded and resized", flush=True)
+    # Resize to 1024 on shortest side, keeping aspect
+    w, h = img.size
+    if w < h:
+        new_w = 1024
+        new_h = int(h * 1024 / w)
+    else:
+        new_h = 1024
+        new_w = int(w * 1024 / h)
+    # Round to multiple of 8
+    new_w = (new_w // 8) * 8
+    new_h = (new_h // 8) * 8
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    print(f"IMG2IMG: Input resized to {new_w}x{new_h}", flush=True)
 
-    # Enhance prompt to preserve 3D object character
-    enhanced_prompt = f"{prompt}, single object centered on plain white background, studio lighting, high detail, product photography, 3D render"
+    # Keep it simple - don't over-enhance the prompt
+    enhanced_prompt = f"{prompt}, high quality, detailed"
 
     print(f"IMG2IMG: Generating with strength={strength}...", flush=True)
     result = pipe(
         prompt=enhanced_prompt,
         image=img,
         strength=float(strength),
-        num_inference_steps=30,
-        guidance_scale=7.5,
+        num_inference_steps=40,
+        guidance_scale=8.0,
     ).images[0]
 
     result.save(output_path)
