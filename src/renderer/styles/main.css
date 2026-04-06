@@ -613,17 +613,53 @@ body {
 
 .job-bar {
   width: 100%;
-  height: 4px;
+  height: 6px;
   background: var(--bg-primary);
-  border-radius: 2px;
+  border-radius: 3px;
   overflow: hidden;
+  position: relative;
 }
 
 .job-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #a855f7);
-  border-radius: 2px;
-  transition: width 0.5s;
+  background: linear-gradient(90deg, var(--accent), #a855f7, var(--accent));
+  background-size: 200% 100%;
+  border-radius: 3px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  animation: bar-shine 2s linear infinite;
+}
+
+@keyframes bar-shine {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.job-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+  animation: bar-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes bar-pulse {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.job-item.done .job-bar-fill::after,
+.job-item.error .job-bar-fill::after {
+  animation: none;
+  display: none;
+}
+
+.job-item.done .job-bar-fill,
+.job-item.error .job-bar-fill {
+  animation: none;
 }
 
 .job-item.done .job-bar-fill { background: var(--success); }
