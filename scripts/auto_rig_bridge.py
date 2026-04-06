@@ -222,7 +222,12 @@ t_center = (t_min + t_max) / 2
 t_up_idx = max(range(3), key=lambda i: t_size[i])
 print(f"AUTORIG: template bbox size={{tuple(t_size)}} center={{tuple(t_center)}} up={{['X','Y','Z'][t_up_idx]}}", flush=True)
 
-# ===== Step 5: Rotate template if up axes differ =====
+# ===== Step 5: Mixamo-style align (scale NEW MESH, not template) =====
+# Distorting the template skeleton produces broken proportions for
+# fantasy meshes. Instead we keep the template at its true UE5 size
+# and scale + translate the new mesh to match.
+
+# 5a: Rotate template if up axes differ
 if t_up_idx != nm_up_idx:
     bpy.ops.object.select_all(action='DESELECT')
     template_armature.select_set(True)
@@ -236,48 +241,37 @@ if t_up_idx != nm_up_idx:
         print("AUTORIG: rotate template +90deg X (Y-up -> Z-up)", flush=True)
         bpy.ops.transform.rotate(value=math.pi/2, orient_axis='X')
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-    # Recompute bbox after rotation
     if template_meshes:
         t_min, t_max = vertex_bbox(template_meshes[0])
         t_size = t_max - t_min
         t_center = (t_min + t_max) / 2
 
-# ===== Step 6: Scale template to match new mesh height =====
-height_ratio = nm_size[nm_up_idx] / max(t_size[nm_up_idx], 0.0001)
-print(f"AUTORIG: scale template by {{height_ratio:.3f}}", flush=True)
+# 5b: Scale the NEW MESH to match the template's height (along template up axis)
+mesh_scale = t_size[t_up_idx] / max(nm_size[nm_up_idx], 0.0001)
+print(f"AUTORIG: scaling NEW MESH by {{mesh_scale:.3f}} to match template height", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
-template_armature.select_set(True)
-for tm in template_meshes:
-    tm.select_set(True)
-bpy.context.view_layer.objects.active = template_armature
-bpy.ops.transform.resize(value=(height_ratio, height_ratio, height_ratio))
+new_mesh.select_set(True)
+bpy.context.view_layer.objects.active = new_mesh
+bpy.ops.transform.resize(value=(mesh_scale, mesh_scale, mesh_scale))
 bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
-# Recompute template bbox + center after scale
-if template_meshes:
-    bb = [template_meshes[0].matrix_world @ Vector(c) for c in template_meshes[0].bound_box]
-    t_min = Vector((min(v.x for v in bb), min(v.y for v in bb), min(v.z for v in bb)))
-    t_max = Vector((max(v.x for v in bb), max(v.y for v in bb), max(v.z for v in bb)))
-    t_center = (t_min + t_max) / 2
+# Recompute new mesh bbox after scale
+nm_min, nm_max = vertex_bbox(new_mesh)
+nm_size = nm_max - nm_min
+nm_center = (nm_min + nm_max) / 2
+print(f"AUTORIG: new mesh after scale: size={{tuple(nm_size)}} center={{tuple(nm_center)}}", flush=True)
 
-# ===== Step 7: Translate template so bbox centers match =====
-offset = nm_center - t_center
-print(f"AUTORIG: translate template by {{tuple(offset)}}", flush=True)
-template_armature.location = template_armature.location + offset
-for tm in template_meshes:
-    tm.location = tm.location + offset
-# Apply
-bpy.ops.object.select_all(action='DESELECT')
-template_armature.select_set(True)
-for tm in template_meshes:
-    tm.select_set(True)
-bpy.context.view_layer.objects.active = template_armature
+# 5c: Translate the NEW MESH so its bbox center matches the template's
+offset = t_center - nm_center
+print(f"AUTORIG: translating NEW MESH by {{tuple(offset)}}", flush=True)
+new_mesh.location = new_mesh.location + offset
 bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
 
 # ===== Step 8: Delete template meshes (keep only armature) =====
 print(f"AUTORIG: deleting {{len(template_meshes)}} template mesh(es)", flush=True)
 for tm in list(template_meshes):
     bpy.data.objects.remove(tm, do_unlink=True)
+template_meshes = []
 
 # ===== Step 9: Parent new mesh to armature with auto weights =====
 print("AUTORIG: parenting new mesh to armature (ARMATURE_AUTO)...", flush=True)
