@@ -53,6 +53,9 @@
           <button id="btn-reset-camera" class="toolbar-btn" title="Reset camera">Reset</button>
           <button id="btn-wireframe" class="toolbar-btn" title="Toggle wireframe">Wire</button>
           <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
+          <span class="toolbar-separator"></span>
+          <span class="toolbar-label">Light</span>
+          <input type="range" id="light-slider" min="0" max="300" value="120" class="toolbar-slider" title="Light intensity">
           <span id="mesh-info" class="mesh-info"></span>
         </div>
       </main>
@@ -1036,6 +1039,13 @@
       isGridVisible = !isGridVisible;
       this.classList.toggle('active', isGridVisible);
       gridHelper.visible = isGridVisible;
+    };
+
+    // Light slider
+    document.getElementById('light-slider').oninput = function() {
+      const val = this.value / 100;
+      dirLight.intensity = val;
+      scene.children.forEach(c => { if (c.isAmbientLight) c.intensity = val * 0.35; });
     };
 
     // Convert

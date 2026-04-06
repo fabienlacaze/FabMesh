@@ -555,6 +555,26 @@ body {
   border-top: 1px solid var(--border);
 }
 
+.toolbar-separator {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.toolbar-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.toolbar-slider {
+  width: 80px;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .mesh-info {
   margin-left: auto;
   font-size: 11px;
