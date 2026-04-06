@@ -48,8 +48,9 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
                     octree_res = res
                     break
         # Effort slider controls num_inference_steps (quality vs speed)
-        effort_steps = {1: 20, 2: 30, 3: 50, 4: 75}
-        effort_labels = {1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max'}
+        # 20 = fast preview, 200 = max quality (beyond that, gains are negligible)
+        effort_steps = {1: 20, 2: 30, 3: 50, 4: 100, 5: 200}
+        effort_labels = {1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max', 5: 'Ultra'}
         inf_steps = effort_steps.get(int(effort), 30)
         label = effort_labels.get(int(effort), 'Medium')
         print(f"HUNYUAN3D: octree_resolution={octree_res}, steps={inf_steps} (effort={label})", flush=True)

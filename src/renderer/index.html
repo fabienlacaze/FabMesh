@@ -253,7 +253,7 @@
               </div>
               <div class="action-row">
                 <label>Effort <span id="effort-label" style="color:var(--text-muted); font-size:10px;">(Medium)</span></label>
-                <input type="range" id="effort-slider" min="1" max="4" value="2" step="1" style="flex:1; accent-color: var(--accent);" />
+                <input type="range" id="effort-slider" min="1" max="5" value="2" step="1" style="flex:1; accent-color: var(--accent);" />
               </div>
               <div class="adv-check-row">
                 <input type="checkbox" id="chk-build-stages" />
@@ -1778,7 +1778,7 @@
     });
 
     // Effort slider (controls num_inference_steps for Hunyuan3D)
-    const effortLabels = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max' };
+    const effortLabels = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max', 5: 'Ultra' };
     const effortSlider = document.getElementById('effort-slider');
     if (effortSlider) {
       effortSlider.addEventListener('input', (e) => {
