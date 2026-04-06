@@ -26,6 +26,16 @@ def generate_3d(image_path, output_path, max_faces=0):
     img = Image.open(image_path)
     print(f"HUNYUAN3D: Image loaded ({img.size})", flush=True)
 
+    # Auto-remove background for cleaner shape (Hunyuan3D handles RGBA)
+    if img.mode != 'RGBA':
+        try:
+            from rembg import remove
+            print("HUNYUAN3D: Removing background for cleaner shape...", flush=True)
+            img = remove(img)
+            print("HUNYUAN3D: Background removed", flush=True)
+        except Exception as e:
+            print(f"HUNYUAN3D: rembg skipped ({e})", flush=True)
+
     print("HUNYUAN3D: Generating 3D shape...", flush=True)
     start = time.time()
     try:
@@ -37,8 +47,11 @@ def generate_3d(image_path, output_path, max_faces=0):
                 if max_faces <= faces:
                     octree_res = res
                     break
-        print(f"HUNYUAN3D: Using octree_resolution={octree_res} for max {max_faces} faces", flush=True)
-        meshes = shape_pipe(image=img, octree_resolution=octree_res, num_inference_steps=30)
+        # Higher inference steps = better shape quality, slightly slower
+        # 30 for fast low-poly, 50 for detailed meshes
+        inf_steps = 50 if max_faces == 0 or max_faces >= 50000 else 30
+        print(f"HUNYUAN3D: octree_resolution={octree_res}, steps={inf_steps} for max {max_faces} faces", flush=True)
+        meshes = shape_pipe(image=img, octree_resolution=octree_res, num_inference_steps=inf_steps)
         mesh = meshes[0]
         print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s", flush=True)
 

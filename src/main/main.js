@@ -853,7 +853,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
       try {
         const https = require('https');
         const encoded = encodeURIComponent(stage.imgPrompt);
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${timestamp}`;
+        const url = `https://image.pollinations.ai/prompt/${encoded}?model=flux&width=1344&height=1344&nologo=true&enhance=true&seed=${timestamp}`;
         await new Promise((resolve, reject) => {
           const req = https.get(url, { headers: { 'User-Agent': 'FabMesh/1.0' }, timeout: 120000 }, (resp) => {
             if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
@@ -948,14 +948,15 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       return { success: true, images: result.images };
     }
 
-    // CLOUD: Pollinations
+    // CLOUD: Pollinations (using flux model for higher quality)
     const images = [];
-    const optimizedPrompt = `3D render of ${prompt}, single object centered on plain white background, studio lighting, high detail, no text, isometric view, product photography`;
+    const optimizedPrompt = `${prompt}, masterpiece, highly detailed, 8k, sharp focus, professional photography, studio lighting, single object centered on plain white background, product shot, no text, no watermark`;
 
     for (let i = 0; i < (numImages || 4); i++) {
       const seed = timestamp + i;
       const encoded = encodeURIComponent(optimizedPrompt);
-      const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${seed}`;
+      // flux = higher quality than default; 1344x1344 = more detail
+      const url = `https://image.pollinations.ai/prompt/${encoded}?model=flux&width=1344&height=1344&nologo=true&enhance=true&seed=${seed}`;
       // Unique filename per run to avoid overwrites
       const imgPath = path.join(imagesDir, `ref_${timestamp}_${i}.png`);
 
