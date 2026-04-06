@@ -927,7 +927,7 @@
         document.getElementById('viewer-empty').classList.remove('hidden');
         document.getElementById('mesh-info').textContent = '';
       }
-      await refreshGallery();
+      await refreshActiveGallery();
       // Refresh version history if we're in the same project
       if (currentProject) {
         const vData = await window.meshyAPI.getVersions(currentProject);
@@ -1192,7 +1192,7 @@
           }
         }
 
-        await refreshGallery();
+        await refreshActiveGallery();
         const okCount = result.stages.filter(s => s.success).length;
         showLog(`Build stages done! ${okCount}/3 stages generated successfully.`, okCount === 3 ? 'success' : 'error');
         window.meshyAPI.flashTaskbar();
@@ -1231,7 +1231,7 @@
             const buffer = await window.meshyAPI.readMeshFile(last.meshPath);
             if (buffer) { await loadMeshFromBuffer(buffer, 'glb', last.meshPath); selectedMesh = { path: last.meshPath, filename: last.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
           }
-          await refreshGallery();
+          await refreshActiveGallery();
           showLog(`${successes.length}/2 engines succeeded.`, successes.length > 0 ? 'success' : 'error');
         } else {
           const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
@@ -1247,7 +1247,7 @@
           stopProgress(); setProgress(100, 'Done!');
           const buffer = await window.meshyAPI.readMeshFile(r3d.meshPath);
           if (buffer) { await loadMeshFromBuffer(buffer, 'glb', r3d.meshPath); selectedMesh = { path: r3d.meshPath, filename: r3d.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
-          await refreshGallery();
+          await refreshActiveGallery();
           showLog('Success! ' + r3d.meshFilename + ' (' + formatSize(r3d.size) + ')', 'success');
           API.showNotification({ title: 'FabMesh - 3D Ready', body: r3d.meshFilename });
         }
@@ -1291,7 +1291,7 @@
 
       stopProgress();
       setProgress(100, 'Done!');
-      await refreshGallery();
+      await refreshActiveGallery();
       showLog('Success! Created: ' + result.meshFilename + ' (' + formatSize(result.size) + ')', 'success');
       window.meshyAPI.flashTaskbar();
       btn.disabled = false; btn.textContent = '\u25B6 Generate 3D Mesh'; loader.classList.add('hidden');
@@ -1335,7 +1335,7 @@
       }
       const result = await window.meshyAPI.importMesh();
       if (result) {
-        await refreshGallery();
+        await refreshActiveGallery();
         const buf = await window.meshyAPI.readMeshFile(result.meshPath);
         if (buf) {
           await loadMeshFromBuffer(buf, result.format, result.meshPath);
@@ -1392,7 +1392,7 @@
 
       const result = await window.meshyAPI.copyMeshToProject(meshFile.path);
       if (result) {
-        await refreshGallery();
+        await refreshActiveGallery();
         const buf = await window.meshyAPI.readMeshFile(result.meshPath);
         if (buf) {
           await loadMeshFromBuffer(buf, result.format, result.meshPath);
@@ -1466,7 +1466,7 @@
       try {
         const r = await window.meshyAPI.exportMesh({ sourcePath: selectedMesh.path, targetFormat: document.getElementById('convert-format').value });
         showLog('Converted: ' + r.filename, 'success');
-        await refreshGallery();
+        await refreshActiveGallery();
       } catch(e) { showLog('Error: ' + (e.error||e.message), 'error'); }
     };
 
@@ -1483,7 +1483,7 @@
         if (r?.success) {
           showLog('Exported to Unreal FBX: ' + r.filename, 'success');
           API.showNotification({ title: 'FabMesh', body: 'Unreal FBX exported: ' + r.filename });
-          await refreshGallery();
+          await refreshActiveGallery();
         } else {
           showLog('Export failed: ' + (r?.error || 'unknown'), 'error');
         }
@@ -1508,7 +1508,8 @@
             completeJob(job.id, true);
             showLog('Rigged FBX: ' + r.filename + ' (' + formatSize(r.size) + ')', 'success');
             API.showNotification({ title: 'FabMesh - Rig Ready', body: r.filename });
-            await refreshGallery();
+            await refreshActiveGallery();
+            window.meshyAPI.flashTaskbar();
           } else {
             completeJob(job.id, false);
             showLog('Auto-Rig failed: ' + (r?.error || 'unknown'), 'error');
@@ -1521,6 +1522,19 @@
           btnRig.textContent = 'Generate Rig';
         }
       };
+    }
+
+    // Helper: refresh whichever gallery is currently active
+    async function refreshActiveGallery() {
+      try {
+        if (currentTab === 'tab-image') {
+          await refreshGalleryImages();
+        } else {
+          await refreshGallery();
+        }
+      } catch (e) {
+        console.error('refreshActiveGallery failed:', e);
+      }
     }
 
     document.getElementById('btn-clear-log').onclick = () => document.getElementById('output-log').classList.add('hidden');
@@ -2179,6 +2193,9 @@
         imgViewer.classList.remove('hidden');
         canvas.style.display = 'none';
         if (emptyMesh) emptyMesh.style.display = 'none';
+        // Hide mesh-only sections (export, auto-rig, etc.)
+        const exportSec = document.getElementById('export-section');
+        if (exportSec) exportSec.style.display = 'none';
         // Load current image if any
         if (selectedImagePath) {
           document.getElementById('image-viewer-img').src = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
@@ -2191,6 +2208,9 @@
         imgViewer.classList.add('hidden');
         canvas.style.display = '';
         if (emptyMesh && !currentModel) emptyMesh.style.display = '';
+        // Show export section back if a mesh was selected
+        const exportSec = document.getElementById('export-section');
+        if (exportSec && selectedMesh) exportSec.style.display = 'block';
       }
 
       // Switch gallery view based on tab — expand all groups
@@ -2267,7 +2287,7 @@
         selectedMesh = { path: result.meshPath, filename: result.meshFile, format: fmt.toUpperCase() };
         document.getElementById('export-section').style.display = 'block';
       }
-      await refreshGallery();
+      await refreshActiveGallery();
       showLog('Version v' + vNum, 'success');
     };
 
@@ -2347,7 +2367,7 @@
         }
 
         completeJob(job.id, true);
-        await refreshGallery();
+        await refreshActiveGallery();
         showLog('Refined from mesh capture! ' + r3d.meshFilename, 'success');
         window.meshyAPI.flashTaskbar();
       } catch (e) {
@@ -2433,7 +2453,7 @@
 
       stopProgress();
       setProgress(100, 'Done!');
-      await refreshGallery();
+      await refreshActiveGallery();
       if (result.versionData) updateVersionUI(result.versionData);
       showLog('Refined! v' + result.versionData.currentVersion + ' - ' + result.meshFilename + ' (' + formatSize(result.size) + ')', 'success');
       window.meshyAPI.flashTaskbar();
