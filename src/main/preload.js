@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   removeBackground: (imagePath) => ipcRenderer.invoke('remove-background', imagePath),
   importImageFile: (filePath) => ipcRenderer.invoke('import-image-file', filePath),
   showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
+  exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),

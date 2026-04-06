@@ -197,6 +197,84 @@ async function uploadToCatbox(imagePath) {
   });
 }
 
+// Show Windows native notification
+const { Notification } = require('electron');
+ipcMain.handle('show-notification', (event, { title, body }) => {
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title: title || 'FabMesh', body: body || '', silent: false });
+      n.show();
+      return true;
+    }
+  } catch(e) { console.error('notification failed:', e); }
+  return false;
+});
+
+// Export mesh to Unreal-friendly FBX (cm scale, Y-up axis)
+ipcMain.handle('export-to-unreal', async (event, { sourcePath }) => {
+  try {
+    if (!isPathAllowed(sourcePath)) throw new Error('Source not allowed');
+    if (!fs.existsSync(sourcePath)) throw new Error('Source not found');
+    const config = loadConfig();
+    if (!config.blenderPath) throw new Error('Blender path not configured (Settings)');
+
+    const baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const outputPath = path.join(MESHES_DIR, `${baseName}_unreal.fbx`);
+
+    const exportScript = `
+import bpy
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+
+src = ${JSON.stringify(sourcePath.replace(/\\/g, '/'))}
+ext = src.rsplit('.', 1)[-1].lower()
+if ext in ('glb','gltf'):
+    bpy.ops.import_scene.gltf(filepath=src)
+elif ext == 'obj':
+    bpy.ops.wm.obj_import(filepath=src)
+elif ext == 'fbx':
+    bpy.ops.import_scene.fbx(filepath=src)
+elif ext == 'stl':
+    bpy.ops.import_mesh.stl(filepath=src)
+
+# Scale to cm (Unreal default unit) and set Y-up (Unreal axis)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.transform.resize(value=(100, 100, 100))
+
+out = ${JSON.stringify(outputPath.replace(/\\/g, '/'))}
+bpy.ops.export_scene.fbx(
+    filepath=out,
+    use_selection=False,
+    global_scale=1.0,
+    apply_unit_scale=True,
+    apply_scale_options='FBX_SCALE_NONE',
+    axis_forward='-Z',
+    axis_up='Y',
+    object_types={'MESH'},
+    use_mesh_modifiers=True,
+    mesh_smooth_type='FACE',
+    path_mode='COPY',
+    embed_textures=True
+)
+`;
+    const tmpScript = path.join(SCRIPTS_DIR, `unreal_export_${Date.now()}.py`);
+    fs.writeFileSync(tmpScript, exportScript);
+
+    return await new Promise((resolve) => {
+      const cleanup = () => { try { if (fs.existsSync(tmpScript)) fs.unlinkSync(tmpScript); } catch(e) {} };
+      const proc = execFile(config.blenderPath, ['--background', '--python', tmpScript], { timeout: 120000 }, (error, stdout, stderr) => {
+        cleanup();
+        if (error) resolve({ success: false, error: error.message, stderr });
+        else if (!fs.existsSync(outputPath)) resolve({ success: false, error: 'Export failed' });
+        else resolve({ success: true, path: outputPath, filename: path.basename(outputPath) });
+      });
+      proc.on('error', err => { cleanup(); resolve({ success: false, error: err.message }); });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Import an image file (drag&drop or picker) into the images folder
 ipcMain.handle('import-image-file', (event, filePath) => {
   try {
@@ -1072,7 +1150,9 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
         if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created (Python did not produce output)', stdout, stderr }); return; }
         const stats = fs.statSync(meshPath);
-        resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, stdout });
+        // Save source image path for later display in viewer
+        try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
+        resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout });
       });
       const flushStdout = () => {
         if (stdoutBuf && mainWindow) {
@@ -1311,13 +1391,19 @@ ipcMain.handle('list-meshes', () => {
     .map(f => {
       const stats = fs.statSync(path.join(MESHES_DIR, f));
       const thumbPath = path.join(MESHES_DIR, f.replace(/\.[^.]+$/, '_thumb.png'));
+      const sourcePath = path.join(MESHES_DIR, f) + '.source';
+      let source = null;
+      if (fs.existsSync(sourcePath)) {
+        try { source = fs.readFileSync(sourcePath, 'utf-8').trim(); } catch(e) {}
+      }
       return {
         filename: f,
         path: path.join(MESHES_DIR, f),
         size: stats.size,
         created: stats.birthtime,
         format: path.extname(f).slice(1).toUpperCase(),
-        thumb: fs.existsSync(thumbPath) ? 'file:///' + thumbPath.replace(/\\/g, '/') : null
+        thumb: fs.existsSync(thumbPath) ? 'file:///' + thumbPath.replace(/\\/g, '/') : null,
+        sourceImage: source
       };
     })
     .sort((a, b) => new Date(b.created) - new Date(a.created));

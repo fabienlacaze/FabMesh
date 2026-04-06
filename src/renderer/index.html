@@ -71,6 +71,12 @@
           <button id="btn-wireframe" class="toolbar-btn" title="Toggle wireframe">Wire</button>
           <button id="btn-matcap" class="toolbar-btn" title="Toggle matcap/PBR">PBR</button>
           <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
+          <select id="bg-preset" class="toolbar-btn" title="Background" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; padding: 4px 6px;">
+            <option value="dark" selected>Dark</option>
+            <option value="studio">Studio (white)</option>
+            <option value="black">Black</option>
+            <option value="gray">Gray</option>
+          </select>
           <span class="toolbar-separator"></span>
           <span class="toolbar-label">Light</span>
           <input type="range" id="light-slider" min="0" max="1000" value="1000" class="toolbar-slider" title="Light intensity">
@@ -296,6 +302,15 @@
                 <span id="project-version-badge">v0</span>
               </div>
 
+              <div id="mesh-source-image" class="hidden" style="padding: 8px 12px; border-bottom: 1px solid var(--border);">
+                <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">SOURCE IMAGE</div>
+                <img id="mesh-source-thumb" style="max-width: 100%; max-height: 120px; border-radius: 4px; cursor: pointer; display: block;" onclick="if(this.src) window._openLightbox(this.src)" />
+                <div style="display: flex; gap: 4px; margin-top: 4px;">
+                  <button id="btn-reuse-source" class="secondary-btn" style="flex:1; font-size:10px; padding:4px 8px;">Use as ref</button>
+                  <button id="btn-copy-mesh-prompt" class="secondary-btn hidden" style="flex:1; font-size:10px; padding:4px 8px;">Copy prompt</button>
+                </div>
+              </div>
+
               <div class="refine-input-area">
                 <textarea id="refine-input" placeholder="Describe what to change..." rows="3"></textarea>
                 <button id="btn-refine" class="refine-btn">Refine</button>
@@ -334,7 +349,9 @@
               </select>
               <button id="btn-convert" class="secondary-btn">Convert</button>
             </div>
+            <button id="btn-export-unreal" class="secondary-btn" style="margin-top: 6px; width: 100%;" title="Export FBX scaled for Unreal Engine (cm units, Y-up)">Export to Unreal (FBX)</button>
           </div>
+          <button id="btn-copy-mesh-prompt-bottom" class="secondary-btn hidden" style="margin: 6px 12px 0; padding: 6px 8px; font-size: 11px;">Copy mesh prompt</button>
 
           <!-- Advanced Blender section removed -->
         </div>
@@ -779,6 +796,24 @@
       selectedMesh = target;
       refreshGallery();
       document.getElementById('export-section').style.display = 'block';
+
+      // Show source image if available
+      const sourceDiv = document.getElementById('mesh-source-image');
+      if (sourceDiv) {
+        if (target.sourceImage) {
+          sourceDiv.classList.remove('hidden');
+          document.getElementById('mesh-source-thumb').src = 'file:///' + target.sourceImage.replace(/\\/g, '/');
+          document.getElementById('btn-reuse-source').onclick = () => {
+            selectedImagePath = target.sourceImage;
+            showImageRefine(target.sourceImage, lastImagePrompt);
+            switchTab('tab-image');
+            showLog('Source image loaded', 'success');
+          };
+        } else {
+          sourceDiv.classList.add('hidden');
+        }
+      }
+
       const buf = await API.readMeshFile(target.path);
       if (buf) {
         await loadMeshFromBuffer(buf, target.format, target.path);
@@ -1153,6 +1188,7 @@
           if (buffer) { await loadMeshFromBuffer(buffer, 'glb', r3d.meshPath); selectedMesh = { path: r3d.meshPath, filename: r3d.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
           await refreshGallery();
           showLog('Success! ' + r3d.meshFilename + ' (' + formatSize(r3d.size) + ')', 'success');
+          API.showNotification({ title: 'FabMesh - 3D Ready', body: r3d.meshFilename });
         }
 
         completeJob(job.id, true);
@@ -1348,6 +1384,21 @@
       scene.children.forEach(c => { if (c.isAmbientLight) c.intensity = val * 0.35; });
     };
 
+    // Background preset
+    const bgPresetSelect = document.getElementById('bg-preset');
+    if (bgPresetSelect) {
+      const bgColors = { dark: 0x0f0f1a, studio: 0xffffff, black: 0x000000, gray: 0x808080 };
+      bgPresetSelect.addEventListener('change', (e) => {
+        const c = bgColors[e.target.value] || 0x0f0f1a;
+        renderer.setClearColor(c);
+        scene.background = new THREE.Color(c);
+        // Adjust grid color for visibility on white bg
+        if (gridHelper) {
+          gridHelper.material.color.set(e.target.value === 'studio' ? 0xaaaaaa : 0x444444);
+        }
+      });
+    }
+
     // Convert
     document.getElementById('btn-convert').onclick = async () => {
       if (!selectedMesh) return;
@@ -1357,6 +1408,26 @@
         await refreshGallery();
       } catch(e) { showLog('Error: ' + (e.error||e.message), 'error'); }
     };
+
+    // Export to Unreal button
+    const btnUnreal = document.getElementById('btn-export-unreal');
+    if (btnUnreal) {
+      btnUnreal.onclick = async () => {
+        if (!selectedMesh) { showLog('Select a mesh first', 'error'); return; }
+        btnUnreal.disabled = true;
+        btnUnreal.textContent = 'Exporting...';
+        const r = await API.exportToUnreal({ sourcePath: selectedMesh.path });
+        btnUnreal.disabled = false;
+        btnUnreal.textContent = 'Export to Unreal (FBX)';
+        if (r?.success) {
+          showLog('Exported to Unreal FBX: ' + r.filename, 'success');
+          API.showNotification({ title: 'FabMesh', body: 'Unreal FBX exported: ' + r.filename });
+          await refreshGallery();
+        } else {
+          showLog('Export failed: ' + (r?.error || 'unknown'), 'error');
+        }
+      };
+    }
 
     document.getElementById('btn-clear-log').onclick = () => document.getElementById('output-log').classList.add('hidden');
 
