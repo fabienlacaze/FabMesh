@@ -418,6 +418,66 @@ ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
   }
 });
 
+// Analyze a SKM template's skeleton: returns the bones JSON (cached)
+ipcMain.handle('analyze-skeleton', async (event, { templateId }) => {
+  try {
+    if (!templateId) return { success: false, error: 'no templateId' };
+    // Find the template FBX path from registry
+    const registryPath = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'skm', 'registry.json');
+    if (!fs.existsSync(registryPath)) return { success: false, error: 'registry missing' };
+    const reg = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+    const tpl = (reg.skm_templates || []).find(t => t.id === templateId);
+    if (!tpl) return { success: false, error: 'template not in registry' };
+    const fbxPath = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', tpl.fbx);
+    if (!fs.existsSync(fbxPath)) return { success: false, error: 'fbx missing' };
+
+    // Cache: <fbx>.bones.json next to the FBX
+    const cachePath = fbxPath + '.bones.json';
+    // If cache exists and is newer than the FBX, use it
+    if (fs.existsSync(cachePath)) {
+      try {
+        const cs = fs.statSync(cachePath);
+        const fs2 = fs.statSync(fbxPath);
+        if (cs.mtimeMs >= fs2.mtimeMs) {
+          const data = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+          return { success: true, data, cached: true };
+        }
+      } catch(e) {}
+    }
+
+    // Run blender to extract bones
+    const config = loadConfig();
+    if (!config.blenderPath) return { success: false, error: 'Blender path not configured' };
+    const script = path.join(__dirname, '..', '..', 'scripts', 'analyze_skeleton.py');
+
+    return await new Promise((resolve) => {
+      const proc = execFile('python', [script, fbxPath, cachePath, config.blenderPath], {
+        timeout: 120000,
+        maxBuffer: 50 * 1024 * 1024
+      }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({ success: false, error: error.message, stderr });
+          return;
+        }
+        if (!fs.existsSync(cachePath)) {
+          resolve({ success: false, error: 'output not created' });
+          return;
+        }
+        try {
+          const data = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+          resolve({ success: true, data, cached: false });
+        } catch (e) {
+          resolve({ success: false, error: 'parse failed: ' + e.message });
+        }
+      });
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+      proc.on('error', e => resolve({ success: false, error: e.message }));
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Save / load rig landmarks (per-mesh JSON file)
 ipcMain.handle('save-landmarks', (event, { meshPath, landmarks }) => {
   try {

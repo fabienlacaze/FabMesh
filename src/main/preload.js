@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   listRigTemplates: () => ipcRenderer.invoke('list-rig-templates'),
   saveLandmarks: (opts) => ipcRenderer.invoke('save-landmarks', opts),
   loadLandmarks: (opts) => ipcRenderer.invoke('load-landmarks', opts),
+  analyzeSkeleton: (opts) => ipcRenderer.invoke('analyze-skeleton', opts),
   cancelJob: (jobId) => ipcRenderer.invoke('cancel-job', jobId),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),

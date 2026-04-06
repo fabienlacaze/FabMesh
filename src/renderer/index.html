@@ -2105,17 +2105,199 @@
       },
     };
 
-    // Get the active schema based on the current template selection
+    // Cache: templateId -> dynamically generated schema (from analyzed bones)
+    const _templateSchemaCache = {};
+    let _activeSchema = LANDMARK_SCHEMAS.humanoid;
+
+    // Get the active schema (preferring the analyzed one if available)
     function getCurrentSchema() {
+      return _activeSchema;
+    }
+
+    // Categorize a bone by name with regex patterns. Returns { group, label, side }
+    function classifyBone(name) {
+      const n = name.toLowerCase();
+      // Detect side
+      let side = null;
+      if (/(_l$|_left|left[_\s]?|^l_)/.test(n)) side = 'l';
+      else if (/(_r$|_right|right[_\s]?|^r_)/.test(n)) side = 'r';
+
+      // Important top-level joints (we want one landmark per anatomical pivot)
+      // Order matters: more specific first
+      const patterns = [
+        // Head & Spine
+        { rx: /^head$|^head_|head_01|skull/, group: 'Head & Spine', label: 'Head' },
+        { rx: /^neck$|neck_01/, group: 'Head & Spine', label: 'Neck' },
+        { rx: /spine_05|spine_top|chest|upperchest/, group: 'Head & Spine', label: 'Upper spine' },
+        { rx: /spine_03|spine_mid/, group: 'Head & Spine', label: 'Mid spine' },
+        { rx: /spine_01|spine_lo|lowerback/, group: 'Head & Spine', label: 'Lower spine' },
+        { rx: /^pelvis$|^hips$|^cc_base_pelvis$/, group: 'Hips', label: 'Hips center' },
+        // Arms
+        { rx: /^clavicle/, group: 'arm', label: 'Clavicle' },
+        { rx: /^upperarm$|^shoulder$|^upperarm_|^shoulder_/, group: 'arm', label: 'Shoulder' },
+        { rx: /^lowerarm|^forearm$|^elbow$|^lowerarm_|^forearm_|^elbow_/, group: 'arm', label: 'Elbow' },
+        { rx: /^hand$|^wrist$|^hand_|^wrist_/, group: 'arm', label: 'Wrist' },
+        { rx: /thumb_03|thumb_tip/, group: 'arm', label: 'Thumb tip' },
+        { rx: /index_03|index_tip/, group: 'arm', label: 'Index tip' },
+        // Legs
+        { rx: /^thigh$|^upleg$|^upperleg$|^thigh_|^upleg_|^upperleg_/, group: 'leg', label: 'Hip' },
+        { rx: /^calf$|^shin$|^lowerleg$|^knee$|^calf_|^shin_|^lowerleg_|^knee_/, group: 'leg', label: 'Knee' },
+        { rx: /^foot$|^ankle$|^foot_|^ankle_/, group: 'leg', label: 'Ankle' },
+        { rx: /^ball|^toe|^foot_tip/, group: 'leg', label: 'Foot tip' },
+      ];
+
+      for (const p of patterns) {
+        if (p.rx.test(n)) {
+          let group = p.group;
+          if (group === 'arm') group = side === 'l' ? 'Left arm' : (side === 'r' ? 'Right arm' : 'Arms');
+          else if (group === 'leg') group = side === 'l' ? 'Left leg' : (side === 'r' ? 'Right leg' : 'Legs');
+          return { group, label: p.label, side };
+        }
+      }
+      return null;
+    }
+
+    // Build a schema from a bones JSON (analyzed FBX)
+    function buildSchemaFromBones(bonesData) {
+      // bbox info for projection
+      const bbox = bonesData.bbox || {min:[0,0,0], max:[0,0,0]};
+      const min = bbox.min, max = bbox.max;
+      const size = [max[0]-min[0], max[1]-min[1], max[2]-min[2]];
+      // Detect up axis = tallest dimension
+      let upIdx = 0;
+      if (size[1] > size[upIdx]) upIdx = 1;
+      if (size[2] > size[upIdx]) upIdx = 2;
+      // Lateral axis = the OTHER axis with the second-biggest size (but not depth)
+      // For most rigs: up=Z or Y, lateral=X
+      const lateralIdx = (upIdx === 0) ? 1 : 0;
+      const depthIdx = 3 - upIdx - lateralIdx;
+
+      // Project a 3D point to SVG (200x300) front view + side view
+      function project(p) {
+        // Front view: x = lateral, y = -up (because SVG y goes down)
+        const lx = p[lateralIdx];
+        const ux = p[upIdx];
+        const dx = p[depthIdx];
+        // Normalize lateral to [0,1] using max abs
+        const maxLat = Math.max(Math.abs(min[lateralIdx]), Math.abs(max[lateralIdx]), 0.001);
+        const normLat = lx / maxLat; // -1 to 1
+        const normUp = (ux - min[upIdx]) / (size[upIdx] || 1); // 0 to 1
+        const normDepth = dx / (Math.max(Math.abs(min[depthIdx]), Math.abs(max[depthIdx])) || 0.001);
+        // Front: subject left = viewer right (mirror), so invert lateral
+        const fx = 100 + (-normLat) * 80;
+        const fy = 290 - normUp * 270;
+        // Side: depth on x, up on y
+        const sx = 100 + normDepth * 60;
+        const sy = 290 - normUp * 270;
+        return { front: [fx, fy], side: [sx, sy] };
+      }
+
+      // Categorize bones
+      const groups = {
+        'Head & Spine': [],
+        'Hips': [],
+        'Left arm': [],
+        'Right arm': [],
+        'Left leg': [],
+        'Right leg': [],
+      };
+      const usedNames = new Set(); // avoid duplicates per logical landmark
+
+      // Color palette
+      const colorMap = {
+        'Head': '#ff4444', 'Neck': '#ff8844',
+        'Upper spine': '#ff6622', 'Mid spine': '#cc5511', 'Lower spine': '#aa4400',
+        'Hips center': '#ffaa00', 'Hip': '#ffcc00',
+        'Clavicle': '#22ddaa', 'Shoulder': '#22cc88',
+        'Elbow': '#88ff88', 'Wrist': '#44ff44',
+        'Thumb tip': '#aaff44', 'Index tip': '#ccff66',
+        'Knee': '#88aaff', 'Ankle': '#5577ee', 'Foot tip': '#4444ff',
+      };
+
+      for (const b of bonesData.bones) {
+        const cls = classifyBone(b.name);
+        if (!cls) continue;
+        // Unique key per (group, label) so we don't add 5 spine variants
+        const key = `${cls.group}__${cls.label}`;
+        if (usedNames.has(key)) continue;
+        usedNames.add(key);
+        const proj = project(b.head);
+        const colorBase = colorMap[cls.label] || '#ffffff';
+        // Slightly darker for right side
+        const color = (cls.side === 'r' && (cls.group === 'Right arm' || cls.group === 'Right leg'))
+          ? darken(colorBase) : colorBase;
+        const item = {
+          id: cls.group.toLowerCase().replace(/[^a-z]/g, '_') + '__' + cls.label.toLowerCase().replace(/\s+/g, '_'),
+          label: cls.label,
+          color,
+          front: proj.front,
+          side: proj.side,
+          boneName: b.name,
+        };
+        groups[cls.group] = groups[cls.group] || [];
+        groups[cls.group].push(item);
+      }
+
+      // Build the final schema (only non-empty groups)
+      const groupOrder = ['Head & Spine', 'Hips', 'Left arm', 'Right arm', 'Left leg', 'Right leg'];
+      const schemaGroups = [];
+      for (const g of groupOrder) {
+        if (groups[g] && groups[g].length > 0) {
+          schemaGroups.push({ name: g, items: groups[g] });
+        }
+      }
+
+      return {
+        groups: schemaGroups,
+        silhouette: 'humanoid', // TODO: detect from bone count / structure
+        fromAnalysis: true,
+      };
+    }
+
+    function darken(hex) {
+      // Quick darken a #rrggbb hex by 30%
+      const r = Math.max(0, parseInt(hex.slice(1,3), 16) - 50);
+      const g = Math.max(0, parseInt(hex.slice(3,5), 16) - 50);
+      const b = Math.max(0, parseInt(hex.slice(5,7), 16) - 50);
+      return '#' + [r,g,b].map(c => c.toString(16).padStart(2,'0')).join('');
+    }
+
+    // Load the schema for the current template (analyzed if SKM custom)
+    async function loadSchemaForCurrentTemplate() {
       const tplSel = document.getElementById('rig-tab-template');
-      if (!tplSel || !tplSel.value) return LANDMARK_SCHEMAS.humanoid;
-      // Try to detect category from registry data
-      // We assume id contains 'quad', 'hex', 'oct' or default to humanoid
-      const v = tplSel.value.toLowerCase();
-      if (v.includes('quad') || v.includes('deer') || v.includes('fox') || v.includes('pig') || v.includes('wolf')) return LANDMARK_SCHEMAS.quadruped;
-      if (v.includes('hex')) return LANDMARK_SCHEMAS.hexapod;
-      if (v.includes('oct') || v.includes('spider')) return LANDMARK_SCHEMAS.octopod;
-      return LANDMARK_SCHEMAS.humanoid;
+      if (!tplSel || !tplSel.value) return;
+      const id = tplSel.value;
+
+      if (_templateSchemaCache[id]) {
+        _activeSchema = _templateSchemaCache[id];
+        buildLandmarkListFromSchema(_activeSchema);
+        return;
+      }
+
+      // Try analyzing the FBX template
+      try {
+        const r = await API.analyzeSkeleton({ templateId: id });
+        if (r?.success && r.data) {
+          const schema = buildSchemaFromBones(r.data);
+          _templateSchemaCache[id] = schema;
+          _activeSchema = schema;
+          showLog(`Skeleton analyzed: ${r.data.bone_count} bones, ${schema.groups.length} groups`, r.cached ? 'info' : 'success');
+          buildLandmarkListFromSchema(schema);
+          return;
+        }
+      } catch (e) {
+        console.warn('analyzeSkeleton failed:', e);
+      }
+
+      // Fallback to hardcoded schemas (humanoid/quad/hex/oct detection by name)
+      const v = id.toLowerCase();
+      let schema;
+      if (v.includes('quad') || v.includes('deer') || v.includes('fox') || v.includes('pig') || v.includes('wolf')) schema = LANDMARK_SCHEMAS.quadruped;
+      else if (v.includes('hex')) schema = LANDMARK_SCHEMAS.hexapod;
+      else if (v.includes('oct') || v.includes('spider')) schema = LANDMARK_SCHEMAS.octopod;
+      else schema = LANDMARK_SCHEMAS.humanoid;
+      _activeSchema = schema;
+      buildLandmarkListFromSchema(schema);
     }
 
     // Build the landmark list HTML from a schema
@@ -2548,12 +2730,12 @@
     }
     bindLandmarkButtons();
 
-    // Rebuild landmark list when template changes
+    // Rebuild landmark list when template changes (analyzes the FBX bones)
     document.getElementById('rig-tab-template')?.addEventListener('change', () => {
-      buildLandmarkListFromSchema(getCurrentSchema());
+      loadSchemaForCurrentTemplate();
     });
-    // Initial build
-    setTimeout(() => buildLandmarkListFromSchema(getCurrentSchema()), 200);
+    // Initial build (after templates dropdown has been populated)
+    setTimeout(() => loadSchemaForCurrentTemplate(), 500);
 
     // Tooltip element for hovering markers in viewer
     let lmTooltip = document.getElementById('lm-tooltip');
