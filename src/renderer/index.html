@@ -507,6 +507,8 @@
     // ========== GALLERY ==========
     let meshList = [], selectedMesh = null;
     let collapsedProjects = {}; // track collapsed state per project
+    let selectedImagePath = null;
+    let lastImagePrompt = '';
 
     async function refreshGallery() {
       meshList = await window.meshyAPI.listMeshes();
@@ -1314,7 +1316,7 @@
     }
 
     // ========== IMAGE TAB ==========
-    let selectedImagePath = null;
+    // selectedImagePath declared at top of module
 
     // Generate Images button
     document.getElementById('btn-gen-images').addEventListener('click', async () => {
@@ -1369,7 +1371,7 @@
       btn.disabled = false; btn.textContent = 'Generate Images';
     });
 
-    let lastImagePrompt = '';
+    // lastImagePrompt declared at top
 
     // Resize handles for gallery + action panels
     function setupResize(handleId, panelId, fromLeft) {
