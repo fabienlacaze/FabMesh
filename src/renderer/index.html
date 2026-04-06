@@ -160,7 +160,6 @@
               <div id="img-refine-preview">
                 <img id="img-refine-thumb" class="selected-thumb" style="cursor:pointer" onclick="window._openLightbox(this.src)" />
               </div>
-              <button id="btn-send-to-3d" class="convert-btn">Send to 3D tab &#8594;</button>
 
               <!-- Method tabs -->
               <div class="refine-method-tabs">
@@ -221,6 +220,11 @@
             </select>
             <button id="btn-image-export" class="secondary-btn">Save Image As...</button>
             <button id="btn-image-open-folder" class="secondary-btn">Open in Explorer</button>
+          </div>
+
+          <!-- Big green action button at the very bottom of Image tab -->
+          <div class="big-action-bar">
+            <button id="btn-send-to-3d" class="big-action-btn green hidden">Send to 3D tab &#8594;</button>
           </div>
         </div>
 
@@ -346,6 +350,11 @@
               </div>
             </div>
           </div><!-- end subtab-refine -->
+
+          <!-- Big green action button at the very bottom of 3D tab -->
+          <div class="big-action-bar">
+            <button id="btn-send-to-rig" class="big-action-btn green hidden">Send to Rig tab &#8594;</button>
+          </div>
         </div><!-- end tab-3d -->
 
         <!-- ============ TAB: RIG ============ -->
@@ -1024,6 +1033,9 @@
         saveMeshThumbnail(target.path);
         // Refresh rig tab source info if visible
         if (typeof updateRigSourceInfo === 'function') updateRigSourceInfo();
+        // Show "Send to Rig" green button at bottom of 3D tab
+        const sendRigBtn = document.getElementById('btn-send-to-rig');
+        if (sendRigBtn) sendRigBtn.classList.remove('hidden');
       } else {
         showLog('Could not read mesh file', 'error');
         return;
@@ -2247,6 +2259,19 @@
       document.getElementById('btn-clear-ref').classList.remove('hidden');
       showImageRefine(el.dataset.path, lastImagePrompt);
     };
+
+    // Send to Rig tab button (3D -> Rig)
+    const btnSendRig = document.getElementById('btn-send-to-rig');
+    if (btnSendRig) {
+      btnSendRig.addEventListener('click', () => {
+        if (!selectedMesh) {
+          showLog('Select a mesh first', 'error');
+          return;
+        }
+        switchTab('tab-rig');
+        if (typeof updateRigSourceInfo === 'function') updateRigSourceInfo();
+      });
+    }
 
     // Send to 3D tab button
     document.getElementById('btn-send-to-3d').addEventListener('click', () => {

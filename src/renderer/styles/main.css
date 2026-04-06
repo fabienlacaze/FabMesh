@@ -957,7 +957,10 @@ body {
 }
 
 .tab-content.active {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Sub-tabs toggle switch (inside 3D tab) */
@@ -1217,6 +1220,47 @@ body {
 
 .convert-btn:hover { opacity: 0.9; }
 .convert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Big action bar at the very bottom of a tab */
+.big-action-bar {
+  margin-top: auto;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.big-action-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.3px;
+}
+
+.big-action-btn.green {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.big-action-btn.green:hover {
+  background: linear-gradient(135deg, #14d399, #07a574);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+.big-action-btn.green:active {
+  transform: translateY(0);
+}
+
+.big-action-btn:disabled,
+.big-action-btn.hidden {
+  display: none;
+}
 
 /* Section label */
 .section-label-row {
