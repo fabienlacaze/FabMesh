@@ -197,6 +197,26 @@ async function uploadToCatbox(imagePath) {
   });
 }
 
+// Import an image file (drag&drop or picker) into the images folder
+ipcMain.handle('import-image-file', (event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const ext = path.extname(filePath).toLowerCase();
+    if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) return null;
+    const baseName = path.basename(filePath, ext).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    const projDir = path.join(IMAGES_DIR, baseName);
+    fs.mkdirSync(projDir, { recursive: true });
+    const ts = Date.now();
+    const dest = path.join(projDir, `imported_${ts}${ext}`);
+    fs.copyFileSync(filePath, dest);
+    fs.writeFileSync(path.join(projDir, 'prompt.txt'), '[Imported] ' + path.basename(filePath), 'utf-8');
+    return { path: dest, projectName: baseName };
+  } catch (e) {
+    console.error('import-image-file failed:', e);
+    return null;
+  }
+});
+
 // Auto-inpaint: CLIPSeg segments target area + SDXL Inpainting replaces it
 ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate }) => {
   try {

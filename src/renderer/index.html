@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' file: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:; connect-src 'self' file: blob:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: blob:; script-src 'self' 'unsafe-inline' file: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: http://127.0.0.1:* https:; connect-src 'self' file: blob: http://127.0.0.1:*">
   <title>FabMesh</title>
   <link rel="stylesheet" href="styles/main.css">
 </head>
@@ -27,9 +27,12 @@
         <div id="gallery-content">
           <div class="panel-header">
             <h2 id="gallery-title">Gallery</h2>
-            <button id="btn-import" class="small-btn" title="Import mesh">&#43;</button>
+            <button id="btn-import" class="small-btn" title="Import">&#43;</button>
             <button id="btn-open-folder" class="small-btn" title="Open folder">&#128193;</button>
             <button id="btn-refresh" class="small-btn" title="Refresh">&#8635;</button>
+          </div>
+          <div style="padding: 4px 8px;">
+            <input type="text" id="gallery-search" placeholder="Search..." style="width: 100%; padding: 5px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px;" />
           </div>
           <div id="mesh-list"></div>
         </div>
@@ -1274,8 +1277,21 @@
       dropOverlay.classList.add('hidden');
 
       const files = Array.from(e.dataTransfer.files);
+      // Image drop: import as a new image project
+      const imageFile = files.find(f => /\.(png|jpg|jpeg|webp)$/i.test(f.name));
+      if (imageFile) {
+        const result = await API.importImageFile(imageFile.path);
+        if (result) {
+          await refreshGalleryImages();
+          showLog('Image imported: ' + imageFile.name, 'success');
+        } else {
+          showLog('Failed to import image', 'error');
+        }
+        return;
+      }
+
       const meshFile = files.find(f => /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f.name));
-      if (!meshFile) { showLog('Unsupported file format. Use GLB, OBJ, FBX, or STL.', 'error'); return; }
+      if (!meshFile) { showLog('Unsupported file format. Use GLB, OBJ, FBX, STL, PNG, or JPG.', 'error'); return; }
 
       const result = await window.meshyAPI.copyMeshToProject(meshFile.path);
       if (result) {
@@ -1535,17 +1551,29 @@
 
     // Generate Images button
     document.getElementById('btn-gen-images').addEventListener('click', async () => {
-      const prompt = document.getElementById('prompt-input').value.trim();
-      if (!prompt) { showLog('Describe what to generate.', 'error'); return; }
-      const numImages = parseInt(document.getElementById('num-images').value) || 4;
+      const promptRaw = document.getElementById('prompt-input').value.trim();
+      if (!promptRaw) { showLog('Describe what to generate.', 'error'); return; }
+      const numImagesUI = parseInt(document.getElementById('num-images').value) || 4;
       const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
       const btn = document.getElementById('btn-gen-images');
       const imageEngine = document.getElementById('image-engine').value;
+      const isMultiView = document.getElementById('chk-multi-view')?.checked;
+
+      // Multi-view: generate 3 separate images (front, side, back) instead
+      // Each call to generateImages produces 1 image with a view-specific prompt
+      let prompt, numImages;
+      if (isMultiView) {
+        prompt = promptRaw; // base prompt; view suffix added per call
+        numImages = 3;
+      } else {
+        prompt = promptRaw;
+        numImages = numImagesUI;
+      }
 
       // Check capacity for local image generation
       if (!await checkCapacityAndConfirm(imageEngine)) return;
 
-      const imgJob = addJob(`${numImages} images (${imageEngine})`, imageEngine);
+      const imgJob = addJob(`${numImages} images${isMultiView ? ' (multi-view)' : ''} (${imageEngine})`, imageEngine);
       btn.disabled = false; // Keep enabled for parallel
 
       document.getElementById('generation-status').classList.remove('hidden');
@@ -1558,7 +1586,28 @@
       gridItems.innerHTML = Array(numImages).fill('<div class="grid-img-loading">...</div>').join('');
       document.getElementById('btn-send-to-3d').classList.add('hidden');
 
-      const result = await window.meshyAPI.generateImages({ prompt, numImages, projectName: meshName, engine: imageEngine });
+      let result;
+      if (isMultiView) {
+        // 3 sequential calls with different view prompts
+        const views = [
+          { suffix: 'front view, facing camera', label: 'front' },
+          { suffix: 'side view, profile from the right', label: 'side' },
+          { suffix: 'back view, from behind', label: 'back' },
+        ];
+        const allImages = [];
+        for (const v of views) {
+          const r = await window.meshyAPI.generateImages({
+            prompt: `${prompt}, ${v.suffix}`,
+            numImages: 1,
+            projectName: meshName,
+            engine: imageEngine
+          });
+          if (r?.success && r.images?.length) allImages.push(...r.images);
+        }
+        result = { success: allImages.length > 0, images: allImages };
+      } else {
+        result = await window.meshyAPI.generateImages({ prompt, numImages, projectName: meshName, engine: imageEngine });
+      }
 
       stopProgress();
       if (!result.success || !result.images?.length) {
@@ -1784,6 +1833,18 @@
         });
       });
     });
+
+    // Gallery search filter
+    const gallerySearch = document.getElementById('gallery-search');
+    if (gallerySearch) {
+      gallerySearch.addEventListener('input', (e) => {
+        const q = e.target.value.toLowerCase().trim();
+        document.querySelectorAll('#mesh-list .mesh-item, #mesh-list .gallery-project').forEach(el => {
+          const txt = el.textContent.toLowerCase();
+          el.style.display = (!q || txt.includes(q)) ? '' : 'none';
+        });
+      });
+    }
 
     // Effort slider (controls num_inference_steps for Hunyuan3D)
     const effortLabels = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max', 5: 'Ultra' };

@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   saveThumbnail: (opts) => ipcRenderer.invoke('save-thumbnail', opts),
   getThumbnail: (meshPath) => ipcRenderer.invoke('get-thumbnail', meshPath),
   removeBackground: (imagePath) => ipcRenderer.invoke('remove-background', imagePath),
+  importImageFile: (filePath) => ipcRenderer.invoke('import-image-file', filePath),
+  showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),
