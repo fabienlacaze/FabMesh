@@ -435,21 +435,13 @@
     new ResizeObserver(resize).observe(container);
     resize();
 
-    // Event-driven render: only when camera/scene changes
-    let needsRender = true;
-    let rafId = null;
-    function requestRender() { needsRender = true; }
-    function renderLoop() {
-      rafId = requestAnimationFrame(renderLoop);
-      if (needsRender) {
-        controls.update();
-        renderer.render(scene, camera);
-        needsRender = false;
-      }
-    }
-    controls.addEventListener('change', requestRender);
-    window.addEventListener('resize', requestRender);
-    renderLoop();
+    // Render loop (keep simple and reliable)
+    function requestRender() { /* no-op, loop always runs */ }
+    (function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
 
     function clearModel() {
       if (currentModel) {
@@ -1499,6 +1491,8 @@
       if (first) window._pickImage(first);
 
       await refreshImageHistory();
+      // Refresh main gallery so new images appear
+      if (currentTab === 'tab-image') await refreshGalleryImages();
       window.meshyAPI.flashTaskbar();
       btn.disabled = false; btn.textContent = 'Generate Images';
     });
@@ -1647,46 +1641,7 @@
       window._selectedPreviewImage = imgPath;
     };
 
-    // Generate Images button in Images tab
-    document.getElementById('btn-gen-images').addEventListener('click', async () => {
-      const prompt = document.getElementById('img-prompt').value.trim();
-      if (!prompt) { showLog('Describe what to generate.', 'error'); return; }
-      const count = parseInt(document.getElementById('img-count').value) || 4;
-      const btn = document.getElementById('btn-gen-images');
-      btn.disabled = true; btn.textContent = `Generating ${count} images...`;
-
-      document.getElementById('generation-status').classList.remove('hidden');
-      resetProgress();
-      startProgressAnimation(90, count * 30000, `Generating ${count} images...`);
-
-      const grid = document.getElementById('img-tab-grid');
-      const gridItems = document.getElementById('img-tab-grid-items');
-      grid.classList.remove('hidden');
-      gridItems.innerHTML = Array(count).fill('<div class="grid-img-loading">...</div>').join('');
-
-      const result = await window.meshyAPI.generateImages({ prompt, numImages: count, projectName: prompt.slice(0, 20).replace(/[^a-zA-Z0-9]/g, '_') });
-
-      stopProgress();
-      if (!result.success || !result.images?.length) {
-        showProgressError('Failed');
-        showLog(result.error || 'No images', 'error');
-        btn.disabled = false; btn.textContent = 'Generate Images';
-        return;
-      }
-
-      setProgress(100, `${result.images.length} images generated!`);
-      gridItems.innerHTML = result.images.map(img =>
-        `<img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="this.parentElement.querySelectorAll('.grid-img').forEach(i=>i.classList.remove('selected')); this.classList.add('selected'); window._selectedPreviewImage='${img.replace(/\\/g, '/')}';" />`
-      ).join('');
-
-      // Auto-select first
-      const first = gridItems.querySelector('.grid-img');
-      if (first) first.click();
-
-      await refreshImageHistory();
-      window.meshyAPI.flashTaskbar();
-      btn.disabled = false; btn.textContent = 'Generate Images';
-    });
+    // (Removed legacy second btn-gen-images listener)
 
     // ========== IMAGE REFINE ==========
     // Remove background button (runs in background as a job)
