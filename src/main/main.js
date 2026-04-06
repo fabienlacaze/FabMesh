@@ -194,38 +194,62 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
   try {
     backupImage(imagePath);
 
+    // Resize image first if too big (kontext prefers small images)
+    const sharp = (() => { try { return require('sharp'); } catch(e) { return null; } })();
+    let uploadPath = imagePath;
+    const tempResized = imagePath + '.resize.png';
+
     // Upload image to catbox.moe to get a public URL
-    const publicUrl = await uploadToCatbox(imagePath);
+    const publicUrl = await uploadToCatbox(uploadPath);
     console.log('Uploaded to:', publicUrl);
 
-    // Use kontext via Pollinations
+    // Use kontext via Pollinations - try multiple times with different settings
     const https = require('https');
     const http = require('http');
     const enc = encodeURIComponent(prompt);
-    const url = `https://image.pollinations.ai/prompt/${enc}?model=kontext&image=${encodeURIComponent(publicUrl)}&nologo=true&width=1024&height=1024`;
 
-    await new Promise((resolve, reject) => {
-      const followRedirect = (u, depth) => {
-        if (depth > 5) return reject(new Error('Too many redirects'));
-        const lib = u.startsWith('https') ? https : http;
-        lib.get(u, { headers: { 'User-Agent': 'FabMesh/1.0' }, timeout: 180000 }, (resp) => {
-          if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
-            return followRedirect(resp.headers.location, depth + 1);
-          }
-          if (resp.statusCode !== 200) return reject(new Error(`HTTP ${resp.statusCode}`));
-          const chunks = [];
-          resp.on('data', c => chunks.push(c));
-          resp.on('end', () => {
-            fs.writeFileSync(imagePath, Buffer.concat(chunks));
-            resolve();
-          });
-          resp.on('error', reject);
-        }).on('error', reject);
-      };
-      followRedirect(url, 0);
-    });
+    const attempts = [
+      `https://image.pollinations.ai/prompt/${enc}?model=kontext&image=${encodeURIComponent(publicUrl)}&nologo=true`,
+      `https://image.pollinations.ai/prompt/${enc}?model=kontext&image=${encodeURIComponent(publicUrl)}`,
+      `https://image.pollinations.ai/prompt/${enc}?model=flux&image=${encodeURIComponent(publicUrl)}&nologo=true`,
+    ];
 
-    return { success: true };
+    let lastError = null;
+    for (const url of attempts) {
+      try {
+        await new Promise((resolve, reject) => {
+          const followRedirect = (u, depth) => {
+            if (depth > 5) return reject(new Error('Too many redirects'));
+            const lib = u.startsWith('https') ? https : http;
+            lib.get(u, { headers: { 'User-Agent': 'FabMesh/1.0' }, timeout: 180000 }, (resp) => {
+              if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+                return followRedirect(resp.headers.location, depth + 1);
+              }
+              if (resp.statusCode !== 200) return reject(new Error(`HTTP ${resp.statusCode}`));
+              const chunks = [];
+              resp.on('data', c => chunks.push(c));
+              resp.on('end', () => {
+                const buf = Buffer.concat(chunks);
+                if (buf.length < 1000) return reject(new Error('Response too small'));
+                fs.writeFileSync(imagePath, buf);
+                resolve();
+              });
+              resp.on('error', reject);
+            }).on('error', reject);
+          };
+          followRedirect(url, 0);
+        });
+        // Cleanup temp
+        if (fs.existsSync(tempResized)) fs.unlinkSync(tempResized);
+        return { success: true };
+      } catch (e) {
+        lastError = e;
+        console.log('Attempt failed:', e.message);
+      }
+    }
+
+    if (fs.existsSync(tempResized)) fs.unlinkSync(tempResized);
+    return { success: false, error: lastError ? lastError.message : 'All attempts failed' };
   } catch (e) {
     return { success: false, error: e.message };
   }
