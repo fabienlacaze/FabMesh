@@ -144,6 +144,20 @@
                 <input type="range" id="refine-strength" min="30" max="95" value="55" style="flex:1; accent-color: var(--accent);" />
                 <span id="refine-strength-val" style="font-size: 11px; color: var(--text-secondary); min-width: 30px; text-align: right;">55%</span>
               </div>
+
+              <details style="margin: 8px 12px;">
+                <summary style="font-size: 12px; color: var(--text-secondary); cursor: pointer; padding: 4px 0;">Inpaint (remove/replace object)</summary>
+                <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+                  <input type="text" id="inpaint-target" placeholder="What to target (e.g. hat, background)" style="padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px;" />
+                  <input type="text" id="inpaint-replace" placeholder="Replace with (empty = remove)" style="padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px;" />
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 10px; color: var(--text-muted); min-width: 60px;">Padding</label>
+                    <input type="range" id="inpaint-dilate" min="0" max="40" value="15" style="flex:1; accent-color: var(--accent);" />
+                    <span id="inpaint-dilate-val" style="font-size: 10px; color: var(--text-secondary); min-width: 30px; text-align: right;">15px</span>
+                  </div>
+                  <button id="btn-inpaint" class="secondary-btn">Auto Inpaint</button>
+                </div>
+              </details>
               <div class="refine-input-area">
                 <textarea id="img-refine-input" placeholder="What to change? Ex: add more snow on the roof, make the door bigger..." rows="3"></textarea>
                 <button id="btn-refine-image" class="refine-btn" disabled>Refine Image</button>
@@ -1264,6 +1278,11 @@
       else if (msg.includes('HUNYUAN3D: Painting textures')) { setSteps(2); stopProgress(); setProgress(65, 'Painting textures...'); startProgressAnimation(99, 180000, 'Painting textures...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=65;j.step='Painting textures...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D: Total time')) { setSteps(3); stopProgress(); setProgress(98, 'Exporting...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=98;j.step='Exporting...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D_SUCCESS')) { setSteps(3); stopProgress(); setProgress(100, 'Done!'); }
+      else if (msg.includes('INPAINT: Loading CLIPSeg')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=10;j.step='Loading CLIPSeg...';}); renderJobs(); }
+      else if (msg.includes('INPAINT: Segmenting')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=30;j.step='Segmenting target...';}); renderJobs(); }
+      else if (msg.includes('INPAINT: Loading SDXL')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=50;j.step='Loading SDXL Inpainting...';}); renderJobs(); }
+      else if (msg.includes('INPAINT: Generating')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=70;j.step='Inpainting...';}); renderJobs(); }
+      else if (msg.includes('INPAINT_SUCCESS')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=100;j.step='Done!';}); renderJobs(); }
     });
 
     // ========== GALLERY: IMAGE MODE ==========
@@ -1660,6 +1679,45 @@
 
     document.getElementById('refine-strength').addEventListener('input', (e) => {
       document.getElementById('refine-strength-val').textContent = e.target.value + '%';
+    });
+
+    document.getElementById('inpaint-dilate').addEventListener('input', (e) => {
+      document.getElementById('inpaint-dilate-val').textContent = e.target.value + 'px';
+    });
+
+    document.getElementById('btn-inpaint').addEventListener('click', async () => {
+      if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
+      const target = document.getElementById('inpaint-target').value.trim();
+      const replace = document.getElementById('inpaint-replace').value.trim();
+      if (!target) { showLog('What do you want to target?', 'error'); return; }
+
+      const dilate = parseInt(document.getElementById('inpaint-dilate').value) || 15;
+      const job = addJob(`Inpaint: ${target}`, 'inpaint', selectedImagePath);
+      job.step = 'Segmenting...';
+      job.progress = 15;
+      renderJobs();
+
+      try {
+        const result = await window.meshyAPI.autoInpaint({
+          imagePath: selectedImagePath,
+          targetText: target,
+          prompt: replace,
+          dilate
+        });
+        if (result.success && result.newPath) {
+          selectedImagePath = result.newPath;
+          showImageRefine(result.newPath, lastImagePrompt);
+          if (currentTab === 'tab-image') refreshGalleryImages();
+          completeJob(job.id, true);
+          showLog('Inpainted! New version created.', 'success');
+        } else {
+          completeJob(job.id, false);
+          showLog('Inpaint failed: ' + (result.error || 'unknown'), 'error');
+        }
+      } catch (e) {
+        completeJob(job.id, false);
+        showLog('Inpaint error: ' + e.message, 'error');
+      }
     });
 
     document.getElementById('btn-refine-image').addEventListener('click', async () => {

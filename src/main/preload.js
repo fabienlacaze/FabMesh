@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   getThumbnail: (meshPath) => ipcRenderer.invoke('get-thumbnail', meshPath),
   removeBackground: (imagePath) => ipcRenderer.invoke('remove-background', imagePath),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
+  autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),
   revertImage: (opts) => ipcRenderer.invoke('revert-image', opts)
 });

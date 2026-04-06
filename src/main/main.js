@@ -189,6 +189,37 @@ async function uploadToCatbox(imagePath) {
   });
 }
 
+// Auto-inpaint: CLIPSeg segments target area + SDXL Inpainting replaces it
+ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate }) => {
+  try {
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const ts = Date.now();
+    const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
+
+    const script = path.join(__dirname, '..', '..', 'scripts', 'local_inpaint_bridge.py');
+    return new Promise((resolve) => {
+      const proc = execFile('python', [script, imagePath, targetText, prompt || '', newImagePath, String(dilate || 15)], {
+        timeout: 300000, maxBuffer: 10 * 1024 * 1024
+      }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({ success: false, error: error.message, stdout, stderr });
+        } else if (fs.existsSync(newImagePath)) {
+          resolve({ success: true, newPath: newImagePath });
+        } else {
+          resolve({ success: false, error: 'Output not created', stdout, stderr });
+        }
+      });
+      proc.stdout?.on('data', d => {
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Img2img: use local Stable Diffusion XL img2img for real image modification
 ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
   try {

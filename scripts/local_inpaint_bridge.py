@@ -1,0 +1,137 @@
+"""
+FabMesh Local Inpainting Bridge
+Auto-segments target area with CLIPSeg + inpaints with SDXL Inpainting.
+
+Usage: python local_inpaint_bridge.py <input_image> <target_text> <prompt> <output_image> [dilate]
+
+- target_text: what to segment (e.g. "hat", "background", "shirt")
+- prompt: what to replace it with (e.g. "hair", "white background", "red shirt")
+  - Use "background" or "empty" to remove the element
+- dilate: mask dilation in pixels (default 15, higher = more context for seamless blending)
+"""
+import sys
+import os
+import torch
+import numpy as np
+from PIL import Image, ImageFilter
+
+
+def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
+    from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
+    from diffusers import StableDiffusionXLInpaintPipeline
+
+    # Step 1: CLIPSeg - segment the target area
+    print("INPAINT: Loading CLIPSeg...", flush=True)
+    seg_processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+    seg_model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+    seg_model.to("cuda")
+    seg_model.eval()
+
+    img = Image.open(input_path).convert("RGB")
+    orig_w, orig_h = img.size
+
+    # Work at 1024 max to keep VRAM reasonable
+    max_dim = 1024
+    if max(orig_w, orig_h) > max_dim:
+        if orig_w > orig_h:
+            work_w, work_h = max_dim, int(orig_h * max_dim / orig_w)
+        else:
+            work_h, work_w = max_dim, int(orig_w * max_dim / orig_h)
+    else:
+        work_w, work_h = orig_w, orig_h
+    work_w = (work_w // 8) * 8
+    work_h = (work_h // 8) * 8
+    img_work = img.resize((work_w, work_h), Image.LANCZOS)
+
+    print(f"INPAINT: Segmenting '{target_text}'...", flush=True)
+    inputs = seg_processor(text=[target_text], images=[img_work], padding=True, return_tensors="pt")
+    inputs = {k: v.to("cuda") for k, v in inputs.items()}
+    with torch.no_grad():
+        seg_out = seg_model(**inputs)
+    # Get mask, normalize to 0-1
+    mask = torch.sigmoid(seg_out.logits).squeeze().cpu().numpy()
+    # Resize mask to work image size
+    mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize((work_w, work_h), Image.BILINEAR)
+
+    # Threshold: pixels > 50% probability are the mask
+    mask_arr = np.array(mask_img)
+    binary = (mask_arr > 100).astype(np.uint8) * 255
+    mask_binary = Image.fromarray(binary, mode="L")
+
+    # Dilate the mask to include some surrounding context
+    if dilate > 0:
+        mask_binary = mask_binary.filter(ImageFilter.MaxFilter(dilate * 2 + 1))
+    # Smooth edges
+    mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
+
+    mask_coverage = (np.array(mask_binary) > 128).mean() * 100
+    print(f"INPAINT: Mask covers {mask_coverage:.1f}% of image", flush=True)
+
+    if mask_coverage < 0.5:
+        print("INPAINT_ERROR: Mask empty - target not found in image", flush=True)
+        sys.exit(1)
+
+    # Save mask for debugging
+    debug_mask = output_path.replace(".png", "_mask.png").replace(".jpg", "_mask.png")
+    mask_binary.save(debug_mask)
+    print(f"INPAINT: Debug mask saved to {debug_mask}", flush=True)
+
+    # Free CLIPSeg before loading inpaint
+    del seg_model, seg_processor
+    torch.cuda.empty_cache()
+
+    # Step 2: SDXL Inpainting
+    print("INPAINT: Loading SDXL Inpainting...", flush=True)
+    pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
+        "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
+        torch_dtype=torch.float16,
+        variant="fp16",
+    )
+    pipe.to("cuda")
+    print(f"INPAINT: Model loaded ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
+
+    # If prompt is "remove" type, use a generic background prompt
+    inpaint_prompt = prompt.strip()
+    if inpaint_prompt.lower() in ("", "remove", "delete", "none", "nothing"):
+        inpaint_prompt = "seamless background, matching surroundings, clean"
+
+    print(f"INPAINT: Generating with prompt '{inpaint_prompt}'...", flush=True)
+    result = pipe(
+        prompt=inpaint_prompt,
+        image=img_work,
+        mask_image=mask_binary,
+        num_inference_steps=30,
+        guidance_scale=7.5,
+        strength=0.99,
+        height=work_h,
+        width=work_w,
+    ).images[0]
+
+    # Resize back to original if needed
+    if (work_w, work_h) != (orig_w, orig_h):
+        result = result.resize((orig_w, orig_h), Image.LANCZOS)
+
+    result.save(output_path)
+    print(f"INPAINT_SUCCESS: {os.path.getsize(output_path)} bytes", flush=True)
+    return True
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 5:
+        print("Usage: python local_inpaint_bridge.py <input> <target_text> <prompt> <output> [dilate]")
+        sys.exit(1)
+
+    input_path = sys.argv[1]
+    target_text = sys.argv[2]
+    prompt = sys.argv[3]
+    output_path = sys.argv[4]
+    dilate = int(sys.argv[5]) if len(sys.argv) > 5 else 15
+
+    try:
+        auto_inpaint(input_path, target_text, prompt, output_path, dilate)
+        sys.exit(0)
+    except Exception as e:
+        print(f"INPAINT_ERROR: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
