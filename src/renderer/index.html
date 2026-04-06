@@ -25,15 +25,13 @@
           <button class="tab" data-tab="tab-3d">3D</button>
         </div>
         <div id="gallery-content">
-          <div class="panel-header">
-            <h2 id="gallery-title">Gallery</h2>
-            <button id="btn-import" class="small-btn" title="Import">&#43;</button>
-            <button id="btn-open-folder" class="small-btn" title="Open folder">&#128193;</button>
-            <button id="btn-refresh" class="small-btn" title="Refresh">&#8635;</button>
+          <div class="gallery-toolbar">
+            <input type="text" id="gallery-search" placeholder="Search..." class="gallery-search-input" />
+            <button id="btn-import" class="gallery-tool-btn" title="Import">+</button>
+            <button id="btn-open-folder" class="gallery-tool-btn" title="Open folder in explorer">&#128194;</button>
+            <button id="btn-refresh" class="gallery-tool-btn" title="Refresh gallery">&#x21bb;</button>
           </div>
-          <div style="padding: 4px 8px;">
-            <input type="text" id="gallery-search" placeholder="Search..." style="width: 100%; padding: 5px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 12px;" />
-          </div>
+          <h2 id="gallery-title" class="hidden">Gallery</h2>
           <div id="mesh-list"></div>
         </div>
         <div class="resize-handle-right" id="gallery-resize"></div>
