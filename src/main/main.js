@@ -145,6 +145,56 @@ ipcMain.handle('revert-image', (event, { imagePath, versionPath }) => {
   return true;
 });
 
+// Img2img: regenerate image with kontext model using existing image as reference
+ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
+  try {
+    // Backup current image
+    backupImage(imagePath);
+
+    // Start a tiny HTTP server to expose the image
+    const http = require('http');
+    const imgBuffer = fs.readFileSync(imagePath);
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.end(imgBuffer);
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    const localUrl = `http://127.0.0.1:${port}/img.png`;
+
+    // Use kontext via Pollinations
+    const https = require('https');
+    const enc = encodeURIComponent(prompt);
+    const url = `https://image.pollinations.ai/prompt/${enc}?model=kontext&image=${encodeURIComponent(localUrl)}&nologo=true&width=1024&height=1024`;
+
+    await new Promise((resolve, reject) => {
+      const followRedirect = (u, depth) => {
+        if (depth > 5) return reject(new Error('Too many redirects'));
+        const lib = u.startsWith('https') ? https : http;
+        lib.get(u, { headers: { 'User-Agent': 'FabMesh/1.0' }, timeout: 180000 }, (resp) => {
+          if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+            return followRedirect(resp.headers.location, depth + 1);
+          }
+          if (resp.statusCode !== 200) return reject(new Error(`HTTP ${resp.statusCode}`));
+          const chunks = [];
+          resp.on('data', c => chunks.push(c));
+          resp.on('end', () => {
+            fs.writeFileSync(imagePath, Buffer.concat(chunks));
+            resolve();
+          });
+          resp.on('error', reject);
+        }).on('error', reject);
+      };
+      followRedirect(url, 0);
+    });
+
+    server.close();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('remove-background', async (event, imagePath) => {
   return new Promise((resolve) => {
     // Backup before modification

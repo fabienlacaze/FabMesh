@@ -1585,38 +1585,49 @@
     document.getElementById('btn-refine-image').addEventListener('click', async () => {
       const modification = document.getElementById('img-refine-input').value.trim();
       if (!modification) { showLog('Describe what to change.', 'error'); return; }
+      if (!selectedImagePath) { showLog('Select an image first.', 'error'); return; }
 
-      const basePrompt = lastImagePrompt || document.getElementById('prompt-input').value.trim() || 'object';
-      const refinedPrompt = `${basePrompt}, ${modification}`;
-      document.getElementById('prompt-input').value = refinedPrompt;
-      lastImagePrompt = refinedPrompt;
+      // Use img2img to MODIFY the existing image instead of regenerating
+      const refineJob = addJob(`Refine image (img2img)`, 'pollinations');
+      refineJob.step = 'Modifying image...';
+      refineJob.progress = 20;
+      renderJobs();
 
-      const numImages = 1; // Refine generates a single image
+      const result = await window.meshyAPI.img2img({ imagePath: selectedImagePath, prompt: modification });
+
+      if (!result.success) {
+        completeJob(refineJob.id, false);
+        showLog('Refine failed: ' + (result.error || ''), 'error');
+        return;
+      }
+
+      // Reload the image with cache bust
+      const newSrc = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+      document.getElementById('img-refine-thumb').src = newSrc;
+      document.querySelectorAll('.grid-img').forEach(i => {
+        if (i.dataset.path === selectedImagePath) i.src = newSrc;
+      });
+      // Refresh history
+      showImageRefine(selectedImagePath, lastImagePrompt);
+      if (currentTab === 'tab-image') refreshGalleryImages();
+      completeJob(refineJob.id, true);
+      showLog('Image refined!', 'success');
+      window.meshyAPI.flashTaskbar();
+      document.getElementById('img-refine-input').value = '';
+      return;
+
+      // (legacy regenerate path below — unreachable now)
+      const numImages = 1;
       const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
       const imageEngine = document.getElementById('image-engine').value;
       const btn = document.getElementById('btn-refine-image');
-      btn.disabled = false; // Don't lock — runs as a background job
-
-      // Add to job queue
-      const refineJob = addJob(`Refine: 1 image`, imageEngine);
-      refineJob.step = 'Refining images...';
-      refineJob.progress = 10;
-      renderJobs();
-
       const grid = document.getElementById('image-grid');
       const gridItems = document.getElementById('image-grid-items');
       grid.classList.remove('hidden');
       gridItems.innerHTML = Array(numImages).fill('<div class="grid-img-loading">...</div>').join('');
-
-      const result = await window.meshyAPI.generateImages({ prompt: refinedPrompt, numImages, projectName: meshName, engine: imageEngine });
-
-      if (!result.success || !result.images?.length) {
-        completeJob(refineJob.id, false);
-        showLog(result.error || 'No images', 'error');
-        return;
-      }
-
-      completeJob(refineJob.id, true);
+      const refinedPrompt = (lastImagePrompt || '') + ', ' + modification;
+      const result2 = await window.meshyAPI.generateImages({ prompt: refinedPrompt, numImages, projectName: meshName, engine: imageEngine });
+      if (!result2.success) return;
       const safePrompt = refinedPrompt.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       gridItems.innerHTML = result.images.map(img =>
         `<div class="grid-img-wrapper"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
