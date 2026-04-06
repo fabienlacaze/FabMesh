@@ -75,6 +75,91 @@ function saveConfig(config) {
 
 let mainWindow;
 
+// ========== SDXL PERSISTENT SERVER ==========
+// Lazy-spawned Python HTTP server that keeps SDXL models in memory
+// to avoid 5-10s reload per img2img/inpaint call
+let sdxlProc = null;
+let sdxlReady = false;
+const SDXL_PORT = 5555;
+
+function startSdxlServer() {
+  if (sdxlProc) return;
+  const serverScript = path.join(__dirname, '..', '..', 'scripts', 'sdxl_server.py');
+  if (!fs.existsSync(serverScript)) {
+    console.warn('SDXL server script not found, falling back to subprocess mode');
+    return;
+  }
+  console.log('[SDXL] Spawning persistent server...');
+  try {
+    sdxlProc = require('child_process').spawn('python', [serverScript], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    sdxlProc.stdout.on('data', d => {
+      const msg = d.toString().trim();
+      if (msg) console.log('[SDXL]', msg);
+      if (msg.includes('Server ready')) sdxlReady = true;
+    });
+    sdxlProc.stderr.on('data', d => console.error('[SDXL stderr]', d.toString().trim()));
+    sdxlProc.on('exit', (code) => {
+      console.log('[SDXL] server exited with code', code);
+      sdxlProc = null;
+      sdxlReady = false;
+    });
+  } catch (e) {
+    console.error('[SDXL] failed to spawn:', e);
+    sdxlProc = null;
+  }
+}
+
+function stopSdxlServer() {
+  if (sdxlProc) {
+    try {
+      // Send shutdown via HTTP first (clean)
+      const http = require('http');
+      const req = http.request({ host: '127.0.0.1', port: SDXL_PORT, path: '/shutdown', method: 'POST', timeout: 2000 }, () => {});
+      req.on('error', () => {});
+      req.end();
+      setTimeout(() => {
+        if (sdxlProc) { try { sdxlProc.kill(); } catch(e) {} }
+      }, 500);
+    } catch(e) {}
+  }
+}
+
+// Helper: HTTP POST to SDXL server, returns { ok, output, error }
+function sdxlServerCall(endpoint, payload) {
+  return new Promise((resolve) => {
+    if (!sdxlReady) {
+      resolve({ ok: false, error: 'sdxl_server_not_ready' });
+      return;
+    }
+    const http = require('http');
+    const body = JSON.stringify(payload);
+    const req = http.request({
+      host: '127.0.0.1',
+      port: SDXL_PORT,
+      path: endpoint,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 600000
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+        } catch(e) {
+          resolve({ ok: false, error: 'parse_error: ' + e.message });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.write(body);
+    req.end();
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -110,8 +195,16 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
-app.on('window-all-closed', () => app.quit());
+app.whenReady().then(() => {
+  createWindow();
+  // Lazy start SDXL server in background (doesn't block UI)
+  setTimeout(() => startSdxlServer(), 1500);
+});
+app.on('window-all-closed', () => {
+  stopSdxlServer();
+  app.quit();
+});
+app.on('before-quit', () => stopSdxlServer());
 
 // Show file in explorer
 // Image history: backup current image before modifying
@@ -323,6 +416,16 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
 
+    // Try persistent SDXL server first (no model reload)
+    if (sdxlReady) {
+      console.log('[inpaint] Using persistent SDXL server');
+      const r = await sdxlServerCall('/inpaint', {
+        input: imagePath, target: targetText, prompt: prompt || '', output: newImagePath, dilate: dilate || 15
+      });
+      if (r.ok) return { success: true, newPath: newImagePath };
+      console.warn('[inpaint] SDXL server failed, falling back to subprocess:', r.error);
+    }
+
     const script = path.join(__dirname, '..', '..', 'scripts', 'local_inpaint_bridge.py');
     return new Promise((resolve) => {
       const proc = execFile('python', [script, imagePath, targetText, prompt || '', newImagePath, String(dilate || 15)], {
@@ -359,7 +462,17 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_refined_${ts}${ext}`);
 
-    // Try local SDXL img2img first (real image modification)
+    // Try persistent SDXL server first (no model reload, ~2s instead of ~10s)
+    if (sdxlReady) {
+      console.log('[img2img] Using persistent SDXL server');
+      const r = await sdxlServerCall('/img2img', {
+        input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
+      });
+      if (r.ok) return { success: true, newPath: newImagePath };
+      console.warn('[img2img] SDXL server failed, falling back to subprocess:', r.error);
+    }
+
+    // Fallback: subprocess (slower because reloads model)
     const script = path.join(__dirname, '..', '..', 'scripts', 'local_img2img_bridge.py');
     const localResult = await new Promise((resolve) => {
       const proc = execFile('python', [script, imagePath, prompt, newImagePath, String(strength || 0.55)], {
@@ -988,24 +1101,22 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
         continue;
       }
 
-      // Step 2: Convert image to 3D
+      // Step 2: Convert image to 3D using Hunyuan3D (default)
       const meshFilename = `${safeName}_${stage.name}_${timestamp}.glb`;
       const meshPath = path.join(MESHES_DIR, meshFilename);
-      const selectedEngine = engine || 'local';
+      const selectedEngine = engine || 'hunyuan';
       const bridgeScripts = {
-        'trellis2': path.join(__dirname, '..', '..', 'scripts', 'local_trellis2_bridge.py'),
+        'hunyuan': path.join(__dirname, '..', '..', 'scripts', 'local_hunyuan3d_bridge.py'),
         'local': path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
-        'triposg': path.join(__dirname, '..', '..', 'scripts', 'triposg_bridge.py'),
         'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
       };
-      const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['trellis2'];
+      const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['hunyuan'];
       const argsMap = {
-        'trellis2': [bridgeScript, imgPath, meshPath],
+        'hunyuan': [bridgeScript, imgPath, meshPath, '50000', '2'],
         'local': [bridgeScript, imgPath, meshPath, '512'],
-        'triposg': [bridgeScript, imgPath, meshPath, '50000'],
         'trellis': [bridgeScript, imgPath, meshPath, '0.95', '1024']
       };
-      const args = argsMap[selectedEngine] || argsMap['trellis2'];
+      const args = argsMap[selectedEngine] || argsMap['hunyuan'];
 
       try {
         await new Promise((resolve, reject) => {

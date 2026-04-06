@@ -1045,6 +1045,12 @@
       const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
       const format = document.getElementById('export-format')?.value || 'glb';
 
+      // Auto-switch to build mode if checkbox is checked
+      const buildStagesChecked = document.getElementById('chk-build-stages')?.checked;
+      if (buildStagesChecked && currentMethod !== 'build') {
+        currentMethod = 'build';
+      }
+
       // In Image-to-3D mode, we need an image, not a prompt
       if (currentMethod === 'ai3d') {
         if (!selectedImagePath) {
@@ -1052,9 +1058,14 @@
           switchTab('tab-image');
           return;
         }
-      } else if (!prompt) {
-        showLog('Please describe the 3D object you want to create.', 'error');
-        return;
+      } else if (!prompt && !selectedImagePath) {
+        // Build mode: try to use the lastImagePrompt or a default
+        if (currentMethod === 'build' && lastImagePrompt) {
+          // OK, will use last prompt
+        } else {
+          showLog('Please describe the building or select an image.', 'error');
+          return;
+        }
       }
 
       // Route to Build Stages method
@@ -1629,12 +1640,12 @@
       const btn = document.getElementById('btn-gen-images');
       const imageEngine = document.getElementById('image-engine').value;
       const isMultiView = document.getElementById('chk-multi-view')?.checked;
+      const isImgBuildStages = document.getElementById('chk-img-build-stages')?.checked;
 
-      // Multi-view: generate 3 separate images (front, side, back) instead
-      // Each call to generateImages produces 1 image with a view-specific prompt
+      // Multi-view / build stages: generate 3 separate images
       let prompt, numImages;
-      if (isMultiView) {
-        prompt = promptRaw; // base prompt; view suffix added per call
+      if (isMultiView || isImgBuildStages) {
+        prompt = promptRaw;
         numImages = 3;
       } else {
         prompt = promptRaw;
@@ -1658,7 +1669,25 @@
       document.getElementById('btn-send-to-3d').classList.add('hidden');
 
       let result;
-      if (isMultiView) {
+      if (isImgBuildStages) {
+        // Construction stages: foundation -> half-built -> complete
+        const stages = [
+          { suffix: 'construction site foundation, scaffolding, building materials, early phase, no walls yet', label: 'site' },
+          { suffix: 'half-built, walls partially built, scaffolding, wooden frame, roof beams without tiles, unfinished', label: 'wip' },
+          { suffix: 'completed, fully built, roof tiles, windows doors installed, polished, final', label: 'done' },
+        ];
+        const allImages = [];
+        for (const s of stages) {
+          const r = await window.meshyAPI.generateImages({
+            prompt: `${prompt}, ${s.suffix}`,
+            numImages: 1,
+            projectName: meshName + '_stages',
+            engine: imageEngine
+          });
+          if (r?.success && r.images?.length) allImages.push(...r.images);
+        }
+        result = { success: allImages.length > 0, images: allImages };
+      } else if (isMultiView) {
         // 3 sequential calls with different view prompts
         const views = [
           { suffix: 'front view, facing camera', label: 'front' },
