@@ -481,6 +481,39 @@
       <button id="lightbox-close" onclick="document.getElementById('lightbox').classList.add('hidden')">&#10005;</button>
     </div>
 
+    <!-- Draw Mask Modal -->
+    <div id="mask-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Draw Mask (paint to remove)</h3>
+          <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Click & drag</strong> to paint red mask &nbsp;|&nbsp;
+          <strong>Right-click drag</strong> to erase &nbsp;|&nbsp;
+          <strong>Z</strong> to undo
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px;">Brush:
+            <input type="range" id="mask-brush-size" min="5" max="200" value="50" />
+            <span id="mask-brush-val" style="min-width:30px;">50</span>
+          </label>
+          <button id="mask-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
+          <button id="mask-clear" class="secondary-btn" style="padding: 4px 12px;">Clear</button>
+          <input type="text" id="mask-prompt" placeholder="Replace with... (empty = just remove)" style="flex: 1; min-width: 200px; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;" />
+        </div>
+        <div id="mask-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
+          <canvas id="mask-base-canvas" style="position: absolute; left: 0; top: 0;"></canvas>
+          <canvas id="mask-overlay-canvas" style="position: absolute; left: 0; top: 0; cursor: none; pointer-events: auto; opacity: 0.55;"></canvas>
+          <div id="mask-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button id="mask-cancel" class="secondary-btn">Cancel</button>
+          <button id="mask-apply" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Apply Inpaint</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Universal Export Modal -->
     <div id="export-modal" class="modal hidden">
       <div class="modal-content" style="max-width: 480px; padding: 20px; display: flex; flex-direction: column; gap: 14px;">
@@ -2943,13 +2976,228 @@
       btnCloneStamp.addEventListener('click', openCloneStamp);
     }
 
-    // Wire the Draw Mask button (placeholder - opens Clone Stamp for now)
+    // ========== DRAW MASK MODAL ==========
+    const maskModal = document.getElementById('mask-modal');
+    const maskBaseCanvas = document.getElementById('mask-base-canvas');
+    const maskOverlayCanvas = document.getElementById('mask-overlay-canvas');
+    const maskBaseCtx = maskBaseCanvas?.getContext('2d');
+    const maskOverlayCtx = maskOverlayCanvas?.getContext('2d', { willReadFrequently: true });
+    let maskState = {
+      isDown: false,
+      isErasing: false,
+      lastPoint: null,
+      brushSize: 50,
+      undoStack: [],
+      baseW: 0,
+      baseH: 0,
+    };
+
+    function openMaskTool() {
+      if (!selectedImagePath) {
+        showLog('Select an image first', 'error');
+        return;
+      }
+      maskModal.classList.remove('hidden');
+      const img = new Image();
+      img.onload = () => {
+        const maxW = window.innerWidth * 0.85;
+        const maxH = window.innerHeight * 0.65;
+        let w = img.width, h = img.height;
+        const scale = Math.min(maxW / w, maxH / h, 1);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+        maskState.baseW = w;
+        maskState.baseH = h;
+
+        maskBaseCanvas.width = img.width;
+        maskBaseCanvas.height = img.height;
+        maskOverlayCanvas.width = img.width;
+        maskOverlayCanvas.height = img.height;
+        maskBaseCanvas.style.width = w + 'px';
+        maskBaseCanvas.style.height = h + 'px';
+        maskOverlayCanvas.style.width = w + 'px';
+        maskOverlayCanvas.style.height = h + 'px';
+
+        // Center in container
+        const container = document.getElementById('mask-canvas-container');
+        const cw = container.clientWidth;
+        const ch = container.clientHeight;
+        const left = (cw - w) / 2;
+        const top = (ch - h) / 2;
+        maskBaseCanvas.style.left = left + 'px';
+        maskBaseCanvas.style.top = top + 'px';
+        maskOverlayCanvas.style.left = left + 'px';
+        maskOverlayCanvas.style.top = top + 'px';
+
+        maskBaseCtx.drawImage(img, 0, 0);
+        maskOverlayCtx.clearRect(0, 0, img.width, img.height);
+        maskState.undoStack = [];
+      };
+      img.src = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+
+    function maskGetCoords(e) {
+      const rect = maskOverlayCanvas.getBoundingClientRect();
+      const sx = maskOverlayCanvas.width / rect.width;
+      const sy = maskOverlayCanvas.height / rect.height;
+      return {
+        x: Math.round((e.clientX - rect.left) * sx),
+        y: Math.round((e.clientY - rect.top) * sy),
+      };
+    }
+
+    function maskPaint(x, y, erase) {
+      maskOverlayCtx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+      maskOverlayCtx.fillStyle = 'rgb(255, 0, 0)';
+      maskOverlayCtx.beginPath();
+      maskOverlayCtx.arc(x, y, maskState.brushSize / 2, 0, Math.PI * 2);
+      maskOverlayCtx.fill();
+      maskOverlayCtx.globalCompositeOperation = 'source-over';
+    }
+
+    function maskPushUndo() {
+      try {
+        maskState.undoStack.push(maskOverlayCtx.getImageData(0, 0, maskOverlayCanvas.width, maskOverlayCanvas.height));
+        if (maskState.undoStack.length > 20) maskState.undoStack.shift();
+      } catch(e) {}
+    }
+
+    function updateMaskCursor(e) {
+      const cur = document.getElementById('mask-brush-cursor');
+      if (!cur) return;
+      const rect = maskOverlayCanvas.getBoundingClientRect();
+      const scale = rect.width / maskOverlayCanvas.width || 1;
+      const displaySize = Math.max(4, maskState.brushSize * scale);
+      cur.style.width = displaySize + 'px';
+      cur.style.height = displaySize + 'px';
+      cur.style.left = (e.clientX - displaySize / 2) + 'px';
+      cur.style.top = (e.clientY - displaySize / 2) + 'px';
+      cur.style.display = 'block';
+    }
+
+    if (maskOverlayCanvas) {
+      const maskContainer = document.getElementById('mask-canvas-container');
+
+      maskContainer.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      maskOverlayCanvas.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        maskPushUndo();
+        maskState.isDown = true;
+        maskState.isErasing = (e.button === 2);
+        const p = maskGetCoords(e);
+        maskState.lastPoint = p;
+        maskPaint(p.x, p.y, maskState.isErasing);
+      });
+
+      maskOverlayCanvas.addEventListener('mousemove', (e) => {
+        updateMaskCursor(e);
+        if (!maskState.isDown) return;
+        const p = maskGetCoords(e);
+        const dx = p.x - maskState.lastPoint.x;
+        const dy = p.y - maskState.lastPoint.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const step = Math.max(1, maskState.brushSize / 4);
+        const steps = Math.ceil(dist / step);
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          maskPaint(
+            Math.round(maskState.lastPoint.x + dx * t),
+            Math.round(maskState.lastPoint.y + dy * t),
+            maskState.isErasing
+          );
+        }
+        maskState.lastPoint = p;
+      });
+
+      maskContainer.addEventListener('mouseenter', updateMaskCursor);
+      maskContainer.addEventListener('mousemove', updateMaskCursor);
+      maskContainer.addEventListener('mouseleave', () => {
+        const cur = document.getElementById('mask-brush-cursor');
+        if (cur) cur.style.display = 'none';
+      });
+
+      window.addEventListener('mouseup', () => { maskState.isDown = false; });
+
+      document.getElementById('mask-brush-size').addEventListener('input', (e) => {
+        maskState.brushSize = parseInt(e.target.value);
+        document.getElementById('mask-brush-val').textContent = e.target.value;
+      });
+
+      document.getElementById('mask-undo').addEventListener('click', () => {
+        if (maskState.undoStack.length > 0) {
+          maskOverlayCtx.putImageData(maskState.undoStack.pop(), 0, 0);
+        }
+      });
+
+      document.getElementById('mask-clear').addEventListener('click', () => {
+        maskPushUndo();
+        maskOverlayCtx.clearRect(0, 0, maskOverlayCanvas.width, maskOverlayCanvas.height);
+      });
+
+      document.getElementById('mask-cancel').addEventListener('click', () => maskModal.classList.add('hidden'));
+      document.getElementById('mask-modal-close').addEventListener('click', () => maskModal.classList.add('hidden'));
+
+      document.getElementById('mask-apply').addEventListener('click', async () => {
+        if (!selectedImagePath) return;
+        // Build a binary mask (white where painted, black elsewhere)
+        const w = maskOverlayCanvas.width;
+        const h = maskOverlayCanvas.height;
+        const overlayData = maskOverlayCtx.getImageData(0, 0, w, h);
+        // Check if anything is painted
+        let painted = 0;
+        for (let i = 3; i < overlayData.data.length; i += 4) {
+          if (overlayData.data[i] > 30) painted++;
+        }
+        if (painted < 50) {
+          showLog('Paint a mask first', 'error');
+          return;
+        }
+        // Convert to white-on-black mask
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = w;
+        maskCanvas.height = h;
+        const mctx = maskCanvas.getContext('2d');
+        mctx.fillStyle = 'black';
+        mctx.fillRect(0, 0, w, h);
+        const md = mctx.getImageData(0, 0, w, h);
+        for (let i = 0; i < overlayData.data.length; i += 4) {
+          if (overlayData.data[i + 3] > 30) {
+            md.data[i] = 255;
+            md.data[i + 1] = 255;
+            md.data[i + 2] = 255;
+          }
+          md.data[i + 3] = 255;
+        }
+        mctx.putImageData(md, 0, 0);
+        const maskDataUrl = maskCanvas.toDataURL('image/png');
+
+        const prompt = document.getElementById('mask-prompt').value.trim();
+        const job = addJob('Manual mask inpaint', 'inpaint', selectedImagePath);
+        job.progress = 30;
+        renderJobs();
+        try {
+          const r = await API.maskInpaint?.({ imagePath: selectedImagePath, maskDataUrl, prompt });
+          if (r?.success) {
+            completeJob(job.id, true);
+            showLog('Inpaint done: ' + (r.newPath || ''), 'success');
+            maskModal.classList.add('hidden');
+            await refreshActiveGallery();
+          } else {
+            completeJob(job.id, false);
+            showLog('Inpaint failed: ' + (r?.error || 'API not implemented'), 'error');
+          }
+        } catch (e) {
+          completeJob(job.id, false);
+          showLog('Inpaint error: ' + e.message, 'error');
+        }
+      });
+    }
+
+    // Wire the Draw Mask button to open the mask modal
     const btnDrawMask = document.getElementById('btn-draw-mask');
     if (btnDrawMask) {
-      btnDrawMask.addEventListener('click', () => {
-        showLog('Draw mask: not yet implemented, opening Clone Stamp instead', 'info');
-        openCloneStamp();
-      });
+      btnDrawMask.addEventListener('click', openMaskTool);
     }
 
     // ========== UNIVERSAL EXPORT MODAL ==========
