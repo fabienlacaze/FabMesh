@@ -143,7 +143,7 @@ function sdxlServerCall(endpoint, payload) {
       path: endpoint,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      timeout: 600000
+      timeout: 1800000
     }, (res) => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
@@ -1126,7 +1126,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 
       try {
         await new Promise((resolve, reject) => {
-          execFile('python', args, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+          execFile('python', args, { timeout: 1800000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
             if (error) { reject({ error: error.message, stdout, stderr }); return; }
             if (!fs.existsSync(meshPath)) { reject({ error: 'Mesh not created' }); return; }
             resolve();
@@ -1170,7 +1170,7 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_image_bridge.py');
       const result = await new Promise((resolve, reject) => {
         const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4)], {
-          timeout: 600000, maxBuffer: 50 * 1024 * 1024
+          timeout: 1800000, maxBuffer: 50 * 1024 * 1024
         }, (error, stdout, stderr) => {
           if (error) { reject({ error: error.message, stdout, stderr }); return; }
           // Collect generated images
@@ -1319,7 +1319,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
       let stderrBuf = '';
       let lastSent = 0;
       const proc = execFile('python', fixedArgs, {
-        timeout: 600000,
+        timeout: 1800000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (jobId) activeProcs.delete(jobId);
@@ -1375,7 +1375,7 @@ ipcMain.handle('image-to-3d-trellis', async (event, { imagePath, outputName, tex
 
     const result = await new Promise((resolve, reject) => {
       const proc = execFile('python', [bridgeScript, imagePath, meshPath, String(textureSize || 1024)], {
-        timeout: 600000,
+        timeout: 1800000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
