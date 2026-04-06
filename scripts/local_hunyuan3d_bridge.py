@@ -17,6 +17,14 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
     from PIL import Image
     from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
+    # Reserve 5% VRAM for the OS / display so the PC stays responsive
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.set_per_process_memory_fraction(0.95, 0)
+            print("HUNYUAN3D: GPU memory limited to 95% (5% reserved for OS)", flush=True)
+        except Exception as e:
+            print(f"HUNYUAN3D: Could not set memory fraction: {e}", flush=True)
+
     # Step 1: Shape on Windows GPU
     print("HUNYUAN3D: Loading shape model...", flush=True)
     shape_pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained('tencent/Hunyuan3D-2')
@@ -118,6 +126,13 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
             f"sys.path.insert(0, {json.dumps(hunyuan_wsl)})\n"
             "from PIL import Image\n"
             "from hy3dgen.texgen import Hunyuan3DPaintPipeline\n"
+            "\n"
+            "# Reserve 5% VRAM for OS responsiveness\n"
+            "if torch.cuda.is_available():\n"
+            "    try:\n"
+            "        torch.cuda.set_per_process_memory_fraction(0.95, 0)\n"
+            "    except Exception:\n"
+            "        pass\n"
             "\n"
             'print("TEXGEN: Loading model...", flush=True)\n'
             'pipe = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")\n'
