@@ -273,6 +273,104 @@ for tm in list(template_meshes):
     bpy.data.objects.remove(tm, do_unlink=True)
 template_meshes = []
 
+# ===== Step 8b: Convert T-pose to A-pose by editing bone positions =====
+# Most generated meshes are in A-pose (arms down ~45deg), but the
+# template skeleton is in T-pose (arms horizontal). We rotate the
+# arm bones in EDIT mode so they match the mesh's actual geometry.
+print("AUTORIG: converting skeleton to A-pose...", flush=True)
+bpy.ops.object.select_all(action='DESELECT')
+template_armature.select_set(True)
+bpy.context.view_layer.objects.active = template_armature
+bpy.ops.object.mode_set(mode='EDIT')
+
+# Bone name patterns to detect (covers Orc M1, UE Mannequin, Mixamo, Mixamo:...)
+arm_bone_patterns = [
+    ('upperarm_l', 'lowerarm_l', 'hand_l'),
+    ('upperarm_r', 'lowerarm_r', 'hand_r'),
+    ('Left_Shoulder', 'Left_Elbow', 'Left_Wrist'),
+    ('Right_Shoulder', 'Right_Elbow', 'Right_Wrist'),
+    ('LeftArm', 'LeftForeArm', 'LeftHand'),
+    ('RightArm', 'RightForeArm', 'RightHand'),
+    ('mixamorig:LeftArm', 'mixamorig:LeftForeArm', 'mixamorig:LeftHand'),
+    ('mixamorig:RightArm', 'mixamorig:RightForeArm', 'mixamorig:RightHand'),
+]
+
+import math as _m
+
+def find_bone_ci(name):
+    """Case-insensitive bone find."""
+    target = name.lower()
+    for b in template_armature.data.edit_bones:
+        if b.name.lower() == target:
+            return b
+    return None
+
+def rotate_bone_chain(upper_name, lower_name, hand_name, angle_deg, side):
+    """Rotate the upper arm down by angle_deg and propagate to children.
+    side: 'L' or 'R' (mirrors X for right side)
+    """
+    upper = find_bone_ci(upper_name)
+    lower = find_bone_ci(lower_name)
+    hand = find_bone_ci(hand_name)
+    if not upper:
+        return False
+    print(f"AUTORIG: A-pose rotate {{upper.name}} ({{angle_deg}}deg)", flush=True)
+
+    # Pivot = upper bone head
+    pivot = upper.head.copy()
+    # Rotation around Y axis (horizontal arm -> diagonal down)
+    # For left side, negative angle pushes arm down; right side is mirrored
+    rad = _m.radians(angle_deg)
+    if side == 'R':
+        rad = -rad
+
+    # Build a rotation matrix around Y axis at pivot
+    from mathutils import Matrix
+    rot = Matrix.Rotation(rad, 4, 'Y')
+
+    def transform_point(p):
+        return rot @ (p - pivot) + pivot
+
+    # Apply to all bones in chain (upper, lower, hand and any children)
+    chain = []
+    for b in (upper, lower, hand):
+        if b:
+            chain.append(b)
+    # Walk children too (fingers etc.)
+    def collect_children(b, out):
+        for c in b.children:
+            out.append(c)
+            collect_children(c, out)
+    extra = []
+    if upper:
+        collect_children(upper, extra)
+    for b in extra:
+        if b not in chain:
+            chain.append(b)
+
+    for b in chain:
+        b.head = transform_point(b.head)
+        b.tail = transform_point(b.tail)
+    return True
+
+# Try each pattern (only first match per side will work)
+A_POSE_ANGLE = 35  # degrees - typical A-pose
+done_l = done_r = False
+for pattern in arm_bone_patterns:
+    upper, lower, hand = pattern
+    # Detect side from name
+    name_lower = upper.lower()
+    if 'left' in name_lower or '_l' in name_lower or name_lower.endswith('l'):
+        if not done_l:
+            done_l = rotate_bone_chain(upper, lower, hand, A_POSE_ANGLE, 'L')
+    elif 'right' in name_lower or '_r' in name_lower or name_lower.endswith('r'):
+        if not done_r:
+            done_r = rotate_bone_chain(upper, lower, hand, A_POSE_ANGLE, 'R')
+
+print(f"AUTORIG: A-pose conversion: left={{done_l}} right={{done_r}}", flush=True)
+
+bpy.ops.object.mode_set(mode='OBJECT')
+
 # ===== Step 9: Parent new mesh to armature with auto weights =====
 print("AUTORIG: parenting new mesh to armature (ARMATURE_AUTO)...", flush=True)
 bpy.ops.object.select_all(action='DESELECT')
