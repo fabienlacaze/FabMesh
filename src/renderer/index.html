@@ -72,7 +72,16 @@
         </div>
 
         <div id="viewer-toolbar">
-          <button id="btn-reset-camera" class="toolbar-btn" title="Reset camera">Reset</button>
+          <button id="btn-reset-camera" class="toolbar-btn" title="Reset camera (3/4 view)">Reset</button>
+          <select id="cam-view" class="toolbar-btn" title="Camera orientation" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; padding: 4px 6px;">
+            <option value="">View...</option>
+            <option value="front">Front</option>
+            <option value="back">Back</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+            <option value="top">Top</option>
+            <option value="bottom">Bottom</option>
+          </select>
           <button id="btn-wireframe" class="toolbar-btn" title="Toggle wireframe">Wire</button>
           <button id="btn-matcap" class="toolbar-btn" title="Toggle matcap/PBR">PBR</button>
           <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
@@ -1882,6 +1891,42 @@
         if (gridHelper) {
           gridHelper.material.color.set(e.target.value === 'studio' ? 0xaaaaaa : 0x444444);
         }
+      });
+    }
+
+    // Camera view orientation selector
+    const camViewSelect = document.getElementById('cam-view');
+    if (camViewSelect) {
+      camViewSelect.addEventListener('change', (e) => {
+        const view = e.target.value;
+        if (!view) return;
+        // Compute target = current model center, distance from current bbox
+        const target = new THREE.Vector3(0, 0, 0);
+        let dist = 3;
+        if (currentModel) {
+          const box = new THREE.Box3().setFromObject(currentModel);
+          box.getCenter(target);
+          const size = box.getSize(new THREE.Vector3());
+          const maxDim = Math.max(size.x, size.y, size.z);
+          dist = maxDim / (2 * Math.tan(camera.fov * Math.PI / 360)) * 1.6;
+        }
+        const offset = { x: 0, y: 0, z: 0 };
+        switch (view) {
+          case 'front':  offset.z = dist; break;
+          case 'back':   offset.z = -dist; break;
+          case 'right':  offset.x = dist; break;
+          case 'left':   offset.x = -dist; break;
+          case 'top':    offset.y = dist; break;
+          case 'bottom': offset.y = -dist; break;
+        }
+        camera.position.set(target.x + offset.x, target.y + offset.y, target.z + offset.z);
+        camera.up.set(0, 1, 0); // reset up
+        if (view === 'top') camera.up.set(0, 0, -1);
+        if (view === 'bottom') camera.up.set(0, 0, 1);
+        controls.target.copy(target);
+        controls.update();
+        // Reset the dropdown so user can pick the same view again
+        e.target.value = '';
       });
     }
 
