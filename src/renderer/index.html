@@ -485,7 +485,12 @@
           <h3 id="export-modal-title" style="margin:0;">Export</h3>
           <button id="export-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
         </div>
-        <div id="export-modal-source" style="font-size: 11px; color: var(--text-muted); padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px;">--</div>
+
+        <div class="action-row">
+          <label>Filename</label>
+          <input type="text" id="export-modal-filename" style="flex:1; padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;" />
+          <span id="export-modal-ext" style="color: var(--text-muted); font-size: 11px;">.ext</span>
+        </div>
 
         <div class="action-row">
           <label>Format</label>
@@ -2745,6 +2750,14 @@
       cloneCanvas.addEventListener('mousemove', (e) => {
         // Always update brush cursor position + size
         updateBrushCursor(e);
+        // Pan handling
+        if (cloneState.isPanning && cloneState.panStart) {
+          cloneState.panX = e.clientX - cloneState.panStart.x;
+          cloneState.panY = e.clientY - cloneState.panStart.y;
+          applyCloneView();
+          updateSourceMarker();
+          return;
+        }
         if (!cloneState.isDown) return;
         const p = getCanvasCoords(e);
         // Interpolate between last and current point for smooth strokes
@@ -2799,8 +2812,13 @@
         m.style.display = 'block';
       }
 
-      window.addEventListener('mouseup', () => {
+      window.addEventListener('mouseup', (e) => {
         cloneState.isDown = false;
+        if (cloneState.isPanning) {
+          cloneState.isPanning = false;
+          cloneState.panStart = null;
+          cloneCanvas.style.cursor = 'none';
+        }
       });
 
       // Brush size slider
@@ -2952,9 +2970,13 @@
         showLog(cfg.getSourceLabel(), 'error');
         return;
       }
-      // Title + source label
+      // Title
       document.getElementById('export-modal-title').textContent = cfg.title;
-      document.getElementById('export-modal-source').textContent = cfg.getSourceLabel();
+
+      // Pre-fill filename input with the source basename (no extension)
+      const sourceBaseName = (cfg.getSourceLabel() || '').replace(/\.[^.]+$/, '');
+      const filenameInput = document.getElementById('export-modal-filename');
+      filenameInput.value = sourceBaseName;
 
       // Format select
       const fmtSel = document.getElementById('export-modal-format');
@@ -2965,6 +2987,20 @@
         opt.textContent = f.label;
         fmtSel.appendChild(opt);
       });
+
+      // Show extension hint based on selected format
+      const updateExtHint = () => {
+        const fmt = fmtSel.value;
+        const extMap = {
+          png: '.png', jpg: '.jpg', webp: '.webp',
+          glb: '.glb', gltf: '.gltf', fbx: '.fbx',
+          obj: '.obj', stl: '.stl', ply: '.ply',
+          fbx_unreal: '.fbx', fbx_ue5: '.fbx', fbx_generic: '.fbx',
+        };
+        document.getElementById('export-modal-ext').textContent = extMap[fmt] || '';
+      };
+      fmtSel.onchange = updateExtHint;
+      updateExtHint();
 
       // Options
       const optsContainer = document.getElementById('export-modal-options');
@@ -2998,6 +3034,10 @@
       const src = cfg.getSource();
       if (!src) return;
       const fmt = document.getElementById('export-modal-format').value;
+      // Read filename from the editable input (sanitize)
+      let customName = (document.getElementById('export-modal-filename').value || '').trim();
+      customName = customName.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80);
+      if (!customName) customName = 'export_' + Date.now();
       // Read all options into a dict
       const opts = {};
       cfg.options.forEach(o => {
@@ -3009,11 +3049,8 @@
       try {
         let result;
         if (ctx === 'image') {
-          // For images we just save the displayed image as a copy
-          // (resize if requested would need a Python op; for now copy as-is for png)
-          result = await API.saveImageAs?.({ basePath: src, format: fmt, ...opts });
+          result = await API.saveImageAs?.({ basePath: src, format: fmt, customName, ...opts });
           if (!result) {
-            // Fallback: just open the explorer at source
             await API.showInExplorer(src);
             showLog('Opened in explorer (Save As not yet wired for images)', 'info');
             document.getElementById('export-modal').classList.add('hidden');
@@ -3021,15 +3058,15 @@
           }
         } else if (ctx === 'mesh') {
           if (fmt === 'fbx_unreal') {
-            result = await API.exportToUnreal({ sourcePath: src });
+            result = await API.exportToUnreal({ sourcePath: src, customName });
           } else {
-            result = await window.meshyAPI.exportMesh({ sourcePath: src, targetFormat: fmt });
+            result = await window.meshyAPI.exportMesh({ sourcePath: src, targetFormat: fmt, customName });
             if (result) result = { success: true, ...result };
           }
         } else if (ctx === 'rig') {
           // For rigs, we just convert via exportMesh (FBX/GLB)
           const targetFormat = fmt === 'glb' ? 'glb' : 'fbx';
-          result = await window.meshyAPI.exportMesh({ sourcePath: src, targetFormat });
+          result = await window.meshyAPI.exportMesh({ sourcePath: src, targetFormat, customName });
           if (result) result = { success: true, ...result };
         }
 

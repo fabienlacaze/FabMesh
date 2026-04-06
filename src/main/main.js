@@ -500,15 +500,20 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
 });
 
 // Export mesh to Unreal-friendly FBX (cm scale, Y-up axis)
-ipcMain.handle('export-to-unreal', async (event, { sourcePath }) => {
+ipcMain.handle('export-to-unreal', async (event, { sourcePath, customName }) => {
   try {
     if (!isPathAllowed(sourcePath)) throw new Error('Source not allowed');
     if (!fs.existsSync(sourcePath)) throw new Error('Source not found');
     const config = loadConfig();
     if (!config.blenderPath) throw new Error('Blender path not configured (Settings)');
 
-    const baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const outputPath = path.join(MESHES_DIR, `${baseName}_unreal.fbx`);
+    let baseName;
+    if (customName) {
+      baseName = customName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+    } else {
+      baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_') + '_unreal';
+    }
+    const outputPath = path.join(MESHES_DIR, `${baseName}.fbx`);
 
     const exportScript = `
 import bpy
@@ -1900,16 +1905,22 @@ ipcMain.handle('read-mesh-file', (event, filePath) => {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 });
 
-ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat }) => {
+ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat, customName }) => {
   const config = loadConfig();
   if (!config.blenderPath) throw new Error('Blender path not configured');
 
   // Validate inputs against injection
-  const validFormats = ['glb', 'gltf', 'obj', 'fbx', 'stl'];
+  const validFormats = ['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply'];
   if (!validFormats.includes(targetFormat)) throw new Error('Invalid target format');
   if (!isPathAllowed(sourcePath)) throw new Error('Source path not allowed');
 
-  const baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+  // Use customName if provided, else derive from source
+  let baseName;
+  if (customName) {
+    baseName = customName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  } else {
+    baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
   const outputPath = path.join(MESHES_DIR, `${baseName}.${targetFormat}`);
 
   const exportScript = `
