@@ -996,7 +996,7 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
 });
 
 // --- Image-to-3D: supports TRELLIS and TripoSG ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine, targetFaces }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine, targetFaces, effort }) => {
   let imagePath = _imagePath;
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1010,8 +1010,9 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     };
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['local'];
 
+    const effortVal = String(effort || 2);
     const argsMap = {
-      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0)],
+      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0), effortVal],
       'local': [bridgeScript, imagePath, meshPath, '512'],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)]
     };
@@ -1032,7 +1033,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     }
     // Rebuild args with fixed path
     const fixedArgsMap = {
-      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0)],
+      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0), effortVal],
       'local': [bridgeScript, imagePath, meshPath, '512'],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)]
     };

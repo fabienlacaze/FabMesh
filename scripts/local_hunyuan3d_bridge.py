@@ -12,7 +12,7 @@ import subprocess
 HUNYUAN_DIR = os.path.join(os.path.dirname(__file__), '..', 'Hunyuan3D-2')
 sys.path.insert(0, HUNYUAN_DIR)
 
-def generate_3d(image_path, output_path, max_faces=0):
+def generate_3d(image_path, output_path, max_faces=0, effort=2):
     import torch
     from PIL import Image
     from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
@@ -47,10 +47,12 @@ def generate_3d(image_path, output_path, max_faces=0):
                 if max_faces <= faces:
                     octree_res = res
                     break
-        # Higher inference steps = better shape quality, slightly slower
-        # 30 for fast low-poly, 50 for detailed meshes
-        inf_steps = 50 if max_faces == 0 or max_faces >= 50000 else 30
-        print(f"HUNYUAN3D: octree_resolution={octree_res}, steps={inf_steps} for max {max_faces} faces", flush=True)
+        # Effort slider controls num_inference_steps (quality vs speed)
+        effort_steps = {1: 20, 2: 30, 3: 50, 4: 75}
+        effort_labels = {1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max'}
+        inf_steps = effort_steps.get(int(effort), 30)
+        label = effort_labels.get(int(effort), 'Medium')
+        print(f"HUNYUAN3D: octree_resolution={octree_res}, steps={inf_steps} (effort={label})", flush=True)
         meshes = shape_pipe(image=img, octree_resolution=octree_res, num_inference_steps=inf_steps)
         mesh = meshes[0]
         print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s", flush=True)
@@ -188,8 +190,9 @@ def generate_3d(image_path, output_path, max_faces=0):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python local_hunyuan3d_bridge.py <image_path> <output_glb_path> [max_faces]")
+        print("Usage: python local_hunyuan3d_bridge.py <image_path> <output_glb_path> [max_faces] [effort]")
         sys.exit(1)
     max_faces = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-    success = generate_3d(sys.argv[1], sys.argv[2], max_faces)
+    effort = int(sys.argv[4]) if len(sys.argv) > 4 else 2
+    success = generate_3d(sys.argv[1], sys.argv[2], max_faces, effort)
     sys.exit(0 if success else 1)

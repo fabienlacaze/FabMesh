@@ -251,6 +251,10 @@
                   <option value="500000">500K</option>
                 </select>
               </div>
+              <div class="action-row">
+                <label>Effort <span id="effort-label" style="color:var(--text-muted); font-size:10px;">(Medium)</span></label>
+                <input type="range" id="effort-slider" min="1" max="4" value="2" step="1" style="flex:1; accent-color: var(--accent);" />
+              </div>
               <div class="adv-check-row">
                 <input type="checkbox" id="chk-build-stages" />
                 <label for="chk-build-stages">Construction stages (3 versions)</label>
@@ -1124,7 +1128,8 @@
           showLog(`${successes.length}/2 engines succeeded.`, successes.length > 0 ? 'success' : 'error');
         } else {
           const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
-          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: maxTris || 50000 });
+          const effort = parseInt(document.getElementById('effort-slider')?.value) || 2;
+          const r3d = await window.meshyAPI.imageTo3D({ imagePath: selectedImagePath, outputName: meshName, engine, textureSize: 1024, targetFaces: maxTris || 50000, effort });
           if (!r3d.success) {
             showProgressError(`${engineName} failed`);
             showLog(r3d.error || 'Failed', 'error');
@@ -1772,6 +1777,15 @@
       });
     });
 
+    // Effort slider (controls num_inference_steps for Hunyuan3D)
+    const effortLabels = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Max' };
+    const effortSlider = document.getElementById('effort-slider');
+    if (effortSlider) {
+      effortSlider.addEventListener('input', (e) => {
+        document.getElementById('effort-label').textContent = `(${effortLabels[e.target.value] || 'Medium'})`;
+      });
+    }
+
     document.getElementById('inpaint-dilate').addEventListener('input', (e) => {
       document.getElementById('inpaint-dilate-val').textContent = e.target.value + 'px';
     });
@@ -2027,11 +2041,13 @@
 
         // Step 3: Run Hunyuan3D on the (possibly modified) screenshot
         const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
+        const effort = parseInt(document.getElementById('effort-slider')?.value) || 2;
         const r3d = await window.meshyAPI.imageTo3D({
           imagePath: imgForMesh,
           outputName: meshName,
           engine: 'hunyuan',
-          targetFaces: maxTris || 50000
+          targetFaces: maxTris || 50000,
+          effort
         });
 
         if (!r3d.success) {
