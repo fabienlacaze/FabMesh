@@ -63,7 +63,7 @@
           <button id="btn-grid" class="toolbar-btn active" title="Toggle grid">Grid</button>
           <span class="toolbar-separator"></span>
           <span class="toolbar-label">Light</span>
-          <input type="range" id="light-slider" min="0" max="1000" value="240" class="toolbar-slider" title="Light intensity">
+          <input type="range" id="light-slider" min="0" max="1000" value="1000" class="toolbar-slider" title="Light intensity">
           <span id="mesh-info" class="mesh-info"></span>
         </div>
       </main>
@@ -365,8 +365,8 @@
     controls.target.set(0, 0.5, 0);
     controls.update();
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.84));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    scene.add(new THREE.AmbientLight(0xffffff, 3.5));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 10);
     dirLight.position.set(5, 8, 5);
     dirLight.castShadow = true;
     scene.add(dirLight);
