@@ -385,22 +385,46 @@
             </div>
           </details>
 
-          <details class="advanced-details">
-            <summary>Landmarks (5 points - optional)</summary>
+          <details class="advanced-details" open>
+            <summary>Landmarks (click on mesh to place)</summary>
             <div class="advanced-content">
-              <p class="hint-text" style="margin: 4px 0 8px 0;">Click in the 3D viewer to place landmarks. Improves rig accuracy on non-standard proportions.</p>
-              <div class="adv-check-row">
-                <input type="checkbox" id="rig-use-landmarks" />
-                <label for="rig-use-landmarks">Enable landmark mode</label>
+              <p class="hint-text" style="margin: 4px 0 8px 0;">Click a button below, then click on the 3D mesh where that body part is.</p>
+              <div id="rig-landmark-list" style="display: flex; flex-direction: column; gap: 4px;">
+                <button class="lm-btn" data-lm="head" data-color="#ff4444">
+                  <span class="lm-color" style="background:#ff4444"></span>
+                  <span class="lm-label">Head</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="hand_l" data-color="#44ff44">
+                  <span class="lm-color" style="background:#44ff44"></span>
+                  <span class="lm-label">Left hand</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="hand_r" data-color="#44aa44">
+                  <span class="lm-color" style="background:#44aa44"></span>
+                  <span class="lm-label">Right hand</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="foot_l" data-color="#4444ff">
+                  <span class="lm-color" style="background:#4444ff"></span>
+                  <span class="lm-label">Left foot</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="foot_r" data-color="#4477ff">
+                  <span class="lm-color" style="background:#4477ff"></span>
+                  <span class="lm-label">Right foot</span>
+                  <span class="lm-status">not set</span>
+                </button>
+                <button class="lm-btn" data-lm="hips" data-color="#ffaa00">
+                  <span class="lm-color" style="background:#ffaa00"></span>
+                  <span class="lm-label">Hips</span>
+                  <span class="lm-status">not set</span>
+                </button>
               </div>
-              <div id="rig-landmark-list" style="font-size: 11px; padding: 6px; background: var(--bg-primary); border-radius: 4px; margin-top: 6px;">
-                <div data-lm="head" class="rig-lm-row"><span class="rig-lm-name">Head</span> <span class="rig-lm-status">not set</span></div>
-                <div data-lm="hand_l" class="rig-lm-row"><span class="rig-lm-name">Left hand</span> <span class="rig-lm-status">not set</span></div>
-                <div data-lm="hand_r" class="rig-lm-row"><span class="rig-lm-name">Right hand</span> <span class="rig-lm-status">not set</span></div>
-                <div data-lm="foot_l" class="rig-lm-row"><span class="rig-lm-name">Left foot</span> <span class="rig-lm-status">not set</span></div>
-                <div data-lm="foot_r" class="rig-lm-row"><span class="rig-lm-name">Right foot</span> <span class="rig-lm-status">not set</span></div>
+              <div style="display:flex; gap:4px; margin-top: 8px;">
+                <button id="btn-rig-auto-landmarks" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Auto-detect</button>
+                <button id="btn-rig-clear-landmarks" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Clear all</button>
               </div>
-              <button id="btn-rig-clear-landmarks" class="secondary-btn" style="margin-top: 6px; width: 100%; font-size: 11px; padding: 4px;">Clear landmarks</button>
             </div>
           </details>
 
@@ -1840,6 +1864,219 @@
       };
     }
 
+    // ========== RIG TAB - LANDMARKS SYSTEM ==========
+    // Stores landmarks for the currently selected mesh, in WORLD-space coords
+    let rigLandmarks = {}; // { head: [x,y,z], hand_l: [x,y,z], ... }
+    let activeLandmarkBtn = null; // currently 'arming' button (waiting for click on mesh)
+    let landmarkMarkers = {}; // { lm_name: THREE.Mesh sphere }
+    const LM_RADIUS = 0.04; // marker sphere radius (will scale with mesh size)
+
+    function clearLandmarkMarkers() {
+      for (const k in landmarkMarkers) {
+        const m = landmarkMarkers[k];
+        if (m) {
+          scene.remove(m);
+          if (m.geometry) m.geometry.dispose();
+          if (m.material) m.material.dispose();
+        }
+      }
+      landmarkMarkers = {};
+    }
+
+    function placeLandmarkMarker(name, point, color) {
+      // Remove existing marker for this landmark
+      if (landmarkMarkers[name]) {
+        scene.remove(landmarkMarkers[name]);
+        landmarkMarkers[name].geometry?.dispose();
+        landmarkMarkers[name].material?.dispose();
+      }
+      // Auto-scale radius based on current model bbox
+      let r = LM_RADIUS;
+      if (currentModel) {
+        const box = new THREE.Box3().setFromObject(currentModel);
+        const size = box.getSize(new THREE.Vector3());
+        r = Math.max(size.x, size.y, size.z) * 0.015;
+      }
+      const geom = new THREE.SphereGeometry(r, 16, 16);
+      const mat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.85 });
+      const sphere = new THREE.Mesh(geom, mat);
+      sphere.position.set(point.x, point.y, point.z);
+      sphere.renderOrder = 999;
+      scene.add(sphere);
+      landmarkMarkers[name] = sphere;
+    }
+
+    function updateLandmarkBtnUI() {
+      document.querySelectorAll('.lm-btn').forEach(btn => {
+        const name = btn.dataset.lm;
+        const status = btn.querySelector('.lm-status');
+        if (rigLandmarks[name]) {
+          btn.classList.add('set');
+          if (status) status.textContent = '\u2713 set';
+        } else {
+          btn.classList.remove('set');
+          if (status) status.textContent = 'not set';
+        }
+        btn.classList.toggle('active', activeLandmarkBtn === btn);
+      });
+    }
+
+    function setLandmark(name, point, color) {
+      rigLandmarks[name] = [point.x, point.y, point.z];
+      placeLandmarkMarker(name, point, color);
+      updateLandmarkBtnUI();
+      saveLandmarksForCurrentMesh();
+    }
+
+    function clearAllLandmarks() {
+      rigLandmarks = {};
+      clearLandmarkMarkers();
+      activeLandmarkBtn = null;
+      updateLandmarkBtnUI();
+      saveLandmarksForCurrentMesh();
+    }
+
+    // Persist landmarks alongside the mesh as <mesh>.landmarks.json
+    async function saveLandmarksForCurrentMesh() {
+      if (!selectedMesh) return;
+      try {
+        await API.saveLandmarks?.({ meshPath: selectedMesh.path, landmarks: rigLandmarks });
+      } catch (e) { console.warn('saveLandmarks failed:', e); }
+    }
+
+    async function loadLandmarksForCurrentMesh() {
+      clearAllLandmarks();
+      if (!selectedMesh) return;
+      try {
+        const data = await API.loadLandmarks?.({ meshPath: selectedMesh.path });
+        if (data && typeof data === 'object') {
+          // Recreate markers
+          const colorMap = {
+            head: 0xff4444, hand_l: 0x44ff44, hand_r: 0x44aa44,
+            foot_l: 0x4444ff, foot_r: 0x4477ff, hips: 0xffaa00
+          };
+          for (const k in data) {
+            const p = data[k];
+            if (Array.isArray(p) && p.length === 3) {
+              rigLandmarks[k] = p;
+              placeLandmarkMarker(k, { x: p[0], y: p[1], z: p[2] }, colorMap[k] || 0xffffff);
+            }
+          }
+          updateLandmarkBtnUI();
+        }
+      } catch (e) { console.warn('loadLandmarks failed:', e); }
+    }
+
+    // Auto-detect: simple heuristic using mesh bbox extrema
+    function autoDetectLandmarks() {
+      if (!currentModel) {
+        showLog('Load a mesh first', 'error');
+        return;
+      }
+      const box = new THREE.Box3().setFromObject(currentModel);
+      const min = box.min;
+      const max = box.max;
+      const center = new THREE.Vector3().addVectors(min, max).multiplyScalar(0.5);
+      // Detect tallest axis
+      const size = new THREE.Vector3().subVectors(max, min);
+      let upAxis = 'y';
+      if (size.z > size.y && size.z > size.x) upAxis = 'z';
+      else if (size.x > size.y && size.x > size.z) upAxis = 'x';
+
+      // For Y-up (typical Hunyuan3D/glTF) or Z-up (UE)
+      const colorMap = {
+        head: 0xff4444, hand_l: 0x44ff44, hand_r: 0x44aa44,
+        foot_l: 0x4444ff, foot_r: 0x4477ff, hips: 0xffaa00
+      };
+
+      let head, hand_l, hand_r, foot_l, foot_r, hips;
+      if (upAxis === 'y') {
+        head   = { x: center.x, y: max.y * 0.97, z: center.z };
+        foot_l = { x: center.x + size.x * 0.15, y: min.y * 0.97 + size.y * 0.02, z: center.z };
+        foot_r = { x: center.x - size.x * 0.15, y: min.y * 0.97 + size.y * 0.02, z: center.z };
+        hand_l = { x: max.x * 0.93, y: center.y, z: center.z };
+        hand_r = { x: min.x * 0.93, y: center.y, z: center.z };
+        hips   = { x: center.x, y: min.y + size.y * 0.55, z: center.z };
+      } else if (upAxis === 'z') {
+        head   = { x: center.x, y: center.y, z: max.z * 0.97 };
+        foot_l = { x: center.x + size.x * 0.15, y: center.y, z: min.z * 0.97 + size.z * 0.02 };
+        foot_r = { x: center.x - size.x * 0.15, y: center.y, z: min.z * 0.97 + size.z * 0.02 };
+        hand_l = { x: max.x * 0.93, y: center.y, z: center.z };
+        hand_r = { x: min.x * 0.93, y: center.y, z: center.z };
+        hips   = { x: center.x, y: center.y, z: min.z + size.z * 0.55 };
+      } else {
+        // X-up (rare)
+        head   = { x: max.x * 0.97, y: center.y, z: center.z };
+        foot_l = { x: min.x, y: center.y + size.y * 0.15, z: center.z };
+        foot_r = { x: min.x, y: center.y - size.y * 0.15, z: center.z };
+        hand_l = { x: center.x, y: max.y * 0.93, z: center.z };
+        hand_r = { x: center.x, y: min.y * 0.93, z: center.z };
+        hips   = { x: min.x + size.x * 0.55, y: center.y, z: center.z };
+      }
+
+      const all = { head, hand_l, hand_r, foot_l, foot_r, hips };
+      for (const k in all) {
+        rigLandmarks[k] = [all[k].x, all[k].y, all[k].z];
+        placeLandmarkMarker(k, all[k], colorMap[k]);
+      }
+      updateLandmarkBtnUI();
+      saveLandmarksForCurrentMesh();
+      showLog('Auto-detected 6 landmarks (adjust manually if needed)', 'info');
+    }
+
+    // Raycast: when in landmark-arm mode and user clicks on the canvas, find the
+    // hit point on the current mesh and store it as the active landmark
+    const _raycaster = new THREE.Raycaster();
+    const _ndc = new THREE.Vector2();
+    function handleViewerClickForLandmark(evt) {
+      if (!activeLandmarkBtn || !currentModel) return;
+      // Don't trigger on right-click (orbit)
+      if (evt.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      _ndc.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
+      _ndc.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
+      _raycaster.setFromCamera(_ndc, camera);
+      const meshes = [];
+      currentModel.traverse(c => { if (c.isMesh) meshes.push(c); });
+      const hits = _raycaster.intersectObjects(meshes, true);
+      if (hits.length === 0) return;
+      const hit = hits[0].point;
+      const name = activeLandmarkBtn.dataset.lm;
+      const color = parseInt(activeLandmarkBtn.dataset.color.replace('#', ''), 16);
+      setLandmark(name, hit, color);
+      // Disarm
+      activeLandmarkBtn.classList.remove('active');
+      activeLandmarkBtn = null;
+      canvas.style.cursor = '';
+      // Stop event so OrbitControls doesn't process it
+      evt.stopPropagation();
+      evt.preventDefault();
+    }
+    // Bind in capture phase so we win over OrbitControls
+    canvas.addEventListener('mousedown', handleViewerClickForLandmark, true);
+
+    // Wire landmark buttons
+    document.querySelectorAll('.lm-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (activeLandmarkBtn === btn) {
+          // Toggle off
+          btn.classList.remove('active');
+          activeLandmarkBtn = null;
+          canvas.style.cursor = '';
+          return;
+        }
+        if (activeLandmarkBtn) activeLandmarkBtn.classList.remove('active');
+        activeLandmarkBtn = btn;
+        btn.classList.add('active');
+        canvas.style.cursor = 'crosshair';
+        showLog('Click on the mesh to place: ' + btn.querySelector('.lm-label').textContent, 'info');
+      });
+    });
+
+    document.getElementById('btn-rig-clear-landmarks')?.addEventListener('click', clearAllLandmarks);
+    document.getElementById('btn-rig-auto-landmarks')?.addEventListener('click', autoDetectLandmarks);
+
     // ========== RIG TAB ==========
     // Populate template dropdowns from registry, grouped by category
     async function loadRigTemplates() {
@@ -1910,21 +2147,21 @@
       if (!el) return;
       if (selectedMesh) {
         el.innerHTML = `<strong>${selectedMesh.filename}</strong><br><span style="font-size: 11px; color: var(--text-muted);">${selectedMesh.format} - ${formatSize(selectedMesh.size)}</span>`;
-        // Detect if the selected mesh is a rig (skeletal mesh)
         const isRigged = /_rigged_/i.test(selectedMesh.filename) || selectedMesh.isRigged;
         if (isRigged) {
-          // Already a rig: show post-process (test anim, edit, re-skin), hide create
           if (createSec) createSec.style.display = 'none';
           if (postSec) postSec.classList.remove('hidden');
         } else {
-          // Static mesh: show create section, hide post-process
           if (createSec) createSec.style.display = '';
           if (postSec) postSec.classList.add('hidden');
+          // Load saved landmarks for this mesh (or clear)
+          loadLandmarksForCurrentMesh();
         }
       } else {
         el.innerHTML = 'No mesh selected. Click a mesh in the gallery.';
         if (createSec) createSec.style.display = '';
         if (postSec) postSec.classList.add('hidden');
+        clearAllLandmarks();
       }
     }
 
@@ -1953,7 +2190,11 @@
         btnRigGen.disabled = true;
         btnRigGen.textContent = 'Rigging...';
         try {
-          const r = await API.autoRig({ meshPath: selectedMesh.path, templateName });
+          const r = await API.autoRig({
+            meshPath: selectedMesh.path,
+            templateName,
+            landmarks: Object.keys(rigLandmarks).length ? rigLandmarks : null
+          });
           if (r?.success) {
             completeJob(job.id, true);
             showLog('Rigged FBX created: ' + r.filename, 'success');

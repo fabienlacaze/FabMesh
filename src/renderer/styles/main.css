@@ -2292,6 +2292,52 @@ select optgroup option {
 .rig-lm-status { color: var(--text-muted); font-size: 10px; }
 .rig-lm-row.set .rig-lm-status { color: #4ade80; }
 
+/* Landmark buttons in Rig tab */
+.lm-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  width: 100%;
+  transition: all 0.15s;
+}
+.lm-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.lm-btn.active {
+  border-color: var(--accent);
+  background: rgba(233, 69, 96, 0.2);
+  box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.3);
+}
+.lm-btn.set {
+  background: rgba(74, 222, 128, 0.08);
+  border-color: rgba(74, 222, 128, 0.4);
+}
+.lm-color {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.lm-label { flex: 1; }
+.lm-status {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.lm-btn.set .lm-status {
+  color: #4ade80;
+}
+
 /* Mesh item rows: prevent overflow with ellipsis */
 .mesh-item-name {
   overflow: hidden;

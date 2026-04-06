@@ -418,6 +418,35 @@ ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
   }
 });
 
+// Save / load rig landmarks (per-mesh JSON file)
+ipcMain.handle('save-landmarks', (event, { meshPath, landmarks }) => {
+  try {
+    if (!meshPath || !isPathAllowed(meshPath)) return { success: false };
+    const lmPath = meshPath + '.landmarks.json';
+    if (!landmarks || Object.keys(landmarks).length === 0) {
+      // Empty -> delete
+      if (fs.existsSync(lmPath)) fs.unlinkSync(lmPath);
+    } else {
+      fs.writeFileSync(lmPath, JSON.stringify(landmarks, null, 2));
+    }
+    return { success: true };
+  } catch (e) {
+    console.error('save-landmarks failed:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('load-landmarks', (event, { meshPath }) => {
+  try {
+    if (!meshPath) return null;
+    const lmPath = meshPath + '.landmarks.json';
+    if (!fs.existsSync(lmPath)) return null;
+    return JSON.parse(fs.readFileSync(lmPath, 'utf-8'));
+  } catch (e) {
+    return null;
+  }
+});
+
 // List available SKM templates (custom FBX) and generic templates from registry
 ipcMain.handle('list-rig-templates', () => {
   try {
@@ -435,7 +464,7 @@ ipcMain.handle('list-rig-templates', () => {
 });
 
 // Auto-rigging: applies a skeleton template to a mesh and exports rigged FBX
-ipcMain.handle('auto-rig', async (event, { meshPath, templateName }) => {
+ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) => {
   try {
     if (!meshPath || !fs.existsSync(meshPath)) {
       return { success: false, error: 'Mesh not found' };
@@ -459,8 +488,18 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName }) => {
 
     const script = path.join(__dirname, '..', '..', 'scripts', 'auto_rig_bridge.py');
 
+    // Write landmarks to a temp file (avoids long argv on Windows)
+    const args = [script, meshPath, templateName, outputFbx, config.blenderPath];
+    if (landmarks && Object.keys(landmarks).length > 0) {
+      const lmTmp = path.join(SCRIPTS_DIR, `_landmarks_${Date.now()}.json`);
+      try {
+        fs.writeFileSync(lmTmp, JSON.stringify(landmarks));
+        args.push(lmTmp);
+      } catch(e) { console.warn('write landmarks tmp failed:', e); }
+    }
+
     return await new Promise((resolve) => {
-      const proc = execFile('python', [script, meshPath, templateName, outputFbx, config.blenderPath], {
+      const proc = execFile('python', args, {
         timeout: 300000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {

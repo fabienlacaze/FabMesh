@@ -65,7 +65,7 @@ def load_template(name):
     raise FileNotFoundError(f"Template not found: {name}")
 
 
-def build_fbx_template_script(mesh_path, template_fbx_path, output_fbx):
+def build_fbx_template_script(mesh_path, template_fbx_path, output_fbx, landmarks=None):
     """Generate Blender script that uses an existing FBX as rig template.
 
     Pipeline:
@@ -80,6 +80,7 @@ def build_fbx_template_script(mesh_path, template_fbx_path, output_fbx):
     9. Parent new mesh to armature with ARMATURE_AUTO
     10. Export selection
     """
+    landmarks_json = json.dumps(landmarks) if landmarks else "None"
     return f'''
 import bpy
 import math
@@ -273,86 +274,151 @@ for tm in list(template_meshes):
     bpy.data.objects.remove(tm, do_unlink=True)
 template_meshes = []
 
-# ===== Step 8b: Convert T-pose to A-pose via Pose mode =====
-# Use Pose mode + apply pose as rest pose. This is the most reliable
-# method because Blender handles all the math and bone roll properly.
-print("AUTORIG: converting skeleton to A-pose (pose mode)...", flush=True)
+# ===== Step 8b: Position bones from user landmarks (or fallback A-pose) =====
+LANDMARKS = {landmarks_json}
+print(f"AUTORIG: landmarks provided: {{LANDMARKS is not None and len(LANDMARKS) > 0}}", flush=True)
+
+import math as _m
+from mathutils import Vector as _Vec
+
 bpy.ops.object.select_all(action='DESELECT')
 template_armature.select_set(True)
 bpy.context.view_layer.objects.active = template_armature
 
-import math as _m
-from mathutils import Euler
+# Bone name patterns (case-insensitive)
+ARM_L_NAMES = ['upperarm_l', 'LeftArm', 'mixamorig:LeftArm', 'Left_Shoulder', 'shoulder_l']
+ARM_R_NAMES = ['upperarm_r', 'RightArm', 'mixamorig:RightArm', 'Right_Shoulder', 'shoulder_r']
+HAND_L_NAMES = ['hand_l', 'LeftHand', 'mixamorig:LeftHand', 'wrist_l']
+HAND_R_NAMES = ['hand_r', 'RightHand', 'mixamorig:RightHand', 'wrist_r']
+LEG_L_NAMES = ['thigh_l', 'LeftUpLeg', 'mixamorig:LeftUpLeg', 'leg_l', 'upperleg_l']
+LEG_R_NAMES = ['thigh_r', 'RightUpLeg', 'mixamorig:RightUpLeg', 'leg_r', 'upperleg_r']
+FOOT_L_NAMES = ['foot_l', 'LeftFoot', 'mixamorig:LeftFoot', 'ankle_l']
+FOOT_R_NAMES = ['foot_r', 'RightFoot', 'mixamorig:RightFoot', 'ankle_r']
+HEAD_NAMES = ['head', 'Head', 'mixamorig:Head']
+HIPS_NAMES = ['pelvis', 'hips', 'Hips', 'mixamorig:Hips', 'root_pelvis']
 
-def find_pose_bone_ci(name):
-    target = name.lower()
-    for b in template_armature.pose.bones:
-        if b.name.lower() == target:
-            return b
-    return None
-
-# Map of bone -> rotation in degrees around the GLOBAL Z axis (Blender world)
-# For A-pose orc:
-#   left arm: rotate -35 deg around the world Y axis at the bone (down-out)
-#   right arm: +35 deg
-# We do this in Pose mode so Blender computes rest delta correctly.
-
-bpy.ops.object.mode_set(mode='POSE')
-
-# Clear any existing pose
-bpy.ops.pose.select_all(action='SELECT')
-bpy.ops.pose.transforms_clear()
-
-arm_l_names = ['upperarm_l', 'LeftArm', 'mixamorig:LeftArm', 'Left_Shoulder', 'shoulder_l']
-arm_r_names = ['upperarm_r', 'RightArm', 'mixamorig:RightArm', 'Right_Shoulder', 'shoulder_r']
-leg_l_names = ['thigh_l', 'LeftUpLeg', 'mixamorig:LeftUpLeg', 'Left_Hip', 'leg_l', 'upperleg_l']
-leg_r_names = ['thigh_r', 'RightUpLeg', 'mixamorig:RightUpLeg', 'Right_Hip', 'leg_r', 'upperleg_r']
-
-def find_first_pose(names):
+def find_edit_bone(names):
     for n in names:
-        b = find_pose_bone_ci(n)
-        if b:
-            return b
+        target = n.lower()
+        for b in template_armature.data.edit_bones:
+            if b.name.lower() == target:
+                return b
     return None
 
-arm_l = find_first_pose(arm_l_names)
-arm_r = find_first_pose(arm_r_names)
-leg_l = find_first_pose(leg_l_names)
-leg_r = find_first_pose(leg_r_names)
+def collect_chain_edit(root):
+    out = [root]
+    def walk(b):
+        for c in b.children:
+            out.append(c)
+            walk(c)
+    walk(root)
+    return out
 
-def rotate_pose_bone_global(pose_bone, axis, angle_deg):
-    """Apply a global-space rotation to a pose bone."""
-    if not pose_bone:
+def rotate_chain_to_target(root, target_pos):
+    """Rotate the chain at the root bone so the chain end (root or last)
+    points toward target_pos in world space.
+    Uses the root bone's head as pivot.
+    """
+    if not root:
         return False
-    from mathutils import Matrix, Vector
-    rot_mat = Matrix.Rotation(_m.radians(angle_deg), 4, axis)
-    # Apply in armature space (works regardless of bone roll/orientation)
-    pose_bone.matrix = rot_mat @ pose_bone.matrix
-    bpy.context.view_layer.update()
+    pivot = root.head.copy()
+    cur_dir = (root.tail - root.head)
+    if cur_dir.length < 1e-6:
+        return False
+    cur_dir.normalize()
+    tgt_dir = (target_pos - pivot)
+    if tgt_dir.length < 1e-6:
+        return False
+    tgt_dir.normalize()
+    # Rotation matrix that maps cur_dir -> tgt_dir
+    axis = cur_dir.cross(tgt_dir)
+    if axis.length < 1e-6:
+        return True  # already aligned
+    axis.normalize()
+    angle = _m.acos(max(-1.0, min(1.0, cur_dir.dot(tgt_dir))))
+    from mathutils import Matrix
+    rot = Matrix.Rotation(angle, 4, axis)
+    def transform(p):
+        return rot @ (p - pivot) + pivot
+    for b in collect_chain_edit(root):
+        b.head = transform(b.head)
+        b.tail = transform(b.tail)
     return True
 
-# Rotate arms 35 deg around global Y to push down (left arm: -Y, right: +Y)
-# Actually we want around X to push down toward -Z: rotate around Y/X depending
-# on initial orientation. Try Y first.
-A_DEG = 35
-if arm_l:
-    print(f"AUTORIG: A-pose left arm pose: {{arm_l.name}}", flush=True)
-    rotate_pose_bone_global(arm_l, 'Y', -A_DEG)
-if arm_r:
-    print(f"AUTORIG: A-pose right arm pose: {{arm_r.name}}", flush=True)
-    rotate_pose_bone_global(arm_r, 'Y', A_DEG)
+if LANDMARKS:
+    print("AUTORIG: positioning bones from landmarks...", flush=True)
+    # Note: landmarks are in WORLD space relative to the NEW MESH (after we
+    # scaled & translated it). So we use them directly.
+    # For each available landmark, we rotate the corresponding bone chain
+    # to point toward it.
+    bpy.ops.object.mode_set(mode='EDIT')
 
-# Apply pose as rest pose (bakes the pose into the armature rest position)
-bpy.ops.pose.select_all(action='SELECT')
-try:
-    bpy.ops.pose.armature_apply(selected=False)
-    print("AUTORIG: pose applied as rest pose", flush=True)
-except Exception as e:
-    print(f"AUTORIG: armature_apply failed: {{e}}", flush=True)
+    # Helper: target the chain root toward a far landmark by chaining
+    def aim_chain_at(root_names, target_xyz):
+        if not target_xyz:
+            return False
+        root = find_edit_bone(root_names)
+        if not root:
+            print(f"AUTORIG: bone not found for {{root_names[0]}}", flush=True)
+            return False
+        target = _Vec(target_xyz)
+        ok = rotate_chain_to_target(root, target)
+        print(f"AUTORIG: aimed {{root.name}} -> {{tuple(target)}} ok={{ok}}", flush=True)
+        return ok
 
-bpy.ops.object.mode_set(mode='OBJECT')
+    # Arms: aim shoulder chain at the hand landmark
+    if 'hand_l' in LANDMARKS:
+        aim_chain_at(ARM_L_NAMES, LANDMARKS['hand_l'])
+    if 'hand_r' in LANDMARKS:
+        aim_chain_at(ARM_R_NAMES, LANDMARKS['hand_r'])
+    # Legs: aim thigh chain at the foot landmark
+    if 'foot_l' in LANDMARKS:
+        aim_chain_at(LEG_L_NAMES, LANDMARKS['foot_l'])
+    if 'foot_r' in LANDMARKS:
+        aim_chain_at(LEG_R_NAMES, LANDMARKS['foot_r'])
+    # Head: aim head bone toward the head landmark
+    if 'head' in LANDMARKS:
+        aim_chain_at(HEAD_NAMES, LANDMARKS['head'])
 
-print(f"AUTORIG: A-pose done", flush=True)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    print("AUTORIG: bone positioning from landmarks done", flush=True)
+else:
+    # Fallback: hardcoded A-pose (35 deg arms down)
+    print("AUTORIG: no landmarks, using hardcoded A-pose...", flush=True)
+    bpy.ops.object.mode_set(mode='POSE')
+    bpy.ops.pose.select_all(action='SELECT')
+    bpy.ops.pose.transforms_clear()
+
+    def find_pose_bone_ci(names):
+        for n in names:
+            target = n.lower()
+            for b in template_armature.pose.bones:
+                if b.name.lower() == target:
+                    return b
+        return None
+
+    def rotate_pose_global(pb, axis, angle_deg):
+        if not pb:
+            return
+        from mathutils import Matrix
+        rot = Matrix.Rotation(_m.radians(angle_deg), 4, axis)
+        pb.matrix = rot @ pb.matrix
+        bpy.context.view_layer.update()
+
+    arm_l = find_pose_bone_ci(ARM_L_NAMES)
+    arm_r = find_pose_bone_ci(ARM_R_NAMES)
+    A_DEG = 35
+    if arm_l: rotate_pose_global(arm_l, 'Y', -A_DEG)
+    if arm_r: rotate_pose_global(arm_r, 'Y', A_DEG)
+
+    bpy.ops.pose.select_all(action='SELECT')
+    try:
+        bpy.ops.pose.armature_apply(selected=False)
+    except Exception as e:
+        print(f"AUTORIG: armature_apply failed: {{e}}", flush=True)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+print(f"AUTORIG: bone positioning done", flush=True)
 
 # ===== Step 9: Parent new mesh to armature with auto weights =====
 print("AUTORIG: parenting new mesh to armature (ARMATURE_AUTO)...", flush=True)
@@ -609,13 +675,22 @@ print(f"AUTORIG_SUCCESS: {{output_fbx}}", flush=True)
 
 def main():
     if len(sys.argv) < 5:
-        print("Usage: python auto_rig_bridge.py <mesh> <template> <output> <blender_exe>")
+        print("Usage: python auto_rig_bridge.py <mesh> <template> <output> <blender_exe> [landmarks.json]")
         sys.exit(1)
 
     mesh_path = sys.argv[1]
     template_name = sys.argv[2]
     output_fbx = sys.argv[3]
     blender_exe = sys.argv[4]
+    landmarks_path = sys.argv[5] if len(sys.argv) > 5 else None
+    landmarks = None
+    if landmarks_path and os.path.exists(landmarks_path):
+        try:
+            with open(landmarks_path, "r", encoding="utf-8") as f:
+                landmarks = json.load(f)
+            print(f"AUTORIG: loaded {len(landmarks)} landmarks from {landmarks_path}", flush=True)
+        except Exception as e:
+            print(f"AUTORIG: landmarks load failed: {e}", flush=True)
 
     if not os.path.exists(mesh_path):
         print(f"AUTORIG_ERROR: Input mesh not found: {mesh_path}")
@@ -632,7 +707,7 @@ def main():
 
     print(f"AUTORIG: Building Blender script for template '{template_name}' (type={template.get('type')})", flush=True)
     if template.get("type") == "fbx":
-        script_content = build_fbx_template_script(mesh_path, template["path"], output_fbx)
+        script_content = build_fbx_template_script(mesh_path, template["path"], output_fbx, landmarks)
     else:
         script_content = build_blender_script(mesh_path, template, output_fbx)
 
