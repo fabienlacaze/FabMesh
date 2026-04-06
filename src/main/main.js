@@ -3,6 +3,25 @@ const path = require('path');
 const fs = require('fs');
 const { execFile, exec, spawn } = require('child_process');
 
+// Catch uncaught errors so the app doesn't show the fatal dialog
+process.on('uncaughtException', (err) => {
+  console.error('[main.js uncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[main.js unhandledRejection]', reason);
+});
+
+// Safe send: never throws, never crashes the app on subprocess data after window close
+function safeSend(channel, data) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(channel, data);
+    }
+  } catch (e) {
+    // Window destroyed mid-send - ignore silently
+  }
+}
+
 const MESHES_DIR = path.join(__dirname, '..', '..', 'meshes');
 const SCRIPTS_DIR = path.join(__dirname, '..', '..', 'scripts');
 const PREVIEWS_DIR = path.join(__dirname, '..', '..', 'previews');
@@ -201,15 +220,38 @@ app.whenReady().then(() => {
   // Lazy start SDXL server in background (doesn't block UI)
   setTimeout(() => startSdxlServer(), 1500);
 });
-app.on('window-all-closed', () => {
+// Kill all tracked Python subprocesses (cancel-job map) on exit
+function killAllActiveProcs() {
+  for (const [jobId, proc] of activeProcs.entries()) {
+    try {
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], () => {});
+      } else {
+        proc.kill('SIGKILL');
+      }
+    } catch (e) {}
+  }
+  activeProcs.clear();
+}
+
+let _isQuitting = false;
+function fullCleanup() {
+  if (_isQuitting) return;
+  _isQuitting = true;
+  killAllActiveProcs();
   stopSdxlServer();
-  // Free WSL memory (~10-20 GB held by Hunyuan3D texgen)
   try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
+}
+
+app.on('window-all-closed', () => {
+  fullCleanup();
   app.quit();
 });
 app.on('before-quit', () => {
-  stopSdxlServer();
-  try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
+  fullCleanup();
+});
+app.on('will-quit', () => {
+  fullCleanup();
 });
 
 // Show file in explorer
@@ -355,10 +397,10 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName }) => {
         }
       });
       proc.stdout?.on('data', d => {
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
+        safeSend('ai3d-progress', d.toString());
       });
       proc.stderr?.on('data', d => {
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+        safeSend('ai3d-progress', '[stderr] ' + d.toString());
       });
       proc.on('error', e => resolve({ success: false, error: e.message }));
     });
@@ -498,10 +540,10 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
         }
       });
       proc.stdout?.on('data', d => {
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
+        safeSend('ai3d-progress', d.toString());
       });
       proc.stderr?.on('data', d => {
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+        safeSend('ai3d-progress', '[stderr] ' + d.toString());
       });
       proc.on('error', e => resolve({ success: false, error: e.message }));
     });
@@ -541,10 +583,10 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
         else resolve({ success: false, error: 'Output not created' });
       });
       proc.stdout?.on('data', d => {
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
+        safeSend('ai3d-progress', d.toString());
       });
       proc.stderr?.on('data', d => {
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+        safeSend('ai3d-progress', '[stderr] ' + d.toString());
       });
       proc.on('error', e => resolve({ success: false, error: e.message }));
     });
@@ -639,7 +681,7 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
       }
     });
     proc.stderr?.on('data', d => {
-      if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + d.toString());
+      safeSend('ai3d-progress', '[stderr] ' + d.toString());
     });
     proc.on('error', err => { cleanup(); resolve({ success: false, error: err.message }); });
   });
@@ -1130,7 +1172,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 
     for (let i = 0; i < stagePrompts.length; i++) {
       const stage = stagePrompts[i];
-      if (mainWindow) mainWindow.webContents.send('build-stage-progress', { stage: i, total: 3, label: stage.label });
+      safeSend('build-stage-progress', { stage: i, total: 3, label: stage.label });
 
       const timestamp = Date.now();
       const imgDir = path.join(IMAGES_DIR, `${safeName}_${stage.name}_${timestamp}`);
@@ -1229,7 +1271,7 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
           const imgs = fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f)).map(f => path.join(imagesDir, f));
           resolve({ images: imgs, stdout });
         });
-        proc.stdout.on('data', d => { if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString()); });
+        proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
       });
       return { success: true, images: result.images };
     }
@@ -1304,7 +1346,7 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
         try {
           fs.renameSync(r.path, finalPath);
           images.push(finalPath);
-          if (mainWindow) mainWindow.webContents.send('ai3d-progress', `IMAGE_GENERATED:${r.idx}:${finalPath}`);
+          safeSend('ai3d-progress', `IMAGE_GENERATED:${r.idx}:${finalPath}`);
         } catch (e) {
           console.error('Move failed:', e.message);
         }
@@ -1384,8 +1426,8 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
       });
       if (jobId) activeProcs.set(jobId, proc);
       const flushStdout = () => {
-        if (stdoutBuf && mainWindow) {
-          mainWindow.webContents.send('ai3d-progress', stdoutBuf);
+        if (stdoutBuf) {
+          safeSend('ai3d-progress', stdoutBuf);
           stdoutBuf = '';
           lastSent = Date.now();
         }
@@ -1400,7 +1442,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
       proc.stderr?.on('data', d => {
         const s = d.toString();
         stderrBuf += s;
-        if (mainWindow) mainWindow.webContents.send('ai3d-progress', '[stderr] ' + s);
+        safeSend('ai3d-progress', '[stderr] ' + s);
       });
       proc.on('error', err => {
         console.error('image-to-3d process error:', err);
@@ -1435,7 +1477,7 @@ ipcMain.handle('image-to-3d-trellis', async (event, { imagePath, outputName, tex
         const stats = fs.statSync(meshPath);
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, stdout });
       });
-      proc.stdout.on('data', d => { if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString()); });
+      proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
     });
 
     return { success: true, ...result };
