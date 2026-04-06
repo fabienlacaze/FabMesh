@@ -39,6 +39,13 @@
       <main id="viewer-panel">
         <div id="viewer-container">
           <canvas id="three-canvas"></canvas>
+          <div id="image-viewer" class="hidden">
+            <img id="image-viewer-img" alt="" onclick="if(this.src) window._openLightbox(this.src)" />
+            <div id="image-viewer-empty">
+              <p>No image loaded</p>
+              <p class="hint">Generate an image or select one from the gallery</p>
+            </div>
+          </div>
           <div id="viewer-empty">
             <p>No mesh loaded</p>
             <p class="hint">Generate a mesh or select one from the gallery</p>
@@ -1356,14 +1363,18 @@
         lastImagePrompt = prompt;
         document.getElementById('prompt-input').value = prompt;
       }
-      const grid = document.getElementById('image-grid');
-      const gridItems = document.getElementById('image-grid-items');
-      grid.classList.remove('hidden');
-      gridItems.innerHTML = `<img class="grid-img selected" src="file:///${imgPath}" data-path="${imgPath}" style="grid-column:1/-1; max-height:180px; object-fit:contain; cursor:pointer;" onclick="window._openLightbox(this.src)" />`;
+      // Show image in main viewer if in image tab
+      if (currentTab === 'tab-image') {
+        const viewerImg = document.getElementById('image-viewer-img');
+        viewerImg.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+        document.getElementById('image-viewer-empty').style.display = 'none';
+      }
       document.getElementById('btn-send-to-3d').classList.remove('hidden');
       showImageRefine(imgPath, prompt);
       // Switch to refine sub-tab
       document.querySelector('#img-subtab-bar .img-subtab[data-imgsubtab="img-refine-tab"]').click();
+      // Refresh gallery to update "active" selection
+      refreshGalleryImages();
     };
 
     // 3D tab: From Gallery button — switch to Image tab
@@ -1807,6 +1818,29 @@
       currentTab = tabId;
       document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === tabId));
+
+      // Show image viewer or 3D viewer based on tab
+      const imgViewer = document.getElementById('image-viewer');
+      const canvas = document.getElementById('three-canvas');
+      const emptyMesh = document.getElementById('viewer-empty');
+      if (tabId === 'tab-image') {
+        imgViewer.classList.remove('hidden');
+        canvas.style.display = 'none';
+        if (emptyMesh) emptyMesh.style.display = 'none';
+        // Load current image if any
+        if (selectedImagePath) {
+          document.getElementById('image-viewer-img').src = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+          document.getElementById('image-viewer-empty').style.display = 'none';
+        } else {
+          document.getElementById('image-viewer-img').removeAttribute('src');
+          document.getElementById('image-viewer-empty').style.display = 'block';
+        }
+      } else {
+        imgViewer.classList.add('hidden');
+        canvas.style.display = '';
+        if (emptyMesh && !currentModel) emptyMesh.style.display = '';
+      }
+
       // Switch gallery view based on tab — expand all groups
       const title = document.getElementById('gallery-title');
       try {

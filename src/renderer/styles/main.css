@@ -377,6 +377,48 @@ body {
   border: 1px solid var(--border);
 }
 
+#image-viewer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  padding: 20px;
+}
+
+#image-viewer.hidden {
+  display: none;
+}
+
+#image-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  cursor: zoom-in;
+  display: block;
+}
+
+#image-viewer-img[src=""], #image-viewer-img:not([src]) {
+  display: none;
+}
+
+#image-viewer-empty {
+  position: absolute;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+#image-viewer-empty p {
+  margin: 4px 0;
+}
+
+#image-viewer:has(#image-viewer-img[src]:not([src=""])) #image-viewer-empty {
+  display: none;
+}
+
 #hover-preview {
   position: fixed;
   z-index: 9999;
