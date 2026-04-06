@@ -55,8 +55,11 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
             150000: 576, 200000: 640, 250000: 704, 300000: 768,
             350000: 832, 400000: 896, 450000: 960, 500000: 1024
         }
-        octree_res = 256
-        if max_faces > 0:
+        # max_faces=0 means "No limit" -> use highest octree_resolution
+        if max_faces == 0:
+            octree_res = 1024
+        else:
+            octree_res = 256
             for faces, res in sorted(res_map.items()):
                 if max_faces <= faces:
                     octree_res = res
