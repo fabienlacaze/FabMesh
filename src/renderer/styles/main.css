@@ -1221,36 +1221,38 @@ body {
 .convert-btn:hover { opacity: 0.9; }
 .convert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Big action bar at the very bottom of a tab */
+/* Big action bar - sticky at bottom-right of action panel */
 .big-action-bar {
   margin-top: auto;
-  padding: 12px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-primary);
+  padding: 10px 12px;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none; /* let clicks pass through the empty space */
 }
 
 .big-action-btn {
-  width: 100%;
-  padding: 12px 16px;
+  pointer-events: auto;
+  padding: 10px 18px;
   border: none;
   border-radius: var(--radius);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
   letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
 .big-action-btn.green {
   background: linear-gradient(135deg, #10b981, #059669);
   color: white;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
 }
 
 .big-action-btn.green:hover {
   background: linear-gradient(135deg, #14d399, #07a574);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.5);
+  transform: translateY(-2px);
 }
 
 .big-action-btn.green:active {
