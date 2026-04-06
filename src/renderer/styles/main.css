@@ -201,14 +201,14 @@ body {
 
 /* Gallery Panel */
 #gallery-panel {
-  width: 280px;
+  width: 260px;
   min-width: 160px;
   max-width: 460px;
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   overflow: hidden;
   resize: horizontal;
 }
@@ -682,33 +682,27 @@ body {
 /* Tabs */
 #tab-bar {
   display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
+  flex-direction: row;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
   flex-shrink: 0;
   background: var(--bg-primary);
-  width: 56px;
-  padding-top: 8px;
-  gap: 4px;
+  border-bottom: 1px solid var(--border);
 }
 
 .tab {
-  padding: 24px 8px;
+  padding: 10px 24px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-right: 3px solid transparent;
-  border-radius: 6px 0 0 6px;
-  margin-left: 4px;
-  margin-right: -1px;
+  border-radius: 8px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  transform: rotate(180deg);
-  letter-spacing: 1px;
-  min-height: 80px;
+  letter-spacing: 0.5px;
+  min-width: 70px;
 }
 
 .tab:hover {
@@ -721,7 +715,6 @@ body {
   color: white;
   background: linear-gradient(135deg, var(--accent), #a855f7);
   border-color: var(--accent);
-  border-right-color: var(--accent);
   box-shadow: 0 2px 8px rgba(233,69,96,0.3);
 }
 
