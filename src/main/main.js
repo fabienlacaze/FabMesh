@@ -106,8 +106,49 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 
 // Show file in explorer
+// Image history: backup current image before modifying
+function backupImage(imagePath) {
+  const dir = path.dirname(imagePath);
+  const base = path.basename(imagePath, path.extname(imagePath));
+  const ext = path.extname(imagePath);
+  const histDir = path.join(dir, '.history');
+  if (!fs.existsSync(histDir)) fs.mkdirSync(histDir);
+  const timestamp = Date.now();
+  const backupPath = path.join(histDir, `${base}_${timestamp}${ext}`);
+  fs.copyFileSync(imagePath, backupPath);
+  return backupPath;
+}
+
+ipcMain.handle('list-image-versions', (event, imagePath) => {
+  const dir = path.dirname(imagePath);
+  const base = path.basename(imagePath, path.extname(imagePath));
+  const histDir = path.join(dir, '.history');
+  if (!fs.existsSync(histDir)) return [];
+  return fs.readdirSync(histDir)
+    .filter(f => f.startsWith(base + '_'))
+    .map(f => {
+      const fullPath = path.join(histDir, f);
+      return {
+        path: fullPath,
+        filename: f,
+        created: fs.statSync(fullPath).birthtime,
+        size: fs.statSync(fullPath).size
+      };
+    })
+    .sort((a, b) => new Date(b.created) - new Date(a.created));
+});
+
+ipcMain.handle('revert-image', (event, { imagePath, versionPath }) => {
+  // Save current as new version, restore the version
+  backupImage(imagePath);
+  fs.copyFileSync(versionPath, imagePath);
+  return true;
+});
+
 ipcMain.handle('remove-background', async (event, imagePath) => {
   return new Promise((resolve) => {
+    // Backup before modification
+    backupImage(imagePath);
     const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
     execFile('python', [script, imagePath], { timeout: 60000 }, (error, stdout, stderr) => {
       if (error) resolve({ success: false, error: error.message });
