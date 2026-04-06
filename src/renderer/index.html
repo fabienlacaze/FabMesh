@@ -1192,16 +1192,25 @@
           </div>`;
 
         if (!collapsed) {
-          html += '<div class="gallery-children gallery-img-children">';
+          html += '<div class="gallery-children">';
           const b64Prompt = btoa(unescape(encodeURIComponent(f.prompt || '')));
           f.images.forEach((img, i) => {
             const imgSrc = 'file:///' + img.replace(/\\/g, '/');
             const imgPathSafe = img.replace(/\\/g, '/');
-            const badge = i === 0 ? '<span class="thumb-badge latest">LATEST</span>' : `<span class="thumb-badge ver">v${f.images.length - 1 - i}</span>`;
             const verLabel = i === 0 ? 'LATEST' : `v${f.images.length - 1 - i}`;
+            const verClass = i === 0 ? 'latest-tag' : 'version-tag';
+            const fileData = f.imagesData ? f.imagesData[i] : null;
+            const date = fileData ? new Date(fileData.created) : new Date();
+            const ds = date.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+            const sz = fileData ? (fileData.size < 1048576 ? (fileData.size/1024).toFixed(1)+' KB' : (fileData.size/1048576).toFixed(1)+' MB') : '';
+            const isSelected = selectedImagePath === img;
             const fname = imgPathSafe.split('/').pop();
-            const meta = `${fname} | ${verLabel}`;
-            html += `<div class="gallery-thumb-wrapper" data-thumb="${imgSrc}" data-name="${name} - ${verLabel}" data-meta="${meta}">${badge}<img class="gallery-thumb" src="${imgSrc}" data-path="${imgPathSafe}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage(this.dataset.path, decodeURIComponent(escape(atob(this.dataset.prompt))))" /><button class="gallery-thumb-del" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>`;
+            html += `<div class="mesh-item mesh-child ${isSelected ? 'active' : ''}" data-thumb="${imgSrc}" data-name="${name} - ${verLabel}" data-meta="${fname}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage('${imgPathSafe}', decodeURIComponent(escape(atob(this.dataset.prompt))))">
+              <div class="mesh-item-with-thumb"><img class="mesh-thumb" src="${imgSrc}" /><div class="mesh-item-details">
+              <div class="mesh-item-row"><div class="mesh-item-name"><span class="${verClass}">${verLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>
+              <div class="mesh-item-info"><span>${sz}</span><span class="mesh-item-format">PNG</span></div>
+              </div></div>
+            </div>`;
           });
           html += '</div>';
         }

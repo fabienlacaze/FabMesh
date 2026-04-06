@@ -1919,6 +1919,17 @@ select option {
   margin-right: 4px;
 }
 
+.latest-tag {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+
 /* Progress bar */
 .progress-section {
   margin: 8px 12px;
