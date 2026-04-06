@@ -189,8 +189,8 @@ async function uploadToCatbox(imagePath) {
   });
 }
 
-// Img2img: regenerate image with kontext model using existing image as reference
-ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
+// Img2img: use local Stable Diffusion XL img2img for real image modification
+ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
   try {
     // Create new version path in same folder
     const dir = path.dirname(imagePath);
@@ -198,6 +198,26 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
     const base = path.basename(imagePath, ext);
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_refined_${ts}${ext}`);
+
+    // Try local SDXL img2img first (real image modification)
+    const script = path.join(__dirname, '..', '..', 'scripts', 'local_img2img_bridge.py');
+    const localResult = await new Promise((resolve) => {
+      const proc = execFile('python', [script, imagePath, prompt, newImagePath, String(strength || 0.55)], {
+        timeout: 300000, maxBuffer: 10 * 1024 * 1024
+      }, (error, stdout, stderr) => {
+        if (error) resolve({ success: false, error: error.message, stdout, stderr });
+        else if (fs.existsSync(newImagePath)) resolve({ success: true });
+        else resolve({ success: false, error: 'Output not created' });
+      });
+      proc.stdout?.on('data', d => {
+        if (mainWindow) mainWindow.webContents.send('ai3d-progress', d.toString());
+      });
+    });
+
+    if (localResult.success) {
+      return { success: true, newPath: newImagePath };
+    }
+    console.warn('Local img2img failed, falling back to Pollinations:', localResult.error);
 
     let uploadPath = imagePath;
     const tempResized = imagePath + '.resize.png';
