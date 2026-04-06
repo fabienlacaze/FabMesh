@@ -1553,14 +1553,14 @@
       document.getElementById('prompt-input').value = refinedPrompt;
       lastImagePrompt = refinedPrompt;
 
-      const numImages = parseInt(document.getElementById('num-images').value) || 4;
+      const numImages = 1; // Refine generates a single image
       const meshName = document.getElementById('mesh-name').value.trim() || 'mesh';
       const imageEngine = document.getElementById('image-engine').value;
       const btn = document.getElementById('btn-refine-image');
       btn.disabled = false; // Don't lock — runs as a background job
 
       // Add to job queue
-      const refineJob = addJob(`Refine: ${numImages} images`, imageEngine);
+      const refineJob = addJob(`Refine: 1 image`, imageEngine);
       refineJob.step = 'Refining images...';
       refineJob.progress = 10;
       renderJobs();
