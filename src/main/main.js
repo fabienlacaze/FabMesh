@@ -1146,7 +1146,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 });
 
 // --- Text-to-3D: Step 1 - Generate images via Pollinations ---
-ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName, engine }) => {
+ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName, engine, quality }) => {
   try {
     const timestamp = Date.now();
     const safeName = (projectName || 'gen').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1182,15 +1182,23 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       return { success: true, images: result.images };
     }
 
-    // CLOUD: Pollinations (using flux model for higher quality)
+    // CLOUD: Pollinations
     const images = [];
-    const optimizedPrompt = `${prompt}, masterpiece, highly detailed, 8k, sharp focus, professional photography, studio lighting, single object centered on plain white background, product shot, no text, no watermark`;
+    // Quality 1=Fast, 2=Medium, 3=High (default), 4=Ultra
+    const qualityConfig = {
+      1: { model: 'turbo',   width: 1024, height: 1024, enhance: false, suffix: '' },
+      2: { model: 'flux',    width: 1024, height: 1024, enhance: false, suffix: ', detailed' },
+      3: { model: 'flux',    width: 1344, height: 1344, enhance: true,  suffix: ', masterpiece, highly detailed, 8k, sharp focus, professional photography, studio lighting' },
+      4: { model: 'flux',    width: 1536, height: 1536, enhance: true,  suffix: ', masterpiece, ultra detailed, 16k, sharp focus, professional photography, studio lighting, perfect composition, award winning, intricate details' },
+    };
+    const q = qualityConfig[quality || 3] || qualityConfig[3];
+    const optimizedPrompt = `${prompt}${q.suffix}, single object centered on plain white background, product shot, no text, no watermark`;
 
     for (let i = 0; i < (numImages || 4); i++) {
       const seed = timestamp + i;
       const encoded = encodeURIComponent(optimizedPrompt);
-      // flux = higher quality than default; 1344x1344 = more detail
-      const url = `https://image.pollinations.ai/prompt/${encoded}?model=flux&width=1344&height=1344&nologo=true&enhance=true&seed=${seed}`;
+      const enhanceParam = q.enhance ? '&enhance=true' : '';
+      const url = `https://image.pollinations.ai/prompt/${encoded}?model=${q.model}&width=${q.width}&height=${q.height}&nologo=true${enhanceParam}&seed=${seed}`;
       // Unique filename per run to avoid overwrites
       const imgPath = path.join(imagesDir, `ref_${timestamp}_${i}.png`);
 

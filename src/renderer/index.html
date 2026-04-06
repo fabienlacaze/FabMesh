@@ -134,6 +134,10 @@
             <details class="advanced-details">
               <summary>Advanced</summary>
               <div class="advanced-content">
+                <div class="action-row">
+                  <label>Quality <span id="img-quality-label" style="color:var(--text-muted); font-size:10px;">(High)</span></label>
+                  <input type="range" id="img-quality-slider" min="1" max="4" value="3" step="1" style="flex:1; accent-color: var(--accent);" />
+                </div>
                 <div class="adv-check-row">
                   <input type="checkbox" id="chk-multi-view" />
                   <label for="chk-multi-view">Multi-view (front, side, back)</label>
@@ -1644,6 +1648,7 @@
       const imageEngine = document.getElementById('image-engine').value;
       const isMultiView = document.getElementById('chk-multi-view')?.checked;
       const isImgBuildStages = document.getElementById('chk-img-build-stages')?.checked;
+      const imgQuality = parseInt(document.getElementById('img-quality-slider')?.value) || 3;
 
       // Multi-view / build stages: generate 3 separate images
       let prompt, numImages;
@@ -1685,7 +1690,8 @@
             prompt: `${prompt}, ${s.suffix}`,
             numImages: 1,
             projectName: meshName + '_stages',
-            engine: imageEngine
+            engine: imageEngine,
+            quality: imgQuality
           });
           if (r?.success && r.images?.length) allImages.push(...r.images);
         }
@@ -1703,13 +1709,14 @@
             prompt: `${prompt}, ${v.suffix}`,
             numImages: 1,
             projectName: meshName,
-            engine: imageEngine
+            engine: imageEngine,
+            quality: imgQuality
           });
           if (r?.success && r.images?.length) allImages.push(...r.images);
         }
         result = { success: allImages.length > 0, images: allImages };
       } else {
-        result = await window.meshyAPI.generateImages({ prompt, numImages, projectName: meshName, engine: imageEngine });
+        result = await window.meshyAPI.generateImages({ prompt, numImages, projectName: meshName, engine: imageEngine, quality: imgQuality });
       }
 
       stopProgress();
@@ -1965,6 +1972,15 @@
           const txt = el.textContent.toLowerCase();
           el.style.display = (!q || txt.includes(q)) ? '' : 'none';
         });
+      });
+    }
+
+    // Image Quality slider (controls model + resolution + enhance)
+    const imgQualityLabels = { 1: 'Fast', 2: 'Medium', 3: 'High', 4: 'Ultra' };
+    const imgQualitySlider = document.getElementById('img-quality-slider');
+    if (imgQualitySlider) {
+      imgQualitySlider.addEventListener('input', (e) => {
+        document.getElementById('img-quality-label').textContent = `(${imgQualityLabels[e.target.value] || 'High'})`;
       });
     }
 
