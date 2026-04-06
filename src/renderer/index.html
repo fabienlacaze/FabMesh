@@ -1893,11 +1893,40 @@
       const rect = item.getBoundingClientRect();
       popup.style.display = 'block';
       const popupRect = popup.getBoundingClientRect();
-      let left = rect.right + 10;
-      let top = rect.top - 50;
-      if (left + popupRect.width > window.innerWidth) left = rect.left - popupRect.width - 10;
+
+      // Position to the RIGHT of the parent gallery/jobs panel, never overlapping
+      const galleryPanel = document.getElementById('gallery-panel');
+      const jobsPanel = document.getElementById('jobs-panel');
+      const actionPanel = document.getElementById('action-panel');
+      let containerRect = null;
+      if (galleryPanel && galleryPanel.contains(item)) {
+        containerRect = galleryPanel.getBoundingClientRect();
+      } else if (jobsPanel && jobsPanel.contains(item)) {
+        containerRect = jobsPanel.getBoundingClientRect();
+      } else if (actionPanel && actionPanel.contains(item)) {
+        containerRect = actionPanel.getBoundingClientRect();
+      }
+
+      let left, top;
+      if (containerRect) {
+        // Place to the right of the entire panel
+        left = containerRect.right + 12;
+        top = rect.top + (rect.height / 2) - (popupRect.height / 2);
+        // If popup would overflow right, place to the LEFT of the panel instead
+        if (left + popupRect.width > window.innerWidth - 10) {
+          left = containerRect.left - popupRect.width - 12;
+        }
+      } else {
+        left = rect.right + 12;
+        top = rect.top - 50;
+      }
+
+      // Clamp to viewport
+      if (left < 10) left = 10;
       if (top < 10) top = 10;
-      if (top + popupRect.height > window.innerHeight) top = window.innerHeight - popupRect.height - 10;
+      if (top + popupRect.height > window.innerHeight - 10) {
+        top = window.innerHeight - popupRect.height - 10;
+      }
       popup.style.left = left + 'px';
       popup.style.top = top + 'px';
     }
