@@ -2000,11 +2000,44 @@
     function renderJobs() {
       const panel = document.getElementById('jobs-panel');
       const list = document.getElementById('jobs-list');
-      // Preserve toasts (added directly to DOM)
       const toasts = Array.from(list.querySelectorAll('.toast-success, .toast-error, .toast-info'));
       if (activeJobs.length === 0 && toasts.length === 0) { panel.classList.add('hidden'); return; }
       panel.classList.remove('hidden');
-      // Remove only non-toast items
+
+      // In-place update: if same job count + same IDs, update in place (no DOM recreation = no animation reset)
+      const existingJobs = Array.from(list.querySelectorAll('.job-item:not([class*="toast-"])'));
+      const sameLayout = existingJobs.length === activeJobs.length &&
+        existingJobs.every((el, i) => el.dataset.jobId === String(activeJobs[i].id));
+
+      if (sameLayout) {
+        // Just update the dynamic parts
+        activeJobs.forEach((j, i) => {
+          const el = existingJobs[i];
+          const pct = Math.round(j.progress);
+          const fill = el.querySelector('.job-bar-fill');
+          if (fill) fill.style.width = pct + '%';
+          const pctSpan = el.querySelector('.job-percent');
+          if (pctSpan) pctSpan.textContent = pct + '%';
+          const statusSpan = el.querySelector('.job-status');
+          if (statusSpan) statusSpan.textContent = j.step || j.status;
+          const timeSpan = el.querySelector('.job-time');
+          if (timeSpan) {
+            const elapsed = Math.floor((Date.now() - j.startTime) / 1000);
+            const min = Math.floor(elapsed / 60);
+            const sec = elapsed % 60;
+            const timeStr = min > 0 ? `${min}m${sec.toString().padStart(2,'0')}s` : `${sec}s`;
+            // Preserve cancel button
+            const cancelBtn = timeSpan.querySelector('.job-cancel');
+            timeSpan.textContent = timeStr;
+            if (cancelBtn) timeSpan.appendChild(cancelBtn);
+          }
+          // Update class for status change
+          el.className = `job-item ${j.status} ${j.id === activeJobId ? 'focused' : ''}`;
+        });
+        return;
+      }
+
+      // Full re-render
       Array.from(list.children).forEach(c => {
         const isToast = c.classList && (c.classList.contains('toast-success') || c.classList.contains('toast-error') || c.classList.contains('toast-info'));
         if (!isToast) c.remove();
@@ -2021,7 +2054,7 @@
         const srcImg = j.sourceImage ? 'file:///' + j.sourceImage.replace(/\\/g, '/') : '';
         const thumbHtml = srcImg ? `<img class="job-thumb" src="${srcImg}" />` : '';
         const hoverData = srcImg ? `data-thumb="${srcImg}" data-name="${j.name}" data-meta="${j.step || j.status}"` : '';
-        return `<div class="job-item ${j.status} ${focused}" onclick="window._focusJob(${j.id})" ${hoverData}>
+        return `<div class="job-item ${j.status} ${focused}" data-job-id="${j.id}" onclick="window._focusJob(${j.id})" ${hoverData}>
           ${thumbHtml}
           ${icon}
           <div class="job-detail">
