@@ -631,6 +631,13 @@ body {
 .job-item.waiting .job-bar-fill { background: var(--warning); }
 .job-item.waiting { opacity: 0.7; }
 
+.job-item.toast-success { border-color: var(--success); }
+.job-item.toast-error { border-color: var(--error); }
+.job-item.toast-info { border-color: var(--text-muted); }
+.job-item[class*="toast-"] {
+  transition: opacity 0.3s;
+}
+
 .job-thumb {
   width: 40px;
   height: 40px;

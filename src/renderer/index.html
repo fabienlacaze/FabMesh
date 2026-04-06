@@ -767,10 +767,24 @@
     }
 
     function showLog(text, type) {
-      document.getElementById('output-log').classList.remove('hidden');
-      const c = document.getElementById('log-content');
-      c.textContent = text;
-      c.style.color = type === 'error' ? '#f87171' : type === 'success' ? '#4ade80' : '#8892b0';
+      // Create a toast in the jobs panel
+      const panel = document.getElementById('jobs-panel');
+      const list = document.getElementById('jobs-list');
+      panel.classList.remove('hidden');
+      const toast = document.createElement('div');
+      toast.className = 'job-item toast-' + (type || 'info');
+      const icon = type === 'error' ? '<span class="job-done-icon" style="color:var(--error)">&#10007;</span>' :
+                   type === 'success' ? '<span class="job-done-icon" style="color:var(--success)">&#10003;</span>' :
+                   '<span class="job-done-icon" style="color:var(--text-muted)">&#9432;</span>';
+      toast.innerHTML = `${icon}<div class="job-detail"><div class="job-name">${text}</div></div>`;
+      list.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => {
+          toast.remove();
+          if (activeJobs.length === 0 && list.children.length === 0) panel.classList.add('hidden');
+        }, 300);
+      }, 4000);
     }
 
     const config = await window.meshyAPI.getConfig();
@@ -1003,6 +1017,16 @@
 
     // Import mesh button
     document.getElementById('btn-import').onclick = async () => {
+      // If image tab active, import an image; else import a mesh
+      if (currentTab === 'tab-image') {
+        const imgPath = await window.meshyAPI.importImage();
+        if (imgPath) {
+          // Move imported image to images folder so it appears in gallery
+          await refreshGalleryImages();
+          showLog('Imported image: ' + imgPath.split(/[/\\]/).pop(), 'success');
+        }
+        return;
+      }
       const result = await window.meshyAPI.importMesh();
       if (result) {
         await refreshGallery();
@@ -1929,9 +1953,15 @@
     function renderJobs() {
       const panel = document.getElementById('jobs-panel');
       const list = document.getElementById('jobs-list');
-      if (activeJobs.length === 0) { panel.classList.add('hidden'); return; }
+      // Preserve toasts (added directly to DOM)
+      const toasts = Array.from(list.querySelectorAll('[class*="toast-"]'));
+      if (activeJobs.length === 0 && toasts.length === 0) { panel.classList.add('hidden'); return; }
       panel.classList.remove('hidden');
-      list.innerHTML = activeJobs.map(j => {
+      // Remove only non-toast items
+      Array.from(list.children).forEach(c => {
+        if (!c.className.includes('toast-')) c.remove();
+      });
+      const html = activeJobs.map(j => {
         const elapsed = Math.floor((Date.now() - j.startTime) / 1000);
         const min = Math.floor(elapsed / 60);
         const sec = elapsed % 60;
@@ -1959,6 +1989,12 @@
           </div>
         </div>`;
       }).join('');
+      // Insert jobs HTML before any toasts
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      while (tmp.firstChild) {
+        list.insertBefore(tmp.firstChild, list.firstChild);
+      }
     }
 
     // Cancel a running or waiting job
