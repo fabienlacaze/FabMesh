@@ -1563,9 +1563,84 @@
     };
 
     // Refine button
+    // Refine Hunyuan3D mesh by regenerating with modified prompt
+    async function refineHunyuanMesh(modification) {
+      const btn = document.getElementById('btn-refine');
+      btn.disabled = true; btn.textContent = 'Refining...';
+      const loader = document.getElementById('viewer-loading');
+      loader.classList.remove('hidden');
+      document.getElementById('loading-text').textContent = 'Regenerating image...';
+
+      try {
+        // Step 1: Get base prompt (from lastImagePrompt or fallback)
+        const basePrompt = lastImagePrompt || 'object';
+        const newPrompt = `${basePrompt}, ${modification}`;
+        const meshName = (selectedMesh.filename.replace(/\.[^.]+$/, '').replace(/_hunyuan_\d+$/, '')) || 'mesh';
+
+        // Step 2: Generate new image
+        const job = addJob(`Refine: ${meshName}`, 'pollinations');
+        const imgResult = await window.meshyAPI.generateImages({
+          prompt: newPrompt, numImages: 1, projectName: meshName + '_refined', engine: 'pollinations'
+        });
+        if (!imgResult.success || !imgResult.images?.length) {
+          completeJob(job.id, false);
+          throw new Error('Image generation failed');
+        }
+
+        const newImagePath = imgResult.images[0];
+        document.getElementById('loading-text').textContent = 'Generating refined 3D mesh...';
+
+        // Step 3: Run Hunyuan3D on the new image
+        updateJob(job.id, 30, 'Generating shape...');
+        const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
+        const r3d = await window.meshyAPI.imageTo3D({
+          imagePath: newImagePath,
+          outputName: meshName,
+          engine: 'hunyuan',
+          targetFaces: maxTris || 50000
+        });
+
+        if (!r3d.success) {
+          completeJob(job.id, false);
+          throw new Error(r3d.error || '3D generation failed');
+        }
+
+        // Step 4: Load the new mesh
+        const buf = await window.meshyAPI.readMeshFile(r3d.meshPath);
+        if (buf) {
+          await loadMeshFromBuffer(buf, 'glb', r3d.meshPath);
+          selectedMesh = { path: r3d.meshPath, filename: r3d.meshFilename, format: 'GLB' };
+          saveMeshThumbnail(r3d.meshPath);
+        }
+
+        lastImagePrompt = newPrompt;
+        document.getElementById('prompt-input').value = newPrompt;
+
+        completeJob(job.id, true);
+        await refreshGallery();
+        showLog('Refined! ' + r3d.meshFilename, 'success');
+        window.meshyAPI.flashTaskbar();
+      } catch (e) {
+        showLog('Refine failed: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Refine';
+        loader.classList.add('hidden');
+        document.getElementById('refine-input').value = '';
+      }
+    }
+
     document.getElementById('btn-refine').addEventListener('click', async () => {
       const modification = document.getElementById('refine-input').value.trim();
       if (!modification) { showLog('Describe what to change.', 'error'); return; }
+      if (!selectedMesh) { showLog('Select a mesh first.', 'error'); return; }
+
+      // For Hunyuan3D meshes, regenerate with modified prompt instead of Claude+Blender
+      const isHunyuan = selectedMesh.filename.includes('hunyuan');
+      if (isHunyuan) {
+        await refineHunyuanMesh(modification);
+        return;
+      }
+
       if (!currentProject) { showLog('Select a mesh first.', 'error'); return; }
 
       // If no version data yet (imported mesh), create a project
