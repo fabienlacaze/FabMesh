@@ -852,10 +852,26 @@
         API.listMeshes(),
         API.listProjects()
       ]);
-      meshList = meshesResult || [];
+      const allMeshes = meshesResult || [];
       const projects = projectsResult || [];
       const el = document.getElementById('mesh-list');
-      if (!meshList.length) { el.innerHTML = '<div class="gallery-empty">No meshes yet.</div>'; return; }
+
+      // Filter by current tab: tab-3d shows only static meshes, tab-rig shows only rigs
+      // A mesh is "rigged" only if its filename contains the marker _rigged_ added by auto-rig.
+      // We do NOT use ".fbx" alone because Convert/Export-to-Unreal also produce .fbx files.
+      const isRiggedFile = (f) => /_rigged_/i.test(f);
+      let filtered;
+      if (currentTab === 'tab-rig') {
+        filtered = allMeshes.filter(m => isRiggedFile(m.filename));
+      } else {
+        filtered = allMeshes.filter(m => !isRiggedFile(m.filename));
+      }
+      meshList = filtered;
+      if (!meshList.length) {
+        const msg = currentTab === 'tab-rig' ? 'No rigs yet. Generate one in the Rig tab.' : 'No meshes yet.';
+        el.innerHTML = `<div class="gallery-empty">${msg}</div>`;
+        return;
+      }
 
       // Batch getVersions calls in parallel
       const projMap = {};
