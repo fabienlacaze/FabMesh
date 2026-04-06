@@ -16,7 +16,7 @@ import sys
 import json
 import time
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import torch
@@ -250,7 +250,7 @@ def preload_models():
         load_img2img()
         log("Preloading inpaint model...")
         load_inpaint()
-        log("All models preloaded - server fully ready")
+        log("MODELS READY - all SDXL models in VRAM")
     except Exception as e:
         log(f"Preload error: {e}")
         import traceback
@@ -259,7 +259,7 @@ def preload_models():
 
 def main():
     log(f"Starting SDXL server on http://{HOST}:{PORT}")
-    server = HTTPServer((HOST, PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
     log("Server ready (loading models in background...)")
     sys.stdout.flush()
 

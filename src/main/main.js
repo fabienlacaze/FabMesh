@@ -98,7 +98,8 @@ function startSdxlServer() {
     sdxlProc.stdout.on('data', d => {
       const msg = d.toString().trim();
       if (msg) console.log('[SDXL]', msg);
-      if (msg.includes('Server ready')) sdxlReady = true;
+      // Mark ready only when models are actually loaded in VRAM
+      if (msg.includes('MODELS READY')) sdxlReady = true;
     });
     sdxlProc.stderr.on('data', d => console.error('[SDXL stderr]', d.toString().trim()));
     sdxlProc.on('exit', (code) => {
