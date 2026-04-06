@@ -1036,31 +1036,76 @@
         if (data && data.versions && data.versions.length > 0) projMap[name] = data;
       }
 
-      // Group meshes by project name
+      // Group meshes
       const groups = {};
       const ungrouped = [];
-      for (let i = 0; i < meshList.length; i++) {
-        const m = meshList[i];
-        // Strip _rigged_<template> suffix and other variants to find parent project
-        let baseName = m.filename
-          .replace(/\.[^.]+$/, '')
-          .replace(/_rigged_[a-z0-9_]+$/i, '')
-          .replace(/_unreal$/i, '')
-          .replace(/_shape$/i, '')
-          .replace(/_thumb$/i, '')
-          .replace(/_\d+$/, '');
-        if (projMap[baseName]) {
-          if (!groups[baseName]) groups[baseName] = [];
-          groups[baseName].push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
-        } else {
-          // Try to find by stem (file name minus extension, minus timestamp)
-          // Useful for orphan rigs whose parent was deleted
-          const stem = m.filename.replace(/\.[^.]+$/, '').replace(/_rigged_[a-z0-9_]+$/i, '').replace(/_\d+$/, '');
-          if (projMap[stem]) {
-            if (!groups[stem]) groups[stem] = [];
-            groups[stem].push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
+
+      if (currentTab === 'tab-rig') {
+        // RIG TAB: each rigged FBX (SKM) is a group root, and the static mesh
+        // it was generated from becomes its child.
+        // Strategy:
+        //   1) Find all rigs (filename contains _rigged_)
+        //   2) For each rig, derive the source mesh stem (strip _rigged_<template>_<ts>)
+        //   3) The matching static mesh in the list becomes the child
+        //   4) Static meshes that don't have a corresponding rig go in 'ungrouped'
+
+        const rigs = [];
+        const staticMeshes = [];
+        meshList.forEach((m, i) => {
+          const item = { ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) };
+          if (item.isRigged) rigs.push(item);
+          else staticMeshes.push(item);
+        });
+
+        // Find source stem of each rig: filename without "_rigged_<template>" suffix
+        const usedStaticIdx = new Set();
+        rigs.forEach((rig) => {
+          const rigBase = rig.filename
+            .replace(/\.[^.]+$/, '')
+            .replace(/_rigged_[a-z0-9_-]+$/i, '');
+          // Match a static mesh whose name (without ext) starts with rigBase
+          const sourceMesh = staticMeshes.find((sm, sidx) => {
+            if (usedStaticIdx.has(sidx)) return false;
+            const smBase = sm.filename.replace(/\.[^.]+$/, '');
+            return smBase === rigBase || smBase.startsWith(rigBase);
+          });
+          const groupName = rig.filename.replace(/\.[^.]+$/, '');
+          groups[groupName] = [rig];
+          if (sourceMesh) {
+            const idx = staticMeshes.indexOf(sourceMesh);
+            usedStaticIdx.add(idx);
+            groups[groupName].push(sourceMesh);
+          }
+        });
+
+        // Static meshes without a rig: ungrouped (so user can pick them to rig)
+        staticMeshes.forEach((sm, sidx) => {
+          if (!usedStaticIdx.has(sidx)) {
+            ungrouped.push(sm);
+          }
+        });
+      } else {
+        // 3D TAB / IMAGE TAB: group by project name from Versions Manager
+        for (let i = 0; i < meshList.length; i++) {
+          const m = meshList[i];
+          let baseName = m.filename
+            .replace(/\.[^.]+$/, '')
+            .replace(/_rigged_[a-z0-9_]+$/i, '')
+            .replace(/_unreal$/i, '')
+            .replace(/_shape$/i, '')
+            .replace(/_thumb$/i, '')
+            .replace(/_\d+$/, '');
+          if (projMap[baseName]) {
+            if (!groups[baseName]) groups[baseName] = [];
+            groups[baseName].push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
           } else {
-            ungrouped.push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
+            const stem = m.filename.replace(/\.[^.]+$/, '').replace(/_rigged_[a-z0-9_]+$/i, '').replace(/_\d+$/, '');
+            if (projMap[stem]) {
+              if (!groups[stem]) groups[stem] = [];
+              groups[stem].push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
+            } else {
+              ungrouped.push({ ...m, idx: i, isRigged: /_rigged_/i.test(m.filename) });
+            }
           }
         }
       }
