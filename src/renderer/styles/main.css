@@ -2321,6 +2321,11 @@ select optgroup option {
   background: rgba(74, 222, 128, 0.08);
   border-color: rgba(74, 222, 128, 0.4);
 }
+.lm-btn.hovered {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.4);
+}
 .lm-color {
   display: inline-block;
   width: 12px;

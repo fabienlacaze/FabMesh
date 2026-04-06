@@ -2037,8 +2037,28 @@
       const sphere = new THREE.Mesh(geom, mat);
       sphere.position.set(point.x, point.y, point.z);
       sphere.renderOrder = 999;
+      sphere.userData.landmarkName = name;
+      sphere.userData.baseRadius = r;
+      sphere.userData.baseColor = color;
       scene.add(sphere);
       landmarkMarkers[name] = sphere;
+    }
+
+    // Highlight a landmark marker (called when hovering its row in the list,
+    // or when hovering the marker in the viewer).
+    let _hoveredLandmark = null;
+    function setLandmarkHighlight(name, on) {
+      const m = landmarkMarkers[name];
+      if (m) {
+        const r = m.userData.baseRadius || LM_RADIUS;
+        m.scale.setScalar(on ? 1.6 : 1.0);
+        m.material.opacity = on ? 1.0 : 0.85;
+      }
+      // Also highlight the corresponding button in the list
+      const btn = document.querySelector(`.lm-btn[data-lm="${name}"]`);
+      if (btn) {
+        btn.classList.toggle('hovered', on);
+      }
     }
 
     function updateLandmarkBtnUI() {
@@ -2320,12 +2340,11 @@
       }
     });
 
-    // Wire landmark buttons
+    // Wire landmark buttons (click to arm + hover to highlight marker)
     document.querySelectorAll('.lm-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         if (activeLandmarkBtn === btn) {
-          // Toggle off
           btn.classList.remove('active');
           activeLandmarkBtn = null;
           canvas.style.cursor = '';
@@ -2337,6 +2356,64 @@
         canvas.style.cursor = 'crosshair';
         showLog('Click on the mesh to place: ' + btn.querySelector('.lm-label').textContent, 'info');
       });
+      // Hover row -> highlight the corresponding 3D marker
+      btn.addEventListener('mouseenter', () => {
+        const name = btn.dataset.lm;
+        if (rigLandmarks[name]) setLandmarkHighlight(name, true);
+      });
+      btn.addEventListener('mouseleave', () => {
+        const name = btn.dataset.lm;
+        if (rigLandmarks[name]) setLandmarkHighlight(name, false);
+      });
+    });
+
+    // Tooltip element for hovering markers in viewer
+    let lmTooltip = document.getElementById('lm-tooltip');
+    if (!lmTooltip) {
+      lmTooltip = document.createElement('div');
+      lmTooltip.id = 'lm-tooltip';
+      lmTooltip.style.cssText = 'position: fixed; pointer-events: none; background: rgba(0,0,0,0.85); color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; z-index: 9999; display: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.5);';
+      document.body.appendChild(lmTooltip);
+    }
+    const LM_DISPLAY_NAMES = {
+      head: 'Head', neck: 'Neck',
+      hand_l: 'Left hand', elbow_l: 'Left elbow',
+      finger_l_thumb: 'Left thumb', finger_l_index: 'Left index',
+      hand_r: 'Right hand', elbow_r: 'Right elbow',
+      finger_r_thumb: 'Right thumb', finger_r_index: 'Right index',
+      foot_l: 'Left foot', knee_l: 'Left knee',
+      foot_r: 'Right foot', knee_r: 'Right knee',
+      hips: 'Hips',
+    };
+
+    // Detect marker under cursor on viewer mousemove (when not dragging/arming)
+    canvas.addEventListener('mousemove', (evt) => {
+      // Skip if we're in another mode
+      if (activeLandmarkBtn || _draggingMarker) return;
+      const hit = raycastMarkers(evt);
+      if (hit) {
+        if (_hoveredLandmark !== hit.name) {
+          if (_hoveredLandmark) setLandmarkHighlight(_hoveredLandmark, false);
+          _hoveredLandmark = hit.name;
+          setLandmarkHighlight(hit.name, true);
+        }
+        // Show tooltip
+        lmTooltip.textContent = LM_DISPLAY_NAMES[hit.name] || hit.name;
+        lmTooltip.style.left = (evt.clientX + 12) + 'px';
+        lmTooltip.style.top = (evt.clientY + 12) + 'px';
+        lmTooltip.style.display = 'block';
+      } else if (_hoveredLandmark) {
+        setLandmarkHighlight(_hoveredLandmark, false);
+        _hoveredLandmark = null;
+        lmTooltip.style.display = 'none';
+      }
+    });
+    canvas.addEventListener('mouseleave', () => {
+      if (_hoveredLandmark) {
+        setLandmarkHighlight(_hoveredLandmark, false);
+        _hoveredLandmark = null;
+      }
+      lmTooltip.style.display = 'none';
     });
 
     document.getElementById('btn-rig-clear-landmarks')?.addEventListener('click', clearAllLandmarks);
