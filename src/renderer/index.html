@@ -1578,17 +1578,13 @@
         return;
       }
 
-      // Reload the image with cache bust
-      const newSrc = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
-      document.getElementById('img-refine-thumb').src = newSrc;
-      document.querySelectorAll('.grid-img').forEach(i => {
-        if (i.dataset.path === selectedImagePath) i.src = newSrc;
-      });
-      // Refresh history
-      showImageRefine(selectedImagePath, lastImagePrompt);
+      // Use the new refined image as current
+      const newPath = result.newPath || selectedImagePath;
+      selectedImagePath = newPath;
+      showImageRefine(newPath, lastImagePrompt);
       if (currentTab === 'tab-image') refreshGalleryImages();
       completeJob(refineJob.id, true);
-      showLog('Image refined!', 'success');
+      showLog('Refined image added to history!', 'success');
       window.meshyAPI.flashTaskbar();
       document.getElementById('img-refine-input').value = '';
       return;

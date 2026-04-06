@@ -192,10 +192,13 @@ async function uploadToCatbox(imagePath) {
 // Img2img: regenerate image with kontext model using existing image as reference
 ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
   try {
-    backupImage(imagePath);
+    // Create new version path in same folder
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const ts = Date.now();
+    const newImagePath = path.join(dir, `${base}_refined_${ts}${ext}`);
 
-    // Resize image first if too big (kontext prefers small images)
-    const sharp = (() => { try { return require('sharp'); } catch(e) { return null; } })();
     let uploadPath = imagePath;
     const tempResized = imagePath + '.resize.png';
 
@@ -231,7 +234,7 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
               resp.on('end', () => {
                 const buf = Buffer.concat(chunks);
                 if (buf.length < 1000) return reject(new Error('Response too small'));
-                fs.writeFileSync(imagePath, buf);
+                fs.writeFileSync(newImagePath, buf);
                 resolve();
               });
               resp.on('error', reject);
@@ -241,7 +244,7 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
         });
         // Cleanup temp
         if (fs.existsSync(tempResized)) fs.unlinkSync(tempResized);
-        return { success: true };
+        return { success: true, newPath: newImagePath };
       } catch (e) {
         lastError = e;
         console.log('Attempt failed:', e.message);
