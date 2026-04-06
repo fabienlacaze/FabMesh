@@ -141,8 +141,19 @@ print(f"TEXGEN_SUCCESS: {{sz}} bytes", flush=True)
             print("HUNYUAN3D: Textured mesh ready!", flush=True)
         else:
             print("HUNYUAN3D: Texturing failed, using shape only", flush=True)
+
+        # Free WSL memory by shutting it down (texgen uses ~10GB RAM)
+        try:
+            print("HUNYUAN3D: Shutting down WSL to free RAM...", flush=True)
+            subprocess.run(['wsl', '--shutdown'], timeout=10, capture_output=True)
+        except Exception:
+            pass
     except Exception as tex_err:
         print(f"HUNYUAN3D: Texturing skipped ({tex_err})", flush=True)
+        try:
+            subprocess.run(['wsl', '--shutdown'], timeout=10, capture_output=True)
+        except Exception:
+            pass
 
     # Cleanup shape OBJ
     try:
