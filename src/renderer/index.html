@@ -1507,7 +1507,7 @@
       else if (msg.includes('HUNYUAN3D: Loading texture')) { setSteps(1); stopProgress(); setProgress(55, 'Loading texture model...'); startProgressAnimation(65, 15000, 'Loading texture...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=55;j.step='Loading texture model...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D: Painting textures')) { setSteps(2); stopProgress(); setProgress(65, 'Painting textures...'); startProgressAnimation(99, 180000, 'Painting textures...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=65;j.step='Painting textures...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D: Total time')) { setSteps(3); stopProgress(); setProgress(98, 'Exporting...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=98;j.step='Exporting...';}); renderJobs(); }
-      else if (msg.includes('HUNYUAN3D_SUCCESS')) { setSteps(3); stopProgress(); setProgress(100, 'Done!'); }
+      else if (msg.includes('HUNYUAN3D_SUCCESS')) { setSteps(3); stopProgress(); setProgress(99, 'Finalizing...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=99;j.step='Finalizing...';}); renderJobs(); }
       else if (msg.includes('INPAINT: Loading CLIPSeg')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=10;j.step='Loading CLIPSeg...';}); renderJobs(); }
       else if (msg.includes('INPAINT: Segmenting')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=30;j.step='Segmenting target...';}); renderJobs(); }
       else if (msg.includes('INPAINT: Loading SDXL')) { activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=50;j.step='Loading SDXL Inpainting...';}); renderJobs(); }
