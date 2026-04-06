@@ -257,12 +257,24 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt }) => {
 
 ipcMain.handle('remove-background', async (event, imagePath) => {
   return new Promise((resolve) => {
-    // Backup before modification
-    backupImage(imagePath);
+    // Save current as a new version (creates new file in folder)
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const timestamp = Date.now();
+    const newImagePath = path.join(dir, `${base}_nobg_${timestamp}${ext}`);
+
+    // Copy original to new path then process the new one
+    fs.copyFileSync(imagePath, newImagePath);
     const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
-    execFile('python', [script, imagePath], { timeout: 60000 }, (error, stdout, stderr) => {
-      if (error) resolve({ success: false, error: error.message });
-      else resolve({ success: true });
+    execFile('python', [script, newImagePath], { timeout: 60000 }, (error, stdout, stderr) => {
+      if (error) {
+        // Cleanup on error
+        try { fs.unlinkSync(newImagePath); } catch(e) {}
+        resolve({ success: false, error: error.message });
+      } else {
+        resolve({ success: true, newPath: newImagePath });
+      }
     });
   });
 });

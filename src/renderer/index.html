@@ -1559,17 +1559,14 @@
       try {
         const result = await window.meshyAPI.removeBackground(imgPath);
         if (result.success) {
-          const newSrc = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
-          if (selectedImagePath === imgPath) {
-            document.getElementById('img-refine-thumb').src = newSrc;
-            showImageRefine(imgPath, lastImagePrompt); // Refresh history
-          }
-          document.querySelectorAll('.grid-img').forEach(i => {
-            if (i.dataset.path === imgPath) i.src = newSrc;
-          });
+          // The result is a new file - select it as the current image
+          const newPath = result.newPath || imgPath;
+          selectedImagePath = newPath;
           if (currentTab === 'tab-image') refreshGalleryImages();
+          // Update preview with new image
+          showImageRefine(newPath, lastImagePrompt);
           completeJob(job.id, true);
-          showLog('Background removed!', 'success');
+          showLog('Background removed! New version created.', 'success');
         } else {
           completeJob(job.id, false);
           showLog('Failed: ' + (result.error || ''), 'error');
