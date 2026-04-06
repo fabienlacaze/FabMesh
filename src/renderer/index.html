@@ -1164,7 +1164,7 @@
       else if (msg.includes('HUNYUAN3D: Generating 3D shape')) { setSteps(0); stopProgress(); setProgress(20, 'Generating shape...'); startProgressAnimation(50, 30000, 'Generating shape...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=20;j.step='Generating shape...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D: Shape done')) { setSteps(1); stopProgress(); setProgress(50, 'Shape complete!'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=50;j.step='Shape complete!';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D: Loading texture')) { setSteps(1); stopProgress(); setProgress(55, 'Loading texture model...'); startProgressAnimation(65, 15000, 'Loading texture...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=55;j.step='Loading texture model...';}); renderJobs(); }
-      else if (msg.includes('HUNYUAN3D: Painting textures')) { setSteps(2); stopProgress(); setProgress(65, 'Painting textures...'); startProgressAnimation(95, 60000, 'Painting textures...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=65;j.step='Painting textures...';}); renderJobs(); }
+      else if (msg.includes('HUNYUAN3D: Painting textures')) { setSteps(2); stopProgress(); setProgress(65, 'Painting textures...'); startProgressAnimation(99, 180000, 'Painting textures...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=65;j.step='Painting textures...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D: Total time')) { setSteps(3); stopProgress(); setProgress(98, 'Exporting...'); activeJobs.filter(j=>j.status==='running').forEach(j=>{j.progress=98;j.step='Exporting...';}); renderJobs(); }
       else if (msg.includes('HUNYUAN3D_SUCCESS')) { setSteps(3); stopProgress(); setProgress(100, 'Done!'); }
     });
@@ -1282,9 +1282,10 @@
         versionsDiv.classList.add('hidden');
       } else {
         versionsDiv.classList.remove('hidden');
-        list.innerHTML = versions.map(v => {
+        list.innerHTML = versions.map((v, vi) => {
           const src = 'file:///' + v.path.replace(/\\/g, '/');
-          return `<img class="img-version-thumb" src="${src}" title="Click to revert" data-version="${v.path.replace(/\\/g, '/')}" data-current="${imgPath.replace(/\\/g, '/')}" />`;
+          const fname = v.path.split(/[/\\]/).pop();
+          return `<div class="img-version-wrap" data-thumb="${src}" data-name="Version ${vi + 1}" data-meta="${fname}"><img class="img-version-thumb" src="${src}" title="Click to revert" data-version="${v.path.replace(/\\/g, '/')}" data-current="${imgPath.replace(/\\/g, '/')}" /></div>`;
         }).join('');
         list.querySelectorAll('.img-version-thumb').forEach(t => {
           t.onclick = async () => {
@@ -1347,7 +1348,7 @@
       lastImagePrompt = prompt;
       const safePrompt = prompt.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       gridItems.innerHTML = result.images.map(img =>
-        `<div class="grid-img-wrapper"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
+        `<div class="grid-img-wrapper" data-thumb="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-name="Generated image" data-meta="${img.split(/[/\\\\]/).pop()}"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
       ).join('');
 
       // Auto-select first
@@ -1413,14 +1414,15 @@
       popup.style.left = left + 'px';
       popup.style.top = top + 'px';
     }
+    const hoverSelector = '.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb], .job-item[data-thumb], .img-version-wrap[data-thumb], .grid-img-wrapper[data-thumb]';
     document.addEventListener('mouseover', (e) => {
-      const item = e.target.closest('.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb], .job-item[data-thumb]');
+      const item = e.target.closest(hoverSelector);
       if (!item) return;
       clearTimeout(hoverTimer);
       hoverTimer = setTimeout(() => showHoverPreview(item), 1000);
     });
     document.addEventListener('mouseout', (e) => {
-      const item = e.target.closest('.mesh-item[data-thumb], .gallery-thumb-wrapper[data-thumb], .job-item[data-thumb]');
+      const item = e.target.closest(hoverSelector);
       if (!item) return;
       clearTimeout(hoverTimer);
       document.getElementById('hover-preview').style.display = 'none';
@@ -1630,7 +1632,7 @@
       if (!result2.success) return;
       const safePrompt = refinedPrompt.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       gridItems.innerHTML = result.images.map(img =>
-        `<div class="grid-img-wrapper"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
+        `<div class="grid-img-wrapper" data-thumb="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-name="Generated image" data-meta="${img.split(/[/\\\\]/).pop()}"><img class="grid-img" src="file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}" data-path="${img}" onclick="window._pickImage(this)" /><button class="grid-img-zoom" onclick="event.stopPropagation(); window._openLightbox('file:///${img.replace(/\\\\/g, '/').replace(/\\/g, '/')}')">View</button><button class="grid-img-dl" onclick="event.stopPropagation(); window.meshyAPI.showInExplorer('${img.replace(/\\/g, '/')}')">Open</button><button class="grid-img-reuse" onclick="event.stopPropagation(); document.getElementById('prompt-input').value='${safePrompt}'; showLog('Prompt restored!', 'success')">Reuse prompt</button></div>`
       ).join('');
 
       const first = gridItems.querySelector('.grid-img');
