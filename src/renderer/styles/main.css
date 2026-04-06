@@ -1221,13 +1221,29 @@ body {
 .convert-btn:hover { opacity: 0.9; }
 .convert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Big action bar - sticky at bottom-right of action panel */
+/* Floating actions overlay - bottom-right of viewer */
+#viewer-floating-actions {
+  position: absolute;
+  bottom: 60px; /* above viewer-toolbar */
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  z-index: 10;
+  pointer-events: none;
+}
+#viewer-floating-actions > * {
+  pointer-events: auto;
+}
+
+/* Big action bar - legacy support */
 .big-action-bar {
   margin-top: auto;
   padding: 10px 12px;
   display: flex;
   justify-content: flex-end;
-  pointer-events: none; /* let clicks pass through the empty space */
+  pointer-events: none;
 }
 
 .big-action-btn {
