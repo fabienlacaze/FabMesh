@@ -1955,12 +1955,13 @@
       const panel = document.getElementById('jobs-panel');
       const list = document.getElementById('jobs-list');
       // Preserve toasts (added directly to DOM)
-      const toasts = Array.from(list.querySelectorAll('[class*="toast-"]'));
+      const toasts = Array.from(list.querySelectorAll('.toast-success, .toast-error, .toast-info'));
       if (activeJobs.length === 0 && toasts.length === 0) { panel.classList.add('hidden'); return; }
       panel.classList.remove('hidden');
       // Remove only non-toast items
       Array.from(list.children).forEach(c => {
-        if (!c.className.includes('toast-')) c.remove();
+        const isToast = c.classList && (c.classList.contains('toast-success') || c.classList.contains('toast-error') || c.classList.contains('toast-info'));
+        if (!isToast) c.remove();
       });
       const html = activeJobs.map(j => {
         const elapsed = Math.floor((Date.now() - j.startTime) / 1000);
