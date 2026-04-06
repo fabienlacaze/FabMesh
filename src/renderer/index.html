@@ -1348,7 +1348,8 @@
             const date = fileData ? new Date(fileData.created) : new Date();
             const ds = date.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
             const sz = fileData ? (fileData.size < 1048576 ? (fileData.size/1024).toFixed(1)+' KB' : (fileData.size/1048576).toFixed(1)+' MB') : '';
-            const isSelected = selectedImagePath === img;
+            const normSelected = (selectedImagePath || '').replace(/\\/g, '/');
+            const isSelected = normSelected === imgPathSafe;
             const fname = imgPathSafe.split('/').pop();
             html += `<div class="mesh-item mesh-child ${isSelected ? 'active' : ''}" data-thumb="${imgSrc}" data-name="${name} - ${verLabel}" data-meta="${fname}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage('${imgPathSafe}', decodeURIComponent(escape(atob(this.dataset.prompt))))">
               <div class="mesh-item-with-thumb"><img class="mesh-thumb" src="${imgSrc}" /><div class="mesh-item-details">
