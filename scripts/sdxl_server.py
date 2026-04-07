@@ -346,6 +346,69 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             return {"ok": False, "error": str(e)}
 
 
+def do_mask_inpaint(input_path, mask_path, prompt, output_path):
+    """Inpaint using a user-provided mask (white = inpaint, black = keep)."""
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    if not os.path.exists(mask_path):
+        return {"ok": False, "error": f"Mask not found: {mask_path}"}
+
+    pipe = load_inpaint()
+    state.last_use['inpaint'] = time.time()
+
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            orig_size = img.size
+            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+
+            mask = Image.open(mask_path).convert("L").resize((work_w, work_h), Image.BILINEAR)
+            mask = mask.filter(ImageFilter.GaussianBlur(3))
+
+            coverage = (np.array(mask) > 128).mean() * 100
+            if coverage < 0.1:
+                return {"ok": False, "error": "Mask is empty"}
+
+            save_debug_mask(output_path, mask)
+
+            inpaint_prompt = (prompt or "").strip()
+            removal_keywords = ("", "remove", "delete", "none", "nothing", "empty", "gone")
+            is_removal = inpaint_prompt.lower() in removal_keywords
+            if is_removal:
+                inpaint_prompt = "continuation of the surrounding area, same background, seamless"
+                negative_prompt = "any object, duplicate, artifact, blurry, distorted, deformed"
+            else:
+                negative_prompt = "blurry, distorted, duplicate, deformed, low quality"
+
+            t0 = time.time()
+            with torch.inference_mode():
+                result = pipe(
+                    prompt=inpaint_prompt,
+                    negative_prompt=negative_prompt,
+                    image=img_work,
+                    mask_image=mask,
+                    num_inference_steps=40,
+                    guidance_scale=8.5,
+                    strength=0.99,
+                    height=work_h,
+                    width=work_w,
+                ).images[0]
+
+            if (work_w, work_h) != orig_size:
+                result = result.resize(orig_size, Image.LANCZOS)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            result.save(output_path)
+
+            elapsed = time.time() - t0
+            log(f"mask_inpaint done in {elapsed:.1f}s ({coverage:.0f}% mask) -> {output_path}")
+            return {"ok": True, "output": output_path, "time": elapsed, "mask_coverage": round(coverage, 1)}
+        except Exception as e:
+            log(f"mask_inpaint error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
 # ========== HTTP HANDLER ==========
 class Handler(BaseHTTPRequestHandler):
     # Suppress default request logging
@@ -427,6 +490,18 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('prompt', ''),
                     data['output'],
                     data.get('dilate', 15),
+                )
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/mask_inpaint':
+                if 'input' not in data or 'output' not in data or 'mask' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output/mask"})
+                    return
+                result = do_mask_inpaint(
+                    data['input'],
+                    data['mask'],
+                    data.get('prompt', ''),
+                    data['output'],
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

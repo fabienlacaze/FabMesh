@@ -130,8 +130,9 @@
             <div class="action-row">
               <label>Engine</label>
               <select id="image-engine">
+                <option value="local-flux" selected>Local GPU (Juggernaut XL) — recommended</option>
+                <option value="local-sd">Local GPU (SDXL Turbo, fast)</option>
                 <option value="pollinations">Pollinations (cloud, free)</option>
-                <option value="local-sd">Local GPU (Stable Diffusion)</option>
               </select>
             </div>
 
@@ -181,7 +182,6 @@
               <!-- Method tabs -->
               <div class="refine-method-tabs">
                 <button class="refine-method-btn active" data-method="modify">Modify</button>
-                <button class="refine-method-btn" data-method="replace">Replace</button>
                 <button class="refine-method-btn" data-method="tools">Tools</button>
               </div>
 
@@ -189,6 +189,13 @@
               <div class="refine-method-content" data-method-content="modify">
                 <p class="refine-hint">Change style, colors, details. Keeps composition.</p>
                 <textarea id="img-refine-input" placeholder="Ex: make it red, add more details, anime style..." rows="3"></textarea>
+                <div class="action-row">
+                  <label>Engine</label>
+                  <select id="refine-engine">
+                    <option value="local-sdxl" selected>Local GPU (SDXL) — recommended</option>
+                    <option value="pollinations">Pollinations (cloud, free)</option>
+                  </select>
+                </div>
                 <div class="slider-row">
                   <label>Strength</label>
                   <input type="range" id="refine-strength" min="30" max="95" value="55" />
@@ -197,25 +204,23 @@
                 <button id="btn-refine-image" class="refine-btn" disabled>Modify Image</button>
               </div>
 
-              <!-- REPLACE: inpainting -->
-              <div class="refine-method-content hidden" data-method-content="replace">
-                <p class="refine-hint">Remove or replace a specific object (auto-detected).</p>
-                <input type="text" id="inpaint-target" placeholder="Target (e.g. hat, background, shirt)" />
-                <input type="text" id="inpaint-replace" placeholder="Replace with (leave empty to remove)" />
-                <div class="slider-row">
-                  <label>Padding</label>
-                  <input type="range" id="inpaint-dilate" min="0" max="40" value="15" />
-                  <span id="inpaint-dilate-val">15px</span>
-                </div>
-                <button id="btn-inpaint" class="refine-btn" disabled>Auto Inpaint</button>
-              </div>
-
-              <!-- TOOLS: quick actions -->
+              <!-- TOOLS: quick actions + auto replace -->
               <div class="refine-method-content hidden" data-method-content="tools">
                 <p class="refine-hint">Quick image operations.</p>
                 <button id="btn-remove-bg" class="secondary-btn">Remove background</button>
                 <button id="btn-clone-stamp" class="secondary-btn" title="Clone Stamp tool (L) - Ctrl+click to set source, then paint to clone">&#128203; Clone Stamp</button>
                 <button id="btn-draw-mask" class="secondary-btn" title="Draw a mask on the image to mark an area to remove">&#9999; Draw mask manually</button>
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+                  <p class="refine-hint" style="margin-top:0;">Auto replace: detect & replace an object.</p>
+                  <input type="text" id="inpaint-target" placeholder="Target (e.g. hat, background, shirt)" />
+                  <input type="text" id="inpaint-replace" placeholder="Replace with (leave empty to remove)" style="margin-top:6px;" />
+                  <div class="slider-row">
+                    <label>Padding</label>
+                    <input type="range" id="inpaint-dilate" min="0" max="40" value="15" />
+                    <span id="inpaint-dilate-val">15px</span>
+                  </div>
+                  <button id="btn-inpaint" class="refine-btn" disabled>Auto Inpaint</button>
+                </div>
               </div>
             </div>
           </div>
@@ -563,13 +568,17 @@
             <span id="mask-brush-val" style="min-width:30px;">50</span>
           </label>
           <button id="mask-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
+          <button id="mask-redo" class="secondary-btn" style="padding: 4px 12px;">Redo</button>
           <button id="mask-clear" class="secondary-btn" style="padding: 4px 12px;">Clear</button>
-          <input type="text" id="mask-prompt" placeholder="Replace with... (empty = just remove)" style="flex: 1; min-width: 200px; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;" />
         </div>
         <div id="mask-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
           <canvas id="mask-base-canvas" style="position: absolute; left: 0; top: 0;"></canvas>
           <canvas id="mask-overlay-canvas" style="position: absolute; left: 0; top: 0; cursor: none; pointer-events: auto; opacity: 0.55;"></canvas>
           <div id="mask-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <label for="mask-prompt" style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">Replace with:</label>
+          <input type="text" id="mask-prompt" placeholder="Describe replacement (empty = just remove)" style="flex: 1; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 13px;" />
         </div>
         <div style="display:flex; justify-content:flex-end; gap:8px;">
           <button id="mask-cancel" class="secondary-btn">Cancel</button>
@@ -631,11 +640,12 @@
             <input type="range" id="clone-hardness" min="0" max="100" value="50" style="vertical-align:middle;" />
             <span id="clone-hardness-val" style="min-width:30px;">50</span>
           </label>
-          <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
+          <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;" disabled>Undo</button>
+          <button id="clone-redo" class="secondary-btn" style="padding: 4px 12px;" disabled>Redo</button>
           <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
         </div>
         <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
-          <canvas id="clone-canvas" style="cursor: none; background: #000; position: absolute; left: 0; top: 0;"></canvas>
+          <canvas id="clone-canvas" style="cursor: none; position: absolute; left: 0; top: 0;"></canvas>
           <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
           <div id="clone-source-marker" style="position: fixed; pointer-events: none; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.15); display: none; z-index: 999; box-sizing: border-box;"></div>
         </div>
@@ -646,6 +656,7 @@
             <button id="clone-save" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Save as new version</button>
           </div>
         </div>
+        <div id="clone-error" style="display:none; padding: 8px 12px; background: rgba(255,68,68,0.15); border: 1px solid var(--error); border-radius: 4px; color: var(--error); font-size: 12px; font-weight: 600;"></div>
       </div>
     </div>
 
@@ -1590,10 +1601,11 @@
           const successes = [r1, r2].filter(r => r.status === 'fulfilled' && r.value.success).map(r => r.value);
           if (successes.length) {
             const last = successes[successes.length - 1];
-            const buffer = await window.meshyAPI.readMeshFile(last.meshPath);
-            if (buffer) { await loadMeshFromBuffer(buffer, 'glb', last.meshPath); selectedMesh = { path: last.meshPath, filename: last.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
+            await refreshAndSelectMesh(last.meshPath);
+            document.getElementById('export-section').style.display = 'block';
+          } else {
+            await refreshActiveGallery();
           }
-          await refreshActiveGallery();
           showLog(`${successes.length}/2 engines succeeded.`, successes.length > 0 ? 'success' : 'error');
         } else {
           const maxTris = parseInt(document.getElementById('max-tris')?.value) || 0;
@@ -1607,9 +1619,8 @@
             return;
           }
           stopProgress(); setProgress(100, 'Done!');
-          const buffer = await window.meshyAPI.readMeshFile(r3d.meshPath);
-          if (buffer) { await loadMeshFromBuffer(buffer, 'glb', r3d.meshPath); selectedMesh = { path: r3d.meshPath, filename: r3d.meshFilename, format: 'GLB' }; document.getElementById('export-section').style.display = 'block'; }
-          await refreshActiveGallery();
+          await refreshAndSelectMesh(r3d.meshPath);
+          document.getElementById('export-section').style.display = 'block';
           showLog('Success! ' + r3d.meshFilename + ' (' + formatSize(r3d.size) + ')', 'success');
           API.showNotification({ title: 'FabMesh - 3D Ready', body: r3d.meshFilename });
         }
@@ -1967,7 +1978,7 @@
             completeJob(job.id, true);
             showLog('Rigged FBX: ' + r.filename + ' (' + formatSize(r.size) + ')', 'success');
             API.showNotification({ title: 'FabMesh - Rig Ready', body: r.filename });
-            await refreshActiveGallery();
+            await refreshAndSelectMesh(r.path);
             window.meshyAPI.flashTaskbar();
           } else {
             completeJob(job.id, false);
@@ -2375,6 +2386,7 @@
       sphere.userData.landmarkName = name;
       sphere.userData.baseRadius = r;
       sphere.userData.baseColor = color;
+      sphere.visible = (currentTab === 'tab-rig');
       scene.add(sphere);
       landmarkMarkers[name] = sphere;
     }
@@ -2494,6 +2506,8 @@
         showLog('Load a mesh first', 'error');
         return;
       }
+      // Clear stale markers from previous schemas / loads first
+      clearLandmarksInMemory();
       const box = new THREE.Box3().setFromObject(currentModel);
       const min = box.min;
       const max = box.max;
@@ -2577,13 +2591,59 @@
         foot_l:        pt( 0.10, 0.00, 0.05),
         foot_r:        pt(-0.10, 0.00, 0.05),
       };
-      for (const k in all) {
-        rigLandmarks[k] = [all[k].x, all[k].y, all[k].z];
-        placeLandmarkMarker(k, all[k], colorMap[k]);
+      // Heuristic: place schema items by guessing from id keywords.
+      // Falls back to body center if unrecognized.
+      function guessPosForId(id) {
+        const s = id.toLowerCase();
+        const isL = /(_l$|_left|left_|\bl_)/.test(s);
+        const isR = /(_r$|_right|right_|\br_)/.test(s);
+        const side = isL ? 1 : (isR ? -1 : 0);
+        if (s.includes('head')) return pt(0, 0.97);
+        if (s.includes('neck')) return pt(0, 0.85);
+        if (s.includes('upper') && s.includes('spine')) return pt(0, 0.72);
+        if (s.includes('mid') && s.includes('spine')) return pt(0, 0.62);
+        if (s.includes('lower') && s.includes('spine')) return pt(0, 0.55);
+        if (s.includes('spine')) return pt(0, 0.62);
+        if (s.includes('clavicle')) return pt(side * 0.10, 0.80);
+        if (s.includes('shoulder')) return pt(side * 0.32, 0.78);
+        if (s.includes('elbow')) return pt(side * 0.34, 0.65, 0.05);
+        if (s.includes('wrist') || s.includes('hand')) return pt(side * 0.36, 0.50);
+        if (s.includes('thumb')) return pt(side * 0.40, 0.49, 0.02);
+        if (s.includes('index') || s.includes('finger')) return pt(side * 0.42, 0.48, 0.00);
+        if (s.includes('hip') && side !== 0) return pt(side * 0.10, 0.50);
+        if (s.includes('hip') || s.includes('pelvis')) return pt(0, 0.52);
+        if (s.includes('knee')) return pt(side * 0.10, 0.27);
+        if (s.includes('ankle')) return pt(side * 0.10, 0.04);
+        if (s.includes('toe') || s.includes('foot')) return pt(side * 0.10, 0.00, 0.05);
+        if (s.includes('tail')) return pt(0, 0.45, -0.15);
+        return pt(side * 0.05, 0.50);
+      }
+
+      const schema = (typeof getCurrentSchema === 'function') ? getCurrentSchema() : _activeSchema;
+      let count = 0;
+      if (schema && schema.groups) {
+        schema.groups.forEach(group => {
+          group.items.forEach(item => {
+            const p = guessPosForId(item.id);
+            const col = item.color
+              ? parseInt(String(item.color).replace('#', ''), 16)
+              : 0xffffff;
+            rigLandmarks[item.id] = [p.x, p.y, p.z];
+            placeLandmarkMarker(item.id, p, col);
+            count++;
+          });
+        });
+      } else {
+        // Fallback to legacy hardcoded humanoid set
+        for (const k in all) {
+          rigLandmarks[k] = [all[k].x, all[k].y, all[k].z];
+          placeLandmarkMarker(k, all[k], colorMap[k]);
+          count++;
+        }
       }
       updateLandmarkBtnUI();
       saveLandmarksForCurrentMesh();
-      showLog(`Auto-detected ${Object.keys(all).length} landmarks (adjust manually if needed)`, 'info');
+      showLog(`Auto-detected ${count} landmarks (adjust manually if needed)`, 'info');
     }
 
     // Raycast for landmark placement + drag
@@ -2715,13 +2775,13 @@
         });
         btn.addEventListener('mouseenter', (e) => {
           const name = btn.dataset.lm;
-          if (rigLandmarks[name]) setLandmarkHighlight(name, true);
+          if (landmarkMarkers[name]) setLandmarkHighlight(name, true);
           const rect = btn.getBoundingClientRect();
           showLandmarkHelp(name, rect.left - 280, rect.top);
         });
         btn.addEventListener('mouseleave', () => {
           const name = btn.dataset.lm;
-          if (rigLandmarks[name]) setLandmarkHighlight(name, false);
+          if (landmarkMarkers[name]) setLandmarkHighlight(name, false);
           hideLandmarkHelp();
         });
       });
@@ -3090,17 +3150,34 @@
       const hit = raycastMarkers(evt);
       if (hit) {
         if (_hoveredLandmark !== hit.name) {
-          if (_hoveredLandmark) setLandmarkHighlight(_hoveredLandmark, false);
+          if (_hoveredLandmark) {
+            setLandmarkHighlight(_hoveredLandmark, false);
+            hideLandmarkHelp();
+          }
           _hoveredLandmark = hit.name;
           setLandmarkHighlight(hit.name, true);
+          // Scroll the corresponding row into view + show silhouette help
+          const btn = document.querySelector(`.lm-btn[data-lm="${hit.name}"]`);
+          if (btn) {
+            // Expand parent group if collapsed
+            const groupContent = btn.closest('.lm-group-content');
+            if (groupContent && groupContent.style.display === 'none') {
+              groupContent.style.display = '';
+            }
+            btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            const rect = btn.getBoundingClientRect();
+            showLandmarkHelp(hit.name, rect.left - 280, rect.top);
+          }
         }
-        // Show tooltip
-        lmTooltip.textContent = LM_DISPLAY_NAMES[hit.name] || hit.name;
+        // Show tooltip — prefer schema label, fall back to legacy display map
+        const spec = (typeof getLandmarkSpec === 'function') ? getLandmarkSpec(hit.name) : null;
+        lmTooltip.textContent = (spec && spec.label) || LM_DISPLAY_NAMES[hit.name] || hit.name;
         lmTooltip.style.left = (evt.clientX + 12) + 'px';
         lmTooltip.style.top = (evt.clientY + 12) + 'px';
         lmTooltip.style.display = 'block';
       } else if (_hoveredLandmark) {
         setLandmarkHighlight(_hoveredLandmark, false);
+        hideLandmarkHelp();
         _hoveredLandmark = null;
         lmTooltip.style.display = 'none';
       }
@@ -3108,6 +3185,7 @@
     canvas.addEventListener('mouseleave', () => {
       if (_hoveredLandmark) {
         setLandmarkHighlight(_hoveredLandmark, false);
+        hideLandmarkHelp();
         _hoveredLandmark = null;
       }
       lmTooltip.style.display = 'none';
@@ -3900,6 +3978,7 @@
       lastPoint: null,
       offset: null,         // {dx,dy} from source to first stamp
       undoStack: [],
+      redoStack: [],
       brushSize: 50,
       hardness: 50,
       // Zoom & pan view state
@@ -3940,6 +4019,8 @@
         cloneState.sourcePoint = null;
         cloneState.offset = null;
         cloneState.undoStack = [];
+        cloneState.redoStack = [];
+        if (window.updateCloneUndoBtn) window.updateCloneUndoBtn();
         cloneState.lastPoint = null;
         document.getElementById('clone-status').textContent = 'No source point set - Ctrl+click to set source';
         const sm = document.getElementById('clone-source-marker');
@@ -3978,6 +4059,8 @@
       try {
         cloneState.undoStack.push(cloneCtx.getImageData(0, 0, cloneCanvas.width, cloneCanvas.height));
         if (cloneState.undoStack.length > 20) cloneState.undoStack.shift();
+        cloneState.redoStack = [];
+        if (window.updateCloneUndoBtn) window.updateCloneUndoBtn();
       } catch (e) {}
     }
 
@@ -4020,7 +4103,9 @@
           dst.data[dIdx]     = dst.data[dIdx]     * (1 - a) + src.data[sIdx]     * a;
           dst.data[dIdx + 1] = dst.data[dIdx + 1] * (1 - a) + src.data[sIdx + 1] * a;
           dst.data[dIdx + 2] = dst.data[dIdx + 2] * (1 - a) + src.data[sIdx + 2] * a;
-          dst.data[dIdx + 3] = 255;
+          // Preserve alpha: blend source alpha into destination so painting from
+          // a transparent area stays transparent (no black fill on no-bg images).
+          dst.data[dIdx + 3] = dst.data[dIdx + 3] * (1 - a) + src.data[sIdx + 3] * a;
         }
       }
       cloneCtx.putImageData(dst, ox, oy);
@@ -4048,17 +4133,22 @@
       // Wheel = zoom (centered on mouse position)
       cloneContainer.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const rect = cloneCanvas.getBoundingClientRect();
-        // Mouse position relative to canvas top-left in display pixels
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
+        const cRect = cloneContainer.getBoundingClientRect();
         const oldZoom = cloneState.zoom;
         const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
         const newZoom = Math.max(0.1, Math.min(10, oldZoom * factor));
         const ratio = newZoom / oldZoom;
-        // Adjust pan so the point under the cursor stays under the cursor
-        cloneState.panX = cloneState.panX - (mx * (ratio - 1));
-        cloneState.panY = cloneState.panY - (my * (ratio - 1));
+        // Canvas layout: left = (cw - baseW*zoom)/2 + panX. To keep the point
+        // under the cursor fixed, compute the cursor position relative to the
+        // canvas top-left, then anchor the zoom on it.
+        const canvasLeft = (cRect.width  - cloneState.baseW * oldZoom) / 2 + cloneState.panX;
+        const canvasTop  = (cRect.height - cloneState.baseH * oldZoom) / 2 + cloneState.panY;
+        const mx = (e.clientX - cRect.left) - canvasLeft;
+        const my = (e.clientY - cRect.top)  - canvasTop;
+        // After zoom, the canvas size changes; pan must shift so (mx,my) maps
+        // to (mx*ratio, my*ratio) under the same screen point.
+        cloneState.panX += mx * (1 - ratio) + (cloneState.baseW * (newZoom - oldZoom)) / 2;
+        cloneState.panY += my * (1 - ratio) + (cloneState.baseH * (newZoom - oldZoom)) / 2;
         cloneState.zoom = newZoom;
         applyCloneView();
         updateSourceMarker();
@@ -4076,7 +4166,7 @@
           return;
         }
         if (!cloneState.sourcePoint) {
-          showLog('Set source first with Ctrl+Click', 'error');
+          cloneShowError('Set source first with Ctrl+Click');
           return;
         }
         // First stamp: compute offset from source point
@@ -4198,20 +4288,60 @@
       });
 
       // Undo
+      function updateCloneUndoBtn() {
+        const u = document.getElementById('clone-undo');
+        const r = document.getElementById('clone-redo');
+        if (u) {
+          const can = cloneState.undoStack.length > 0;
+          u.disabled = !can;
+          u.style.opacity = can ? '' : '0.4';
+          u.style.cursor = can ? '' : 'not-allowed';
+        }
+        if (r) {
+          const can = cloneState.redoStack.length > 0;
+          r.disabled = !can;
+          r.style.opacity = can ? '' : '0.4';
+          r.style.cursor = can ? '' : 'not-allowed';
+        }
+      }
+      window.updateCloneUndoBtn = updateCloneUndoBtn;
+      function cloneShowError(msg) {
+        const el = document.getElementById('clone-error');
+        if (!el) return;
+        el.textContent = '\u2717  ' + msg;
+        el.style.display = 'block';
+        clearTimeout(cloneShowError._t);
+        cloneShowError._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
+      }
+      window.cloneShowError = cloneShowError;
       const undoFn = () => {
         if (cloneState.undoStack.length > 0) {
+          try { cloneState.redoStack.push(cloneCtx.getImageData(0, 0, cloneCanvas.width, cloneCanvas.height)); } catch(e) {}
           const last = cloneState.undoStack.pop();
           cloneCtx.putImageData(last, 0, 0);
+          updateCloneUndoBtn();
+        }
+      };
+      const redoFn = () => {
+        if (cloneState.redoStack.length > 0) {
+          try { cloneState.undoStack.push(cloneCtx.getImageData(0, 0, cloneCanvas.width, cloneCanvas.height)); } catch(e) {}
+          const next = cloneState.redoStack.pop();
+          cloneCtx.putImageData(next, 0, 0);
+          updateCloneUndoBtn();
         }
       };
       document.getElementById('clone-undo').addEventListener('click', undoFn);
+      document.getElementById('clone-redo').addEventListener('click', redoFn);
 
       // Keyboard shortcuts (Z for undo)
       document.addEventListener('keydown', (e) => {
         if (cloneModal.classList.contains('hidden')) return;
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
           e.preventDefault();
           undoFn();
+        } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+          e.preventDefault();
+          redoFn();
         } else if (e.key === 'Escape') {
           cloneModal.classList.add('hidden');
         }
@@ -4221,6 +4351,8 @@
         if (cloneState.sourceImageData) {
           cloneCtx.putImageData(cloneState.sourceImageData, 0, 0);
           cloneState.undoStack = [];
+          cloneState.redoStack = [];
+          updateCloneUndoBtn();
         }
       });
 
@@ -4270,9 +4402,50 @@
       lastPoint: null,
       brushSize: 50,
       undoStack: [],
+      redoStack: [],
       baseW: 0,
       baseH: 0,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      isPanning: false,
+      panStart: null,
     };
+
+    function applyMaskView() {
+      const w = maskState.baseW * maskState.zoom;
+      const h = maskState.baseH * maskState.zoom;
+      const container = document.getElementById('mask-canvas-container');
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const left = (cw - w) / 2 + maskState.panX;
+      const top = (ch - h) / 2 + maskState.panY;
+      maskBaseCanvas.style.width = w + 'px';
+      maskBaseCanvas.style.height = h + 'px';
+      maskOverlayCanvas.style.width = w + 'px';
+      maskOverlayCanvas.style.height = h + 'px';
+      maskBaseCanvas.style.left = left + 'px';
+      maskBaseCanvas.style.top = top + 'px';
+      maskOverlayCanvas.style.left = left + 'px';
+      maskOverlayCanvas.style.top = top + 'px';
+    }
+
+    function updateMaskUndoBtn() {
+      const u = document.getElementById('mask-undo');
+      const r = document.getElementById('mask-redo');
+      if (u) {
+        const can = maskState.undoStack.length > 0;
+        u.disabled = !can;
+        u.style.opacity = can ? '' : '0.4';
+        u.style.cursor = can ? '' : 'not-allowed';
+      }
+      if (r) {
+        const can = maskState.redoStack.length > 0;
+        r.disabled = !can;
+        r.style.opacity = can ? '' : '0.4';
+        r.style.cursor = can ? '' : 'not-allowed';
+      }
+    }
 
     function openMaskTool() {
       if (!selectedImagePath) {
@@ -4290,30 +4463,21 @@
         h = Math.round(h * scale);
         maskState.baseW = w;
         maskState.baseH = h;
+        maskState.zoom = 1;
+        maskState.panX = 0;
+        maskState.panY = 0;
 
         maskBaseCanvas.width = img.width;
         maskBaseCanvas.height = img.height;
         maskOverlayCanvas.width = img.width;
         maskOverlayCanvas.height = img.height;
-        maskBaseCanvas.style.width = w + 'px';
-        maskBaseCanvas.style.height = h + 'px';
-        maskOverlayCanvas.style.width = w + 'px';
-        maskOverlayCanvas.style.height = h + 'px';
-
-        // Center in container
-        const container = document.getElementById('mask-canvas-container');
-        const cw = container.clientWidth;
-        const ch = container.clientHeight;
-        const left = (cw - w) / 2;
-        const top = (ch - h) / 2;
-        maskBaseCanvas.style.left = left + 'px';
-        maskBaseCanvas.style.top = top + 'px';
-        maskOverlayCanvas.style.left = left + 'px';
-        maskOverlayCanvas.style.top = top + 'px';
+        applyMaskView();
 
         maskBaseCtx.drawImage(img, 0, 0);
         maskOverlayCtx.clearRect(0, 0, img.width, img.height);
         maskState.undoStack = [];
+        maskState.redoStack = [];
+        updateMaskUndoBtn();
       };
       img.src = 'file:///' + selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
     }
@@ -4341,6 +4505,8 @@
       try {
         maskState.undoStack.push(maskOverlayCtx.getImageData(0, 0, maskOverlayCanvas.width, maskOverlayCanvas.height));
         if (maskState.undoStack.length > 20) maskState.undoStack.shift();
+        maskState.redoStack = [];
+        updateMaskUndoBtn();
       } catch(e) {}
     }
 
@@ -4362,7 +4528,43 @@
 
       maskContainer.addEventListener('contextmenu', (e) => e.preventDefault());
 
+      // Wheel = zoom centered on cursor
+      maskContainer.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const cRect = maskContainer.getBoundingClientRect();
+        const oldZoom = maskState.zoom;
+        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+        const newZoom = Math.max(0.1, Math.min(10, oldZoom * factor));
+        const ratio = newZoom / oldZoom;
+        const canvasLeft = (cRect.width  - maskState.baseW * oldZoom) / 2 + maskState.panX;
+        const canvasTop  = (cRect.height - maskState.baseH * oldZoom) / 2 + maskState.panY;
+        const mx = (e.clientX - cRect.left) - canvasLeft;
+        const my = (e.clientY - cRect.top)  - canvasTop;
+        maskState.panX += mx * (1 - ratio) + (maskState.baseW * (newZoom - oldZoom)) / 2;
+        maskState.panY += my * (1 - ratio) + (maskState.baseH * (newZoom - oldZoom)) / 2;
+        maskState.zoom = newZoom;
+        applyMaskView();
+      }, { passive: false });
+
+      // Middle-click drag = pan (right-click is reserved for erase)
+      maskContainer.addEventListener('mousedown', (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          maskState.isPanning = true;
+          maskState.panStart = { x: e.clientX - maskState.panX, y: e.clientY - maskState.panY };
+        }
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (maskState.isPanning && maskState.panStart) {
+          maskState.panX = e.clientX - maskState.panStart.x;
+          maskState.panY = e.clientY - maskState.panStart.y;
+          applyMaskView();
+        }
+      });
+      window.addEventListener('mouseup', () => { maskState.isPanning = false; });
+
       maskOverlayCanvas.addEventListener('mousedown', (e) => {
+        if (e.button === 1) return;
         e.preventDefault();
         maskPushUndo();
         maskState.isDown = true;
@@ -4408,7 +4610,16 @@
 
       document.getElementById('mask-undo').addEventListener('click', () => {
         if (maskState.undoStack.length > 0) {
+          try { maskState.redoStack.push(maskOverlayCtx.getImageData(0, 0, maskOverlayCanvas.width, maskOverlayCanvas.height)); } catch(e) {}
           maskOverlayCtx.putImageData(maskState.undoStack.pop(), 0, 0);
+          updateMaskUndoBtn();
+        }
+      });
+      document.getElementById('mask-redo').addEventListener('click', () => {
+        if (maskState.redoStack.length > 0) {
+          try { maskState.undoStack.push(maskOverlayCtx.getImageData(0, 0, maskOverlayCanvas.width, maskOverlayCanvas.height)); } catch(e) {}
+          maskOverlayCtx.putImageData(maskState.redoStack.pop(), 0, 0);
+          updateMaskUndoBtn();
         }
       });
 
@@ -4422,6 +4633,8 @@
 
       document.getElementById('mask-apply').addEventListener('click', async () => {
         if (!selectedImagePath) return;
+        // Close popup immediately — generation happens in background
+        maskModal.classList.add('hidden');
         // Build a binary mask (white where painted, black elsewhere)
         const w = maskOverlayCanvas.width;
         const h = maskOverlayCanvas.height;
@@ -4456,20 +4669,37 @@
 
         const prompt = document.getElementById('mask-prompt').value.trim();
         const job = addJob('Manual mask inpaint', 'inpaint', selectedImagePath);
-        job.progress = 30;
+        job.progress = 10;
         renderJobs();
+        // Fake smooth progression while we wait — SDXL inpaint takes ~3 min on RTX 5080.
+        // Climbs from 10 to 90 over ~3 minutes, then completeJob sets it to 100.
+        const startedAt = Date.now();
+        const expectedMs = 180000;
+        const progTimer = setInterval(() => {
+          const elapsed = Date.now() - startedAt;
+          const pct = Math.min(90, 10 + (elapsed / expectedMs) * 80);
+          job.progress = pct;
+          renderJobs();
+        }, 1000);
         try {
           const r = await API.maskInpaint?.({ imagePath: selectedImagePath, maskDataUrl, prompt });
+          clearInterval(progTimer);
           if (r?.success) {
             completeJob(job.id, true);
             showLog('Inpaint done: ' + (r.newPath || ''), 'success');
             maskModal.classList.add('hidden');
-            await refreshActiveGallery();
+            await refreshGalleryImages();
+            if (r.newPath) {
+              selectedImagePath = r.newPath;
+              const imgEl = document.getElementById('image-viewer-img');
+              if (imgEl) imgEl.src = 'file:///' + r.newPath.replace(/\\/g, '/') + '?t=' + Date.now();
+            }
           } else {
             completeJob(job.id, false);
             showLog('Inpaint failed: ' + (r?.error || 'API not implemented'), 'error');
           }
         } catch (e) {
+          clearInterval(progTimer);
           completeJob(job.id, false);
           showLog('Inpaint error: ' + e.message, 'error');
         }
@@ -4726,7 +4956,8 @@
       renderJobs();
 
       const strength = parseInt(document.getElementById('refine-strength')?.value || '55') / 100;
-      const result = await window.meshyAPI.img2img({ imagePath: selectedImagePath, prompt: modification, strength });
+      const refineEngine = document.getElementById('refine-engine')?.value || 'local-sdxl';
+      const result = await window.meshyAPI.img2img({ imagePath: selectedImagePath, prompt: modification, strength, engine: refineEngine });
 
       if (!result.success) {
         completeJob(refineJob.id, false);
@@ -4832,6 +5063,13 @@
         if (tabId === 'tab-rig' && typeof updateRigSourceInfo === 'function') {
           updateRigSourceInfo();
         }
+        // Landmarks markers are only visible in Rig tab
+        try {
+          const showLm = (tabId === 'tab-rig');
+          for (const k in landmarkMarkers) {
+            if (landmarkMarkers[k]) landmarkMarkers[k].visible = showLm;
+          }
+        } catch (e) {}
       }
 
       // Switch gallery view based on tab — expand all groups

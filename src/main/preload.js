@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   cancelJob: (jobId) => ipcRenderer.invoke('cancel-job', jobId),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
+  maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),
   revertImage: (opts) => ipcRenderer.invoke('revert-image', opts)
 });

@@ -688,6 +688,38 @@ ipcMain.handle('import-image-file', (event, filePath) => {
   }
 });
 
+// Manual mask inpaint: user paints the mask in-app, we send it to SDXL
+ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt }) => {
+  try {
+    if (!imagePath || !maskDataUrl) {
+      return { success: false, error: 'imagePath and maskDataUrl required' };
+    }
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const ts = Date.now();
+    const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
+    // Decode dataURL to a temp PNG file
+    const m = /^data:image\/\w+;base64,(.+)$/.exec(maskDataUrl);
+    if (!m) return { success: false, error: 'invalid maskDataUrl' };
+    const tmpDir = path.join(dir, '.debug');
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
+    const maskPath = path.join(tmpDir, `${base}_usermask_${ts}.png`);
+    fs.writeFileSync(maskPath, Buffer.from(m[1], 'base64'));
+
+    if (sdxlReady) {
+      const r = await sdxlServerCall('/mask_inpaint', {
+        input: imagePath, mask: maskPath, prompt: prompt || '', output: newImagePath
+      });
+      if (r.ok) return { success: true, newPath: newImagePath };
+      return { success: false, error: r.error || 'SDXL server error' };
+    }
+    return { success: false, error: 'SDXL server not ready' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Auto-inpaint: CLIPSeg segments target area + SDXL Inpainting replaces it
 ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate }) => {
   try {
@@ -733,8 +765,8 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
   }
 });
 
-// Img2img: use local Stable Diffusion XL img2img for real image modification
-ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
+// Img2img: local SDXL by default, or cloud Pollinations if explicitly chosen
+ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine }) => {
   try {
     // Create new version path in same folder
     const dir = path.dirname(imagePath);
@@ -743,39 +775,47 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength }) => {
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_refined_${ts}${ext}`);
 
-    // Try persistent SDXL server first (no model reload, ~2s instead of ~10s)
-    if (sdxlReady) {
-      console.log('[img2img] Using persistent SDXL server');
-      const r = await sdxlServerCall('/img2img', {
-        input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
+    const useCloud = (engine === 'pollinations');
+
+    if (!useCloud) {
+      // Try persistent SDXL server first (no model reload, ~2s instead of ~10s)
+      if (sdxlReady) {
+        console.log('[img2img] Using persistent SDXL server');
+        const r = await sdxlServerCall('/img2img', {
+          input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
+        });
+        if (r.ok) return { success: true, newPath: newImagePath };
+        console.warn('[img2img] SDXL server failed, falling back to subprocess:', r.error);
+      }
+
+      // Fallback: subprocess (slower because reloads model)
+      const script = path.join(__dirname, '..', '..', 'scripts', 'local_img2img_bridge.py');
+      const localResult = await new Promise((resolve) => {
+        const proc = execFile('python', [script, imagePath, prompt, newImagePath, String(strength || 0.55)], {
+          timeout: 300000, maxBuffer: 50 * 1024 * 1024
+        }, (error, stdout, stderr) => {
+          if (error) resolve({ success: false, error: error.message, stdout, stderr });
+          else if (fs.existsSync(newImagePath)) resolve({ success: true });
+          else resolve({ success: false, error: 'Output not created' });
+        });
+        proc.stdout?.on('data', d => {
+          safeSend('ai3d-progress', d.toString());
+        });
+        proc.stderr?.on('data', d => {
+          safeSend('ai3d-progress', '[stderr] ' + d.toString());
+        });
+        proc.on('error', e => resolve({ success: false, error: e.message }));
       });
-      if (r.ok) return { success: true, newPath: newImagePath };
-      console.warn('[img2img] SDXL server failed, falling back to subprocess:', r.error);
+
+      if (localResult.success) {
+        return { success: true, newPath: newImagePath };
+      }
+      // No silent cloud fallback — local was explicitly requested
+      return { success: false, error: localResult.error || 'Local SDXL failed. Switch engine to Pollinations to use cloud.' };
     }
 
-    // Fallback: subprocess (slower because reloads model)
-    const script = path.join(__dirname, '..', '..', 'scripts', 'local_img2img_bridge.py');
-    const localResult = await new Promise((resolve) => {
-      const proc = execFile('python', [script, imagePath, prompt, newImagePath, String(strength || 0.55)], {
-        timeout: 300000, maxBuffer: 50 * 1024 * 1024
-      }, (error, stdout, stderr) => {
-        if (error) resolve({ success: false, error: error.message, stdout, stderr });
-        else if (fs.existsSync(newImagePath)) resolve({ success: true });
-        else resolve({ success: false, error: 'Output not created' });
-      });
-      proc.stdout?.on('data', d => {
-        safeSend('ai3d-progress', d.toString());
-      });
-      proc.stderr?.on('data', d => {
-        safeSend('ai3d-progress', '[stderr] ' + d.toString());
-      });
-      proc.on('error', e => resolve({ success: false, error: e.message }));
-    });
-
-    if (localResult.success) {
-      return { success: true, newPath: newImagePath };
-    }
-    console.warn('Local img2img failed, falling back to Pollinations:', localResult.error);
+    // Explicit cloud path (user selected Pollinations)
+    console.log('[img2img] Using Pollinations (cloud, user-selected)');
 
     let uploadPath = imagePath;
     const tempResized = imagePath + '.resize.png';
@@ -1440,7 +1480,24 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
     // Latest prompt also in prompt.txt for backward compat
     fs.writeFileSync(path.join(imagesDir, 'prompt.txt'), prompt, 'utf-8');
 
-    // LOCAL GPU: Stable Diffusion
+    // LOCAL GPU: Juggernaut XL v9 (recommended, photorealistic SDXL fine-tune)
+    if (engine === 'local-flux') {
+      const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
+      const result = await new Promise((resolve, reject) => {
+        const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4)], {
+          timeout: 1800000, maxBuffer: 50 * 1024 * 1024
+        }, (error, stdout, stderr) => {
+          if (error) { reject({ error: error.message, stdout, stderr }); return; }
+          const imgs = fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f)).map(f => path.join(imagesDir, f));
+          resolve({ images: imgs, stdout });
+        });
+        proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
+        proc.stderr?.on('data', d => { safeSend('ai3d-progress', '[stderr] ' + d.toString()); });
+      });
+      return { success: true, images: result.images };
+    }
+
+    // LOCAL GPU: Stable Diffusion XL Turbo (legacy fast option)
     if (engine === 'local-sd') {
       const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_image_bridge.py');
       const result = await new Promise((resolve, reject) => {
