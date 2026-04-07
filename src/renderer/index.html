@@ -8,6 +8,36 @@
   <link rel="stylesheet" href="styles/main.css">
 </head>
 <body>
+  <div id="onboarding-overlay" class="hidden">
+    <div class="onboarding-card">
+      <h2>Welcome to FabMesh</h2>
+      <p>Generate 3D characters from a text prompt in 3 simple steps.</p>
+      <div class="onboarding-steps">
+        <div class="onboarding-step">
+          <span class="onboarding-step-num">1</span>
+          <div class="onboarding-step-text">
+            <strong>Generate an image</strong>
+            <small>Type what you want (an orc, a dragon, a sword...) and click Generate.</small>
+          </div>
+        </div>
+        <div class="onboarding-step">
+          <span class="onboarding-step-num">2</span>
+          <div class="onboarding-step-text">
+            <strong>Convert to 3D mesh</strong>
+            <small>Pick the image you like and turn it into a 3D model.</small>
+          </div>
+        </div>
+        <div class="onboarding-step">
+          <span class="onboarding-step-num">3</span>
+          <div class="onboarding-step-text">
+            <strong>Add a skeleton (rig)</strong>
+            <small>Pick a template (humanoid, quadruped...) for animation in Unreal/Blender.</small>
+          </div>
+        </div>
+      </div>
+      <button class="onboarding-cta" id="onboarding-start">Let&#39;s start &#8594;</button>
+    </div>
+  </div>
   <div id="app">
     <header id="header">
       <div class="header-left">
@@ -15,6 +45,10 @@
         <span class="subtitle">3D Mesh Generator</span>
       </div>
       <div class="header-right">
+        <label class="ui-mode-toggle" title="Toggle simple / advanced UI">
+          <input type="checkbox" id="ui-mode-checkbox" />
+          <span class="ui-mode-label">Advanced mode</span>
+        </label>
       </div>
     </header>
 
@@ -24,6 +58,12 @@
           <button class="tab active" data-tab="tab-image">Image</button>
           <button class="tab" data-tab="tab-3d">3D</button>
           <button class="tab" data-tab="tab-rig">Rig</button>
+        </div>
+        <div id="project-switcher">
+          <span class="ps-label">Project</span>
+          <select id="project-select">
+            <option value="__all__">All projects</option>
+          </select>
         </div>
         <div id="gallery-content">
           <div class="gallery-toolbar">
@@ -39,6 +79,23 @@
       </aside>
 
       <main id="viewer-panel">
+        <div id="pipeline-stepper">
+          <button class="step-btn active" data-step-tab="tab-image">
+            <span class="step-num">1</span>
+            <span class="step-label">Image</span>
+          </button>
+          <span class="step-arrow">&#8594;</span>
+          <button class="step-btn" data-step-tab="tab-3d">
+            <span class="step-num">2</span>
+            <span class="step-label">3D Mesh</span>
+          </button>
+          <span class="step-arrow">&#8594;</span>
+          <button class="step-btn" data-step-tab="tab-rig">
+            <span class="step-num">3</span>
+            <span class="step-label">Rig</span>
+          </button>
+        </div>
+        <div id="pipeline-hint" class="hidden"></div>
         <div id="viewer-container">
           <canvas id="three-canvas"></canvas>
           <div id="image-viewer" class="hidden">
@@ -60,8 +117,16 @@
             <p id="loading-text">Generating...</p>
           </div>
         </div>
-        <!-- Jobs overlay -->
-        <div id="jobs-panel" class="hidden">
+        <!-- Jobs overlay (collapsed by default into a small bubble) -->
+        <button id="jobs-bubble" class="hidden" title="Show jobs">
+          <span id="jobs-bubble-count">0</span>
+          <span class="jobs-bubble-spinner"></span>
+        </button>
+        <div id="jobs-panel" class="hidden collapsed">
+          <div id="jobs-panel-header">
+            <span>Jobs</span>
+            <button id="jobs-collapse-btn" class="small-btn" title="Collapse">&#10005;</button>
+          </div>
           <div id="jobs-list"></div>
         </div>
 
@@ -408,6 +473,7 @@
                 <button id="btn-rig-auto-landmarks-top" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Auto-detect</button>
                 <button id="btn-rig-clear-landmarks-top" class="secondary-btn" style="flex:1; font-size: 11px; padding: 6px;">Clear all</button>
               </div>
+              <button id="btn-rig-guided-placement" class="primary-btn" style="width:100%; margin-bottom:8px; font-size:12px; padding:8px;">&#9758; Guided placement</button>
               <div id="rig-landmark-list" style="display: flex; flex-direction: column; gap: 4px;">
                 <details class="lm-cat" open>
                   <summary>Head &amp; Spine</summary>
@@ -1025,6 +1091,16 @@
       } else {
         // tab-rig and others: show everything
         filtered = allMeshes;
+      }
+      // Also filter by selected project (simple mode)
+      const projectSelectFilter = document.getElementById('project-select');
+      const projFilter = projectSelectFilter ? projectSelectFilter.value : '__all__';
+      if (projFilter && projFilter !== '__all__' && !document.body.classList.contains('advanced-mode')) {
+        const cleanFilter = projFilter.replace(/_\d+$/, '');
+        filtered = filtered.filter(m => {
+          const proj = (m.project || m.folder || '').replace(/_\d+$/, '');
+          return proj === cleanFilter || proj === projFilter;
+        });
       }
       meshList = filtered;
       if (!meshList.length) {
@@ -2790,6 +2866,205 @@
     }
     bindLandmarkButtons();
 
+    // ============================================================
+    // GUIDED LANDMARK PLACEMENT WIZARD
+    // ============================================================
+    // Walk through each landmark of the active schema. For each one:
+    //   1. Estimate the expected position from bbox heuristics
+    //   2. Smoothly animate the camera to look at that position
+    //   3. Highlight the row in the list + show an instruction overlay
+    //   4. Arm the corresponding lm-btn so the next click on the mesh places it
+    //   5. When the user clicks (or skips), advance to the next landmark
+    let _guidedState = null; // { items: [...], idx: number, overlay: HTMLElement }
+
+    function _estimateWorldPos(itemId) {
+      // Reuse the heuristic from autoDetectLandmarks: bbox-based body proportions.
+      if (!currentModel) return null;
+      const box = new THREE.Box3().setFromObject(currentModel);
+      const min = box.min, max = box.max;
+      const center = new THREE.Vector3().addVectors(min, max).multiplyScalar(0.5);
+      const size = new THREE.Vector3().subVectors(max, min);
+      let upAxis = 'y';
+      if (size.z > size.y && size.z > size.x) upAxis = 'z';
+      else if (size.x > size.y && size.x > size.z) upAxis = 'x';
+      const minU = min[upAxis], maxU = max[upAxis], sU = maxU - minU;
+      const lateralAxis = (upAxis === 'y') ? 'x' : (upAxis === 'z' ? 'x' : 'y');
+      const depthAxis   = (upAxis === 'y') ? 'z' : (upAxis === 'z' ? 'y' : 'z');
+      function pt(side_x, height_pct, depth) {
+        const u = minU + height_pct * sU;
+        const p = new THREE.Vector3();
+        p[upAxis] = u;
+        p[lateralAxis] = center[lateralAxis] + side_x * size[lateralAxis];
+        p[depthAxis]   = center[depthAxis]   + (depth || 0) * size[depthAxis];
+        return p;
+      }
+      const s = itemId.toLowerCase();
+      const isL = /(_l$|_left|left_|\bl_)/.test(s);
+      const isR = /(_r$|_right|right_|\br_)/.test(s);
+      const side = isL ? 1 : (isR ? -1 : 0);
+      if (s.includes('head')) return pt(0, 0.97);
+      if (s.includes('neck')) return pt(0, 0.85);
+      if (s.includes('upper') && s.includes('spine')) return pt(0, 0.72);
+      if (s.includes('mid') && s.includes('spine')) return pt(0, 0.62);
+      if (s.includes('lower') && s.includes('spine')) return pt(0, 0.55);
+      if (s.includes('spine')) return pt(0, 0.62);
+      if (s.includes('clavicle')) return pt(side * 0.10, 0.80);
+      if (s.includes('shoulder')) return pt(side * 0.32, 0.78);
+      if (s.includes('elbow')) return pt(side * 0.34, 0.65, 0.05);
+      if (s.includes('wrist') || s.includes('hand')) return pt(side * 0.36, 0.50);
+      if (s.includes('thumb')) return pt(side * 0.40, 0.49, 0.02);
+      if (s.includes('index') || s.includes('finger')) return pt(side * 0.42, 0.48, 0.00);
+      if (s.includes('hip') && side !== 0) return pt(side * 0.10, 0.50);
+      if (s.includes('hip') || s.includes('pelvis')) return pt(0, 0.52);
+      if (s.includes('knee')) return pt(side * 0.10, 0.27);
+      if (s.includes('ankle')) return pt(side * 0.10, 0.04);
+      if (s.includes('toe') || s.includes('foot')) return pt(side * 0.10, 0.00, 0.05);
+      if (s.includes('tail')) return pt(0, 0.45, -0.15);
+      return pt(side * 0.05, 0.50);
+    }
+
+    function _animateCameraTo(targetPos, distance) {
+      if (!camera || !controls || !targetPos) return;
+      const startTarget = controls.target.clone();
+      const startPos = camera.position.clone();
+      // Camera offset from target: stay roughly on the same orbit, just zoom
+      const dir = startPos.clone().sub(startTarget).normalize();
+      if (dir.lengthSq() < 0.01) dir.set(0.7, 0.3, 0.7).normalize();
+      const endTarget = targetPos.clone();
+      const endPos = endTarget.clone().add(dir.multiplyScalar(distance));
+      const duration = 600;
+      const t0 = performance.now();
+      function step() {
+        const t = Math.min(1, (performance.now() - t0) / duration);
+        const k = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out
+        controls.target.lerpVectors(startTarget, endTarget, k);
+        camera.position.lerpVectors(startPos, endPos, k);
+        controls.update();
+        if (t < 1) requestAnimationFrame(step);
+      }
+      step();
+    }
+
+    function _ensureGuidedOverlay() {
+      let o = document.getElementById('guided-overlay');
+      if (o) return o;
+      o = document.createElement('div');
+      o.id = 'guided-overlay';
+      o.innerHTML = `
+        <div class="guided-card">
+          <div class="guided-step-label"><span id="guided-step-num">1/0</span> &middot; <span id="guided-step-name">--</span></div>
+          <div class="guided-instruction">Click on the highlighted area of the mesh.</div>
+          <div class="guided-actions">
+            <button id="guided-skip" class="secondary-btn">Skip</button>
+            <button id="guided-back" class="secondary-btn">Back</button>
+            <button id="guided-cancel" class="secondary-btn">Cancel</button>
+          </div>
+        </div>`;
+      document.body.appendChild(o);
+      o.querySelector('#guided-skip').addEventListener('click', () => _guidedNext());
+      o.querySelector('#guided-back').addEventListener('click', () => _guidedPrev());
+      o.querySelector('#guided-cancel').addEventListener('click', () => _guidedStop());
+      return o;
+    }
+
+    function _guidedShowCurrent() {
+      if (!_guidedState) return;
+      const item = _guidedState.items[_guidedState.idx];
+      if (!item) { _guidedStop(); return; }
+      const overlay = _guidedState.overlay;
+      overlay.querySelector('#guided-step-num').textContent =
+        `${_guidedState.idx + 1}/${_guidedState.items.length}`;
+      overlay.querySelector('#guided-step-name').textContent = item.label || item.id;
+      // Estimate position and animate camera there
+      const pos = _estimateWorldPos(item.id);
+      if (pos && currentModel) {
+        const box = new THREE.Box3().setFromObject(currentModel);
+        const size = box.getSize(new THREE.Vector3()).length();
+        _animateCameraTo(pos, size * 0.6);
+      }
+      // Highlight the row + scroll into view, expand its parent group
+      const btn = document.querySelector(`.lm-btn[data-lm="${item.id}"]`);
+      if (btn) {
+        document.querySelectorAll('.lm-btn.guided-current').forEach(b => b.classList.remove('guided-current'));
+        btn.classList.add('guided-current');
+        const groupContent = btn.closest('.lm-cat');
+        if (groupContent && !groupContent.open) groupContent.open = true;
+        btn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        // Arm the button so the next click on the mesh places this landmark
+        if (activeLandmarkBtn && activeLandmarkBtn !== btn) {
+          activeLandmarkBtn.classList.remove('active');
+        }
+        activeLandmarkBtn = btn;
+        btn.classList.add('active');
+        canvas.style.cursor = 'crosshair';
+      }
+    }
+
+    function _guidedNext() {
+      if (!_guidedState) return;
+      _guidedState.idx++;
+      if (_guidedState.idx >= _guidedState.items.length) { _guidedStop(); return; }
+      _guidedShowCurrent();
+    }
+    function _guidedPrev() {
+      if (!_guidedState) return;
+      if (_guidedState.idx > 0) _guidedState.idx--;
+      _guidedShowCurrent();
+    }
+    function _guidedStop() {
+      if (!_guidedState) return;
+      const o = _guidedState.overlay;
+      if (o) o.remove();
+      document.querySelectorAll('.lm-btn.guided-current').forEach(b => b.classList.remove('guided-current'));
+      if (activeLandmarkBtn) {
+        activeLandmarkBtn.classList.remove('active');
+        activeLandmarkBtn = null;
+      }
+      canvas.style.cursor = '';
+      _guidedState = null;
+      showLog('Guided placement finished', 'info');
+    }
+
+    function startGuidedPlacement() {
+      if (!currentModel) { showLog('Load a mesh first', 'error'); return; }
+      const schema = (typeof getCurrentSchema === 'function') ? getCurrentSchema() : _activeSchema;
+      if (!schema || !schema.groups) { showLog('No landmark schema available', 'error'); return; }
+      const items = [];
+      schema.groups.forEach(g => g.items.forEach(it => items.push(it)));
+      if (items.length === 0) { showLog('Schema is empty', 'error'); return; }
+      _guidedState = {
+        items,
+        idx: 0,
+        overlay: _ensureGuidedOverlay(),
+      };
+      _guidedShowCurrent();
+    }
+    window.startGuidedPlacement = startGuidedPlacement;
+
+    // Wire the Guided placement button
+    document.getElementById('btn-rig-guided-placement')?.addEventListener('click', startGuidedPlacement);
+
+    // After setLandmark is called (mesh click while wizard is active), advance.
+    // We hook by wrapping setLandmark via a flag check inside the click handler — the
+    // simplest place is the canvas mousedown, but setLandmark itself is the choke point.
+    // Use a MutationObserver on the lm-btn 'set' class as an indirect signal.
+    const _guidedLmObserver = new MutationObserver((muts) => {
+      if (!_guidedState) return;
+      for (const m of muts) {
+        if (m.attributeName !== 'class') continue;
+        const el = m.target;
+        if (!el.classList || !el.classList.contains('lm-btn')) continue;
+        if (el.classList.contains('set') && el.dataset.lm === _guidedState.items[_guidedState.idx]?.id) {
+          // Landmark just got placed — advance after a short delay so the user sees the marker
+          setTimeout(() => _guidedNext(), 350);
+          break;
+        }
+      }
+    });
+    // Observe the landmark list for class changes (lm-btn .set toggles)
+    const _lmListEl = document.getElementById('rig-landmark-list');
+    if (_lmListEl) _guidedLmObserver.observe(_lmListEl, { attributes: true, subtree: true, attributeFilter: ['class'] });
+
     // Rebuild landmark list when template changes (analyzes the FBX bones)
     document.getElementById('rig-tab-template')?.addEventListener('change', () => {
       loadSchemaForCurrentTemplate();
@@ -3436,7 +3711,30 @@
     async function refreshGalleryImages() {
       const allFolders = await window.meshyAPI.listImageFolders();
       const el = document.getElementById('mesh-list');
-      const folders = allFolders.filter(f => f.count > 0);
+      let folders = allFolders.filter(f => f.count > 0);
+      // Populate the project switcher dropdown
+      const projectSelect = document.getElementById('project-select');
+      if (projectSelect) {
+        const prev = projectSelect.value;
+        const opts = ['<option value="__all__">All projects</option>'];
+        folders.forEach(f => {
+          const cleanName = f.name.replace(/_\d+$/, '');
+          opts.push(`<option value="${f.name}">${cleanName} (${f.count})</option>`);
+        });
+        projectSelect.innerHTML = opts.join('');
+        // Restore selection if still present, otherwise default to first project
+        if (prev && Array.from(projectSelect.options).some(o => o.value === prev)) {
+          projectSelect.value = prev;
+        } else if (folders.length > 0 && !document.body.classList.contains('advanced-mode')) {
+          // In simple mode, auto-select the most recent project
+          projectSelect.value = folders[0].name;
+        }
+      }
+      // Filter by selected project (simple mode)
+      const filterValue = projectSelect ? projectSelect.value : '__all__';
+      if (filterValue && filterValue !== '__all__') {
+        folders = folders.filter(f => f.name === filterValue);
+      }
       if (!folders.length) { el.innerHTML = '<div class="gallery-empty">No images yet.<br>Generate some in the Image tab.</div>'; return; }
 
       el.innerHTML = folders.map((f, fi) => {
@@ -3471,8 +3769,7 @@
             const fname = imgPathSafe.split('/').pop();
             html += `<div class="mesh-item mesh-child ${isSelected ? 'active' : ''}" data-thumb="${imgSrc}" data-name="${name} - ${verLabel}" data-meta="${fname}" data-prompt="${b64Prompt}" onclick="window._selectGalleryImage('${imgPathSafe}', decodeURIComponent(escape(atob(this.dataset.prompt))))">
               <div class="mesh-item-with-thumb"><img class="mesh-thumb" src="${imgSrc}" /><div class="mesh-item-details">
-              <div class="mesh-item-row"><div class="mesh-item-name"><span class="${verClass}">${verLabel}</span> ${ds}</div><button class="del-btn" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>
-              <div class="mesh-item-info"><span>${sz}</span><span class="mesh-item-format">PNG</span></div>
+                <div class="mesh-item-row"><span class="${verClass}">${verLabel}</span><span class="mesh-item-date">${ds}</span><button class="del-btn" onclick="event.stopPropagation(); window._deleteImage('${imgPathSafe}', '${f.name}')">x</button></div>
               </div></div>
             </div>`;
           });
@@ -3498,8 +3795,11 @@
       }
       document.getElementById('btn-send-to-3d').classList.remove('hidden');
       showImageRefine(imgPath, prompt);
-      // Switch to refine sub-tab
-      document.querySelector('#img-subtab-bar .img-subtab[data-imgsubtab="img-refine-tab"]').click();
+      // In advanced mode, jump to refine sub-tab. In simple mode, stay on Create
+      // (which is the only visible sub-tab and shows the prompt + Generate button).
+      if (document.body.classList.contains('advanced-mode')) {
+        document.querySelector('#img-subtab-bar .img-subtab[data-imgsubtab="img-refine-tab"]')?.click();
+      }
       // Refresh gallery to update "active" selection
       refreshGalleryImages();
     };
@@ -5088,6 +5388,169 @@
       } catch(e) { console.error('Gallery refresh error:', e); }
     }
     document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+    // ============================================================
+    // PIPELINE STEPPER (Image -> 3D -> Rig)
+    // ============================================================
+    function syncStepperToTab(tabId) {
+      document.querySelectorAll('#pipeline-stepper .step-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.stepTab === tabId);
+      });
+      // Mark earlier steps as completed if a project artifact exists for them.
+      const stepOrder = ['tab-image', 'tab-3d', 'tab-rig'];
+      const idx = stepOrder.indexOf(tabId);
+      document.querySelectorAll('#pipeline-stepper .step-btn').forEach(b => {
+        const i = stepOrder.indexOf(b.dataset.stepTab);
+        b.classList.toggle('completed', i < idx);
+      });
+      updatePipelineHint(tabId);
+    }
+    function updatePipelineHint(tabId) {
+      const hint = document.getElementById('pipeline-hint');
+      if (!hint) return;
+      const hasImage = !!selectedImagePath;
+      const hasMesh = !!selectedMesh;
+      let msg = '';
+      if (tabId === 'tab-image') {
+        if (!hasImage) {
+          msg = 'Type a description in the right panel and click <b>Generate Images</b>.';
+        } else {
+          msg = 'Image ready. <span class="hint-arrow">&#8594;</span> Click <b>3D Mesh</b> above to convert it.';
+        }
+      } else if (tabId === 'tab-3d') {
+        if (!hasImage) {
+          msg = 'Pick an image in the gallery first, then click <b>Generate 3D</b>.';
+        } else if (!hasMesh) {
+          msg = 'Click <b>Generate 3D</b> in the right panel to convert the selected image.';
+        } else {
+          msg = 'Mesh ready. <span class="hint-arrow">&#8594;</span> Click <b>Rig</b> above to add a skeleton.';
+        }
+      } else if (tabId === 'tab-rig') {
+        if (!hasMesh) {
+          msg = 'Pick a mesh in the gallery first.';
+        } else {
+          msg = 'Pick a template and click <b>Generate Rig</b>, or place landmarks manually.';
+        }
+      }
+      if (msg) {
+        hint.innerHTML = msg;
+        hint.classList.remove('hidden');
+      } else {
+        hint.classList.add('hidden');
+      }
+    }
+    // Refresh hint when selection changes (poll on common triggers)
+    setInterval(() => {
+      const active = document.querySelector('.tab-content.active');
+      if (active) updatePipelineHint(active.id);
+    }, 800);
+    document.querySelectorAll('#pipeline-stepper .step-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        const tabId = b.dataset.stepTab;
+        switchTab(tabId);
+        syncStepperToTab(tabId);
+      });
+    });
+    // Sync stepper whenever a .tab is clicked too (legacy gallery tab bar)
+    document.querySelectorAll('.tab').forEach(t => {
+      t.addEventListener('click', () => syncStepperToTab(t.dataset.tab));
+    });
+    // Watch tab content for active class changes via MutationObserver as a safety net
+    const _stepperObserver = new MutationObserver(() => {
+      const active = document.querySelector('.tab-content.active');
+      if (active) syncStepperToTab(active.id);
+    });
+    document.querySelectorAll('.tab-content').forEach(c => {
+      _stepperObserver.observe(c, { attributes: true, attributeFilter: ['class'] });
+    });
+    syncStepperToTab(currentTab || 'tab-image');
+
+    // ============================================================
+    // UI MODE TOGGLE (Simple / Advanced)
+    // ============================================================
+    const uiModeCheckbox = document.getElementById('ui-mode-checkbox');
+    function applyUiMode(advanced) {
+      document.body.classList.toggle('advanced-mode', advanced);
+      try { localStorage.setItem('fabmesh-ui-mode', advanced ? 'advanced' : 'simple'); } catch (e) {}
+    }
+    if (uiModeCheckbox) {
+      const stored = (() => { try { return localStorage.getItem('fabmesh-ui-mode'); } catch (e) { return null; } })();
+      const initialAdvanced = stored === 'advanced';
+      uiModeCheckbox.checked = initialAdvanced;
+      applyUiMode(initialAdvanced);
+      uiModeCheckbox.addEventListener('change', () => applyUiMode(uiModeCheckbox.checked));
+    }
+
+    // ============================================================
+    // PROJECT SWITCHER (simple mode: gallery filtered to one project)
+    // ============================================================
+    const projectSelectEl = document.getElementById('project-select');
+    if (projectSelectEl) {
+      projectSelectEl.addEventListener('change', () => {
+        if (currentTab === 'tab-image') refreshGalleryImages();
+        else if (typeof refreshGallery === 'function') refreshGallery();
+      });
+    }
+
+    // ============================================================
+    // ONBOARDING (first launch only)
+    // ============================================================
+    (function setupOnboarding() {
+      const seen = (() => { try { return localStorage.getItem('fabmesh-onboarding-seen'); } catch (e) { return null; } })();
+      const overlay = document.getElementById('onboarding-overlay');
+      if (!overlay) return;
+      if (!seen) {
+        overlay.classList.remove('hidden');
+      }
+      const startBtn = document.getElementById('onboarding-start');
+      if (startBtn) {
+        startBtn.addEventListener('click', () => {
+          overlay.classList.add('hidden');
+          try { localStorage.setItem('fabmesh-onboarding-seen', '1'); } catch (e) {}
+          // Focus the prompt input so the user can start typing immediately
+          const promptInput = document.getElementById('prompt-input');
+          if (promptInput) promptInput.focus();
+        });
+      }
+    })();
+
+    // ============================================================
+    // JOBS BUBBLE (collapsed jobs panel)
+    // ============================================================
+    const jobsBubble = document.getElementById('jobs-bubble');
+    const jobsPanelEl = document.getElementById('jobs-panel');
+    const jobsCollapseBtn = document.getElementById('jobs-collapse-btn');
+    function showJobsPanel() {
+      jobsPanelEl.classList.remove('collapsed', 'hidden');
+      jobsBubble.classList.add('hidden');
+    }
+    function collapseJobsPanel() {
+      jobsPanelEl.classList.add('collapsed');
+      // Bubble visible only if there are running jobs
+      const runningCount = (typeof activeJobs !== 'undefined' ? activeJobs.length : 0);
+      if (runningCount > 0) {
+        jobsBubble.classList.remove('hidden');
+        document.getElementById('jobs-bubble-count').textContent = String(runningCount);
+      } else {
+        jobsBubble.classList.add('hidden');
+      }
+    }
+    if (jobsBubble) jobsBubble.addEventListener('click', showJobsPanel);
+    if (jobsCollapseBtn) jobsCollapseBtn.addEventListener('click', collapseJobsPanel);
+    // Watch the jobs list for changes — when jobs are added/removed, sync the bubble.
+    const _jobsObserver = new MutationObserver(() => {
+      const count = (typeof activeJobs !== 'undefined' ? activeJobs.length : 0);
+      const bubbleCount = document.getElementById('jobs-bubble-count');
+      if (bubbleCount) bubbleCount.textContent = String(count);
+      if (jobsPanelEl.classList.contains('collapsed')) {
+        if (count > 0) jobsBubble.classList.remove('hidden');
+        else jobsBubble.classList.add('hidden');
+      }
+    });
+    const jobsListEl = document.getElementById('jobs-list');
+    if (jobsListEl) _jobsObserver.observe(jobsListEl, { childList: true, subtree: true });
+    // Start collapsed by default
+    collapseJobsPanel();
 
     // Sub-tab switching (Create / Refine inside 3D)
     document.querySelectorAll('.subtab').forEach(t => t.addEventListener('click', () => {

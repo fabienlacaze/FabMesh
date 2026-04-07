@@ -10,7 +10,7 @@ import json
 import torch
 
 
-def generate_images(prompt, output_dir, num_images=4):
+def generate_images(prompt, output_dir, num_images=4, steps=30):
     from diffusers import StableDiffusionXLPipeline
 
     os.makedirs(output_dir, exist_ok=True)
@@ -46,7 +46,7 @@ def generate_images(prompt, output_dir, num_images=4):
         result = pipe(
             prompt=optimized_prompt,
             negative_prompt=negative_prompt,
-            num_inference_steps=30,
+            num_inference_steps=int(steps),
             guidance_scale=7.0,
             height=1024,
             width=1024,
@@ -69,15 +69,16 @@ def generate_images(prompt, output_dir, num_images=4):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python local_flux_bridge.py \"<prompt>\" <output_dir> [num_images]")
+        print("Usage: python local_juggernaut_bridge.py \"<prompt>\" <output_dir> [num_images] [steps]")
         sys.exit(1)
 
     prompt = sys.argv[1]
     output_dir = sys.argv[2]
     num_images = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+    steps = int(sys.argv[4]) if len(sys.argv) > 4 else 30
 
     try:
-        images = generate_images(prompt, output_dir, num_images)
+        images = generate_images(prompt, output_dir, num_images, steps)
     except Exception as e:
         import traceback
         traceback.print_exc()

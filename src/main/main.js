@@ -100,6 +100,27 @@ let mainWindow;
 let sdxlProc = null;
 let sdxlReady = false;
 const SDXL_PORT = 5555;
+// Auto-shutdown: kill the SDXL server after this many ms of inactivity to free ~13 GB VRAM.
+// The server will be lazy-restarted at the next img2img / inpaint call.
+const SDXL_IDLE_TIMEOUT_MS = 60 * 1000; // 1 minute
+let sdxlLastUsedAt = 0;
+let sdxlIdleTimer = null;
+
+function markSdxlUsed() {
+  sdxlLastUsedAt = Date.now();
+  if (sdxlIdleTimer) clearInterval(sdxlIdleTimer);
+  // Check every 15s whether the server is idle and should be killed
+  sdxlIdleTimer = setInterval(() => {
+    if (!sdxlProc || !sdxlReady) return;
+    const idleMs = Date.now() - sdxlLastUsedAt;
+    if (idleMs >= SDXL_IDLE_TIMEOUT_MS) {
+      console.log(`[SDXL] Idle for ${Math.round(idleMs/1000)}s, shutting down to free VRAM`);
+      stopSdxlServer();
+      clearInterval(sdxlIdleTimer);
+      sdxlIdleTimer = null;
+    }
+  }, 15000);
+}
 
 function startSdxlServer() {
   if (sdxlProc) return;
@@ -118,7 +139,10 @@ function startSdxlServer() {
       const msg = d.toString().trim();
       if (msg) console.log('[SDXL]', msg);
       // Mark ready only when models are actually loaded in VRAM
-      if (msg.includes('MODELS READY')) sdxlReady = true;
+      if (msg.includes('MODELS READY')) {
+        sdxlReady = true;
+        markSdxlUsed(); // Start the idle timer from this point
+      }
     });
     sdxlProc.stderr.on('data', d => console.error('[SDXL stderr]', d.toString().trim()));
     sdxlProc.on('exit', (code) => {
@@ -133,18 +157,27 @@ function startSdxlServer() {
 }
 
 function stopSdxlServer() {
-  if (sdxlProc) {
-    try {
-      // Send shutdown via HTTP first (clean)
-      const http = require('http');
-      const req = http.request({ host: '127.0.0.1', port: SDXL_PORT, path: '/shutdown', method: 'POST', timeout: 2000 }, () => {});
-      req.on('error', () => {});
-      req.end();
-      setTimeout(() => {
-        if (sdxlProc) { try { sdxlProc.kill(); } catch(e) {} }
-      }, 500);
-    } catch(e) {}
-  }
+  if (sdxlIdleTimer) { clearInterval(sdxlIdleTimer); sdxlIdleTimer = null; }
+  if (!sdxlProc) return;
+  const pid = sdxlProc.pid;
+  try {
+    // Best-effort: send HTTP shutdown (clean)
+    const http = require('http');
+    const req = http.request({ host: '127.0.0.1', port: SDXL_PORT, path: '/shutdown', method: 'POST', timeout: 500 }, () => {});
+    req.on('error', () => {});
+    req.end();
+  } catch(e) {}
+  // Force-kill the process tree immediately — don't rely on timers that won't fire during electron quit
+  try {
+    if (process.platform === 'win32' && pid) {
+      // Synchronously kill the entire process tree (taskkill /T = children too, /F = force)
+      require('child_process').execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      sdxlProc.kill('SIGKILL');
+    }
+  } catch(e) {}
+  sdxlProc = null;
+  sdxlReady = false;
 }
 
 // Helper: HTTP POST to SDXL server, returns { ok, output, error }
@@ -154,6 +187,8 @@ function sdxlServerCall(endpoint, payload) {
       resolve({ ok: false, error: 'sdxl_server_not_ready' });
       return;
     }
+    // Reset the idle timer every time we use the server
+    markSdxlUsed();
     const http = require('http');
     const body = JSON.stringify(payload);
     const req = http.request({
@@ -197,7 +232,10 @@ function createWindow() {
     show: false
   });
 
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // Load the new redesigned UI by default. Use ?legacy=1 to fall back to the old one.
+  const useLegacy = process.argv.includes('--legacy');
+  const rendererFile = useLegacy ? 'index.html' : 'index2.html';
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', rendererFile));
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.setMenuBarVisibility(false);
 
@@ -217,9 +255,32 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
-  // Lazy start SDXL server in background (doesn't block UI)
-  setTimeout(() => startSdxlServer(), 1500);
+  // SDXL server is started on-demand, at the first img2img / inpaint call.
+  // This avoids loading 13+ GB into VRAM for users who only do image generation.
 });
+
+// Ensure the SDXL server is running. Returns a promise that resolves when the
+// server reports "MODELS READY" (or after a short timeout fallback).
+function ensureSdxlServer() {
+  return new Promise((resolve) => {
+    if (sdxlReady) return resolve(true);
+    if (!sdxlProc) {
+      startSdxlServer();
+    }
+    if (!sdxlProc) return resolve(false);
+    // Poll sdxlReady for up to 120s
+    const start = Date.now();
+    const poll = setInterval(() => {
+      if (sdxlReady) {
+        clearInterval(poll);
+        resolve(true);
+      } else if (Date.now() - start > 120000 || !sdxlProc) {
+        clearInterval(poll);
+        resolve(sdxlReady);
+      }
+    }, 500);
+  });
+}
 // Kill all tracked Python subprocesses (cancel-job map) on exit
 function killAllActiveProcs() {
   for (const [jobId, proc] of activeProcs.entries()) {
@@ -707,14 +768,13 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
     const maskPath = path.join(tmpDir, `${base}_usermask_${ts}.png`);
     fs.writeFileSync(maskPath, Buffer.from(m[1], 'base64'));
 
-    if (sdxlReady) {
-      const r = await sdxlServerCall('/mask_inpaint', {
-        input: imagePath, mask: maskPath, prompt: prompt || '', output: newImagePath
-      });
-      if (r.ok) return { success: true, newPath: newImagePath };
-      return { success: false, error: r.error || 'SDXL server error' };
-    }
-    return { success: false, error: 'SDXL server not ready' };
+    await ensureSdxlServer();
+    if (!sdxlReady) return { success: false, error: 'SDXL server failed to start' };
+    const r = await sdxlServerCall('/mask_inpaint', {
+      input: imagePath, mask: maskPath, prompt: prompt || '', output: newImagePath
+    });
+    if (r.ok) return { success: true, newPath: newImagePath };
+    return { success: false, error: r.error || 'SDXL server error' };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -729,7 +789,8 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
 
-    // Try persistent SDXL server first (no model reload)
+    // Lazy-start the persistent SDXL server (no model reload between calls)
+    await ensureSdxlServer();
     if (sdxlReady) {
       console.log('[inpaint] Using persistent SDXL server');
       const r = await sdxlServerCall('/inpaint', {
@@ -778,7 +839,8 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
     const useCloud = (engine === 'pollinations');
 
     if (!useCloud) {
-      // Try persistent SDXL server first (no model reload, ~2s instead of ~10s)
+      // Lazy-start the persistent SDXL server on first use
+      await ensureSdxlServer();
       if (sdxlReady) {
         console.log('[img2img] Using persistent SDXL server');
         const r = await sdxlServerCall('/img2img', {
@@ -1461,7 +1523,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 });
 
 // --- Text-to-3D: Step 1 - Generate images via Pollinations ---
-ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName, engine, quality }) => {
+ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName, engine, quality, steps }) => {
   try {
     const timestamp = Date.now();
     const safeName = (projectName || 'gen').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1483,8 +1545,9 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
     // LOCAL GPU: Juggernaut XL v9 (recommended, photorealistic SDXL fine-tune)
     if (engine === 'local-flux') {
       const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
+      const stepsClamped = Math.max(4, Math.min(60, parseInt(steps) || 30));
       const result = await new Promise((resolve, reject) => {
-        const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4)], {
+        const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
           timeout: 1800000, maxBuffer: 50 * 1024 * 1024
         }, (error, stdout, stderr) => {
           if (error) { reject({ error: error.message, stdout, stderr }); return; }
@@ -1983,6 +2046,46 @@ function isPathAllowed(p) {
   const allowed = [MESHES_DIR, IMAGES_DIR, SCRIPTS_DIR, HISTORY_DIR].map(d => path.resolve(d));
   return allowed.some(d => real === d || real.startsWith(d + path.sep));
 }
+
+// Delete an entire project: image folders matching the name, all meshes
+// derived from it, and the version history folder.
+ipcMain.handle('delete-project', (event, { projectName }) => {
+  if (!projectName) return { ok: false, error: 'projectName required' };
+  let removed = { folders: 0, meshes: 0, history: 0 };
+  // 1) Image folders: any folder under IMAGES_DIR named exactly projectName or projectName_<digits>
+  try {
+    if (fs.existsSync(IMAGES_DIR)) {
+      const re = new RegExp('^' + projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(_\\d+)?$');
+      for (const entry of fs.readdirSync(IMAGES_DIR)) {
+        const full = path.join(IMAGES_DIR, entry);
+        if (re.test(entry) && fs.statSync(full).isDirectory()) {
+          fs.rmSync(full, { recursive: true, force: true });
+          removed.folders++;
+        }
+      }
+    }
+  } catch (e) { console.warn('delete-project: image folders failed:', e.message); }
+  // 2) Mesh files: any file in MESHES_DIR whose base name starts with projectName_
+  try {
+    if (fs.existsSync(MESHES_DIR)) {
+      const prefix = projectName + '_';
+      for (const entry of fs.readdirSync(MESHES_DIR)) {
+        if (entry === projectName || entry.startsWith(prefix) || entry.startsWith(projectName + '.')) {
+          try { fs.unlinkSync(path.join(MESHES_DIR, entry)); removed.meshes++; } catch (e) {}
+        }
+      }
+    }
+  } catch (e) { console.warn('delete-project: meshes failed:', e.message); }
+  // 3) History folder
+  try {
+    const histDir = path.join(HISTORY_DIR, projectName);
+    if (fs.existsSync(histDir)) {
+      fs.rmSync(histDir, { recursive: true, force: true });
+      removed.history++;
+    }
+  } catch (e) { console.warn('delete-project: history failed:', e.message); }
+  return { ok: true, removed };
+});
 
 ipcMain.handle('delete-file', (event, filePath) => {
   if (!isPathAllowed(filePath)) {

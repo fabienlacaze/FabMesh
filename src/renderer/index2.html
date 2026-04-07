@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: blob:; script-src 'self' 'unsafe-inline' file: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: http://127.0.0.1:* https:; connect-src 'self' file: blob: http://127.0.0.1:*">
+  <title>FabMesh</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/index2.css">
+</head>
+<body class="advanced-mode">
+  <div id="app2">
+    <header id="topbar">
+      <div class="topbar-left">
+        <button id="back-to-projects" class="icon-btn" title="Back to projects">&#8592;</button>
+        <h1 class="brand">FabMesh</h1>
+        <span id="breadcrumb"></span>
+      </div>
+      <div class="topbar-right">
+        <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
+        <button id="open-old-ui" class="ghost-btn" title="Open the legacy UI">Legacy UI</button>
+      </div>
+    </header>
+
+    <!-- ============================================================
+         PAGE 1: PROJECTS HOME (grid of project cards)
+         ============================================================ -->
+    <section id="page-projects" class="page">
+      <div class="page-header">
+        <h2>Your projects</h2>
+        <button id="btn-new-project" class="primary-btn">+ New project</button>
+      </div>
+      <div id="projects-grid" class="projects-grid">
+        <!-- project cards injected here -->
+      </div>
+      <div id="projects-empty" class="empty-state hidden">
+        <h3>No projects yet</h3>
+        <p>Create your first 3D character in 3 simple steps.</p>
+        <button class="primary-btn" onclick="document.getElementById('btn-new-project').click()">+ Create a project</button>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         PAGE 2: PROJECT WORKSPACE (3 vertical step cards)
+         ============================================================ -->
+    <section id="page-workspace" class="page hidden">
+      <div class="workspace-grid">
+        <!-- STEP 1: IMAGE -->
+        <article class="step-card" id="step-card-image">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="1">1</span>
+            <h3>Image</h3>
+            <span class="step-status" id="step1-status">Pending</span>
+          </header>
+          <div class="step-card-body">
+            <div class="step-preview-col">
+              <div class="step-card-preview" id="step1-preview">
+                <div class="preview-placeholder">No image yet</div>
+              </div>
+              <div id="ws-use-for-3d-bar" class="use-for-bar hidden">
+                <button id="ws-use-for-3d-btn" class="primary-btn">Use this image for 3D &rarr;</button>
+              </div>
+            </div>
+            <div class="step-card-form">
+              <label>Describe your character</label>
+              <textarea id="ws-prompt" rows="3" placeholder="An orc warrior with leather armor, fantasy art..."></textarea>
+              <div class="form-row">
+                <label>Engine</label>
+                <select id="ws-engine">
+                  <option value="local-flux" selected>Local GPU (Juggernaut XL)</option>
+                  <option value="local-sd">Local GPU (SDXL Turbo, fast)</option>
+                  <option value="pollinations">Pollinations (cloud)</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>Count</label>
+                <select id="ws-count">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="4" selected>4</option>
+                  <option value="6">6</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>Quality</label>
+                <input type="range" id="ws-quality" min="10" max="60" step="2" value="30" style="flex:1; accent-color: var(--accent);" />
+                <span id="ws-quality-val" style="min-width: 70px; font-size: 11px; color: var(--text-2);">30 steps</span>
+              </div>
+              <button id="ws-generate-image" class="primary-btn">Generate</button>
+              <div id="ws-image-versions" class="versions-strip"></div>
+              <details class="step-tools-details">
+                <summary>Edit selected image</summary>
+                <div class="step-tools-body">
+                  <div class="step-tools-row">
+                    <button id="ws-modify-btn" class="ghost-btn">&#9998; Modify (img2img)</button>
+                    <button id="ws-removebg-btn" class="ghost-btn">&#9986; Remove background</button>
+                    <button id="ws-clone-btn" class="ghost-btn">&#128203; Clone Stamp</button>
+                    <button id="ws-mask-btn" class="ghost-btn">&#9999; Draw mask</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </article>
+
+        <!-- STEP 2: 3D MESH -->
+        <article class="step-card disabled" id="step-card-mesh">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="2">2</span>
+            <h3>3D Mesh</h3>
+            <span class="step-status" id="step2-status">Pending</span>
+          </header>
+          <div class="step-card-body">
+            <div class="step-preview-col">
+              <div class="step-card-preview" id="step2-preview">
+                <canvas id="ws-mesh-canvas"></canvas>
+                <div class="preview-placeholder" id="step2-placeholder">No mesh yet</div>
+              </div>
+              <div id="ws-use-for-rig-bar" class="use-for-bar hidden">
+                <button id="ws-use-for-rig-btn" class="primary-btn">Use this mesh for Rig &rarr;</button>
+              </div>
+            </div>
+            <div class="step-card-form">
+              <p class="step-hint">Convert the selected image into a 3D mesh.</p>
+              <div class="form-row">
+                <label>Engine</label>
+                <select id="ws-3d-engine">
+                  <option value="hunyuan" selected>Hunyuan3D Local (best)</option>
+                  <option value="local">TripoSR Local (fast)</option>
+                  <option value="trellis">TRELLIS Cloud</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>Max triangles</label>
+                <select id="ws-3d-maxtris">
+                  <option value="0">No limit</option>
+                  <option value="5000">5K (low-poly)</option>
+                  <option value="10000">10K</option>
+                  <option value="20000">20K</option>
+                  <option value="50000" selected>50K (default)</option>
+                  <option value="100000">100K</option>
+                  <option value="200000">200K</option>
+                  <option value="500000">500K (high)</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>Effort</label>
+                <input type="range" id="ws-3d-effort" min="1" max="5" step="1" value="2" style="flex:1; accent-color: var(--accent);" />
+                <span id="ws-3d-effort-val" style="min-width: 70px; font-size: 11px; color: var(--text-2);">Medium</span>
+              </div>
+              <div class="form-row">
+                <label>Texture size</label>
+                <select id="ws-3d-texsize">
+                  <option value="512">512 px</option>
+                  <option value="1024" selected>1024 px</option>
+                  <option value="2048">2048 px</option>
+                  <option value="4096">4096 px</option>
+                </select>
+              </div>
+              <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
+              <div id="ws-mesh-versions" class="versions-strip"></div>
+              <details class="step-tools-details">
+                <summary>Edit selected mesh</summary>
+                <div class="step-tools-body">
+                  <div class="step-tools-row">
+                    <button id="ws-mesh-refine-btn" class="ghost-btn">&#10024; Refine with AI</button>
+                    <button id="ws-mesh-export-btn" class="ghost-btn">&#128190; Export...</button>
+                    <button id="ws-mesh-blender-btn" class="ghost-btn">&#129704; Open in Blender</button>
+                    <button id="ws-mesh-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </article>
+
+        <!-- STEP 3: RIG -->
+        <article class="step-card disabled" id="step-card-rig">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="3">3</span>
+            <h3>Rig</h3>
+            <span class="step-status" id="step3-status">Pending</span>
+          </header>
+          <div class="step-card-body">
+            <div class="step-card-preview" id="step3-preview">
+              <div class="preview-placeholder">No rig yet</div>
+            </div>
+            <div class="step-card-form">
+              <p class="step-hint">Bind a skeleton to your mesh for animation.</p>
+              <div class="form-row">
+                <label>Template</label>
+                <select id="ws-rig-template">
+                  <option value="">Loading templates...</option>
+                </select>
+              </div>
+              <button id="ws-generate-rig" class="primary-btn" disabled>Generate Rig</button>
+              <div id="ws-rig-versions" class="versions-strip"></div>
+              <details class="step-tools-details">
+                <summary>Edit selected rig</summary>
+                <div class="step-tools-body">
+                  <div class="step-tools-row">
+                    <button id="ws-rig-test-btn" class="ghost-btn">&#9654; Test animation</button>
+                    <button id="ws-rig-unreal-btn" class="ghost-btn">&#127918; Export to Unreal</button>
+                    <button id="ws-rig-blender-btn" class="ghost-btn">&#129704; Edit in Blender</button>
+                    <button id="ws-rig-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         MODAL: NEW PROJECT
+         ============================================================ -->
+    <div id="modal-new-project" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>New project</h2>
+        <p class="modal-subtitle">Give your project a name and describe what you want to create.</p>
+        <label>Project name</label>
+        <input type="text" id="np-name" placeholder="orc_warrior" />
+        <label>Description (prompt)</label>
+        <textarea id="np-prompt" rows="3" placeholder="An orc warrior with leather armor, full-body pose..."></textarea>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="np-cancel">Cancel</button>
+          <button class="primary-btn" id="np-create">Create project</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         LIGHTBOX (fullscreen image preview)
+         ============================================================ -->
+    <div id="lightbox-2" class="hidden">
+      <button id="lightbox-2-close" title="Close">&#10005;</button>
+      <img id="lightbox-2-img" alt="" />
+    </div>
+
+    <!-- ============================================================
+         REFINE MESH MODAL (AI-driven mesh modification)
+         ============================================================ -->
+    <div id="modal-refine-mesh" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Refine mesh with AI</h2>
+        <p class="modal-subtitle">Describe what to change. The AI rebuilds the mesh from a new script.</p>
+        <label>Modification</label>
+        <textarea id="rfn-prompt" rows="3" placeholder="add wheels, make it taller, smoother surface..."></textarea>
+        <label>Output format</label>
+        <select id="rfn-format">
+          <option value="glb" selected>GLB</option>
+          <option value="fbx">FBX</option>
+          <option value="obj">OBJ</option>
+          <option value="stl">STL</option>
+        </select>
+        <label>AI model</label>
+        <select id="rfn-model">
+          <option value="claude" selected>Claude (best)</option>
+          <option value="gpt-4o">GPT-4o</option>
+          <option value="local">Local LLM</option>
+        </select>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="rfn-cancel">Cancel</button>
+          <button class="primary-btn" id="rfn-go">Refine</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         EXPORT MESH MODAL
+         ============================================================ -->
+    <div id="modal-export-mesh" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Export 3D mesh</h2>
+        <p class="modal-subtitle">Pick a format and a destination filename.</p>
+        <label>Format</label>
+        <select id="exp-format">
+          <option value="glb">GLB (web/Three.js)</option>
+          <option value="gltf">GLTF + textures</option>
+          <option value="fbx">FBX (Autodesk)</option>
+          <option value="obj">OBJ (universal)</option>
+          <option value="stl">STL (3D printing)</option>
+          <option value="ply">PLY (point cloud)</option>
+          <option value="fbx_unreal">FBX for Unreal Engine</option>
+        </select>
+        <label>Filename</label>
+        <input type="text" id="exp-filename" placeholder="my_mesh" />
+        <div class="modal-actions">
+          <button class="ghost-btn" id="exp-cancel">Cancel</button>
+          <button class="primary-btn" id="exp-go">Export</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         TEST RIG ANIMATION MODAL
+         ============================================================ -->
+    <div id="modal-test-anim" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Test rig animation</h2>
+        <p class="modal-subtitle">Apply a built-in animation to the rig and open it in Blender.</p>
+        <label>Animation</label>
+        <select id="anim-select">
+          <option value="idle">Idle</option>
+          <option value="walk">Walk</option>
+          <option value="run">Run</option>
+        </select>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="anim-cancel">Cancel</button>
+          <button class="primary-btn" id="anim-go">Open in Blender</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         JOB DETAILS MODAL
+         ============================================================ -->
+    <div id="modal-job-details" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="job-details-head">
+          <img id="jd-ref-img" alt="" />
+          <div class="job-details-head-text">
+            <h2 id="job-details-title">Running task</h2>
+            <p class="modal-subtitle" id="job-details-subtitle">--</p>
+          </div>
+        </div>
+        <div class="job-details-stats">
+          <div class="jd-row"><span class="jd-label">Status</span><span class="jd-value" id="jd-status">Running</span></div>
+          <div class="jd-row"><span class="jd-label">Started</span><span class="jd-value" id="jd-started">--</span></div>
+          <div class="jd-row"><span class="jd-label">Elapsed</span><span class="jd-value" id="jd-elapsed">--</span></div>
+          <div class="jd-row"><span class="jd-label">Estimated</span><span class="jd-value" id="jd-estimated">--</span></div>
+          <div class="jd-row"><span class="jd-label">Project</span><span class="jd-value" id="jd-project">--</span></div>
+        </div>
+        <div id="jd-params" class="job-details-stats hidden"></div>
+        <div class="jd-progress">
+          <div class="jd-progress-bar"><div class="jd-progress-fill" id="jd-progress-fill"></div></div>
+          <div class="jd-progress-pct" id="jd-progress-pct">0%</div>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="job-details-close">Close</button>
+          <button class="primary-btn danger" id="job-details-cancel">Cancel task</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CONFIRM MODAL (custom-styled replacement for window.confirm)
+         ============================================================ -->
+    <div id="modal-confirm" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width: 400px;">
+        <h2 id="confirm-title">Confirm</h2>
+        <p class="modal-subtitle" id="confirm-message">Are you sure?</p>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="confirm-cancel">Cancel</button>
+          <button class="primary-btn danger" id="confirm-ok">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         MODIFY IMAGE MODAL (img2img)
+         ============================================================ -->
+    <div id="modal-modify-image" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Modify image</h2>
+        <p class="modal-subtitle">Describe the changes you want. The AI keeps the composition.</p>
+        <label>Modification prompt</label>
+        <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
+        <label>Engine</label>
+        <select id="mod-engine">
+          <option value="local-sdxl" selected>Local GPU (SDXL)</option>
+          <option value="pollinations">Pollinations (cloud)</option>
+        </select>
+        <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
+        <input type="range" id="mod-strength" min="30" max="95" value="55" />
+        <div class="modal-actions">
+          <button class="ghost-btn" id="mod-cancel">Cancel</button>
+          <button class="primary-btn" id="mod-apply">Modify image</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         DRAW MASK MODAL (ported from legacy)
+         ============================================================ -->
+    <div id="mask-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Draw Mask (paint to remove)</h3>
+          <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Click & drag</strong> to paint red mask &nbsp;|&nbsp;
+          <strong>Right-click drag</strong> to erase &nbsp;|&nbsp;
+          <strong>Z</strong> to undo
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px;">Brush:
+            <input type="range" id="mask-brush-size" min="5" max="200" value="50" />
+            <span id="mask-brush-val" style="min-width:30px;">50</span>
+          </label>
+          <button id="mask-undo" class="secondary-btn" style="padding: 4px 12px;">Undo</button>
+          <button id="mask-redo" class="secondary-btn" style="padding: 4px 12px;">Redo</button>
+          <button id="mask-clear" class="secondary-btn" style="padding: 4px 12px;">Clear</button>
+        </div>
+        <div id="mask-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
+          <canvas id="mask-base-canvas" style="position: absolute; left: 0; top: 0;"></canvas>
+          <canvas id="mask-overlay-canvas" style="position: absolute; left: 0; top: 0; cursor: none; pointer-events: auto; opacity: 0.55;"></canvas>
+          <div id="mask-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <label for="mask-prompt" style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">Replace with:</label>
+          <input type="text" id="mask-prompt" placeholder="Describe replacement (empty = just remove)" style="flex: 1; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 13px;" />
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button id="mask-cancel" class="secondary-btn">Cancel</button>
+          <button id="mask-apply" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Apply Inpaint</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CLONE STAMP MODAL (ported from legacy)
+         ============================================================ -->
+    <div id="clone-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Clone Stamp</h3>
+          <button id="clone-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Ctrl+Click</strong> to set source point &nbsp;|&nbsp;
+          <strong>Click & drag</strong> to clone &nbsp;|&nbsp;
+          <strong>Z</strong> to undo
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px;">Brush:
+            <input type="range" id="clone-brush-size" min="5" max="200" value="50" style="vertical-align:middle;" />
+            <span id="clone-brush-val" style="min-width:30px;">50</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px;">Hardness:
+            <input type="range" id="clone-hardness" min="0" max="100" value="50" style="vertical-align:middle;" />
+            <span id="clone-hardness-val" style="min-width:30px;">50</span>
+          </label>
+          <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;" disabled>Undo</button>
+          <button id="clone-redo" class="secondary-btn" style="padding: 4px 12px;" disabled>Redo</button>
+          <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
+        </div>
+        <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
+          <canvas id="clone-canvas" style="cursor: none; position: absolute; left: 0; top: 0;"></canvas>
+          <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;"></div>
+          <div id="clone-source-marker" style="position: fixed; pointer-events: none; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.15); display: none; z-index: 999; box-sizing: border-box;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
+          <div style="display:flex; gap:8px;">
+            <button id="clone-cancel" class="secondary-btn">Cancel</button>
+            <button id="clone-save" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Save as new version</button>
+          </div>
+        </div>
+        <div id="clone-error" style="display:none; padding: 8px 12px; background: rgba(255,68,68,0.15); border: 1px solid var(--error); border-radius: 4px; color: var(--error); font-size: 12px; font-weight: 600;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         JOBS BUBBLE (collapsed jobs panel)
+         ============================================================ -->
+    <button id="jobs-bubble-2" class="hidden" title="Show running jobs">
+      <span id="jobs-bubble-count-2">0</span>
+    </button>
+    <div id="jobs-panel-2" class="hidden">
+      <div class="jobs-panel-header">
+        <span>Running jobs</span>
+        <button id="jobs-close-2" class="icon-btn">&#10005;</button>
+      </div>
+      <div id="jobs-list-2"></div>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../node_modules/three/build/three.module.js",
+        "three/addons/": "../../node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="index2-edit-tools.js"></script>
+  <script type="module" src="index2.js"></script>
+</body>
+</html>
