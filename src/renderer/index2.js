@@ -27,6 +27,51 @@ const state = {
 // ============================================================
 // CUSTOM CONFIRM MODAL (replaces window.confirm)
 // ============================================================
+// Show a long error message in a styled modal instead of native alert()
+function customError(message, title = 'Error') {
+  // Truncate insanely long messages but keep them scrollable
+  const safe = String(message || 'Unknown error');
+  const modal = document.getElementById('modal-confirm');
+  const titleEl = document.getElementById('confirm-title');
+  const msgEl = document.getElementById('confirm-message');
+  const okBtn = document.getElementById('confirm-ok');
+  const cancelBtn = document.getElementById('confirm-cancel');
+  titleEl.textContent = title;
+  msgEl.textContent = safe;
+  msgEl.style.maxHeight = '50vh';
+  msgEl.style.overflowY = 'auto';
+  msgEl.style.whiteSpace = 'pre-wrap';
+  msgEl.style.fontFamily = 'monospace';
+  msgEl.style.fontSize = '11px';
+  msgEl.style.textAlign = 'left';
+  okBtn.textContent = 'OK';
+  okBtn.classList.remove('danger');
+  cancelBtn.style.display = 'none';
+  modal.classList.remove('hidden');
+  return new Promise(resolve => {
+    function cleanup() {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      modal.removeEventListener('click', onOverlay);
+      // Reset for normal customConfirm reuse
+      msgEl.style.maxHeight = '';
+      msgEl.style.overflowY = '';
+      msgEl.style.whiteSpace = '';
+      msgEl.style.fontFamily = '';
+      msgEl.style.fontSize = '';
+      msgEl.style.textAlign = '';
+      okBtn.classList.add('danger');
+      cancelBtn.style.display = '';
+      resolve();
+    }
+    function onOk() { cleanup(); }
+    function onOverlay(e) { if (e.target === modal) cleanup(); }
+    okBtn.addEventListener('click', onOk);
+    modal.addEventListener('click', onOverlay);
+    setTimeout(() => okBtn.focus(), 50);
+  });
+}
+
 function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
   return new Promise((resolve) => {
     const modal = document.getElementById('modal-confirm');
@@ -125,13 +170,21 @@ async function refreshProjectsPage() {
     if (!p.prompt && f.prompt) p.prompt = f.prompt;
   }
   // Meshes don't carry a project field — derive from filename.
-  // Convention: <projectName>_<index>_<extra>.<ext> e.g. orc_42.glb, mesh_3_rigged_orc_v1.fbx
+  // Convention examples:
+  //   orc_42.glb                          -> orc
+  //   test_hunyuan_1775589123456.glb      -> test
+  //   spider_local_1775589000000.glb      -> spider
+  //   mesh_3_rigged_orc_v1.fbx            -> mesh
   function meshProject(filename) {
     // Strip extension
     let base = filename.replace(/\.[^.]+$/, '');
     // Remove "_rigged_<anything>" suffix
     base = base.replace(/_rigged_.+$/i, '');
-    // Remove trailing _<number> (the index)
+    // Remove trailing timestamp (_<10+ digits>)
+    base = base.replace(/_\d{10,}$/, '');
+    // Remove trailing engine suffix added by main.js: _hunyuan / _local / _trellis / _ai
+    base = base.replace(/_(hunyuan|local|trellis|ai)$/i, '');
+    // Remove a trailing _<number> if any (legacy index naming)
     base = base.replace(/_\d+$/, '');
     return base || 'untitled';
   }
@@ -279,10 +332,20 @@ function resetWorkspaceUI() {
   // Image step
   const step1Prev = document.getElementById('step1-preview');
   if (step1Prev) {
-    step1Prev.innerHTML = '<div class="preview-placeholder">No image yet</div>';
+    // Remove img + restore placeholder, KEEP the static expand button
+    const oldImg = step1Prev.querySelector('img');
+    if (oldImg) oldImg.remove();
+    if (!step1Prev.querySelector('.preview-placeholder')) {
+      const ph = document.createElement('div');
+      ph.className = 'preview-placeholder';
+      ph.textContent = 'No image yet';
+      step1Prev.insertBefore(ph, step1Prev.firstChild);
+    }
     step1Prev.classList.remove('clickable');
     step1Prev.onclick = null;
   }
+  const imgExpandBtn = document.getElementById('ws-image-expand-btn');
+  if (imgExpandBtn) imgExpandBtn.classList.add('hidden');
   const useBar = document.getElementById('ws-use-for-3d-bar');
   if (useBar) useBar.classList.add('hidden');
   const imgStrip = document.getElementById('ws-image-versions');
@@ -294,10 +357,12 @@ function resetWorkspaceUI() {
   if (step2Placeholder) step2Placeholder.style.display = '';
   if (step2Prev) {
     step2Prev.classList.remove('clickable');
-    // Remove any source-image overlay left from a previous project
-    const overlay = step2Prev.querySelector('.step2-source-overlay');
-    if (overlay) overlay.remove();
   }
+  // Reset the source-image preview in the Create new section
+  const srcPreview = document.getElementById('ws-3d-source-preview');
+  if (srcPreview) srcPreview.innerHTML = '<div class="preview-placeholder">No image selected</div>';
+  const meshExpandBtn = document.getElementById('ws-mesh-expand-btn');
+  if (meshExpandBtn) meshExpandBtn.classList.add('hidden');
   // Clear the three.js scene if it exists
   if (wsModel && wsScene) {
     wsScene.remove(wsModel);
@@ -353,6 +418,12 @@ function populateWorkspace(p) {
     setStepStatus(2, 'done');
     showStep2Preview(p.meshes[0]);
     enableStep(3);
+  } else if (p.selectedImagePath) {
+    // No mesh yet but an image is queued for 3D — show it as the source preview
+    showStep2SourceImage(p.selectedImagePath);
+    setStepStatus(2, 'active');
+    const step2Card = document.getElementById('step-card-mesh');
+    if (step2Card) step2Card.classList.remove('disabled');
   }
 
   // Rig step
@@ -462,40 +533,40 @@ document.getElementById('ws-use-for-3d-btn')?.addEventListener('click', () => {
 });
 
 function showStep2SourceImage(imgPath) {
-  // If no mesh has been generated yet, show the source image as a hint in the step-2 preview
-  const p = state.currentProject;
-  if (p && p.meshes.length > 0) return; // mesh already present, don't overwrite
-  const preview = document.getElementById('step2-preview');
-  const placeholder = document.getElementById('step2-placeholder');
-  if (placeholder) placeholder.style.display = 'none';
-  if (preview) {
-    // Keep the canvas element in the DOM for three.js, but add an overlay img
-    let overlay = preview.querySelector('.step2-source-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.className = 'step2-source-overlay';
-      preview.appendChild(overlay);
-    }
-    overlay.innerHTML = `
-      <img src="file:///${imgPath.replace(/\\/g, '/')}">
-      <div class="step2-source-label">Source image for 3D</div>
-    `;
+  // Populate the source-image preview shown next to the "Create new" form
+  // in the 3D Mesh card. This is independent of the Edit-selected mesh viewer.
+  const target = document.getElementById('ws-3d-source-preview');
+  if (!target) return;
+  if (imgPath) {
+    target.innerHTML = `<img src="file:///${imgPath.replace(/\\/g, '/')}">`;
+  } else {
+    target.innerHTML = '<div class="preview-placeholder">No image selected</div>';
   }
 }
 
 function showStep1Preview(imgPath) {
   const preview = document.getElementById('step1-preview');
-  preview.innerHTML = `
-    <img src="file:///${imgPath.replace(/\\/g, '/')}">
-    <button class="preview-expand-btn" title="Open full size">&#x26F6;</button>
-  `;
+  // Remove any previous img + placeholder, but KEEP the static expand button + toolbar
+  const placeholder = preview.querySelector('.preview-placeholder');
+  if (placeholder) placeholder.remove();
+  let imgEl = preview.querySelector('img');
+  if (!imgEl) {
+    imgEl = document.createElement('img');
+    preview.insertBefore(imgEl, preview.firstChild);
+  }
+  imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/');
   preview.classList.add('clickable');
   preview.onclick = (e) => {
-    // Don't double-trigger when clicking the button
+    // Ignore clicks on the use-for-3d bar buttons that bubble up
+    if (e.target.closest('button')) return;
     openLightbox(imgPath);
   };
-  // The button is inside the preview div so its click bubbles up — that's fine,
-  // both the button and the image trigger the same lightbox.
+  // Show + wire the expand button
+  const expandBtn = document.getElementById('ws-image-expand-btn');
+  if (expandBtn) {
+    expandBtn.classList.remove('hidden');
+    expandBtn.onclick = (e) => { e.stopPropagation(); openLightbox(imgPath); };
+  }
   // Show the "use for 3D" helper bar
   const useBar = document.getElementById('ws-use-for-3d-bar');
   if (useBar) {
@@ -509,6 +580,367 @@ function showStep1Preview(imgPath) {
     }
   }
 }
+
+// ============================================================
+// MESH VIEWER CONTROLS (toolbar logic shared between mini + lightbox)
+// ============================================================
+// State per viewer: a Set of options. Each viewer has its own state.
+function createMeshViewerControls(toolbarEl, getViewer) {
+  if (!toolbarEl) return;
+  // viewer = { scene, camera, controls, model, renderer, gridHelper, skelHelper, lightDir }
+  const state = {
+    wireframe: false,
+    pbr: true,
+    grid: true,
+    bones: false,
+    shadows: true,
+    bg: 'dark',
+    light: 1.0,
+  };
+
+  const BG_COLORS = {
+    dark: 0x1d1d2c,
+    studio: 0xf0f0f0,
+    black: 0x000000,
+    gray: 0x444444,
+  };
+
+  function ensureGrid(viewer) {
+    if (!viewer.scene) return;
+    if (!viewer.gridHelper && state.grid) {
+      const grid = new THREE.GridHelper(10, 20, 0x444466, 0x222233);
+      grid.material.opacity = 0.5;
+      grid.material.transparent = true;
+      viewer.scene.add(grid);
+      viewer.gridHelper = grid;
+    } else if (viewer.gridHelper && !state.grid) {
+      viewer.scene.remove(viewer.gridHelper);
+      viewer.gridHelper = null;
+    }
+  }
+
+  function ensureSkeletonHelper(viewer) {
+    if (!viewer.scene || !viewer.model) return;
+    if (state.bones && !viewer.skelHelper) {
+      const helper = new THREE.SkeletonHelper(viewer.model);
+      try { helper.material.linewidth = 2; helper.material.color = new THREE.Color(0xff4488); } catch (e) {}
+      helper.name = 'SkeletonHelper';
+      viewer.scene.add(helper);
+      viewer.skelHelper = helper;
+      // Make the mesh semi-transparent so the bones are visible
+      viewer.model.traverse(c => {
+        if (c.isMesh && c.material) {
+          const mats = Array.isArray(c.material) ? c.material : [c.material];
+          mats.forEach(m => { m.transparent = true; m.opacity = 0.4; });
+        }
+      });
+    } else if (!state.bones && viewer.skelHelper) {
+      viewer.scene.remove(viewer.skelHelper);
+      viewer.skelHelper = null;
+      if (viewer.model) viewer.model.traverse(c => {
+        if (c.isMesh && c.material) {
+          const mats = Array.isArray(c.material) ? c.material : [c.material];
+          mats.forEach(m => { m.transparent = false; m.opacity = 1.0; });
+        }
+      });
+    }
+  }
+
+  function applyWireframe(viewer) {
+    if (!viewer.model) return;
+    viewer.model.traverse(c => {
+      if (c.isMesh && c.material) {
+        const mats = Array.isArray(c.material) ? c.material : [c.material];
+        mats.forEach(m => { if ('wireframe' in m) m.wireframe = state.wireframe; });
+      }
+    });
+  }
+
+  function applyPBR(viewer) {
+    if (!viewer.model) return;
+    // PBR on = original materials. PBR off = MeshNormalMaterial-like flat shading.
+    viewer.model.traverse(c => {
+      if (c.isMesh && c.material) {
+        if (state.pbr) {
+          if (c.userData._origMat) {
+            c.material = c.userData._origMat;
+            delete c.userData._origMat;
+          }
+        } else {
+          if (!c.userData._origMat) {
+            c.userData._origMat = c.material;
+            c.material = new THREE.MeshNormalMaterial({ flatShading: true });
+          }
+        }
+      }
+    });
+  }
+
+  function applyBackground(viewer) {
+    if (!viewer.scene) return;
+    viewer.scene.background = new THREE.Color(BG_COLORS[state.bg] || 0x1d1d2c);
+  }
+
+  function applyLight(viewer) {
+    if (!viewer.scene) return;
+    viewer.scene.traverse(o => {
+      if (o.isLight) o.intensity = (o.userData._baseIntensity || 1) * state.light;
+    });
+  }
+
+  function applyShadows(viewer) {
+    if (!viewer.renderer) viewer.renderer = (viewer === lb3dViewerRef() ? lb3dRenderer : wsRenderer);
+    if (viewer.renderer) viewer.renderer.shadowMap.enabled = state.shadows;
+    viewer.scene?.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = state.shadows;
+        o.receiveShadow = state.shadows;
+      }
+      if (o.isLight && o.castShadow !== undefined) {
+        o.castShadow = state.shadows;
+      }
+    });
+    // For shading-on-mesh fakery: if shadows off, increase emissive on materials
+    viewer.scene?.traverse(c => {
+      if (c.isMesh && c.material) {
+        const mats = Array.isArray(c.material) ? c.material : [c.material];
+        mats.forEach(m => {
+          if ('emissive' in m && m.emissive) {
+            if (!state.shadows) {
+              if (!m.userData._origEmissive) m.userData._origEmissive = m.emissive.clone();
+              m.emissive.setRGB(0.4, 0.4, 0.4);
+              m.emissiveIntensity = 1;
+            } else if (m.userData._origEmissive) {
+              m.emissive.copy(m.userData._origEmissive);
+              delete m.userData._origEmissive;
+            }
+          }
+        });
+      }
+    });
+  }
+  // Helper to find lb3d viewer (used in applyShadows)
+  function lb3dViewerRef() {
+    return typeof lb3dScene !== 'undefined' && lb3dScene ? { scene: lb3dScene } : null;
+  }
+
+  function captureBaseLightIntensities(viewer) {
+    viewer.scene.traverse(o => {
+      if (o.isLight && !o.userData._baseIntensity) {
+        o.userData._baseIntensity = o.intensity;
+      }
+    });
+  }
+
+  function setView(viewer, view) {
+    if (!viewer.camera || !viewer.controls || !viewer.model) return;
+    const box = new THREE.Box3().setFromObject(viewer.model);
+    const sizeVec = box.getSize(new THREE.Vector3());
+    const size = sizeVec.length();
+    // Model is centered on X/Z and sits on y=0. Look at mid-height.
+    const cx = 0, cz = 0;
+    const cy = sizeVec.y * 0.5;
+    const d = size * 1.4;
+    const positions = {
+      front:  [cx, cy, cz + d],
+      back:   [cx, cy, cz - d],
+      left:   [cx - d, cy, cz],
+      right:  [cx + d, cy, cz],
+      top:    [cx, cy + d, cz + 0.001],
+      bottom: [cx, cy - d, cz + 0.001],
+      iso:    [cx + d * 0.7, cy + d * 0.5, cz + d * 0.7],
+    };
+    const p = positions[view];
+    if (!p) return;
+    viewer.camera.position.set(p[0], p[1], p[2]);
+    viewer.camera.lookAt(cx, cy, cz);
+    viewer.controls.target.set(cx, cy, cz);
+    viewer.controls.update();
+  }
+
+  function resetCamera(viewer) {
+    if (!viewer.model) return;
+    const box = new THREE.Box3().setFromObject(viewer.model);
+    const sizeVec = box.getSize(new THREE.Vector3());
+    const size = sizeVec.length();
+    // The model is already positioned so its bottom sits on y=0; aim at mid-height
+    const lookY = sizeVec.y * 0.5;
+    viewer.camera.position.set(size * 1.2, size * 0.8 + lookY, size * 1.2);
+    viewer.camera.lookAt(0, lookY, 0);
+    viewer.controls.target.set(0, lookY, 0);
+    viewer.controls.update();
+  }
+
+  // Event bindings on the toolbar
+  toolbarEl.querySelectorAll('button[data-act], select[data-act], input[data-act]').forEach(el => {
+    const act = el.dataset.act;
+    if (el.tagName === 'BUTTON') {
+      el.addEventListener('click', () => {
+        const viewer = getViewer();
+        if (!viewer) return;
+        captureBaseLightIntensities(viewer);
+        if (act === 'reset') { resetCamera(viewer); return; }
+        if (act === 'wire') { state.wireframe = !state.wireframe; el.classList.toggle('active', state.wireframe); applyWireframe(viewer); return; }
+        if (act === 'pbr') { state.pbr = !state.pbr; el.classList.toggle('active', !state.pbr); applyPBR(viewer); return; }
+        if (act === 'grid') { state.grid = !state.grid; el.classList.toggle('active', state.grid); ensureGrid(viewer); return; }
+        if (act === 'bones') { state.bones = !state.bones; el.classList.toggle('active', state.bones); ensureSkeletonHelper(viewer); return; }
+        if (act === 'shadows') { state.shadows = !state.shadows; el.classList.toggle('active', state.shadows); applyShadows(viewer); return; }
+      });
+    } else if (el.tagName === 'SELECT') {
+      el.addEventListener('change', () => {
+        const viewer = getViewer();
+        if (!viewer) return;
+        captureBaseLightIntensities(viewer);
+        if (act === 'view') { setView(viewer, el.value); el.value = ''; return; }
+        if (act === 'bg') { state.bg = el.value; applyBackground(viewer); return; }
+      });
+    } else if (el.type === 'range' && act === 'light') {
+      const updateFill = () => {
+        const min = parseFloat(el.min) || 0;
+        const max = parseFloat(el.max) || 100;
+        const v = parseFloat(el.value) || 0;
+        const pct = ((v - min) / (max - min)) * 100;
+        el.style.setProperty('--val', pct + '%');
+      };
+      updateFill();
+      el.addEventListener('input', () => {
+        updateFill();
+        const viewer = getViewer();
+        if (!viewer) return;
+        captureBaseLightIntensities(viewer);
+        state.light = parseInt(el.value) / 100;
+        applyLight(viewer);
+      });
+    }
+  });
+
+  // Apply default state once a viewer becomes available
+  return {
+    refreshAll() {
+      const viewer = getViewer();
+      if (!viewer) return;
+      captureBaseLightIntensities(viewer);
+      ensureGrid(viewer);
+      applyBackground(viewer);
+      applyWireframe(viewer);
+      applyPBR(viewer);
+      ensureSkeletonHelper(viewer);
+      applyLight(viewer);
+      applyShadows(viewer);
+    }
+  };
+}
+
+// Bind controls for the small mesh viewer (step 2 preview)
+const wsMeshControls = createMeshViewerControls(
+  document.getElementById('ws-mesh-toolbar'),
+  () => wsScene && wsCamera && wsControls && wsModel ? {
+    scene: wsScene, camera: wsCamera, controls: wsControls, model: wsModel
+  } : null
+);
+// Bind controls for the lightbox viewer (initialized lazily)
+let lb3dControlsApi = null;
+function ensureLb3dControlsBinding() {
+  if (lb3dControlsApi) return;
+  lb3dControlsApi = createMeshViewerControls(
+    document.getElementById('lightbox-3d-toolbar'),
+    () => lb3dScene && lb3dCamera && lb3dControls && lb3dModel ? {
+      scene: lb3dScene, camera: lb3dCamera, controls: lb3dControls, model: lb3dModel
+    } : null
+  );
+}
+
+// Toolbar refresh is triggered from showStep2Preview itself (search "ws-mesh-toolbar" lower in file).
+
+// ----- 3D Lightbox -----
+let lb3dRenderer, lb3dScene, lb3dCamera, lb3dControls, lb3dModel, lb3dRafId;
+function init3DLightbox() {
+  if (lb3dRenderer) return;
+  const canvas = document.getElementById('lightbox-3d-canvas');
+  lb3dRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  lb3dRenderer.setPixelRatio(window.devicePixelRatio);
+  lb3dRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  lb3dRenderer.toneMappingExposure = 1.4;
+  lb3dScene = new THREE.Scene();
+  lb3dScene.background = new THREE.Color(0x0b0b14);
+  lb3dCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 200);
+  lb3dCamera.position.set(2, 2, 3);
+  lb3dControls = new OrbitControls(lb3dCamera, canvas);
+  lb3dControls.enableDamping = true;
+  // Bright base lighting
+  lb3dScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 2.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  dir.position.set(5, 8, 5);
+  lb3dScene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  fill.position.set(-5, 3, -5);
+  lb3dScene.add(fill);
+  lb3dScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+}
+function resize3DLightbox() {
+  if (!lb3dRenderer) return;
+  const w = window.innerWidth, h = window.innerHeight;
+  lb3dRenderer.setSize(w, h, false);
+  lb3dCamera.aspect = w / h;
+  lb3dCamera.updateProjectionMatrix();
+}
+function startLb3dLoop() {
+  if (lb3dRafId) cancelAnimationFrame(lb3dRafId);
+  function tick() {
+    lb3dControls.update();
+    lb3dRenderer.render(lb3dScene, lb3dCamera);
+    lb3dRafId = requestAnimationFrame(tick);
+  }
+  tick();
+}
+function stopLb3dLoop() {
+  if (lb3dRafId) cancelAnimationFrame(lb3dRafId);
+  lb3dRafId = null;
+}
+async function openMeshLightbox(meshPath) {
+  init3DLightbox();
+  ensureLb3dControlsBinding();
+  document.getElementById('lightbox-3d').classList.remove('hidden');
+  resize3DLightbox();
+  // Clear previous model
+  if (lb3dModel) { lb3dScene.remove(lb3dModel); lb3dModel = null; }
+  const buffer = await API.readMeshFile(meshPath);
+  if (!buffer) { alert('Could not load mesh file'); return; }
+  const loader = new GLTFLoader();
+  loader.parse(buffer, '', (gltf) => {
+    lb3dModel = gltf.scene;
+    lb3dScene.add(lb3dModel);
+    // Fit camera so the model's bottom sits on y=0
+    const box = new THREE.Box3().setFromObject(lb3dModel);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    const sizeVec = box.getSize(new THREE.Vector3());
+    lb3dModel.position.x -= center.x;
+    lb3dModel.position.z -= center.z;
+    lb3dModel.position.y -= box.min.y;
+    const lookY = sizeVec.y * 0.5;
+    lb3dCamera.position.set(size * 1.3, size * 0.9 + lookY, size * 1.3);
+    lb3dCamera.lookAt(0, lookY, 0);
+    lb3dControls.target.set(0, lookY, 0);
+    lb3dControls.update();
+    // Apply default toolbar state to the lightbox viewer
+    if (lb3dControlsApi) setTimeout(() => lb3dControlsApi.refreshAll(), 50);
+  }, (err) => console.error('GLTF parse error in lightbox', err));
+  startLb3dLoop();
+}
+function closeMeshLightbox() {
+  document.getElementById('lightbox-3d').classList.add('hidden');
+  stopLb3dLoop();
+}
+document.getElementById('lightbox-3d-close')?.addEventListener('click', closeMeshLightbox);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('lightbox-3d').classList.contains('hidden')) {
+    closeMeshLightbox();
+  }
+});
+window.addEventListener('resize', () => {
+  if (!document.getElementById('lightbox-3d').classList.contains('hidden')) resize3DLightbox();
+});
 
 // ----- Lightbox -----
 function openLightbox(imgPath) {
@@ -563,14 +995,18 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
   const steps = parseInt(document.getElementById('ws-quality').value) || 30;
+  const multiView = document.getElementById('ws-multiview')?.checked || false;
+  const buildStages = document.getElementById('ws-img-buildstages')?.checked || false;
   const job = pushJob(`Generate images: ${p.name}`, null, {
     Engine: engine,
     Count: count,
     Steps: steps,
+    'Multi-view': multiView ? 'yes' : 'no',
+    'Construction stages': buildStages ? 'yes' : 'no',
     Prompt: prompt,
   });
   try {
-    const r = await API.generateImages({ prompt, engine, numImages: count, projectName: p.name, steps });
+    const r = await API.generateImages({ prompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages });
     if (r?.success) {
       completeJob(job.id, true);
       // Refresh the project's images from disk
@@ -621,7 +1057,7 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
       await reloadCurrentProject();
     } else {
       completeJob(job.id, false);
-      alert('Modify failed: ' + (r?.error || 'unknown'));
+      customError(r?.error || 'unknown', 'Modify failed');
     }
   } catch (e) {
     completeJob(job.id, false);
@@ -672,17 +1108,25 @@ function initWsThree() {
   wsRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   wsRenderer.setSize(w, h, false);
   wsRenderer.setPixelRatio(window.devicePixelRatio);
+  wsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  wsRenderer.toneMappingExposure = 1.4;
   wsScene = new THREE.Scene();
   wsScene.background = new THREE.Color(0x1d1d2c);
   wsCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
   wsCamera.position.set(2, 2, 3);
   wsControls = new OrbitControls(wsCamera, canvas);
   wsControls.enableDamping = true;
-  const light = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0);
-  wsScene.add(light);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(5, 5, 5);
+  // Bright base lighting so the slider has plenty of headroom
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 2.0);
+  wsScene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  dir.position.set(5, 8, 5);
   wsScene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  fill.position.set(-5, 3, -5);
+  wsScene.add(fill);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  wsScene.add(ambient);
   function tick() {
     wsControls.update();
     wsRenderer.render(wsScene, wsCamera);
@@ -697,6 +1141,12 @@ async function showStep2Preview(mesh) {
   // Remove the source-image overlay if it was shown
   const overlay = document.querySelector('.step2-source-overlay');
   if (overlay) overlay.remove();
+  // Show the expand button (hidden until a mesh is actually loaded)
+  const expandBtn = document.getElementById('ws-mesh-expand-btn');
+  if (expandBtn) {
+    expandBtn.classList.remove('hidden');
+    expandBtn.onclick = (e) => { e.stopPropagation(); openMeshLightbox(mesh.path); };
+  }
   // Track which mesh is currently previewed
   const p = state.currentProject;
   if (p) p.previewMeshPath = mesh.path;
@@ -720,6 +1170,12 @@ async function showStep2Preview(mesh) {
     wsModel = gltf.scene;
     wsScene.add(wsModel);
     fitWsCamera(wsModel);
+    // Show the toolbar and refresh its state for this new model
+    const tb = document.getElementById('ws-mesh-toolbar');
+    if (tb) tb.classList.remove('hidden');
+    if (typeof wsMeshControls !== 'undefined' && wsMeshControls) {
+      setTimeout(() => wsMeshControls.refreshAll(), 50);
+    }
   }, (err) => { console.error('GLTF parse error', err); });
 }
 
@@ -727,10 +1183,17 @@ function fitWsCamera(obj) {
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3()).length();
   const center = box.getCenter(new THREE.Vector3());
-  obj.position.sub(center);
-  wsCamera.position.set(size * 1.2, size * 0.8, size * 1.2);
-  wsCamera.lookAt(0, 0, 0);
-  wsControls.target.set(0, 0, 0);
+  // Translate so the model's bottom (min.y) sits on y=0 (the grid plane),
+  // and X / Z are centered on the origin
+  obj.position.x -= center.x;
+  obj.position.z -= center.z;
+  obj.position.y -= box.min.y;
+  // Look at the model's vertical mid-height instead of (0,0,0)
+  const sizeVec = box.getSize(new THREE.Vector3());
+  const lookY = sizeVec.y * 0.5;
+  wsCamera.position.set(size * 1.2, size * 0.8 + lookY, size * 1.2);
+  wsCamera.lookAt(0, lookY, 0);
+  wsControls.target.set(0, lookY, 0);
   wsControls.update();
 }
 
@@ -747,7 +1210,18 @@ function renderMeshVersions(p) {
     t.className = 'version-thumb';
     if (m.path === p.previewMeshPath) t.classList.add('selected');
     if (m.path === p.selectedMeshPath) t.classList.add('used-for-3d'); // reuse same green check style
+    // Resolve a thumbnail: prefer the mesh's own thumb (if main process generated one),
+    // fall back to the source image used to generate this mesh, then to the project thumb.
+    let thumbSrc = '';
+    if (m.thumb) {
+      thumbSrc = m.thumb.startsWith('file:') ? m.thumb : 'file:///' + m.thumb.replace(/\\/g, '/');
+    } else if (m.sourceImage) {
+      thumbSrc = 'file:///' + m.sourceImage.replace(/\\/g, '/');
+    } else if (p.thumb) {
+      thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
+    }
     t.innerHTML = `
+      ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${p.meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
     `;
@@ -820,12 +1294,14 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   const maxTris = parseInt(document.getElementById('ws-3d-maxtris').value) || 0;
   const effort = parseInt(document.getElementById('ws-3d-effort').value) || 2;
   const texSize = parseInt(document.getElementById('ws-3d-texsize').value) || 1024;
+  const buildStages = document.getElementById('ws-3d-buildstages')?.checked || false;
   const effortNames = { 1: 'Fast', 2: 'Medium', 3: 'High', 4: 'Very high', 5: 'Max' };
   const job = pushJob(`Generate 3D: ${p.name}`, null, {
     Engine: engine,
     'Max triangles': maxTris === 0 ? 'No limit' : `${maxTris.toLocaleString()}`,
     Effort: effortNames[effort] || effort,
     'Texture size': `${texSize} px`,
+    'Construction stages': buildStages ? 'yes' : 'no',
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   });
   try {
@@ -836,17 +1312,18 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
       textureSize: texSize,
       targetFaces: maxTris || 50000,
       effort,
+      buildStages,
     });
     if (r?.success) {
       completeJob(job.id, true);
       await reloadCurrentProject();
     } else {
       completeJob(job.id, false);
-      alert('3D generation failed: ' + (r?.error || 'unknown'));
+      customError(r?.error || 'unknown', '3D generation failed');
     }
   } catch (e) {
     completeJob(job.id, false);
-    alert('3D generation error: ' + e.message);
+    customError(e.message, '3D generation error');
   }
 });
 
@@ -1016,7 +1493,16 @@ function renderRigVersions(p) {
     const t = document.createElement('div');
     t.className = 'version-thumb';
     if (i === 0) t.classList.add('selected');
+    let thumbSrc = '';
+    if (r.thumb) {
+      thumbSrc = r.thumb.startsWith('file:') ? r.thumb : 'file:///' + r.thumb.replace(/\\/g, '/');
+    } else if (r.sourceImage) {
+      thumbSrc = 'file:///' + r.sourceImage.replace(/\\/g, '/');
+    } else if (p.thumb) {
+      thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
+    }
     t.innerHTML = `
+      ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>
     `;
@@ -1124,18 +1610,37 @@ document.getElementById('ws-generate-rig').addEventListener('click', async () =>
   if (!p || p.meshes.length === 0) { alert('Generate a 3D mesh first.'); return; }
   const tpl = document.getElementById('ws-rig-template').value;
   if (!tpl) { alert('Pick a rig template.'); return; }
+  const skinMethod = document.getElementById('ws-rig-skin-method')?.value || 'auto';
+  const skinSmoothing = parseInt(document.getElementById('ws-rig-skin-smooth')?.value) || 3;
+  const mirrorX = document.getElementById('ws-rig-mirror-x')?.checked;
+  // Collect placed landmarks from the in-memory map
+  const lmData = {};
+  for (const id in lmMarkers) {
+    const m = lmMarkers[id];
+    lmData[id] = [m.position.x, m.position.y, m.position.z];
+  }
+  const meshPathToUse = p.selectedMeshPath || p.meshes[0].path;
   const job = pushJob(`Auto-rig: ${p.name}`, null, {
     Template: tpl,
-    'Source mesh': p.selectedMeshPath ? p.selectedMeshPath.split(/[/\\]/).pop() : '--',
+    Skinning: skinMethod,
+    Smoothing: skinSmoothing,
+    'Mirror X': mirrorX ? 'yes' : 'no',
+    Landmarks: Object.keys(lmData).length > 0 ? `${Object.keys(lmData).length} placed` : 'auto',
+    'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
   });
   try {
-    const r = await API.autoRig({ meshPath: p.meshes[0].path, templateName: tpl });
+    const r = await API.autoRig({
+      meshPath: meshPathToUse,
+      templateName: tpl,
+      skinMethod, skinSmoothing, mirrorX,
+      landmarks: Object.keys(lmData).length > 0 ? lmData : null,
+    });
     if (r?.success) {
       completeJob(job.id, true);
       await reloadCurrentProject();
     } else {
       completeJob(job.id, false);
-      alert('Rig failed: ' + (r?.error || 'unknown'));
+      customError(r?.error || 'unknown', 'Rig failed');
     }
   } catch (e) {
     completeJob(job.id, false);
@@ -1205,6 +1710,9 @@ function pushJob(name, onCancel, params) {
   }, 800);
   state.jobs.push(job);
   renderJobs();
+  // Auto-open the details modal so the user sees the live progress + cancel button
+  // without having to click the bubble in the corner.
+  try { openJobDetails(id); } catch (e) {}
   return job;
 }
 
@@ -1379,6 +1887,452 @@ document.getElementById('jobs-close-2').addEventListener('click', () => {
   document.getElementById('jobs-panel-2').classList.add('hidden');
   if (state.jobs.length > 0) document.getElementById('jobs-bubble-2').classList.remove('hidden');
 });
+
+// ============================================================
+// AUTO INPAINT (CLIPSeg target + replace)
+// ============================================================
+document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.previewImagePath) { alert('Pick an image first.'); return; }
+  document.getElementById('ai-target').value = '';
+  document.getElementById('ai-replace').value = '';
+  document.getElementById('modal-auto-inpaint').classList.remove('hidden');
+});
+const aiDilate = document.getElementById('ai-dilate');
+if (aiDilate) aiDilate.addEventListener('input', () => {
+  document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
+});
+document.getElementById('ai-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-auto-inpaint').classList.add('hidden');
+});
+document.getElementById('ai-go')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.previewImagePath) return;
+  const target = document.getElementById('ai-target').value.trim();
+  if (!target) { alert('Type what to find first (e.g. "hat", "background")'); return; }
+  const replace = document.getElementById('ai-replace').value.trim();
+  const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
+  document.getElementById('modal-auto-inpaint').classList.add('hidden');
+  const job = pushJob(`Auto inpaint: ${p.name}`, null, {
+    Target: target,
+    Replace: replace || '(remove)',
+    Padding: dilate + 'px',
+  });
+  try {
+    const r = await API.autoInpaint({ imagePath: p.previewImagePath, targetText: target, prompt: replace, dilate });
+    if (r?.success) {
+      completeJob(job.id, true);
+      await reloadCurrentProject();
+    } else {
+      completeJob(job.id, false);
+      alert('Auto inpaint failed: ' + (r?.error || 'unknown'));
+    }
+  } catch (e) {
+    completeJob(job.id, false);
+    alert('Auto inpaint error: ' + e.message);
+  }
+});
+
+// ============================================================
+// SETTINGS MODAL
+// ============================================================
+document.getElementById('btn-settings')?.addEventListener('click', async () => {
+  document.getElementById('modal-settings').classList.remove('hidden');
+  // Populate Blender path
+  try {
+    const cfg = await API.getConfig();
+    document.getElementById('set-blender-path').value = cfg?.blenderPath || '';
+  } catch (e) {}
+  // Populate GPU info
+  try {
+    const gpu = await API.checkGPU();
+    const text = gpu ? (gpu.name || gpu.gpu || JSON.stringify(gpu)) : 'Unknown';
+    document.getElementById('set-gpu-info').textContent = text;
+  } catch (e) {
+    document.getElementById('set-gpu-info').textContent = 'GPU info unavailable';
+  }
+});
+document.getElementById('set-close')?.addEventListener('click', () => {
+  document.getElementById('modal-settings').classList.add('hidden');
+});
+document.getElementById('set-blender-browse')?.addEventListener('click', async () => {
+  try {
+    const r = await API.setBlenderPath();
+    if (r) {
+      document.getElementById('set-blender-path').value = r.blenderPath || r;
+    }
+  } catch (e) { alert('Browse failed: ' + e.message); }
+});
+
+// ============================================================
+// SKINNING SLIDER LABEL
+// ============================================================
+const skinSlider = document.getElementById('ws-rig-skin-smooth');
+const skinSliderVal = document.getElementById('ws-rig-skin-smooth-val');
+if (skinSlider && skinSliderVal) {
+  const upd = () => { skinSliderVal.textContent = skinSlider.value; };
+  skinSlider.addEventListener('input', upd);
+  upd();
+}
+
+// ============================================================
+// RE-SKIN ONLY (post-rig)
+// ============================================================
+document.getElementById('ws-rig-reskin-btn')?.addEventListener('click', async () => {
+  const r = getCurrentRigObj();
+  if (!r) { alert('No rig yet.'); return; }
+  const ok = await customConfirm('Re-skin this rig with current skinning options? The rig structure stays unchanged.', 'Re-skin', 'Re-skin');
+  if (!ok) return;
+  const skinMethod = document.getElementById('ws-rig-skin-method')?.value || 'auto';
+  const skinSmoothing = parseInt(document.getElementById('ws-rig-skin-smooth')?.value) || 3;
+  const mirrorX = document.getElementById('ws-rig-mirror-x')?.checked;
+  const job = pushJob(`Re-skin: ${r.filename}`, null, {
+    'Skinning': skinMethod,
+    'Smoothing': skinSmoothing,
+    'Mirror X': mirrorX ? 'yes' : 'no',
+  });
+  try {
+    if (!API.autoRig) {
+      completeJob(job.id, false);
+      alert('Auto-rig API not available');
+      return;
+    }
+    // Call auto-rig with the same template but reskin-only flag
+    const result = await API.autoRig({ meshPath: r.path, templateName: '', skinMethod, skinSmoothing, mirrorX, reskinOnly: true });
+    if (result?.success) {
+      completeJob(job.id, true);
+      await reloadCurrentProject();
+    } else {
+      completeJob(job.id, false);
+      alert('Re-skin failed: ' + (result?.error || 'unknown'));
+    }
+  } catch (e) {
+    completeJob(job.id, false);
+    alert('Re-skin error: ' + e.message);
+  }
+});
+
+// ============================================================
+// DRAG & DROP (image / mesh files)
+// ============================================================
+const dropOverlay = document.getElementById('drop-overlay');
+let dragCounter = 0;
+window.addEventListener('dragenter', (e) => {
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+    dragCounter++;
+    dropOverlay.classList.remove('hidden');
+  }
+});
+window.addEventListener('dragleave', (e) => {
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    dropOverlay.classList.add('hidden');
+  }
+});
+window.addEventListener('dragover', (e) => { e.preventDefault(); });
+window.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  dropOverlay.classList.add('hidden');
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (files.length === 0) return;
+  const f = files[0];
+  const path_ = f.path || '';
+  const isImage = /\.(png|jpg|jpeg|webp)$/i.test(f.name);
+  const isMesh = /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f.name);
+  if (!isImage && !isMesh) {
+    alert('Unsupported file type. Drop a .png, .jpg, .glb, .fbx, .obj, .stl or .ply');
+    return;
+  }
+  try {
+    if (isImage && API.importImageFile) {
+      await API.importImageFile(path_);
+    } else if (isMesh && API.importMesh) {
+      await API.importMesh();
+    }
+    await refreshProjectsPage();
+  } catch (err) { alert('Import failed: ' + err.message); }
+});
+
+// ============================================================
+// LANDMARKS (manual placement on the 3D mesh viewer)
+// ============================================================
+// Schema: 22 landmarks across 6 categories
+const LM_SCHEMA = [
+  { cat: 'Head & Spine', items: [
+    { id: 'head', label: 'Head', color: '#ff4444' },
+    { id: 'neck', label: 'Neck', color: '#ff8844' },
+    { id: 'spine_top', label: 'Upper spine', color: '#ff6622' },
+    { id: 'spine_mid', label: 'Mid spine', color: '#cc5511' },
+    { id: 'hips', label: 'Hips center', color: '#ffaa00' },
+  ]},
+  { cat: 'Left arm', items: [
+    { id: 'shoulder_l', label: 'L Shoulder', color: '#22cc88' },
+    { id: 'elbow_l', label: 'L Elbow', color: '#88ff88' },
+    { id: 'hand_l', label: 'L Wrist', color: '#44ff44' },
+  ]},
+  { cat: 'Right arm', items: [
+    { id: 'shoulder_r', label: 'R Shoulder', color: '#11aa66' },
+    { id: 'elbow_r', label: 'R Elbow', color: '#66cc66' },
+    { id: 'hand_r', label: 'R Wrist', color: '#44aa44' },
+  ]},
+  { cat: 'Left leg', items: [
+    { id: 'hip_l', label: 'L Hip', color: '#ffcc00' },
+    { id: 'knee_l', label: 'L Knee', color: '#88aaff' },
+    { id: 'ankle_l', label: 'L Ankle', color: '#5577ee' },
+    { id: 'foot_l', label: 'L Foot', color: '#4444ff' },
+  ]},
+  { cat: 'Right leg', items: [
+    { id: 'hip_r', label: 'R Hip', color: '#dd9900' },
+    { id: 'knee_r', label: 'R Knee', color: '#6688cc' },
+    { id: 'ankle_r', label: 'R Ankle', color: '#4466bb' },
+    { id: 'foot_r', label: 'R Foot', color: '#4477ff' },
+  ]},
+];
+const LM_RAYCASTER = new THREE.Raycaster();
+const LM_NDC = new THREE.Vector2();
+let lmActive = null; // currently armed landmark id
+let lmMarkers = {}; // id -> THREE.Mesh
+
+function buildLandmarkList() {
+  const list = document.getElementById('ws-lm-list');
+  if (!list) return;
+  list.innerHTML = '';
+  LM_SCHEMA.forEach(group => {
+    const cat = document.createElement('div');
+    cat.className = 'lm-cat';
+    cat.textContent = group.cat;
+    list.appendChild(cat);
+    group.items.forEach(item => {
+      const btn = document.createElement('button');
+      btn.className = 'lm-btn';
+      btn.dataset.lm = item.id;
+      btn.dataset.color = item.color;
+      btn.innerHTML = `<span class="lm-color" style="background:${item.color}"></span><span>${item.label}</span>`;
+      btn.addEventListener('click', () => armLandmark(item.id, btn));
+      list.appendChild(btn);
+    });
+  });
+}
+buildLandmarkList();
+
+function armLandmark(id, btn) {
+  document.querySelectorAll('.lm-btn').forEach(b => b.classList.remove('armed'));
+  if (lmActive === id) {
+    lmActive = null;
+    return;
+  }
+  lmActive = id;
+  btn.classList.add('armed');
+}
+
+function placeLandmarkMarker(id, point, color) {
+  if (!wsScene) return;
+  if (lmMarkers[id]) {
+    wsScene.remove(lmMarkers[id]);
+    lmMarkers[id].geometry?.dispose();
+    lmMarkers[id].material?.dispose();
+  }
+  // Auto-scale radius based on bbox
+  let r = 0.03;
+  if (wsModel) {
+    const box = new THREE.Box3().setFromObject(wsModel);
+    const sz = box.getSize(new THREE.Vector3());
+    r = Math.max(sz.x, sz.y, sz.z) * 0.015;
+  }
+  const geo = new THREE.SphereGeometry(r, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color: color, depthTest: false, transparent: true, opacity: 0.85 });
+  const sphere = new THREE.Mesh(geo, mat);
+  sphere.position.copy(point);
+  sphere.renderOrder = 999;
+  wsScene.add(sphere);
+  lmMarkers[id] = sphere;
+  // Mark the button as placed
+  const btn = document.querySelector(`.lm-btn[data-lm="${id}"]`);
+  if (btn) btn.classList.add('placed');
+}
+
+function clearAllLandmarks() {
+  for (const id in lmMarkers) {
+    wsScene.remove(lmMarkers[id]);
+    try { lmMarkers[id].geometry.dispose(); lmMarkers[id].material.dispose(); } catch (e) {}
+  }
+  lmMarkers = {};
+  document.querySelectorAll('.lm-btn').forEach(b => b.classList.remove('placed', 'armed'));
+  lmActive = null;
+  saveLandmarksForCurrentMesh();
+}
+
+async function saveLandmarksForCurrentMesh() {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) return;
+  const data = {};
+  for (const id in lmMarkers) {
+    const m = lmMarkers[id];
+    data[id] = [m.position.x, m.position.y, m.position.z];
+  }
+  try { await API.saveLandmarks?.({ meshPath: p.selectedMeshPath, landmarks: data }); }
+  catch (e) { console.warn('saveLandmarks failed:', e); }
+}
+
+async function loadLandmarksForCurrentMesh() {
+  // Clear current
+  for (const id in lmMarkers) {
+    wsScene.remove(lmMarkers[id]);
+    try { lmMarkers[id].geometry.dispose(); lmMarkers[id].material.dispose(); } catch (e) {}
+  }
+  lmMarkers = {};
+  document.querySelectorAll('.lm-btn').forEach(b => b.classList.remove('placed', 'armed'));
+  lmActive = null;
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) return;
+  try {
+    const data = await API.loadLandmarks?.({ meshPath: p.selectedMeshPath });
+    if (data && typeof data === 'object') {
+      const colorMap = {};
+      LM_SCHEMA.forEach(g => g.items.forEach(it => { colorMap[it.id] = it.color; }));
+      for (const id in data) {
+        const arr = data[id];
+        if (Array.isArray(arr) && arr.length === 3) {
+          const color = parseInt((colorMap[id] || '#ffffff').replace('#', ''), 16);
+          placeLandmarkMarker(id, new THREE.Vector3(arr[0], arr[1], arr[2]), color);
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+function autoDetectLandmarks() {
+  if (!wsModel) { alert('Load a mesh first.'); return; }
+  const box = new THREE.Box3().setFromObject(wsModel);
+  const min = box.min, max = box.max;
+  const size = new THREE.Vector3().subVectors(max, min);
+  const center = new THREE.Vector3().addVectors(min, max).multiplyScalar(0.5);
+  let upAxis = 'y';
+  if (size.z > size.y && size.z > size.x) upAxis = 'z';
+  else if (size.x > size.y && size.x > size.z) upAxis = 'x';
+  const minU = min[upAxis], sU = max[upAxis] - min[upAxis];
+  const lateralAxis = upAxis === 'y' ? 'x' : 'x';
+  const depthAxis = upAxis === 'y' ? 'z' : 'z';
+  function pt(side, height_pct, depth = 0) {
+    const v = new THREE.Vector3();
+    v[upAxis] = minU + height_pct * sU;
+    v[lateralAxis] = center[lateralAxis] + side * size[lateralAxis];
+    v[depthAxis] = center[depthAxis] + depth * size[depthAxis];
+    return v;
+  }
+  const all = {
+    head: pt(0, 0.97), neck: pt(0, 0.85), spine_top: pt(0, 0.72), spine_mid: pt(0, 0.62), hips: pt(0, 0.52),
+    shoulder_l: pt(0.32, 0.78), elbow_l: pt(0.34, 0.65, 0.05), hand_l: pt(0.36, 0.50),
+    shoulder_r: pt(-0.32, 0.78), elbow_r: pt(-0.34, 0.65, 0.05), hand_r: pt(-0.36, 0.50),
+    hip_l: pt(0.10, 0.50), knee_l: pt(0.10, 0.27), ankle_l: pt(0.10, 0.04), foot_l: pt(0.10, 0.00, 0.05),
+    hip_r: pt(-0.10, 0.50), knee_r: pt(-0.10, 0.27), ankle_r: pt(-0.10, 0.04), foot_r: pt(-0.10, 0.00, 0.05),
+  };
+  const colorMap = {};
+  LM_SCHEMA.forEach(g => g.items.forEach(it => { colorMap[it.id] = it.color; }));
+  for (const id in all) {
+    const color = parseInt((colorMap[id] || '#ffffff').replace('#', ''), 16);
+    placeLandmarkMarker(id, all[id], color);
+  }
+  saveLandmarksForCurrentMesh();
+}
+
+function setupLandmarkRaycasting() {
+  const canvas = document.getElementById('ws-mesh-canvas');
+  if (!canvas) return;
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !lmActive || !wsModel) return;
+    const rect = canvas.getBoundingClientRect();
+    LM_NDC.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    LM_RAYCASTER.setFromCamera(LM_NDC, wsCamera);
+    const meshes = [];
+    wsModel.traverse(c => { if (c.isMesh) meshes.push(c); });
+    const hits = LM_RAYCASTER.intersectObjects(meshes, true);
+    if (hits.length > 0) {
+      const btn = document.querySelector(`.lm-btn[data-lm="${lmActive}"]`);
+      const colorHex = btn?.dataset.color || '#ffffff';
+      const color = parseInt(colorHex.replace('#', ''), 16);
+      placeLandmarkMarker(lmActive, hits[0].point.clone(), color);
+      saveLandmarksForCurrentMesh();
+      // Disarm after placement
+      btn?.classList.remove('armed');
+      lmActive = null;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+}
+setupLandmarkRaycasting();
+
+document.getElementById('ws-lm-auto')?.addEventListener('click', autoDetectLandmarks);
+document.getElementById('ws-lm-clear')?.addEventListener('click', async () => {
+  if (!await customConfirm('Clear all landmarks for this mesh?', 'Clear landmarks', 'Clear')) return;
+  clearAllLandmarks();
+});
+document.getElementById('ws-lm-guided')?.addEventListener('click', async () => {
+  if (!wsModel) { alert('Load a mesh first.'); return; }
+  // Walk through each landmark in order, auto-arming the next button
+  const all = LM_SCHEMA.flatMap(g => g.items);
+  for (const item of all) {
+    if (lmMarkers[item.id]) continue; // skip already-placed
+    const btn = document.querySelector(`.lm-btn[data-lm="${item.id}"]`);
+    if (!btn) continue;
+    armLandmark(item.id, btn);
+    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Wait until the user places this landmark, or 60s
+    const placed = await new Promise(resolve => {
+      const start = Date.now();
+      const check = setInterval(() => {
+        if (lmMarkers[item.id]) { clearInterval(check); resolve(true); }
+        else if (Date.now() - start > 60000) { clearInterval(check); resolve(false); }
+        else if (lmActive !== item.id) { clearInterval(check); resolve(false); } // user disarmed
+      }, 200);
+    });
+    if (!placed) break;
+  }
+});
+
+// Reload landmarks whenever the previewed mesh changes — observe the canvas
+// for size changes (when the model is loaded, three.js fits the camera).
+// Simpler: set up a periodic check that loads landmarks when wsModel changes.
+let _lastWsModelRef = null;
+setInterval(() => {
+  if (wsModel !== _lastWsModelRef) {
+    _lastWsModelRef = wsModel;
+    if (wsModel) loadLandmarksForCurrentMesh();
+  }
+}, 500);
+
+// ============================================================
+// CLOSE CONFIRMATION (when jobs are running)
+// ============================================================
+if (API.onAppCloseRequested) {
+  API.onAppCloseRequested(async () => {
+    const runningCount = state.jobs.filter(j => j.status === 'running').length;
+    if (runningCount === 0) {
+      // No job running, just confirm immediately
+      API.confirmAppClose();
+      return;
+    }
+    const ok = await customConfirm(
+      `${runningCount} task${runningCount > 1 ? 's are' : ' is'} running. They will be cancelled if you quit now. Continue?`,
+      'Quit FabMesh',
+      'Quit and cancel'
+    );
+    if (ok) {
+      // Cancel all running jobs first (so the user sees them stop), then quit
+      try {
+        for (const j of state.jobs.filter(j => j.status === 'running')) {
+          if (API.cancelJob) await API.cancelJob(j.id);
+        }
+      } catch (e) {}
+      API.confirmAppClose();
+    }
+    // If "ok === false", we do nothing — the close is cancelled because
+    // main.js called event.preventDefault() and we never sent the confirm IPC.
+  });
+}
 
 // ============================================================
 // INIT

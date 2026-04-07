@@ -27,9 +27,43 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
 
     # Step 1: Shape on Windows GPU
     print("HUNYUAN3D: Loading shape model...", flush=True)
-    shape_pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained('tencent/Hunyuan3D-2')
-    shape_pipe.to('cuda')
-    print(f"HUNYUAN3D: Shape model on GPU ({torch.cuda.memory_allocated()/1024**3:.1f} GB)", flush=True)
+    # Free any leftover VRAM from previous runs before allocating
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        import gc; gc.collect()
+        torch.cuda.empty_cache()
+    # Load with bfloat16 if supported (more numerically stable than float16 on Ada/Blackwell)
+    try:
+        shape_pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
+            'tencent/Hunyuan3D-2',
+            torch_dtype=torch.bfloat16,
+        )
+        print("HUNYUAN3D: Loaded with bfloat16", flush=True)
+    except Exception as e:
+        print(f"HUNYUAN3D: bfloat16 load failed ({e}), falling back to float16", flush=True)
+        shape_pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained('tencent/Hunyuan3D-2')
+    # Decide between full GPU and CPU offload based on requested quality
+    use_offload = False
+    try:
+        free_bytes, total_bytes = torch.cuda.mem_get_info()
+        free_gb = free_bytes / (1024**3)
+        total_gb = total_bytes / (1024**3)
+        print(f"HUNYUAN3D: VRAM free={free_gb:.1f} GB / total={total_gb:.1f} GB", flush=True)
+        # If asking for high effort + high res on a tight VRAM budget, enable offload
+        if int(effort) >= 4 and total_gb < 18 and free_gb < 13:
+            use_offload = True
+    except Exception:
+        pass
+    if use_offload and hasattr(shape_pipe, 'enable_sequential_cpu_offload'):
+        try:
+            shape_pipe.enable_sequential_cpu_offload()
+            print("HUNYUAN3D: Sequential CPU offload enabled (slower but fits in tight VRAM)", flush=True)
+        except Exception as e:
+            print(f"HUNYUAN3D: CPU offload failed ({e}), using full GPU", flush=True)
+            shape_pipe.to('cuda')
+    else:
+        shape_pipe.to('cuda')
+    print(f"HUNYUAN3D: Shape model ready ({torch.cuda.memory_allocated()/1024**3:.1f} GB allocated)", flush=True)
 
     img = Image.open(image_path)
     print(f"HUNYUAN3D: Image loaded ({img.size})", flush=True)
@@ -71,9 +105,42 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
         inf_steps = effort_steps.get(int(effort), 30)
         label = effort_labels.get(int(effort), 'Medium')
         print(f"HUNYUAN3D: octree_resolution={octree_res}, steps={inf_steps} (effort={label})", flush=True)
-        meshes = shape_pipe(image=img, octree_resolution=octree_res, num_inference_steps=inf_steps)
+        # Try the requested resolution; on OOM, drop one octree level and retry up to 3 times
+        attempts = [octree_res]
+        if octree_res > 384: attempts.append(max(384, octree_res - 128))
+        if octree_res > 256: attempts.append(256)
+        meshes = None
+        last_err = None
+        for attempt_res in attempts:
+            try:
+                if attempt_res != octree_res:
+                    print(f"HUNYUAN3D: Retrying with lower octree_resolution={attempt_res}", flush=True)
+                    torch.cuda.empty_cache()
+                    import gc; gc.collect()
+                    torch.cuda.empty_cache()
+                meshes = shape_pipe(image=img, octree_resolution=attempt_res, num_inference_steps=inf_steps)
+                octree_res = attempt_res  # remember which one actually worked
+                break
+            except torch.cuda.OutOfMemoryError as oom:
+                last_err = oom
+                print(f"HUNYUAN3D: CUDA OOM at octree_resolution={attempt_res}: {oom}", flush=True)
+                torch.cuda.empty_cache()
+                import gc; gc.collect()
+                torch.cuda.empty_cache()
+            except RuntimeError as rt:
+                # Some torch builds wrap OOM as a generic RuntimeError
+                if 'out of memory' in str(rt).lower() or 'cuda' in str(rt).lower():
+                    last_err = rt
+                    print(f"HUNYUAN3D: CUDA runtime error at octree_resolution={attempt_res}: {rt}", flush=True)
+                    torch.cuda.empty_cache()
+                    import gc; gc.collect()
+                    torch.cuda.empty_cache()
+                else:
+                    raise
+        if meshes is None:
+            raise last_err or RuntimeError('Shape inference failed at all octree resolutions')
         mesh = meshes[0]
-        print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s", flush=True)
+        print(f"HUNYUAN3D: Shape done in {time.time()-start:.0f}s (final octree={octree_res})", flush=True)
 
         # Save shape as OBJ
         shape_obj = output_path.replace('.glb', '_shape.obj')
@@ -101,8 +168,29 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
         import gc
         gc.collect()
         torch.cuda.empty_cache()
+    except torch.cuda.OutOfMemoryError as e:
+        print(f"HUNYUAN3D_ERROR: CUDA out of memory: {e}", flush=True)
+        print("HUNYUAN3D_HINT: Lower 'Max triangles' or 'Effort' in the UI, "
+              "or close other GPU apps (Chrome, Discord, games) to free VRAM.", flush=True)
+        try:
+            del shape_pipe
+            torch.cuda.empty_cache()
+            import gc; gc.collect()
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return False
     except Exception as e:
+        import traceback
         print(f"HUNYUAN3D_ERROR: Shape failed: {type(e).__name__}: {e}", flush=True)
+        traceback.print_exc()
+        try:
+            del shape_pipe
+            torch.cuda.empty_cache()
+            import gc; gc.collect()
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
         return False
 
     # Step 2: Texture via WSL

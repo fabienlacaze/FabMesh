@@ -36,6 +36,12 @@ html, body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 14px;
   overflow: hidden;
+  user-select: none; /* prevents accidental selection of UI labels */
+}
+/* But always allow text editing inside form fields */
+input, textarea, select, [contenteditable] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 #app2 {
@@ -403,6 +409,163 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   gap: 18px;
   padding: 18px;
 }
+/* Two-stage layout: vertical stack of "Create new" then "Edit selected" */
+.step-card-body.two-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px 18px 18px;
+}
+.stage {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.stage > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+  transition: background 0.15s;
+}
+.stage > summary::-webkit-details-marker { display: none; }
+.stage > summary::before {
+  content: "\25B6";
+  color: var(--text-2);
+  font-size: 9px;
+  transition: transform 0.2s;
+}
+.stage[open] > summary::before {
+  transform: rotate(90deg);
+}
+.stage > summary:hover {
+  background: var(--bg-3);
+}
+.stage .stage-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.stage .stage-title {
+  font-weight: 700;
+  color: var(--text-0);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stage .stage-hint {
+  color: var(--text-2);
+  font-size: 12px;
+  font-style: italic;
+  margin-left: auto;
+}
+.stage .stage-body {
+  padding: 16px 18px 18px 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Edit stage: 2-column layout (preview on left, side panel with versions+tools on right) */
+.stage .stage-body.stage-edit-body {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+}
+/* Create stage with source image on the right */
+.stage .stage-body.stage-create-with-source {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 18px;
+}
+.stage-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stage-create-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stage-source-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.stage-source-img {
+  flex: 1;
+  background: var(--bg-0);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 240px;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.1);
+}
+.stage-source-img img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.stage-source-img .preview-placeholder {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.stage .stage-edit-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Make the form labels in the create stage uniform width */
+.stage .form-row > label:not(.inline-check) {
+  flex: 0 0 90px;
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+/* Sub-details for landmarks block */
+.sub-details {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.sub-details summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2);
+  font-weight: 700;
+  user-select: none;
+}
+.sub-details summary:hover { color: var(--text-1); }
+.sub-details-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .step-preview-col {
   display: flex;
   flex-direction: column;
@@ -486,7 +649,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   align-items: center;
   gap: 10px;
 }
-.step-card-form .form-row label {
+.step-card-form .form-row > label:not(.inline-check) {
   flex: 0 0 70px;
   margin: 0;
 }
@@ -504,8 +667,8 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border-top: 1px solid var(--border);
 }
 .versions-strip .version-thumb {
-  width: 48px;
-  height: 48px;
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-sm);
   background: var(--bg-2);
   border: 2px solid transparent;
@@ -530,19 +693,20 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .versions-strip .version-thumb.used-for-3d::before {
   content: "\2713";
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
   background: var(--success);
   color: white;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
 }
 
 /* Step 2: source-image overlay shown after "Use for 3D" (before a mesh exists) */
@@ -586,23 +750,25 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   bottom: 0;
   left: 0;
   right: 0;
-  background: rgba(0,0,0,0.7);
-  font-size: 9px;
+  background: rgba(0,0,0,0.75);
+  font-size: 10px;
+  font-weight: 700;
   color: white;
   text-align: center;
-  padding: 1px 0;
+  padding: 2px 0;
+  letter-spacing: 0.3px;
 }
 .versions-strip .version-thumb .version-delete-btn {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 18px;
-  height: 18px;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0,0,0,0.8);
   border: 1px solid rgba(255,255,255,0.3);
   color: white;
-  font-size: 9px;
+  font-size: 11px;
   cursor: pointer;
   display: none;
   align-items: center;
@@ -998,6 +1164,165 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 }
 
 /* ============================================================
+   MESH VIEWER TOOLBAR (small + lightbox)
+   ============================================================ */
+.mesh-toolbar {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 15, 26, 0.9);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  backdrop-filter: blur(8px);
+  z-index: 4;
+  opacity: 0;
+  transition: opacity 0.18s;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
+}
+.step-card-preview:hover .mesh-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+.mesh-toolbar.hidden { display: none; }
+.mesh-toolbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-1);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mesh-toolbar button:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.mesh-toolbar button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mesh-toolbar select {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  height: 24px;
+}
+.mesh-toolbar input[type="range"] {
+  width: 90px;
+  height: 24px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  margin: 0 4px;
+}
+.mesh-toolbar input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent) var(--val, 50%), var(--bg-3) var(--val, 50%), var(--bg-3) 100%);
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+}
+.mesh-toolbar input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: white;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  margin-top: -5px;
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.6);
+  cursor: pointer;
+}
+.mesh-toolbar input[type="range"]:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.9);
+}
+/* Tiny "sun" icon to mark the light slider */
+.mesh-toolbar .light-label {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-right: -2px;
+  user-select: none;
+}
+/* Lightbox variant: always visible, larger */
+.mesh-toolbar.lb3d {
+  bottom: 24px;
+  opacity: 1;
+  pointer-events: auto;
+  padding: 8px 14px;
+  gap: 8px;
+}
+.mesh-toolbar.lb3d button,
+.mesh-toolbar.lb3d select { height: 32px; font-size: 12px; padding: 6px 12px; }
+.mesh-toolbar.lb3d input[type="range"] { width: 130px; height: 32px; }
+.mesh-toolbar.lb3d input[type="range"]::-webkit-slider-runnable-track { height: 8px; }
+.mesh-toolbar.lb3d input[type="range"]::-webkit-slider-thumb {
+  width: 18px; height: 18px; margin-top: -7px;
+}
+.mesh-toolbar.lb3d .light-label { font-size: 16px; }
+
+/* ============================================================
+   3D LIGHTBOX (fullscreen mesh preview)
+   ============================================================ */
+#lightbox-3d {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, #1d1d2c 0%, #0b0b14 100%);
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#lightbox-3d.hidden { display: none; }
+#lightbox-3d canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#lightbox-3d-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #1d1d2c;
+  border: 2px solid #4a4a6a;
+  color: #f5f5fa;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  transition: all 0.15s;
+}
+#lightbox-3d-close:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.08);
+}
+
+/* ============================================================
    LIGHTBOX (fullscreen image preview)
    ============================================================ */
 #lightbox-2 {
@@ -1023,20 +1348,25 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   position: absolute;
   top: 20px;
   right: 20px;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.3);
-  color: white;
+  background: #1d1d2c;
+  border: 2px solid #4a4a6a;
+  color: #f5f5fa;
   font-size: 18px;
+  font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  transition: all 0.15s;
 }
 #lightbox-2-close:hover {
-  background: rgba(255,255,255,0.2);
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.08);
 }
 
 /* Clickable preview hint */
@@ -1072,6 +1402,131 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .preview-expand-btn:hover {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* ============================================================
+   FORM ROW: inline checkbox
+   ============================================================ */
+.form-row.check-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.form-row.check-row > label.inline-check {
+  flex: 1 1 auto !important;
+  min-width: 0;
+  white-space: normal;
+}
+.inline-check {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  color: var(--text-1) !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.inline-check > input[type="checkbox"] {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   DRAG & DROP OVERLAY
+   ============================================================ */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(168, 85, 247, 0.15);
+  border: 4px dashed var(--accent);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+#drop-overlay.hidden { display: none; }
+.drop-overlay-msg {
+  background: var(--bg-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 32px 48px;
+  text-align: center;
+  color: var(--text-0);
+  font-size: 16px;
+  font-weight: 700;
+}
+.drop-overlay-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  color: var(--accent);
+}
+
+/* ============================================================
+   LANDMARKS LIST
+   ============================================================ */
+.lm-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.lm-list .lm-cat {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--text-2);
+  padding: 6px 0 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+.lm-list .lm-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+  transition: all 0.15s;
+}
+.lm-list .lm-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--accent);
+}
+.lm-list .lm-btn.armed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.lm-list .lm-btn.placed::after {
+  content: "\2713";
+  margin-left: auto;
+  color: var(--success);
+  font-weight: 700;
+}
+.lm-list .lm-btn .lm-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.3);
+  flex-shrink: 0;
 }
 
 /* ============================================================

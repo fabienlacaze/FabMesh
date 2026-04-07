@@ -9,6 +9,12 @@
   <link rel="stylesheet" href="styles/index2.css">
 </head>
 <body class="advanced-mode">
+  <div id="drop-overlay" class="hidden">
+    <div class="drop-overlay-msg">
+      <div class="drop-overlay-icon">&#11015;</div>
+      <div>Drop image or mesh file to import</div>
+    </div>
+  </div>
   <div id="app2">
     <header id="topbar">
       <div class="topbar-left">
@@ -18,6 +24,7 @@
       </div>
       <div class="topbar-right">
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
+        <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         <button id="open-old-ui" class="ghost-btn" title="Open the legacy UI">Legacy UI</button>
       </div>
     </header>
@@ -52,54 +59,84 @@
             <h3>Image</h3>
             <span class="step-status" id="step1-status">Pending</span>
           </header>
-          <div class="step-card-body">
-            <div class="step-preview-col">
-              <div class="step-card-preview" id="step1-preview">
-                <div class="preview-placeholder">No image yet</div>
+          <div class="step-card-body two-stage">
+            <!-- ===== STAGE: CREATE NEW ===== -->
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Generate a new image from a text prompt</span>
+              </summary>
+              <div class="stage-body">
+                <label>Describe your character</label>
+                <textarea id="ws-prompt" rows="3" placeholder="An orc warrior with leather armor, fantasy art..."></textarea>
+                <div class="form-row">
+                  <label>Engine</label>
+                  <select id="ws-engine">
+                    <option value="local-flux" selected>Local GPU (Juggernaut XL)</option>
+                    <option value="local-sd">Local GPU (SDXL Turbo, fast)</option>
+                    <option value="pollinations">Pollinations (cloud)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Count</label>
+                  <select id="ws-count">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="4" selected>4</option>
+                    <option value="6">6</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Quality</label>
+                  <input type="range" id="ws-quality" min="10" max="60" step="2" value="30" style="flex:1; accent-color: var(--accent);" />
+                  <span id="ws-quality-val" style="min-width: 90px; font-size: 11px; color: var(--text-2); text-align: right;">30 steps</span>
+                </div>
+                <div class="form-row check-row">
+                  <label class="inline-check">
+                    <input type="checkbox" id="ws-multiview" />
+                    Multi-view (front + side + back)
+                  </label>
+                </div>
+                <div class="form-row check-row">
+                  <label class="inline-check">
+                    <input type="checkbox" id="ws-img-buildstages" />
+                    Construction stages (3 progressive versions)
+                  </label>
+                </div>
+                <button id="ws-generate-image" class="primary-btn">Generate</button>
               </div>
-              <div id="ws-use-for-3d-bar" class="use-for-bar hidden">
-                <button id="ws-use-for-3d-btn" class="primary-btn">Use this image for 3D &rarr;</button>
-              </div>
-            </div>
-            <div class="step-card-form">
-              <label>Describe your character</label>
-              <textarea id="ws-prompt" rows="3" placeholder="An orc warrior with leather armor, fantasy art..."></textarea>
-              <div class="form-row">
-                <label>Engine</label>
-                <select id="ws-engine">
-                  <option value="local-flux" selected>Local GPU (Juggernaut XL)</option>
-                  <option value="local-sd">Local GPU (SDXL Turbo, fast)</option>
-                  <option value="pollinations">Pollinations (cloud)</option>
-                </select>
-              </div>
-              <div class="form-row">
-                <label>Count</label>
-                <select id="ws-count">
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="4" selected>4</option>
-                  <option value="6">6</option>
-                </select>
-              </div>
-              <div class="form-row">
-                <label>Quality</label>
-                <input type="range" id="ws-quality" min="10" max="60" step="2" value="30" style="flex:1; accent-color: var(--accent);" />
-                <span id="ws-quality-val" style="min-width: 70px; font-size: 11px; color: var(--text-2);">30 steps</span>
-              </div>
-              <button id="ws-generate-image" class="primary-btn">Generate</button>
-              <div id="ws-image-versions" class="versions-strip"></div>
-              <details class="step-tools-details">
-                <summary>Edit selected image</summary>
-                <div class="step-tools-body">
+            </details>
+
+            <!-- ===== STAGE: EDIT SELECTED ===== -->
+            <details class="stage stage-edit" open>
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a version, preview it, modify or convert</span>
+              </summary>
+              <div class="stage-body stage-edit-body">
+                <div class="step-preview-col">
+                  <div class="step-card-preview" id="step1-preview">
+                    <div class="preview-placeholder">No image yet</div>
+                    <button id="ws-image-expand-btn" class="preview-expand-btn hidden" title="View image fullscreen">&#x26F6;</button>
+                  </div>
+                  <div id="ws-use-for-3d-bar" class="use-for-bar hidden">
+                    <button id="ws-use-for-3d-btn" class="primary-btn">Use this image for 3D &rarr;</button>
+                  </div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-image-versions" class="versions-strip"></div>
                   <div class="step-tools-row">
                     <button id="ws-modify-btn" class="ghost-btn">&#9998; Modify (img2img)</button>
+                    <button id="ws-autoinpaint-btn" class="ghost-btn">&#129668; Auto Inpaint</button>
                     <button id="ws-removebg-btn" class="ghost-btn">&#9986; Remove background</button>
                     <button id="ws-clone-btn" class="ghost-btn">&#128203; Clone Stamp</button>
                     <button id="ws-mask-btn" class="ghost-btn">&#9999; Draw mask</button>
                   </div>
                 </div>
-              </details>
-            </div>
+              </div>
+            </details>
           </div>
         </article>
 
@@ -110,58 +147,114 @@
             <h3>3D Mesh</h3>
             <span class="step-status" id="step2-status">Pending</span>
           </header>
-          <div class="step-card-body">
-            <div class="step-preview-col">
-              <div class="step-card-preview" id="step2-preview">
-                <canvas id="ws-mesh-canvas"></canvas>
-                <div class="preview-placeholder" id="step2-placeholder">No mesh yet</div>
+          <div class="step-card-body two-stage">
+            <!-- ===== STAGE: CREATE NEW ===== -->
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Convert the selected image into a 3D mesh</span>
+              </summary>
+              <div class="stage-body stage-create-with-source">
+                <div class="stage-create-form">
+                  <div class="form-row">
+                    <label>Engine</label>
+                    <select id="ws-3d-engine">
+                      <option value="hunyuan" selected>Hunyuan3D Local (best)</option>
+                      <option value="local">TripoSR Local (fast)</option>
+                      <option value="trellis">TRELLIS Cloud</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label>Max triangles</label>
+                    <select id="ws-3d-maxtris">
+                      <option value="0">No limit</option>
+                      <option value="5000">5K (low-poly)</option>
+                      <option value="10000">10K</option>
+                      <option value="20000">20K</option>
+                      <option value="50000" selected>50K (default)</option>
+                      <option value="100000">100K</option>
+                      <option value="200000">200K</option>
+                      <option value="500000">500K (high)</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label>Effort</label>
+                    <input type="range" id="ws-3d-effort" min="1" max="5" step="1" value="2" style="flex:1; accent-color: var(--accent);" />
+                    <span id="ws-3d-effort-val" style="min-width: 90px; font-size: 11px; color: var(--text-2); text-align: right;">Medium</span>
+                  </div>
+                  <div class="form-row">
+                    <label>Texture size</label>
+                    <select id="ws-3d-texsize">
+                      <option value="512">512 px</option>
+                      <option value="1024" selected>1024 px</option>
+                      <option value="2048">2048 px</option>
+                      <option value="4096">4096 px</option>
+                    </select>
+                  </div>
+                  <div class="form-row check-row">
+                    <label class="inline-check">
+                      <input type="checkbox" id="ws-3d-buildstages" />
+                      Construction stages (3 versions)
+                    </label>
+                  </div>
+                  <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
+                </div>
+                <div class="stage-create-source">
+                  <div class="stage-source-label">Source image for 3D</div>
+                  <div id="ws-3d-source-preview" class="stage-source-img">
+                    <div class="preview-placeholder">No image selected</div>
+                  </div>
+                </div>
               </div>
-              <div id="ws-use-for-rig-bar" class="use-for-bar hidden">
-                <button id="ws-use-for-rig-btn" class="primary-btn">Use this mesh for Rig &rarr;</button>
-              </div>
-            </div>
-            <div class="step-card-form">
-              <p class="step-hint">Convert the selected image into a 3D mesh.</p>
-              <div class="form-row">
-                <label>Engine</label>
-                <select id="ws-3d-engine">
-                  <option value="hunyuan" selected>Hunyuan3D Local (best)</option>
-                  <option value="local">TripoSR Local (fast)</option>
-                  <option value="trellis">TRELLIS Cloud</option>
-                </select>
-              </div>
-              <div class="form-row">
-                <label>Max triangles</label>
-                <select id="ws-3d-maxtris">
-                  <option value="0">No limit</option>
-                  <option value="5000">5K (low-poly)</option>
-                  <option value="10000">10K</option>
-                  <option value="20000">20K</option>
-                  <option value="50000" selected>50K (default)</option>
-                  <option value="100000">100K</option>
-                  <option value="200000">200K</option>
-                  <option value="500000">500K (high)</option>
-                </select>
-              </div>
-              <div class="form-row">
-                <label>Effort</label>
-                <input type="range" id="ws-3d-effort" min="1" max="5" step="1" value="2" style="flex:1; accent-color: var(--accent);" />
-                <span id="ws-3d-effort-val" style="min-width: 70px; font-size: 11px; color: var(--text-2);">Medium</span>
-              </div>
-              <div class="form-row">
-                <label>Texture size</label>
-                <select id="ws-3d-texsize">
-                  <option value="512">512 px</option>
-                  <option value="1024" selected>1024 px</option>
-                  <option value="2048">2048 px</option>
-                  <option value="4096">4096 px</option>
-                </select>
-              </div>
-              <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
-              <div id="ws-mesh-versions" class="versions-strip"></div>
-              <details class="step-tools-details">
-                <summary>Edit selected mesh</summary>
-                <div class="step-tools-body">
+            </details>
+
+            <!-- ===== STAGE: EDIT SELECTED ===== -->
+            <details class="stage stage-edit" open>
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a mesh version, preview, refine or export</span>
+              </summary>
+              <div class="stage-body stage-edit-body">
+                <div class="step-preview-col">
+                  <div class="step-card-preview" id="step2-preview">
+                    <canvas id="ws-mesh-canvas"></canvas>
+                    <div class="preview-placeholder" id="step2-placeholder">No mesh yet</div>
+                    <button id="ws-mesh-expand-btn" class="preview-expand-btn hidden" title="View 3D fullscreen">&#x26F6;</button>
+                    <div id="ws-mesh-toolbar" class="mesh-toolbar hidden">
+                      <button data-act="reset" title="Reset camera">&#10227;</button>
+                      <select data-act="view" title="Camera view">
+                        <option value="">View</option>
+                        <option value="front">Front</option>
+                        <option value="back">Back</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                        <option value="top">Top</option>
+                        <option value="bottom">Bottom</option>
+                        <option value="iso">Iso</option>
+                      </select>
+                      <button data-act="wire" title="Wireframe">Wire</button>
+                      <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
+                      <button data-act="grid" class="active" title="Grid">Grid</button>
+                      <button data-act="bones" title="Show skeleton">Bones</button>
+                      <select data-act="bg" title="Background">
+                        <option value="dark" selected>Dark</option>
+                        <option value="studio">Studio</option>
+                        <option value="black">Black</option>
+                        <option value="gray">Gray</option>
+                      </select>
+                      <button data-act="shadows" class="active" title="Shadows">Shadows</button>
+                      <span class="light-label" title="Light intensity">&#9728;</span>
+                      <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
+                    </div>
+                  </div>
+                  <div id="ws-use-for-rig-bar" class="use-for-bar hidden">
+                    <button id="ws-use-for-rig-btn" class="primary-btn">Use this mesh for Rig &rarr;</button>
+                  </div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-mesh-versions" class="versions-strip"></div>
                   <div class="step-tools-row">
                     <button id="ws-mesh-refine-btn" class="ghost-btn">&#10024; Refine with AI</button>
                     <button id="ws-mesh-export-btn" class="ghost-btn">&#128190; Export...</button>
@@ -169,8 +262,8 @@
                     <button id="ws-mesh-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
                   </div>
                 </div>
-              </details>
-            </div>
+              </div>
+            </details>
           </div>
         </article>
 
@@ -181,32 +274,81 @@
             <h3>Rig</h3>
             <span class="step-status" id="step3-status">Pending</span>
           </header>
-          <div class="step-card-body">
-            <div class="step-card-preview" id="step3-preview">
-              <div class="preview-placeholder">No rig yet</div>
-            </div>
-            <div class="step-card-form">
-              <p class="step-hint">Bind a skeleton to your mesh for animation.</p>
-              <div class="form-row">
-                <label>Template</label>
-                <select id="ws-rig-template">
-                  <option value="">Loading templates...</option>
-                </select>
+          <div class="step-card-body two-stage">
+            <!-- ===== STAGE: CREATE NEW ===== -->
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Bind a skeleton to your mesh for animation</span>
+              </summary>
+              <div class="stage-body">
+                <div class="form-row">
+                  <label>Template</label>
+                  <select id="ws-rig-template">
+                    <option value="">Loading templates...</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Skinning</label>
+                  <select id="ws-rig-skin-method">
+                    <option value="auto" selected>Auto weights (fast)</option>
+                    <option value="heat">Heat diffusion (better)</option>
+                    <option value="voxel">Voxel weights (complex)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Smoothing</label>
+                  <input type="range" id="ws-rig-skin-smooth" min="0" max="10" value="3" style="flex:1; accent-color: var(--accent);" />
+                  <span id="ws-rig-skin-smooth-val" style="min-width: 24px; font-size: 11px; color: var(--text-2); text-align: right;">3</span>
+                </div>
+                <div class="form-row check-row">
+                  <label class="inline-check">
+                    <input type="checkbox" id="ws-rig-mirror-x" checked />
+                    Mirror weights (X axis)
+                  </label>
+                </div>
+                <button id="ws-generate-rig" class="primary-btn" disabled>Generate Rig</button>
               </div>
-              <button id="ws-generate-rig" class="primary-btn" disabled>Generate Rig</button>
-              <div id="ws-rig-versions" class="versions-strip"></div>
-              <details class="step-tools-details">
-                <summary>Edit selected rig</summary>
-                <div class="step-tools-body">
+            </details>
+
+            <!-- ===== STAGE: EDIT SELECTED ===== -->
+            <details class="stage stage-edit" open>
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a rig, test animation or export</span>
+              </summary>
+              <div class="stage-body stage-edit-body">
+                <div class="step-preview-col">
+                  <div class="step-card-preview" id="step3-preview">
+                    <div class="preview-placeholder">No rig yet</div>
+                  </div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-rig-versions" class="versions-strip"></div>
                   <div class="step-tools-row">
                     <button id="ws-rig-test-btn" class="ghost-btn">&#9654; Test animation</button>
+                    <button id="ws-rig-reskin-btn" class="ghost-btn">&#127814; Re-skin only</button>
                     <button id="ws-rig-unreal-btn" class="ghost-btn">&#127918; Export to Unreal</button>
                     <button id="ws-rig-blender-btn" class="ghost-btn">&#129704; Edit in Blender</button>
                     <button id="ws-rig-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
                   </div>
+                  <details class="sub-details" open>
+                    <summary>Landmarks (manual placement)</summary>
+                    <div class="sub-details-body">
+                      <p class="step-hint">Click a body part below, then click on the 3D mesh in the <b>3D Mesh</b> card above to place its marker. The auto-rigger uses these to align the skeleton.</p>
+                      <div class="step-tools-row">
+                        <button id="ws-lm-auto" class="ghost-btn">Auto-detect</button>
+                        <button id="ws-lm-clear" class="ghost-btn">Clear all</button>
+                        <button id="ws-lm-guided" class="ghost-btn">&#9758; Guided placement</button>
+                      </div>
+                      <div id="ws-lm-list" class="lm-list"></div>
+                    </div>
+                  </details>
                 </div>
-              </details>
-            </div>
+              </div>
+            </details>
           </div>
         </article>
       </div>
@@ -231,11 +373,83 @@
     </div>
 
     <!-- ============================================================
+         3D LIGHTBOX (fullscreen mesh preview)
+         ============================================================ -->
+    <div id="lightbox-3d" class="hidden">
+      <button id="lightbox-3d-close" title="Close">&#10005;</button>
+      <canvas id="lightbox-3d-canvas"></canvas>
+      <div id="lightbox-3d-toolbar" class="mesh-toolbar lb3d">
+        <button data-act="reset" title="Reset camera">&#10227;</button>
+        <select data-act="view" title="Camera view">
+          <option value="">View</option>
+          <option value="front">Front</option>
+          <option value="back">Back</option>
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+          <option value="top">Top</option>
+          <option value="bottom">Bottom</option>
+          <option value="iso">Iso</option>
+        </select>
+        <button data-act="wire" title="Wireframe">Wire</button>
+        <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
+        <button data-act="grid" class="active" title="Grid">Grid</button>
+        <button data-act="bones" title="Show skeleton">Bones</button>
+        <select data-act="bg" title="Background">
+          <option value="dark" selected>Dark</option>
+          <option value="studio">Studio</option>
+          <option value="black">Black</option>
+          <option value="gray">Gray</option>
+        </select>
+        <input type="range" data-act="light" min="0" max="200" value="100" title="Light intensity" />
+      </div>
+    </div>
+
+    <!-- ============================================================
          LIGHTBOX (fullscreen image preview)
          ============================================================ -->
     <div id="lightbox-2" class="hidden">
       <button id="lightbox-2-close" title="Close">&#10005;</button>
       <img id="lightbox-2-img" alt="" />
+    </div>
+
+    <!-- ============================================================
+         AUTO INPAINT MODAL (CLIPSeg target + replacement)
+         ============================================================ -->
+    <div id="modal-auto-inpaint" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Auto Inpaint</h2>
+        <p class="modal-subtitle">CLIPSeg detects what to replace from a text description.</p>
+        <label>Target (what to find)</label>
+        <input type="text" id="ai-target" placeholder="hat, shirt, background, sword..." />
+        <label>Replace with (empty = remove)</label>
+        <input type="text" id="ai-replace" placeholder="leather helmet, plain background..." />
+        <label>Detection padding <span id="ai-dilate-val" class="slider-val">15px</span></label>
+        <input type="range" id="ai-dilate" min="0" max="40" value="15" />
+        <div class="modal-actions">
+          <button class="ghost-btn" id="ai-cancel">Cancel</button>
+          <button class="primary-btn" id="ai-go">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         SETTINGS MODAL
+         ============================================================ -->
+    <div id="modal-settings" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Settings</h2>
+        <p class="modal-subtitle">Local environment configuration.</p>
+        <label>Blender executable path</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="set-blender-path" placeholder="C:\Program Files\Blender Foundation\Blender 4.x\blender.exe" />
+          <button id="set-blender-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
+        </div>
+        <label>GPU</label>
+        <div id="set-gpu-info" style="font-size:12px; color: var(--text-1); padding: 8px 12px; background: var(--bg-0); border-radius: var(--radius-sm); border: 1px solid var(--border);">Loading...</div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="set-close">Close</button>
+        </div>
+      </div>
     </div>
 
     <!-- ============================================================

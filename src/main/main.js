@@ -239,6 +239,19 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.setMenuBarVisibility(false);
 
+  // Intercept close: ask the renderer if there are running jobs.
+  // The renderer shows its own styled modal and replies via IPC.
+  let closeConfirmed = false;
+  mainWindow.on('close', (event) => {
+    if (closeConfirmed || _isQuitting) return; // already confirmed or quitting via app.quit
+    event.preventDefault();
+    mainWindow.webContents.send('app-close-requested');
+  });
+  ipcMain.on('app-close-confirmed', () => {
+    closeConfirmed = true;
+    mainWindow.close();
+  });
+
   // Open DevTools in dev mode
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
