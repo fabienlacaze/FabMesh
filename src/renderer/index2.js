@@ -548,6 +548,25 @@ document.getElementById('np-cancel').addEventListener('click', closeNewProjectMo
 document.getElementById('np-create').addEventListener('click', async () => {
   const name = document.getElementById('np-name').value.trim() || 'project';
   const prompt = document.getElementById('np-prompt').value.trim();
+
+  // Parental control: check name + prompt for blocked content
+  let restricted = true;
+  try {
+    if (API.getParentalStatus) {
+      const ps = await API.getParentalStatus();
+      restricted = !ps.unrestricted;
+    }
+  } catch(_) {}
+  if (restricted) {
+    const keywords = await _getNsfwKeywords();
+    const text = (name + ' ' + prompt).toLowerCase();
+    const blocked = keywords.find(kw => text.includes(kw));
+    if (blocked) {
+      showToast(`Blocked: "${blocked}" is not allowed with parental control active.`, 'error', 5000);
+      return;
+    }
+  }
+
   closeNewProjectModal();
   // Create an empty project shell and open it
   const proj = {
