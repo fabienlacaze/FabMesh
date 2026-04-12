@@ -959,21 +959,24 @@
           <strong>Click & drag</strong> to clone &nbsp;|&nbsp;
           <strong>Z</strong> to undo
         </div>
-        <div style="display:flex; align-items:center; gap:12px;">
-          <label style="display:flex; align-items:center; gap:6px;">Brush:
-            <input type="range" id="clone-brush-size" min="5" max="200" value="50" style="vertical-align:middle;" />
-            <span id="clone-brush-val" style="min-width:30px;">50</span>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:4px; min-width:0; flex:1 1 140px;">
+            <span style="font-size:11px; white-space:nowrap;">Brush:</span>
+            <input type="range" id="clone-brush-size" min="5" max="200" value="50" style="flex:1; min-width:60px;" />
+            <span id="clone-brush-val" style="min-width:24px; font-size:11px;">50</span>
           </label>
-          <label style="display:flex; align-items:center; gap:6px;">Hardness:
-            <input type="range" id="clone-hardness" min="0" max="100" value="50" style="vertical-align:middle;" />
-            <span id="clone-hardness-val" style="min-width:30px;">50</span>
+          <label style="display:flex; align-items:center; gap:4px; min-width:0; flex:1 1 140px;">
+            <span style="font-size:11px; white-space:nowrap;">Hard:</span>
+            <input type="range" id="clone-hardness" min="0" max="100" value="50" style="flex:1; min-width:60px;" />
+            <span id="clone-hardness-val" style="min-width:24px; font-size:11px;">50</span>
           </label>
-          <span style="flex:1;"></span>
-          <button id="clone-flip-toggle" class="secondary-btn" style="padding: 4px 12px; min-width:80px;" title="Cycle flip mode: None / H / V / Both">Flip: Off</button>
-          <button id="clone-loupe-toggle" class="secondary-btn" style="padding: 4px 12px;" title="Toggle magnifier">&#128270; Loupe</button>
-          <button id="clone-undo" class="secondary-btn" style="padding: 4px 8px;" disabled title="Undo">&#8630;</button>
-          <button id="clone-redo" class="secondary-btn" style="padding: 4px 8px;" disabled title="Redo">&#8631;</button>
-          <button id="clone-reset" class="secondary-btn" style="padding: 4px 8px;" title="Reset">&#8634;</button>
+          <div style="display:flex; gap:4px; flex-shrink:0;">
+            <button id="clone-flip-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Flip mode">Flip: Off</button>
+            <button id="clone-loupe-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Magnifier">&#128270;</button>
+            <button id="clone-undo" class="secondary-btn" style="padding:4px 6px;" disabled title="Undo">&#8630;</button>
+            <button id="clone-redo" class="secondary-btn" style="padding:4px 6px;" disabled title="Redo">&#8631;</button>
+            <button id="clone-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
+          </div>
         </div>
         <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
           <canvas id="clone-canvas" style="cursor: none; position: absolute; left: 0; top: 0;"></canvas>

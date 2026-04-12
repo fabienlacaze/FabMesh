@@ -1079,6 +1079,13 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-direction: column;
   gap: 8px;
 }
+/* Active state for toggle buttons (Loupe, Flip) in Clone Stamp / Draw Mask */
+.tool-active, .secondary-btn.tool-active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: white !important;
+}
+
 .step-tools-group {
   margin-bottom: 8px;
 }

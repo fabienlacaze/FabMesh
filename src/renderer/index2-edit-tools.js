@@ -118,9 +118,7 @@
 
   function _highlightLoupeBtn(btn, active) {
     if (!btn) return;
-    btn.style.borderColor = active ? 'var(--accent)' : '';
-    btn.style.color = active ? 'white' : '';
-    btn.style.background = active ? 'var(--accent)' : '';
+    btn.classList.toggle('tool-active', active);
   }
 
   var cloneState = {
@@ -520,8 +518,7 @@
       cloneFlipMode = (cloneFlipMode + 1) % 4;
       var labels = ['Flip: Off', 'Flip: H', 'Flip: V', 'Flip: HV'];
       cFlip.textContent = labels[cloneFlipMode];
-      cFlip.style.borderColor = cloneFlipMode > 0 ? 'var(--accent)' : '';
-      cFlip.style.color = cloneFlipMode > 0 ? 'var(--accent)' : '';
+      cFlip.classList.toggle('tool-active', cloneFlipMode > 0);
     });
 
     var cCancel = document.getElementById('clone-cancel');
