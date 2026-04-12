@@ -1692,6 +1692,116 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
   }
 });
 
+// Quick image edits: symmetrize, upscale, brightness, crop, etc.
+// All done via a single Python one-liner using PIL — fast, no GPU needed.
+ipcMain.handle('image-quick-edit', async (event, { imagePath, operation, params }) => {
+  try {
+    if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: 'Image not found' };
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const ts = Date.now();
+    const outPath = path.join(dir, `${base}_${operation}_${ts}${ext}`);
+    const p = params || {};
+
+    const scripts = {
+      symmetrize: `
+from PIL import Image
+img = Image.open(r"${imagePath}")
+w, h = img.size
+half = img.crop((0, 0, w//2, h))
+flipped = half.transpose(Image.FLIP_LEFT_RIGHT)
+out = Image.new(img.mode, (w, h))
+out.paste(half, (0, 0))
+out.paste(flipped, (w//2, 0))
+out.save(r"${outPath}")
+print("OK")`,
+
+      symmetrize_right: `
+from PIL import Image
+img = Image.open(r"${imagePath}")
+w, h = img.size
+half = img.crop((w//2, 0, w, h))
+flipped = half.transpose(Image.FLIP_LEFT_RIGHT)
+out = Image.new(img.mode, (w, h))
+out.paste(flipped, (0, 0))
+out.paste(half, (w//2, 0))
+out.save(r"${outPath}")
+print("OK")`,
+
+      upscale: `
+from PIL import Image
+img = Image.open(r"${imagePath}")
+w, h = img.size
+out = img.resize((w*2, h*2), Image.LANCZOS)
+out.save(r"${outPath}")
+print("OK")`,
+
+      brightness: `
+from PIL import Image, ImageEnhance
+img = Image.open(r"${imagePath}")
+img = ImageEnhance.Brightness(img).enhance(${p.brightness || 1.2})
+img = ImageEnhance.Contrast(img).enhance(${p.contrast || 1.2})
+img.save(r"${outPath}")
+print("OK")`,
+
+      crop: `
+from PIL import Image
+img = Image.open(r"${imagePath}")
+w, h = img.size
+l = int(w * ${p.left || 0})
+t = int(h * ${p.top || 0})
+r = int(w * ${p.right || 1})
+b = int(h * ${p.bottom || 1})
+out = img.crop((l, t, r, b))
+out.save(r"${outPath}")
+print("OK")`,
+
+      extend: `
+from PIL import Image
+img = Image.open(r"${imagePath}")
+w, h = img.size
+pad = int(max(w, h) * ${p.padding || 0.2})
+out = Image.new(img.mode, (w + pad*2, h + pad*2), (255,255,255) if img.mode == 'RGB' else (255,255,255,0))
+out.paste(img, (pad, pad))
+out.save(r"${outPath}")
+print("OK")`,
+
+      facefix: `
+from PIL import Image, ImageFilter
+img = Image.open(r"${imagePath}")
+w, h = img.size
+# Simple face region: top 40% center 60%
+fl = int(w * 0.2)
+ft = 0
+fr = int(w * 0.8)
+fb = int(h * 0.4)
+face = img.crop((fl, ft, fr, fb))
+face = face.filter(ImageFilter.SMOOTH_MORE)
+from PIL import ImageEnhance
+face = ImageEnhance.Sharpness(face).enhance(1.5)
+img.paste(face, (fl, ft))
+img.save(r"${outPath}")
+print("OK")`,
+    };
+
+    const script = scripts[operation];
+    if (!script) return { success: false, error: `Unknown operation: ${operation}` };
+
+    return await new Promise((resolve) => {
+      execFile('python', ['-c', script], { timeout: 120000 }, (error, stdout, stderr) => {
+        if (error || !fs.existsSync(outPath)) {
+          resolve({ success: false, error: (error?.message || stderr || 'failed').slice(-300) });
+        } else {
+          resolve({ success: true, newPath: outPath });
+        }
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('remove-background', async (event, imagePath) => {
   return new Promise((resolve) => {
     const dir = path.dirname(imagePath);
