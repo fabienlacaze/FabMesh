@@ -4370,13 +4370,17 @@ async function enqueueJob(kind, displayName, runFn) {
   if (_panel) _panel.classList.remove('hidden');
   if (_bubble) _bubble.classList.add('hidden');
   log('queue', `Job "${displayName}" queued — ${reason}`);
-  // If the SDXL server is hogging VRAM and the queued job doesn't need it,
-  // ask main.js to kill the SDXL server to free VRAM for the queued job.
-  if (kind === 'mesh' || kind === 'rig') {
+  // Auto-kill SDXL server when a mesh/rig job is queued because of VRAM.
+  // The SDXL server holds ~6.6 GB that the queued job needs. We kill it
+  // and wait a moment for the VRAM to be freed before processQueue polls.
+  if (kind === 'mesh' || kind === 'rig' || kind === 'image') {
     try {
-      if (API.cancelJob) API.cancelJob(0).catch(() => {}); // 0 = kill orphan python (SDXL preserved by default)
-      // More targeted: tell main.js to stop the SDXL server specifically
-      if (API.stopSdxlServer) API.stopSdxlServer().catch(() => {});
+      log('queue', 'Auto-killing SDXL server to free VRAM for queued job');
+      if (API.stopSdxlServer) {
+        await API.stopSdxlServer();
+        // Give the OS a moment to reclaim the VRAM
+        await new Promise(r => setTimeout(r, 2000));
+      }
     } catch (_) {}
   }
   // Show a popup so the user knows WHY the job didn't start immediately
@@ -4519,12 +4523,15 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   if (API.openLogsFolder) await API.openLogsFolder();
 });
 document.getElementById('set-kill-python')?.addEventListener('click', async () => {
-  const ok = await customConfirm('Kill all Python subprocesses (orphan generations)? The SDXL server will be preserved.', 'Kill stuck Python', 'Kill');
+  const ok = await customConfirm('Kill all Python processes including the SDXL server?\nThis will free all VRAM and allow new jobs to start.', 'Kill processes', 'Kill all');
   if (!ok) return;
-  if (API.cancelJob) await API.cancelJob(0); // 0 = no specific jobId, triggers the orphan-kill fallback
-  // Reload jobs list to clear any zombie entries on the renderer side
+  // Kill SDXL server + all orphan python processes
+  try { if (API.stopSdxlServer) await API.stopSdxlServer(); } catch(_) {}
+  try { if (API.cancelJob) await API.cancelJob(0); } catch(_) {}
+  // Clear zombie job entries
   state.jobs = state.jobs.filter(j => j.status !== 'running');
   renderJobs();
+  showToast('All processes killed. VRAM freed.', 'success');
 });
 
 // Forward main process logs to the renderer console for live debugging
