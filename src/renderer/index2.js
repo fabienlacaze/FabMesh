@@ -2428,7 +2428,8 @@ function gatedRun(kind, displayName, runFn) {
 const MESH_QUALITY_PRESETS = {
   draft:    { tex: 512,  verts: 3000,  expectedMs: 12000 },
   standard: { tex: 1024, verts: -1,    expectedMs: 20000 },
-  high:     { tex: 2048, verts: 30000, expectedMs: 45000 },
+  high:     { tex: 2048, verts: -1,    expectedMs: 45000 },
+  ultra:    { tex: 4096, verts: -1,    expectedMs: 90000 },
 };
 // subdivide value convention:
 //   negative = decimate to abs(val) faces (low-poly)
