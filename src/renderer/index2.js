@@ -285,6 +285,7 @@ function showPage(name) {
   if (name === 'projects') {
     document.getElementById('breadcrumb').textContent = '';
     refreshProjectsPage();
+    refreshParentalStatus();
   } else {
     document.getElementById('breadcrumb').textContent = state.currentProject?.name || '';
   }
@@ -5212,9 +5213,12 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 async function refreshParentalStatus() {
   const statusEl = document.getElementById('parental-status');
   const toggleBtn = document.getElementById('parental-toggle');
+  const lockIcon = document.getElementById('btn-parental-lock');
   if (!statusEl || !toggleBtn || !API.getParentalStatus) return;
   try {
     const r = await API.getParentalStatus();
+    // Topbar lock icon
+    if (lockIcon) lockIcon.style.display = r.unrestricted ? 'none' : '';
     if (r.unrestricted) {
       statusEl.textContent = '🔓 Unrestricted';
       statusEl.style.color = '#f59e0b';

@@ -1033,10 +1033,11 @@ ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   const imgList = images.filter(p => fs.existsSync(p));
   if (imgList.length === 0) return {};
 
-  // Write paths to a temp file
+  // Write paths to a temp file (use forward slashes to avoid JSON escape issues)
   const tmpFile = path.join(LOGS_DIR, '_nsfw_scan_paths.json');
   const outFile = path.join(LOGS_DIR, '_nsfw_scan_results.json');
-  fs.writeFileSync(tmpFile, JSON.stringify(imgList), 'utf-8');
+  const forwardSlashList = imgList.map(p => p.replace(/\\/g, '/'));
+  fs.writeFileSync(tmpFile, JSON.stringify(forwardSlashList), 'utf-8');
 
   const script = `
 import sys, json
