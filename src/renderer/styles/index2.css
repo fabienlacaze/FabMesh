@@ -1535,10 +1535,15 @@ button.tool-active {
   border-color: var(--error);
   color: var(--error);
 }
-.ghost-btn.danger:hover {
+.ghost-btn.danger:hover:not(:disabled) {
   background: var(--error);
   color: white;
   border-color: var(--error);
+}
+.ghost-btn:disabled, .ghost-btn.danger:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Python processes status block */
