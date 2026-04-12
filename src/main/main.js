@@ -2889,6 +2889,57 @@ ipcMain.handle('test-meshy-key', async (_event, apiKey) => {
   });
 });
 
+// Connect FabMesh to Claude Desktop by writing the MCP server config into
+// Claude Desktop's settings file (%APPDATA%\Claude\claude_desktop_config.json).
+// This is a one-click operation: the user clicks "Connect to Claude Desktop"
+// in FabMesh Settings, and Claude Desktop discovers FabMesh's MCP tools
+// (generate_image, generate_mesh, generate_rig, batch_pipeline) on next restart.
+ipcMain.handle('connect-claude-desktop', async () => {
+  try {
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const claudeDir = path.join(appData, 'Claude');
+    const configPath = path.join(claudeDir, 'claude_desktop_config.json');
+    const mcpServerScript = path.join(__dirname, '..', '..', 'scripts', 'mcp_server.py').replace(/\\/g, '\\\\');
+    const projectRoot = path.join(__dirname, '..', '..').replace(/\\/g, '\\\\');
+
+    // Read existing config or start fresh
+    let config = {};
+    if (fs.existsSync(configPath)) {
+      try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) {}
+    }
+    if (!config.mcpServers) config.mcpServers = {};
+
+    // Add/update FabMesh MCP server entry
+    config.mcpServers.fabmesh = {
+      command: 'python',
+      args: [mcpServerScript],
+      cwd: projectRoot,
+    };
+
+    // Write back
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    log.info('main', `Claude Desktop config written to ${configPath}`);
+    return { success: true, configPath };
+  } catch (e) {
+    log.error('main', `connect-claude-desktop failed: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('check-claude-desktop', async () => {
+  try {
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const configPath = path.join(appData, 'Claude', 'claude_desktop_config.json');
+    if (!fs.existsSync(configPath)) return { connected: false };
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const hasFabmesh = !!(config.mcpServers && config.mcpServers.fabmesh);
+    return { connected: hasFabmesh };
+  } catch (e) {
+    return { connected: false };
+  }
+});
+
 ipcMain.handle('set-blender-path', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Blender executable',

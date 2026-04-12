@@ -16,7 +16,7 @@
   --text-0: #f5f5fa;
   --text-1: #c2c2d4;
   --text-2: #7c7c95;
-  --text-3: #4f4f68;
+  --text-3: #8888a8;
   --accent: #a855f7;
   --accent-2: #e94560;
   --accent-grad: linear-gradient(135deg, #e94560, #a855f7);
@@ -697,9 +697,8 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 }
 .viewer-filename:empty { display: none; }
 .form-hint {
-  font-size: 10px;
-  color: var(--text-2);
-  opacity: 0.7;
+  font-size: 11px;
+  color: var(--text-3);
   margin-top: -4px;
   margin-bottom: 4px;
   padding-left: 2px;

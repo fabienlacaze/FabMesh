@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   getVersions: (name) => ipcRenderer.invoke('get-versions', name),
   revertToVersion: (opts) => ipcRenderer.invoke('revert-to-version', opts),
   listProjects: () => ipcRenderer.invoke('list-projects'),
+  connectClaudeDesktop: () => ipcRenderer.invoke('connect-claude-desktop'),
+  checkClaudeDesktop: () => ipcRenderer.invoke('check-claude-desktop'),
   onMcpJobStart: (cb) => ipcRenderer.on('mcp-job-start', (e, data) => cb(data)),
   onMcpJobEnd: (cb) => ipcRenderer.on('mcp-job-end', (e, data) => cb(data)),
   onMcpRefresh: (cb) => ipcRenderer.on('mcp-refresh', (e, data) => cb(data)),

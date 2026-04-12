@@ -673,6 +673,15 @@
             Jobs are blocked when system RAM exceeds this limit. Python subprocesses receive a hard cap via FABMESH_RAM_LIMIT_MB.
           </div>
         </div>
+        <label>Claude Desktop <span style="font-weight:normal; color:var(--text-2); font-size:11px;">(optional, free)</span></label>
+        <div class="gpu-limits-hint" style="margin-bottom:8px;">
+          Connect FabMesh to <a href="https://claude.ai/download" target="_blank" rel="noopener">Claude Desktop</a> (free) so Claude can generate batches of assets for you via voice/text commands.
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="set-claude-connect" class="ghost-btn" style="flex:1;">&#129302; Connect to Claude Desktop</button>
+          <span id="set-claude-status" style="font-size:11px; color:var(--text-2); align-self:center;"></span>
+        </div>
+
         <label>Logs</label>
         <button id="set-open-logs" class="ghost-btn" style="width:100%;">&#128193; Open logs folder</button>
 

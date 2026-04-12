@@ -4258,13 +4258,15 @@ async function openSettings() {
   document.getElementById('modal-settings').classList.remove('hidden');
   try {
     const cfg = await API.getConfig();
-    document.getElementById('set-blender-path').value = cfg?.blenderPath || '';
+    const blenderEl = document.getElementById('set-blender-path');
+    if (blenderEl) blenderEl.value = cfg?.blenderPath || '';
     const meshyInput = document.getElementById('set-meshy-api-key');
     if (meshyInput) meshyInput.value = cfg?.meshyApiKey || '';
   } catch (e) {}
   applyGpuLimitMarkers();
   setupGpuLimitDragging();
   refreshGpuStats();
+  checkClaudeDesktopStatus();
   // Ensure main process has the current RAM limit
   if (API.setRamLimit) API.setRamLimit(gpuLimits.ram).catch(() => {});
   if (_gpuPollTimer) clearInterval(_gpuPollTimer);
@@ -4337,13 +4339,16 @@ if (API.onMcpRefresh) {
     reloadCurrentProject().catch(() => {});
   });
 }
+// Legacy: Blender browse button (removed from UI but handler kept to avoid crash
+// if any code path still references it).
 document.getElementById('set-blender-browse')?.addEventListener('click', async () => {
   try {
     const r = await API.setBlenderPath();
     if (r) {
-      document.getElementById('set-blender-path').value = r.blenderPath || r;
+      const el = document.getElementById('set-blender-path');
+      if (el) el.value = r.blenderPath || r;
     }
-  } catch (e) { alert('Browse failed: ' + e.message); }
+  } catch (e) {}
 });
 
 // ----------- Meshy.ai API key: persist on blur, test via button ----------
@@ -4386,6 +4391,47 @@ document.getElementById('set-meshy-test')?.addEventListener('click', async () =>
     setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
   }
 });
+
+// ----------- Claude Desktop: connect button + status check ----------
+document.getElementById('set-claude-connect')?.addEventListener('click', async () => {
+  const btn = document.getElementById('set-claude-connect');
+  const status = document.getElementById('set-claude-status');
+  const orig = btn.innerHTML;
+  btn.innerHTML = 'Connecting...';
+  btn.disabled = true;
+  try {
+    const r = await API.connectClaudeDesktop();
+    if (r && r.success) {
+      btn.innerHTML = '&#10003; Connected';
+      btn.style.borderColor = '#1f6f3a';
+      if (status) status.textContent = 'Restart Claude Desktop to activate.';
+      if (status) status.style.color = '#86efac';
+    } else {
+      btn.innerHTML = 'Failed';
+      if (status) status.textContent = r?.error || 'Unknown error';
+      if (status) status.style.color = '#fca5a5';
+    }
+  } catch (e) {
+    btn.innerHTML = 'Error';
+    if (status) status.textContent = e.message;
+  }
+  setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 3000);
+});
+// Check connection status when settings opens
+async function checkClaudeDesktopStatus() {
+  const status = document.getElementById('set-claude-status');
+  if (!status || !API.checkClaudeDesktop) return;
+  try {
+    const r = await API.checkClaudeDesktop();
+    if (r && r.connected) {
+      status.textContent = 'Connected';
+      status.style.color = '#86efac';
+    } else {
+      status.textContent = 'Not connected';
+      status.style.color = 'var(--text-2)';
+    }
+  } catch (e) { /* ignore */ }
+}
 
 // ============================================================
 // SKINNING SLIDER LABEL
