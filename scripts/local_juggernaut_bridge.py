@@ -116,7 +116,33 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             result = pipe(**_pipe_kwargs)
 
         img_path = os.path.join(output_dir, f"ref_{i}.png")
-        result.images[0].save(img_path)
+        gen_img = result.images[0]
+
+        # Post-generation safety check (parental control).
+        # Uses a simple skin-ratio heuristic: if >40% of the image is skin-colored
+        # pixels, flag as potentially NSFW and block when restricted.
+        if os.environ.get('FABMESH_UNRESTRICTED') != '1':
+            try:
+                import numpy as _np
+                arr = _np.array(gen_img.convert('RGB'))
+                r, g, b = arr[:,:,0].astype(float), arr[:,:,1].astype(float), arr[:,:,2].astype(float)
+                # Skin detection (RGB heuristic)
+                skin = ((r > 95) & (g > 40) & (b > 20) &
+                        (r > g) & (r > b) &
+                        ((r - g).astype(float) > 15) &
+                        (arr.max(axis=2).astype(float) - arr.min(axis=2).astype(float) > 15))
+                skin_ratio = skin.sum() / (arr.shape[0] * arr.shape[1])
+                if skin_ratio > 0.45:
+                    print(f"LOCAL_REALVIS_BLOCKED: image {i} blocked by safety filter (skin ratio {skin_ratio:.0%})", flush=True)
+                    # Replace with a black image + warning text
+                    from PIL import ImageDraw, ImageFont
+                    gen_img = Image.new('RGB', gen_img.size, (30, 30, 30))
+                    draw = ImageDraw.Draw(gen_img)
+                    draw.text((gen_img.width//2 - 100, gen_img.height//2 - 10), "Blocked by content filter", fill=(200, 50, 50))
+            except Exception as _se:
+                print(f"LOCAL_REALVIS: safety check error ({_se}), allowing image", flush=True)
+
+        gen_img.save(img_path)
         images.append(img_path)
         print(f"LOCAL_REALVIS_DONE: {img_path} ({os.path.getsize(img_path)} bytes)")
         sys.stdout.flush()

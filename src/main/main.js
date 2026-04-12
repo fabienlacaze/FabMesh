@@ -91,14 +91,43 @@ function isUnrestrictedMode() {
   return process.env.FABMESH_UNRESTRICTED === '1';
 }
 
+// Dangerous combinations: if ANY word from group A AND ANY word from group B
+// appear together, the prompt is blocked. This catches circumventions like
+// "young child without clothes" that individual keywords miss.
+const NSFW_COMBOS = [
+  // Children + nudity/sexual
+  { a: ['child', 'children', 'kid', 'kids', 'boy', 'girl', 'teen', 'teenager', 'young', 'infant', 'baby', 'toddler', 'minor', 'preteen', 'schoolgirl', 'schoolboy', 'enfant', 'fille', 'garcon', 'jeune', 'ado', 'adolescent', 'gamin', 'gamine', 'bebe'],
+    b: ['without clothes', 'no clothes', 'unclothed', 'undressed', 'disrobed', 'bare', 'exposed', 'revealing', 'intimate', 'sensual', 'seductive', 'provocative', 'suggestive', 'sexy', 'hot', 'bath', 'shower', 'bedroom', 'bed', 'lingerie', 'underwear', 'panties', 'bra', 'bikini', 'swimsuit', 'diaper only', 'sans vetement', 'sans habit', 'deshabill', 'nu ', 'nue ', 'nus ', 'nues'] },
+  // Anyone + extreme sexual
+  { a: ['woman', 'man', 'person', 'girl', 'boy', 'female', 'male', 'lady', 'femme', 'homme'],
+    b: ['without clothes', 'no clothes', 'unclothed', 'fully exposed', 'spread legs', 'bent over', 'on knees', 'tied up', 'chained', 'whipped', 'spanked'] },
+  // Violence + children
+  { a: ['child', 'children', 'kid', 'kids', 'baby', 'infant', 'toddler', 'enfant', 'bebe'],
+    b: ['hurt', 'hit', 'beat', 'punch', 'slap', 'abuse', 'attack', 'weapon', 'knife', 'gun', 'shoot', 'bleed', 'cry', 'scream', 'pain', 'suffer', 'frapper', 'battre', 'blesser'] },
+];
+
 function checkPromptSafety(prompt) {
   if (isUnrestrictedMode()) return { safe: true };
   const lower = (prompt || '').toLowerCase();
+
+  // Check individual keywords
   for (const kw of NSFW_KEYWORDS) {
     if (lower.includes(kw)) {
       return { safe: false, blocked: kw, reason: `Content filter: "${kw}" is blocked. Disable parental control in Settings to use unrestricted mode.` };
     }
   }
+
+  // Check dangerous combinations
+  for (const combo of NSFW_COMBOS) {
+    const hasA = combo.a.some(w => lower.includes(w));
+    const hasB = combo.b.some(w => lower.includes(w));
+    if (hasA && hasB) {
+      const matchA = combo.a.find(w => lower.includes(w));
+      const matchB = combo.b.find(w => lower.includes(w));
+      return { safe: false, blocked: `${matchA} + ${matchB}`, reason: `Content filter: combination "${matchA}" + "${matchB}" is blocked. This type of content is not allowed.` };
+    }
+  }
+
   return { safe: true };
 }
 
