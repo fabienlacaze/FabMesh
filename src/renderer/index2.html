@@ -1186,6 +1186,34 @@
     </div>
   </div>
 
+  <!-- Crop modal -->
+  <div id="modal-crop" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Crop</h3>
+        <button id="crop-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <button id="crop-preset-free" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Free</button>
+        <button id="crop-preset-1-1" class="secondary-btn" style="padding:4px 10px; font-size:11px;">1:1</button>
+        <button id="crop-preset-4-3" class="secondary-btn" style="padding:4px 10px; font-size:11px;">4:3</button>
+        <button id="crop-preset-16-9" class="secondary-btn" style="padding:4px 10px; font-size:11px;">16:9</button>
+        <button id="crop-preset-center" class="secondary-btn" style="padding:4px 10px; font-size:11px;">Auto center</button>
+        <span style="flex:1;"></span>
+        <span id="crop-size-label" style="font-size:11px; color:var(--text-2);"></span>
+      </div>
+      <div style="font-size:10px; color:var(--text-3);">Drag to select the crop area. Use presets for fixed aspect ratios.</div>
+      <div id="crop-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px; cursor:crosshair;">
+        <canvas id="crop-canvas" style="position:absolute; left:0; top:0;"></canvas>
+        <canvas id="crop-overlay" style="position:absolute; left:0; top:0;"></canvas>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="crop-cancel" class="secondary-btn">Cancel</button>
+        <button id="crop-apply" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Apply Crop</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Symmetrize modal -->
   <div id="modal-symmetrize" class="modal hidden">
     <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">

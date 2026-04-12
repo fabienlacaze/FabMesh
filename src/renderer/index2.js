@@ -2845,7 +2845,169 @@ document.getElementById('bright-apply')?.addEventListener('click', async () => {
 });
 document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQuickEdit('facefix'));
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
-document.getElementById('ws-crop-btn')?.addEventListener('click', () => runQuickEdit('crop', { left: 0.1, top: 0.05, right: 0.9, bottom: 0.95 }));
+// ============================================================
+// CROP TOOL — interactive modal with drag selection + presets
+// ============================================================
+const cropState = { x1: 0, y1: 0, x2: 1, y2: 1, dragging: false, aspect: null, w: 0, h: 0, imgPath: null };
+
+document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  cropState.imgPath = p.selectedImagePath;
+  const modal = document.getElementById('modal-crop');
+  const canvas = document.getElementById('crop-canvas');
+  const overlay = document.getElementById('crop-overlay');
+  if (!modal || !canvas || !overlay) return;
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    const container = document.getElementById('crop-canvas-container');
+    const cw = container.clientWidth || 800;
+    const ch = container.clientHeight || 600;
+    const scale = Math.min(cw / img.width, ch / img.height, 1);
+    const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
+    canvas.width = img.width; canvas.height = img.height;
+    overlay.width = img.width; overlay.height = img.height;
+    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+    overlay.style.width = dw + 'px'; overlay.style.height = dh + 'px';
+    const left = Math.round((cw - dw) / 2), top = Math.round((ch - dh) / 2);
+    canvas.style.left = left + 'px'; canvas.style.top = top + 'px';
+    overlay.style.left = left + 'px'; overlay.style.top = top + 'px';
+    ctx.drawImage(img, 0, 0);
+    cropState.w = img.width; cropState.h = img.height;
+    cropState.x1 = 0.1; cropState.y1 = 0.1; cropState.x2 = 0.9; cropState.y2 = 0.9;
+    cropState.aspect = null;
+    _cropDrawOverlay();
+    _cropUpdateLabel();
+    // Reset preset buttons
+    document.querySelectorAll('[id^="crop-preset-"]').forEach(b => b.classList.remove('tool-active'));
+    document.getElementById('crop-preset-free')?.classList.add('tool-active');
+    modal.classList.remove('hidden');
+  };
+  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+});
+
+function _cropDrawOverlay() {
+  const overlay = document.getElementById('crop-overlay');
+  if (!overlay) return;
+  const ctx = overlay.getContext('2d');
+  const w = cropState.w, h = cropState.h;
+  ctx.clearRect(0, 0, w, h);
+  // Darken outside crop area
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, w, h);
+  // Clear the crop area (transparent)
+  const cx1 = Math.round(cropState.x1 * w), cy1 = Math.round(cropState.y1 * h);
+  const cx2 = Math.round(cropState.x2 * w), cy2 = Math.round(cropState.y2 * h);
+  ctx.clearRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
+  // Draw crop border
+  ctx.strokeStyle = '#22c55e';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 3]);
+  ctx.strokeRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
+  // Rule of thirds grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  const cw = cx2 - cx1, ch2 = cy2 - cy1;
+  for (let i = 1; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(cx1 + cw * i / 3, cy1); ctx.lineTo(cx1 + cw * i / 3, cy2);
+    ctx.moveTo(cx1, cy1 + ch2 * i / 3); ctx.lineTo(cx2, cy1 + ch2 * i / 3);
+    ctx.stroke();
+  }
+  // Corner handles
+  ctx.fillStyle = '#22c55e';
+  const hs = 6;
+  [[cx1,cy1],[cx2,cy1],[cx1,cy2],[cx2,cy2]].forEach(([x,y]) => {
+    ctx.fillRect(x - hs/2, y - hs/2, hs, hs);
+  });
+}
+
+function _cropUpdateLabel() {
+  const label = document.getElementById('crop-size-label');
+  if (!label) return;
+  const cw = Math.round((cropState.x2 - cropState.x1) * cropState.w);
+  const ch = Math.round((cropState.y2 - cropState.y1) * cropState.h);
+  label.textContent = `${cw} x ${ch} px`;
+}
+
+// Overlay mouse interactions
+(() => {
+  const ov = document.getElementById('crop-overlay');
+  if (!ov) return;
+  function _coords(e) {
+    const rect = ov.getBoundingClientRect();
+    const sx = cropState.w / rect.width;
+    return { x: (e.clientX - rect.left) * sx / cropState.w, y: (e.clientY - rect.top) * sx / cropState.h };
+  }
+  ov.addEventListener('mousedown', (e) => {
+    const p = _coords(e);
+    cropState.x1 = p.x; cropState.y1 = p.y;
+    cropState.x2 = p.x; cropState.y2 = p.y;
+    cropState.dragging = true;
+  });
+  ov.addEventListener('mousemove', (e) => {
+    if (!cropState.dragging) return;
+    const p = _coords(e);
+    cropState.x2 = Math.max(0, Math.min(1, p.x));
+    cropState.y2 = Math.max(0, Math.min(1, p.y));
+    // Enforce aspect ratio if set
+    if (cropState.aspect) {
+      const dw = Math.abs(cropState.x2 - cropState.x1);
+      const dh = dw / cropState.aspect * (cropState.w / cropState.h);
+      cropState.y2 = cropState.y1 + (cropState.y2 > cropState.y1 ? dh : -dh);
+    }
+    _cropDrawOverlay();
+    _cropUpdateLabel();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!cropState.dragging) return;
+    cropState.dragging = false;
+    // Normalize so x1<x2, y1<y2
+    if (cropState.x1 > cropState.x2) { const t = cropState.x1; cropState.x1 = cropState.x2; cropState.x2 = t; }
+    if (cropState.y1 > cropState.y2) { const t = cropState.y1; cropState.y1 = cropState.y2; cropState.y2 = t; }
+    _cropDrawOverlay();
+    _cropUpdateLabel();
+  });
+})();
+
+// Presets
+function _cropSetPreset(aspect, id) {
+  document.querySelectorAll('[id^="crop-preset-"]').forEach(b => b.classList.remove('tool-active'));
+  document.getElementById(id)?.classList.add('tool-active');
+  cropState.aspect = aspect;
+  if (aspect === 'center') {
+    // Auto-center: crop 10% from each edge
+    cropState.x1 = 0.1; cropState.y1 = 0.1; cropState.x2 = 0.9; cropState.y2 = 0.9;
+    cropState.aspect = null;
+    _cropDrawOverlay(); _cropUpdateLabel();
+  }
+}
+document.getElementById('crop-preset-free')?.addEventListener('click', () => _cropSetPreset(null, 'crop-preset-free'));
+document.getElementById('crop-preset-1-1')?.addEventListener('click', () => _cropSetPreset(1, 'crop-preset-1-1'));
+document.getElementById('crop-preset-4-3')?.addEventListener('click', () => _cropSetPreset(4/3, 'crop-preset-4-3'));
+document.getElementById('crop-preset-16-9')?.addEventListener('click', () => _cropSetPreset(16/9, 'crop-preset-16-9'));
+document.getElementById('crop-preset-center')?.addEventListener('click', () => _cropSetPreset('center', 'crop-preset-center'));
+
+// Close / Cancel
+document.getElementById('crop-close-x')?.addEventListener('click', () => document.getElementById('modal-crop')?.classList.add('hidden'));
+document.getElementById('crop-cancel')?.addEventListener('click', () => document.getElementById('modal-crop')?.classList.add('hidden'));
+
+// Apply crop
+document.getElementById('crop-apply')?.addEventListener('click', async () => {
+  document.getElementById('modal-crop')?.classList.add('hidden');
+  // Normalize
+  const left = Math.min(cropState.x1, cropState.x2);
+  const top = Math.min(cropState.y1, cropState.y2);
+  const right = Math.max(cropState.x1, cropState.x2);
+  const bottom = Math.max(cropState.y1, cropState.y2);
+  if (right - left < 0.05 || bottom - top < 0.05) {
+    showToast('Crop area too small.', 'error');
+    return;
+  }
+  await runQuickEdit('crop', { left, top, right, bottom });
+});
 
 // Per-image style memory (stored in localStorage as a JSON map path→styleValue)
 function _saveImageStyle(imgPath, styleValue) {
