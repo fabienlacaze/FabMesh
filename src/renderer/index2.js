@@ -3786,15 +3786,18 @@ async function refreshJobDetailsModal(id) {
   // so the user understands why the first call takes 1-3 minutes (model
   // download + VRAM load). Hidden for cloud jobs (pollinations / meshy) and
   // for jobs that have already finished.
+  // First-run hint: only show when the job JUST started (first 15s) AND
+  // it's a local GPU job. After 15s the model is either loaded (hint no
+  // longer relevant) or the job already has real progress. This prevents
+  // the hint from appearing on every single generation.
   const hintEl = document.getElementById('jd-first-run-hint');
   if (hintEl) {
-    const engineStr = (j.params?.Engine || '').toLowerCase();
-    const usesLocalSdxl =
-      j.status === 'running' && (
-        /realvis|local gpu|sdxl|img2img|inpaint|mask inpaint|clone|local sd/i.test(engineStr)
-        || /inpaint|mask inpaint|img2img|remove bg|clone/i.test(j.name || '')
-      );
-    hintEl.classList.toggle('hidden', !usesLocalSdxl);
+    const elapsed = Date.now() - j.startedAt;
+    const isEarly = j.status === 'running' && elapsed < 15000;
+    const isLocalGpu = /realvis|sf3d|stable fast|unirig|sdxl|inpaint/i.test(
+      (j.params?.Engine || '') + ' ' + (j.name || '')
+    );
+    hintEl.classList.toggle('hidden', !(isEarly && isLocalGpu));
   }
   // Cancel button: only enabled while running
   const cancelBtn = document.getElementById('job-details-cancel');
