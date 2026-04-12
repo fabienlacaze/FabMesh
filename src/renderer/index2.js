@@ -2357,18 +2357,6 @@ document.getElementById('ws-use-for-rig-btn')?.addEventListener('click', () => {
   setTimeout(() => step3Card?.classList.remove('pulse-highlight'), 1500);
 });
 
-// Effort slider label
-const effortEl = document.getElementById('ws-3d-effort');
-const effortLabel = document.getElementById('ws-3d-effort-val');
-if (effortEl && effortLabel) {
-  const effortNames = { 1: 'Fast', 2: 'Medium', 3: 'High', 4: 'Very high', 5: 'Max' };
-  const updateEffortLabel = () => {
-    effortLabel.textContent = effortNames[effortEl.value] || effortEl.value;
-  };
-  effortEl.addEventListener('input', updateEffortLabel);
-  updateEffortLabel();
-}
-
 // Wrap a generate handler so it goes through the queue if VRAM is tight
 function gatedRun(kind, displayName, runFn) {
   enqueueJob(kind, displayName, runFn);
@@ -2378,45 +2366,32 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
   const engine = document.getElementById('ws-3d-engine').value;
-  const maxTris = parseInt(document.getElementById('ws-3d-maxtris').value) || 0;
-  const effort = parseInt(document.getElementById('ws-3d-effort').value) || 2;
-  const texSize = parseInt(document.getElementById('ws-3d-texsize').value) || 1024;
+  const texSize = parseInt(document.getElementById('ws-3d-texsize')?.value) || 1024;
   const buildStages = document.getElementById('ws-3d-buildstages')?.checked || false;
-  const effortNames = { 1: 'Fast', 2: 'Medium', 3: 'High', 4: 'Very high', 5: 'Max' };
-  // Estimate based on engine + effort + max triangles + texture size
+  // SF3D works best with its internal defaults (~6K verts). We don't expose
+  // vertex count / effort sliders — they only caused OOM crashes with no
+  // visible quality improvement. Meshy.ai uses its own server-side defaults.
   let expectedMs;
   if (engine === 'sf3d') {
-    // Stable Fast 3D: ~10s cold, ~3s warm (native PBR, blazing fast)
     expectedMs = 20000;
-  } else if (engine === 'local') {
-    // TripoSR: very fast, ~30s total
-    expectedMs = 30000;
-  } else if (engine === 'triposg') {
-    // TripoSG: geometry only, ~60s
-    expectedMs = 60000;
   } else if (engine === 'meshy') {
-    // Meshy.ai cloud: typically 2-5 min depending on queue load
     expectedMs = 240000;
   } else {
-    // Trellis 2
-    expectedMs = 90000;
+    expectedMs = 60000;
   }
   if (buildStages) expectedMs *= 2.5;
-  // Capture all params now (the user might change them while the job is queued)
   const params = {
     imagePath: p.selectedImagePath,
     outputName: p.name,
     engine,
     textureSize: texSize,
-    targetFaces: maxTris || 50000,
-    effort,
+    targetFaces: -1,  // let SF3D use its internal default (~6K verts, optimal quality)
+    effort: 2,
     buildStages,
     vramFraction: (gpuLimits?.vram || 90) / 100,
   };
   const jobParams = {
     Engine: engineLabel(engine),
-    'Max triangles': maxTris === 0 ? 'No limit' : `${maxTris.toLocaleString()}`,
-    Effort: effortNames[effort] || effort,
     'Texture size': `${texSize} px`,
     'Construction stages': buildStages ? 'yes' : 'no',
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
