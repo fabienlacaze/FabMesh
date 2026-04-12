@@ -2941,6 +2941,23 @@ ipcMain.handle('connect-claude-desktop', async () => {
   }
 });
 
+ipcMain.handle('disconnect-claude-desktop', async () => {
+  try {
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const configPath = path.join(appData, 'Claude', 'claude_desktop_config.json');
+    if (!fs.existsSync(configPath)) return { success: true };
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (config.mcpServers && config.mcpServers.fabmesh) {
+      delete config.mcpServers.fabmesh;
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      log.info('main', 'Removed FabMesh from Claude Desktop config');
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('check-claude-desktop', async () => {
   try {
     const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');

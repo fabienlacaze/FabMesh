@@ -4037,11 +4037,14 @@ async function refreshPythonStats() {
     const r = await API.countPython();
     const countEl = document.getElementById('set-python-count');
     const sdxlEl = document.getElementById('set-python-sdxl');
-    if (countEl) countEl.textContent = String(r.count || 0);
+    const killBtn = document.getElementById('set-kill-python');
+    const n = r.count || 0;
+    if (countEl) countEl.textContent = String(n);
     if (sdxlEl) {
       sdxlEl.textContent = r.sdxl ? 'running' : 'stopped';
-      sdxlEl.style.color = r.sdxl ? 'var(--warning)' : 'var(--success)';
+      sdxlEl.style.color = r.sdxl ? 'var(--warning)' : '';
     }
+    if (killBtn) killBtn.disabled = (n === 0);
   } catch (e) {}
 }
 
@@ -4427,21 +4430,37 @@ document.getElementById('set-claude-connect')?.addEventListener('click', async (
     btn.innerHTML = 'Error';
     if (status) status.textContent = e.message;
   }
-  setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 3000);
+  setTimeout(() => {
+    btn.innerHTML = orig; btn.disabled = false;
+    checkClaudeDesktopStatus();
+  }, 2000);
 });
-// Check connection status when settings opens
+document.getElementById('set-claude-disconnect')?.addEventListener('click', async () => {
+  const btn = document.getElementById('set-claude-disconnect');
+  btn.disabled = true;
+  btn.textContent = 'Disconnecting...';
+  try {
+    if (API.disconnectClaudeDesktop) await API.disconnectClaudeDesktop();
+  } catch (e) {}
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = 'Disconnect';
+    checkClaudeDesktopStatus();
+  }, 1500);
+});
+// Check connection status and toggle Connect/Disconnect buttons
 async function checkClaudeDesktopStatus() {
   const status = document.getElementById('set-claude-status');
+  const connectBtn = document.getElementById('set-claude-connect');
+  const disconnectBtn = document.getElementById('set-claude-disconnect');
   if (!status || !API.checkClaudeDesktop) return;
   try {
     const r = await API.checkClaudeDesktop();
-    if (r && r.connected) {
-      status.textContent = 'Connected';
-      status.style.color = '#86efac';
-    } else {
-      status.textContent = 'Not connected';
-      status.style.color = 'var(--text-2)';
-    }
+    const connected = !!(r && r.connected);
+    status.textContent = connected ? 'Connected' : 'Not connected';
+    status.style.color = connected ? '#86efac' : 'var(--text-2)';
+    if (connectBtn) connectBtn.style.display = connected ? 'none' : '';
+    if (disconnectBtn) disconnectBtn.style.display = connected ? '' : 'none';
   } catch (e) { /* ignore */ }
 }
 

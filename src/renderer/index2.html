@@ -651,6 +651,7 @@
           <div class="settings-box-desc">Let Claude generate batches of assets for you via text commands.</div>
           <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
             <button id="set-claude-connect" class="ghost-btn" style="flex:1; padding:6px 12px;">&#129302; Connect to Claude Desktop</button>
+            <button id="set-claude-disconnect" class="ghost-btn danger" style="flex:1; padding:6px 12px; display:none;">Disconnect</button>
             <span id="set-claude-status" class="settings-status-dot"></span>
           </div>
           <div class="settings-box-footer">
@@ -715,7 +716,7 @@
           </div>
           <div style="display:flex; gap:8px;">
             <button id="set-open-logs" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128193; Logs</button>
-            <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 12px;">&#128369; Kill stuck Python</button>
+            <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 12px;" disabled>&#128369; Kill processes</button>
           </div>
         </div>
 
