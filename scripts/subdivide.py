@@ -1,20 +1,19 @@
 """
-FabMesh mesh subdivision (Python-only, no Blender dependency).
-==============================================================
+FabMesh mesh subdivision (Python-only, no Blender, no pymeshlab).
+================================================================
 
-Subdivides a GLB mesh using Catmull-Clark (pymeshlab) while preserving
-PBR textures and UV maps. Each level ×4 the triangle count.
+Subdivides a GLB mesh using midpoint subdivision (trimesh) while
+preserving PBR textures and UV maps. Each level ×4 the triangle count.
 
 Usage:
     python subdivide.py <input.glb> <output.glb> <levels>
 
 Levels:
-    1 → ~4× triangles  (13K → ~53K)
-    2 → ~16× triangles (13K → ~212K)
-    3 → ~64× triangles (13K → ~850K)
+    1 → ~4× triangles
+    2 → ~16× triangles
+    3 → ~64× triangles
 
-Dependencies: trimesh, pymeshlab, numpy, PIL — all already installed for SF3D.
-No Blender required.
+Dependencies: trimesh, numpy, PIL — all already installed for SF3D.
 """
 import sys
 import os
@@ -23,6 +22,7 @@ import numpy as np
 import trimesh
 import trimesh.visual as _vis
 import trimesh.visual.material as _mat
+from trimesh.remesh import subdivide
 
 
 def log(msg):
@@ -30,14 +30,12 @@ def log(msg):
 
 
 def subdivide_glb(input_path, output_path, levels=2):
-    """Load a GLB, subdivide, re-export with original textures."""
-    import pymeshlab
-
+    """Load a GLB, subdivide geometry + interpolate UVs, re-export with original textures."""
     log(f'input={input_path} output={output_path} levels={levels}')
     t0 = time.time()
 
     # ------------------------------------------------------------------
-    # 1. Load GLB via trimesh — this gives us the PBR material + UVs
+    # 1. Load GLB
     # ------------------------------------------------------------------
     scene = trimesh.load(input_path)
     geometries = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
@@ -57,58 +55,65 @@ def subdivide_glb(input_path, output_path, levels=2):
         # Extract UVs if present
         has_uv = (hasattr(geom.visual, 'uv') and geom.visual.uv is not None
                   and len(geom.visual.uv) > 0)
+        uv = np.asarray(geom.visual.uv, dtype=np.float64) if has_uv else None
 
         # ------------------------------------------------------------------
-        # 2. Subdivide via pymeshlab
+        # 2. Subdivide geometry + interpolate UVs
         # ------------------------------------------------------------------
-        ms = pymeshlab.MeshSet()
-        pm = pymeshlab.Mesh(
-            vertex_matrix=verts,
-            face_matrix=faces,
-        )
-        # Attach UVs as wedge texture coordinates if available
-        if has_uv:
-            uv = np.asarray(geom.visual.uv, dtype=np.float64)
-            # pymeshlab wants per-face-vertex (wedge) UVs: shape (n_faces, 3, 2)
-            face_uv = uv[faces]  # (n_faces, 3, 2)
-            pm = pymeshlab.Mesh(
-                vertex_matrix=verts,
-                face_matrix=faces,
-                f_wedge_tex_coord_matrix=face_uv.reshape(-1, 2),
-            )
+        for lvl in range(int(levels)):
+            n_verts_before = len(verts)
+            # trimesh.remesh.subdivide: splits each triangle into 4 by
+            # inserting midpoints on each edge. Returns (new_verts, new_faces).
+            verts, faces = subdivide(verts, faces)
 
-        ms.add_mesh(pm)
-        ms.meshing_surface_subdivision_catmull_clark(iterations=int(levels))
-        out = ms.current_mesh()
+            # Interpolate UVs for the new midpoint vertices.
+            # subdivide() adds new verts at indices [n_verts_before:] — each
+            # new vert is the midpoint of an edge. We approximate its UV as
+            # the average of the 2 endpoint UVs. This is exact for linear
+            # interpolation and good enough for textured game assets.
+            if uv is not None:
+                n_new = len(verts) - n_verts_before
+                if n_new > 0:
+                    # Build a UV array for the new vertices by averaging
+                    # the UVs of the face-vertices that reference them.
+                    new_uv = np.zeros((n_new, 2), dtype=np.float64)
+                    counts = np.zeros(n_new, dtype=np.float64)
+                    for f in faces:
+                        for vi in f:
+                            if vi >= n_verts_before:
+                                # This is a new midpoint vertex. Average the
+                                # UVs of all original verts in faces that
+                                # share it. As a fast approximation we use
+                                # the UVs of the other verts in this face.
+                                for vj in f:
+                                    if vj < len(uv):
+                                        ni = vi - n_verts_before
+                                        new_uv[ni] += uv[vj]
+                                        counts[ni] += 1
+                    mask = counts > 0
+                    new_uv[mask] /= counts[mask, None]
+                    uv = np.vstack([uv, new_uv])
 
-        new_verts = np.asarray(out.vertex_matrix(), dtype=np.float32)
-        new_faces = np.asarray(out.face_matrix(), dtype=np.int32)
-        log(f'  {name}: {len(new_verts)} verts, {len(new_faces)} faces after subdivision')
+        log(f'  {name}: {len(verts)} verts, {len(faces)} faces after subdivision')
 
         # ------------------------------------------------------------------
         # 3. Rebuild the trimesh with original material
         # ------------------------------------------------------------------
-        # Try to recover subdivided UVs from pymeshlab
-        new_uv = None
-        try:
-            wedge_uv = np.asarray(out.wedge_tex_coord_matrix(), dtype=np.float32)
-            if wedge_uv.shape[0] == new_faces.shape[0] * 3:
-                # Convert wedge (per-face-vertex) back to per-vertex UVs.
-                # This is lossy at UV seams but good enough for smooth subdivision.
-                new_uv = np.zeros((len(new_verts), 2), dtype=np.float32)
-                counts = np.zeros(len(new_verts), dtype=np.float32)
-                flat_faces = new_faces.flatten()
-                for i in range(len(flat_faces)):
-                    vi = flat_faces[i]
-                    new_uv[vi] += wedge_uv[i]
-                    counts[vi] += 1
-                mask = counts > 0
-                new_uv[mask] /= counts[mask, None]
-        except Exception as e:
-            log(f'  UV recovery failed ({e}), using projection fallback')
+        new_verts = np.asarray(verts, dtype=np.float32)
+        new_faces = np.asarray(faces, dtype=np.int32)
 
-        # If UVs were lost or not available, generate simple spherical projection
-        if new_uv is None or len(new_uv) != len(new_verts):
+        # Use original PBR material
+        original_material = None
+        if hasattr(geom.visual, 'material'):
+            original_material = geom.visual.material
+
+        if uv is not None and len(uv) == len(new_verts) and original_material is not None:
+            visual = _vis.TextureVisuals(
+                uv=np.asarray(uv, dtype=np.float32),
+                material=original_material,
+            )
+        elif original_material is not None:
+            # UVs lost or mismatched — generate spherical fallback
             log(f'  generating fallback spherical UV projection')
             center = new_verts.mean(axis=0)
             d = new_verts - center
@@ -117,17 +122,10 @@ def subdivide_glb(input_path, output_path, levels=2):
             d = d / norms
             u = 0.5 + np.arctan2(d[:, 0], d[:, 2]) / (2 * np.pi)
             v = 0.5 + np.arcsin(np.clip(d[:, 1], -1, 1)) / np.pi
-            new_uv = np.column_stack([u, v]).astype(np.float32)
-
-        # Reconstruct visual with original PBR material
-        original_material = None
-        if hasattr(geom.visual, 'material'):
-            original_material = geom.visual.material
-
-        if original_material is not None:
-            visual = _vis.TextureVisuals(uv=new_uv, material=original_material)
+            fallback_uv = np.column_stack([u, v]).astype(np.float32)
+            visual = _vis.TextureVisuals(uv=fallback_uv, material=original_material)
         else:
-            visual = _vis.TextureVisuals(uv=new_uv)
+            visual = None
 
         new_mesh = trimesh.Trimesh(
             vertices=new_verts,
@@ -135,22 +133,17 @@ def subdivide_glb(input_path, output_path, levels=2):
             visual=visual,
             process=False,
         )
-        # Force vertex normals
         _ = new_mesh.vertex_normals
-
         result_meshes[name] = new_mesh
 
     # ------------------------------------------------------------------
     # 4. Export as GLB
     # ------------------------------------------------------------------
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     if len(result_meshes) == 1:
-        mesh = list(result_meshes.values())[0]
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        mesh.export(output_path)
+        list(result_meshes.values())[0].export(output_path)
     else:
-        new_scene = trimesh.Scene(geometry=result_meshes)
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        new_scene.export(output_path)
+        trimesh.Scene(geometry=result_meshes).export(output_path)
 
     elapsed = time.time() - t0
     size = os.path.getsize(output_path)
