@@ -961,8 +961,17 @@ ipcMain.handle('verify-parental-pin', (_event, { pin }) => {
 
 ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
   const config = loadConfig();
+
+  if (!enable) {
+    // LOCK: no PIN needed — anyone can re-enable parental control
+    delete process.env.FABMESH_UNRESTRICTED;
+    try { stopSdxlServer(); } catch(_) {}
+    return { success: true, unrestricted: false };
+  }
+
+  // UNLOCK: requires PIN
   if (!config.parentalPinHash) {
-    // First time: set PIN and enable
+    // First time: set PIN
     if (!pin || pin.length < 4) return { success: false, error: 'Set a 4+ digit PIN first' };
     const hash = require('crypto').createHash('sha256').update(pin).digest('hex');
     config.parentalPinHash = hash;
@@ -972,16 +981,9 @@ ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
     const hash = require('crypto').createHash('sha256').update(pin || '').digest('hex');
     if (hash !== config.parentalPinHash) return { success: false, error: 'Wrong PIN' };
   }
-  // Toggle
-  if (enable) {
-    process.env.FABMESH_UNRESTRICTED = '1';
-    // Restart SDXL server so it picks up the new env var
-    try { stopSdxlServer(); } catch(_) {}
-  } else {
-    delete process.env.FABMESH_UNRESTRICTED;
-    try { stopSdxlServer(); } catch(_) {}
-  }
-  return { success: true, unrestricted: !!enable };
+  process.env.FABMESH_UNRESTRICTED = '1';
+  try { stopSdxlServer(); } catch(_) {}
+  return { success: true, unrestricted: true };
 });
 
 ipcMain.handle('get-nsfw-keywords', () => {
