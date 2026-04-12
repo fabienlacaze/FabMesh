@@ -3137,7 +3137,7 @@ document.getElementById('cpick-close-x')?.addEventListener('click', () => docume
 // ============================================================
 // BLUR / SHARPEN BRUSH MODAL
 // ============================================================
-const blurState = { mode: 'blur', brushSize: 30, strength: 5, painting: false, imgData: null, undoStack: [] };
+const blurState = { mode: 'blur', brushSize: 30, strength: 5, painting: false, imgData: null, undoStack: [], redoStack: [] };
 
 document.getElementById('ws-blur-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
@@ -3200,54 +3200,50 @@ document.getElementById('blur-loupe-toggle')?.addEventListener('click', () => {
 
   function blurPaint(cx, cy) {
     const r = blurState.brushSize / 2;
-    const w = bCanvas.width, h = bCanvas.height;
     const s = blurState.strength;
-    const data = bCtx.getImageData(0, 0, w, h);
-    const orig = new Uint8ClampedArray(data.data);
+    // Extract the brush area
+    const ax = Math.max(0, Math.round(cx - r));
+    const ay = Math.max(0, Math.round(cy - r));
+    const aw = Math.min(bCanvas.width - ax, Math.round(r * 2));
+    const ah = Math.min(bCanvas.height - ay, Math.round(r * 2));
+    if (aw <= 0 || ah <= 0) return;
 
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy > r * r) continue;
-        const px = Math.round(cx + dx), py = Math.round(cy + dy);
-        if (px < 1 || py < 1 || px >= w - 1 || py >= h - 1) continue;
-        const idx = (py * w + px) * 4;
-        if (blurState.mode === 'blur') {
-          // Box blur: average with neighbors
-          for (let c = 0; c < 3; c++) {
-            let sum = 0, count = 0;
-            for (let ny = -1; ny <= 1; ny++) {
-              for (let nx = -1; nx <= 1; nx++) {
-                const ni = ((py + ny) * w + (px + nx)) * 4 + c;
-                sum += orig[ni]; count++;
-              }
-            }
-            const avg = sum / count;
-            data.data[idx + c] = Math.round(orig[idx + c] * (1 - s / 20) + avg * (s / 20));
-          }
-        } else {
-          // Sharpen: enhance difference from neighbors
-          for (let c = 0; c < 3; c++) {
-            let sum = 0, count = 0;
-            for (let ny = -1; ny <= 1; ny++) {
-              for (let nx = -1; nx <= 1; nx++) {
-                if (ny === 0 && nx === 0) continue;
-                sum += orig[((py + ny) * w + (px + nx)) * 4 + c]; count++;
-              }
-            }
-            const avg = sum / count;
-            const sharp = orig[idx + c] + (orig[idx + c] - avg) * (s / 5);
-            data.data[idx + c] = Math.max(0, Math.min(255, Math.round(sharp)));
-          }
-        }
-      }
+    // Use an offscreen canvas with ctx.filter for blur (GPU-accelerated)
+    const tmp = document.createElement('canvas');
+    tmp.width = aw; tmp.height = ah;
+    const tCtx = tmp.getContext('2d');
+
+    if (blurState.mode === 'blur') {
+      // Native CSS blur filter — fast, smooth, correct
+      tCtx.filter = `blur(${Math.max(1, s)}px)`;
+      tCtx.drawImage(bCanvas, ax, ay, aw, ah, 0, 0, aw, ah);
+    } else {
+      // Sharpen: draw normal, then overlay sharpened with contrast
+      tCtx.drawImage(bCanvas, ax, ay, aw, ah, 0, 0, aw, ah);
+      const tCtx2 = document.createElement('canvas').getContext('2d');
+      tCtx2.canvas.width = aw; tCtx2.canvas.height = ah;
+      tCtx2.filter = `contrast(${100 + s * 15}%) brightness(${100 + s * 2}%)`;
+      tCtx2.drawImage(bCanvas, ax, ay, aw, ah, 0, 0, aw, ah);
+      tCtx.globalAlpha = 0.5;
+      tCtx.drawImage(tCtx2.canvas, 0, 0);
+      tCtx.globalAlpha = 1;
     }
-    bCtx.putImageData(data, 0, 0);
+
+    // Apply only within the circular brush (clip to circle)
+    bCtx.save();
+    bCtx.beginPath();
+    bCtx.arc(cx, cy, r, 0, Math.PI * 2);
+    bCtx.clip();
+    bCtx.drawImage(tmp, ax, ay);
+    bCtx.restore();
   }
 
   bCanvas.addEventListener('mousedown', (e) => {
     blurState.painting = true;
     blurState.undoStack.push(bCtx.getImageData(0, 0, bCanvas.width, bCanvas.height));
     if (blurState.undoStack.length > 15) blurState.undoStack.shift();
+    blurState.redoStack = [];
+    _blurUpdateBtns();
     const rect = bCanvas.getBoundingClientRect();
     const sx = bCanvas.width / rect.width;
     blurPaint((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sx);
@@ -3275,10 +3271,26 @@ document.getElementById('blur-loupe-toggle')?.addEventListener('click', () => {
   window.addEventListener('mouseup', () => { blurState.painting = false; });
 })();
 
+function _blurUpdateBtns() {
+  const u = document.getElementById('blur-undo');
+  const r = document.getElementById('blur-redo');
+  if (u) u.disabled = blurState.undoStack.length === 0;
+  if (r) r.disabled = blurState.redoStack.length === 0;
+}
 document.getElementById('blur-undo')?.addEventListener('click', () => {
   const bCanvas = document.getElementById('blur-canvas');
   if (blurState.undoStack.length > 0 && bCanvas) {
+    blurState.redoStack.push(bCanvas.getContext('2d').getImageData(0, 0, bCanvas.width, bCanvas.height));
     bCanvas.getContext('2d').putImageData(blurState.undoStack.pop(), 0, 0);
+    _blurUpdateBtns();
+  }
+});
+document.getElementById('blur-redo')?.addEventListener('click', () => {
+  const bCanvas = document.getElementById('blur-canvas');
+  if (blurState.redoStack.length > 0 && bCanvas) {
+    blurState.undoStack.push(bCanvas.getContext('2d').getImageData(0, 0, bCanvas.width, bCanvas.height));
+    bCanvas.getContext('2d').putImageData(blurState.redoStack.pop(), 0, 0);
+    _blurUpdateBtns();
   }
 });
 document.getElementById('blur-reset')?.addEventListener('click', () => {
@@ -3286,6 +3298,8 @@ document.getElementById('blur-reset')?.addEventListener('click', () => {
   if (blurState.imgData && bCanvas) {
     bCanvas.getContext('2d').putImageData(blurState.imgData, 0, 0);
     blurState.undoStack = [];
+    blurState.redoStack = [];
+    _blurUpdateBtns();
   }
 });
 document.getElementById('blur-cancel')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
