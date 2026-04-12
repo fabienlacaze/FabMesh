@@ -5221,8 +5221,14 @@ async function refreshParentalStatus() {
   if (!statusEl || !toggleBtn || !API.getParentalStatus) return;
   try {
     const r = await API.getParentalStatus();
-    // Topbar lock icon
-    if (lockIcon) lockIcon.style.display = r.unrestricted ? 'none' : '';
+    // Topbar lock icon: always visible, changes icon based on state
+    // 🔒 (U+1F512) = locked/restricted, 🔓 (U+1F513) = unlocked/unrestricted
+    if (lockIcon) {
+      lockIcon.style.display = '';
+      lockIcon.innerHTML = r.unrestricted ? '&#128275;' : '&#128274;';
+      lockIcon.title = r.unrestricted ? 'Unrestricted mode — click to lock' : 'Parental control active — click to unlock';
+      lockIcon.style.opacity = r.unrestricted ? '0.4' : '0.8';
+    }
     if (r.unrestricted) {
       statusEl.textContent = '🔓 Unrestricted';
       statusEl.style.color = '#f59e0b';
@@ -5243,7 +5249,7 @@ async function toggleParentalControl() {
   const status = await API.getParentalStatus();
 
   if (status.unrestricted) {
-    // Lock — no PIN needed
+    // Lock — no PIN needed, instant
     const r = await API.toggleUnrestricted({ pin: 'lock', enable: false });
     if (r?.success) {
       showToast('Parental control re-enabled.', 'success');
@@ -5255,7 +5261,7 @@ async function toggleParentalControl() {
   } else {
     // Unlock — prompt for PIN
     const pin = await _promptPin(status.hasPin ? 'Enter your PIN to unlock:' : 'Create a PIN (4+ digits) to enable unrestricted mode:');
-    if (!pin) return; // cancelled
+    if (!pin) return;
     if (pin.length < 4) { showToast('PIN must be at least 4 digits.', 'error'); return; }
     const r = await API.toggleUnrestricted({ pin, enable: true });
     if (r?.success) {
@@ -5288,7 +5294,7 @@ function _promptPin(message) {
     cancelBtn.textContent = 'Cancel';
     cancelBtn.style.display = '';
     const _prevZ = modal.style.zIndex;
-    modal.style.zIndex = '10000';
+    modal.style.zIndex = '99999'; // above Settings modal (9000)
     modal.classList.remove('hidden');
     setTimeout(() => document.getElementById('_pin-input')?.focus(), 50);
 

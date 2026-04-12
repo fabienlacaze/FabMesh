@@ -1036,40 +1036,18 @@ ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   // Write paths to a temp file (use forward slashes to avoid JSON escape issues)
   const tmpFile = path.join(LOGS_DIR, '_nsfw_scan_paths.json');
   const outFile = path.join(LOGS_DIR, '_nsfw_scan_results.json');
-  const forwardSlashList = imgList.map(p => p.replace(/\\/g, '/'));
-  fs.writeFileSync(tmpFile, JSON.stringify(forwardSlashList), 'utf-8');
-
-  const script = `
-import sys, json
-from PIL import Image
-paths = json.load(open(r"${tmpFile.replace(/\\/g, '/')}"))
-results = {}
-try:
-    from transformers import pipeline
-    clf = pipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
-    for p in paths:
-        try:
-            r = clf(Image.open(p).convert('RGB').resize((224,224)))
-            score = next((x['score'] for x in r if x['label'] == 'nsfw'), 0)
-            results[p] = score > 0.5
-        except:
-            results[p] = False
-except Exception as e:
-    print("NSFW scan error:", e, file=sys.stderr)
-    for p in paths:
-        results[p] = False
-with open(r"${outFile.replace(/\\/g, '/')}", 'w') as f:
-    json.dump(results, f)
-print("OK")
-`;
+  fs.writeFileSync(tmpFile, JSON.stringify(imgList), 'utf-8');
+  const scanScript = path.join(__dirname, '..', '..', 'scripts', 'nsfw_scan.py');
 
   return new Promise((resolve) => {
-    execFile('python', ['-c', script], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error) => {
+    execFile('python', [scanScript, tmpFile, outFile], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       try { fs.unlinkSync(tmpFile); } catch(_) {}
-      if (error || !fs.existsSync(outFile)) { resolve({}); return; }
+      if (error) { log.error('main', `NSFW scan failed: ${stderr?.slice(-200) || error.message}`); resolve({}); return; }
+      if (!fs.existsSync(outFile)) { resolve({}); return; }
       try {
         const results = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
         try { fs.unlinkSync(outFile); } catch(_) {}
+        log.info('main', `NSFW scan: ${Object.keys(results).length} images scanned, ${Object.values(results).filter(v=>v).length} NSFW`);
         resolve(results);
       } catch (_) { resolve({}); }
     });
