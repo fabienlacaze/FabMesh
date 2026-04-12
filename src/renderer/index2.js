@@ -4304,6 +4304,39 @@ if (API.onMainLog) {
     console[fn](`[main:${entry.source}]`, entry.msg);
   });
 }
+
+// ============================================================
+// MCP JOB TRACKING — jobs dispatched by Claude via the MCP server
+// appear in the same job panel as user-triggered jobs.
+// ============================================================
+const _mcpJobs = new Map(); // type -> job.id
+if (API.onMcpJobStart) {
+  API.onMcpJobStart((data) => {
+    const name = data.name || `MCP: ${data.type || 'task'}`;
+    const expectedMs = { image: 120000, mesh: 45000, rig: 120000 }[data.type] || 90000;
+    const job = pushJob(name, null, data.params || {}, expectedMs);
+    _mcpJobs.set(data.type, job.id);
+    console.log(`[MCP] job started: ${name} (id=${job.id})`);
+  });
+}
+if (API.onMcpJobEnd) {
+  API.onMcpJobEnd((data) => {
+    const jobId = _mcpJobs.get(data.type);
+    if (jobId != null) {
+      completeJob(jobId, !!data.success, data.error || null);
+      _mcpJobs.delete(data.type);
+      console.log(`[MCP] job ended: ${data.type} success=${data.success}`);
+    }
+    // Refresh the project workspace to show newly generated assets
+    reloadCurrentProject().catch(() => {});
+  });
+}
+if (API.onMcpRefresh) {
+  API.onMcpRefresh(() => {
+    // Refresh projects list + current workspace when MCP finishes any action
+    reloadCurrentProject().catch(() => {});
+  });
+}
 document.getElementById('set-blender-browse')?.addEventListener('click', async () => {
   try {
     const r = await API.setBlenderPath();

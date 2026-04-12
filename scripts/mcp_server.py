@@ -55,182 +55,89 @@ def send_notification(method, params=None):
 
 
 # =====================================================================
-# Tool implementations
+# Electron bridge — all commands go through FabMesh Electron main.js
+# so jobs appear in the UI and VRAM is gated.
 # =====================================================================
 
-def _run_bridge(script_name, args, timeout=600):
-    """Run a Python bridge script and return (success, stdout, stderr)."""
-    script = os.path.join(SCRIPTS_DIR, script_name)
-    if not os.path.exists(script):
-        return False, "", f"Script not found: {script}"
-    cmd = [PYTHON, script] + [str(a) for a in args]
-    log(f"running: {' '.join(cmd)}")
+ELECTRON_BRIDGE_URL = "http://127.0.0.1:7555"
+
+def _call_electron(action, params, timeout=600):
+    """POST a command to FabMesh Electron's MCP bridge HTTP endpoint.
+    Returns the JSON response dict. Raises RuntimeError on failure."""
+    import urllib.request
+    url = f"{ELECTRON_BRIDGE_URL}/{action}"
+    data = json.dumps(params).encode('utf-8')
+    req = urllib.request.Request(url, data=data, method='POST',
+                                 headers={'Content-Type': 'application/json'})
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            cwd=PROJECT_ROOT,
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode('utf-8')
+            return json.loads(body)
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"Cannot reach FabMesh Electron (is FabMesh running?). "
+            f"The MCP server needs FabMesh open to dispatch jobs. Error: {e}"
         )
-        return result.returncode == 0, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return False, "", f"Timed out after {timeout}s"
     except Exception as e:
-        return False, "", str(e)
+        raise RuntimeError(f"Electron bridge call failed: {e}")
 
 
 def tool_generate_image(params):
-    """Generate an image from a text prompt using RealVis XL (local GPU)."""
+    """Generate an image from a text prompt using RealVis XL (local GPU).
+    Dispatched through FabMesh Electron so the job appears in the UI."""
     prompt = params.get("prompt", "")
     if not prompt:
         return {"success": False, "error": "prompt is required"}
-    project = params.get("project", "mcp_gen")
-    count = params.get("count", 1)
-    steps = params.get("steps", 30)
-
-    safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in project)
-    out_dir = os.path.join(IMAGES_DIR, safe_name)
-    os.makedirs(out_dir, exist_ok=True)
-
-    ok, stdout, stderr = _run_bridge(
-        "local_juggernaut_bridge.py",
-        [prompt, out_dir, str(count), str(steps)],
-        timeout=300
-    )
-    if not ok:
-        return {"success": False, "error": stderr[-500:] if stderr else "generation failed", "stdout": stdout[-500:]}
-
-    # Find generated images
-    images = sorted([
-        os.path.join(out_dir, f) for f in os.listdir(out_dir)
-        if f.endswith('.png') and not f.startswith('.')
-    ], key=os.path.getmtime, reverse=True)[:count]
-
-    return {
-        "success": True,
-        "images": images,
-        "count": len(images),
-        "project": safe_name,
-    }
+    return _call_electron("generate-images", {
+        "prompt": prompt,
+        "userPrompt": prompt,
+        "projectName": params.get("project", "mcp_gen"),
+        "numImages": params.get("count", 1),
+        "steps": params.get("steps", 30),
+        "engine": "local-flux",
+    })
 
 
 def tool_generate_mesh(params):
-    """Generate a 3D mesh from an image using Stable Fast 3D (local GPU)."""
+    """Generate a textured 3D mesh from an image using Stable Fast 3D (local GPU).
+    Dispatched through FabMesh Electron so the job appears in the UI."""
     image_path = params.get("image_path", "")
     if not image_path or not os.path.exists(image_path):
         return {"success": False, "error": f"image not found: {image_path}"}
     quality = params.get("quality", "standard")
-    subdivide = params.get("subdivide", 0)
-
     quality_map = {
         "draft": {"tex": 512, "verts": 3000},
         "standard": {"tex": 1024, "verts": -1},
         "high": {"tex": 2048, "verts": 30000},
     }
     q = quality_map.get(quality, quality_map["standard"])
-
-    timestamp = int(time.time())
     base = os.path.splitext(os.path.basename(image_path))[0]
     safe_base = "".join(c if c.isalnum() or c in "_-" else "_" for c in base)
-    out_glb = os.path.join(MESHES_DIR, f"{safe_base}_sf3d_{timestamp}.glb")
-
-    ok, stdout, stderr = _run_bridge(
-        "local_sf3d_bridge.py",
-        [image_path, out_glb, str(q["tex"]), str(q["verts"]), "none", str(subdivide)],
-        timeout=300
-    )
-    if not ok:
-        return {"success": False, "error": stderr[-500:] if stderr else "mesh generation failed"}
-
-    if not os.path.exists(out_glb):
-        return {"success": False, "error": "GLB file not created"}
-
-    # Parse stats from stdout
-    verts, faces = "?", "?"
-    for line in stdout.split("\n"):
-        if "STATS:" in line:
-            import re
-            m = re.search(r"verts=(\d+)\s+faces=(\d+)", line)
-            if m:
-                verts, faces = m.group(1), m.group(2)
-
-    return {
-        "success": True,
-        "mesh_path": out_glb,
-        "size_bytes": os.path.getsize(out_glb),
-        "vertices": verts,
-        "triangles": faces,
-        "quality": quality,
-        "subdivide_levels": subdivide,
-    }
+    return _call_electron("image-to-3d", {
+        "imagePath": image_path,
+        "outputName": safe_base,
+        "engine": "sf3d",
+        "textureSize": q["tex"],
+        "targetFaces": q["verts"],
+        "subdivide": params.get("subdivide", 0),
+    })
 
 
 def tool_generate_rig(params):
-    """Rig a mesh using UniRig (local GPU) for UE5-compatible skeleton."""
+    """Auto-rig a 3D mesh for UE5 using UniRig (local GPU).
+    Dispatched through FabMesh Electron so the job appears in the UI."""
     mesh_path = params.get("mesh_path", "")
     if not mesh_path or not os.path.exists(mesh_path):
         return {"success": False, "error": f"mesh not found: {mesh_path}"}
-
-    timestamp = int(time.time())
-    base = os.path.splitext(os.path.basename(mesh_path))[0]
-    safe_base = "".join(c if c.isalnum() or c in "_-" else "_" for c in base)
-    out_glb = os.path.join(MESHES_DIR, f"{safe_base}_rigged_{timestamp}.glb")
-
-    # Step 1: UniRig skeleton + skin
-    unirig_out = os.path.join(MESHES_DIR, f"{safe_base}_unirig_temp_{timestamp}.glb")
-    ok, stdout, stderr = _run_bridge("unirig_bridge.py", [mesh_path, unirig_out], timeout=600)
-    if not ok or not os.path.exists(unirig_out):
-        return {"success": False, "error": f"UniRig failed: {stderr[-300:]}", "stdout": stdout[-300:]}
-
-    # Step 2: Swap to UE5 skeleton
-    swap_out = os.path.join(MESHES_DIR, f"{safe_base}_swap_temp_{timestamp}.glb")
-    bones_json = os.path.join(SCRIPTS_DIR, "rig_templates", "skm", "orc_m1.bones.json")
-    ok2, stdout2, stderr2 = _run_bridge("swap_skeleton.py", [unirig_out, bones_json, swap_out], timeout=120)
-    try: os.remove(unirig_out)
-    except: pass
-    if not ok2 or not os.path.exists(swap_out):
-        return {"success": False, "error": f"Skeleton swap failed: {stderr2[-300:]}"}
-
-    # Step 3: Bake procedural animations
-    bake_script = os.path.join(SCRIPTS_DIR, "bake_procedural_anims.py")
-    if os.path.exists(bake_script):
-        ok3, stdout3, stderr3 = _run_bridge("bake_procedural_anims.py", [swap_out, bones_json, out_glb], timeout=120)
-        if not ok3 or not os.path.exists(out_glb):
-            # Fallback: use swap output as-is
-            import shutil
-            shutil.copy2(swap_out, out_glb)
-    else:
-        import shutil
-        shutil.copy2(swap_out, out_glb)
-    try: os.remove(swap_out)
-    except: pass
-
-    if not os.path.exists(out_glb):
-        return {"success": False, "error": "Rigged GLB not created"}
-
-    return {
-        "success": True,
-        "rigged_mesh_path": out_glb,
-        "size_bytes": os.path.getsize(out_glb),
-    }
+    return _call_electron("auto-rig-ai", {
+        "meshPath": mesh_path,
+        "engine": "unirig",
+    })
 
 
 def tool_list_projects(params):
-    """List all FabMesh projects with their images, meshes, and rigs."""
-    projects = []
-    if os.path.isdir(IMAGES_DIR):
-        for name in sorted(os.listdir(IMAGES_DIR)):
-            proj_dir = os.path.join(IMAGES_DIR, name)
-            if not os.path.isdir(proj_dir):
-                continue
-            images = [f for f in os.listdir(proj_dir) if f.endswith('.png') and not f.startswith('.')]
-            # Find meshes matching this project name
-            meshes = [f for f in os.listdir(MESHES_DIR) if f.startswith(name) and f.endswith('.glb')] if os.path.isdir(MESHES_DIR) else []
-            projects.append({
-                "name": name,
-                "images": len(images),
-                "meshes": len(meshes),
-                "path": proj_dir,
-            })
-    return {"projects": projects, "count": len(projects)}
+    """List all FabMesh projects via Electron."""
+    return _call_electron("list-projects", {})
 
 
 def tool_batch_pipeline(params):
@@ -275,7 +182,8 @@ def tool_batch_pipeline(params):
             results.append(asset_result)
             continue
 
-        mesh_path = mesh_result["mesh_path"]
+        # Electron returns meshPath (camelCase), bridge returns mesh_path
+        mesh_path = mesh_result.get("meshPath") or mesh_result.get("mesh_path", "")
 
         # Step 3: Rig (optional, skip if asset says skip_rig=true)
         if not asset.get("skip_rig", False):
