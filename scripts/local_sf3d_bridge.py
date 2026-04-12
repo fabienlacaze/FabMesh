@@ -103,10 +103,10 @@ def generate_3d(
     # ------------------------------------------------------------------
     # Clamp parameters to avoid OOM on 16 GB cards.
     # SF3D VRAM scales with (vertex_count × bake_resolution²). Empirically:
-    #   1024 tex + 50K verts  → ~6.2 GB peak (safe on 16 GB)
-    #   2048 tex + 30K verts  → ~10 GB peak
-    #   4096 tex + 10K verts  → ~13 GB peak (tight on 16 GB)
-    #   4096 tex + 250K verts → OOM guaranteed on 16 GB
+    #   1024 tex + 50K verts  -> ~6.2 GB peak (safe on 16 GB)
+    #   2048 tex + 30K verts  -> ~10 GB peak
+    #   4096 tex + 10K verts  -> ~13 GB peak (tight on 16 GB)
+    #   4096 tex + 250K verts -> OOM guaranteed on 16 GB
     # We auto-downscale to keep things runnable rather than crashing.
     # ------------------------------------------------------------------
     tex_res = int(texture_resolution)
@@ -118,7 +118,7 @@ def generate_3d(
 
     # VRAM-safe clamps. The texture baker's dilate_fill operation allocates
     # tensors proportional to tex_res², which is the main OOM culprit.
-    # 4096 tex alone uses ~13 GB peak → only safe on 20+ GB cards.
+    # 4096 tex alone uses ~13 GB peak -> only safe on 20+ GB cards.
     if total_gb < 12:
         tex_res = min(tex_res, 1024)
         if vert_count > 0:
@@ -135,7 +135,7 @@ def generate_3d(
     upscale_tex_to = int(texture_resolution) if tex_res < int(texture_resolution) else 0
 
     if tex_res != int(texture_resolution) or vert_count != int(target_vertex_count):
-        msg = f"LOCAL_SF3D: params clamped for VRAM safety ({total_gb:.0f}GB card): tex {texture_resolution}→{tex_res}, verts {target_vertex_count}→{vert_count}"
+        msg = f"LOCAL_SF3D: params clamped for VRAM safety ({total_gb:.0f}GB card): tex {texture_resolution}->{tex_res}, verts {target_vertex_count}->{vert_count}"
         if upscale_tex_to:
             msg += f" (will upscale texture to {upscale_tex_to} post-gen)"
         print(msg, flush=True)
@@ -208,7 +208,7 @@ def generate_3d(
 
     # ------------------------------------------------------------------
     # Upscale texture if we clamped it for VRAM safety.
-    # E.g. user requested 4096 but SF3D baked at 2048 → upscale to 4096
+    # E.g. user requested 4096 but SF3D baked at 2048 -> upscale to 4096
     # via PIL Lanczos (CPU, ~0.1s). Not AI super-resolution, but on a
     # clean PBR texture the visual difference is negligible.
     # ------------------------------------------------------------------
@@ -237,7 +237,7 @@ def generate_3d(
                     _geoms_up[0].export(output_path)
                 else:
                     _scene_up.export(output_path)
-                print(f"LOCAL_SF3D: texture upscaled {tex_res}→{upscale_tex_to} px (Lanczos, CPU)", flush=True)
+                print(f"LOCAL_SF3D: texture upscaled {tex_res}->{upscale_tex_to} px (Lanczos, CPU)", flush=True)
         except Exception as _ue:
             print(f"LOCAL_SF3D: texture upscale skipped ({_ue})", flush=True)
 
