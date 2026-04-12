@@ -4440,13 +4440,20 @@ document.getElementById('set-claude-disconnect')?.addEventListener('click', asyn
   btn.disabled = true;
   btn.textContent = 'Disconnecting...';
   try {
-    if (API.disconnectClaudeDesktop) await API.disconnectClaudeDesktop();
+    if (API.disconnectClaudeDesktop) {
+      const r = await API.disconnectClaudeDesktop();
+      if (r && r.success) {
+        // Immediately update UI without waiting for timer
+        btn.style.display = 'none';
+        const connectBtn = document.getElementById('set-claude-connect');
+        if (connectBtn) connectBtn.style.display = '';
+        const status = document.getElementById('set-claude-status');
+        if (status) { status.textContent = 'Disconnected'; status.style.color = 'var(--text-3)'; }
+      }
+    }
   } catch (e) {}
-  setTimeout(() => {
-    btn.disabled = false;
-    btn.textContent = 'Disconnect';
-    checkClaudeDesktopStatus();
-  }, 1500);
+  btn.disabled = false;
+  btn.textContent = 'Disconnect';
 });
 // Check connection status and toggle Connect/Disconnect buttons
 async function checkClaudeDesktopStatus() {

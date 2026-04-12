@@ -2943,14 +2943,22 @@ ipcMain.handle('connect-claude-desktop', async () => {
 
 ipcMain.handle('disconnect-claude-desktop', async () => {
   try {
+    // Remove from Claude Desktop config
     const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
     const configPath = path.join(appData, 'Claude', 'claude_desktop_config.json');
-    if (!fs.existsSync(configPath)) return { success: true };
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (config.mcpServers && config.mcpServers.fabmesh) {
-      delete config.mcpServers.fabmesh;
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-      log.info('main', 'Removed FabMesh from Claude Desktop config');
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (config.mcpServers && config.mcpServers.fabmesh) {
+        delete config.mcpServers.fabmesh;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        log.info('main', 'Removed FabMesh from Claude Desktop config');
+      }
+    }
+    // Also remove the local .claude/mcp.json so Claude Code doesn't re-detect
+    const localMcp = path.join(__dirname, '..', '..', '.claude', 'mcp.json');
+    if (fs.existsSync(localMcp)) {
+      fs.unlinkSync(localMcp);
+      log.info('main', 'Removed local .claude/mcp.json');
     }
     return { success: true };
   } catch (e) {
