@@ -4570,9 +4570,11 @@ async function refreshPythonStats() {
       sdxlEl.textContent = r.sdxl ? 'running' : 'stopped';
       sdxlEl.style.color = r.sdxl ? 'var(--warning)' : '';
     }
-    if (killBtn) killBtn.disabled = (n === 0 && !r.sdxl);
+    if (killBtn) killBtn.disabled = (n === 0);
     const killSdxlBtn = document.getElementById('set-kill-sdxl');
     if (killSdxlBtn) killSdxlBtn.disabled = !r.sdxl;
+    const killAllBtn = document.getElementById('set-kill-all');
+    if (killAllBtn) killAllBtn.disabled = (n === 0 && !r.sdxl);
   } catch (e) {}
 }
 
@@ -4863,17 +4865,24 @@ document.getElementById('set-kill-sdxl')?.addEventListener('click', async () => 
   }
 });
 
-// Kill ALL Python processes (SDXL + any running generations)
+// Kill Processes: kill running Python subprocesses (generations) but keep SDXL
 document.getElementById('set-kill-python')?.addEventListener('click', async () => {
-  try {
-    if (API.stopSdxlServer) await API.stopSdxlServer();
-  } catch(_) {}
   try {
     if (API.cancelJob) await API.cancelJob(0);
   } catch(_) {}
   state.jobs = state.jobs.filter(j => j.status !== 'running');
   renderJobs();
-  showToast('All processes killed.', 'success');
+  showToast('Processes killed. SDXL preserved.', 'success');
+  setTimeout(refreshPythonStats, 1000);
+});
+
+// Kill All: kill SDXL + all Python subprocesses
+document.getElementById('set-kill-all')?.addEventListener('click', async () => {
+  try { if (API.stopSdxlServer) await API.stopSdxlServer(); } catch(_) {}
+  try { if (API.cancelJob) await API.cancelJob(0); } catch(_) {}
+  state.jobs = state.jobs.filter(j => j.status !== 'running');
+  renderJobs();
+  showToast('All processes + SDXL killed. VRAM freed.', 'success');
   setTimeout(refreshPythonStats, 1000);
 });
 
