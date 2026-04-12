@@ -1025,6 +1025,41 @@ except Exception as e:
   });
 });
 
+// Batch scan multiple images for NSFW in one Python process (loads model once)
+ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
+  if (isUnrestrictedMode()) return {};
+  if (!images || images.length === 0) return {};
+  const imgList = images.filter(p => fs.existsSync(p));
+  if (imgList.length === 0) return {};
+  const imgJson = JSON.stringify(imgList).replace(/\\/g, '\\\\');
+  return new Promise((resolve) => {
+    execFile('python', ['-c', `
+import sys, json
+from PIL import Image
+paths = json.loads('${imgJson}')
+results = {}
+try:
+    from transformers import pipeline
+    clf = pipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
+    for p in paths:
+        try:
+            r = clf(Image.open(p).convert('RGB').resize((224,224)))
+            score = next((x['score'] for x in r if x['label'] == 'nsfw'), 0)
+            results[p] = score > 0.5
+        except:
+            results[p] = False
+except:
+    for p in paths:
+        results[p] = False
+print(json.dumps(results))
+`], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout) => {
+      if (error) { resolve({}); return; }
+      try { resolve(JSON.parse(stdout.trim())); }
+      catch (_) { resolve({}); }
+    });
+  });
+});
+
 ipcMain.handle('get-parental-status', () => {
   const config = loadConfig();
   return {

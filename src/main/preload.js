@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   getParentalStatus: () => ipcRenderer.invoke('get-parental-status'),
   getNsfwKeywords: () => ipcRenderer.invoke('get-nsfw-keywords'),
   checkImageNsfw: (opts) => ipcRenderer.invoke('check-image-nsfw', opts),
+  batchCheckNsfw: (opts) => ipcRenderer.invoke('batch-check-nsfw', opts),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),

@@ -397,26 +397,34 @@ async function _isProjectNSFW(p) {
   return false;
 }
 
-// Background scan: runs once after page load, scans all project thumbnails
-// and caches results. Re-renders the grid when done.
+// Background scan: runs once after page load, scans ALL project thumbnails
+// in a single Python batch process (loads the ViT model once, scans all images).
+// Re-renders the grid when done.
 async function _runNsfwBackgroundScan() {
-  if (_nsfwScanRunning || !API.checkImageNsfw) return;
-  _nsfwScanRunning = true;
-  let changed = false;
+  if (_nsfwScanRunning || !API.batchCheckNsfw) return;
+  // Collect thumbnails that haven't been scanned yet
+  const toScan = [];
   for (const p of state.projects) {
     if (!p.thumb) continue;
     const fname = p.thumb.split(/[/\\]/).pop();
-    if (fname in _nsfwScanCache) continue; // already scanned
-    try {
-      const r = await API.checkImageNsfw({ imagePath: p.thumb });
-      _nsfwScanCache[fname] = !!(r?.nsfw);
-      if (r?.nsfw) changed = true;
-    } catch (_) {
-      _nsfwScanCache[fname] = false;
-    }
+    if (fname in _nsfwScanCache) continue;
+    toScan.push(p.thumb);
   }
+  if (toScan.length === 0) return;
+  _nsfwScanRunning = true;
+  try {
+    const results = await API.batchCheckNsfw({ images: toScan });
+    if (results && typeof results === 'object') {
+      let changed = false;
+      for (const [imgPath, nsfw] of Object.entries(results)) {
+        const fname = imgPath.split(/[/\\]/).pop();
+        _nsfwScanCache[fname] = !!nsfw;
+        if (nsfw) changed = true;
+      }
+      if (changed) renderProjectsGrid();
+    }
+  } catch (_) {}
   _nsfwScanRunning = false;
-  if (changed) renderProjectsGrid(); // re-render to hide newly detected NSFW
 }
 
 async function renderProjectsGrid() {
