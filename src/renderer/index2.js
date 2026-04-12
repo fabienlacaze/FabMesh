@@ -4334,6 +4334,11 @@ if (API.onMcpJobStart) {
     const job = pushJob(name, null, data.params || {}, expectedMs);
     _mcpJobs.set(data.type, job.id);
     console.log(`[MCP] job started: ${name} (id=${job.id})`);
+    // Force the jobs panel open so the user sees what Claude is doing
+    const panel = document.getElementById('jobs-panel-2');
+    const bubble = document.getElementById('jobs-bubble-2');
+    if (panel) panel.classList.remove('hidden');
+    if (bubble) bubble.classList.add('hidden');
   });
 }
 if (API.onMcpJobEnd) {
