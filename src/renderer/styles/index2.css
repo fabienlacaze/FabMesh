@@ -1085,10 +1085,11 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .tool-active,
 .secondary-btn.tool-active,
 button.tool-active {
-  background: #a855f7 !important;
-  border-color: #a855f7 !important;
-  color: #fff !important;
-  box-shadow: 0 0 8px rgba(168, 85, 247, 0.4) !important;
+  background: #22c55e !important;
+  border-color: #22c55e !important;
+  color: #000 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.5) !important;
 }
 
 .step-tools-group {
