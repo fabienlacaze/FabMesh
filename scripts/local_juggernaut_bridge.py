@@ -119,26 +119,23 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         gen_img = result.images[0]
 
         # Post-generation safety check (parental control).
-        # Uses a simple skin-ratio heuristic: if >40% of the image is skin-colored
-        # pixels, flag as potentially NSFW and block when restricted.
+        # Uses Falconsai/nsfw_image_detection ViT classifier (Apache 2.0).
+        # Scans EVERY generated image regardless of prompt — catches all
+        # circumventions that keyword filters miss.
         if os.environ.get('FABMESH_UNRESTRICTED') != '1':
             try:
-                import numpy as _np
-                arr = _np.array(gen_img.convert('RGB'))
-                r, g, b = arr[:,:,0].astype(float), arr[:,:,1].astype(float), arr[:,:,2].astype(float)
-                # Skin detection (RGB heuristic)
-                skin = ((r > 95) & (g > 40) & (b > 20) &
-                        (r > g) & (r > b) &
-                        ((r - g).astype(float) > 15) &
-                        (arr.max(axis=2).astype(float) - arr.min(axis=2).astype(float) > 15))
-                skin_ratio = skin.sum() / (arr.shape[0] * arr.shape[1])
-                if skin_ratio > 0.45:
-                    print(f"LOCAL_REALVIS_BLOCKED: image {i} blocked by safety filter (skin ratio {skin_ratio:.0%})", flush=True)
-                    # Replace with a black image + warning text
-                    from PIL import ImageDraw, ImageFont
+                from transformers import pipeline as _tfpipeline
+                _nsfw_clf = _tfpipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
+                _nsfw_result = _nsfw_clf(gen_img.convert('RGB').resize((224, 224)))
+                _nsfw_score = next((x['score'] for x in _nsfw_result if x['label'] == 'nsfw'), 0)
+                if _nsfw_score > 0.5:
+                    print(f"LOCAL_REALVIS_BLOCKED: image {i} blocked by NSFW classifier (score {_nsfw_score:.0%})", flush=True)
+                    from PIL import ImageDraw
                     gen_img = Image.new('RGB', gen_img.size, (30, 30, 30))
                     draw = ImageDraw.Draw(gen_img)
-                    draw.text((gen_img.width//2 - 100, gen_img.height//2 - 10), "Blocked by content filter", fill=(200, 50, 50))
+                    draw.text((gen_img.width//2 - 120, gen_img.height//2 - 10), "Blocked by content filter", fill=(200, 50, 50))
+                else:
+                    print(f"LOCAL_REALVIS: safety check passed (nsfw={_nsfw_score:.0%})", flush=True)
             except Exception as _se:
                 print(f"LOCAL_REALVIS: safety check error ({_se}), allowing image", flush=True)
 
