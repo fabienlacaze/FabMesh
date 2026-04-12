@@ -705,6 +705,20 @@ function populateWorkspace(p) {
 
   refreshButtonStates(p);
 
+  // Restore last used style in the Style Transfer dropdown
+  try {
+    const lastStyle = localStorage.getItem('fabmesh-last-style');
+    const styleSelect = document.getElementById('ws-style-btn');
+    if (lastStyle && styleSelect) {
+      for (let i = 0; i < styleSelect.options.length; i++) {
+        if (styleSelect.options[i].value === lastStyle) {
+          styleSelect.selectedIndex = i;
+          break;
+        }
+      }
+    }
+  } catch(_) {}
+
   // Mesh step
   renderMeshVersions(p);
   if (p.meshes.length > 0) {
@@ -2299,7 +2313,8 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => runQuick
 document.getElementById('ws-style-btn')?.addEventListener('change', async (e) => {
   const style = e.target.value;
   if (!style) return;
-  // Keep the selected style visible instead of resetting to placeholder
+  // Save last used style so it persists across reloads
+  try { localStorage.setItem('fabmesh-last-style', style); } catch(_) {}
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   showToast(`Applying style: ${style.split(',')[0]}...`, 'info', 2000);
