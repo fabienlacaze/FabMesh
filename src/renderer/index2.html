@@ -189,11 +189,11 @@
                     </select>
                   </div>
                   <div class="form-row">
-                    <label>Quality</label>
+                    <label>Texture</label>
                     <select id="ws-3d-quality">
-                      <option value="draft">Draft</option>
-                      <option value="standard" selected>Standard</option>
-                      <option value="high">High</option>
+                      <option value="draft">512 px</option>
+                      <option value="standard" selected>1024 px</option>
+                      <option value="high">2048 px</option>
                     </select>
                   </div>
                   <div class="form-row">
@@ -206,6 +206,7 @@
                     </select>
                   </div>
                   <div id="ws-3d-quality-hint" class="form-hint">~200K triangles · 1024 px texture</div>
+                  <div class="form-hint" style="margin-top:2px;">Texture is baked by SF3D (GPU). Triangles are added via subdivision (CPU, no extra VRAM).</div>
                   <div class="form-row check-row">
                     <label class="inline-check">
                       <input type="checkbox" id="ws-3d-buildstages" />

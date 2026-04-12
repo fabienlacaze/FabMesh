@@ -2436,8 +2436,6 @@ const MESH_TRI_PRESETS = {
   '2': { subdivide: 2, label: '~200K', extraMs: 8000 },
   '3': { subdivide: 3, label: '~800K', extraMs: 15000 },
 };
-const TEX_LABELS = { 512: '512 px', 1024: '1024 px', 2048: '2048 px' };
-
 function updateMeshHint() {
   const hint = document.getElementById('ws-3d-quality-hint');
   if (!hint) return;
@@ -2445,7 +2443,7 @@ function updateMeshHint() {
   const t = document.getElementById('ws-3d-triangles')?.value || '0';
   const preset = MESH_QUALITY_PRESETS[q] || MESH_QUALITY_PRESETS.standard;
   const tri = MESH_TRI_PRESETS[t] || MESH_TRI_PRESETS['0'];
-  hint.textContent = `${tri.label} triangles · ${TEX_LABELS[preset.tex] || preset.tex} texture`;
+  hint.textContent = `${tri.label} triangles · ${preset.tex} px texture`;
 }
 document.getElementById('ws-3d-quality')?.addEventListener('change', updateMeshHint);
 document.getElementById('ws-3d-triangles')?.addEventListener('change', updateMeshHint);
