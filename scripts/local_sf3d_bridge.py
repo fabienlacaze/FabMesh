@@ -169,6 +169,36 @@ def generate_3d(
     print(f"LOCAL_SF3D_PROGRESS: 90 export", flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     mesh.export(output_path, include_normals=True)
+
+    # ------------------------------------------------------------------
+    # Post-process texture: SF3D tends to produce washed-out / desaturated
+    # textures (especially on buildings and props). Boost contrast and
+    # saturation on the baseColorTexture to get vivid, game-ready colors.
+    # ------------------------------------------------------------------
+    try:
+        import trimesh as _tmesh
+        from PIL import ImageEnhance
+        _scene = _tmesh.load(output_path)
+        _geoms = list(_scene.geometry.values()) if hasattr(_scene, 'geometry') else [_scene]
+        _touched = False
+        for _g in _geoms:
+            if hasattr(_g.visual, 'material') and hasattr(_g.visual.material, 'baseColorTexture'):
+                _tex = _g.visual.material.baseColorTexture
+                if _tex is not None:
+                    _tex = ImageEnhance.Contrast(_tex).enhance(1.3)
+                    _tex = ImageEnhance.Color(_tex).enhance(1.4)
+                    _tex = ImageEnhance.Brightness(_tex).enhance(1.05)
+                    _g.visual.material.baseColorTexture = _tex
+                    _touched = True
+        if _touched:
+            if len(_geoms) == 1:
+                _geoms[0].export(output_path)
+            else:
+                _scene.export(output_path)
+            print(f"LOCAL_SF3D: texture enhanced (contrast +30%, saturation +40%, brightness +5%)", flush=True)
+    except Exception as _te:
+        print(f"LOCAL_SF3D: texture enhance skipped ({_te})", flush=True)
+
     size = os.path.getsize(output_path)
 
     # Read back the GLB to count verts/faces for the UI stats display.
