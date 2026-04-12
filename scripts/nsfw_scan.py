@@ -16,15 +16,28 @@ def main():
     results = {}
     try:
         from transformers import pipeline
-        clf = pipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
+        import numpy as np
+        # Use 2 models combined for better detection (both Apache 2.0, local)
+        clf1 = pipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
+        clf2 = pipeline('image-classification', model='AdamCodd/vit-base-nsfw-detector', device='cpu')
         for p in paths:
             try:
                 img = Image.open(p).convert('RGB').resize((224, 224))
-                r = clf(img)
-                score = next((x['score'] for x in r if x['label'] == 'nsfw'), 0)
+                r1 = clf1(img)
+                r2 = clf2(img)
+                s1 = next((x['score'] for x in r1 if x['label'] == 'nsfw'), 0)
+                s2 = next((x['score'] for x in r2 if x['label'] == 'nsfw'), 0)
+                score = max(s1, s2)
                 is_nsfw = score > 0.5
+                # Fallback: skin ratio for cases both models miss
+                if not is_nsfw:
+                    arr = np.array(Image.open(p).convert('RGB').resize((256, 256))).astype(float)
+                    rv, gv, bv = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+                    skin = ((rv>95)&(gv>40)&(bv>20)&(rv>gv)&(rv>bv)&((rv-gv)>15)&(arr.max(2)-arr.min(2)>15))
+                    skin_ratio = float(skin.sum()) / (256*256)
+                    if skin_ratio > 0.35:
+                        is_nsfw = True
                 results[p] = is_nsfw
-                # Create .nsfw tag file for instant detection on next load
                 if is_nsfw:
                     try:
                         with open(p + '.nsfw', 'w') as nf:

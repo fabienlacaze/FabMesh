@@ -125,12 +125,28 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         if os.environ.get('FABMESH_UNRESTRICTED') != '1':
             try:
                 from transformers import pipeline as _tfpipeline
-                _nsfw_clf = _tfpipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
-                _nsfw_result = _nsfw_clf(gen_img.convert('RGB').resize((224, 224)))
-                _nsfw_score = next((x['score'] for x in _nsfw_result if x['label'] == 'nsfw'), 0)
-                if _nsfw_score > 0.5:
-                    print(f"LOCAL_REALVIS_BLOCKED: image {i} blocked by NSFW classifier (score {_nsfw_score:.0%})", flush=True)
-                    # Tag the image as NSFW so the project list can hide it instantly
+                import numpy as _np2
+                # Dual model detection (both Apache 2.0, local, ~350 MB total)
+                _clf1 = _tfpipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
+                _clf2 = _tfpipeline('image-classification', model='AdamCodd/vit-base-nsfw-detector', device='cpu')
+                _img224 = gen_img.convert('RGB').resize((224, 224))
+                _r1 = _clf1(_img224)
+                _r2 = _clf2(_img224)
+                _s1 = next((x['score'] for x in _r1 if x['label'] == 'nsfw'), 0)
+                _s2 = next((x['score'] for x in _r2 if x['label'] == 'nsfw'), 0)
+                _nsfw_score = max(_s1, _s2)
+                _is_blocked = _nsfw_score > 0.5
+                # Fallback: skin ratio for cases both models miss
+                if not _is_blocked:
+                    _arr = _np2.array(gen_img.convert('RGB').resize((256, 256))).astype(float)
+                    _rv, _gv, _bv = _arr[:,:,0], _arr[:,:,1], _arr[:,:,2]
+                    _skin = ((_rv>95)&(_gv>40)&(_bv>20)&(_rv>_gv)&(_rv>_bv)&((_rv-_gv)>15)&(_arr.max(2)-_arr.min(2)>15))
+                    _skin_ratio = float(_skin.sum()) / (256*256)
+                    if _skin_ratio > 0.35:
+                        _is_blocked = True
+                        print(f"LOCAL_REALVIS: skin ratio {_skin_ratio:.0%} -> blocked", flush=True)
+                if _is_blocked:
+                    print(f"LOCAL_REALVIS_BLOCKED: image {i} blocked (nsfw={_nsfw_score:.0%})", flush=True)
                     try:
                         with open(img_path + '.nsfw', 'w') as _nf:
                             _nf.write(f'{_nsfw_score:.4f}')
