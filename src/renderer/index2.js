@@ -5307,6 +5307,10 @@ async function toggleParentalControl() {
       _nsfwKeywordsCache = null;
       renderProjectsGrid();
       _runNsfwBackgroundScan();
+      // Refresh the open project workspace to hide/show NSFW images
+      if (state.currentProject) {
+        renderImageVersions(state.currentProject);
+      }
     }
   } else {
     // Unlock — show legal warning first, then prompt for PIN
@@ -5321,6 +5325,9 @@ async function toggleParentalControl() {
       refreshParentalStatus();
       _nsfwKeywordsCache = null;
       renderProjectsGrid();
+      if (state.currentProject) {
+        renderImageVersions(state.currentProject);
+      }
     } else {
       showToast(r?.error || 'Wrong PIN', 'error');
     }
