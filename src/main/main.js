@@ -988,6 +988,29 @@ ipcMain.handle('get-nsfw-keywords', () => {
   return NSFW_KEYWORDS;
 });
 
+// Scan an image file for NSFW content using skin-ratio heuristic.
+// Returns { nsfw: true/false, skinRatio: 0.XX }
+ipcMain.handle('check-image-nsfw', async (_event, { imagePath }) => {
+  if (isUnrestrictedMode()) return { nsfw: false, skinRatio: 0 };
+  if (!imagePath || !fs.existsSync(imagePath)) return { nsfw: false, skinRatio: 0 };
+  return new Promise((resolve) => {
+    execFile('python', ['-c', `
+import sys, numpy as np
+from PIL import Image
+img = Image.open(r"${imagePath}").convert('RGB').resize((256,256))
+arr = np.array(img).astype(float)
+r,g,b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+skin = ((r>95)&(g>40)&(b>20)&(r>g)&(r>b)&((r-g)>15)&(arr.max(2)-arr.min(2)>15))
+ratio = float(skin.sum()) / (256*256)
+print(f"{ratio:.4f}")
+`], { timeout: 10000 }, (error, stdout) => {
+      if (error) { resolve({ nsfw: false, skinRatio: 0 }); return; }
+      const ratio = parseFloat(stdout.trim()) || 0;
+      resolve({ nsfw: ratio > 0.40, skinRatio: ratio });
+    });
+  });
+});
+
 ipcMain.handle('get-parental-status', () => {
   const config = loadConfig();
   return {

@@ -379,9 +379,18 @@ async function _getNsfwKeywords() {
   return ['nude','naked','nsfw','porn','sex','gore','blood','murder','kill','drug','terrorist'];
 }
 async function _isProjectNSFW(p) {
+  // Check name + prompt against keyword list
   const keywords = await _getNsfwKeywords();
   const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
-  return keywords.some(kw => text.includes(kw));
+  if (keywords.some(kw => text.includes(kw))) return true;
+  // Check thumbnail image for skin content (catches unnamed NSFW projects)
+  if (p.thumb && API.checkImageNsfw) {
+    try {
+      const r = await API.checkImageNsfw({ imagePath: p.thumb });
+      if (r?.nsfw) return true;
+    } catch (_) {}
+  }
+  return false;
 }
 
 async function renderProjectsGrid() {
