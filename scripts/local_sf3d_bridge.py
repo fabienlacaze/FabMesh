@@ -183,60 +183,36 @@ def generate_3d(
         print(f"LOCAL_SF3D_STATS: verts=? faces=? tex={tex_res} (count failed: {_e})", flush=True)
 
     # ------------------------------------------------------------------
-    # Optional: Blender Catmull-Clark subdivision for Ultra quality.
-    # This runs on CPU (no VRAM needed) and preserves UVs + PBR materials.
+    # Optional: Catmull-Clark subdivision for higher triangle counts.
+    # Uses pymeshlab (Python-only, no Blender needed). Runs on CPU so
+    # no extra VRAM is consumed. Preserves UVs + PBR materials.
     # ------------------------------------------------------------------
     if int(subdivide_levels) > 0:
         print(f"LOCAL_SF3D_PROGRESS: 92 subdivide_start", flush=True)
-        print(f"LOCAL_SF3D: subdividing ×{subdivide_levels} via Blender...", flush=True)
+        print(f"LOCAL_SF3D: subdividing ×{subdivide_levels} via pymeshlab (no Blender)...", flush=True)
         import subprocess
-        import json
-        # Find Blender path from FabMesh config
-        blender_exe = None
+        subdivide_script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
+        raw_glb = output_path + '.raw.glb'
+        os.rename(output_path, raw_glb)
         try:
-            config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
-            if os.path.exists(config_path):
-                with open(config_path) as f:
-                    cfg = json.load(f)
-                blender_exe = cfg.get('blenderPath', '')
-        except Exception:
-            pass
-        if not blender_exe or not os.path.exists(blender_exe):
-            # Try common default paths
-            for candidate in [
-                r'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe',
-                r'C:\Program Files\Blender Foundation\Blender 4.3\blender.exe',
-                r'C:\Program Files\Blender Foundation\Blender 4.0\blender.exe',
-            ]:
-                if os.path.exists(candidate):
-                    blender_exe = candidate
-                    break
-        if blender_exe and os.path.exists(blender_exe):
-            subdivide_script = os.path.join(os.path.dirname(__file__), 'blender_subdivide.py')
-            raw_glb = output_path + '.raw.glb'
-            os.rename(output_path, raw_glb)
-            try:
-                result = subprocess.run(
-                    [blender_exe, '--background', '--python', subdivide_script,
-                     '--', raw_glb, output_path, str(subdivide_levels)],
-                    capture_output=True, text=True, timeout=300
-                )
-                print(result.stdout, flush=True)
-                if result.returncode != 0 or not os.path.exists(output_path):
-                    print(f"LOCAL_SF3D: subdivide failed (code {result.returncode}), using raw mesh", flush=True)
-                    if result.stderr:
-                        print(f"LOCAL_SF3D: {result.stderr[-500:]}", flush=True)
+            result = subprocess.run(
+                [sys.executable, subdivide_script, raw_glb, output_path, str(subdivide_levels)],
+                capture_output=True, text=True, timeout=300
+            )
+            print(result.stdout, flush=True)
+            if result.returncode != 0 or not os.path.exists(output_path):
+                print(f"LOCAL_SF3D: subdivide failed (code {result.returncode}), using raw mesh", flush=True)
+                if result.stderr:
+                    print(f"LOCAL_SF3D: {result.stderr[-500:]}", flush=True)
+                if os.path.exists(raw_glb):
                     os.rename(raw_glb, output_path)
-                else:
-                    # Clean up the raw file
-                    try: os.remove(raw_glb)
-                    except: pass
-            except Exception as e:
-                print(f"LOCAL_SF3D: subdivide exception ({e}), using raw mesh", flush=True)
-                if os.path.exists(raw_glb) and not os.path.exists(output_path):
-                    os.rename(raw_glb, output_path)
-        else:
-            print(f"LOCAL_SF3D: Blender not found, skipping subdivision", flush=True)
+            else:
+                try: os.remove(raw_glb)
+                except: pass
+        except Exception as e:
+            print(f"LOCAL_SF3D: subdivide exception ({e}), using raw mesh", flush=True)
+            if os.path.exists(raw_glb) and not os.path.exists(output_path):
+                os.rename(raw_glb, output_path)
 
     # Re-read final file size after possible subdivision
     size = os.path.getsize(output_path)
