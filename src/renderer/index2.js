@@ -2613,7 +2613,63 @@ function _hideResTarget() {
 document.getElementById('res-upscale')?.addEventListener('mouseenter', () => _showResTarget(_resW*2, _resH*2, true));
 document.getElementById('res-downscale')?.addEventListener('mouseenter', () => _showResTarget(Math.round(_resW/2), Math.round(_resH/2), false));
 document.querySelectorAll('#res-upscale, #res-downscale').forEach(el => el.addEventListener('mouseleave', _hideResTarget));
-document.getElementById('ws-brightness-btn')?.addEventListener('click', () => runQuickEdit('brightness', { brightness: 1.15, contrast: 1.2 }));
+// ============================================================
+// BRIGHTNESS / CONTRAST MODAL
+// ============================================================
+document.getElementById('ws-brightness-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const modal = document.getElementById('modal-brightness');
+  const preview = document.getElementById('bright-preview');
+  if (!modal || !preview) return;
+  preview.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  // Reset sliders
+  ['brightness', 'contrast', 'saturation', 'sharpness'].forEach(k => {
+    const sl = document.getElementById('bright-' + k);
+    const val = document.getElementById('bright-' + k + '-val');
+    if (sl) sl.value = '100';
+    if (val) val.textContent = '100%';
+  });
+  // Live preview via CSS filter
+  const updatePreview = () => {
+    const b = document.getElementById('bright-brightness').value / 100;
+    const c = document.getElementById('bright-contrast').value / 100;
+    const s = document.getElementById('bright-saturation').value / 100;
+    preview.style.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+    document.getElementById('bright-brightness-val').textContent = document.getElementById('bright-brightness').value + '%';
+    document.getElementById('bright-contrast-val').textContent = document.getElementById('bright-contrast').value + '%';
+    document.getElementById('bright-saturation-val').textContent = document.getElementById('bright-saturation').value + '%';
+    document.getElementById('bright-sharpness-val').textContent = document.getElementById('bright-sharpness').value + '%';
+  };
+  ['brightness', 'contrast', 'saturation', 'sharpness'].forEach(k => {
+    document.getElementById('bright-' + k)?.addEventListener('input', updatePreview);
+  });
+  modal.classList.remove('hidden');
+});
+document.getElementById('bright-reset')?.addEventListener('click', () => {
+  ['brightness', 'contrast', 'saturation', 'sharpness'].forEach(k => {
+    const sl = document.getElementById('bright-' + k);
+    const val = document.getElementById('bright-' + k + '-val');
+    if (sl) sl.value = '100';
+    if (val) val.textContent = '100%';
+  });
+  const preview = document.getElementById('bright-preview');
+  if (preview) preview.style.filter = '';
+});
+document.getElementById('bright-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-brightness')?.classList.add('hidden');
+});
+document.getElementById('bright-close-x')?.addEventListener('click', () => {
+  document.getElementById('modal-brightness')?.classList.add('hidden');
+});
+document.getElementById('bright-apply')?.addEventListener('click', async () => {
+  document.getElementById('modal-brightness')?.classList.add('hidden');
+  const b = document.getElementById('bright-brightness').value / 100;
+  const c = document.getElementById('bright-contrast').value / 100;
+  const s = document.getElementById('bright-saturation').value / 100;
+  const sh = document.getElementById('bright-sharpness').value / 100;
+  await runQuickEdit('brightness', { brightness: b, contrast: c, saturation: s, sharpness: sh });
+});
 document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQuickEdit('facefix'));
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
 document.getElementById('ws-crop-btn')?.addEventListener('click', () => runQuickEdit('crop', { left: 0.1, top: 0.05, right: 0.9, bottom: 0.95 }));
@@ -2690,41 +2746,233 @@ document.getElementById('ws-style-btn')?.addEventListener('change', async (e) =>
   });
 });
 
-// Color Picker: read pixel color from image and copy to clipboard
-document.getElementById('ws-picker-btn')?.addEventListener('click', async () => {
+// ============================================================
+// COLOR PICKER MODAL
+// ============================================================
+document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  showToast('Click on the image preview to pick a color', 'info', 3000);
-  // One-time click handler on the image preview
-  const preview = document.getElementById('step1-preview');
-  if (!preview) return;
-  const handler = (e) => {
-    preview.removeEventListener('click', handler);
-    const img = preview.querySelector('img');
-    if (!img) { showToast('No image loaded', 'error'); return; }
-    const rect = img.getBoundingClientRect();
-    const x = Math.round((e.clientX - rect.left) / rect.width * img.naturalWidth);
-    const y = Math.round((e.clientY - rect.top) / rect.height * img.naturalHeight);
-    const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
+  const modal = document.getElementById('modal-colorpick');
+  const canvas = document.getElementById('cpick-canvas');
+  if (!modal || !canvas) return;
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    canvas.width = img.width; canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
-    const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-    const hex = '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
-    navigator.clipboard.writeText(hex).catch(() => {});
-    showToast(`Color: ${hex} (copied)`, 'success', 3000);
+    document.getElementById('cpick-swatch').style.background = '#000';
+    document.getElementById('cpick-hex').textContent = '';
+    document.getElementById('cpick-rgb').textContent = 'Move cursor over image';
+    modal.classList.remove('hidden');
   };
-  preview.addEventListener('click', handler);
+  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+});
+(() => {
+  const cpCanvas = document.getElementById('cpick-canvas');
+  if (!cpCanvas) return;
+  function _cpSample(e) {
+    const rect = cpCanvas.getBoundingClientRect();
+    const sx = cpCanvas.width / rect.width;
+    const x = Math.max(0, Math.min(Math.round((e.clientX - rect.left) * sx), cpCanvas.width - 1));
+    const y = Math.max(0, Math.min(Math.round((e.clientY - rect.top) * sx), cpCanvas.height - 1));
+    const ctx = cpCanvas.getContext('2d');
+    const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
+    const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+    document.getElementById('cpick-swatch').style.background = hex;
+    document.getElementById('cpick-hex').textContent = hex;
+    document.getElementById('cpick-rgb').textContent = `rgb(${r}, ${g}, ${b})`;
+    const cur = document.getElementById('cpick-cursor');
+    if (cur) { cur.style.left = (e.clientX - rect.left) + 'px'; cur.style.top = (e.clientY - rect.top) + 'px'; cur.style.display = 'block'; }
+    return hex;
+  }
+  cpCanvas.addEventListener('mousemove', _cpSample);
+  cpCanvas.addEventListener('click', (e) => {
+    const hex = _cpSample(e);
+    navigator.clipboard.writeText(hex).catch(() => {});
+    showToast(hex + ' copied!', 'success', 1500);
+  });
+})();
+document.getElementById('cpick-copy')?.addEventListener('click', () => {
+  const hex = document.getElementById('cpick-hex')?.textContent;
+  if (hex) { navigator.clipboard.writeText(hex).catch(() => {}); showToast(hex + ' copied!', 'success', 1500); }
+});
+document.getElementById('cpick-close')?.addEventListener('click', () => document.getElementById('modal-colorpick')?.classList.add('hidden'));
+document.getElementById('cpick-close-x')?.addEventListener('click', () => document.getElementById('modal-colorpick')?.classList.add('hidden'));
+
+// ============================================================
+// BLUR / SHARPEN BRUSH MODAL
+// ============================================================
+const blurState = { mode: 'blur', brushSize: 30, strength: 5, painting: false, imgData: null, undoStack: [] };
+
+document.getElementById('ws-blur-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const modal = document.getElementById('modal-blur');
+  const canvas = document.getElementById('blur-canvas');
+  if (!modal || !canvas) return;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const img = new Image();
+  img.onload = () => {
+    const container = document.getElementById('blur-canvas-container');
+    const cw = container.clientWidth || 800;
+    const ch = container.clientHeight || 600;
+    const scale = Math.min(cw / img.width, ch / img.height, 1);
+    const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
+    canvas.width = img.width; canvas.height = img.height;
+    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+    canvas.style.left = Math.round((cw - dw) / 2) + 'px';
+    canvas.style.top = Math.round((ch - dh) / 2) + 'px';
+    ctx.drawImage(img, 0, 0);
+    blurState.imgData = ctx.getImageData(0, 0, img.width, img.height);
+    blurState.undoStack = [];
+    modal.classList.remove('hidden');
+  };
+  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
 });
 
-// Blur Brush + Eraser: open Draw Mask modal (same tool, different purpose)
-document.getElementById('ws-blur-btn')?.addEventListener('click', () => {
-  showToast('Use Draw Mask to paint areas, then Apply Inpaint with "blur, smooth" prompt', 'info', 4000);
+// Mode toggle
+document.getElementById('blur-mode-blur')?.addEventListener('click', () => {
+  blurState.mode = 'blur';
+  document.getElementById('blur-mode-blur')?.classList.add('tool-active');
+  document.getElementById('blur-mode-sharpen')?.classList.remove('tool-active');
 });
+document.getElementById('blur-mode-sharpen')?.addEventListener('click', () => {
+  blurState.mode = 'sharpen';
+  document.getElementById('blur-mode-sharpen')?.classList.add('tool-active');
+  document.getElementById('blur-mode-blur')?.classList.remove('tool-active');
+});
+document.getElementById('blur-brush-size')?.addEventListener('input', (e) => {
+  blurState.brushSize = parseInt(e.target.value);
+  document.getElementById('blur-brush-val').textContent = e.target.value;
+});
+document.getElementById('blur-strength')?.addEventListener('input', (e) => {
+  blurState.strength = parseInt(e.target.value);
+  document.getElementById('blur-strength-val').textContent = e.target.value;
+});
+
+// Loupe toggle
+document.getElementById('blur-loupe-toggle')?.addEventListener('click', () => {
+  loupeEnabled = !loupeEnabled;
+  document.getElementById('blur-loupe-toggle')?.classList.toggle('tool-active', loupeEnabled);
+  if (!loupeEnabled) { const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none'; }
+});
+
+// Canvas paint interaction
+(() => {
+  const bCanvas = document.getElementById('blur-canvas');
+  if (!bCanvas) return;
+  const bCtx = bCanvas.getContext('2d', { willReadFrequently: true });
+
+  function blurPaint(cx, cy) {
+    const r = blurState.brushSize / 2;
+    const w = bCanvas.width, h = bCanvas.height;
+    const s = blurState.strength;
+    const data = bCtx.getImageData(0, 0, w, h);
+    const orig = new Uint8ClampedArray(data.data);
+
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const px = Math.round(cx + dx), py = Math.round(cy + dy);
+        if (px < 1 || py < 1 || px >= w - 1 || py >= h - 1) continue;
+        const idx = (py * w + px) * 4;
+        if (blurState.mode === 'blur') {
+          // Box blur: average with neighbors
+          for (let c = 0; c < 3; c++) {
+            let sum = 0, count = 0;
+            for (let ny = -1; ny <= 1; ny++) {
+              for (let nx = -1; nx <= 1; nx++) {
+                const ni = ((py + ny) * w + (px + nx)) * 4 + c;
+                sum += orig[ni]; count++;
+              }
+            }
+            const avg = sum / count;
+            data.data[idx + c] = Math.round(orig[idx + c] * (1 - s / 20) + avg * (s / 20));
+          }
+        } else {
+          // Sharpen: enhance difference from neighbors
+          for (let c = 0; c < 3; c++) {
+            let sum = 0, count = 0;
+            for (let ny = -1; ny <= 1; ny++) {
+              for (let nx = -1; nx <= 1; nx++) {
+                if (ny === 0 && nx === 0) continue;
+                sum += orig[((py + ny) * w + (px + nx)) * 4 + c]; count++;
+              }
+            }
+            const avg = sum / count;
+            const sharp = orig[idx + c] + (orig[idx + c] - avg) * (s / 5);
+            data.data[idx + c] = Math.max(0, Math.min(255, Math.round(sharp)));
+          }
+        }
+      }
+    }
+    bCtx.putImageData(data, 0, 0);
+  }
+
+  bCanvas.addEventListener('mousedown', (e) => {
+    blurState.painting = true;
+    blurState.undoStack.push(bCtx.getImageData(0, 0, bCanvas.width, bCanvas.height));
+    if (blurState.undoStack.length > 15) blurState.undoStack.shift();
+    const rect = bCanvas.getBoundingClientRect();
+    const sx = bCanvas.width / rect.width;
+    blurPaint((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sx);
+  });
+  bCanvas.addEventListener('mousemove', (e) => {
+    const rect = bCanvas.getBoundingClientRect();
+    const sx = bCanvas.width / rect.width;
+    // Brush cursor
+    const cur = document.getElementById('blur-brush-cursor');
+    if (cur) {
+      const ds = Math.max(4, blurState.brushSize * (rect.width / bCanvas.width));
+      cur.style.width = ds + 'px'; cur.style.height = ds + 'px';
+      cur.style.left = (e.clientX - ds / 2) + 'px'; cur.style.top = (e.clientY - ds / 2) + 'px';
+      cur.style.display = 'block';
+    }
+    if (blurState.painting) {
+      blurPaint((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sx);
+    }
+    updateLoupe(e, bCanvas);
+  });
+  bCanvas.addEventListener('mouseleave', () => {
+    const cur = document.getElementById('blur-brush-cursor');
+    if (cur) cur.style.display = 'none';
+  });
+  window.addEventListener('mouseup', () => { blurState.painting = false; });
+})();
+
+document.getElementById('blur-undo')?.addEventListener('click', () => {
+  const bCanvas = document.getElementById('blur-canvas');
+  if (blurState.undoStack.length > 0 && bCanvas) {
+    bCanvas.getContext('2d').putImageData(blurState.undoStack.pop(), 0, 0);
+  }
+});
+document.getElementById('blur-reset')?.addEventListener('click', () => {
+  const bCanvas = document.getElementById('blur-canvas');
+  if (blurState.imgData && bCanvas) {
+    bCanvas.getContext('2d').putImageData(blurState.imgData, 0, 0);
+    blurState.undoStack = [];
+  }
+});
+document.getElementById('blur-cancel')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
+document.getElementById('blur-close-x')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
+document.getElementById('blur-save')?.addEventListener('click', async () => {
+  const bCanvas = document.getElementById('blur-canvas');
+  const p = state.currentProject;
+  if (!bCanvas || !p?.selectedImagePath) return;
+  document.getElementById('modal-blur')?.classList.add('hidden');
+  showToast('Saving...', 'info', 1500);
+  try {
+    const dataUrl = bCanvas.toDataURL('image/png');
+    const r = await API.saveImageDataUrl({ imagePath: p.selectedImagePath, dataUrl, suffix: 'blur' });
+    if (r?.success) { showToast('Saved!', 'success'); await reloadCurrentProject(); }
+    else showToast('Save failed: ' + (r?.error || ''), 'error');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+});
+
+// Eraser: guide to Remove BG + Draw Mask
 document.getElementById('ws-eraser-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  // Eraser = Remove BG then use Draw Mask to clean edges
   showToast('Use Remove BG first, then Draw Mask to clean edges', 'info', 4000);
 });
 

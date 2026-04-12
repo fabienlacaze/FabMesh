@@ -1065,6 +1065,114 @@
     </div>
   </div>
 
+  <!-- Brightness/Contrast modal -->
+  <div id="modal-brightness" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:450px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Brightness / Contrast</h2>
+        <button class="settings-close-x" id="bright-close-x">&#10005;</button>
+      </div>
+      <img id="bright-preview" alt="" style="max-width:100%; max-height:250px; border-radius:8px; margin:8px auto; display:block; border:1px solid var(--border);" />
+      <div style="display:flex; flex-direction:column; gap:10px; margin:12px 0;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Brightness</span>
+          <input type="range" id="bright-brightness" min="50" max="200" value="100" style="flex:1;" />
+          <span id="bright-brightness-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Contrast</span>
+          <input type="range" id="bright-contrast" min="50" max="200" value="100" style="flex:1;" />
+          <span id="bright-contrast-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Saturation</span>
+          <input type="range" id="bright-saturation" min="0" max="200" value="100" style="flex:1;" />
+          <span id="bright-saturation-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Sharpness</span>
+          <input type="range" id="bright-sharpness" min="0" max="300" value="100" style="flex:1;" />
+          <span id="bright-sharpness-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+      </div>
+      <div style="display:flex; justify-content:space-between;">
+        <button id="bright-reset" class="ghost-btn" style="padding:6px 16px;">Reset</button>
+        <div style="display:flex; gap:8px;">
+          <button id="bright-cancel" class="ghost-btn" style="padding:6px 16px;">Cancel</button>
+          <button id="bright-apply" class="primary-btn" style="padding:6px 16px;">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Color Picker modal -->
+  <div id="modal-colorpick" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:500px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Color Picker</h2>
+        <button class="settings-close-x" id="cpick-close-x">&#10005;</button>
+      </div>
+      <p class="modal-subtitle">Click anywhere on the image to pick a color.</p>
+      <div id="cpick-canvas-container" style="position:relative; overflow:hidden; background:#1a1a2e; border-radius:8px; min-height:300px; cursor:crosshair;">
+        <canvas id="cpick-canvas" style="width:100%; display:block;"></canvas>
+        <div id="cpick-cursor" style="position:absolute; pointer-events:none; width:20px; height:20px; border:2px solid white; border-radius:50%; box-shadow:0 0 0 1px black; display:none; transform:translate(-50%,-50%);">
+          <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%);"></div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin:12px 0;">
+        <div id="cpick-swatch" style="width:48px; height:48px; border-radius:8px; border:2px solid var(--border);"></div>
+        <div>
+          <div id="cpick-hex" style="font-size:18px; font-weight:700; font-family:monospace;"></div>
+          <div id="cpick-rgb" style="font-size:11px; color:var(--text-2);"></div>
+        </div>
+        <span style="flex:1;"></span>
+        <button id="cpick-copy" class="primary-btn" style="padding:6px 16px;">Copy HEX</button>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button id="cpick-close" class="ghost-btn" style="padding:6px 16px;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blur Brush modal -->
+  <div id="modal-blur" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Blur / Sharpen Brush</h3>
+        <button id="blur-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:4px; flex:1 1 140px;">
+          <span style="font-size:11px;">Brush:</span>
+          <input type="range" id="blur-brush-size" min="5" max="200" value="30" style="flex:1; min-width:60px;" />
+          <span id="blur-brush-val" style="min-width:24px; font-size:11px;">30</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; flex:1 1 140px;">
+          <span style="font-size:11px;">Strength:</span>
+          <input type="range" id="blur-strength" min="1" max="20" value="5" style="flex:1; min-width:60px;" />
+          <span id="blur-strength-val" style="min-width:24px; font-size:11px;">5</span>
+        </label>
+        <div style="display:flex; gap:4px; flex-shrink:0;">
+          <button id="blur-mode-blur" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Blur</button>
+          <button id="blur-mode-sharpen" class="secondary-btn" style="padding:4px 10px; font-size:11px;">Sharpen</button>
+          <button id="blur-loupe-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Magnifier">&#128270;</button>
+          <button id="blur-undo" class="secondary-btn" style="padding:4px 6px;" title="Undo">&#8630;</button>
+          <button id="blur-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
+        </div>
+      </div>
+      <div id="blur-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+        <canvas id="blur-canvas" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+        <div id="blur-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid white; border-radius:50%; display:none; z-index:1000;">
+          <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%);"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="blur-cancel" class="secondary-btn">Cancel</button>
+        <button id="blur-save" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Save as new version</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Symmetrize modal -->
   <div id="modal-symmetrize" class="modal hidden">
     <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">

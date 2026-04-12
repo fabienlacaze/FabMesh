@@ -1731,10 +1731,14 @@ out.save(r"${outPath}")
 print("OK")`,
 
       brightness: `
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 img = Image.open(r"${imagePath}")
-img = ImageEnhance.Brightness(img).enhance(${p.brightness || 1.2})
-img = ImageEnhance.Contrast(img).enhance(${p.contrast || 1.2})
+img = ImageEnhance.Brightness(img).enhance(${p.brightness || 1.0})
+img = ImageEnhance.Contrast(img).enhance(${p.contrast || 1.0})
+img = ImageEnhance.Color(img).enhance(${p.saturation || 1.0})
+sh = ${p.sharpness || 1.0}
+if sh != 1.0:
+    img = ImageEnhance.Sharpness(img).enhance(sh)
 img.save(r"${outPath}")
 print("OK")`,
 
