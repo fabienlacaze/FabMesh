@@ -362,6 +362,8 @@ async function refreshProjectsPage() {
 
   state.projects = Array.from(projectsMap.values()).sort((a, b) => b.latestTimestamp - a.latestTimestamp);
   renderProjectsGrid();
+  // Start background NSFW scan (non-blocking, re-renders when done)
+  _runNsfwBackgroundScan();
 }
 
 // NSFW keywords for project name / prompt filtering (renderer-side).
@@ -378,19 +380,43 @@ async function _getNsfwKeywords() {
   // Fallback minimal list if IPC not available
   return ['nude','naked','nsfw','porn','sex','gore','blood','murder','kill','drug','terrorist'];
 }
+// NSFW scan cache: { filename: true/false }
+const _nsfwScanCache = {};
+let _nsfwScanRunning = false;
+
 async function _isProjectNSFW(p) {
-  // Check name + prompt against keyword list
+  // Check name + prompt against keyword list (instant)
   const keywords = await _getNsfwKeywords();
   const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
   if (keywords.some(kw => text.includes(kw))) return true;
-  // Check thumbnail image for skin content (catches unnamed NSFW projects)
-  if (p.thumb && API.checkImageNsfw) {
-    try {
-      const r = await API.checkImageNsfw({ imagePath: p.thumb });
-      if (r?.nsfw) return true;
-    } catch (_) {}
+  // Check cached thumbnail scan result
+  if (p.thumb) {
+    const fname = p.thumb.split(/[/\\]/).pop();
+    if (fname in _nsfwScanCache) return _nsfwScanCache[fname];
   }
   return false;
+}
+
+// Background scan: runs once after page load, scans all project thumbnails
+// and caches results. Re-renders the grid when done.
+async function _runNsfwBackgroundScan() {
+  if (_nsfwScanRunning || !API.checkImageNsfw) return;
+  _nsfwScanRunning = true;
+  let changed = false;
+  for (const p of state.projects) {
+    if (!p.thumb) continue;
+    const fname = p.thumb.split(/[/\\]/).pop();
+    if (fname in _nsfwScanCache) continue; // already scanned
+    try {
+      const r = await API.checkImageNsfw({ imagePath: p.thumb });
+      _nsfwScanCache[fname] = !!(r?.nsfw);
+      if (r?.nsfw) changed = true;
+    } catch (_) {
+      _nsfwScanCache[fname] = false;
+    }
+  }
+  _nsfwScanRunning = false;
+  if (changed) renderProjectsGrid(); // re-render to hide newly detected NSFW
 }
 
 async function renderProjectsGrid() {
@@ -5209,8 +5235,9 @@ document.getElementById('parental-toggle')?.addEventListener('click', async () =
       showToast('Parental control re-enabled.', 'success');
       if (pinEl) pinEl.value = '';
       refreshParentalStatus();
-      _nsfwKeywordsCache = null; // reset cache
-      renderProjectsGrid(); // refresh project list immediately
+      _nsfwKeywordsCache = null;
+      renderProjectsGrid();
+      _runNsfwBackgroundScan();
     }
   } else {
     // Unlock — requires PIN
@@ -5225,7 +5252,7 @@ document.getElementById('parental-toggle')?.addEventListener('click', async () =
       if (pinEl) pinEl.value = '';
       refreshParentalStatus();
       _nsfwKeywordsCache = null;
-      renderProjectsGrid();
+      renderProjectsGrid(); // instant: shows all projects (unrestricted)
     } else {
       showToast(r?.error || 'Wrong PIN', 'error');
     }
