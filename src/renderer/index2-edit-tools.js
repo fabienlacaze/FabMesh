@@ -65,6 +65,8 @@
   var cloneModal = document.getElementById('clone-modal');
   var cloneCanvas = document.getElementById('clone-canvas');
   var cloneCtx2d = cloneCanvas ? cloneCanvas.getContext('2d', { willReadFrequently: true }) : null;
+  // flipMode: 0=none, 1=horizontal, 2=vertical, 3=both
+  var cloneFlipMode = 0;
   var cloneState = {
     sourcePoint: null,
     sourceImageData: null,
@@ -187,8 +189,21 @@
         a *= hardness + (1 - hardness) * (1 - t);
         if (a <= 0) continue;
 
-        var sxi = (ox + px) + cloneState.offset.dx;
-        var syi = (oy + py) + cloneState.offset.dy;
+        var rawSx = (ox + px) + cloneState.offset.dx;
+        var rawSy = (oy + py) + cloneState.offset.dy;
+        // Apply flip around the source point
+        var sxi = rawSx;
+        var syi = rawSy;
+        if (cloneFlipMode === 1 || cloneFlipMode === 3) {
+          // Horizontal flip: mirror X around source point
+          sxi = cloneState.sourcePoint.x - (rawSx - cloneState.sourcePoint.x);
+        }
+        if (cloneFlipMode === 2 || cloneFlipMode === 3) {
+          // Vertical flip: mirror Y around source point
+          syi = cloneState.sourcePoint.y - (rawSy - cloneState.sourcePoint.y);
+        }
+        sxi = Math.round(sxi);
+        syi = Math.round(syi);
         if (sxi < 0 || syi < 0 || sxi >= src.width || syi >= src.height) continue;
 
         var sIdx = (syi * src.width + sxi) * 4;
@@ -427,6 +442,16 @@
         cloneState.redoStack = [];
         updateCloneUndoBtn();
       }
+    });
+
+    // Flip toggle: cycles None → H → V → Both
+    var cFlip = document.getElementById('clone-flip-toggle');
+    if (cFlip) cFlip.addEventListener('click', function () {
+      cloneFlipMode = (cloneFlipMode + 1) % 4;
+      var labels = ['Flip: Off', 'Flip: H', 'Flip: V', 'Flip: HV'];
+      cFlip.textContent = labels[cloneFlipMode];
+      cFlip.style.borderColor = cloneFlipMode > 0 ? 'var(--accent)' : '';
+      cFlip.style.color = cloneFlipMode > 0 ? 'var(--accent)' : '';
     });
 
     var cCancel = document.getElementById('clone-cancel');
