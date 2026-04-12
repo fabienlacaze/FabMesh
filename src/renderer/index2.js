@@ -819,6 +819,9 @@ function renderImageVersions(p) {
       t.classList.add('selected');
       p.previewImagePath = img.path;
       showStep1Preview(img.path);
+      // Reset Style dropdown when switching images (different image = unknown style)
+      const styleEl = document.getElementById('ws-style-btn');
+      if (styleEl) styleEl.selectedIndex = 0;
     });
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
