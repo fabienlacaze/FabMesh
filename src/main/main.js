@@ -52,7 +52,11 @@ const NSFW_KEYWORDS = [
   'masturbat', 'ejaculat', 'cum shot', 'creampie', 'gangbang', 'threesome',
   'orgy', 'sextoy', 'dildo', 'vibrator', 'lolicon', 'shotacon', 'furry nsfw',
   'rule34', 'rule 34', 'ahegao', 'ecchi', 'yaoi', 'yuri',
-  'nu', 'nue', 'sexe', 'sexuel', 'erotique', 'poitrine', 'seins',
+  'nu', 'nue', 'nus', 'nues', 'sexe', 'sexuel', 'erotique', 'poitrine', 'seins',
+  'bite', 'couille', 'couilles', 'queue', 'chatte', 'nichon', 'nichons',
+  'enculer', 'baiser', 'foutre', 'salope', 'pute', 'putain',
+  'sodomie', 'fellation', 'cunnilingus', 'orgasme', 'jouir',
+  'dick', 'cock', 'pussy', 'ass', 'tits', 'boobs', 'cum', 'slut', 'whore',
   // Violence / gore
   'gore', 'gory', 'blood', 'bloody', 'bleed', 'murder', 'murderer',
   'kill', 'killer', 'killing', 'torture', 'torturer', 'dismember',
@@ -107,10 +111,14 @@ const NSFW_COMBOS = [
 ];
 
 function _matchesKeyword(text, kw) {
-  // Short words (<=3 chars) use word boundary regex to avoid false positives
-  // e.g. "nu" shouldn't match "menu", "ado" shouldn't match "shadow"
+  // Short words (<=4 chars): check with spaces around to avoid false positives
+  // e.g. "nu" matches " nu " but not "menu"
   if (kw.length <= 4) {
-    return new RegExp('\\b' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(text);
+    const padded = ' ' + text + ' ';
+    return padded.includes(' ' + kw + ' ') || padded.includes(' ' + kw + ',') ||
+           padded.includes(' ' + kw + '.') || padded.includes(' ' + kw + '!') ||
+           padded.includes(' ' + kw + '?') || text.startsWith(kw + ' ') ||
+           text.endsWith(' ' + kw);
   }
   return text.includes(kw);
 }
