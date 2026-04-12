@@ -4194,7 +4194,22 @@ async function enqueueJob(kind, displayName, runFn) {
   // No room — push to queue and surface a visible notice
   queuedJobs.push({ kind, displayName, run: runFn, queuedAt: Date.now() });
   renderQueueIndicator();
+  renderJobs(); // Show queued jobs in the panel immediately
+  // Force the jobs panel open so the user sees the queued job
+  const _panel = document.getElementById('jobs-panel-2');
+  const _bubble = document.getElementById('jobs-bubble-2');
+  if (_panel) _panel.classList.remove('hidden');
+  if (_bubble) _bubble.classList.add('hidden');
   log('queue', `Job "${displayName}" queued — ${reason}`);
+  // If the SDXL server is hogging VRAM and the queued job doesn't need it,
+  // ask main.js to kill the SDXL server to free VRAM for the queued job.
+  if (kind === 'mesh' || kind === 'rig') {
+    try {
+      if (API.cancelJob) API.cancelJob(0).catch(() => {}); // 0 = kill orphan python (SDXL preserved by default)
+      // More targeted: tell main.js to stop the SDXL server specifically
+      if (API.stopSdxlServer) API.stopSdxlServer().catch(() => {});
+    } catch (_) {}
+  }
   // Show a popup so the user knows WHY the job didn't start immediately
   try {
     if (typeof customError === 'function') {

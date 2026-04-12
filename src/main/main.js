@@ -834,6 +834,14 @@ function trackProc(proc) {
   cp.spawn = function (...args) { return trackProc(_spawn.apply(this, args)); };
 })();
 
+// Stop the SDXL server to free VRAM (called when a mesh/rig job is queued
+// and the SDXL server is hogging VRAM that the queued job needs).
+ipcMain.handle('stop-sdxl-server', () => {
+  log.info('main', 'stop-sdxl-server: stopping SDXL server to free VRAM for queued job');
+  try { stopSdxlServer(); } catch (e) {}
+  return { success: true };
+});
+
 ipcMain.handle('cancel-job', (event, jobId) => {
   log.info('main', `cancel-job: jobId=${jobId}, killing ${allActiveProcs.size} tracked procs + orphans`);
   // Kill the specific tracked proc if any

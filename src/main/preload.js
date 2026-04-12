@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   loadLandmarks: (opts) => ipcRenderer.invoke('load-landmarks', opts),
   analyzeSkeleton: (opts) => ipcRenderer.invoke('analyze-skeleton', opts),
   cancelJob: (jobId) => ipcRenderer.invoke('cancel-job', jobId),
+  stopSdxlServer: () => ipcRenderer.invoke('stop-sdxl-server'),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),
