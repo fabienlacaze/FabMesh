@@ -140,6 +140,31 @@ function checkPromptSafety(prompt) {
   return { safe: true };
 }
 
+// Layer 3: AI text classifier (async, non-blocking)
+// michellejieli/NSFW_text_classifier — local, Apache 2.0, ~250 MB, no internet after first download
+async function checkPromptSafetyAI(prompt) {
+  if (isUnrestrictedMode()) return { safe: true };
+  return new Promise((resolve) => {
+    execFile('python', ['-c', `
+import sys
+from transformers import pipeline
+clf = pipeline('text-classification', model='michellejieli/NSFW_text_classifier', device='cpu')
+r = clf(sys.argv[1])[0]
+print(r['label'], r['score'])
+`, prompt], { timeout: 30000 }, (error, stdout) => {
+      if (error) { resolve({ safe: true }); return; }
+      const parts = (stdout || '').trim().split(' ');
+      const label = parts[0];
+      const score = parseFloat(parts[1]) || 0;
+      if (label === 'NSFW' && score > 0.7) {
+        resolve({ safe: false, blocked: 'AI classifier', reason: `Content filter: AI detected this prompt as inappropriate (${Math.round(score*100)}% confidence). Disable parental control in Settings for unrestricted mode.` });
+      } else {
+        resolve({ safe: true });
+      }
+    });
+  });
+}
+
 function safeBase(base, maxLen = 80) {
   if (base.length <= maxLen) return base;
   return base.slice(0, maxLen);
@@ -1845,6 +1870,8 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
   try {
     const safety = checkPromptSafety(prompt);
     if (!safety.safe) return { success: false, error: safety.reason };
+    const aiSafety = await checkPromptSafetyAI(prompt);
+    if (!aiSafety.safe) return { success: false, error: aiSafety.reason };
     // Create new version path in same folder
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -2736,6 +2763,11 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     const safety = checkPromptSafety(prompt);
     if (!safety.safe) {
       return { success: false, error: safety.reason };
+    }
+    // Layer 3: AI text classifier (local, no internet)
+    const aiSafety = await checkPromptSafetyAI(prompt);
+    if (!aiSafety.safe) {
+      return { success: false, error: aiSafety.reason };
     }
     const timestamp = Date.now();
     const safeName = (projectName || 'gen').replace(/[^a-zA-Z0-9_-]/g, '_');
