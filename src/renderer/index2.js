@@ -2278,7 +2278,7 @@ document.getElementById('res-downscale')?.addEventListener('click', async () => 
 function _showResTarget(nw, nh, up) {
   const arrow = document.getElementById('res-arrow');
   const target = document.getElementById('res-target');
-  if (arrow) { arrow.textContent = up ? '↓' : '↓'; arrow.style.color = up ? '#22c55e' : '#ef4444'; arrow.style.display = ''; }
+  if (arrow) { arrow.textContent = '→'; arrow.style.color = up ? '#22c55e' : '#ef4444'; arrow.style.display = ''; }
   if (target) { target.textContent = `${nw} x ${nh}`; target.style.color = up ? '#22c55e' : '#ef4444'; target.style.display = ''; }
 }
 function _hideResTarget() {
