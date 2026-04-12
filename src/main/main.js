@@ -42,11 +42,49 @@ process.on('unhandledRejection', (reason) => {
 // to "1" when unrestricted so Python bridges can disable safety_checker.
 
 const NSFW_KEYWORDS = [
-  'nude', 'naked', 'nsfw', 'porn', 'sex', 'erotic', 'hentai', 'xxx',
-  'gore', 'blood', 'murder', 'kill', 'torture', 'dismember', 'decapitate',
-  'child abuse', 'pedophil', 'underage', 'minor',
-  'drug', 'cocaine', 'heroin', 'meth',
-  'terrorist', 'bomb', 'mass shooting', 'genocide',
+  // Sexual / nudity
+  'nude', 'naked', 'nsfw', 'porn', 'porno', 'pornograph', 'sex', 'sexual',
+  'erotic', 'hentai', 'xxx', 'lewd', 'topless', 'bottomless', 'lingerie',
+  'bikini', 'underwear', 'undress', 'strip', 'stripper', 'orgasm', 'orgasme',
+  'fetish', 'bdsm', 'bondage', 'dominat', 'submissi', 'sadis', 'masoch',
+  'prostitut', 'escort', 'brothel', 'genital', 'penis', 'vagina', 'breast',
+  'nipple', 'buttock', 'anus', 'anal', 'oral sex', 'fellat', 'cunniling',
+  'masturbat', 'ejaculat', 'cum shot', 'creampie', 'gangbang', 'threesome',
+  'orgy', 'sextoy', 'dildo', 'vibrator', 'lolicon', 'shotacon', 'furry nsfw',
+  'rule34', 'rule 34', 'ahegao', 'ecchi', 'yaoi', 'yuri',
+  'nu', 'nue', 'sexe', 'sexuel', 'erotique', 'poitrine', 'seins',
+  // Violence / gore
+  'gore', 'gory', 'blood', 'bloody', 'bleed', 'murder', 'murderer',
+  'kill', 'killer', 'killing', 'torture', 'torturer', 'dismember',
+  'decapitate', 'decapitation', 'mutilat', 'eviscerat', 'disembowel',
+  'cannibal', 'flesh', 'corpse', 'cadaver', 'dead body', 'death scene',
+  'execution', 'hanging', 'strangul', 'suffocate', 'drown', 'stab',
+  'slash', 'wound', 'injury', 'graphic violence', 'brutal', 'savage',
+  'massacre', 'slaughter', 'carnage', 'bloodbath', 'snuff',
+  'meurtre', 'tuer', 'mort', 'cadavre', 'sang', 'sanglant', 'torture',
+  'massacre', 'violence', 'violent', 'cruaut',
+  // Children / minors
+  'child abuse', 'pedophil', 'paedophil', 'underage', 'minor',
+  'loli', 'shota', 'preteen', 'toddler abuse', 'infant abuse',
+  'enfant', 'mineur', 'pedophil',
+  // Drugs
+  'drug', 'drugs', 'cocaine', 'heroin', 'heroine', 'meth', 'methamphet',
+  'crack', 'opium', 'fentanyl', 'overdose', 'inject drug', 'snort',
+  'drogue', 'stupefi',
+  // Terrorism / extremism
+  'terrorist', 'terrorism', 'bomb', 'bombing', 'mass shooting', 'genocide',
+  'ethnic cleansing', 'hate crime', 'white supremac', 'nazi', 'swastika',
+  'isis', 'al qaeda', 'jihad', 'radicali', 'extremis',
+  'attentat', 'terroris',
+  // Self-harm / suicide
+  'suicide', 'self-harm', 'self harm', 'cut myself', 'slit wrist',
+  'hang myself', 'jump off', 'overdose',
+  // Hate / discrimination
+  'racial slur', 'nigger', 'faggot', 'retard', 'kike', 'spic',
+  'chink', 'wetback', 'hate speech',
+  // Weapons (contextual)
+  'how to make bomb', 'how to make gun', 'weapon tutorial',
+  'build explosive', 'poison recipe',
 ];
 
 function isUnrestrictedMode() {

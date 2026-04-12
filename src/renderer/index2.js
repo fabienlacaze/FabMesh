@@ -364,11 +364,22 @@ async function refreshProjectsPage() {
   renderProjectsGrid();
 }
 
-// NSFW keywords for project name / prompt filtering (renderer-side)
+// NSFW keywords for project name / prompt filtering (renderer-side).
+// Mirrors the main.js list but simplified for project name matching.
 const NSFW_PROJECT_KEYWORDS = [
-  'nude', 'naked', 'nsfw', 'porn', 'sex', 'erotic', 'hentai', 'xxx',
-  'gore', 'blood', 'murder', 'kill', 'torture', 'dismember',
-  'hard', 'hardcore', 'adult', 'fetish',
+  'nude', 'naked', 'nsfw', 'porn', 'porno', 'sex', 'sexual', 'erotic',
+  'hentai', 'xxx', 'lewd', 'topless', 'strip', 'fetish', 'bdsm',
+  'bondage', 'prostitut', 'genital', 'penis', 'vagina', 'nipple',
+  'orgasm', 'masturb', 'dildo', 'lolicon', 'ahegao', 'ecchi',
+  'gore', 'gory', 'blood', 'bloody', 'murder', 'kill', 'torture',
+  'dismember', 'decapit', 'mutilat', 'cannibal', 'corpse', 'cadaver',
+  'execut', 'massacre', 'slaughter', 'snuff', 'brutal',
+  'child abuse', 'pedophil', 'underage', 'loli', 'shota',
+  'drug', 'cocaine', 'heroin', 'meth', 'crack', 'overdose',
+  'terrorist', 'bomb', 'genocide', 'nazi', 'swastika', 'isis',
+  'suicide', 'self-harm', 'hate speech',
+  'hard', 'hardcore', 'adult',
+  'nu', 'nue', 'sexe', 'erotique', 'meurtre', 'tuer', 'drogue',
 ];
 function _isProjectNSFW(p) {
   const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
