@@ -32,6 +32,14 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Safe send: never throws, never crashes the app on subprocess data after window close
+// Truncate a filename base to avoid Windows 260-char path limit.
+// After many edits (inpaint, clone, upscale, refine), the base name
+// accumulates suffixes and can exceed the limit, causing ENOENT errors.
+function safeBase(base, maxLen = 80) {
+  if (base.length <= maxLen) return base;
+  return base.slice(0, maxLen);
+}
+
 function safeSend(channel, data) {
   try {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
@@ -613,7 +621,7 @@ async function handleRemoveBackground(params) {
   if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: 'Image not found' };
   const dir = path.dirname(imagePath);
   const ext = path.extname(imagePath);
-  const base = path.basename(imagePath, ext);
+  const base = safeBase(path.basename(imagePath, ext));
   const outPath = path.join(dir, `${base}_nobg_${Date.now()}${ext}`);
   const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
   // Fallback: use rembg directly
@@ -728,7 +736,7 @@ app.on('will-quit', () => {
 // Image history: backup current image before modifying
 function backupImage(imagePath) {
   const dir = path.dirname(imagePath);
-  const base = path.basename(imagePath, path.extname(imagePath));
+  const base = safeBase(path.basename(imagePath, path.extname(imagePath)));
   const ext = path.extname(imagePath);
   const histDir = path.join(dir, '.history');
   if (!fs.existsSync(histDir)) fs.mkdirSync(histDir);
@@ -740,7 +748,7 @@ function backupImage(imagePath) {
 
 ipcMain.handle('list-image-versions', (event, imagePath) => {
   const dir = path.dirname(imagePath);
-  const base = path.basename(imagePath, path.extname(imagePath));
+  const base = safeBase(path.basename(imagePath, path.extname(imagePath)));
   const histDir = path.join(dir, '.history');
   if (!fs.existsSync(histDir)) return [];
   return fs.readdirSync(histDir)
@@ -991,7 +999,7 @@ ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
 
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
-    const base = path.basename(imagePath, ext);
+    const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_${operation}_${ts}${ext}`);
 
@@ -1511,7 +1519,7 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
     }
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
-    const base = path.basename(imagePath, ext);
+    const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
     // Decode dataURL to a temp PNG file
@@ -1539,7 +1547,7 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
   try {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
-    const base = path.basename(imagePath, ext);
+    const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_inpaint_${ts}${ext}`);
 
@@ -1586,7 +1594,7 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
     // Create new version path in same folder
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
-    const base = path.basename(imagePath, ext);
+    const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
     const newImagePath = path.join(dir, `${base}_refined_${ts}${ext}`);
 
@@ -1676,7 +1684,7 @@ ipcMain.handle('image-quick-edit', async (event, { imagePath, operation, params 
     if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: 'Image not found' };
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
-    const base = path.basename(imagePath, ext);
+    const base = safeBase(path.basename(imagePath, ext));
     const ts = Date.now();
     const outPath = path.join(dir, `${base}_${operation}_${ts}${ext}`);
     const p = params || {};
@@ -1791,7 +1799,7 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
   return new Promise((resolve) => {
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
-    const base = path.basename(imagePath, ext);
+    const base = safeBase(path.basename(imagePath, ext));
     const timestamp = Date.now();
     const newImagePath = path.join(dir, `${base}_nobg_${timestamp}${ext}`);
     const cleanup = () => { try { if (fs.existsSync(newImagePath)) fs.unlinkSync(newImagePath); } catch(e) {} };
