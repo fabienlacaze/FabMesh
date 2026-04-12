@@ -390,12 +390,14 @@ async function _isProjectNSFW(p) {
   const keywords = await _getNsfwKeywords();
   const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
   if (keywords.some(kw => text.includes(kw))) return true;
-  // Check cached thumbnail scan result
-  if (p.thumb) {
-    const fname = p.thumb.split(/[/\\]/).pop();
-    if (fname in _nsfwScanCache) {
-      if (_nsfwScanCache[fname]) console.log('[NSFW] _isProjectNSFW: hiding', p.name, 'thumb=', fname);
-      return _nsfwScanCache[fname];
+  // Check ALL images in the project against the scan cache
+  for (const img of (p.images || [])) {
+    const imgPath = img.path || img;
+    if (!imgPath) continue;
+    const fname = imgPath.split(/[/\\]/).pop();
+    if (_nsfwScanCache[fname]) {
+      console.log('[NSFW] _isProjectNSFW: hiding', p.name, 'because of', fname);
+      return true;
     }
   }
   return false;
@@ -408,13 +410,16 @@ async function _runNsfwBackgroundScan() {
   console.log('[NSFW] _runNsfwBackgroundScan called, batchCheckNsfw=', !!API.batchCheckNsfw, 'projects=', state.projects.length);
   if (_nsfwScanRunning) { console.log('[NSFW] already running, skip'); return; }
   if (!API.batchCheckNsfw) { console.log('[NSFW] API.batchCheckNsfw not available'); return; }
-  // Collect thumbnails that haven't been scanned yet
+  // Collect ALL images from ALL projects (not just thumbnails)
   const toScan = [];
   for (const p of state.projects) {
-    if (!p.thumb) continue;
-    const fname = p.thumb.split(/[/\\]/).pop();
-    if (fname in _nsfwScanCache) continue;
-    toScan.push(p.thumb);
+    for (const img of (p.images || [])) {
+      const imgPath = img.path || img;
+      if (!imgPath) continue;
+      const fname = imgPath.split(/[/\\]/).pop();
+      if (fname in _nsfwScanCache) continue;
+      toScan.push(imgPath);
+    }
   }
   if (toScan.length === 0) { console.log('[NSFW] nothing to scan'); return; }
   console.log('[NSFW] scanning', toScan.length, 'thumbnails...');
