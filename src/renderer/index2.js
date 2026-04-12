@@ -2375,18 +2375,35 @@ function gatedRun(kind, displayName, runFn) {
   enqueueJob(kind, displayName, runFn);
 }
 
+// 3D quality presets: map a single dropdown to safe (tex_res, vertex_count) combos.
+// These are VRAM-safe on 16 GB cards. The Python bridge auto-clamps further
+// based on actual GPU VRAM detected at runtime.
+const MESH_QUALITY_PRESETS = {
+  draft:    { tex: 512,  verts: 3000,  label: '~3,000 triangles · 512×512 texture · ~4 GB VRAM',    expectedMs: 12000 },
+  standard: { tex: 1024, verts: -1,    label: '~13,000 triangles · 1024×1024 texture · ~6 GB VRAM',  expectedMs: 20000 },
+  high:     { tex: 2048, verts: 30000, label: '~30,000 triangles · 2048×2048 texture · ~10 GB VRAM', expectedMs: 45000 },
+};
+
+// Update the hint text when the quality preset changes
+const qualitySelect = document.getElementById('ws-3d-quality');
+const qualityHint = document.getElementById('ws-3d-quality-hint');
+if (qualitySelect && qualityHint) {
+  qualitySelect.addEventListener('change', () => {
+    const preset = MESH_QUALITY_PRESETS[qualitySelect.value] || MESH_QUALITY_PRESETS.standard;
+    qualityHint.textContent = preset.label;
+  });
+}
+
 document.getElementById('ws-generate-mesh').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
   const engine = document.getElementById('ws-3d-engine').value;
-  const texSize = parseInt(document.getElementById('ws-3d-texsize')?.value) || 1024;
+  const quality = document.getElementById('ws-3d-quality')?.value || 'standard';
+  const preset = MESH_QUALITY_PRESETS[quality] || MESH_QUALITY_PRESETS.standard;
   const buildStages = document.getElementById('ws-3d-buildstages')?.checked || false;
-  // SF3D works best with its internal defaults (~6K verts). We don't expose
-  // vertex count / effort sliders — they only caused OOM crashes with no
-  // visible quality improvement. Meshy.ai uses its own server-side defaults.
   let expectedMs;
   if (engine === 'sf3d') {
-    expectedMs = 20000;
+    expectedMs = preset.expectedMs;
   } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {
@@ -2397,16 +2414,16 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     imagePath: p.selectedImagePath,
     outputName: p.name,
     engine,
-    textureSize: texSize,
-    targetFaces: -1,  // let SF3D use its internal default (~6K verts, optimal quality)
+    textureSize: preset.tex,
+    targetFaces: preset.verts,
     effort: 2,
     buildStages,
     vramFraction: (gpuLimits?.vram || 90) / 100,
   };
+  const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
   const jobParams = {
     Engine: engineLabel(engine),
-    'Texture size': `${texSize} px`,
-    'Construction stages': buildStages ? 'yes' : 'no',
+    Quality: `${qualityLabels[quality] || quality} (${preset.label.split('·')[0].trim()})`,
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   };
   gatedRun('mesh', `Generate 3D: ${p.name}`, async () => {
