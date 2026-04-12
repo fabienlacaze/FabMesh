@@ -1079,6 +1079,17 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-direction: column;
   gap: 8px;
 }
+.step-tools-group {
+  margin-bottom: 8px;
+}
+.step-tools-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
 .step-tools-row {
   display: flex;
   gap: 8px;
