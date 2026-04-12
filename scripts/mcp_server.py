@@ -60,11 +60,79 @@ def send_notification(method, params=None):
 # =====================================================================
 
 ELECTRON_BRIDGE_URL = "http://127.0.0.1:7555"
+_headless_proc = None
 
-def _call_electron(action, params, timeout=600):
+
+def _is_fabmesh_running():
+    """Check if FabMesh Electron is reachable on the bridge port."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"{ELECTRON_BRIDGE_URL}/list-projects", method='POST',
+                                     data=b'{}', headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def _ensure_fabmesh_running(visible=False):
+    """If FabMesh is not running, launch it automatically.
+
+    visible=False (default): headless mode, no window — Claude works silently.
+    visible=True: normal mode with UI window — user sees the progress.
+    """
+    global _headless_proc
+    if _is_fabmesh_running():
+        return True
+
+    mode = "visible" if visible else "headless"
+    log(f"FabMesh not running -- launching in {mode} mode...")
+    # Find the electron executable
+    electron_cmd = os.path.join(PROJECT_ROOT, 'node_modules', '.bin', 'electron.cmd')
+    if not os.path.exists(electron_cmd):
+        electron_cmd = os.path.join(PROJECT_ROOT, 'node_modules', '.bin', 'electron')
+    if not os.path.exists(electron_cmd):
+        log("ERROR: electron not found in node_modules -- is FabMesh installed?")
+        return False
+
+    env = os.environ.copy()
+    env.pop('ELECTRON_RUN_AS_NODE', None)
+
+    args = [electron_cmd, '.']
+    if not visible:
+        args.append('--headless')
+
+    _headless_proc = subprocess.Popen(
+        args, cwd=PROJECT_ROOT, env=env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    log(f"Launched FabMesh {mode} (pid={_headless_proc.pid}), waiting for bridge...")
+
+    # Wait up to 30s for the bridge to become ready
+    for i in range(60):
+        time.sleep(0.5)
+        if _is_fabmesh_running():
+            log(f"FabMesh {mode} bridge is ready!")
+            return True
+    log("ERROR: FabMesh did not start in 30s")
+    return False
+
+
+def _call_electron(action, params, timeout=600, visible=False):
     """POST a command to FabMesh Electron's MCP bridge HTTP endpoint.
+    Auto-launches FabMesh if not already running.
+    visible=True opens the UI window, False runs headless.
     Returns the JSON response dict. Raises RuntimeError on failure."""
     import urllib.request
+
+    # Auto-launch if needed
+    if not _is_fabmesh_running():
+        if not _ensure_fabmesh_running(visible=visible):
+            raise RuntimeError(
+                "Cannot start FabMesh. Make sure it is installed "
+                "(npm install in the project directory)."
+            )
+
     url = f"{ELECTRON_BRIDGE_URL}/{action}"
     data = json.dumps(params).encode('utf-8')
     req = urllib.request.Request(url, data=data, method='POST',
@@ -75,8 +143,7 @@ def _call_electron(action, params, timeout=600):
             return json.loads(body)
     except urllib.error.URLError as e:
         raise RuntimeError(
-            f"Cannot reach FabMesh Electron (is FabMesh running?). "
-            f"The MCP server needs FabMesh open to dispatch jobs. Error: {e}"
+            f"Cannot reach FabMesh Electron (bridge lost). Error: {e}"
         )
     except Exception as e:
         raise RuntimeError(f"Electron bridge call failed: {e}")
@@ -88,6 +155,7 @@ def tool_generate_image(params):
     prompt = params.get("prompt", "")
     if not prompt:
         return {"success": False, "error": "prompt is required"}
+    visible = params.get("visible", False)
     return _call_electron("generate-images", {
         "prompt": prompt,
         "userPrompt": prompt,
@@ -95,7 +163,7 @@ def tool_generate_image(params):
         "numImages": params.get("count", 1),
         "steps": params.get("steps", 30),
         "engine": "local-flux",
-    })
+    }, visible=visible)
 
 
 def tool_generate_mesh(params):
@@ -141,10 +209,17 @@ def tool_list_projects(params):
 
 
 def tool_batch_pipeline(params):
-    """Run a full image→mesh→rig pipeline for multiple assets in series."""
+    """Run a full image->mesh->rig pipeline for multiple assets in series.
+    Set visible=true to show FabMesh UI, false (default) for background gen."""
     assets = params.get("assets", [])
     if not assets:
         return {"success": False, "error": "assets list is required"}
+    visible = params.get("visible", False)
+
+    # Ensure FabMesh is running before starting the batch
+    if not _is_fabmesh_running():
+        if not _ensure_fabmesh_running(visible=visible):
+            return {"success": False, "error": "Cannot start FabMesh"}
 
     results = []
     for i, asset in enumerate(assets):
@@ -214,7 +289,7 @@ def tool_batch_pipeline(params):
 
 TOOLS = {
     "generate_image": {
-        "description": "Generate an image from a text prompt using RealVis XL (local GPU). Returns the image file path.",
+        "description": "Generate an image from a text prompt using RealVis XL (local GPU). Returns the image file path. Set visible=true to show FabMesh UI with live progress, false (default) to run in background.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -222,6 +297,7 @@ TOOLS = {
                 "project": {"type": "string", "description": "Project name (folder name for organizing outputs)", "default": "mcp_gen"},
                 "count": {"type": "integer", "description": "Number of images to generate", "default": 1},
                 "steps": {"type": "integer", "description": "Diffusion steps (10=fast, 30=balanced, 50=quality)", "default": 30},
+                "visible": {"type": "boolean", "description": "Show FabMesh UI window (true) or run in background (false)", "default": False},
             },
             "required": ["prompt"],
         },
@@ -260,10 +336,11 @@ TOOLS = {
         "handler": tool_list_projects,
     },
     "batch_pipeline": {
-        "description": "Run a full image→mesh→rig pipeline for multiple assets in series. Each asset gets a prompt, quality preset, and optional subdivision. Returns results for each asset.",
+        "description": "Run a full image->mesh->rig pipeline for multiple assets in series. Each asset gets a prompt, quality preset, and optional subdivision. Set visible=true to show FabMesh UI, false (default) to run silently in background.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "visible": {"type": "boolean", "description": "Show FabMesh UI window (true) or run in background (false)", "default": False},
                 "assets": {
                     "type": "array",
                     "description": "List of assets to generate",
@@ -272,8 +349,8 @@ TOOLS = {
                         "properties": {
                             "prompt": {"type": "string", "description": "Text description for image generation"},
                             "project": {"type": "string", "description": "Project name"},
-                            "quality": {"type": "string", "enum": ["draft", "standard", "high"], "default": "standard"},
-                            "subdivide": {"type": "integer", "default": 0},
+                            "quality": {"type": "string", "enum": ["draft", "standard", "high", "ultra"], "default": "standard"},
+                            "subdivide": {"type": "integer", "description": "Target triangles: negative=decimate, 0=default 13K, 1-4=subdivision levels, >100=exact target", "default": 0},
                             "steps": {"type": "integer", "default": 30},
                             "skip_rig": {"type": "boolean", "description": "Skip rigging step", "default": False},
                         },

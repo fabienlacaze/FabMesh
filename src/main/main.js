@@ -635,23 +635,37 @@ print("OK")
   });
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  // SDXL server is started on-demand, at the first img2img / inpaint call.
-  // This avoids loading 13+ GB into VRAM for users who only do image generation.
+// --headless flag: run without a visible window, only the MCP bridge HTTP
+// server on port 7555. Used by Claude Desktop / Claude Code to dispatch
+// batch generation jobs in the background. The user doesn't see FabMesh
+// at all — Claude handles the UX and presents results when done.
+const HEADLESS = process.argv.includes('--headless');
 
-  // ----------------------------------------------------------
-  // MCP Bridge HTTP server — allows the MCP server (scripts/mcp_server.py)
-  // to dispatch generation commands THROUGH Electron so that:
-  //   1. Jobs appear in the renderer UI (progress bar, cancel button)
-  //   2. VRAM gating is applied (same limits as manual UI clicks)
-  //   3. Results are visible in the project workspace immediately
-  //
-  // The MCP server calls POST http://127.0.0.1:7555/<action> with a JSON body.
-  // This bridge invokes the same ipcMain.handle() logic as the renderer,
-  // then notifies the renderer to refresh the project list + workspace.
-  // ----------------------------------------------------------
+app.whenReady().then(() => {
+  if (HEADLESS) {
+    log.info('main', 'Starting in HEADLESS mode (no UI window, MCP bridge only)');
+    // In headless mode we still need mainWindow for IPC handlers that
+    // reference it, but we never show it. Create a hidden window.
+    mainWindow = new BrowserWindow({
+      width: 800, height: 600, show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true, nodeIntegration: false,
+      },
+    });
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
+  } else {
+    createWindow();
+  }
+
+  // MCP Bridge HTTP server — always started (headless or not) so Claude
+  // can dispatch commands whether FabMesh is visible or hidden.
   startMcpBridge();
+
+  if (HEADLESS) {
+    log.info('main', `Headless mode ready. MCP bridge on http://127.0.0.1:${MCP_BRIDGE_PORT}`);
+    log.info('main', 'Waiting for commands... (Ctrl+C to stop)');
+  }
 });
 
 // Ensure the SDXL server is running. Returns a promise that resolves when the
