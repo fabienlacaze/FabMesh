@@ -1737,6 +1737,14 @@ out = img.resize((w*2, h*2), Image.LANCZOS)
 out.save(r"${outPath}")
 print("OK")`,
 
+      downscale: `
+from PIL import Image
+img = Image.open(r"${imagePath}")
+w, h = img.size
+out = img.resize((max(1,w//2), max(1,h//2)), Image.LANCZOS)
+out.save(r"${outPath}")
+print("OK")`,
+
       brightness: `
 from PIL import Image, ImageEnhance
 img = Image.open(r"${imagePath}")

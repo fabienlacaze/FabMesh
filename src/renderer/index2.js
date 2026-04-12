@@ -2230,17 +2230,65 @@ async function runQuickEdit(operation, params) {
 }
 
 document.getElementById('ws-symmetrize-btn')?.addEventListener('click', () => runQuickEdit('symmetrize'));
-document.getElementById('ws-upscale-btn')?.addEventListener('click', async () => {
+// Resolution modal
+let _resW = 0, _resH = 0;
+function openResolutionModal() {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  // Show current → target resolution in the toast
+  const modal = document.getElementById('modal-resolution');
+  const preview = document.getElementById('res-preview');
+  const current = document.getElementById('res-current');
+  const target = document.getElementById('res-target');
+  if (!modal) return;
+  preview.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
   const img = new Image();
   img.onload = () => {
-    showToast(`Upscaling ${img.naturalWidth}x${img.naturalHeight} -> ${img.naturalWidth*2}x${img.naturalHeight*2}...`, 'info', 2000);
-    runQuickEdit('upscale');
+    _resW = img.naturalWidth; _resH = img.naturalHeight;
+    current.textContent = `${_resW} x ${_resH}`;
+    target.textContent = '';
+    modal.classList.remove('hidden');
   };
-  img.onerror = () => runQuickEdit('upscale');
-  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  img.onerror = () => { showToast('Cannot load image', 'error'); };
+  img.src = preview.src;
+}
+document.getElementById('ws-resolution-btn')?.addEventListener('click', openResolutionModal);
+document.getElementById('res-close')?.addEventListener('click', () => {
+  document.getElementById('modal-resolution')?.classList.add('hidden');
+});
+document.getElementById('modal-resolution')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-resolution') document.getElementById('modal-resolution')?.classList.add('hidden');
+});
+document.getElementById('res-upscale')?.addEventListener('click', async () => {
+  document.getElementById('modal-resolution')?.classList.add('hidden');
+  showToast(`Upscaling ${_resW}x${_resH} -> ${_resW*2}x${_resH*2}...`, 'info', 2000);
+  await runQuickEdit('upscale');
+});
+document.getElementById('res-downscale')?.addEventListener('click', async () => {
+  document.getElementById('modal-resolution')?.classList.add('hidden');
+  const nw = Math.round(_resW / 2), nh = Math.round(_resH / 2);
+  showToast(`Downscaling ${_resW}x${_resH} -> ${nw}x${nh}...`, 'info', 2000);
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) return;
+  try {
+    const r = await API.imageQuickEdit({ imagePath: p.selectedImagePath, operation: 'downscale', params: {} });
+    if (r?.success) { showToast('Downscale done', 'success'); await reloadCurrentProject(); }
+    else showToast('Downscale failed: ' + (r?.error || ''), 'error');
+  } catch (e) { showToast('Downscale error: ' + e.message, 'error'); }
+});
+// Hover preview on upscale/downscale buttons
+document.getElementById('res-upscale')?.addEventListener('mouseenter', () => {
+  const t = document.getElementById('res-target');
+  if (t) t.textContent = `-> ${_resW*2} x ${_resH*2}`;
+});
+document.getElementById('res-downscale')?.addEventListener('mouseenter', () => {
+  const t = document.getElementById('res-target');
+  if (t) t.textContent = `-> ${Math.round(_resW/2)} x ${Math.round(_resH/2)}`;
+});
+document.querySelectorAll('#res-upscale, #res-downscale').forEach(el => {
+  el.addEventListener('mouseleave', () => {
+    const t = document.getElementById('res-target');
+    if (t) t.textContent = '';
+  });
 });
 document.getElementById('ws-brightness-btn')?.addEventListener('click', () => runQuickEdit('brightness', { brightness: 1.15, contrast: 1.2 }));
 document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQuickEdit('facefix'));
