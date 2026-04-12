@@ -2954,11 +2954,20 @@ ipcMain.handle('disconnect-claude-desktop', async () => {
         log.info('main', 'Removed FabMesh from Claude Desktop config');
       }
     }
-    // Also remove the local .claude/mcp.json so Claude Code doesn't re-detect
+    // Also remove the fabmesh entry from the local .claude/mcp.json
+    // (DON'T delete the whole file — it may contain other MCP servers)
     const localMcp = path.join(__dirname, '..', '..', '.claude', 'mcp.json');
     if (fs.existsSync(localMcp)) {
-      fs.unlinkSync(localMcp);
-      log.info('main', 'Removed local .claude/mcp.json');
+      try {
+        const localConfig = JSON.parse(fs.readFileSync(localMcp, 'utf-8'));
+        if (localConfig.mcpServers && localConfig.mcpServers.fabmesh) {
+          delete localConfig.mcpServers.fabmesh;
+          fs.writeFileSync(localMcp, JSON.stringify(localConfig, null, 2), 'utf-8');
+          log.info('main', 'Removed fabmesh from local .claude/mcp.json');
+        }
+      } catch (e) {
+        log.error('main', 'Failed to update local .claude/mcp.json: ' + e.message);
+      }
     }
     return { success: true };
   } catch (e) {
