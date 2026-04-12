@@ -347,7 +347,7 @@ def generate_3d(
     elif subdiv_val > 0:
         # --- SUBDIVISION levels (1-4) ---
         print(f"LOCAL_SF3D_PROGRESS: 92 subdivide_start", flush=True)
-        print(f"LOCAL_SF3D: subdividing ×{subdivide_levels} via trimesh...", flush=True)
+        print(f"LOCAL_SF3D: subdividing x{subdivide_levels} via trimesh...", flush=True)
         import subprocess
         subdivide_script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
         raw_glb = output_path + '.raw.glb'
