@@ -2230,7 +2230,18 @@ async function runQuickEdit(operation, params) {
 }
 
 document.getElementById('ws-symmetrize-btn')?.addEventListener('click', () => runQuickEdit('symmetrize'));
-document.getElementById('ws-upscale-btn')?.addEventListener('click', () => runQuickEdit('upscale'));
+document.getElementById('ws-upscale-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  // Show current → target resolution in the toast
+  const img = new Image();
+  img.onload = () => {
+    showToast(`Upscaling ${img.naturalWidth}x${img.naturalHeight} -> ${img.naturalWidth*2}x${img.naturalHeight*2}...`, 'info', 2000);
+    runQuickEdit('upscale');
+  };
+  img.onerror = () => runQuickEdit('upscale');
+  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+});
 document.getElementById('ws-brightness-btn')?.addEventListener('click', () => runQuickEdit('brightness', { brightness: 1.15, contrast: 1.2 }));
 document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQuickEdit('facefix'));
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
