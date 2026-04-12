@@ -2263,6 +2263,14 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
     try {
       const r = await API.generateImages({ prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100 });
       if (r?.success) {
+        // Save the creation style for each generated image so the Style
+        // dropdown shows the correct style when selecting any of them.
+        const stylePrompt = ASSET_STYLE_PROMPTS[assetStyle] || '';
+        if (stylePrompt && r.images) {
+          for (const imgPath of r.images) {
+            _saveImageStyle(imgPath, stylePrompt);
+          }
+        }
         completeJob(job.id, true);
         await reloadCurrentProject();
         // After successful image generation, open the Edit stage and scroll
