@@ -217,9 +217,95 @@ def generate_3d(
     # Uses pymeshlab (Python-only, no Blender needed). Runs on CPU so
     # no extra VRAM is consumed. Preserves UVs + PBR materials.
     # ------------------------------------------------------------------
-    if int(subdivide_levels) > 0:
+    subdiv_val = int(subdivide_levels)
+    # Convention from the UI:
+    #   negative (e.g. -500)  = decimate to abs(val) faces (low-poly)
+    #   0                     = keep SF3D default (~13K faces)
+    #   1-4 (small int)       = subdivision levels (each ×4 triangles)
+    #   >100 (e.g. 20000)    = target face count: subdivide up then decimate to exact target
+    #
+    # For target counts between SF3D default and a subdivision level, we
+    # subdivide to the next level up, then decimate down to the exact target.
+
+    if subdiv_val < 0:
+        # --- DECIMATE to low-poly ---
+        target_faces = abs(subdiv_val)
+        print(f"LOCAL_SF3D_PROGRESS: 92 decimate_start", flush=True)
+        print(f"LOCAL_SF3D: decimating to ~{target_faces} faces...", flush=True)
+        try:
+            import subprocess as _sp
+            _dec_script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
+            # subdivide.py handles negative levels as decimation target
+            _raw = output_path + '.predec.glb'
+            os.rename(output_path, _raw)
+            _r = _sp.run([sys.executable, _dec_script, _raw, output_path, str(subdiv_val)],
+                         capture_output=True, text=True, timeout=120)
+            print(_r.stdout, flush=True)
+            if _r.returncode != 0 or not os.path.exists(output_path):
+                print(f"LOCAL_SF3D: decimation failed, using original", flush=True)
+                if os.path.exists(_raw):
+                    os.rename(_raw, output_path)
+            else:
+                try: os.remove(_raw)
+                except: pass
+        except Exception as _de:
+            print(f"LOCAL_SF3D: decimation failed ({_de}), keeping original mesh", flush=True)
+
+    elif subdiv_val > 100:
+        # --- TARGET face count (e.g. 20000, 75000, 150000) ---
+        # Subdivide to the next power-of-4 level above target, then decimate to exact
+        target_faces = subdiv_val
+        print(f"LOCAL_SF3D_PROGRESS: 92 target_faces_start", flush=True)
+        print(f"LOCAL_SF3D: targeting ~{target_faces} faces (subdivide + decimate)...", flush=True)
+        import subprocess as _sp
+        _raw = output_path + '.presub.glb'
+        os.rename(output_path, _raw)
+        try:
+            # Calculate subdivision levels needed: base ~13K, each level ×4
+            base_faces = 13000
+            levels = 0
+            current = base_faces
+            while current < target_faces and levels < 5:
+                levels += 1
+                current *= 4
+            # Subdivide
+            _sub_script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
+            _sub_out = output_path + '.subdivided.glb'
+            if levels > 0:
+                _r1 = _sp.run([sys.executable, _sub_script, _raw, _sub_out, str(levels)],
+                              capture_output=True, text=True, timeout=300)
+                print(_r1.stdout, flush=True)
+                if _r1.returncode != 0 or not os.path.exists(_sub_out):
+                    print(f"LOCAL_SF3D: subdivision failed, using raw mesh", flush=True)
+                    os.rename(_raw, output_path)
+                    try: os.remove(_sub_out)
+                    except: pass
+                else:
+                    try: os.remove(_raw)
+                    except: pass
+            else:
+                os.rename(_raw, _sub_out)
+
+            # Decimate to exact target if we overshot
+            if os.path.exists(_sub_out):
+                _r2 = _sp.run([sys.executable, _sub_script, _sub_out, output_path, str(-target_faces)],
+                              capture_output=True, text=True, timeout=120)
+                print(_r2.stdout, flush=True)
+                if _r2.returncode != 0 or not os.path.exists(output_path):
+                    print(f"LOCAL_SF3D: final decimation failed, using subdivided mesh", flush=True)
+                    os.rename(_sub_out, output_path)
+                else:
+                    try: os.remove(_sub_out)
+                    except: pass
+        except Exception as _te:
+            print(f"LOCAL_SF3D: target faces failed ({_te}), using raw mesh", flush=True)
+            if not os.path.exists(output_path) and os.path.exists(_raw):
+                os.rename(_raw, output_path)
+
+    elif subdiv_val > 0:
+        # --- SUBDIVISION levels (1-4) ---
         print(f"LOCAL_SF3D_PROGRESS: 92 subdivide_start", flush=True)
-        print(f"LOCAL_SF3D: subdividing ×{subdivide_levels} via pymeshlab (no Blender)...", flush=True)
+        print(f"LOCAL_SF3D: subdividing ×{subdivide_levels} via trimesh...", flush=True)
         import subprocess
         subdivide_script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
         raw_glb = output_path + '.raw.glb'

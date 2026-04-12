@@ -2430,11 +2430,30 @@ const MESH_QUALITY_PRESETS = {
   standard: { tex: 1024, verts: -1,    expectedMs: 20000 },
   high:     { tex: 2048, verts: 30000, expectedMs: 45000 },
 };
+// subdivide value convention:
+//   negative = decimate to abs(val) faces (low-poly)
+//   0 = SF3D default (~13K)
+//   1-4 = subdivision levels (each ×4 triangles)
+//   '100k'-'1m' = subdivide then decimate to exact target
 const MESH_TRI_PRESETS = {
-  '0': { subdivide: 0, label: '~13K',  extraMs: 0 },
-  '1': { subdivide: 1, label: '~50K',  extraMs: 5000 },
-  '2': { subdivide: 2, label: '~200K', extraMs: 8000 },
-  '3': { subdivide: 3, label: '~800K', extraMs: 15000 },
+  '500':  { subdivide: -500,    label: '~500',  extraMs: 2000 },
+  '1000': { subdivide: -1000,   label: '~1K',   extraMs: 2000 },
+  '3000': { subdivide: -3000,   label: '~3K',   extraMs: 2000 },
+  '5000': { subdivide: -5000,   label: '~5K',   extraMs: 2000 },
+  '0':    { subdivide: 0,       label: '~13K',  extraMs: 0 },
+  '20k':  { subdivide: 20000,   label: '~20K',  extraMs: 2000 },
+  '30k':  { subdivide: 30000,   label: '~30K',  extraMs: 2000 },
+  '1':    { subdivide: 1,       label: '~50K',  extraMs: 3000 },
+  '75k':  { subdivide: 75000,   label: '~75K',  extraMs: 4000 },
+  '100k': { subdivide: 100000,  label: '~100K', extraMs: 5000 },
+  '150k': { subdivide: 150000,  label: '~150K', extraMs: 5000 },
+  '2':    { subdivide: 2,       label: '~200K', extraMs: 5000 },
+  '250k': { subdivide: 250000,  label: '~250K', extraMs: 6000 },
+  '300k': { subdivide: 300000,  label: '~300K', extraMs: 7000 },
+  '500k': { subdivide: 500000,  label: '~500K', extraMs: 10000 },
+  '3':    { subdivide: 3,       label: '~800K', extraMs: 12000 },
+  '1m':   { subdivide: 1000000, label: '~1M',   extraMs: 18000 },
+  '4':    { subdivide: 4,       label: '~3M',   extraMs: 25000 },
 };
 function updateMeshHint() {
   const hint = document.getElementById('ws-3d-quality-hint');

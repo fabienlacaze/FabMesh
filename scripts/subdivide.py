@@ -30,9 +30,14 @@ def log(msg):
 
 
 def subdivide_glb(input_path, output_path, levels=2):
-    """Load a GLB, subdivide geometry + interpolate UVs, re-export with original textures."""
+    """Load a GLB, subdivide or decimate, re-export with original textures.
+
+    levels > 0: subdivision (each level ×4 triangles)
+    levels < 0: decimate to abs(levels) target faces via pymeshlab
+    """
     log(f'input={input_path} output={output_path} levels={levels}')
     t0 = time.time()
+    levels = int(levels)
 
     # ------------------------------------------------------------------
     # 1. Load GLB
@@ -45,6 +50,70 @@ def subdivide_glb(input_path, output_path, levels=2):
 
     log(f'loaded {len(geometries)} geometry(ies)')
 
+    # ------------------------------------------------------------------
+    # DECIMATION path (levels < 0)
+    # ------------------------------------------------------------------
+    if levels < 0:
+        import pymeshlab
+        target_faces = abs(levels)
+        result_meshes = {}
+        for idx, geom in enumerate(geometries):
+            name = list(scene.geometry.keys())[idx] if hasattr(scene, 'geometry') else f'mesh_{idx}'
+            log(f'  {name}: {len(geom.vertices)} verts, {len(geom.faces)} faces -> decimate to ~{target_faces}')
+            ms = pymeshlab.MeshSet()
+            pm = pymeshlab.Mesh(
+                vertex_matrix=np.asarray(geom.vertices, dtype=np.float64),
+                face_matrix=np.asarray(geom.faces, dtype=np.int32),
+            )
+            ms.add_mesh(pm)
+            ms.meshing_decimation_quadric_edge_collapse(
+                targetfacenum=target_faces,
+                preservenormal=True,
+                preserveboundary=True,
+                preservetopology=True,
+            )
+            out_m = ms.current_mesh()
+            new_v = np.asarray(out_m.vertex_matrix(), dtype=np.float32)
+            new_f = np.asarray(out_m.face_matrix(), dtype=np.int32)
+            log(f'  {name}: decimated to {len(new_v)} verts, {len(new_f)} faces')
+            # Rebuild with original material + interpolated/fallback UVs
+            mat = geom.visual.material if hasattr(geom.visual, 'material') else None
+            has_uv = hasattr(geom.visual, 'uv') and geom.visual.uv is not None and len(geom.visual.uv) > 0
+            if has_uv and len(geom.visual.uv) == len(geom.vertices):
+                # Nearest-neighbor UV transfer from original to decimated verts
+                from scipy.spatial import cKDTree
+                tree = cKDTree(np.asarray(geom.vertices, dtype=np.float64))
+                _, idx_map = tree.query(new_v)
+                new_uv = np.asarray(geom.visual.uv, dtype=np.float32)[idx_map]
+            else:
+                # Spherical fallback
+                center = new_v.mean(axis=0)
+                d = new_v - center
+                norms = np.linalg.norm(d, axis=1, keepdims=True); norms[norms < 1e-8] = 1.0
+                d = d / norms
+                u = 0.5 + np.arctan2(d[:, 0], d[:, 2]) / (2 * np.pi)
+                v = 0.5 + np.arcsin(np.clip(d[:, 1], -1, 1)) / np.pi
+                new_uv = np.column_stack([u, v]).astype(np.float32)
+            visual = _vis.TextureVisuals(uv=new_uv, material=mat) if mat else None
+            new_mesh = trimesh.Trimesh(vertices=new_v, faces=new_f, visual=visual, process=False)
+            _ = new_mesh.vertex_normals
+            result_meshes[name] = new_mesh
+        # Export
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        if len(result_meshes) == 1:
+            list(result_meshes.values())[0].export(output_path)
+        else:
+            trimesh.Scene(geometry=result_meshes).export(output_path)
+        elapsed = time.time() - t0
+        total_v = sum(len(m.vertices) for m in result_meshes.values())
+        total_f = sum(len(m.faces) for m in result_meshes.values())
+        print(f'SUBDIVIDE_STATS: verts={total_v} faces={total_f}', flush=True)
+        print(f'SUBDIVIDE_SUCCESS: {output_path} ({os.path.getsize(output_path)} bytes) in {elapsed:.1f}s', flush=True)
+        return True
+
+    # ------------------------------------------------------------------
+    # SUBDIVISION path (levels > 0)
+    # ------------------------------------------------------------------
     result_meshes = {}
     for idx, geom in enumerate(geometries):
         name = list(scene.geometry.keys())[idx] if hasattr(scene, 'geometry') else f'mesh_{idx}'
