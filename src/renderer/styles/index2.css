@@ -1141,6 +1141,10 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   display: flex;
   flex-direction: column;
 }
+.modal-form-side select {
+  padding: 6px 10px;
+  font-size: 13px;
+}
 .modal-form-side label {
   margin-top: 12px;
   margin-bottom: 6px;
