@@ -115,23 +115,30 @@ def generate_3d(
         total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
     else:
         total_gb = 8  # conservative default
-    if vert_count > 0:
-        # Apply VRAM-safe clamps based on card size
-        if total_gb < 12:
-            # 8-10 GB cards: keep it very conservative
-            tex_res = min(tex_res, 1024)
+
+    # VRAM-safe clamps. The texture baker's dilate_fill operation allocates
+    # tensors proportional to tex_res², which is the main OOM culprit.
+    # 4096 tex alone uses ~13 GB peak → only safe on 20+ GB cards.
+    if total_gb < 12:
+        tex_res = min(tex_res, 1024)
+        if vert_count > 0:
             vert_count = min(vert_count, 30000)
-        elif total_gb < 20:
-            # 12-16 GB cards (RTX 3060-5080): moderate
-            if tex_res >= 4096:
-                vert_count = min(vert_count, 10000)
-                print(f"LOCAL_SF3D: clamped vertex_count to {vert_count} (4096 tex on {total_gb:.0f}GB card)", flush=True)
-            elif tex_res >= 2048:
-                vert_count = min(vert_count, 50000)
-            # else 1024: up to ~100K is fine
-        # 20+ GB cards (RTX 3090/4090): no clamp needed
+    elif total_gb < 20:
+        # 12-16 GB: 4096 is ALWAYS OOM (dilate_fill alone needs ~13 GB)
+        tex_res = min(tex_res, 2048)
+        if vert_count > 0 and tex_res >= 2048:
+            vert_count = min(vert_count, 50000)
+    # 20+ GB (RTX 3090/4090/A6000): 4096 is fine
+
+    # If the user requested 4096 but we clamped to 2048, remember to upscale
+    # the texture in post-processing (CPU/PIL, no VRAM needed).
+    upscale_tex_to = int(texture_resolution) if tex_res < int(texture_resolution) else 0
+
     if tex_res != int(texture_resolution) or vert_count != int(target_vertex_count):
-        print(f"LOCAL_SF3D: params clamped for VRAM safety: tex {texture_resolution}→{tex_res}, verts {target_vertex_count}→{vert_count}", flush=True)
+        msg = f"LOCAL_SF3D: params clamped for VRAM safety ({total_gb:.0f}GB card): tex {texture_resolution}→{tex_res}, verts {target_vertex_count}→{vert_count}"
+        if upscale_tex_to:
+            msg += f" (will upscale texture to {upscale_tex_to} post-gen)"
+        print(msg, flush=True)
 
     # ------------------------------------------------------------------
     # Run inference
@@ -198,6 +205,41 @@ def generate_3d(
             print(f"LOCAL_SF3D: texture enhanced (contrast +30%, saturation +40%, brightness +5%)", flush=True)
     except Exception as _te:
         print(f"LOCAL_SF3D: texture enhance skipped ({_te})", flush=True)
+
+    # ------------------------------------------------------------------
+    # Upscale texture if we clamped it for VRAM safety.
+    # E.g. user requested 4096 but SF3D baked at 2048 → upscale to 4096
+    # via PIL Lanczos (CPU, ~0.1s). Not AI super-resolution, but on a
+    # clean PBR texture the visual difference is negligible.
+    # ------------------------------------------------------------------
+    if upscale_tex_to > 0:
+        try:
+            import trimesh as _tmesh_up
+            from PIL import Image as _PILImg
+            _scene_up = _tmesh_up.load(output_path)
+            _geoms_up = list(_scene_up.geometry.values()) if hasattr(_scene_up, 'geometry') else [_scene_up]
+            _upscaled = False
+            for _g_up in _geoms_up:
+                if hasattr(_g_up.visual, 'material') and hasattr(_g_up.visual.material, 'baseColorTexture'):
+                    _tex_up = _g_up.visual.material.baseColorTexture
+                    if _tex_up is not None and max(_tex_up.size) < upscale_tex_to:
+                        _tex_up = _tex_up.resize((upscale_tex_to, upscale_tex_to), _PILImg.LANCZOS)
+                        _g_up.visual.material.baseColorTexture = _tex_up
+                        _upscaled = True
+                # Also upscale normal map if present
+                if hasattr(_g_up.visual, 'material') and hasattr(_g_up.visual.material, 'normalTexture'):
+                    _nrm = _g_up.visual.material.normalTexture
+                    if _nrm is not None and max(_nrm.size) < upscale_tex_to:
+                        _nrm = _nrm.resize((upscale_tex_to, upscale_tex_to), _PILImg.LANCZOS)
+                        _g_up.visual.material.normalTexture = _nrm
+            if _upscaled:
+                if len(_geoms_up) == 1:
+                    _geoms_up[0].export(output_path)
+                else:
+                    _scene_up.export(output_path)
+                print(f"LOCAL_SF3D: texture upscaled {tex_res}→{upscale_tex_to} px (Lanczos, CPU)", flush=True)
+        except Exception as _ue:
+            print(f"LOCAL_SF3D: texture upscale skipped ({_ue})", flush=True)
 
     size = os.path.getsize(output_path)
 
