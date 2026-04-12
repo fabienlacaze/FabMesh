@@ -2275,21 +2275,21 @@ document.getElementById('res-downscale')?.addEventListener('click', async () => 
     else showToast('Downscale failed: ' + (r?.error || ''), 'error');
   } catch (e) { showToast('Downscale error: ' + e.message, 'error'); }
 });
-// Hover preview on upscale/downscale buttons
-document.getElementById('res-upscale')?.addEventListener('mouseenter', () => {
-  const t = document.getElementById('res-target');
-  if (t) t.textContent = `-> ${_resW*2} x ${_resH*2}`;
-});
-document.getElementById('res-downscale')?.addEventListener('mouseenter', () => {
-  const t = document.getElementById('res-target');
-  if (t) t.textContent = `-> ${Math.round(_resW/2)} x ${Math.round(_resH/2)}`;
-});
-document.querySelectorAll('#res-upscale, #res-downscale').forEach(el => {
-  el.addEventListener('mouseleave', () => {
-    const t = document.getElementById('res-target');
-    if (t) t.textContent = '';
-  });
-});
+function _showResTarget(nw, nh, up) {
+  const arrow = document.getElementById('res-arrow');
+  const target = document.getElementById('res-target');
+  if (arrow) { arrow.textContent = up ? '↓' : '↓'; arrow.style.color = up ? '#22c55e' : '#ef4444'; arrow.style.display = ''; }
+  if (target) { target.textContent = `${nw} x ${nh}`; target.style.color = up ? '#22c55e' : '#ef4444'; target.style.display = ''; }
+}
+function _hideResTarget() {
+  const arrow = document.getElementById('res-arrow');
+  const target = document.getElementById('res-target');
+  if (arrow) arrow.style.display = 'none';
+  if (target) target.style.display = 'none';
+}
+document.getElementById('res-upscale')?.addEventListener('mouseenter', () => _showResTarget(_resW*2, _resH*2, true));
+document.getElementById('res-downscale')?.addEventListener('mouseenter', () => _showResTarget(Math.round(_resW/2), Math.round(_resH/2), false));
+document.querySelectorAll('#res-upscale, #res-downscale').forEach(el => el.addEventListener('mouseleave', _hideResTarget));
 document.getElementById('ws-brightness-btn')?.addEventListener('click', () => runQuickEdit('brightness', { brightness: 1.15, contrast: 1.2 }));
 document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQuickEdit('facefix'));
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
