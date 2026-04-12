@@ -24,7 +24,7 @@
       </div>
       <div class="topbar-right">
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
-        <span id="btn-parental-lock" class="icon-btn" title="Parental control active" style="display:none; cursor:default; opacity:0.6; font-size:14px;">&#128274;</span>
+        <button id="btn-parental-lock" class="icon-btn" title="Parental control active — click to unlock" style="display:none; font-size:14px;">&#128274;</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
       </div>
     </header>
@@ -746,11 +746,7 @@
           <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
             <span id="parental-status" style="font-size:12px; font-weight:700;"></span>
             <span style="flex:1;"></span>
-            <input type="password" id="parental-pin" placeholder="PIN (4+ digits)" maxlength="8" style="width:120px; padding:4px 8px; font-size:12px;" />
             <button id="parental-toggle" class="ghost-btn" style="padding:4px 12px; font-size:11px;"></button>
-          </div>
-          <div class="settings-box-footer">
-            Default: restricted (safe). Enter PIN to toggle unrestricted mode.
           </div>
         </div>
 

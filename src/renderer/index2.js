@@ -5233,43 +5233,85 @@ async function refreshParentalStatus() {
   } catch(_) {}
 }
 
-document.getElementById('parental-toggle')?.addEventListener('click', async () => {
-  const pinEl = document.getElementById('parental-pin');
-  const pin = pinEl?.value || '';
+// Shared function: prompt for PIN and toggle parental control
+async function toggleParentalControl() {
   if (!API.getParentalStatus || !API.toggleUnrestricted) return;
-
   const status = await API.getParentalStatus();
 
   if (status.unrestricted) {
-    // Lock (re-enable parental control) — no PIN needed to lock
-    const r = await API.toggleUnrestricted({ pin: pin || 'lock', enable: false });
+    // Lock — no PIN needed
+    const r = await API.toggleUnrestricted({ pin: 'lock', enable: false });
     if (r?.success) {
       showToast('Parental control re-enabled.', 'success');
-      if (pinEl) pinEl.value = '';
       refreshParentalStatus();
       _nsfwKeywordsCache = null;
       renderProjectsGrid();
       _runNsfwBackgroundScan();
     }
   } else {
-    // Unlock — requires PIN
-    if (!pin || pin.length < 4) {
-      showToast('Enter your PIN (4+ digits) to unlock.', 'error');
-      pinEl?.focus();
-      return;
-    }
+    // Unlock — prompt for PIN
+    const pin = await _promptPin(status.hasPin ? 'Enter your PIN to unlock:' : 'Create a PIN (4+ digits) to enable unrestricted mode:');
+    if (!pin) return; // cancelled
+    if (pin.length < 4) { showToast('PIN must be at least 4 digits.', 'error'); return; }
     const r = await API.toggleUnrestricted({ pin, enable: true });
     if (r?.success) {
-      showToast('Unrestricted mode enabled. Content filter disabled.', 'info');
-      if (pinEl) pinEl.value = '';
+      showToast('Unrestricted mode enabled.', 'info');
       refreshParentalStatus();
       _nsfwKeywordsCache = null;
-      renderProjectsGrid(); // instant: shows all projects (unrestricted)
+      renderProjectsGrid();
     } else {
       showToast(r?.error || 'Wrong PIN', 'error');
     }
   }
-});
+}
+
+// PIN prompt using the confirm modal (repurposed)
+function _promptPin(message) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-confirm');
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = document.getElementById('confirm-message');
+    const okBtn = document.getElementById('confirm-ok');
+    const cancelBtn = document.getElementById('confirm-cancel');
+    titleEl.textContent = 'Parental Control';
+    // Create an inline input inside the message area
+    msgEl.innerHTML = `<div style="margin-bottom:12px;">${message}</div>
+      <input type="password" id="_pin-input" placeholder="PIN" maxlength="8"
+        style="width:100%; padding:8px 12px; font-size:16px; text-align:center; letter-spacing:8px;
+        background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px;" />`;
+    okBtn.textContent = 'Confirm';
+    okBtn.classList.remove('danger');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.display = '';
+    const _prevZ = modal.style.zIndex;
+    modal.style.zIndex = '10000';
+    modal.classList.remove('hidden');
+    setTimeout(() => document.getElementById('_pin-input')?.focus(), 50);
+
+    function cleanup(result) {
+      modal.classList.add('hidden');
+      modal.style.zIndex = _prevZ;
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onOverlay);
+      msgEl.innerHTML = '';
+      resolve(result);
+    }
+    function onOk() {
+      const val = document.getElementById('_pin-input')?.value || '';
+      cleanup(val);
+    }
+    function onCancel() { cleanup(null); }
+    function onOverlay(e) { if (e.target === modal) cleanup(null); }
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onOverlay);
+  });
+}
+
+// Both the topbar lock icon and the settings button use the same function
+document.getElementById('parental-toggle')?.addEventListener('click', toggleParentalControl);
+document.getElementById('btn-parental-lock')?.addEventListener('click', toggleParentalControl);
 
 // Kill SDXL server only (free ~6.6 GB VRAM)
 document.getElementById('set-kill-sdxl')?.addEventListener('click', async () => {
