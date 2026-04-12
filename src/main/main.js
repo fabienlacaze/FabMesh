@@ -106,24 +106,33 @@ const NSFW_COMBOS = [
     b: ['hurt', 'hit', 'beat', 'punch', 'slap', 'abuse', 'attack', 'weapon', 'knife', 'gun', 'shoot', 'bleed', 'cry', 'scream', 'pain', 'suffer', 'frapper', 'battre', 'blesser'] },
 ];
 
+function _matchesKeyword(text, kw) {
+  // Short words (<=3 chars) use word boundary regex to avoid false positives
+  // e.g. "nu" shouldn't match "menu", "ado" shouldn't match "shadow"
+  if (kw.length <= 4) {
+    return new RegExp('\\b' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(text);
+  }
+  return text.includes(kw);
+}
+
 function checkPromptSafety(prompt) {
   if (isUnrestrictedMode()) return { safe: true };
   const lower = (prompt || '').toLowerCase();
 
   // Check individual keywords
   for (const kw of NSFW_KEYWORDS) {
-    if (lower.includes(kw)) {
+    if (_matchesKeyword(lower, kw)) {
       return { safe: false, blocked: kw, reason: `Content filter: "${kw}" is blocked. Disable parental control in Settings to use unrestricted mode.` };
     }
   }
 
   // Check dangerous combinations
   for (const combo of NSFW_COMBOS) {
-    const hasA = combo.a.some(w => lower.includes(w));
-    const hasB = combo.b.some(w => lower.includes(w));
+    const hasA = combo.a.some(w => _matchesKeyword(lower, w));
+    const hasB = combo.b.some(w => _matchesKeyword(lower, w));
     if (hasA && hasB) {
-      const matchA = combo.a.find(w => lower.includes(w));
-      const matchB = combo.b.find(w => lower.includes(w));
+      const matchA = combo.a.find(w => _matchesKeyword(lower, w));
+      const matchB = combo.b.find(w => _matchesKeyword(lower, w));
       return { safe: false, blocked: `${matchA} + ${matchB}`, reason: `Content filter: combination "${matchA}" + "${matchB}" is blocked. This type of content is not allowed.` };
     }
   }
