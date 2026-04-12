@@ -3137,32 +3137,60 @@ document.getElementById('cpick-close-x')?.addEventListener('click', () => docume
 // ============================================================
 // BLUR / SHARPEN BRUSH MODAL
 // ============================================================
-const blurState = { mode: 'blur', brushSize: 30, strength: 5, painting: false, imgData: null, undoStack: [], redoStack: [] };
+const blurState = { mode: 'blur', brushSize: 30, strength: 5 };
+let _blurMgr = null;
 
-document.getElementById('ws-blur-btn')?.addEventListener('click', () => {
+document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   const modal = document.getElementById('modal-blur');
-  const canvas = document.getElementById('blur-canvas');
-  if (!modal || !canvas) return;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const img = new Image();
-  img.onload = () => {
-    const container = document.getElementById('blur-canvas-container');
-    const cw = container.clientWidth || 800;
-    const ch = container.clientHeight || 600;
-    const scale = Math.min(cw / img.width, ch / img.height, 1);
-    const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    canvas.width = img.width; canvas.height = img.height;
-    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
-    canvas.style.left = Math.round((cw - dw) / 2) + 'px';
-    canvas.style.top = Math.round((ch - dh) / 2) + 'px';
-    ctx.drawImage(img, 0, 0);
-    blurState.imgData = ctx.getImageData(0, 0, img.width, img.height);
-    blurState.undoStack = [];
-    modal.classList.remove('hidden');
-  };
-  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (!modal) return;
+  if (!_blurMgr) {
+    _blurMgr = new CanvasManager({
+      canvas: document.getElementById('blur-canvas'),
+      container: document.getElementById('blur-canvas-container'),
+      undoBtn: document.getElementById('blur-undo'),
+      redoBtn: document.getElementById('blur-redo'),
+      resetBtn: document.getElementById('blur-reset'),
+      loupeBtn: document.getElementById('blur-loupe-toggle'),
+      brushCursor: document.getElementById('blur-brush-cursor'),
+      brushSizeGetter: () => blurState.brushSize,
+      onPaint: (ctx, x, y, mgr) => {
+        const r = blurState.brushSize / 2;
+        const s = blurState.strength;
+        const ax = Math.max(0, Math.round(x - r));
+        const ay = Math.max(0, Math.round(y - r));
+        const aw = Math.min(mgr.w - ax, Math.round(r * 2));
+        const ah = Math.min(mgr.h - ay, Math.round(r * 2));
+        if (aw <= 0 || ah <= 0) return;
+        const tmp = document.createElement('canvas');
+        tmp.width = aw; tmp.height = ah;
+        const tCtx = tmp.getContext('2d');
+        if (blurState.mode === 'blur') {
+          tCtx.filter = 'blur(' + Math.max(1, s) + 'px)';
+          tCtx.drawImage(mgr.canvas, ax, ay, aw, ah, 0, 0, aw, ah);
+        } else {
+          tCtx.drawImage(mgr.canvas, ax, ay, aw, ah, 0, 0, aw, ah);
+          const t2 = document.createElement('canvas');
+          t2.width = aw; t2.height = ah;
+          const t2c = t2.getContext('2d');
+          t2c.filter = 'contrast(' + (100 + s * 15) + '%) brightness(' + (100 + s * 2) + '%)';
+          t2c.drawImage(mgr.canvas, ax, ay, aw, ah, 0, 0, aw, ah);
+          tCtx.globalAlpha = 0.5;
+          tCtx.drawImage(t2, 0, 0);
+          tCtx.globalAlpha = 1;
+        }
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(tmp, ax, ay);
+        ctx.restore();
+      },
+    });
+  }
+  await _blurMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
+  modal.classList.remove('hidden');
 });
 
 // Mode toggle
@@ -3185,127 +3213,11 @@ document.getElementById('blur-strength')?.addEventListener('input', (e) => {
   document.getElementById('blur-strength-val').textContent = e.target.value;
 });
 
-// Loupe toggle
-document.getElementById('blur-loupe-toggle')?.addEventListener('click', () => {
-  loupeEnabled = !loupeEnabled;
-  document.getElementById('blur-loupe-toggle')?.classList.toggle('tool-active', loupeEnabled);
-  if (!loupeEnabled) { const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none'; }
-});
-
-// Canvas paint interaction
-(() => {
-  const bCanvas = document.getElementById('blur-canvas');
-  if (!bCanvas) return;
-  const bCtx = bCanvas.getContext('2d', { willReadFrequently: true });
-
-  function blurPaint(cx, cy) {
-    const r = blurState.brushSize / 2;
-    const s = blurState.strength;
-    // Extract the brush area
-    const ax = Math.max(0, Math.round(cx - r));
-    const ay = Math.max(0, Math.round(cy - r));
-    const aw = Math.min(bCanvas.width - ax, Math.round(r * 2));
-    const ah = Math.min(bCanvas.height - ay, Math.round(r * 2));
-    if (aw <= 0 || ah <= 0) return;
-
-    // Use an offscreen canvas with ctx.filter for blur (GPU-accelerated)
-    const tmp = document.createElement('canvas');
-    tmp.width = aw; tmp.height = ah;
-    const tCtx = tmp.getContext('2d');
-
-    if (blurState.mode === 'blur') {
-      // Native CSS blur filter — fast, smooth, correct
-      tCtx.filter = `blur(${Math.max(1, s)}px)`;
-      tCtx.drawImage(bCanvas, ax, ay, aw, ah, 0, 0, aw, ah);
-    } else {
-      // Sharpen: draw normal, then overlay sharpened with contrast
-      tCtx.drawImage(bCanvas, ax, ay, aw, ah, 0, 0, aw, ah);
-      const tCtx2 = document.createElement('canvas').getContext('2d');
-      tCtx2.canvas.width = aw; tCtx2.canvas.height = ah;
-      tCtx2.filter = `contrast(${100 + s * 15}%) brightness(${100 + s * 2}%)`;
-      tCtx2.drawImage(bCanvas, ax, ay, aw, ah, 0, 0, aw, ah);
-      tCtx.globalAlpha = 0.5;
-      tCtx.drawImage(tCtx2.canvas, 0, 0);
-      tCtx.globalAlpha = 1;
-    }
-
-    // Apply only within the circular brush (clip to circle)
-    bCtx.save();
-    bCtx.beginPath();
-    bCtx.arc(cx, cy, r, 0, Math.PI * 2);
-    bCtx.clip();
-    bCtx.drawImage(tmp, ax, ay);
-    bCtx.restore();
-  }
-
-  bCanvas.addEventListener('mousedown', (e) => {
-    blurState.painting = true;
-    blurState.undoStack.push(bCtx.getImageData(0, 0, bCanvas.width, bCanvas.height));
-    if (blurState.undoStack.length > 15) blurState.undoStack.shift();
-    blurState.redoStack = [];
-    _blurUpdateBtns();
-    const rect = bCanvas.getBoundingClientRect();
-    const sx = bCanvas.width / rect.width;
-    blurPaint((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sx);
-  });
-  bCanvas.addEventListener('mousemove', (e) => {
-    const rect = bCanvas.getBoundingClientRect();
-    const sx = bCanvas.width / rect.width;
-    // Brush cursor
-    const cur = document.getElementById('blur-brush-cursor');
-    if (cur) {
-      const ds = Math.max(4, blurState.brushSize * (rect.width / bCanvas.width));
-      cur.style.width = ds + 'px'; cur.style.height = ds + 'px';
-      cur.style.left = (e.clientX - ds / 2) + 'px'; cur.style.top = (e.clientY - ds / 2) + 'px';
-      cur.style.display = 'block';
-    }
-    if (blurState.painting) {
-      blurPaint((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sx);
-    }
-    updateLoupe(e, bCanvas);
-  });
-  bCanvas.addEventListener('mouseleave', () => {
-    const cur = document.getElementById('blur-brush-cursor');
-    if (cur) cur.style.display = 'none';
-  });
-  window.addEventListener('mouseup', () => { blurState.painting = false; });
-})();
-
-function _blurUpdateBtns() {
-  const u = document.getElementById('blur-undo');
-  const r = document.getElementById('blur-redo');
-  if (u) u.disabled = blurState.undoStack.length === 0;
-  if (r) r.disabled = blurState.redoStack.length === 0;
-}
-document.getElementById('blur-undo')?.addEventListener('click', () => {
-  const bCanvas = document.getElementById('blur-canvas');
-  if (blurState.undoStack.length > 0 && bCanvas) {
-    blurState.redoStack.push(bCanvas.getContext('2d').getImageData(0, 0, bCanvas.width, bCanvas.height));
-    bCanvas.getContext('2d').putImageData(blurState.undoStack.pop(), 0, 0);
-    _blurUpdateBtns();
-  }
-});
-document.getElementById('blur-redo')?.addEventListener('click', () => {
-  const bCanvas = document.getElementById('blur-canvas');
-  if (blurState.redoStack.length > 0 && bCanvas) {
-    blurState.undoStack.push(bCanvas.getContext('2d').getImageData(0, 0, bCanvas.width, bCanvas.height));
-    bCanvas.getContext('2d').putImageData(blurState.redoStack.pop(), 0, 0);
-    _blurUpdateBtns();
-  }
-});
-document.getElementById('blur-reset')?.addEventListener('click', () => {
-  const bCanvas = document.getElementById('blur-canvas');
-  if (blurState.imgData && bCanvas) {
-    bCanvas.getContext('2d').putImageData(blurState.imgData, 0, 0);
-    blurState.undoStack = [];
-    blurState.redoStack = [];
-    _blurUpdateBtns();
-  }
-});
+// Blur mode/slider handlers (CanvasManager handles undo/redo/loupe/zoom/cursor)
 document.getElementById('blur-cancel')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
 document.getElementById('blur-close-x')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
 document.getElementById('blur-save')?.addEventListener('click', async () => {
-  const bCanvas = document.getElementById('blur-canvas');
+  const bCanvas = _blurMgr?.canvas || document.getElementById('blur-canvas');
   const p = state.currentProject;
   if (!bCanvas || !p?.selectedImagePath) return;
   document.getElementById('modal-blur')?.classList.add('hidden');
