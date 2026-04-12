@@ -101,9 +101,26 @@
     loupeCtx.moveTo(50, 60); loupeCtx.lineTo(70, 60);
     loupeCtx.stroke();
     loupeCtx.restore();
-    loupeEl.style.left = (e.clientX + 20) + 'px';
-    loupeEl.style.top = (e.clientY - 140) + 'px';
+    // Position loupe, clamped inside the canvas container
+    var loupeSize = 120;
+    var lx = e.clientX + 20;
+    var ly = e.clientY - loupeSize - 20;
+    // Clamp to viewport and canvas container bounds
+    var containerRect = canvas.parentElement ? canvas.parentElement.getBoundingClientRect() : rect;
+    if (lx + loupeSize > containerRect.right) lx = e.clientX - loupeSize - 20;
+    if (ly < containerRect.top) ly = e.clientY + 20;
+    if (lx < containerRect.left) lx = containerRect.left + 4;
+    if (ly + loupeSize > containerRect.bottom) ly = containerRect.bottom - loupeSize - 4;
+    loupeEl.style.left = lx + 'px';
+    loupeEl.style.top = ly + 'px';
     loupeEl.style.display = 'block';
+  }
+
+  function _highlightLoupeBtn(btn, active) {
+    if (!btn) return;
+    btn.style.borderColor = active ? 'var(--accent)' : '';
+    btn.style.color = active ? 'white' : '';
+    btn.style.background = active ? 'var(--accent)' : '';
   }
 
   var cloneState = {
@@ -490,8 +507,10 @@
     var cLoupeBtn = document.getElementById('clone-loupe-toggle');
     if (cLoupeBtn) cLoupeBtn.addEventListener('click', function () {
       loupeEnabled = !loupeEnabled;
-      cLoupeBtn.style.borderColor = loupeEnabled ? 'var(--accent)' : '';
-      cLoupeBtn.style.color = loupeEnabled ? 'var(--accent)' : '';
+      _highlightLoupeBtn(cLoupeBtn, loupeEnabled);
+      // Sync mask loupe button
+      var mBtn = document.getElementById('mask-loupe-toggle');
+      if (mBtn) _highlightLoupeBtn(mBtn, loupeEnabled);
       if (!loupeEnabled && loupeEl) loupeEl.style.display = 'none';
     });
 
@@ -712,11 +731,10 @@
   var mLoupeBtn = document.getElementById('mask-loupe-toggle');
   if (mLoupeBtn) mLoupeBtn.addEventListener('click', function () {
     loupeEnabled = !loupeEnabled;
-    mLoupeBtn.style.borderColor = loupeEnabled ? 'var(--accent)' : '';
-    mLoupeBtn.style.color = loupeEnabled ? 'var(--accent)' : '';
-    // Sync the clone stamp loupe button if it exists
+    _highlightLoupeBtn(mLoupeBtn, loupeEnabled);
+    // Sync clone stamp loupe button
     var cBtn = document.getElementById('clone-loupe-toggle');
-    if (cBtn) { cBtn.style.borderColor = mLoupeBtn.style.borderColor; cBtn.style.color = mLoupeBtn.style.color; }
+    if (cBtn) _highlightLoupeBtn(cBtn, loupeEnabled);
     if (!loupeEnabled && loupeEl) loupeEl.style.display = 'none';
   });
 
