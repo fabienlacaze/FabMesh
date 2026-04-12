@@ -164,6 +164,18 @@ def generate_3d(
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     mesh.export(output_path, include_normals=True)
     size = os.path.getsize(output_path)
+
+    # Read back the GLB to count verts/faces for the UI stats display.
+    try:
+        import trimesh as _tmesh
+        _scene = _tmesh.load(output_path)
+        _geoms = list(_scene.geometry.values()) if hasattr(_scene, 'geometry') else [_scene]
+        _total_verts = sum(len(g.vertices) for g in _geoms)
+        _total_faces = sum(len(g.faces) for g in _geoms)
+        print(f"LOCAL_SF3D_STATS: verts={_total_verts} faces={_total_faces} tex={tex_res}", flush=True)
+    except Exception as _e:
+        print(f"LOCAL_SF3D_STATS: verts=? faces=? tex={tex_res} (count failed: {_e})", flush=True)
+
     print(f"LOCAL_SF3D_SUCCESS: {output_path} ({size} bytes)", flush=True)
     print(f"LOCAL_SF3D_PROGRESS: 100 done", flush=True)
 

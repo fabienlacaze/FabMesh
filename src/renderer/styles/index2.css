@@ -696,6 +696,14 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   user-select: text;
 }
 .viewer-filename:empty { display: none; }
+.viewer-stats {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 2px;
+  opacity: 0.7;
+}
+.viewer-stats:empty { display: none; }
 
 /* Floating info overlay for the large viewers (image lightbox, 3D lightbox,
    landmarks fullscreen). Sits in the top-left corner with a subtle backdrop. */

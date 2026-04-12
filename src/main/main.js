@@ -2381,7 +2381,15 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
         const stats = fs.statSync(meshPath);
         // Save source image path for later display in viewer
         try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
-        resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout });
+        // Parse mesh stats from bridge stdout (LOCAL_SF3D_STATS: verts=N faces=N tex=N)
+        let meshVerts = null, meshFaces = null;
+        const statsMatch = (stdout || '').match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
+        if (statsMatch) {
+          meshVerts = parseInt(statsMatch[1]);
+          meshFaces = parseInt(statsMatch[2]);
+          log.info('main', `image-to-3d OK: ${meshVerts} verts, ${meshFaces} faces (${(stats.size/1024).toFixed(0)} KB)`);
+        }
+        resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout, meshVerts, meshFaces });
       });
       if (jobId) activeProcs.set(jobId, proc);
       const flushStdout = () => {

@@ -2218,6 +2218,19 @@ async function showStep2Preview(mesh) {
     wsModel = gltf.scene;
     wsScene.add(wsModel);
     fitWsCamera(wsModel);
+    // Count verts/triangles and display under the filename
+    let totalVerts = 0, totalTris = 0;
+    wsModel.traverse(child => {
+      if (child.isMesh && child.geometry) {
+        const geo = child.geometry;
+        totalVerts += geo.attributes.position ? geo.attributes.position.count : 0;
+        totalTris += geo.index ? (geo.index.count / 3) : (totalVerts / 3);
+      }
+    });
+    const statsEl = document.getElementById('ws-mesh-stats');
+    if (statsEl) {
+      statsEl.textContent = `${totalVerts.toLocaleString()} vertices · ${Math.round(totalTris).toLocaleString()} triangles`;
+    }
     // Show the toolbar and refresh its state for this new model
     const tb = document.getElementById('ws-mesh-toolbar');
     if (tb) tb.classList.remove('hidden');
@@ -2401,6 +2414,15 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     try {
       const r = await API.imageTo3D(params);
       if (r?.success) {
+        // Show mesh stats in the job details before completing
+        if (r.meshVerts || r.meshFaces) {
+          job.params = {
+            ...job.params,
+            'Vertices': r.meshVerts ? r.meshVerts.toLocaleString() : '?',
+            'Triangles': r.meshFaces ? r.meshFaces.toLocaleString() : '?',
+            'File size': r.size ? `${(r.size / 1024).toFixed(0)} KB` : '?',
+          };
+        }
         completeJob(job.id, true);
         await reloadCurrentProject();
       } else {
