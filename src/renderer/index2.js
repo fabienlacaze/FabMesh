@@ -2379,9 +2379,9 @@ function gatedRun(kind, displayName, runFn) {
 // These are VRAM-safe on 16 GB cards. The Python bridge auto-clamps further
 // based on actual GPU VRAM detected at runtime.
 const MESH_QUALITY_PRESETS = {
-  draft:    { tex: 512,  verts: 3000,  label: '~3,000 triangles · 512×512 texture · ~4 GB VRAM',    expectedMs: 12000 },
-  standard: { tex: 1024, verts: -1,    label: '~13,000 triangles · 1024×1024 texture · ~6 GB VRAM',  expectedMs: 20000 },
-  high:     { tex: 2048, verts: 30000, label: '~30,000 triangles · 2048×2048 texture · ~10 GB VRAM', expectedMs: 45000 },
+  draft:    { tex: 512,  verts: 3000,  label: '~3K triangles · 512 px texture',  expectedMs: 12000 },
+  standard: { tex: 1024, verts: -1,    label: '~13K triangles · 1024 px texture', expectedMs: 20000 },
+  high:     { tex: 2048, verts: 30000, label: '~30K triangles · 2048 px texture', expectedMs: 45000 },
 };
 
 // Update the hint text when the quality preset changes
