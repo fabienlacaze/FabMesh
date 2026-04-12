@@ -2209,6 +2209,78 @@ document.getElementById('ws-mask-btn').addEventListener('click', () => {
   });
 });
 
+// ----------- New image tools (stubs for now, implemented progressively) -----------
+
+// Upscale 2x: img2img at low strength on a 2x-upscaled image
+document.getElementById('ws-upscale-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Upscale 2x — coming soon', 'info');
+});
+
+// Style Transfer: img2img with a style prompt
+document.getElementById('ws-style-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Style Transfer — coming soon', 'info');
+});
+
+// Extend Canvas: outpainting beyond image borders
+document.getElementById('ws-extend-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Extend Canvas — coming soon', 'info');
+});
+
+// Face Fix: detect face region + targeted inpaint to fix deformations
+document.getElementById('ws-facefix-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Face Fix — coming soon', 'info');
+});
+
+// Symmetrize: mirror half the image for perfect symmetry
+document.getElementById('ws-symmetrize-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Symmetrize — coming soon', 'info');
+});
+
+// Crop: interactive crop tool
+document.getElementById('ws-crop-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Crop — coming soon', 'info');
+});
+
+// Brightness/Contrast adjustment
+document.getElementById('ws-brightness-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Brightness/Contrast — coming soon', 'info');
+});
+
+// Color Picker / eyedropper
+document.getElementById('ws-picker-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Color Picker — coming soon', 'info');
+});
+
+// Blur/Sharpen brush
+document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Blur Brush — coming soon', 'info');
+});
+
+// Eraser (paint transparency)
+document.getElementById('ws-eraser-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Eraser — coming soon', 'info');
+});
+
 // ----- Mesh step -----
 let wsRenderer, wsScene, wsCamera, wsControls, wsModel, wsRafId;
 function initWsThree() {

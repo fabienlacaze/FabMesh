@@ -1092,8 +1092,15 @@ button.tool-active {
   box-shadow: 0 0 16px rgba(245, 158, 11, 0.7), inset 0 0 4px rgba(255,255,255,0.3) !important;
 }
 
+.step-tools-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.step-tools-scroll::-webkit-scrollbar { width: 4px; }
+.step-tools-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .step-tools-group {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .step-tools-label {
   font-size: 9px;
@@ -1102,6 +1109,19 @@ button.tool-active {
   letter-spacing: 1px;
   color: var(--text-3);
   margin-bottom: 4px;
+}
+.step-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.tool-btn {
+  font-size: 11px !important;
+  padding: 6px 4px !important;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .step-tools-row {
   display: flex;
