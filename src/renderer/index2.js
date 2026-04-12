@@ -393,7 +393,10 @@ async function _isProjectNSFW(p) {
   // Check cached thumbnail scan result
   if (p.thumb) {
     const fname = p.thumb.split(/[/\\]/).pop();
-    if (fname in _nsfwScanCache) return _nsfwScanCache[fname];
+    if (fname in _nsfwScanCache) {
+      if (_nsfwScanCache[fname]) console.log('[NSFW] _isProjectNSFW: hiding', p.name, 'thumb=', fname);
+      return _nsfwScanCache[fname];
+    }
   }
   return false;
 }
@@ -424,9 +427,13 @@ async function _runNsfwBackgroundScan() {
       for (const [imgPath, nsfw] of Object.entries(results)) {
         const fname = imgPath.split(/[/\\]/).pop();
         _nsfwScanCache[fname] = !!nsfw;
-        if (nsfw) changed = true;
+        if (nsfw) { changed = true; console.log('[NSFW] BLOCKED:', fname, imgPath); }
       }
-      if (changed) renderProjectsGrid();
+      console.log('[NSFW] cache keys:', Object.keys(_nsfwScanCache).filter(k => _nsfwScanCache[k]));
+      if (changed) {
+        console.log('[NSFW] re-rendering grid to hide', Object.values(_nsfwScanCache).filter(v=>v).length, 'NSFW projects');
+        renderProjectsGrid();
+      }
     }
   } catch (_) {}
   _nsfwScanRunning = false;
