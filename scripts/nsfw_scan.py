@@ -22,7 +22,15 @@ def main():
                 img = Image.open(p).convert('RGB').resize((224, 224))
                 r = clf(img)
                 score = next((x['score'] for x in r if x['label'] == 'nsfw'), 0)
-                results[p] = score > 0.5
+                is_nsfw = score > 0.5
+                results[p] = is_nsfw
+                # Create .nsfw tag file for instant detection on next load
+                if is_nsfw:
+                    try:
+                        with open(p + '.nsfw', 'w') as nf:
+                            nf.write(f'{score:.4f}')
+                    except:
+                        pass
             except Exception:
                 results[p] = False
     except Exception as e:

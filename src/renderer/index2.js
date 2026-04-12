@@ -386,19 +386,29 @@ const _nsfwScanCache = {};
 let _nsfwScanRunning = false;
 
 async function _isProjectNSFW(p) {
-  // Check name + prompt against keyword list (instant)
+  // 1. Check name + prompt against keyword list (instant, no IPC)
   const keywords = await _getNsfwKeywords();
   const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
   if (keywords.some(kw => text.includes(kw))) return true;
-  // Check ALL images in the project against the scan cache
+
+  // 2. Check for .nsfw tag files in the project folder (instant, 1 readdir)
+  if (p.images && p.images.length > 0) {
+    const firstImg = p.images[0].path || p.images[0];
+    if (firstImg && API.checkProjectNsfw) {
+      const folder = firstImg.replace(/[/\\][^/\\]+$/, '');
+      try {
+        const r = await API.checkProjectNsfw({ folderPath: folder });
+        if (r?.nsfw) return true;
+      } catch (_) {}
+    }
+  }
+
+  // 3. Fallback: check ViT scan cache (populated by background scan)
   for (const img of (p.images || [])) {
     const imgPath = img.path || img;
     if (!imgPath) continue;
     const fname = imgPath.split(/[/\\]/).pop();
-    if (_nsfwScanCache[fname]) {
-      console.log('[NSFW] _isProjectNSFW: hiding', p.name, 'because of', fname);
-      return true;
-    }
+    if (_nsfwScanCache[fname]) return true;
   }
   return false;
 }
@@ -410,16 +420,15 @@ async function _runNsfwBackgroundScan() {
   console.log('[NSFW] _runNsfwBackgroundScan called, batchCheckNsfw=', !!API.batchCheckNsfw, 'projects=', state.projects.length);
   if (_nsfwScanRunning) { console.log('[NSFW] already running, skip'); return; }
   if (!API.batchCheckNsfw) { console.log('[NSFW] API.batchCheckNsfw not available'); return; }
-  // Collect ALL images from ALL projects (not just thumbnails)
+  // Collect only THUMBNAIL images that haven't been scanned or tagged yet.
+  // The .nsfw tag files handle per-image detection; this scan is just for
+  // thumbnails of projects that don't have any tags yet (migration path).
   const toScan = [];
   for (const p of state.projects) {
-    for (const img of (p.images || [])) {
-      const imgPath = img.path || img;
-      if (!imgPath) continue;
-      const fname = imgPath.split(/[/\\]/).pop();
-      if (fname in _nsfwScanCache) continue;
-      toScan.push(imgPath);
-    }
+    if (!p.thumb) continue;
+    const fname = p.thumb.split(/[/\\]/).pop();
+    if (fname in _nsfwScanCache) continue;
+    toScan.push(p.thumb);
   }
   if (toScan.length === 0) { console.log('[NSFW] nothing to scan'); return; }
   console.log('[NSFW] scanning', toScan.length, 'thumbnails...');

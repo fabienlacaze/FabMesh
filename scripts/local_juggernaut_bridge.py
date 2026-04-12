@@ -130,6 +130,11 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                 _nsfw_score = next((x['score'] for x in _nsfw_result if x['label'] == 'nsfw'), 0)
                 if _nsfw_score > 0.5:
                     print(f"LOCAL_REALVIS_BLOCKED: image {i} blocked by NSFW classifier (score {_nsfw_score:.0%})", flush=True)
+                    # Tag the image as NSFW so the project list can hide it instantly
+                    try:
+                        with open(img_path + '.nsfw', 'w') as _nf:
+                            _nf.write(f'{_nsfw_score:.4f}')
+                    except: pass
                     from PIL import ImageDraw
                     gen_img = Image.new('RGB', gen_img.size, (30, 30, 30))
                     draw = ImageDraw.Draw(gen_img)

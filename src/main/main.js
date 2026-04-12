@@ -986,6 +986,19 @@ ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
   return { success: true, unrestricted: true };
 });
 
+// Instant NSFW check: look for .nsfw tag files in a project's image folder.
+// Returns true if ANY image in the folder has a .nsfw sidecar file.
+// This is O(1) per project (just readdir + filter), no Python, no AI model.
+ipcMain.handle('check-project-nsfw', (_event, { folderPath }) => {
+  if (isUnrestrictedMode()) return { nsfw: false };
+  if (!folderPath || !fs.existsSync(folderPath)) return { nsfw: false };
+  try {
+    const files = fs.readdirSync(folderPath);
+    const hasNsfwTag = files.some(f => f.endsWith('.nsfw'));
+    return { nsfw: hasNsfwTag };
+  } catch (_) { return { nsfw: false }; }
+});
+
 ipcMain.handle('get-nsfw-keywords', () => {
   return NSFW_KEYWORDS;
 });
