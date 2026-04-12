@@ -167,11 +167,28 @@ function customErrorWithAction(message, title, actionLabel) {
 // 3 Meshy-aware handlers (image gen, mesh gen, rig gen) so any of them can
 // surface the "API key not configured" error the same way.
 function reportPipelineError(errMsg, title) {
-  const msg = String(errMsg || '').trim();
-  if (/meshy.*api key not configured/i.test(msg)) {
+  const raw = String(errMsg || '').trim();
+  if (/meshy.*api key not configured/i.test(raw)) {
     return showMeshyKeyMissingError(title);
   }
-  return customError(msg || 'unknown', title);
+  // Extract the most useful error line from a potentially huge Python dump.
+  // Python tracebacks end with the actual error on the last non-empty line
+  // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")
+  // Show that as a short summary + the raw dump scrollable underneath.
+  const lines = raw.split(/\r?\n/).filter(l => l.trim());
+  const pyError = lines.reverse().find(l =>
+    /Error:|Exception:|CUDA|OOM|killed|Traceback|FAILED/i.test(l)
+  );
+  if (pyError && raw.length > 300) {
+    // Show a short human-readable summary + the full dump below
+    const short = pyError.replace(/^.*?Error:\s*/i, '').trim();
+    const summary = short.length > 200 ? short.slice(0, 200) + '...' : short;
+    return customError(
+      summary + '\n\n─── Full output ───\n' + raw.slice(-2000),
+      title
+    );
+  }
+  return customError(raw || 'unknown', title);
 }
 
 // Show a "Meshy API key not configured" error with a shortcut button to the
@@ -3438,18 +3455,25 @@ window._cancelJob = cancelJob;
 function renderJobs() {
   const bubble = document.getElementById('jobs-bubble-2');
   const panel = document.getElementById('jobs-panel-2');
-  const count = state.jobs.filter(j => j.status === 'running').length;
-  document.getElementById('jobs-bubble-count-2').textContent = String(count);
-  if (state.jobs.length === 0) {
+  const runningCount = state.jobs.filter(j => j.status === 'running').length;
+  const queuedCount = queuedJobs.length;
+  const totalCount = state.jobs.length + queuedCount;
+  const badgeText = queuedCount > 0 ? `${runningCount}+${queuedCount}` : String(runningCount);
+  document.getElementById('jobs-bubble-count-2').textContent = badgeText;
+  if (totalCount === 0) {
     bubble.classList.add('hidden');
     panel.classList.add('hidden');
     return;
   }
+  // Always show the bubble when there are active or queued jobs and the panel
+  // is closed — this was the bug: queued jobs were invisible because they
+  // weren't in state.jobs and the bubble only appeared for state.jobs.length > 0.
   if (panel.classList.contains('hidden')) {
     bubble.classList.remove('hidden');
   }
   const list = document.getElementById('jobs-list-2');
-  list.innerHTML = state.jobs.map(j => {
+  // Active jobs
+  let html = state.jobs.map(j => {
     const pct = Math.round(j.progress);
     const canCancel = j.status === 'running';
     return `
@@ -3465,8 +3489,24 @@ function renderJobs() {
       </div>
     `;
   }).join('');
-  // Bind click on each job item to open the details modal
-  list.querySelectorAll('.job-item-2').forEach(el => {
+  // Queued jobs (waiting for VRAM/GPU headroom)
+  if (queuedCount > 0) {
+    html += queuedJobs.map((q, idx) => `
+      <div class="job-item-2 queued">
+        <div class="job-item-2-header">
+          <div class="job-item-2-name">&#9202; ${escapeHtml(q.displayName || 'Queued job')}</div>
+          <button class="job-cancel-btn" onclick="event.stopPropagation(); window._cancelQueuedJob(${idx})" title="Remove from queue">&#10005;</button>
+        </div>
+        <div class="job-item-2-bar">
+          <div class="job-item-2-bar-fill queued-fill" style="width:0%"></div>
+        </div>
+        <div class="job-item-2-pct" style="color:var(--text-2);">queued</div>
+      </div>
+    `).join('');
+  }
+  list.innerHTML = html;
+  // Bind click on each active job item to open the details modal
+  list.querySelectorAll('.job-item-2[data-job-id]').forEach(el => {
     el.addEventListener('click', () => {
       const id = parseInt(el.dataset.jobId);
       openJobDetails(id);
@@ -3477,6 +3517,15 @@ function renderJobs() {
     refreshJobDetailsModal(state._jobDetailsOpenId);
   }
 }
+// Cancel a queued job (remove from the queue before it ever starts)
+window._cancelQueuedJob = function(idx) {
+  if (idx >= 0 && idx < queuedJobs.length) {
+    const removed = queuedJobs.splice(idx, 1);
+    console.log('[queue] removed queued job:', removed[0]?.displayName);
+    renderQueueIndicator();
+    renderJobs();
+  }
+};
 
 // ----- Job details modal -----
 let _jobGpuTimer = null;

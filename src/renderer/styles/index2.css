@@ -1559,6 +1559,9 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .job-item-2.done .job-item-2-bar-fill { background: var(--success); }
 .job-item-2.done .job-item-2-pct { color: var(--success); }
 .job-item-2.error .job-item-2-pct { color: var(--error); }
+.job-item-2.queued { opacity: 0.65; }
+.job-item-2.queued .job-item-2-bar-fill { background: #6366f1; width: 0 !important; }
+.job-item-2.queued .job-item-2-name { font-style: italic; }
 .job-item-2 { cursor: pointer; transition: background 0.15s; }
 .job-item-2:hover { background: var(--bg-3); }
 

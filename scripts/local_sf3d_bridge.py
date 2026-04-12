@@ -95,6 +95,39 @@ def generate_3d(
     print(f"LOCAL_SF3D: model loaded in {time.time()-t0:.1f}s", flush=True)
 
     # ------------------------------------------------------------------
+    # Clamp parameters to avoid OOM on 16 GB cards.
+    # SF3D VRAM scales with (vertex_count × bake_resolution²). Empirically:
+    #   1024 tex + 50K verts  → ~6.2 GB peak (safe on 16 GB)
+    #   2048 tex + 30K verts  → ~10 GB peak
+    #   4096 tex + 10K verts  → ~13 GB peak (tight on 16 GB)
+    #   4096 tex + 250K verts → OOM guaranteed on 16 GB
+    # We auto-downscale to keep things runnable rather than crashing.
+    # ------------------------------------------------------------------
+    tex_res = int(texture_resolution)
+    vert_count = int(target_vertex_count)
+    if torch.cuda.is_available():
+        total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    else:
+        total_gb = 8  # conservative default
+    if vert_count > 0:
+        # Apply VRAM-safe clamps based on card size
+        if total_gb < 12:
+            # 8-10 GB cards: keep it very conservative
+            tex_res = min(tex_res, 1024)
+            vert_count = min(vert_count, 30000)
+        elif total_gb < 20:
+            # 12-16 GB cards (RTX 3060-5080): moderate
+            if tex_res >= 4096:
+                vert_count = min(vert_count, 10000)
+                print(f"LOCAL_SF3D: clamped vertex_count to {vert_count} (4096 tex on {total_gb:.0f}GB card)", flush=True)
+            elif tex_res >= 2048:
+                vert_count = min(vert_count, 50000)
+            # else 1024: up to ~100K is fine
+        # 20+ GB cards (RTX 3090/4090): no clamp needed
+    if tex_res != int(texture_resolution) or vert_count != int(target_vertex_count):
+        print(f"LOCAL_SF3D: params clamped for VRAM safety: tex {texture_resolution}→{tex_res}, verts {target_vertex_count}→{vert_count}", flush=True)
+
+    # ------------------------------------------------------------------
     # Run inference
     # ------------------------------------------------------------------
     print(f"LOCAL_SF3D_PROGRESS: 50 inference_start", flush=True)
@@ -110,9 +143,9 @@ def generate_3d(
         with ctx:
             mesh, glob_dict = model.run_image(
                 image,
-                bake_resolution=int(texture_resolution),
+                bake_resolution=tex_res,
                 remesh=remesh_option,
-                vertex_count=int(target_vertex_count),
+                vertex_count=vert_count,
             )
     elapsed = time.time() - t0
     print(f"LOCAL_SF3D: inference done in {elapsed:.1f}s", flush=True)

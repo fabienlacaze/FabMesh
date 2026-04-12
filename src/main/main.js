@@ -2412,12 +2412,18 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     return { success: true, ...result };
   } catch (err) {
     const errMsg = err.error || err.message || String(err);
+    // Log to the structured logger so `fabmesh.log` has useful context.
+    // Extract the last meaningful Python error line from stderr/stdout for
+    // a concise summary — the full dump goes to last_error.log.
+    const combined = (err.stdout || '') + '\n' + (err.stderr || '');
+    const pyErrorLine = combined.split(/\r?\n/).reverse()
+      .find(l => /Error|Exception|CUDA|OOM|killed|Traceback/i.test(l.trim())) || '';
+    log.error('main', `image-to-3d FAILED: ${pyErrorLine || errMsg}`);
     // Overwrite (not append) so last_error.log doesn't grow unboundedly.
-    // The full history goes to fabmesh.log via the rotating logger anyway.
     try {
       fs.writeFileSync(
         path.join(__dirname, '..', '..', 'last_error.log'),
-        `[${new Date().toISOString()}]\nERROR: ${errMsg}\nstdout: ${err.stdout || ''}\nstderr: ${err.stderr || ''}\n`
+        `[${new Date().toISOString()}]\nERROR: ${errMsg}\n\n=== PYTHON STDOUT (last 100 lines) ===\n${(err.stdout || '').split('\n').slice(-100).join('\n')}\n\n=== PYTHON STDERR (last 50 lines) ===\n${(err.stderr || '').split('\n').slice(-50).join('\n')}\n`
       );
     } catch (e) { /* disk full / readonly */ }
     return { success: false, error: errMsg, stdout: err.stdout, stderr: err.stderr };
