@@ -402,7 +402,9 @@ async function _isProjectNSFW(p) {
 // in a single Python batch process (loads the ViT model once, scans all images).
 // Re-renders the grid when done.
 async function _runNsfwBackgroundScan() {
-  if (_nsfwScanRunning || !API.batchCheckNsfw) return;
+  console.log('[NSFW] _runNsfwBackgroundScan called, batchCheckNsfw=', !!API.batchCheckNsfw, 'projects=', state.projects.length);
+  if (_nsfwScanRunning) { console.log('[NSFW] already running, skip'); return; }
+  if (!API.batchCheckNsfw) { console.log('[NSFW] API.batchCheckNsfw not available'); return; }
   // Collect thumbnails that haven't been scanned yet
   const toScan = [];
   for (const p of state.projects) {
@@ -411,10 +413,12 @@ async function _runNsfwBackgroundScan() {
     if (fname in _nsfwScanCache) continue;
     toScan.push(p.thumb);
   }
-  if (toScan.length === 0) return;
+  if (toScan.length === 0) { console.log('[NSFW] nothing to scan'); return; }
+  console.log('[NSFW] scanning', toScan.length, 'thumbnails...');
   _nsfwScanRunning = true;
   try {
     const results = await API.batchCheckNsfw({ images: toScan });
+    console.log('[NSFW] scan results:', results);
     if (results && typeof results === 'object') {
       let changed = false;
       for (const [imgPath, nsfw] of Object.entries(results)) {
