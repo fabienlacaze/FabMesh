@@ -2009,10 +2009,23 @@ window.addEventListener('resize', () => {
 // ----- Lightbox -----
 let _lightboxImages = []; // array of paths for prev/next
 let _lightboxIndex = 0;
-function openLightbox(imgPath) {
+async function openLightbox(imgPath) {
+  // Parental control: block opening NSFW images in fullscreen
+  try {
+    if (API.getParentalStatus && API.checkImagesNsfwTags) {
+      const ps = await API.getParentalStatus();
+      if (!ps.unrestricted) {
+        const tags = await API.checkImagesNsfwTags({ images: [imgPath] });
+        if (tags && tags[imgPath]) {
+          showToast('This image is blocked by parental control.', 'error');
+          return;
+        }
+      }
+    }
+  } catch(_) {}
+
   const lb = document.getElementById('lightbox-2');
   const img = document.getElementById('lightbox-2-img');
-  // Build the image list from the current project so prev/next can navigate
   const p = state.currentProject;
   _lightboxImages = (p && p.images) ? p.images.map(i => i.path) : [imgPath];
   _lightboxIndex = Math.max(0, _lightboxImages.indexOf(imgPath));
@@ -3265,15 +3278,40 @@ function fitWsCamera(obj) {
   wsControls.update();
 }
 
-function renderMeshVersions(p) {
+async function renderMeshVersions(p) {
   const strip = document.getElementById('ws-mesh-versions');
   strip.innerHTML = '';
-  // Default: latest mesh is both previewed AND selected for rig
-  if (p.meshes.length > 0) {
-    if (!p.previewMeshPath) p.previewMeshPath = p.meshes[0].path;
-    if (!p.selectedMeshPath) p.selectedMeshPath = p.meshes[0].path;
+
+  // Filter NSFW meshes: check if the source image has a .nsfw tag
+  let meshes = p.meshes;
+  let restricted = true;
+  try {
+    if (API.getParentalStatus) {
+      const ps = await API.getParentalStatus();
+      restricted = !ps.unrestricted;
+    }
+  } catch(_) {}
+  if (restricted && meshes.length > 0 && API.checkImagesNsfwTags) {
+    try {
+      const sourceImages = meshes.map(m => m.sourceImage).filter(Boolean);
+      if (sourceImages.length > 0) {
+        const tags = await API.checkImagesNsfwTags({ images: sourceImages });
+        if (tags) {
+          meshes = meshes.filter(m => !m.sourceImage || !tags[m.sourceImage]);
+        }
+      }
+    } catch(_) {}
   }
-  p.meshes.forEach((m, i) => {
+
+  if (meshes.length > 0) {
+    if (!p.previewMeshPath || !meshes.find(m => m.path === p.previewMeshPath)) {
+      p.previewMeshPath = meshes[0].path;
+    }
+    if (!p.selectedMeshPath || !meshes.find(m => m.path === p.selectedMeshPath)) {
+      p.selectedMeshPath = meshes[0].path;
+    }
+  }
+  meshes.forEach((m, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
     if (m.path === p.previewMeshPath) t.classList.add('selected');
@@ -3290,7 +3328,7 @@ function renderMeshVersions(p) {
     }
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
-      <span class="v-label">v${p.meshes.length - 1 - i}</span>
+      <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
     `;
     t.title = m.filename;
