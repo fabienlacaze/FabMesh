@@ -364,16 +364,40 @@ async function refreshProjectsPage() {
   renderProjectsGrid();
 }
 
-function renderProjectsGrid() {
+// NSFW keywords for project name / prompt filtering (renderer-side)
+const NSFW_PROJECT_KEYWORDS = [
+  'nude', 'naked', 'nsfw', 'porn', 'sex', 'erotic', 'hentai', 'xxx',
+  'gore', 'blood', 'murder', 'kill', 'torture', 'dismember',
+  'hard', 'hardcore', 'adult', 'fetish',
+];
+function _isProjectNSFW(p) {
+  const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
+  return NSFW_PROJECT_KEYWORDS.some(kw => text.includes(kw));
+}
+
+async function renderProjectsGrid() {
   const grid = document.getElementById('projects-grid');
   const empty = document.getElementById('projects-empty');
   grid.innerHTML = '';
-  if (state.projects.length === 0) {
+  // Check parental status
+  let restricted = true;
+  try {
+    if (API.getParentalStatus) {
+      const ps = await API.getParentalStatus();
+      restricted = !ps.unrestricted;
+    }
+  } catch(_) {}
+
+  const visibleProjects = restricted
+    ? state.projects.filter(p => !_isProjectNSFW(p))
+    : state.projects;
+
+  if (visibleProjects.length === 0) {
     empty.classList.remove('hidden');
   } else {
     empty.classList.add('hidden');
   }
-  for (const p of state.projects) {
+  for (const p of visibleProjects) {
     const hasImage = p.images.length > 0;
     const hasMesh = p.meshes.length > 0;
     const hasRig = p.rigs.length > 0;
