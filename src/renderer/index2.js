@@ -2333,15 +2333,15 @@ function _symDrawPreview() {
 
   // Draw axis line + mask overlay
   octx.clearRect(0, 0, w, h);
-  // Draw mask tint
+  // Draw mask overlay (red semi-transparent, like Draw Mask tool)
   if (useMask) {
     const maskImg = octx.createImageData(w, h);
     for (let i = 0; i < symState.maskData.length; i++) {
       if (symState.maskData[i] > 0) {
-        maskImg.data[i*4] = 100;
-        maskImg.data[i*4+1] = 200;
-        maskImg.data[i*4+2] = 255;
-        maskImg.data[i*4+3] = 40;
+        maskImg.data[i*4] = 255;
+        maskImg.data[i*4+1] = 50;
+        maskImg.data[i*4+2] = 50;
+        maskImg.data[i*4+3] = 100;
       }
     }
     octx.putImageData(maskImg, 0, 0);
@@ -2372,6 +2372,9 @@ function _symDrawPreview() {
   octx.restore();
 }
 
+// Auto symmetrize (1-click, mirrors left→right at center)
+document.getElementById('ws-symmetrize-auto-btn')?.addEventListener('click', () => runQuickEdit('symmetrize'));
+// Manual symmetrize (opens interactive modal)
 document.getElementById('ws-symmetrize-btn')?.addEventListener('click', openSymmetrize);
 
 // Symmetrize: direction buttons
@@ -2445,21 +2448,35 @@ if (_symOverlay) {
       const cy = symState.h / 2;
       const ax = symState.axisX * symState.w;
       symState.axisAngle = Math.atan2(p.x - ax, p.y - cy);
-      symState.axisAngle = Math.max(-0.5, Math.min(0.5, symState.axisAngle)); // limit ±30°
       _symDrawPreview();
     } else if (symState.painting) {
       _symPaintMask(p.x, p.y);
       _symDrawPreview();
     }
-    // Cursor
-    const axPx = symState.axisX * symState.w;
-    if (symState.mode === 'mask') {
-      _symOverlay.style.cursor = 'crosshair';
-    } else if (Math.abs(p.x - axPx) < 20) {
-      _symOverlay.style.cursor = 'ew-resize';
+    // Brush cursor for mask mode
+    const symCur = document.getElementById('sym-brush-cursor');
+    if (symState.mode === 'mask' && symCur) {
+      const rect = _symOverlay.getBoundingClientRect();
+      const scaleX = rect.width / symState.w;
+      const displaySize = Math.max(4, symState.brushSize * scaleX);
+      symCur.style.width = displaySize + 'px';
+      symCur.style.height = displaySize + 'px';
+      symCur.style.left = (e.clientX - displaySize / 2) + 'px';
+      symCur.style.top = (e.clientY - displaySize / 2) + 'px';
+      symCur.style.display = 'block';
+      _symOverlay.style.cursor = 'none';
     } else {
-      _symOverlay.style.cursor = 'default';
+      if (symCur) symCur.style.display = 'none';
+      const axPx = symState.axisX * symState.w;
+      _symOverlay.style.cursor = Math.abs(p.x - axPx) < 20 ? 'ew-resize' : 'default';
     }
+    // Loupe
+    updateLoupe(e, document.getElementById('sym-canvas'));
+  });
+
+  _symOverlay.addEventListener('mouseleave', () => {
+    const cur = document.getElementById('sym-brush-cursor');
+    if (cur) cur.style.display = 'none';
   });
 
   window.addEventListener('mouseup', () => {
@@ -2482,6 +2499,14 @@ function _symPaintMask(cx, cy) {
     }
   }
 }
+
+// Sym loupe toggle (shares loupeEnabled from clone/mask tools)
+document.getElementById('sym-loupe-toggle')?.addEventListener('click', () => {
+  loupeEnabled = !loupeEnabled;
+  const btn = document.getElementById('sym-loupe-toggle');
+  if (btn) btn.classList.toggle('tool-active', loupeEnabled);
+  if (!loupeEnabled) { const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none'; }
+});
 
 // Undo + Reset
 document.getElementById('sym-undo')?.addEventListener('click', () => {

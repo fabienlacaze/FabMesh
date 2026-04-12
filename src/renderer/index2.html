@@ -171,7 +171,7 @@
                           <option value="realistic style, photorealistic, sharp details">Realistic</option>
                         </select>
                         <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
-                        <button id="ws-symmetrize-btn" class="ghost-btn tool-btn">&#8651; Symmetrize</button>
+                        <button id="ws-symmetrize-auto-btn" class="ghost-btn tool-btn">&#8651; Sym. Auto</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -183,6 +183,7 @@
                         <button id="ws-brightness-btn" class="ghost-btn tool-btn">&#9728; Brightness</button>
                         <button id="ws-picker-btn" class="ghost-btn tool-btn">&#128167; Color Pick</button>
                         <button id="ws-blur-btn" class="ghost-btn tool-btn">&#128168; Blur Brush</button>
+                        <button id="ws-symmetrize-btn" class="ghost-btn tool-btn">&#8651; Symmetrize</button>
                         <button id="ws-eraser-btn" class="ghost-btn tool-btn">&#9003; Eraser</button>
                       </div>
                     </div>
@@ -744,9 +745,9 @@
             <span style="font-size:11px; color:var(--text-2);"><span id="set-python-count">0</span> active &middot; SDXL <span id="set-python-sdxl">stopped</span></span>
           </div>
           <div style="display:flex; gap:6px;">
-            <button id="set-kill-sdxl" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;">Kill SDXL</button>
-            <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;">Kill Processes</button>
-            <button id="set-kill-all" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;">Kill All</button>
+            <button id="set-kill-sdxl" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill SDXL</button>
+            <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill Processes</button>
+            <button id="set-kill-all" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill All</button>
           </div>
         </div>
 
@@ -1088,6 +1089,7 @@
           <span id="sym-brush-val">40</span>
         </label>
         <span style="flex:1;"></span>
+        <button id="sym-loupe-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Magnifier">&#128270;</button>
         <button id="sym-undo" class="secondary-btn" style="padding:4px 6px;" title="Undo">&#8630;</button>
         <button id="sym-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
       </div>
@@ -1096,7 +1098,10 @@
       </div>
       <div id="sym-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
         <canvas id="sym-canvas" style="position:absolute; left:0; top:0;"></canvas>
-        <canvas id="sym-overlay" style="position:absolute; left:0; top:0; cursor:crosshair;"></canvas>
+        <canvas id="sym-overlay" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+        <div id="sym-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid rgba(255,60,60,0.8); border-radius:50%; display:none; z-index:1000;">
+          <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:rgba(255,60,60,0.9); border-radius:50%; transform:translate(-50%,-50%);"></div>
+        </div>
       </div>
       <div style="display:flex; justify-content:flex-end; gap:8px;">
         <button id="sym-cancel" class="secondary-btn">Cancel</button>
