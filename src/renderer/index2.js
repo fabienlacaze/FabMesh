@@ -2234,7 +2234,300 @@ async function runQuickEdit(operation, params) {
   }
 }
 
-document.getElementById('ws-symmetrize-btn')?.addEventListener('click', () => runQuickEdit('symmetrize'));
+// ============================================================
+// SYMMETRIZE TOOL — interactive modal with draggable/rotatable axis + mask
+// ============================================================
+const symState = {
+  imgPath: null, origData: null, w: 0, h: 0,
+  axisX: 0.5,   // normalized X position of axis (0-1)
+  axisAngle: 0,  // rotation in radians
+  direction: 'lr', // 'lr' = left→right, 'rl' = right→left
+  mode: 'full',    // 'full' or 'mask'
+  brushSize: 40,
+  maskData: null,  // Uint8Array mask (255=symmetrize, 0=keep)
+  dragging: false, rotating: false,
+  painting: false,
+  undoStack: [],
+};
+
+function openSymmetrize() {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  symState.imgPath = p.selectedImagePath;
+  const modal = document.getElementById('modal-symmetrize');
+  const canvas = document.getElementById('sym-canvas');
+  const overlay = document.getElementById('sym-overlay');
+  if (!modal || !canvas || !overlay) return;
+  const ctx = canvas.getContext('2d');
+  const octx = overlay.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    const container = document.getElementById('sym-canvas-container');
+    const cw = container.clientWidth || 800;
+    const ch = container.clientHeight || 600;
+    const scale = Math.min(cw / img.width, ch / img.height, 1);
+    const dw = Math.round(img.width * scale);
+    const dh = Math.round(img.height * scale);
+    canvas.width = img.width; canvas.height = img.height;
+    overlay.width = img.width; overlay.height = img.height;
+    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+    overlay.style.width = dw + 'px'; overlay.style.height = dh + 'px';
+    const left = Math.round((cw - dw) / 2);
+    const top = Math.round((ch - dh) / 2);
+    canvas.style.left = left + 'px'; canvas.style.top = top + 'px';
+    overlay.style.left = left + 'px'; overlay.style.top = top + 'px';
+    ctx.drawImage(img, 0, 0);
+    symState.origData = ctx.getImageData(0, 0, img.width, img.height);
+    symState.w = img.width; symState.h = img.height;
+    symState.axisX = 0.5; symState.axisAngle = 0;
+    symState.maskData = new Uint8Array(img.width * img.height);
+    symState.undoStack = [];
+    _symDrawPreview();
+    modal.classList.remove('hidden');
+  };
+  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+}
+
+function _symDrawPreview() {
+  const canvas = document.getElementById('sym-canvas');
+  const overlay = document.getElementById('sym-overlay');
+  if (!canvas || !overlay || !symState.origData) return;
+  const ctx = canvas.getContext('2d');
+  const octx = overlay.getContext('2d');
+  const w = symState.w, h = symState.h;
+  const orig = symState.origData;
+
+  // Draw symmetrized image
+  const result = ctx.createImageData(w, h);
+  result.data.set(orig.data);
+  const axisPixel = Math.round(symState.axisX * w);
+  const useMask = symState.mode === 'mask';
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      // Check mask if in mask mode
+      if (useMask && symState.maskData[y * w + x] === 0) continue;
+
+      let srcX;
+      if (symState.direction === 'lr') {
+        // Left → Right: mirror left side to right
+        if (x > axisPixel) {
+          srcX = axisPixel - (x - axisPixel);
+        } else continue;
+      } else {
+        // Right → Left: mirror right side to left
+        if (x < axisPixel) {
+          srcX = axisPixel + (axisPixel - x);
+        } else continue;
+      }
+      if (srcX < 0 || srcX >= w) continue;
+      const srcIdx = (y * w + Math.round(srcX)) * 4;
+      result.data[idx] = orig.data[srcIdx];
+      result.data[idx+1] = orig.data[srcIdx+1];
+      result.data[idx+2] = orig.data[srcIdx+2];
+      result.data[idx+3] = orig.data[srcIdx+3];
+    }
+  }
+  ctx.putImageData(result, 0, 0);
+
+  // Draw axis line + mask overlay
+  octx.clearRect(0, 0, w, h);
+  // Draw mask tint
+  if (useMask) {
+    const maskImg = octx.createImageData(w, h);
+    for (let i = 0; i < symState.maskData.length; i++) {
+      if (symState.maskData[i] > 0) {
+        maskImg.data[i*4] = 100;
+        maskImg.data[i*4+1] = 200;
+        maskImg.data[i*4+2] = 255;
+        maskImg.data[i*4+3] = 40;
+      }
+    }
+    octx.putImageData(maskImg, 0, 0);
+  }
+  // Draw axis line
+  octx.save();
+  octx.strokeStyle = '#22c55e';
+  octx.lineWidth = 3;
+  octx.setLineDash([8, 4]);
+  octx.beginPath();
+  const ax = axisPixel;
+  // Rotated line
+  const cos = Math.cos(symState.axisAngle);
+  const sin = Math.sin(symState.axisAngle);
+  const len = Math.max(w, h);
+  octx.moveTo(ax - sin * len, -cos * len + h/2);
+  octx.lineTo(ax + sin * len, cos * len + h/2);
+  octx.stroke();
+  // Draw axis handle (circle at center)
+  octx.beginPath();
+  octx.arc(ax, h/2, 8, 0, Math.PI * 2);
+  octx.fillStyle = 'rgba(34,197,94,0.5)';
+  octx.fill();
+  octx.strokeStyle = '#22c55e';
+  octx.setLineDash([]);
+  octx.lineWidth = 2;
+  octx.stroke();
+  octx.restore();
+}
+
+document.getElementById('ws-symmetrize-btn')?.addEventListener('click', openSymmetrize);
+
+// Symmetrize: direction buttons
+document.getElementById('sym-dir-lr')?.addEventListener('click', () => {
+  symState.direction = 'lr';
+  document.getElementById('sym-dir-lr')?.classList.add('tool-active');
+  document.getElementById('sym-dir-rl')?.classList.remove('tool-active');
+  _symDrawPreview();
+});
+document.getElementById('sym-dir-rl')?.addEventListener('click', () => {
+  symState.direction = 'rl';
+  document.getElementById('sym-dir-rl')?.classList.add('tool-active');
+  document.getElementById('sym-dir-lr')?.classList.remove('tool-active');
+  _symDrawPreview();
+});
+
+// Symmetrize: mode buttons
+document.getElementById('sym-mode-full')?.addEventListener('click', () => {
+  symState.mode = 'full';
+  document.getElementById('sym-mode-full')?.classList.add('tool-active');
+  document.getElementById('sym-mode-mask')?.classList.remove('tool-active');
+  document.getElementById('sym-brush-label').style.display = 'none';
+  _symDrawPreview();
+});
+document.getElementById('sym-mode-mask')?.addEventListener('click', () => {
+  symState.mode = 'mask';
+  document.getElementById('sym-mode-mask')?.classList.add('tool-active');
+  document.getElementById('sym-mode-full')?.classList.remove('tool-active');
+  document.getElementById('sym-brush-label').style.display = 'flex';
+  _symDrawPreview();
+});
+
+// Brush size slider
+document.getElementById('sym-brush-size')?.addEventListener('input', (e) => {
+  symState.brushSize = parseInt(e.target.value);
+  document.getElementById('sym-brush-val').textContent = e.target.value;
+});
+
+// Canvas interactions: drag axis, shift+drag rotate, paint mask
+const _symOverlay = document.getElementById('sym-overlay');
+if (_symOverlay) {
+  function _symCanvasCoords(e) {
+    const rect = _symOverlay.getBoundingClientRect();
+    const sx = symState.w / rect.width;
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sx };
+  }
+
+  _symOverlay.addEventListener('mousedown', (e) => {
+    const p = _symCanvasCoords(e);
+    const axPx = symState.axisX * symState.w;
+    if (e.shiftKey) {
+      // Shift+drag = rotate axis
+      symState.rotating = true;
+    } else if (Math.abs(p.x - axPx) < 20 && symState.mode === 'full') {
+      // Drag axis
+      symState.dragging = true;
+    } else if (symState.mode === 'mask') {
+      // Paint mask
+      symState.painting = true;
+      _symPaintMask(p.x, p.y);
+      _symDrawPreview();
+    }
+  });
+
+  _symOverlay.addEventListener('mousemove', (e) => {
+    const p = _symCanvasCoords(e);
+    if (symState.dragging) {
+      symState.axisX = Math.max(0.05, Math.min(0.95, p.x / symState.w));
+      _symDrawPreview();
+    } else if (symState.rotating) {
+      const cy = symState.h / 2;
+      const ax = symState.axisX * symState.w;
+      symState.axisAngle = Math.atan2(p.x - ax, p.y - cy);
+      symState.axisAngle = Math.max(-0.5, Math.min(0.5, symState.axisAngle)); // limit ±30°
+      _symDrawPreview();
+    } else if (symState.painting) {
+      _symPaintMask(p.x, p.y);
+      _symDrawPreview();
+    }
+    // Cursor
+    const axPx = symState.axisX * symState.w;
+    if (symState.mode === 'mask') {
+      _symOverlay.style.cursor = 'crosshair';
+    } else if (Math.abs(p.x - axPx) < 20) {
+      _symOverlay.style.cursor = 'ew-resize';
+    } else {
+      _symOverlay.style.cursor = 'default';
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    symState.dragging = false;
+    symState.rotating = false;
+    symState.painting = false;
+  });
+}
+
+function _symPaintMask(cx, cy) {
+  const r = symState.brushSize / 2;
+  const w = symState.w, h = symState.h;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy > r*r) continue;
+      const px = Math.round(cx + dx), py = Math.round(cy + dy);
+      if (px >= 0 && px < w && py >= 0 && py < h) {
+        symState.maskData[py * w + px] = 255;
+      }
+    }
+  }
+}
+
+// Undo + Reset
+document.getElementById('sym-undo')?.addEventListener('click', () => {
+  if (symState.undoStack.length > 0) {
+    symState.maskData = symState.undoStack.pop();
+    _symDrawPreview();
+  }
+});
+document.getElementById('sym-reset')?.addEventListener('click', () => {
+  symState.maskData = new Uint8Array(symState.w * symState.h);
+  symState.axisX = 0.5;
+  symState.axisAngle = 0;
+  _symDrawPreview();
+});
+
+// Close / Cancel
+document.getElementById('sym-close')?.addEventListener('click', () => {
+  document.getElementById('modal-symmetrize')?.classList.add('hidden');
+});
+document.getElementById('sym-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-symmetrize')?.classList.add('hidden');
+});
+
+// Apply: save the symmetrized image as a new version
+document.getElementById('sym-apply')?.addEventListener('click', async () => {
+  const canvas = document.getElementById('sym-canvas');
+  if (!canvas || !symState.imgPath) return;
+  document.getElementById('modal-symmetrize')?.classList.add('hidden');
+  showToast('Saving symmetrized version...', 'info', 1500);
+  try {
+    const dataUrl = canvas.toDataURL('image/png');
+    const r = await API.saveImageDataUrl({
+      imagePath: symState.imgPath,
+      dataUrl: dataUrl,
+      suffix: 'symmetrized',
+    });
+    if (r?.success) {
+      showToast('Symmetrized!', 'success');
+      await reloadCurrentProject();
+    } else {
+      showToast('Save failed: ' + (r?.error || ''), 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+});
 // Resolution modal
 let _resW = 0, _resH = 0;
 function openResolutionModal() {

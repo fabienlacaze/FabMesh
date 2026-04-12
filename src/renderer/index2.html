@@ -1066,6 +1066,47 @@
     </div>
   </div>
 
+  <!-- Symmetrize modal -->
+  <div id="modal-symmetrize" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Symmetrize</h3>
+        <button id="sym-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <label style="font-size:11px; display:flex; align-items:center; gap:4px;">
+          Direction:
+          <button id="sym-dir-lr" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">L &#8594; R</button>
+          <button id="sym-dir-rl" class="secondary-btn" style="padding:4px 10px; font-size:11px;">R &#8594; L</button>
+        </label>
+        <label style="font-size:11px; display:flex; align-items:center; gap:4px;">
+          Mode:
+          <button id="sym-mode-full" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Full</button>
+          <button id="sym-mode-mask" class="secondary-btn" style="padding:4px 10px; font-size:11px;">Mask</button>
+        </label>
+        <label id="sym-brush-label" style="font-size:11px; display:none; align-items:center; gap:4px;">
+          Brush:
+          <input type="range" id="sym-brush-size" min="5" max="200" value="40" style="width:80px;" />
+          <span id="sym-brush-val">40</span>
+        </label>
+        <span style="flex:1;"></span>
+        <button id="sym-undo" class="secondary-btn" style="padding:4px 6px;" title="Undo">&#8630;</button>
+        <button id="sym-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
+      </div>
+      <div style="font-size:10px; color:var(--text-3);">
+        Drag the <strong style="color:#22c55e;">green line</strong> to move the axis. Hold <strong>Shift+drag</strong> to rotate. In Mask mode, paint the area to symmetrize.
+      </div>
+      <div id="sym-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+        <canvas id="sym-canvas" style="position:absolute; left:0; top:0;"></canvas>
+        <canvas id="sym-overlay" style="position:absolute; left:0; top:0; cursor:crosshair;"></canvas>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="sym-cancel" class="secondary-btn">Cancel</button>
+        <button id="sym-apply" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Apply Symmetrize</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Global loupe magnifier (shared by Clone Stamp + Draw Mask) -->
   <div id="clone-loupe" style="position:fixed; pointer-events:none; display:none; z-index:99999; width:120px; height:120px; border:3px solid #f59e0b; border-radius:50%; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.6);">
     <canvas id="clone-loupe-canvas" width="120" height="120" style="width:120px; height:120px;"></canvas>
