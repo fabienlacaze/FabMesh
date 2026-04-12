@@ -1079,11 +1079,16 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-direction: column;
   gap: 8px;
 }
-/* Active state for toggle buttons (Loupe, Flip) in Clone Stamp / Draw Mask */
-.tool-active, .secondary-btn.tool-active {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: white !important;
+/* Active state for toggle buttons (Loupe, Flip) in Clone Stamp / Draw Mask.
+   Uses hard-coded colors because these buttons live inside legacy modals
+   where CSS variables may not cascade correctly. */
+.tool-active,
+.secondary-btn.tool-active,
+button.tool-active {
+  background: #a855f7 !important;
+  border-color: #a855f7 !important;
+  color: #fff !important;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.4) !important;
 }
 
 .step-tools-group {
