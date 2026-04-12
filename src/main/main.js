@@ -1593,41 +1593,18 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
     const useCloud = (engine === 'pollinations');
 
     if (!useCloud) {
-      // Lazy-start the persistent SDXL server on first use
+      // Lazy-start the persistent SDXL server (RealVis XL) and wait for ready.
+      // No fallback to local_img2img_bridge.py (SDXL Turbo, non-commercial).
       await ensureSdxlServer();
-      if (sdxlReady) {
-        console.log('[img2img] Using persistent SDXL server');
-        const r = await sdxlServerCall('/img2img', {
-          input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
-        });
-        if (r.ok) return { success: true, newPath: newImagePath };
-        console.warn('[img2img] SDXL server failed, falling back to subprocess:', r.error);
+      if (!sdxlReady) {
+        return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
       }
-
-      // Fallback: subprocess (slower because reloads model)
-      const script = path.join(__dirname, '..', '..', 'scripts', 'local_img2img_bridge.py');
-      const localResult = await new Promise((resolve) => {
-        const proc = execFile('python', [script, imagePath, prompt, newImagePath, String(strength || 0.55)], {
-          timeout: 300000, maxBuffer: 50 * 1024 * 1024
-        }, (error, stdout, stderr) => {
-          if (error) resolve({ success: false, error: error.message, stdout, stderr });
-          else if (fs.existsSync(newImagePath)) resolve({ success: true });
-          else resolve({ success: false, error: 'Output not created' });
-        });
-        proc.stdout?.on('data', d => {
-          safeSend('ai3d-progress', d.toString());
-        });
-        proc.stderr?.on('data', d => {
-          safeSend('ai3d-progress', '[stderr] ' + d.toString());
-        });
-        proc.on('error', e => resolve({ success: false, error: e.message }));
+      console.log('[img2img] Using persistent SDXL server (RealVis XL)');
+      const r = await sdxlServerCall('/img2img', {
+        input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
       });
-
-      if (localResult.success) {
-        return { success: true, newPath: newImagePath };
-      }
-      // No silent cloud fallback — local was explicitly requested
-      return { success: false, error: localResult.error || 'Local SDXL failed. Switch engine to Pollinations to use cloud.' };
+      if (r.ok) return { success: true, newPath: newImagePath };
+      return { success: false, error: r.error || 'img2img failed on SDXL server' };
     }
 
     // Explicit cloud path (user selected Pollinations)
