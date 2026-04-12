@@ -2271,7 +2271,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide }) => {
   let imagePath = _imagePath;
   let engine = _engine;
   try {
@@ -2292,21 +2292,20 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     };
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['sf3d'];
 
-    // SF3D args: <img> <out> <tex_res> <vertex_count> <remesh>
-    // vertex_count=-1 => no reduction (SF3D default ~6k verts which is a good UE5 LOD)
+    // SF3D args: <img> <out> <tex_res> <vertex_count> <remesh> <subdivide_levels>
     const sf3dTexRes = String(textureSize || 1024);
     const sf3dVerts = (targetFaces && Number(targetFaces) > 0) ? String(Math.max(500, Number(targetFaces) * 0.5)) : '-1';
     const sf3dRemesh = (targetFaces && Number(targetFaces) > 0) ? 'triangle' : 'none';
+    const sf3dSubdivide = String(typeof subdivide === 'number' ? subdivide : 0);
 
     // Meshy needs its API key as argv[2] — fetched from config.json.
-    // target_polycount is clamped to [100, 300000] inside the bridge.
     const meshyApiKey = (loadConfig() || {}).meshyApiKey || '';
     const meshyTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Math.min(300000, Number(targetFaces))) : '50000';
 
     const effortVal = String(effort || 2);
     const argsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
-      'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh],
+      'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'triposg': [bridgeScript, imagePath, meshPath, '30', '7.0'],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
@@ -2335,7 +2334,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     // Rebuild args with fixed path
     const fixedArgsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
-      'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh],
+      'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'triposg': [bridgeScript, imagePath, meshPath, '30', '7.0'],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],

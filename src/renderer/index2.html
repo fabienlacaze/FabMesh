@@ -199,7 +199,16 @@
                       <option value="high">High</option>
                     </select>
                   </div>
-                  <div id="ws-3d-quality-hint" class="form-hint">~13K triangles · 1024 px texture</div>
+                  <div class="form-row">
+                    <label>Target triangles</label>
+                    <select id="ws-3d-triangles">
+                      <option value="0">Default (~13K)</option>
+                      <option value="1">~50K</option>
+                      <option value="2" selected>~200K</option>
+                      <option value="3">~800K</option>
+                    </select>
+                  </div>
+                  <div id="ws-3d-quality-hint" class="form-hint">~200K triangles · 1024 px texture</div>
                   <div class="form-row check-row">
                     <label class="inline-check">
                       <input type="checkbox" id="ws-3d-buildstages" />

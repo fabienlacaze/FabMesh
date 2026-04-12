@@ -2379,31 +2379,42 @@ function gatedRun(kind, displayName, runFn) {
 // These are VRAM-safe on 16 GB cards. The Python bridge auto-clamps further
 // based on actual GPU VRAM detected at runtime.
 const MESH_QUALITY_PRESETS = {
-  draft:    { tex: 512,  verts: 3000,  label: '~3K triangles · 512 px texture',  expectedMs: 12000 },
-  standard: { tex: 1024, verts: -1,    label: '~13K triangles · 1024 px texture', expectedMs: 20000 },
-  high:     { tex: 2048, verts: 30000, label: '~30K triangles · 2048 px texture', expectedMs: 45000 },
+  draft:    { tex: 512,  verts: 3000,  expectedMs: 12000 },
+  standard: { tex: 1024, verts: -1,    expectedMs: 20000 },
+  high:     { tex: 2048, verts: 30000, expectedMs: 45000 },
 };
+const MESH_TRI_PRESETS = {
+  '0': { subdivide: 0, label: '~13K',  extraMs: 0 },
+  '1': { subdivide: 1, label: '~50K',  extraMs: 5000 },
+  '2': { subdivide: 2, label: '~200K', extraMs: 8000 },
+  '3': { subdivide: 3, label: '~800K', extraMs: 15000 },
+};
+const TEX_LABELS = { 512: '512 px', 1024: '1024 px', 2048: '2048 px' };
 
-// Update the hint text when the quality preset changes
-const qualitySelect = document.getElementById('ws-3d-quality');
-const qualityHint = document.getElementById('ws-3d-quality-hint');
-if (qualitySelect && qualityHint) {
-  qualitySelect.addEventListener('change', () => {
-    const preset = MESH_QUALITY_PRESETS[qualitySelect.value] || MESH_QUALITY_PRESETS.standard;
-    qualityHint.textContent = preset.label;
-  });
+function updateMeshHint() {
+  const hint = document.getElementById('ws-3d-quality-hint');
+  if (!hint) return;
+  const q = document.getElementById('ws-3d-quality')?.value || 'standard';
+  const t = document.getElementById('ws-3d-triangles')?.value || '0';
+  const preset = MESH_QUALITY_PRESETS[q] || MESH_QUALITY_PRESETS.standard;
+  const tri = MESH_TRI_PRESETS[t] || MESH_TRI_PRESETS['0'];
+  hint.textContent = `${tri.label} triangles · ${TEX_LABELS[preset.tex] || preset.tex} texture`;
 }
+document.getElementById('ws-3d-quality')?.addEventListener('change', updateMeshHint);
+document.getElementById('ws-3d-triangles')?.addEventListener('change', updateMeshHint);
 
 document.getElementById('ws-generate-mesh').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
   const engine = document.getElementById('ws-3d-engine').value;
   const quality = document.getElementById('ws-3d-quality')?.value || 'standard';
+  const triLevel = document.getElementById('ws-3d-triangles')?.value || '0';
   const preset = MESH_QUALITY_PRESETS[quality] || MESH_QUALITY_PRESETS.standard;
+  const triPreset = MESH_TRI_PRESETS[triLevel] || MESH_TRI_PRESETS['0'];
   const buildStages = document.getElementById('ws-3d-buildstages')?.checked || false;
   let expectedMs;
   if (engine === 'sf3d') {
-    expectedMs = preset.expectedMs;
+    expectedMs = preset.expectedMs + triPreset.extraMs;
   } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {
@@ -2418,12 +2429,14 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     targetFaces: preset.verts,
     effort: 2,
     buildStages,
+    subdivide: triPreset.subdivide,
     vramFraction: (gpuLimits?.vram || 90) / 100,
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
   const jobParams = {
     Engine: engineLabel(engine),
-    Quality: `${qualityLabels[quality] || quality} (${preset.label.split('·')[0].trim()})`,
+    Quality: qualityLabels[quality] || quality,
+    'Target triangles': triPreset.label,
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   };
   gatedRun('mesh', `Generate 3D: ${p.name}`, async () => {
