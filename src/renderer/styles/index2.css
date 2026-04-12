@@ -1533,7 +1533,7 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--bg-0);
   border: 1px solid var(--border);
   color: var(--text-0);
-  padding: 10px 12px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-family: inherit;
