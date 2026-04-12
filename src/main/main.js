@@ -35,6 +35,35 @@ process.on('unhandledRejection', (reason) => {
 // Truncate a filename base to avoid Windows 260-char path limit.
 // After many edits (inpaint, clone, upscale, refine), the base name
 // accumulates suffixes and can exceed the limit, causing ENOENT errors.
+// ========== PARENTAL CONTROL ==========
+// When enabled (default), blocks NSFW prompts and keeps safety_checker active.
+// Disabled only via a PIN code in Settings → "Unrestricted mode".
+// The PIN is stored hashed in config.json. FABMESH_UNRESTRICTED env var is set
+// to "1" when unrestricted so Python bridges can disable safety_checker.
+
+const NSFW_KEYWORDS = [
+  'nude', 'naked', 'nsfw', 'porn', 'sex', 'erotic', 'hentai', 'xxx',
+  'gore', 'blood', 'murder', 'kill', 'torture', 'dismember', 'decapitate',
+  'child abuse', 'pedophil', 'underage', 'minor',
+  'drug', 'cocaine', 'heroin', 'meth',
+  'terrorist', 'bomb', 'mass shooting', 'genocide',
+];
+
+function isUnrestrictedMode() {
+  return process.env.FABMESH_UNRESTRICTED === '1';
+}
+
+function checkPromptSafety(prompt) {
+  if (isUnrestrictedMode()) return { safe: true };
+  const lower = (prompt || '').toLowerCase();
+  for (const kw of NSFW_KEYWORDS) {
+    if (lower.includes(kw)) {
+      return { safe: false, blocked: kw, reason: `Content filter: "${kw}" is blocked. Disable parental control in Settings to use unrestricted mode.` };
+    }
+  }
+  return { safe: true };
+}
+
 function safeBase(base, maxLen = 80) {
   if (base.length <= maxLen) return base;
   return base.slice(0, maxLen);
@@ -844,6 +873,58 @@ function trackProc(proc) {
 
 // Stop the SDXL server to free VRAM (called when a mesh/rig job is queued
 // and the SDXL server is hogging VRAM that the queued job needs).
+// Parental control: set/verify PIN + toggle unrestricted mode
+ipcMain.handle('set-parental-pin', (_event, { pin }) => {
+  if (!pin || pin.length < 4) return { success: false, error: 'PIN must be at least 4 digits' };
+  const config = loadConfig();
+  // Simple hash (not crypto-secure, but enough for parental control)
+  const hash = require('crypto').createHash('sha256').update(pin).digest('hex');
+  config.parentalPinHash = hash;
+  saveConfig(config);
+  return { success: true };
+});
+
+ipcMain.handle('verify-parental-pin', (_event, { pin }) => {
+  const config = loadConfig();
+  if (!config.parentalPinHash) return { success: false, error: 'No PIN set. Set one first.' };
+  const hash = require('crypto').createHash('sha256').update(pin || '').digest('hex');
+  if (hash !== config.parentalPinHash) return { success: false, error: 'Wrong PIN' };
+  return { success: true };
+});
+
+ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
+  const config = loadConfig();
+  if (!config.parentalPinHash) {
+    // First time: set PIN and enable
+    if (!pin || pin.length < 4) return { success: false, error: 'Set a 4+ digit PIN first' };
+    const hash = require('crypto').createHash('sha256').update(pin).digest('hex');
+    config.parentalPinHash = hash;
+    saveConfig(config);
+  } else {
+    // Verify PIN
+    const hash = require('crypto').createHash('sha256').update(pin || '').digest('hex');
+    if (hash !== config.parentalPinHash) return { success: false, error: 'Wrong PIN' };
+  }
+  // Toggle
+  if (enable) {
+    process.env.FABMESH_UNRESTRICTED = '1';
+    // Restart SDXL server so it picks up the new env var
+    try { stopSdxlServer(); } catch(_) {}
+  } else {
+    delete process.env.FABMESH_UNRESTRICTED;
+    try { stopSdxlServer(); } catch(_) {}
+  }
+  return { success: true, unrestricted: !!enable };
+});
+
+ipcMain.handle('get-parental-status', () => {
+  const config = loadConfig();
+  return {
+    hasPin: !!config.parentalPinHash,
+    unrestricted: process.env.FABMESH_UNRESTRICTED === '1',
+  };
+});
+
 ipcMain.handle('stop-sdxl-server', () => {
   log.info('main', 'stop-sdxl-server: stopping SDXL server to free VRAM for queued job');
   try { stopSdxlServer(); } catch (e) {}
@@ -1591,6 +1672,8 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
 // Img2img: local SDXL by default, or cloud Pollinations if explicitly chosen
 ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine }) => {
   try {
+    const safety = checkPromptSafety(prompt);
+    if (!safety.safe) return { success: false, error: safety.reason };
     // Create new version path in same folder
     const dir = path.dirname(imagePath);
     const ext = path.extname(imagePath);
@@ -2478,6 +2561,11 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 // "single isolated 3D character, ..." suffixes each time).
 ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction }) => {
   try {
+    // Parental control: check prompt for blocked content
+    const safety = checkPromptSafety(prompt);
+    if (!safety.safe) {
+      return { success: false, error: safety.reason };
+    }
     const timestamp = Date.now();
     const safeName = (projectName || 'gen').replace(/[^a-zA-Z0-9_-]/g, '_');
     // Group by project name (no timestamp suffix) - all images for same project go in same folder

@@ -134,9 +134,14 @@ def load_img2img():
         pipe.to("cuda")
         pipe.enable_attention_slicing()
         pipe.enable_vae_tiling()
-        # Disable safety checker if present (we're local single user)
-        if hasattr(pipe, 'safety_checker'):
-            pipe.safety_checker = None
+        # Safety checker: enabled by default (parental control).
+        # Disabled only when FABMESH_UNRESTRICTED=1 env var is set.
+        if os.environ.get('FABMESH_UNRESTRICTED') == '1':
+            if hasattr(pipe, 'safety_checker'):
+                pipe.safety_checker = None
+                log("Safety checker DISABLED (unrestricted mode)")
+        else:
+            log("Safety checker ENABLED (parental control active)")
         state.img2img_pipe = pipe
         state.last_use['img2img'] = time.time()
         log(f"img2img loaded in {time.time()-t0:.1f}s ({vram_used_gb():.1f} GB VRAM)")
@@ -175,8 +180,9 @@ def load_inpaint():
             pipe.to("cuda")
             pipe.enable_attention_slicing()
             pipe.enable_vae_tiling()
-            if hasattr(pipe, 'safety_checker'):
-                pipe.safety_checker = None
+            if os.environ.get('FABMESH_UNRESTRICTED') == '1':
+                if hasattr(pipe, 'safety_checker'):
+                    pipe.safety_checker = None
             state.inpaint_pipe = pipe
             state.last_use['inpaint'] = time.time()
             log(f"Inpaint loaded in {time.time()-t0:.1f}s ({vram_used_gb():.1f} GB VRAM)")

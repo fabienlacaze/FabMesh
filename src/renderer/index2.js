@@ -5102,6 +5102,7 @@ async function openSettings() {
   setupGpuLimitDragging();
   refreshGpuStats();
   checkClaudeDesktopStatus();
+  refreshParentalStatus();
   // Ensure main process has the current RAM limit
   if (API.setRamLimit) API.setRamLimit(gpuLimits.ram).catch(() => {});
   if (_gpuPollTimer) clearInterval(_gpuPollTimer);
@@ -5127,6 +5128,62 @@ document.getElementById('set-close-x')?.addEventListener('click', closeSettings)
 document.getElementById('set-open-logs')?.addEventListener('click', async () => {
   if (API.openLogsFolder) await API.openLogsFolder();
 });
+// ============================================================
+// PARENTAL CONTROL
+// ============================================================
+async function refreshParentalStatus() {
+  const statusEl = document.getElementById('parental-status');
+  const toggleBtn = document.getElementById('parental-toggle');
+  if (!statusEl || !toggleBtn || !API.getParentalStatus) return;
+  try {
+    const r = await API.getParentalStatus();
+    if (r.unrestricted) {
+      statusEl.textContent = '🔓 Unrestricted';
+      statusEl.style.color = '#f59e0b';
+      toggleBtn.textContent = 'Lock';
+      toggleBtn.classList.add('danger');
+    } else {
+      statusEl.textContent = '🔒 Restricted (safe)';
+      statusEl.style.color = '#22c55e';
+      toggleBtn.textContent = r.hasPin ? 'Unlock' : 'Set PIN & Unlock';
+      toggleBtn.classList.remove('danger');
+    }
+  } catch(_) {}
+}
+
+document.getElementById('parental-toggle')?.addEventListener('click', async () => {
+  const pinEl = document.getElementById('parental-pin');
+  const pin = pinEl?.value || '';
+  if (!API.getParentalStatus || !API.toggleUnrestricted) return;
+
+  const status = await API.getParentalStatus();
+
+  if (status.unrestricted) {
+    // Lock (re-enable parental control) — no PIN needed to lock
+    const r = await API.toggleUnrestricted({ pin: pin || 'lock', enable: false });
+    if (r?.success) {
+      showToast('Parental control re-enabled.', 'success');
+      if (pinEl) pinEl.value = '';
+      refreshParentalStatus();
+    }
+  } else {
+    // Unlock — requires PIN
+    if (!pin || pin.length < 4) {
+      showToast('Enter your PIN (4+ digits) to unlock.', 'error');
+      pinEl?.focus();
+      return;
+    }
+    const r = await API.toggleUnrestricted({ pin, enable: true });
+    if (r?.success) {
+      showToast('Unrestricted mode enabled. Content filter disabled.', 'info');
+      if (pinEl) pinEl.value = '';
+      refreshParentalStatus();
+    } else {
+      showToast(r?.error || 'Wrong PIN', 'error');
+    }
+  }
+});
+
 // Kill SDXL server only (free ~6.6 GB VRAM)
 document.getElementById('set-kill-sdxl')?.addEventListener('click', async () => {
   try {

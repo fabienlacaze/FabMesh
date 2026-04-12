@@ -737,6 +737,22 @@
           </div>
         </div>
 
+        <!-- ═══ PARENTAL CONTROL ═══ -->
+        <div class="settings-section-header">Parental Control</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Content Filter</div>
+          <div class="settings-box-desc">Blocks NSFW, violent, and illegal content in prompts. Disable with a PIN code for unrestricted adult use.</div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+            <span id="parental-status" style="font-size:12px; font-weight:700;"></span>
+            <span style="flex:1;"></span>
+            <input type="password" id="parental-pin" placeholder="PIN (4+ digits)" maxlength="8" style="width:120px; padding:4px 8px; font-size:12px;" />
+            <button id="parental-toggle" class="ghost-btn" style="padding:4px 12px; font-size:11px;"></button>
+          </div>
+          <div class="settings-box-footer">
+            Default: restricted (safe). Enter PIN to toggle unrestricted mode.
+          </div>
+        </div>
+
         <!-- ═══ SYSTEM ═══ -->
         <div class="settings-section-header">System</div>
         <div class="settings-box">
