@@ -705,19 +705,8 @@ function populateWorkspace(p) {
 
   refreshButtonStates(p);
 
-  // Restore last used style in the Style Transfer dropdown
-  try {
-    const lastStyle = localStorage.getItem('fabmesh-last-style');
-    const styleSelect = document.getElementById('ws-style-btn');
-    if (lastStyle && styleSelect) {
-      for (let i = 0; i < styleSelect.options.length; i++) {
-        if (styleSelect.options[i].value === lastStyle) {
-          styleSelect.selectedIndex = i;
-          break;
-        }
-      }
-    }
-  } catch(_) {}
+  // Restore style dropdown for the currently selected image
+  _restoreStyleDropdown(p.previewImagePath || p.selectedImagePath);
 
   // Mesh step
   renderMeshVersions(p);
@@ -819,9 +808,8 @@ function renderImageVersions(p) {
       t.classList.add('selected');
       p.previewImagePath = img.path;
       showStep1Preview(img.path);
-      // Reset Style dropdown when switching images (different image = unknown style)
-      const styleEl = document.getElementById('ws-style-btn');
-      if (styleEl) styleEl.selectedIndex = 0;
+      // Restore the style that was applied to this specific image
+      _restoreStyleDropdown(img.path);
     });
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -2312,6 +2300,46 @@ document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQu
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
 document.getElementById('ws-crop-btn')?.addEventListener('click', () => runQuickEdit('crop', { left: 0.1, top: 0.05, right: 0.9, bottom: 0.95 }));
 
+// Per-image style memory (stored in localStorage as a JSON map path→styleValue)
+function _saveImageStyle(imgPath, styleValue) {
+  if (!imgPath || !styleValue) return;
+  try {
+    const key = 'fabmesh-image-styles';
+    const map = JSON.parse(localStorage.getItem(key) || '{}');
+    // Use just the filename as key (paths change between machines)
+    const fname = imgPath.split(/[/\\]/).pop();
+    map[fname] = styleValue;
+    // Keep only last 500 entries to avoid bloat
+    const keys = Object.keys(map);
+    if (keys.length > 500) { for (let i = 0; i < keys.length - 500; i++) delete map[keys[i]]; }
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch(_) {}
+}
+function _getImageStyle(imgPath) {
+  if (!imgPath) return null;
+  try {
+    const key = 'fabmesh-image-styles';
+    const map = JSON.parse(localStorage.getItem(key) || '{}');
+    const fname = imgPath.split(/[/\\]/).pop();
+    return map[fname] || null;
+  } catch(_) { return null; }
+}
+function _restoreStyleDropdown(imgPath) {
+  const styleEl = document.getElementById('ws-style-btn');
+  if (!styleEl) return;
+  const saved = _getImageStyle(imgPath);
+  if (saved) {
+    for (let i = 0; i < styleEl.options.length; i++) {
+      if (styleEl.options[i].value === saved) {
+        styleEl.selectedIndex = i;
+        return;
+      }
+    }
+  }
+  // No saved style → reset to placeholder
+  styleEl.selectedIndex = 0;
+}
+
 // Style Transfer: dropdown triggers img2img with the selected style prompt
 document.getElementById('ws-style-btn')?.addEventListener('change', async (e) => {
   const style = e.target.value;
@@ -2326,6 +2354,10 @@ document.getElementById('ws-style-btn')?.addEventListener('change', async (e) =>
     try {
       const r = await API.img2img({ imagePath: p.selectedImagePath, prompt: style, strength: 0.6, engine: 'local-sdxl' });
       if (r?.success) {
+        // Remember which style was applied to this new image version
+        if (r.newPath) _saveImageStyle(r.newPath, style);
+        // Also tag the source image with its style (it was the input)
+        _saveImageStyle(p.selectedImagePath, style);
         completeJob(job.id, true);
         await reloadCurrentProject();
         showToast('Style applied!', 'success');
