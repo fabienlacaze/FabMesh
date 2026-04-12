@@ -1452,11 +1452,11 @@ button.tool-active {
   align-items: center;
   justify-content: space-between;
   position: sticky;
-  top: -20px;
+  top: -28px;
   z-index: 10;
   background: var(--bg-1);
-  margin: -20px -24px 4px -24px;
-  padding: 20px 24px 10px 24px;
+  margin: -28px -28px 4px -28px;
+  padding: 28px 28px 10px 28px;
   border-bottom: 1px solid var(--border);
   box-shadow: 0 4px 12px rgba(0,0,0,0.7);
 }
