@@ -2070,6 +2070,22 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
+        // After successful image generation, open the Edit stage and scroll
+        // to show the newly generated images. Without this the user stays
+        // on the "Create new" form and doesn't see the results.
+        const imgCard = document.getElementById('step-card-image');
+        if (imgCard) {
+          imgCard.classList.remove('collapsed', 'disabled');
+          const createStage = imgCard.querySelector('.stage-create');
+          const editStage = imgCard.querySelector('.stage-edit');
+          if (createStage) createStage.open = false;
+          if (editStage) editStage.open = true;
+          setTimeout(() => {
+            imgCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            imgCard.classList.add('pulse-highlight');
+            setTimeout(() => imgCard.classList.remove('pulse-highlight'), 1500);
+          }, 120);
+        }
       } else {
         completeJob(job.id, false, r?.error || 'unknown');
         if (!job.cancelled) reportPipelineError(r?.error, 'Image generation failed');
