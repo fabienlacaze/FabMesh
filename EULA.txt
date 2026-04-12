@@ -1,0 +1,140 @@
+================================================================================
+ FabMesh / MeshyMyself — End User License Agreement (EULA)
+ Version 1.0
+================================================================================
+
+IMPORTANT — READ CAREFULLY. By installing, copying, or otherwise using FabMesh
+(the "Software"), you agree to be bound by the terms of this End User License
+Agreement ("Agreement"). If you do not agree, do not install or use the
+Software.
+
+--------------------------------------------------------------------------------
+ 1. Definitions
+--------------------------------------------------------------------------------
+"Software" means the FabMesh application and its accompanying scripts, assets,
+and documentation.
+"Generated Content" means any image, 3D mesh, rig, skeleton, animation,
+texture, or other output produced by running the Software on your own inputs.
+"You" means the individual or entity using the Software.
+
+--------------------------------------------------------------------------------
+ 2. License grant
+--------------------------------------------------------------------------------
+The Software is provided to You under the terms of its own source license
+(see LICENSE file in the distribution). Third-party components bundled or
+invoked by the Software are governed by their own licenses, as listed in
+THIRD_PARTY_LICENSES.txt, which You agree to respect.
+
+--------------------------------------------------------------------------------
+ 3. Ownership of Generated Content
+--------------------------------------------------------------------------------
+Subject to this Agreement and the underlying model licenses (in particular the
+CreativeML Open RAIL++-M License governing Stable Diffusion XL and RealVis XL
+V4.0), YOU OWN the Generated Content produced from Your own text prompts or
+input images. FabMesh and its authors claim no ownership over Your Generated
+Content.
+
+You are solely responsible for ensuring that Your inputs (prompts, reference
+images, meshes) do not infringe any third-party intellectual property rights,
+rights of publicity, or other rights.
+
+--------------------------------------------------------------------------------
+ 4. External dependencies
+--------------------------------------------------------------------------------
+The Software invokes, but DOES NOT BUNDLE, the following external programs:
+
+  • Blender (GPL-3.0) — You must install Blender separately from
+    https://www.blender.org/download/ for rigging, skinning, and FBX/GLB
+    conversion features to work.
+
+  • AI model weights — Model weights for Stable Diffusion XL, RealVis XL V4.0,
+    TripoSR, Hunyuan3D, and related components are downloaded on first use
+    from Hugging Face and cached on Your machine. FabMesh does not
+    redistribute these weights; Your use of them is governed by their
+    respective model licenses.
+
+--------------------------------------------------------------------------------
+ 5. Use restrictions (CreativeML Open RAIL++-M conditions)
+--------------------------------------------------------------------------------
+Because FabMesh relies on SDXL-family diffusion models, Your use of the
+Software and its Generated Content is subject to the use-based restrictions of
+the CreativeML Open RAIL++-M License. In particular, You agree NOT to use the
+Software or its Generated Content:
+
+  a) To generate or disseminate child sexual abuse material (CSAM) or any
+     sexually explicit content depicting minors;
+  b) To generate or disseminate content that is defamatory, harassing, or
+     violent toward any person or group;
+  c) To generate or disseminate verifiably false information with the purpose
+     of harming others;
+  d) To generate or disseminate personal identifiable information that could
+     be used to harm an individual;
+  e) To impersonate a real person without their consent in a manner that
+     causes harm;
+  f) For fully automated decision-making that adversely impacts an
+     individual's legal rights or creates or modifies a binding obligation;
+  g) For discriminatory purposes against protected classes;
+  h) To provide medical advice or medical-results interpretation;
+  i) For any use that violates applicable laws or regulations, including
+     export control, sanctions, or data-protection laws.
+
+You further agree not to attempt to generate, through prompt engineering or
+fine-tuning, likenesses of identifiable real persons in contexts that would
+violate their rights of publicity, privacy, or dignity.
+
+The full CreativeML Open RAIL++-M license text is available at:
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 6. No warranty
+--------------------------------------------------------------------------------
+THE SOFTWARE AND ALL GENERATED CONTENT ARE PROVIDED "AS IS" AND "AS AVAILABLE",
+WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+NON-INFRINGEMENT, ACCURACY, OR RELIABILITY.
+
+AI-generated content may contain artifacts, hallucinations, biases, or
+inaccuracies. You are solely responsible for reviewing and validating any
+Generated Content before using it in a production, commercial, safety-critical,
+or public-facing context.
+
+--------------------------------------------------------------------------------
+ 7. Limitation of liability
+--------------------------------------------------------------------------------
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS OF FABMESH BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT
+LIMITED TO LOSS OF DATA, LOSS OF PROFITS, BUSINESS INTERRUPTION, OR
+INFRINGEMENT CLAIMS ARISING FROM GENERATED CONTENT) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--------------------------------------------------------------------------------
+ 8. Indemnification
+--------------------------------------------------------------------------------
+You agree to indemnify, defend, and hold harmless the authors and copyright
+holders of FabMesh from and against any claims, damages, losses, and expenses
+(including reasonable attorneys' fees) arising out of or related to (a) Your
+use of the Software, (b) Your Generated Content, or (c) Your breach of this
+Agreement.
+
+--------------------------------------------------------------------------------
+ 9. Termination
+--------------------------------------------------------------------------------
+This Agreement is effective until terminated. Your rights under this Agreement
+terminate automatically and without notice if You fail to comply with any of
+its terms. Upon termination, You must cease all use of the Software and
+destroy all copies in Your possession.
+
+--------------------------------------------------------------------------------
+ 10. Miscellaneous
+--------------------------------------------------------------------------------
+This Agreement constitutes the entire agreement between You and the authors of
+FabMesh regarding the Software and supersedes all prior or contemporaneous
+understandings. If any provision of this Agreement is held unenforceable, the
+remaining provisions shall remain in full force and effect.
+
+================================================================================
+ End of EULA
+================================================================================

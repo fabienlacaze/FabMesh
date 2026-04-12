@@ -1,5 +1,26 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// ----------------------------------------------------------
+// Test/Control API bridge
+// ----------------------------------------------------------
+// Minimal ipc bridge used by src/renderer/test_api_client.js so
+// the external HTTP control server (src/main/test_api.js) can
+// dispatch commands into the renderer. Only whitelisted channels
+// are allowed; this is safe to ship even in prod because nothing
+// happens unless the renderer client decides to hook in.
+const _TEST_ALLOWED_SEND = new Set(['test:result', 'test:console', 'test:state-push']);
+const _TEST_ALLOWED_ON   = new Set(['test:command']);
+contextBridge.exposeInMainWorld('__fabmeshTest', {
+  send: (channel, payload) => {
+    if (_TEST_ALLOWED_SEND.has(channel)) ipcRenderer.send(channel, payload);
+  },
+  on: (channel, cb) => {
+    if (_TEST_ALLOWED_ON.has(channel)) {
+      ipcRenderer.on(channel, (_e, msg) => { try { cb(msg); } catch (_) {} });
+    }
+  }
+});
+
 contextBridge.exposeInMainWorld('meshyAPI', {
   generateFromPrompt: (opts) => ipcRenderer.invoke('generate-from-prompt', opts),
   generateFromImage: (opts) => ipcRenderer.invoke('generate-from-image', opts),
@@ -15,8 +36,11 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   revertToVersion: (opts) => ipcRenderer.invoke('revert-to-version', opts),
   listProjects: () => ipcRenderer.invoke('list-projects'),
   getConfig: () => ipcRenderer.invoke('get-config'),
+  setConfig: (patch) => ipcRenderer.invoke('set-config', patch),
+  testMeshyKey: (apiKey) => ipcRenderer.invoke('test-meshy-key', apiKey),
   setBlenderPath: () => ipcRenderer.invoke('set-blender-path'),
   runBlenderScript: (opts) => ipcRenderer.invoke('run-blender-script', opts),
+  openInBlender: (opts) => ipcRenderer.invoke('open-in-blender', opts),
   listMeshes: () => ipcRenderer.invoke('list-meshes'),
   getMeshPath: (filename) => ipcRenderer.invoke('get-mesh-path', filename),
   deleteMesh: (filename) => ipcRenderer.invoke('delete-mesh', filename),
@@ -26,11 +50,16 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   readMeshFile: (filePath) => ipcRenderer.invoke('read-mesh-file', filePath),
   getMeshLocalUrl: (filePath) => ipcRenderer.invoke('get-mesh-local-url', filePath),
   exportMesh: (opts) => ipcRenderer.invoke('export-mesh', opts),
+  pickExportPath: (opts) => ipcRenderer.invoke('pick-export-path', opts),
+  getFileInfo: (filePath) => ipcRenderer.invoke('get-file-info', filePath),
   importMesh: () => ipcRenderer.invoke('import-mesh'),
   copyMeshToProject: (srcPath) => ipcRenderer.invoke('copy-mesh-to-project', srcPath),
   createProjectFromMesh: (opts) => ipcRenderer.invoke('create-project-from-mesh', opts),
   flashTaskbar: () => ipcRenderer.invoke('flash-taskbar'),
   checkGPU: () => ipcRenderer.invoke('check-gpu'),
+  checkRAM: () => ipcRenderer.invoke('check-ram'),
+  setRamLimit: (pct) => ipcRenderer.invoke('set-ram-limit', pct),
+  setGpuLimits: (limits) => ipcRenderer.invoke('set-gpu-limits', limits),
   showInExplorer: (filePath) => ipcRenderer.invoke('show-in-explorer', filePath),
   deleteImageFolder: (folderPath) => ipcRenderer.invoke('delete-image-folder', folderPath),
   importImage: () => ipcRenderer.invoke('import-image'),
@@ -38,6 +67,11 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   deleteProject: (opts) => ipcRenderer.invoke('delete-project', opts),
   onAppCloseRequested: (cb) => ipcRenderer.on('app-close-requested', () => cb()),
   confirmAppClose: () => ipcRenderer.send('app-close-confirmed'),
+  openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
+  countPython: () => ipcRenderer.invoke('count-python'),
+  readLogTail: (opts) => ipcRenderer.invoke('read-log-tail', opts),
+  rendererLog: (opts) => ipcRenderer.invoke('renderer-log', opts),
+  onMainLog: (cb) => ipcRenderer.on('main-log', (e, data) => cb(data)),
   saveThumbnail: (opts) => ipcRenderer.invoke('save-thumbnail', opts),
   getThumbnail: (meshPath) => ipcRenderer.invoke('get-thumbnail', meshPath),
   removeBackground: (imagePath) => ipcRenderer.invoke('remove-background', imagePath),
@@ -47,7 +81,9 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
   exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
   autoRig: (opts) => ipcRenderer.invoke('auto-rig', opts),
+  autoRigAI: (opts) => ipcRenderer.invoke('auto-rig-ai', opts),
   listRigTemplates: () => ipcRenderer.invoke('list-rig-templates'),
+  listRigAnimations: (opts) => ipcRenderer.invoke('list-rig-animations', opts),
   saveLandmarks: (opts) => ipcRenderer.invoke('save-landmarks', opts),
   loadLandmarks: (opts) => ipcRenderer.invoke('load-landmarks', opts),
   analyzeSkeleton: (opts) => ipcRenderer.invoke('analyze-skeleton', opts),

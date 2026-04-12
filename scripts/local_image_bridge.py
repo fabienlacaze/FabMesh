@@ -13,6 +13,16 @@ def generate_images(prompt, output_dir, num_images=4):
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Enforce VRAM cap from FabMesh settings
+    if torch.cuda.is_available():
+        _frac = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
+        if 0.1 <= _frac < 1.0:
+            try:
+                torch.cuda.set_per_process_memory_fraction(_frac)
+                print(f"LOCAL_IMG: VRAM hard cap set to {_frac*100:.0f}%", flush=True)
+            except Exception as e:
+                print(f"LOCAL_IMG: Could not set VRAM cap ({e})", flush=True)
+
     print("LOCAL_IMG: Loading Stable Diffusion XL Turbo...")
     sys.stdout.flush()
 

@@ -1,49 +1,38 @@
 {
+  "_license_note": "All templates in this registry are either CC0 (FabMesh-authored) or derived landmark JSON (uncopyrightable bone positions). No third-party FBX assets are redistributed.",
   "skm_templates": [
     {
-      "id": "orc_m1",
-      "name": "Orc M1",
+      "id": "humanoid_basic",
+      "name": "Humanoid (CC0)",
       "category": "humanoid",
-      "fbx": "skm/SKM_Orc_M1.FBX",
-      "animations_dir": "animations/orc_m1",
-      "default_height_cm": 180,
-      "description": "Male orc warrior - UE5 compatible"
+      "type": "json",
+      "json": "skm/humanoid_basic.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 200,
+      "description": "Generic 25-bone humanoid skeleton in A-pose, Mixamo-style naming (CC0)",
+      "license": "CC0"
     },
     {
-      "id": "spider",
-      "name": "Spider",
-      "category": "octopod",
-      "fbx": "skm/SKM_Spider.FBX",
+      "id": "quadruped_basic",
+      "name": "Quadruped (CC0)",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/quadruped_basic.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 120,
+      "description": "Generic 22-bone quadruped skeleton (CC0)",
+      "license": "CC0"
+    },
+    {
+      "id": "hexaped_basic",
+      "name": "Hexaped (CC0)",
+      "category": "hexapod",
+      "type": "json",
+      "json": "skm/hexaped_basic.bones.json",
       "animations_dir": null,
       "default_height_cm": 30,
-      "description": "8-legged spider"
-    },
-    {
-      "id": "deer_doe",
-      "name": "Deer / Doe",
-      "category": "quadruped",
-      "fbx": "skm/SK_DeerDoe.FBX",
-      "animations_dir": "animations/Deer",
-      "default_height_cm": 120,
-      "description": "Female deer with idle/walk anims"
-    },
-    {
-      "id": "fox",
-      "name": "Fox",
-      "category": "quadruped",
-      "fbx": "skm/SK_Fox.FBX",
-      "animations_dir": null,
-      "default_height_cm": 50,
-      "description": "Small fox"
-    },
-    {
-      "id": "pig",
-      "name": "Pig",
-      "category": "quadruped",
-      "fbx": "skm/SK_Pig.FBX",
-      "animations_dir": null,
-      "default_height_cm": 90,
-      "description": "Pig"
+      "description": "Generic 25-bone 6-legged insect-like skeleton (CC0)",
+      "license": "CC0"
     }
   ],
   "generic_templates": [

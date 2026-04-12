@@ -17,15 +17,35 @@
 (function () {
   'use strict';
 
-  // ----- Stubs for legacy helpers (jobs / gallery / log) -----
+  // ----- Jobs helpers: delegate to the real queue owned by index2.js -----
+  // index2.js (ES module) exposes pushJob/completeJob/renderJobs via
+  // window.fabmeshJobs. If that's not ready (script order problem) we fall
+  // back to stubs so the edit tools keep working without progress UI.
   function addJob(label, kind, imgPath) {
     console.log('[edit-tools] addJob:', label, kind, imgPath);
+    if (window.fabmeshJobs && typeof window.fabmeshJobs.push === 'function') {
+      // Expected duration: first run of RealVis+Inpaint can take 2-3 min,
+      // subsequent runs ~5-15s. We give 180s so the progress bar fills
+      // smoothly for the cold path and just caps at 90% for the warm one.
+      var params = {
+        Engine: 'RealVis XL (local, SDXL Inpaint)',
+        'Source image': imgPath ? imgPath.split(/[/\\]/).pop() : '--',
+      };
+      return window.fabmeshJobs.push(label, null, params, 180000);
+    }
     return { id: 'stub-' + Date.now(), progress: 0 };
   }
-  function completeJob(id, ok) {
+  function completeJob(id, ok, errorMessage) {
     console.log('[edit-tools] completeJob:', id, ok);
+    if (window.fabmeshJobs && typeof window.fabmeshJobs.complete === 'function') {
+      window.fabmeshJobs.complete(id, ok, errorMessage);
+    }
   }
-  function renderJobs() { /* no-op */ }
+  function renderJobs() {
+    if (window.fabmeshJobs && typeof window.fabmeshJobs.render === 'function') {
+      window.fabmeshJobs.render();
+    }
+  }
   function showLog(msg, level) {
     console.log('[edit-tools][' + (level || 'info') + ']', msg);
     if (level === 'error') {
@@ -766,24 +786,43 @@
     var mApply = document.getElementById('mask-apply');
     if (mApply) mApply.addEventListener('click', function () {
       console.log('[edit-tools] mask Apply click, imagePath=', maskCtx.imagePath);
+
+      // --------- 0. Pre-flight checks BEFORE hiding the popup ---------
       var imgPath = maskCtx.imagePath;
       if (!imgPath) {
         alert('No image selected for inpaint — maskCtx.imagePath is null. Reopen the mask tool from the project workspace.');
         return;
       }
-      // Close popup immediately — generation happens in background
-      maskModal.classList.add('hidden');
+
+      // --------- 1. Read the overlay WHILE the modal is still visible ---------
+      // Hiding the modal first was a bug: on some browsers the canvas context
+      // loses its backing store when the parent becomes display:none, and
+      // getImageData() returns all zeros → we were silently bailing out.
       var w = maskOverlayCanvas.width;
       var h = maskOverlayCanvas.height;
-      var overlayData = maskOverlayCtx.getImageData(0, 0, w, h);
+      if (!w || !h) {
+        alert('Mask canvas has no size. Close the dialog and reopen the mask tool.');
+        return;
+      }
+      var overlayData;
+      try {
+        overlayData = maskOverlayCtx.getImageData(0, 0, w, h);
+      } catch (readErr) {
+        console.error('[edit-tools] getImageData failed', readErr);
+        alert('Could not read mask: ' + (readErr && readErr.message || readErr));
+        return;
+      }
       var painted = 0;
       for (var i = 3; i < overlayData.data.length; i += 4) {
         if (overlayData.data[i] > 30) painted++;
       }
+      console.log('[edit-tools] painted pixels:', painted, '/ canvas', w, 'x', h);
       if (painted < 50) {
-        showLog('Paint a mask first', 'error');
+        alert('Paint a mask first — nothing to inpaint. Draw over the area you want to replace then click Apply Inpaint again.');
         return;
       }
+
+      // --------- 2. Build the black/white mask PNG data URL ---------
       var maskCanvas = document.createElement('canvas');
       maskCanvas.width = w;
       maskCanvas.height = h;
@@ -801,48 +840,77 @@
       }
       mctx.putImageData(md, 0, 0);
       var maskDataUrl = maskCanvas.toDataURL('image/png');
+      console.log('[edit-tools] maskDataUrl length:', maskDataUrl.length);
 
       var promptEl = document.getElementById('mask-prompt');
       var promptText = promptEl ? promptEl.value.trim() : '';
-      var job = addJob('Manual mask inpaint', 'inpaint', imgPath);
-      job.progress = 10;
-      renderJobs();
-      var startedAt = Date.now();
-      var expectedMs = 180000;
-      var progTimer = setInterval(function () {
-        var elapsed = Date.now() - startedAt;
-        var pct = Math.min(90, 10 + (elapsed / expectedMs) * 80);
-        job.progress = pct;
-        renderJobs();
-      }, 1000);
 
-      Promise.resolve()
-        .then(function () {
-          console.log('[edit-tools] calling maskInpaint, prompt=', promptText);
-          if (!window.meshyAPI || !window.meshyAPI.maskInpaint) {
-            return { success: false, error: 'maskInpaint API not available' };
-          }
-          return window.meshyAPI.maskInpaint({ imagePath: imgPath, maskDataUrl: maskDataUrl, prompt: promptText });
+      // --------- 3. NOW hide the popup — we have everything we need ---------
+      maskModal.classList.add('hidden');
+
+      // --------- 4. Enqueue the job through the VRAM/GPU gate ---------
+      // We wrap the actual work in a closure and hand it to fabmeshJobs.enqueue,
+      // which will:
+      //  (a) check VRAM/temp/GPU util/RAM limits BEFORE starting,
+      //  (b) queue the job if any limit is exceeded (and poll until safe),
+      //  (c) only then create the visible job entry and fire the IPC.
+      //
+      // This is the same gating path that Generate Image / Generate 3D use,
+      // so the sliders in Settings finally apply to draw-mask inpaint.
+      function runInpaint() {
+        var job;
+        try {
+          job = addJob('Manual mask inpaint', 'inpaint', imgPath);
+        } catch (jobErr) {
+          console.error('[edit-tools] addJob threw', jobErr);
+          alert('Internal error: could not create job. ' + (jobErr && jobErr.message || jobErr));
+          return;
+        }
+        if (!job || typeof job !== 'object' || job.id == null) {
+          alert('Internal error: addJob returned nothing. Is the renderer fully loaded?');
+          return;
+        }
+
+        if (!window.meshyAPI || !window.meshyAPI.maskInpaint) {
+          try { completeJob(job.id, false, 'maskInpaint API not available'); } catch (_) {}
+          alert('maskInpaint API not available — preload.js did not expose it.');
+          return;
+        }
+
+        window.meshyAPI.maskInpaint({
+          imagePath: imgPath,
+          maskDataUrl: maskDataUrl,
+          prompt: promptText
         })
         .then(function (r) {
-          clearInterval(progTimer);
           if (r && r.success) {
-            completeJob(job.id, true);
+            try { completeJob(job.id, true); } catch (_) {}
             showLog('Inpaint done: ' + (r.newPath || ''), 'success');
-            maskModal.classList.add('hidden');
             if (maskCtx.onSuccess) {
               try { maskCtx.onSuccess(r.newPath || null); } catch (e) {}
             }
           } else {
-            completeJob(job.id, false);
-            showLog('Inpaint failed: ' + ((r && r.error) || 'API not implemented'), 'error');
+            var errMsg = (r && r.error) || 'unknown error';
+            try { completeJob(job.id, false, errMsg); } catch (_) {}
+            console.error('[edit-tools] mask_inpaint failed:', r);
+            alert('Inpaint failed: ' + errMsg);
           }
         })
         .catch(function (e) {
-          clearInterval(progTimer);
-          completeJob(job.id, false);
-          showLog('Inpaint error: ' + e.message, 'error');
+          var errMsg2 = (e && e.message) || String(e);
+          try { completeJob(job.id, false, errMsg2); } catch (_) {}
+          console.error('[edit-tools] mask_inpaint exception:', e);
+          alert('Inpaint error: ' + errMsg2);
         });
+      }
+
+      if (window.fabmeshJobs && typeof window.fabmeshJobs.enqueue === 'function') {
+        window.fabmeshJobs.enqueue('inpaint', 'Manual mask inpaint', runInpaint);
+      } else {
+        // Fallback: no gating exposed — run immediately.
+        console.warn('[edit-tools] window.fabmeshJobs.enqueue not available, running without gating');
+        runInpaint();
+      }
     });
   }
 

@@ -13,6 +13,16 @@ from PIL import Image
 def img2img(input_path, prompt, output_path, strength=0.55):
     from diffusers import StableDiffusionXLImg2ImgPipeline
 
+    # Enforce VRAM cap from FabMesh settings
+    if torch.cuda.is_available():
+        _frac = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
+        if 0.1 <= _frac < 1.0:
+            try:
+                torch.cuda.set_per_process_memory_fraction(_frac)
+                print(f"IMG2IMG: VRAM hard cap set to {_frac*100:.0f}%", flush=True)
+            except Exception as e:
+                print(f"IMG2IMG: Could not set VRAM cap ({e})", flush=True)
+
     print("IMG2IMG: Loading SDXL Turbo img2img pipeline...", flush=True)
     pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
         "stabilityai/sdxl-turbo",

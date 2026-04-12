@@ -30,13 +30,38 @@ import numpy as np
 # ========== CONFIG ==========
 HOST = '127.0.0.1'
 PORT = 5555
-SDXL_TURBO_MODEL = "stabilityai/sdxl-turbo"
+# img2img: RealVis XL V4.0 — CreativeML Open RAIL++-M (commercial-safe).
+# We previously used stabilityai/sdxl-turbo which is under the SAI Non-Commercial
+# Research License, disqualifying it from a Steam release. RealVis XL shares the
+# same SDXL architecture so StableDiffusionXLImg2ImgPipeline loads it unchanged.
+IMG2IMG_MODEL = "SG161222/RealVisXL_V4.0"
+# Back-compat alias (some older code paths still reference the old name).
+SDXL_TURBO_MODEL = IMG2IMG_MODEL
 SDXL_INPAINT_MODEL = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
 CLIPSEG_MODEL = "CIDAS/clipseg-rd64-refined"
 
-# Reserve 5% VRAM for OS / display
-GPU_MEMORY_FRACTION = 0.95
+# Enforce VRAM cap from FabMesh settings (passed via FABMESH_VRAM_FRACTION env var).
+GPU_MEMORY_FRACTION = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
+if torch.cuda.is_available() and 0.1 <= GPU_MEMORY_FRACTION < 1.0:
+    try:
+        torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION)
+        print(f"SDXL_SERVER: VRAM hard cap set to {GPU_MEMORY_FRACTION*100:.0f}%", flush=True)
+    except Exception as e:
+        print(f"SDXL_SERVER: Could not set VRAM cap ({e})", flush=True)
 
+
+# Enforce system RAM limit from FabMesh settings (FABMESH_RAM_LIMIT_MB env var).
+_RAM_LIMIT_MB = os.environ.get('FABMESH_RAM_LIMIT_MB', '')
+if _RAM_LIMIT_MB:
+    try:
+        import psutil
+        _vm = psutil.virtual_memory()
+        print(f"SDXL_SERVER: RAM system used={(_vm.total - _vm.available) / (1024**2):.0f}MB, "
+              f"limit={_RAM_LIMIT_MB}MB, percent={_vm.percent:.0f}%", flush=True)
+    except ImportError:
+        print("SDXL_SERVER: psutil not installed, RAM monitoring skipped", flush=True)
+    except Exception as e:
+        print(f"SDXL_SERVER: RAM check error: {e}", flush=True)
 
 # ========== STATE ==========
 class ModelState:
@@ -81,11 +106,9 @@ def free_vram():
 
 # ========== MODEL LOADING ==========
 def _set_memory_fraction():
-    if torch.cuda.is_available():
-        try:
-            torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION, 0)
-        except Exception as e:
-            log(f"Could not set memory fraction: {e}", 'warn')
+    # No-op: see GPU_MEMORY_FRACTION comment above. Kept so existing call sites
+    # (load_img2img, load_inpaint) don't need to be touched.
+    pass
 
 
 def load_img2img():
@@ -97,14 +120,15 @@ def load_img2img():
     with state.load_lock:
         if state.img2img_pipe is not None:
             return state.img2img_pipe
-        log(f"Loading {SDXL_TURBO_MODEL}...")
+        log(f"Loading {IMG2IMG_MODEL}...")
         _set_memory_fraction()
         from diffusers import StableDiffusionXLImg2ImgPipeline
         t0 = time.time()
+        # RealVis XL V4.0 doesn't ship an fp16 variant branch — ask for fp16 dtype
+        # but omit variant="fp16" so the loader grabs the default safetensors.
         pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
-            SDXL_TURBO_MODEL,
+            IMG2IMG_MODEL,
             torch_dtype=torch.float16,
-            variant="fp16",
             use_safetensors=True,
         )
         pipe.to("cuda")
@@ -214,6 +238,12 @@ def do_img2img(input_path, prompt, output_path, strength=0.55):
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
 
+    # Only one SDXL pipeline at a time — RealVis img2img (~6 GB) + SDXL Inpaint
+    # (~6 GB) together saturate a 16 GB card and force NVIDIA driver shared-mem
+    # fallback, making every step 10x slower. Unload the other pipeline first.
+    if state.inpaint_pipe is not None:
+        unload_model('inpaint')
+
     pipe = load_img2img()
     state.last_use['img2img'] = time.time()
 
@@ -224,8 +254,11 @@ def do_img2img(input_path, prompt, output_path, strength=0.55):
 
             enhanced = f"{prompt}, high quality, detailed"
             s = max(0.1, min(1.0, float(strength)))
-            # SDXL Turbo: total_steps must be >= 1/strength
-            steps = max(2, int(round(4 / s)))
+            # RealVis XL V4.0: standard SDXL fine-tune, likes 25-30 steps + CFG 5-7.
+            # num_inference_steps * strength must be >= 1 (same diffusers rule
+            # as Turbo, but with higher base step count).
+            steps = max(int(round(25 / s)), int(round(1 / s)) + 1)
+            steps = min(steps, 60)  # safety upper bound
 
             t0 = time.time()
             with torch.inference_mode():
@@ -234,7 +267,7 @@ def do_img2img(input_path, prompt, output_path, strength=0.55):
                     image=img,
                     strength=s,
                     num_inference_steps=steps,
-                    guidance_scale=0.0,
+                    guidance_scale=6.0,
                 ).images[0]
 
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -254,6 +287,10 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     if not target_text or not target_text.strip():
         return {"ok": False, "error": "target_text required"}
+
+    # Only one SDXL pipeline at a time — see do_img2img comment.
+    if state.img2img_pipe is not None:
+        unload_model('img2img')
 
     pipe = load_inpaint()
     state.last_use['inpaint'] = time.time()
@@ -352,6 +389,11 @@ def do_mask_inpaint(input_path, mask_path, prompt, output_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     if not os.path.exists(mask_path):
         return {"ok": False, "error": f"Mask not found: {mask_path}"}
+
+    # Only one SDXL pipeline at a time — see do_img2img comment above.
+    # Unload img2img before loading inpaint so we stay under 16 GB VRAM.
+    if state.img2img_pipe is not None:
+        unload_model('img2img')
 
     pipe = load_inpaint()
     state.last_use['inpaint'] = time.time()
@@ -531,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
 def preload_models():
     """Preload only img2img model (most common). Inpaint loads on demand."""
     try:
-        log("Preloading SDXL Turbo img2img...")
+        log("Preloading RealVis XL img2img...")
         load_img2img()
         log("MODELS READY - img2img loaded (inpaint on first use)")
     except Exception as e:

@@ -25,7 +25,6 @@
       <div class="topbar-right">
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
-        <button id="open-old-ui" class="ghost-btn" title="Open the legacy UI">Legacy UI</button>
       </div>
     </header>
 
@@ -68,16 +67,43 @@
                 <span class="stage-hint">Generate a new image from a text prompt</span>
               </summary>
               <div class="stage-body">
-                <label>Describe your character</label>
-                <textarea id="ws-prompt" rows="3" placeholder="An orc warrior with leather armor, fantasy art..."></textarea>
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
-                    <option value="local-flux" selected>Local GPU (Juggernaut XL)</option>
-                    <option value="local-sd">Local GPU (SDXL Turbo, fast)</option>
-                    <option value="pollinations">Pollinations (cloud)</option>
+                    <option value="local-flux" selected>RealVis XL (local)</option>
+                    <option value="meshy">Meshy.ai (cloud, needs API key)</option>
                   </select>
                 </div>
+                <div class="form-row">
+                  <label>Asset type</label>
+                  <select id="ws-asset-type">
+                    <option value="character" selected>Character / Unit (RTS, RPG)</option>
+                    <option value="building">Building / Structure</option>
+                    <option value="vehicle">Vehicle</option>
+                    <option value="weapon">Weapon</option>
+                    <option value="prop">Prop / Item</option>
+                    <option value="creature">Creature / Beast</option>
+                    <option value="environment">Environment piece</option>
+                    <option value="custom">Custom (no preset)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Style</label>
+                  <select id="ws-asset-style">
+                    <option value="realistic" selected>Realistic</option>
+                    <option value="stylized">Stylized (mid-poly)</option>
+                    <option value="lowpoly">Low-poly</option>
+                    <option value="cartoon">Cartoon</option>
+                    <option value="anime">Anime</option>
+                    <option value="pixelart">Pixel art</option>
+                    <option value="painterly">Painterly</option>
+                    <option value="pbr">PBR (high detail)</option>
+                    <option value="voxel">Voxel</option>
+                    <option value="custom">Custom (no preset)</option>
+                  </select>
+                </div>
+                <label>Describe your asset</label>
+                <textarea id="ws-prompt" rows="3" placeholder="An orc warrior with leather armor..."></textarea>
                 <div class="form-row">
                   <label>Count</label>
                   <select id="ws-count">
@@ -121,6 +147,7 @@
                     <div class="preview-placeholder">No image yet</div>
                     <button id="ws-image-expand-btn" class="preview-expand-btn hidden" title="View image fullscreen">&#x26F6;</button>
                   </div>
+                  <div id="ws-image-filename" class="viewer-filename"></div>
                   <div id="ws-use-for-3d-bar" class="use-for-bar hidden">
                     <button id="ws-use-for-3d-btn" class="primary-btn">Use this image for 3D &rarr;</button>
                   </div>
@@ -160,9 +187,8 @@
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-3d-engine">
-                      <option value="hunyuan" selected>Hunyuan3D Local (best)</option>
-                      <option value="local">TripoSR Local (fast)</option>
-                      <option value="trellis">TRELLIS Cloud</option>
+                      <option value="sf3d" selected>Stable Fast 3D (local)</option>
+                      <option value="meshy">Meshy.ai (cloud, needs API key)</option>
                     </select>
                   </div>
                   <div class="form-row">
@@ -205,6 +231,7 @@
                   <div id="ws-3d-source-preview" class="stage-source-img">
                     <div class="preview-placeholder">No image selected</div>
                   </div>
+                  <div id="ws-3d-source-filename" class="viewer-filename"></div>
                 </div>
               </div>
             </details>
@@ -234,21 +261,28 @@
                         <option value="bottom">Bottom</option>
                         <option value="iso">Iso</option>
                       </select>
+                      <select data-act="pivot" title="Pivot point">
+                        <option value="bottom" selected>Pivot: bottom</option>
+                        <option value="center">Pivot: center</option>
+                        <option value="top">Pivot: top</option>
+                      </select>
+                      <button data-act="pivot-show" title="Show pivot axes">&#9737;</button>
                       <button data-act="wire" title="Wireframe">Wire</button>
                       <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
                       <button data-act="grid" class="active" title="Grid">Grid</button>
-                      <button data-act="bones" title="Show skeleton">Bones</button>
+                      <button data-act="xray" title="X-Ray (semi-transparent mesh)">X-Ray</button>
                       <select data-act="bg" title="Background">
                         <option value="dark" selected>Dark</option>
                         <option value="studio">Studio</option>
                         <option value="black">Black</option>
                         <option value="gray">Gray</option>
                       </select>
-                      <button data-act="shadows" class="active" title="Shadows">Shadows</button>
+                      <button data-act="shadows" title="Toggle shadows">Shadows</button>
                       <span class="light-label" title="Light intensity">&#9728;</span>
                       <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
                     </div>
                   </div>
+                  <div id="ws-mesh-filename" class="viewer-filename"></div>
                   <div id="ws-use-for-rig-bar" class="use-for-bar hidden">
                     <button id="ws-use-for-rig-btn" class="primary-btn">Use this mesh for Rig &rarr;</button>
                   </div>
@@ -256,7 +290,6 @@
                 <div class="stage-edit-side">
                   <div id="ws-mesh-versions" class="versions-strip"></div>
                   <div class="step-tools-row">
-                    <button id="ws-mesh-refine-btn" class="ghost-btn">&#10024; Refine with AI</button>
                     <button id="ws-mesh-export-btn" class="ghost-btn">&#128190; Export...</button>
                     <button id="ws-mesh-blender-btn" class="ghost-btn">&#129704; Open in Blender</button>
                     <button id="ws-mesh-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
@@ -282,33 +315,25 @@
                 <span class="stage-title">Create new</span>
                 <span class="stage-hint">Bind a skeleton to your mesh for animation</span>
               </summary>
-              <div class="stage-body">
-                <div class="form-row">
-                  <label>Template</label>
-                  <select id="ws-rig-template">
-                    <option value="">Loading templates...</option>
-                  </select>
+              <div class="stage-body stage-create-with-source">
+                <div class="stage-create-form">
+                  <div class="form-row">
+                    <label>Engine</label>
+                    <select id="ws-rig-engine">
+                      <option value="unirig" selected>UniRig (local)</option>
+                      <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+                    </select>
+                  </div>
+                  <button id="ws-generate-rig-ai" class="primary-btn" disabled>Generate Rig</button>
                 </div>
-                <div class="form-row">
-                  <label>Skinning</label>
-                  <select id="ws-rig-skin-method">
-                    <option value="auto" selected>Auto weights (fast)</option>
-                    <option value="heat">Heat diffusion (better)</option>
-                    <option value="voxel">Voxel weights (complex)</option>
-                  </select>
+                <div class="stage-create-source">
+                  <div class="stage-source-label">Source mesh for rig</div>
+                  <div id="ws-rig-source-preview" class="stage-source-img stage-source-mesh">
+                    <canvas id="ws-rig-source-canvas"></canvas>
+                    <div class="preview-placeholder" id="ws-rig-source-placeholder">No mesh selected</div>
+                  </div>
+                  <div id="ws-rig-source-filename" class="viewer-filename"></div>
                 </div>
-                <div class="form-row">
-                  <label>Smoothing</label>
-                  <input type="range" id="ws-rig-skin-smooth" min="0" max="10" value="3" style="flex:1; accent-color: var(--accent);" />
-                  <span id="ws-rig-skin-smooth-val" style="min-width: 24px; font-size: 11px; color: var(--text-2); text-align: right;">3</span>
-                </div>
-                <div class="form-row check-row">
-                  <label class="inline-check">
-                    <input type="checkbox" id="ws-rig-mirror-x" checked />
-                    Mirror weights (X axis)
-                  </label>
-                </div>
-                <button id="ws-generate-rig" class="primary-btn" disabled>Generate Rig</button>
               </div>
             </details>
 
@@ -319,33 +344,83 @@
                 <span class="stage-title">Edit selected</span>
                 <span class="stage-hint">Pick a rig, test animation or export</span>
               </summary>
-              <div class="stage-body stage-edit-body">
+              <div class="stage-body stage-edit-rig-body">
                 <div class="step-preview-col">
-                  <div class="step-card-preview" id="step3-preview">
-                    <div class="preview-placeholder">No rig yet</div>
+                  <div id="ws-rig-anim-bar" class="rig-anim-bar hidden">
+                    <select id="ws-rig-anim-select"><option value="">No animation</option></select>
+                    <button id="ws-rig-anim-play" class="ghost-btn">&#9654; Play</button>
                   </div>
+                  <div class="step-card-preview large" id="step3-preview">
+                    <canvas id="ws-rig-canvas"></canvas>
+                    <div class="preview-placeholder" id="step3-placeholder">No rig yet</div>
+                    <button id="ws-rig-expand-btn" class="preview-expand-btn hidden" title="View rig fullscreen">&#x26F6;</button>
+                    <div id="ws-rig-toolbar" class="mesh-toolbar hidden">
+                      <button data-act="reset" title="Reset camera">&#10227;</button>
+                      <select data-act="view" title="Camera view">
+                        <option value="">View</option>
+                        <option value="front">Front</option>
+                        <option value="back">Back</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                        <option value="top">Top</option>
+                        <option value="bottom">Bottom</option>
+                        <option value="iso">Iso</option>
+                      </select>
+                      <select data-act="pivot" title="Pivot point">
+                        <option value="bottom" selected>Pivot: bottom</option>
+                        <option value="center">Pivot: center</option>
+                        <option value="top">Pivot: top</option>
+                      </select>
+                      <button data-act="pivot-show" title="Show pivot axes">&#9737;</button>
+                      <button data-act="wire" title="Wireframe">Wire</button>
+                      <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
+                      <button data-act="grid" class="active" title="Grid">Grid</button>
+                      <button data-act="bones" title="Show skeleton">Bones</button>
+                      <button data-act="xray" title="X-Ray (semi-transparent mesh)">X-Ray</button>
+                      <select data-act="bg" title="Background">
+                        <option value="dark" selected>Dark</option>
+                        <option value="studio">Studio</option>
+                        <option value="black">Black</option>
+                        <option value="gray">Gray</option>
+                      </select>
+                      <button data-act="shadows" title="Toggle shadows">Shadows</button>
+                      <span class="light-label" title="Light intensity">&#9728;</span>
+                      <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
+                    </div>
+                  </div>
+                  <div id="ws-rig-filename" class="viewer-filename"></div>
                 </div>
                 <div class="stage-edit-side">
+                  <!-- 1) Version thumbnails -->
                   <div id="ws-rig-versions" class="versions-strip"></div>
-                  <div class="step-tools-row">
-                    <button id="ws-rig-test-btn" class="ghost-btn">&#9654; Test animation</button>
-                    <button id="ws-rig-reskin-btn" class="ghost-btn">&#127814; Re-skin only</button>
-                    <button id="ws-rig-unreal-btn" class="ghost-btn">&#127918; Export to Unreal</button>
-                    <button id="ws-rig-blender-btn" class="ghost-btn">&#129704; Edit in Blender</button>
-                    <button id="ws-rig-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
-                  </div>
-                  <details class="sub-details" open>
-                    <summary>Landmarks (manual placement)</summary>
-                    <div class="sub-details-body">
-                      <p class="step-hint">Click a body part below, then click on the 3D mesh in the <b>3D Mesh</b> card above to place its marker. The auto-rigger uses these to align the skeleton.</p>
-                      <div class="step-tools-row">
-                        <button id="ws-lm-auto" class="ghost-btn">Auto-detect</button>
-                        <button id="ws-lm-clear" class="ghost-btn">Clear all</button>
-                        <button id="ws-lm-guided" class="ghost-btn">&#9758; Guided placement</button>
-                      </div>
-                      <div id="ws-lm-list" class="lm-list"></div>
+                  <!-- 2) Landmarks — opens the fullscreen manual modal -->
+                  <div class="rig-action-group">
+                    <div class="rig-action-label">Landmarks</div>
+                    <div class="rig-action-row">
+                      <button id="ws-lm-manual" class="ghost-btn">&#9999; Manual placement</button>
                     </div>
-                  </details>
+                  </div>
+                  <!-- 3) Preview / Modify / Export actions, split onto 3 rows -->
+                  <div class="rig-action-group">
+                    <div class="rig-action-label">Preview</div>
+                    <div class="rig-action-row">
+                      <button id="ws-rig-test-btn" class="ghost-btn">&#9654; Test animation</button>
+                    </div>
+                  </div>
+                  <div class="rig-action-group">
+                    <div class="rig-action-label">Modify</div>
+                    <div class="rig-action-row">
+                      <button id="ws-rig-reskin-btn" class="ghost-btn">&#127814; Re-skin only</button>
+                      <button id="ws-rig-blender-btn" class="ghost-btn">&#129704; Edit in Blender</button>
+                    </div>
+                  </div>
+                  <div class="rig-action-group">
+                    <div class="rig-action-label">Export</div>
+                    <div class="rig-action-row">
+                      <button id="ws-rig-unreal-btn" class="ghost-btn">&#127918; Export to Unreal</button>
+                      <button id="ws-rig-folder-btn" class="ghost-btn">&#128193; Show in folder</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </details>
@@ -373,11 +448,96 @@
     </div>
 
     <!-- ============================================================
+         LANDMARKS FULLSCREEN MODAL
+         ============================================================ -->
+    <div id="lm-fullscreen" class="hidden">
+      <button id="lm-fs-close" title="Close">&#10005;</button>
+      <div id="lm-fs-info" class="viewer-info-overlay"></div>
+      <div class="lm-fs-viewer lm-fs-viewer-split">
+        <div class="lm-fs-subviewer" data-pane="a">
+          <canvas id="lm-fs-canvas" data-pane="a"></canvas>
+          <div class="lm-fs-view-toolbar" data-pane="a">
+            <button data-view="front"  title="Front view">Front</button>
+            <button data-view="back"   title="Back view">Back</button>
+            <button data-view="left"   title="Left side">Left</button>
+            <button data-view="right"  title="Right side">Right</button>
+            <button data-view="top"    title="Top view">Top</button>
+            <button data-view="bottom" title="Bottom view">Bottom</button>
+            <button data-view="iso"    title="Isometric">Iso</button>
+          </div>
+          <div class="lm-fs-pane-label" id="lm-fs-pane-label-a">FRONT</div>
+        </div>
+        <div class="lm-fs-subviewer" data-pane="b">
+          <canvas id="lm-fs-canvas-b" data-pane="b"></canvas>
+          <div class="lm-fs-view-toolbar" data-pane="b">
+            <button data-view="front"  title="Front view">Front</button>
+            <button data-view="back"   title="Back view">Back</button>
+            <button data-view="left"   title="Left side">Left</button>
+            <button data-view="right"  title="Right side">Right</button>
+            <button data-view="top"    title="Top view">Top</button>
+            <button data-view="bottom" title="Bottom view">Bottom</button>
+            <button data-view="iso"    title="Isometric">Iso</button>
+          </div>
+          <div class="lm-fs-pane-label" id="lm-fs-pane-label-b">RIGHT</div>
+        </div>
+        <div id="lm-fs-instruction">Click a body part on the right, then click on either view to place its marker.</div>
+        <div id="lm-fs-undo-toolbar" class="lm-fs-undo-toolbar">
+          <button id="lm-fs-undo" title="Undo (Ctrl+Z)">&#8630; Undo</button>
+          <button id="lm-fs-redo" title="Redo (Ctrl+Y)">&#8631; Redo</button>
+        </div>
+      </div>
+      <div class="lm-fs-side">
+        <div class="lm-fs-side-header">
+          <div class="lm-fs-title">Landmarks</div>
+          <div class="lm-fs-actions">
+            <button id="lm-fs-auto" class="ghost-btn">Auto-detect</button>
+            <button id="lm-fs-guided" class="ghost-btn">&#9758; Guided</button>
+            <button id="lm-fs-clear" class="ghost-btn">Clear all</button>
+          </div>
+          <button id="lm-fs-regen-rig" class="primary-btn lm-fs-regen-btn">&#10227; Re-generate rig with these landmarks</button>
+        </div>
+        <div class="lm-fs-silhouettes">
+          <svg viewBox="0 0 100 200" class="lm-silhouette" id="lm-fs-svg-front" aria-label="Front view">
+            <text x="50" y="14" text-anchor="middle" font-size="9" fill="#7c7c95">FRONT</text>
+            <!-- humanoid front silhouette -->
+            <circle cx="50" cy="38" r="13" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 35 55 L 65 55 L 70 110 L 60 110 L 60 165 L 53 165 L 53 110 L 47 110 L 47 165 L 40 165 L 40 110 L 30 110 Z"
+                  fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1" />
+            <path d="M 35 60 L 18 105 L 22 110 L 38 70 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 65 60 L 82 105 L 78 110 L 62 70 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <!-- Feet (front view = two small ovals at the base of each leg) -->
+            <ellipse cx="42" cy="176" rx="6" ry="3" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <ellipse cx="58" cy="176" rx="6" ry="3" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <g id="lm-fs-svg-front-dots"></g>
+          </svg>
+          <svg viewBox="0 0 100 200" class="lm-silhouette" id="lm-fs-svg-side" aria-label="Side view">
+            <text x="50" y="14" text-anchor="middle" font-size="9" fill="#7c7c95">SIDE</text>
+            <circle cx="52" cy="38" r="13" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 42 55 L 58 55 L 60 110 L 56 110 L 60 165 L 50 165 L 52 110 L 48 110 L 50 165 L 40 165 L 42 110 Z"
+                  fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 50 60 L 42 105 L 46 110 L 54 65 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <!-- Foot profile (side view = heel + sole extending forward) -->
+            <path d="M 46 165 L 46 176 L 64 176 L 66 172 L 54 165 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <g id="lm-fs-svg-side-dots"></g>
+          </svg>
+        </div>
+        <div id="lm-fs-list" class="lm-list lm-fs-list"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
          3D LIGHTBOX (fullscreen mesh preview)
          ============================================================ -->
     <div id="lightbox-3d" class="hidden">
       <button id="lightbox-3d-close" title="Close">&#10005;</button>
+      <button id="lightbox-3d-prev" class="lightbox-nav prev" title="Previous (←)">&#10094;</button>
+      <button id="lightbox-3d-next" class="lightbox-nav next" title="Next (→)">&#10095;</button>
+      <div id="lightbox-3d-info" class="viewer-info-overlay"></div>
       <canvas id="lightbox-3d-canvas"></canvas>
+      <div id="lightbox-3d-bottom">
+        <div id="lightbox-3d-filename"></div>
+        <button id="lightbox-3d-use" class="primary-btn">Use this for next step &rarr;</button>
+      </div>
       <div id="lightbox-3d-toolbar" class="mesh-toolbar lb3d">
         <button data-act="reset" title="Reset camera">&#10227;</button>
         <select data-act="view" title="Camera view">
@@ -390,16 +550,25 @@
           <option value="bottom">Bottom</option>
           <option value="iso">Iso</option>
         </select>
+        <select data-act="pivot" title="Pivot point">
+          <option value="bottom" selected>Pivot: bottom</option>
+          <option value="center">Pivot: center</option>
+          <option value="top">Pivot: top</option>
+        </select>
+        <button data-act="pivot-show" title="Show pivot axes">&#9737;</button>
+        <button data-act="lm-show" id="lb3d-lm-btn" class="active hidden" title="Show landmarks">&#11042;</button>
         <button data-act="wire" title="Wireframe">Wire</button>
         <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
         <button data-act="grid" class="active" title="Grid">Grid</button>
-        <button data-act="bones" title="Show skeleton">Bones</button>
+        <button data-act="bones" id="lb3d-bones-btn" class="hidden" title="Show skeleton">Bones</button>
+        <button data-act="xray" title="X-Ray (semi-transparent mesh)">X-Ray</button>
         <select data-act="bg" title="Background">
           <option value="dark" selected>Dark</option>
           <option value="studio">Studio</option>
           <option value="black">Black</option>
           <option value="gray">Gray</option>
         </select>
+        <button data-act="shadows" title="Toggle shadows">Shadows</button>
         <input type="range" data-act="light" min="0" max="200" value="100" title="Light intensity" />
       </div>
     </div>
@@ -409,22 +578,36 @@
          ============================================================ -->
     <div id="lightbox-2" class="hidden">
       <button id="lightbox-2-close" title="Close">&#10005;</button>
+      <button id="lightbox-2-prev" class="lightbox-nav prev" title="Previous (←)">&#10094;</button>
+      <button id="lightbox-2-next" class="lightbox-nav next" title="Next (→)">&#10095;</button>
+      <div id="lightbox-2-info" class="viewer-info-overlay"></div>
       <img id="lightbox-2-img" alt="" />
+      <div id="lightbox-2-bottom">
+        <div id="lightbox-2-filename"></div>
+        <button id="lightbox-2-use-3d" class="primary-btn">Use this image for 3D &rarr;</button>
+      </div>
     </div>
 
     <!-- ============================================================
          AUTO INPAINT MODAL (CLIPSeg target + replacement)
          ============================================================ -->
     <div id="modal-auto-inpaint" class="modal-overlay hidden">
-      <div class="modal-card">
+      <div class="modal-card modal-card-wide">
         <h2>Auto Inpaint</h2>
         <p class="modal-subtitle">CLIPSeg detects what to replace from a text description.</p>
-        <label>Target (what to find)</label>
-        <input type="text" id="ai-target" placeholder="hat, shirt, background, sword..." />
-        <label>Replace with (empty = remove)</label>
-        <input type="text" id="ai-replace" placeholder="leather helmet, plain background..." />
-        <label>Detection padding <span id="ai-dilate-val" class="slider-val">15px</span></label>
-        <input type="range" id="ai-dilate" min="0" max="40" value="15" />
+        <div class="modal-with-image">
+          <div class="modal-image-side">
+            <img id="ai-source-img" alt="" />
+          </div>
+          <div class="modal-form-side">
+            <label>Target (what to find)</label>
+            <input type="text" id="ai-target" placeholder="hat, shirt, background, sword..." />
+            <label>Replace with (empty = remove)</label>
+            <input type="text" id="ai-replace" placeholder="leather helmet, plain background..." />
+            <label>Detection padding <span id="ai-dilate-val" class="slider-val">15px</span></label>
+            <input type="range" id="ai-dilate" min="0" max="40" value="15" />
+          </div>
+        </div>
         <div class="modal-actions">
           <button class="ghost-btn" id="ai-cancel">Cancel</button>
           <button class="primary-btn" id="ai-go">Apply</button>
@@ -444,8 +627,83 @@
           <input type="text" id="set-blender-path" placeholder="C:\Program Files\Blender Foundation\Blender 4.x\blender.exe" />
           <button id="set-blender-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
         </div>
+        <label>Meshy.ai API key <span style="font-weight:normal; color:var(--text-2); font-size:11px;">(optional, for cloud generation)</span></label>
+        <div style="display:flex; gap:8px;">
+          <input type="password" id="set-meshy-api-key" placeholder="msy_..." autocomplete="off" style="flex:1;" />
+          <button id="set-meshy-test" class="ghost-btn" style="white-space:nowrap;">Test</button>
+        </div>
+        <div class="gpu-limits-hint">
+          Free tier: 200 credits/month, outputs under CC-BY 4.0 (commercial OK with attribution). Get a key at
+          <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">meshy.ai/api</a>.
+        </div>
         <label>GPU</label>
-        <div id="set-gpu-info" style="font-size:12px; color: var(--text-1); padding: 8px 12px; background: var(--bg-0); border-radius: var(--radius-sm); border: 1px solid var(--border);">Loading...</div>
+        <div id="set-gpu-card">
+          <div id="set-gpu-name">Loading...</div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">VRAM</span>
+              <span class="gpu-stat-val" id="set-gpu-vram-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="vram">
+              <div class="gpu-bar-fill" id="set-gpu-vram-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-vram-limit" style="left:90%" title="Drag to set max VRAM allowed"></div>
+            </div>
+          </div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">GPU usage</span>
+              <span class="gpu-stat-val" id="set-gpu-util-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="util">
+              <div class="gpu-bar-fill" id="set-gpu-util-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-util-limit" style="left:95%" title="Drag to set max GPU usage allowed"></div>
+            </div>
+          </div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">Temperature</span>
+              <span class="gpu-stat-val" id="set-gpu-temp-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="temp">
+              <div class="gpu-bar-fill" id="set-gpu-temp-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-temp-limit" style="left:80%" title="Drag to set max temperature allowed"></div>
+            </div>
+          </div>
+          <div class="gpu-limits-hint">
+            Drag the white markers to set limits. Jobs are queued until all limits are satisfied. VRAM is also hard-capped in Python via PyTorch.
+          </div>
+        </div>
+        <label>System RAM</label>
+        <div id="set-ram-card">
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">RAM usage</span>
+              <span class="gpu-stat-val" id="set-ram-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="ram">
+              <div class="gpu-bar-fill" id="set-ram-fill"></div>
+              <div class="gpu-bar-limit" id="set-ram-limit" style="left:85%" title="Drag to set max RAM usage allowed"></div>
+            </div>
+          </div>
+          <div class="gpu-limits-hint">
+            Jobs are blocked when system RAM exceeds this limit. Python subprocesses receive a hard cap via FABMESH_RAM_LIMIT_MB.
+          </div>
+        </div>
+        <label>Logs</label>
+        <button id="set-open-logs" class="ghost-btn" style="width:100%;">&#128193; Open logs folder</button>
+
+        <label>Python processes</label>
+        <div id="set-python-status" class="python-status">
+          <div class="ps-row">
+            <span class="ps-label">Active subprocesses</span>
+            <span class="ps-val" id="set-python-count">--</span>
+          </div>
+          <div class="ps-row">
+            <span class="ps-label">SDXL server</span>
+            <span class="ps-val" id="set-python-sdxl">--</span>
+          </div>
+        </div>
+        <button id="set-kill-python" class="ghost-btn danger" style="width:100%;">&#128369; Kill stuck Python (preserves SDXL)</button>
         <div class="modal-actions">
           <button class="ghost-btn" id="set-close">Close</button>
         </div>
@@ -487,7 +745,7 @@
     <div id="modal-export-mesh" class="modal-overlay hidden">
       <div class="modal-card">
         <h2>Export 3D mesh</h2>
-        <p class="modal-subtitle">Pick a format and a destination filename.</p>
+        <p class="modal-subtitle">Pick a format and where to save the file.</p>
         <label>Format</label>
         <select id="exp-format">
           <option value="glb">GLB (web/Three.js)</option>
@@ -496,10 +754,13 @@
           <option value="obj">OBJ (universal)</option>
           <option value="stl">STL (3D printing)</option>
           <option value="ply">PLY (point cloud)</option>
-          <option value="fbx_unreal">FBX for Unreal Engine</option>
+          <option value="fbx_unreal">FBX for Unreal Engine (cm + Y-up)</option>
         </select>
-        <label>Filename</label>
-        <input type="text" id="exp-filename" placeholder="my_mesh" />
+        <label>Output path</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="exp-path" placeholder="(default: meshes/my_mesh.glb)" style="flex:1;" />
+          <button id="exp-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
+        </div>
         <div class="modal-actions">
           <button class="ghost-btn" id="exp-cancel">Cancel</button>
           <button class="primary-btn" id="exp-go">Export</button>
@@ -532,6 +793,12 @@
          ============================================================ -->
     <div id="modal-job-details" class="modal-overlay hidden">
       <div class="modal-card" style="max-width: 480px;">
+        <div id="job-gpu-monitor" class="job-gpu-monitor">
+          <div class="jgm-row"><span class="jgm-label">VRAM</span><span class="jgm-val" id="jgm-vram">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">GPU</span><span class="jgm-val" id="jgm-util">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">TEMP</span><span class="jgm-val" id="jgm-temp">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">RAM</span><span class="jgm-val" id="jgm-ram">--</span></div>
+        </div>
         <div class="job-details-head">
           <img id="jd-ref-img" alt="" />
           <div class="job-details-head-text">
@@ -551,8 +818,18 @@
           <div class="jd-progress-bar"><div class="jd-progress-fill" id="jd-progress-fill"></div></div>
           <div class="jd-progress-pct" id="jd-progress-pct">0%</div>
         </div>
+        <div id="jd-first-run-hint" class="jd-first-run-hint hidden">
+          <span class="jd-hint-icon">&#9432;</span>
+          <span class="jd-hint-text">
+            First run after idle loads <strong>~7&nbsp;GB</strong> into VRAM (~30&ndash;60&nbsp;s).
+            Subsequent runs are much faster (a few seconds).
+            Models are unloaded after 5&nbsp;min of inactivity to free VRAM.
+          </span>
+        </div>
+        <div id="jd-error-box" class="jd-error-box hidden"></div>
         <div class="modal-actions">
           <button class="ghost-btn" id="job-details-close">Close</button>
+          <button class="primary-btn" id="job-details-open-settings" style="display:none; background:linear-gradient(135deg,#6a5acd,#9370db);">&#9881; Open Settings</button>
           <button class="primary-btn danger" id="job-details-cancel">Cancel task</button>
         </div>
       </div>
@@ -576,18 +853,25 @@
          MODIFY IMAGE MODAL (img2img)
          ============================================================ -->
     <div id="modal-modify-image" class="modal-overlay hidden">
-      <div class="modal-card">
+      <div class="modal-card modal-card-wide">
         <h2>Modify image</h2>
         <p class="modal-subtitle">Describe the changes you want. The AI keeps the composition.</p>
-        <label>Modification prompt</label>
-        <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
-        <label>Engine</label>
-        <select id="mod-engine">
-          <option value="local-sdxl" selected>Local GPU (SDXL)</option>
-          <option value="pollinations">Pollinations (cloud)</option>
-        </select>
-        <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
-        <input type="range" id="mod-strength" min="30" max="95" value="55" />
+        <div class="modal-with-image">
+          <div class="modal-image-side">
+            <img id="mod-source-img" alt="" />
+          </div>
+          <div class="modal-form-side">
+            <label>Modification prompt</label>
+            <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
+            <label>Engine</label>
+            <select id="mod-engine">
+              <option value="local-sdxl" selected>RealVis XL (local)</option>
+              <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+            </select>
+            <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
+            <input type="range" id="mod-strength" min="30" max="95" value="55" />
+          </div>
+        </div>
         <div class="modal-actions">
           <button class="ghost-btn" id="mod-cancel">Cancel</button>
           <button class="primary-btn" id="mod-apply">Modify image</button>
@@ -700,6 +984,7 @@
       }
     }
   </script>
+  <script src="test_api_client.js"></script>
   <script src="index2-edit-tools.js"></script>
   <script type="module" src="index2.js"></script>
 </body>

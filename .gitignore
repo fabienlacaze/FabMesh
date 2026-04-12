@@ -35,3 +35,15 @@ cuda-keyring_1.1-1_all.deb
 scripts/_*.py
 scripts/export_*.py
 scripts/_prompt_*.txt
+
+# Secrets / tokens
+.test_api_token
+
+# Claude Code session data
+.claude/
+
+# Backup directories
+_cleanup_backup_*/
+_commercial_audit_backup_*/
+_legacy_backup/
+*.backup_*

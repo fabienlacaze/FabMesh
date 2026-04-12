@@ -1,0 +1,187 @@
+================================================================================
+ FabMesh / MeshyMyself — Third-Party Licenses and Attributions
+================================================================================
+
+FabMesh bundles and/or depends on the following third-party software and model
+weights. Each component is distributed under its own license. Full license
+texts are available at the URLs listed below. This document is provided to
+satisfy the attribution requirements of those licenses.
+
+FabMesh itself redistributes NO third-party 3D assets, character models,
+skeletons, animations, or textures. All bundled rig templates under
+`scripts/rig_templates/` are CC0, authored by the FabMesh team.
+
+--------------------------------------------------------------------------------
+ 1. Electron
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/electron/electron
+FabMesh uses Electron as the desktop runtime (renderer + main process). Copyright
+(c) Electron contributors and Copyright (c) 2013-present GitHub Inc. Permission
+is granted free of charge under the MIT License. Full license text:
+https://github.com/electron/electron/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 2. three.js
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/mrdoob/three.js
+FabMesh uses three.js for the in-app 3D mesh viewer and interactive previews.
+Copyright (c) 2010-present three.js authors. MIT License. Full license text:
+https://github.com/mrdoob/three.js/blob/dev/LICENSE
+
+--------------------------------------------------------------------------------
+ 3. PyTorch
+--------------------------------------------------------------------------------
+License: BSD-3-Clause
+URL:     https://github.com/pytorch/pytorch
+FabMesh's Python bridges use PyTorch for GPU-accelerated inference of the
+diffusion and mesh-generation models. Copyright (c) Meta Platforms, Inc. and
+affiliates. BSD-3-Clause. Full license text:
+https://github.com/pytorch/pytorch/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 4. Hugging Face Diffusers
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://github.com/huggingface/diffusers
+FabMesh uses the Diffusers library to load and run Stable Diffusion XL and
+related diffusion pipelines. Copyright (c) Hugging Face Inc. Licensed under
+Apache License 2.0. Full license text:
+https://github.com/huggingface/diffusers/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 5. Hugging Face Transformers
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://github.com/huggingface/transformers
+FabMesh uses Transformers for text encoders (CLIP, T5) referenced by the
+diffusion pipelines. Copyright (c) Hugging Face Inc. Apache-2.0. Full license:
+https://github.com/huggingface/transformers/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 6. trimesh
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/mikedh/trimesh
+FabMesh uses trimesh for mesh loading, cleanup, simplification and export.
+Copyright (c) 2013 Michael Dawson-Haggerty. MIT License. Full license text:
+https://github.com/mikedh/trimesh/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 7. pygltflib
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://gitlab.com/dodgyville/pygltflib
+FabMesh uses pygltflib for glTF/GLB serialization of rigged meshes. MIT License.
+Full license text: https://gitlab.com/dodgyville/pygltflib/-/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 8. UniRig
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/VAST-AI-Research/UniRig
+FabMesh uses UniRig as its automatic skeleton/skinning backend. Copyright (c)
+VAST AI Research. MIT License. Full license text:
+https://github.com/VAST-AI-Research/UniRig/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 9. TripoSR
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/VAST-AI-Research/TripoSR
+FabMesh uses TripoSR for single-image-to-3D mesh generation. Copyright (c)
+Tripo AI and Stability AI. MIT License. Full license text:
+https://github.com/VAST-AI-Research/TripoSR/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 10. Stable Diffusion XL (SDXL base 1.0)
+--------------------------------------------------------------------------------
+License: CreativeML Open RAIL++-M
+URL:     https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0
+Model weights are not redistributed by FabMesh; they are downloaded on first
+run from Hugging Face and cached locally. Copyright (c) Stability AI. Licensed
+under the CreativeML Open RAIL++-M License. Commercial use is permitted subject
+to the use-based restrictions in the license. Full license text:
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 11. RealVis XL V4.0
+--------------------------------------------------------------------------------
+License: CreativeML Open RAIL++-M
+URL:     https://huggingface.co/SG161222/RealVisXL_V4.0
+RealVis XL V4.0 is a community photorealistic fine-tune of SDXL used as
+FabMesh's primary local image-generation engine. Model weights are downloaded
+on first run and not redistributed by FabMesh. Licensed under the CreativeML
+Open RAIL++-M License. Commercial use is permitted subject to the use-based
+restrictions in the license. Full license text:
+https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 12. Hunyuan3D
+--------------------------------------------------------------------------------
+License: Tencent Hunyuan Community License
+URL:     https://huggingface.co/tencent/Hunyuan3D-2
+Hunyuan3D weights (if enabled) are downloaded at runtime from Hugging Face and
+governed by the Tencent Hunyuan Community License. FabMesh does not
+redistribute these weights. Full license text:
+https://huggingface.co/tencent/Hunyuan3D-2/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 13. NumPy
+--------------------------------------------------------------------------------
+License: BSD-3-Clause
+URL:     https://github.com/numpy/numpy
+FabMesh depends on NumPy for numerical arrays used throughout the Python
+bridges. Copyright (c) 2005-present NumPy Developers. BSD-3-Clause. Full
+license text: https://github.com/numpy/numpy/blob/main/LICENSE.txt
+
+--------------------------------------------------------------------------------
+ 14. SciPy
+--------------------------------------------------------------------------------
+License: BSD-3-Clause
+URL:     https://github.com/scipy/scipy
+FabMesh uses SciPy for geometry and optimization helpers. Copyright (c)
+2001-present SciPy Developers. BSD-3-Clause. Full license text:
+https://github.com/scipy/scipy/blob/main/LICENSE.txt
+
+--------------------------------------------------------------------------------
+ 15. Pillow (PIL)
+--------------------------------------------------------------------------------
+License: HPND (Historical Permission Notice and Disclaimer)
+URL:     https://github.com/python-pillow/Pillow
+FabMesh uses Pillow for image I/O in the diffusion and 3D bridges. Copyright
+(c) 2010 by Jeffrey A. Clark and contributors; Copyright (c) 1997-2011 by
+Secret Labs AB; Copyright (c) 1995-2011 by Fredrik Lundh. HPND license. Full
+license text: https://github.com/python-pillow/Pillow/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 16. rembg
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/danielgatis/rembg
+FabMesh uses rembg for background removal on generated reference images before
+TripoSR/Hunyuan3D reconstruction. Copyright (c) Daniel Gatis. MIT License.
+Full license text: https://github.com/danielgatis/rembg/blob/main/LICENSE.txt
+
+--------------------------------------------------------------------------------
+ 17. Blender (external dependency — not bundled)
+--------------------------------------------------------------------------------
+License: GNU General Public License v3 (GPL-3.0)
+URL:     https://www.blender.org/about/license/
+FabMesh invokes Blender as an external subprocess for FBX/GLB import/export and
+armature operations. Blender is NOT bundled with FabMesh. The end user must
+install Blender independently from https://www.blender.org/download/. Because
+Blender is not linked or bundled, the GPL does not propagate to FabMesh.
+
+--------------------------------------------------------------------------------
+ Bundled rig templates
+--------------------------------------------------------------------------------
+All files under `scripts/rig_templates/skm/*.bones.json`,
+`scripts/rig_templates/*.json` (humanoid/quadruped/hexapod/octopod JSON) are
+CC0, authored by the FabMesh project for the purpose of rig retargeting.
+You may use, modify, and redistribute them without restriction.
+
+================================================================================
+ End of third-party notices
+================================================================================

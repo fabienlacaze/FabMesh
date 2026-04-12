@@ -363,6 +363,28 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   padding: 14px 18px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.step-card-header:hover {
+  background: var(--bg-3);
+}
+.step-card-header::before {
+  content: "\25BC";
+  color: var(--text-2);
+  font-size: 10px;
+  margin-right: 4px;
+  transition: transform 0.2s;
+}
+.step-card.collapsed .step-card-header::before {
+  transform: rotate(-90deg);
+}
+.step-card.collapsed .step-card-header {
+  border-bottom-color: transparent;
+}
+.step-card.collapsed .step-card-body {
+  display: none;
 }
 .step-card-header h3 {
   font-size: 15px;
@@ -421,6 +443,41 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
+}
+/* Create new = warmer pink/red tint (matches the accent-2 in the gradient) */
+.stage.stage-create {
+  background: linear-gradient(180deg, rgba(233, 69, 96, 0.06), rgba(233, 69, 96, 0.02));
+  border-color: rgba(233, 69, 96, 0.25);
+}
+.stage.stage-create > summary {
+  background: linear-gradient(90deg, rgba(233, 69, 96, 0.08), transparent);
+}
+.stage.stage-create > summary:hover {
+  background: linear-gradient(90deg, rgba(233, 69, 96, 0.16), rgba(233, 69, 96, 0.04));
+}
+.stage.stage-create .stage-icon {
+  background: linear-gradient(135deg, #e94560, #ff6b81);
+}
+.stage.stage-create .stage-body {
+  border-top-color: rgba(233, 69, 96, 0.25);
+}
+
+/* Edit selected = cooler purple/violet tint (matches the accent in the gradient) */
+.stage.stage-edit {
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.06), rgba(168, 85, 247, 0.02));
+  border-color: rgba(168, 85, 247, 0.25);
+}
+.stage.stage-edit > summary {
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.08), transparent);
+}
+.stage.stage-edit > summary:hover {
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.16), rgba(168, 85, 247, 0.04));
+}
+.stage.stage-edit .stage-icon {
+  background: linear-gradient(135deg, #a855f7, #c084fc);
+}
+.stage.stage-edit .stage-body {
+  border-top-color: rgba(168, 85, 247, 0.25);
 }
 .stage > summary {
   list-style: none;
@@ -483,6 +540,104 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 18px;
+  align-items: start;
+}
+/* Rig edit stage: viewer takes the left half, side panel (versions + landmarks)
+   takes the right half — both stretch to the same height. */
+.stage .stage-body.stage-edit-rig-body {
+  display: grid;
+  grid-template-columns: minmax(380px, 1fr) minmax(380px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+.stage .stage-body.stage-edit-rig-body .step-preview-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stage .stage-body.stage-edit-rig-body .step-card-preview.large {
+  height: 100%;
+  min-height: 420px;
+}
+.stage .stage-body.stage-edit-rig-body .stage-edit-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+/* Rig version strip: small thumbnails in a 6-col grid at the top */
+.stage .stage-body.stage-edit-rig-body #ws-rig-versions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 56px);
+  gap: 6px;
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+.stage .stage-body.stage-edit-rig-body #ws-rig-versions .version-thumb {
+  width: 56px;
+  height: 56px;
+}
+/* Landmarks list inside the side panel: 2 columns, scrollable */
+.stage .stage-body.stage-edit-rig-body #ws-lm-list {
+  grid-template-columns: 1fr 1fr;
+  max-height: 380px;
+}
+
+/* Action groups (Landmarks / Preview / Modify / Export) in the rig side panel.
+   Each group has a small category label and a row of buttons that wrap to a
+   new line if needed. */
+.rig-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rig-action-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+  padding-left: 2px;
+}
+.rig-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rig-action-row .ghost-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+/* Rig animation player bar (above the viewer) */
+.rig-anim-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+.rig-anim-bar.hidden { display: none; }
+.rig-anim-bar select {
+  flex: 1;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+.rig-anim-bar .ghost-btn {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
 }
 /* Create stage with source image on the right */
 .stage .stage-body.stage-create-with-source {
@@ -529,10 +684,82 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   color: var(--text-3);
   font-size: 11px;
 }
+.viewer-filename {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-2);
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.viewer-filename:empty { display: none; }
+
+/* Floating info overlay for the large viewers (image lightbox, 3D lightbox,
+   landmarks fullscreen). Sits in the top-left corner with a subtle backdrop. */
+.viewer-info-overlay {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 20;
+  background: rgba(12, 12, 22, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.55;
+  max-width: 320px;
+  pointer-events: none;
+  user-select: text;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.viewer-info-overlay:not(:empty) { opacity: 1; }
+.viewer-info-overlay .vi-title {
+  display: block;
+  color: #e8e8ff;
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 3px;
+  word-break: break-all;
+  white-space: normal;
+}
+.viewer-info-overlay .vi-row {
+  display: block;
+  color: var(--text-3);
+}
+.viewer-info-overlay .vi-row b {
+  color: #c9b4ff;
+  font-weight: 500;
+}
+
+.stage-source-mesh {
+  position: relative;
+}
+.stage-source-mesh canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.stage-source-mesh .preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .stage .stage-edit-side {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  align-self: flex-start;
 }
 /* Make the form labels in the create stage uniform width */
 .stage .form-row > label:not(.inline-check) {
@@ -566,6 +793,22 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-direction: column;
   gap: 8px;
 }
+/* Fullwidth elements under the edit-stage 2-col grid (landmarks, action row) */
+.sub-details.stage-edit-fullwidth,
+.step-tools-row.stage-edit-fullwidth {
+  margin: 0 18px 18px 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.step-tools-row.stage-edit-fullwidth {
+  padding-top: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sub-details.stage-edit-fullwidth #ws-lm-list {
+  grid-template-columns: repeat(4, 1fr);
+  max-height: none;
+}
 .step-preview-col {
   display: flex;
   flex-direction: column;
@@ -587,6 +830,18 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border: 1px solid var(--success);
   box-shadow: none;
   opacity: 1;
+}
+.use-for-bar .primary-btn.used-state {
+  background: var(--bg-3);
+  color: var(--success);
+  border: 1px solid var(--success);
+  box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.1);
+}
+.use-for-bar .primary-btn.used-state:hover {
+  background: var(--success);
+  color: var(--bg-0);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(74, 222, 128, 0.4);
 }
 .step-card-preview {
   background: var(--bg-2);
@@ -838,6 +1093,46 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   max-width: 92vw;
   box-shadow: var(--shadow-pop);
 }
+.modal-card.modal-card-wide {
+  width: 760px;
+}
+.modal-with-image {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  margin-top: 12px;
+}
+.modal-image-side {
+  background: var(--bg-0);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 280px;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.1);
+}
+.modal-image-side img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.modal-image-side img:not([src]),
+.modal-image-side img[src=""] {
+  display: none;
+}
+.modal-form-side {
+  display: flex;
+  flex-direction: column;
+}
+.modal-form-side label {
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+.modal-form-side label:first-child {
+  margin-top: 0;
+}
 .modal-card h2 {
   font-size: 20px;
   margin-bottom: 6px;
@@ -946,6 +1241,182 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   font-weight: 700;
   text-transform: none;
 }
+
+/* GPU stats card in Settings modal */
+#set-gpu-card {
+  padding: 12px 14px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#set-gpu-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.gpu-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.gpu-stat-label {
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.gpu-stat-val {
+  color: var(--text-0);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.gpu-bar {
+  height: 12px;
+  background: var(--bg-3);
+  border-radius: 6px;
+  overflow: visible;
+  border: 1px solid var(--border);
+  position: relative;
+}
+.gpu-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #fbbf24 60%, #f87171 90%);
+  width: 0;
+  transition: width 0.4s;
+  border-radius: 6px;
+}
+.gpu-bar-limit {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 4px;
+  background: white;
+  border: 1px solid #1d1d2c;
+  border-radius: 2px;
+  cursor: ew-resize;
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.15), 0 0 8px rgba(255,255,255,0.5);
+  z-index: 2;
+}
+.gpu-bar-limit::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid white;
+  filter: drop-shadow(0 0 2px rgba(255,255,255,0.5));
+}
+.gpu-bar-limit:hover {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.3), 0 0 12px rgba(168,85,247,0.6);
+}
+/* Live value tooltip shown while dragging a GPU/VRAM/temp/RAM slider handle */
+.gpu-bar-limit-tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: rgba(20, 20, 30, 0.95);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Segoe UI', sans-serif;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6), 0 0 8px rgba(168,85,247,0.3);
+  z-index: 10;
+}
+.gpu-bar-limit-tip.visible {
+  opacity: 1;
+}
+.gpu-bar-limit-tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--accent);
+}
+.gpu-bar.over-limit .gpu-bar-fill {
+  background-image: none !important;
+  background-color: var(--error) !important;
+  animation: gpuBarPulse 1s ease-in-out infinite;
+}
+@keyframes gpuBarPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7); }
+  50%      { box-shadow: 0 0 0 4px rgba(248, 113, 113, 0); }
+}
+.gpu-bar.over-limit {
+  border-color: var(--error);
+}
+.gpu-limits-hint {
+  font-size: 10px;
+  color: var(--text-3);
+  font-style: italic;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Danger ghost button (red) — for destructive actions like Kill stuck Python */
+.ghost-btn.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+.ghost-btn.danger:hover {
+  background: var(--error);
+  color: white;
+  border-color: var(--error);
+}
+
+/* Python processes status block */
+.python-status {
+  padding: 10px 14px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ps-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+.ps-label {
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.ps-val {
+  color: var(--text-0);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ps-val.warn { color: var(--warning); }
+.ps-val.ok { color: var(--success); }
+.ps-val.error { color: var(--error); }
 .modal-card input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
@@ -1006,6 +1477,17 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border-bottom: 1px solid var(--border);
   font-weight: 600;
   font-size: 12px;
+  gap: 8px;
+}
+.queue-badge {
+  background: var(--warning);
+  color: #111;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 #jobs-list-2 {
   overflow-y: auto;
@@ -1080,7 +1562,62 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .job-item-2 { cursor: pointer; transition: background 0.15s; }
 .job-item-2:hover { background: var(--bg-3); }
 
+/* GPU mini monitor inside the job details modal */
+.job-gpu-monitor {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(15, 15, 26, 0.6);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  cursor: pointer;
+  min-width: 130px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.job-gpu-monitor:hover {
+  border-color: var(--accent);
+  background: rgba(25, 25, 40, 0.85);
+}
+.job-gpu-monitor:hover::after {
+  content: "⚙ Open settings";
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--accent);
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.jgm-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  line-height: 1.3;
+}
+.jgm-label {
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.jgm-val {
+  color: var(--text-1);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.jgm-val.warn { color: var(--warning); }
+.jgm-val.error { color: var(--error); }
+
 /* Job details modal */
+.modal-card {
+  position: relative;
+}
 .job-details-head {
   display: flex;
   align-items: center;
@@ -1161,6 +1698,49 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   color: var(--accent);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+/* Info hint shown inside the job-details modal to explain the long first-run
+   of local AI models (model download + VRAM load). Blue-tinted. */
+.jd-first-run-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 6px;
+  color: #c7d2fe;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.jd-hint-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: #a5b4fc;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.jd-hint-text { flex: 1; }
+.jd-hint-text strong { color: #ddd6fe; }
+
+/* Error message box shown inside the job-details modal when a job failed.
+   Red-tinted, monospace-friendly, scrolls if the error is long. */
+.jd-error-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ============================================================
@@ -1279,6 +1859,304 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
 .mesh-toolbar.lb3d .light-label { font-size: 16px; }
 
 /* ============================================================
+   LANDMARKS FULLSCREEN MODAL
+   ============================================================ */
+#lm-fullscreen {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, #1d1d2c 0%, #0b0b14 100%);
+  z-index: 9600;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 0;
+}
+#lm-fullscreen.hidden { display: none; }
+#lm-fs-close {
+  position: absolute;
+  top: 20px;
+  right: 400px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #1d1d2c;
+  border: 2px solid #4a4a6a;
+  color: #f5f5fa;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  transition: all 0.15s;
+}
+#lm-fs-close:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.lm-fs-viewer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lm-fs-viewer canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+/* Split layout: two sub-viewers side-by-side, each with their own canvas,
+   orientation toolbar and pane label. Markers and model are shared (same
+   Three.js scene) so placing in one pane instantly updates the other. */
+.lm-fs-viewer-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.lm-fs-subviewer {
+  position: relative;
+  overflow: hidden;
+  border-right: 1px solid rgba(168, 85, 247, 0.2);
+}
+.lm-fs-subviewer:last-child {
+  border-right: none;
+}
+.lm-fs-subviewer canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.lm-fs-pane-label {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #c9b4ff;
+  background: rgba(20, 20, 36, 0.75);
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 5;
+}
+/* When the split layout is active, the view toolbar sits inside each
+   sub-viewer (not the whole wrapper), so rescope its position. */
+.lm-fs-viewer-split .lm-fs-view-toolbar {
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+/* Instruction pill must float ABOVE both panes; center it on the overall
+   viewer wrapper rather than on a single pane. */
+.lm-fs-viewer-split > #lm-fs-instruction {
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+#lm-fs-instruction {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 36, 0.85);
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--text-1);
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  z-index: 5;
+  /* Stay clear of the info overlay on the left and the close button on the right */
+  max-width: calc(100% - 420px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Inside the landmarks fullscreen specifically, pin the info overlay to a
+   compact width so it doesn't push up against the instruction pill. */
+#lm-fullscreen #lm-fs-info.viewer-info-overlay {
+  max-width: 220px;
+}
+/* Floating view-orientation toolbar at the bottom of the landmarks fullscreen */
+.lm-fs-view-toolbar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background: rgba(20, 20, 36, 0.9);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 6px;
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
+.lm-fs-view-toolbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.lm-fs-view-toolbar button:hover {
+  background: rgba(168, 85, 247, 0.15);
+  color: #e8e8ff;
+  border-color: rgba(168, 85, 247, 0.4);
+}
+.lm-fs-view-toolbar button:active {
+  background: rgba(168, 85, 247, 0.3);
+}
+.lm-fs-view-toolbar button.active {
+  background: rgba(168, 85, 247, 0.45);
+  color: #fff;
+  border-color: #c9b4ff;
+  box-shadow: 0 0 0 1px rgba(201, 180, 255, 0.35);
+}
+/* Undo / Redo floating toolbar. Pinned to the right edge but OVER the view
+   toolbar vertically (~72px up) so it doesn't collide with the pane B
+   orientation toolbar. */
+.lm-fs-undo-toolbar {
+  position: absolute;
+  bottom: 80px;
+  right: 24px;
+  display: flex;
+  gap: 4px;
+  background: rgba(20, 20, 36, 0.9);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 6px;
+  backdrop-filter: blur(8px);
+  z-index: 20;
+}
+.lm-fs-undo-toolbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.lm-fs-undo-toolbar button:hover {
+  background: rgba(168, 85, 247, 0.15);
+  color: #e8e8ff;
+  border-color: rgba(168, 85, 247, 0.4);
+}
+.lm-fs-undo-toolbar button:active {
+  background: rgba(168, 85, 247, 0.3);
+}
+.lm-fs-undo-toolbar button:disabled,
+.lm-fs-undo-toolbar button:disabled:hover {
+  background: transparent;
+  color: var(--text-3);
+  border-color: transparent;
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* Prominent "re-generate rig" CTA inside the landmarks fullscreen sidebar */
+.lm-fs-regen-btn {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 10px 14px;
+}
+.lm-fs-side {
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.lm-fs-side-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.lm-fs-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.lm-fs-actions {
+  display: flex;
+  gap: 6px;
+}
+.lm-fs-actions .ghost-btn {
+  flex: 1;
+  font-size: 11px;
+  height: 30px;
+  padding: 0 10px;
+}
+.lm-fs-silhouettes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.lm-silhouette {
+  width: 100%;
+  height: 220px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.lm-silhouette circle.dot {
+  filter: drop-shadow(0 0 3px currentColor);
+  transition: r 0.12s ease;
+}
+.lm-silhouette circle.dot.hovered {
+  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 2px #fff);
+}
+/* Hint dot + pulsing halo shown on the silhouette while a landmark is armed
+   (waiting for the user to click on the mesh). Helps the user see where the
+   marker is expected to land, especially during Guided placement. */
+.lm-silhouette circle.lm-hint-dot {
+  filter: drop-shadow(0 0 4px currentColor);
+  animation: lmHintDotPulse 1.2s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+.lm-silhouette circle.lm-hint-halo {
+  animation: lmHintHaloPulse 1.2s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes lmHintDotPulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
+}
+@keyframes lmHintHaloPulse {
+  0%      { opacity: 0.9; r: 5; }
+  100%    { opacity: 0;   r: 12; }
+}
+.lm-fs-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 18px 18px 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+/* ============================================================
    3D LIGHTBOX (fullscreen mesh preview)
    ============================================================ */
 #lightbox-3d {
@@ -1320,6 +2198,41 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--accent);
   border-color: var(--accent);
   transform: scale(1.08);
+}
+
+/* Bottom bar for the 3D lightbox: filename + Use button (above the toolbar) */
+#lightbox-3d-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 90px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 11;
+  pointer-events: none;
+}
+#lightbox-3d:hover #lightbox-3d-bottom {
+  opacity: 1;
+  pointer-events: auto;
+}
+#lightbox-3d-filename {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
+  user-select: text;
+}
+#lightbox-3d-bottom .primary-btn {
+  font-size: 13px;
+  padding: 10px 24px;
+  height: auto;
 }
 
 /* ============================================================
@@ -1367,6 +2280,77 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--accent);
   border-color: var(--accent);
   transform: scale(1.08);
+}
+
+/* Prev/Next nav arrows — only visible on hover */
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%) scale(0.85);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(20, 20, 36, 0.85);
+  border: 2px solid var(--border-strong);
+  color: var(--text-0);
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s, background 0.15s, border-color 0.15s;
+  z-index: 11;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+}
+#lightbox-2:hover .lightbox-nav {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+.lightbox-nav.prev { left: 24px; }
+.lightbox-nav.next { right: 24px; }
+.lightbox-nav:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: translateY(-50%) scale(1.1);
+}
+.lightbox-nav:disabled {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* Bottom bar with filename + Use for 3D button */
+#lightbox-2-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 11;
+}
+#lightbox-2:hover #lightbox-2-bottom {
+  opacity: 1;
+}
+#lightbox-2-filename {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
+  user-select: text;
+}
+#lightbox-2-bottom .primary-btn {
+  font-size: 13px;
+  padding: 10px 24px;
+  height: auto;
 }
 
 /* Clickable preview hint */
@@ -1514,6 +2498,12 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--accent);
   border-color: var(--accent);
   color: white;
+}
+/* Mirror the 3D viewer hover on the side panel: same item gets a subtle glow */
+.lm-list .lm-btn.hovered {
+  background: var(--bg-3);
+  border-color: #c9b4ff;
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.35);
 }
 .lm-list .lm-btn.placed::after {
   content: "\2713";

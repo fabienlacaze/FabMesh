@@ -17,13 +17,39 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
     from PIL import Image
     from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
-    # Reserve 5% VRAM for the OS / display so the PC stays responsive
+    # Enforce VRAM limit from FabMesh settings (FABMESH_VRAM_FRACTION env var).
     if torch.cuda.is_available():
         try:
-            torch.cuda.set_per_process_memory_fraction(0.95, 0)
-            print("HUNYUAN3D: GPU memory limited to 95% (5% reserved for OS)", flush=True)
+            free_b, total_b = torch.cuda.mem_get_info()
+            print(f"HUNYUAN3D: VRAM free={free_b/1e9:.1f}GB total={total_b/1e9:.1f}GB", flush=True)
+        except Exception:
+            pass
+        frac = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
+        if 0.1 <= frac < 1.0:
+            try:
+                torch.cuda.set_per_process_memory_fraction(frac)
+                print(f"HUNYUAN3D: VRAM hard cap set to {frac*100:.0f}% of total", flush=True)
+            except Exception as e:
+                print(f"HUNYUAN3D: Could not set VRAM cap ({e}), continuing uncapped", flush=True)
+
+    # Enforce system RAM limit from FabMesh settings (FABMESH_RAM_LIMIT_MB env var).
+    _ram_limit_mb = os.environ.get('FABMESH_RAM_LIMIT_MB', '')
+    _ram_force_offload = False
+    if _ram_limit_mb:
+        try:
+            import psutil, gc
+            _limit = int(_ram_limit_mb)
+            _vm = psutil.virtual_memory()
+            _used_mb = (_vm.total - _vm.available) / (1024 * 1024)
+            print(f"HUNYUAN3D: RAM system used={_used_mb:.0f}MB, limit={_limit}MB, percent={_vm.percent:.0f}%", flush=True)
+            if _used_mb > _limit * 0.9:
+                print("HUNYUAN3D: RAM near limit — forcing aggressive CPU offload", flush=True)
+                gc.collect()
+                _ram_force_offload = True
+        except ImportError:
+            print("HUNYUAN3D: psutil not installed, RAM monitoring skipped", flush=True)
         except Exception as e:
-            print(f"HUNYUAN3D: Could not set memory fraction: {e}", flush=True)
+            print(f"HUNYUAN3D: RAM check error: {e}", flush=True)
 
     # Step 1: Shape on Windows GPU
     print("HUNYUAN3D: Loading shape model...", flush=True)
@@ -42,15 +68,16 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
     except Exception as e:
         print(f"HUNYUAN3D: bfloat16 load failed ({e}), falling back to float16", flush=True)
         shape_pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained('tencent/Hunyuan3D-2')
-    # Decide between full GPU and CPU offload based on requested quality
-    use_offload = False
+    # Decide between full GPU and CPU offload based on requested quality / RAM pressure
+    use_offload = _ram_force_offload
     try:
         free_bytes, total_bytes = torch.cuda.mem_get_info()
         free_gb = free_bytes / (1024**3)
         total_gb = total_bytes / (1024**3)
         print(f"HUNYUAN3D: VRAM free={free_gb:.1f} GB / total={total_gb:.1f} GB", flush=True)
-        # If asking for high effort + high res on a tight VRAM budget, enable offload
-        if int(effort) >= 4 and total_gb < 18 and free_gb < 13:
+        # Enable offload when VRAM is tight or user set a low VRAM cap
+        vram_cap_gb = total_gb * float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
+        if free_gb < 14 or vram_cap_gb < 14:
             use_offload = True
     except Exception:
         pass
@@ -218,12 +245,12 @@ def generate_3d(image_path, output_path, max_faces=0, effort=2):
             "from PIL import Image\n"
             "from hy3dgen.texgen import Hunyuan3DPaintPipeline\n"
             "\n"
-            "# Reserve 5% VRAM for OS responsiveness\n"
-            "if torch.cuda.is_available():\n"
-            "    try:\n"
-            "        torch.cuda.set_per_process_memory_fraction(0.95, 0)\n"
-            "    except Exception:\n"
-            "        pass\n"
+            "# Enforce VRAM cap from FabMesh settings\n"
+            "import os as _os\n"
+            "_frac = float(_os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))\n"
+            "if torch.cuda.is_available() and 0.1 <= _frac < 1.0:\n"
+            "    try: torch.cuda.set_per_process_memory_fraction(_frac)\n"
+            "    except Exception: pass\n"
             "\n"
             'print("TEXGEN: Loading model...", flush=True)\n'
             'pipe = Hunyuan3DPaintPipeline.from_pretrained("tencent/Hunyuan3D-2")\n'

@@ -1,7 +1,27 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { execFile, exec, spawn } = require('child_process');
+const os = require('os');
+// NOTE: do NOT destructure execFile/spawn here — we monkey-patch them below for
+// auto-tracking, and a destructured local would bypass the wrapper. Use the
+// child_process module directly via wrappers further down.
+const _cp = require('child_process');
+// Local references for code below (resolved lazily so they pick up the patch)
+const execFile = (...a) => _cp.execFile(...a);
+const exec     = (...a) => _cp.exec(...a);
+const spawn    = (...a) => _cp.spawn(...a);
+
+// Inherit-by-default: set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True for
+// every Python subprocess we launch. This lets PyTorch's allocator grow segments
+// instead of failing on fragmentation, eliminating the false-OOM crashes that
+// happened with set_per_process_memory_fraction. Set once at startup so all
+// child_process spawns inherit it via process.env.
+(function _setPyTorchAllocConf() {
+  const cur = process.env.PYTORCH_CUDA_ALLOC_CONF || '';
+  if (!cur.includes('expandable_segments')) {
+    process.env.PYTORCH_CUDA_ALLOC_CONF = (cur ? cur + ',' : '') + 'expandable_segments:True';
+  }
+})();
 
 // Catch uncaught errors so the app doesn't show the fatal dialog
 process.on('uncaughtException', (err) => {
@@ -27,12 +47,70 @@ const SCRIPTS_DIR = path.join(__dirname, '..', '..', 'scripts');
 const PREVIEWS_DIR = path.join(__dirname, '..', '..', 'previews');
 const IMAGES_DIR = path.join(__dirname, '..', '..', 'images');
 const HISTORY_DIR = path.join(__dirname, '..', '..', 'history');
+const LOGS_DIR = path.join(__dirname, '..', '..', 'logs');
 const CONFIG_PATH = path.join(__dirname, '..', '..', 'config.json');
 
 // Ensure directories exist
-[MESHES_DIR, SCRIPTS_DIR, PREVIEWS_DIR, IMAGES_DIR, HISTORY_DIR].forEach(dir => {
+[MESHES_DIR, SCRIPTS_DIR, PREVIEWS_DIR, IMAGES_DIR, HISTORY_DIR, LOGS_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
+
+// ============================================================
+// LOGGING SYSTEM
+// ============================================================
+// File: logs/fabmesh.log (10 MB rotation -> .1, .2 archives)
+const LOG_FILE = path.join(LOGS_DIR, 'fabmesh.log');
+const LOG_MAX_BYTES = 10 * 1024 * 1024;
+const LOG_KEEP_ARCHIVES = 3;
+let _logStream = null;
+function _openLogStream() {
+  try {
+    // Rotate if too big
+    if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > LOG_MAX_BYTES) {
+      for (let i = LOG_KEEP_ARCHIVES - 1; i >= 1; i--) {
+        const src = LOG_FILE + '.' + i;
+        const dst = LOG_FILE + '.' + (i + 1);
+        if (fs.existsSync(src)) try { fs.renameSync(src, dst); } catch (e) {}
+      }
+      try { fs.renameSync(LOG_FILE, LOG_FILE + '.1'); } catch (e) {}
+    }
+    _logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+  } catch (e) {
+    console.error('Could not open log file:', e);
+  }
+}
+_openLogStream();
+
+function logToFile(level, source, msg) {
+  const ts = new Date().toISOString();
+  const line = `${ts} [${level}] [${source}] ${msg}\n`;
+  try { _logStream && _logStream.write(line); } catch (e) {}
+  // Also forward to renderer console (devtools) so the user can see it live
+  try {
+    if (typeof mainWindow !== 'undefined' && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('main-log', { level, source, msg, ts });
+    }
+  } catch (e) {}
+}
+// Public log helpers
+const log = {
+  info:  (src, m) => { console.log(`[${src}]`, m); logToFile('INFO',  src, m); },
+  warn:  (src, m) => { console.warn(`[${src}]`, m); logToFile('WARN',  src, m); },
+  error: (src, m) => { console.error(`[${src}]`, m); logToFile('ERROR', src, m); },
+  debug: (src, m) => { logToFile('DEBUG', src, m); },
+};
+// Capture uncaught exceptions / unhandled rejections of the main process
+process.on('uncaughtException', (e) => {
+  log.error('main', 'uncaughtException: ' + (e.stack || e.message || e));
+});
+process.on('unhandledRejection', (reason) => {
+  log.error('main', 'unhandledRejection: ' + (reason && reason.stack || reason));
+});
+log.info('main', '======================================');
+log.info('main', `FabMesh started at ${new Date().toISOString()}`);
+log.info('main', `Platform: ${process.platform} ${process.arch}, Node ${process.version}, Electron ${process.versions.electron}`);
+log.info('main', `Project root: ${path.join(__dirname, '..', '..')}`);
+log.info('main', '======================================');
 
 // --- Version History ---
 // Each project gets a folder in history/ with a versions.json tracking all versions
@@ -100,11 +178,20 @@ let mainWindow;
 let sdxlProc = null;
 let sdxlReady = false;
 const SDXL_PORT = 5555;
-// Auto-shutdown: kill the SDXL server after this many ms of inactivity to free ~13 GB VRAM.
-// The server will be lazy-restarted at the next img2img / inpaint call.
-const SDXL_IDLE_TIMEOUT_MS = 60 * 1000; // 1 minute
+// Auto-shutdown: kill the SDXL server after this many ms of inactivity to
+// free ~13 GB VRAM. Bumped from 60s → 300s because the first /mask_inpaint
+// call lazy-loads the SDXL inpainting pipeline (~6 GB, ~90-120s on a cold
+// HF cache), and we don't want the idle timer to fire DURING that load.
+// The server is also protected by `sdxlInflightRequests > 0`, so this is a
+// safety net, not the primary mechanism.
+const SDXL_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 let sdxlLastUsedAt = 0;
 let sdxlIdleTimer = null;
+// Number of in-flight HTTP requests to the SDXL server. The idle shutdown
+// NEVER fires while this is > 0, even if the wall-clock since `markSdxlUsed`
+// exceeds SDXL_IDLE_TIMEOUT_MS. This prevents the server from being killed
+// mid-inference when a slow first-time model load blocks the response.
+let sdxlInflightRequests = 0;
 
 function markSdxlUsed() {
   sdxlLastUsedAt = Date.now();
@@ -112,6 +199,9 @@ function markSdxlUsed() {
   // Check every 15s whether the server is idle and should be killed
   sdxlIdleTimer = setInterval(() => {
     if (!sdxlProc || !sdxlReady) return;
+    // Never kill while a request is in flight (could be a first-time
+    // model load that legitimately takes > idle timeout).
+    if (sdxlInflightRequests > 0) { sdxlLastUsedAt = Date.now(); return; }
     const idleMs = Date.now() - sdxlLastUsedAt;
     if (idleMs >= SDXL_IDLE_TIMEOUT_MS) {
       console.log(`[SDXL] Idle for ${Math.round(idleMs/1000)}s, shutting down to free VRAM`);
@@ -131,9 +221,14 @@ function startSdxlServer() {
   }
   console.log('[SDXL] Spawning persistent server...');
   try {
+    // Forward the VRAM fraction so the server can enforce the cap via PyTorch
+    const sdxlEnv = { ...process.env };
+    if (sdxlEnv.FABMESH_VRAM_FRACTION) { /* already set */ }
+    else { sdxlEnv.FABMESH_VRAM_FRACTION = '0.95'; }
     sdxlProc = require('child_process').spawn('python', [serverScript], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      env: sdxlEnv
     });
     sdxlProc.stdout.on('data', d => {
       const msg = d.toString().trim();
@@ -189,6 +284,12 @@ function sdxlServerCall(endpoint, payload) {
     }
     // Reset the idle timer every time we use the server
     markSdxlUsed();
+    sdxlInflightRequests++;
+    const done = (result) => {
+      sdxlInflightRequests = Math.max(0, sdxlInflightRequests - 1);
+      markSdxlUsed(); // reset idle window after the call returns
+      resolve(result);
+    };
     const http = require('http');
     const body = JSON.stringify(payload);
     const req = http.request({
@@ -203,13 +304,13 @@ function sdxlServerCall(endpoint, payload) {
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
         try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+          done(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
         } catch(e) {
-          resolve({ ok: false, error: 'parse_error: ' + e.message });
+          done({ ok: false, error: 'parse_error: ' + e.message });
         }
       });
     });
-    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.on('error', (err) => done({ ok: false, error: err.message }));
     req.write(body);
     req.end();
   });
@@ -232,10 +333,7 @@ function createWindow() {
     show: false
   });
 
-  // Load the new redesigned UI by default. Use ?legacy=1 to fall back to the old one.
-  const useLegacy = process.argv.includes('--legacy');
-  const rendererFile = useLegacy ? 'index.html' : 'index2.html';
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', rendererFile));
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.setMenuBarVisibility(false);
 
@@ -264,6 +362,20 @@ function createWindow() {
       event.preventDefault();
     }
   });
+
+  // ----------------------------------------------------------
+  // Start local Test/Control HTTP API (localhost:7331).
+  // Enabled only when FABMESH_TEST_API=1 or when --dev is set.
+  // This lets external processes pilot the app: click buttons,
+  // grab screenshots, tail logs, trigger generations.
+  // ----------------------------------------------------------
+  try {
+    const { startTestApi } = require('./test_api');
+    startTestApi(mainWindow);
+  } catch (e) {
+    try { log.error('test_api', 'failed to start: ' + e.message); }
+    catch (_) { console.error('[test_api] failed to start:', e); }
+  }
 }
 
 app.whenReady().then(() => {
@@ -414,21 +526,143 @@ async function uploadToCatbox(imagePath) {
 
 // Track active Python processes for cancellation
 const activeProcs = new Map(); // jobId -> proc
+// Track ALL spawned subprocesses (not just those with a jobId), so cancel-job
+// can kill any orphan even when the calling handler did not pass a jobId.
+const allActiveProcs = new Set();
+function trackProc(proc) {
+  if (!proc) return proc;
+  allActiveProcs.add(proc);
+  proc.on('exit', () => allActiveProcs.delete(proc));
+  return proc;
+}
+
+// Monkey-patch child_process.execFile and child_process.spawn ONCE so every
+// subprocess we launch is auto-tracked. Without this, cancel-job can only
+// kill image-to-3d (the only handler that explicitly tracked its proc), and
+// every other Python child becomes a VRAM-hogging orphan when cancelled.
+(function _autoTrackChildProcesses() {
+  const cp = require('child_process');
+  if (cp.__fabmeshTracked) return;
+  cp.__fabmeshTracked = true;
+  const _execFile = cp.execFile;
+  const _spawn = cp.spawn;
+  cp.execFile = function (...args) { return trackProc(_execFile.apply(this, args)); };
+  cp.spawn = function (...args) { return trackProc(_spawn.apply(this, args)); };
+})();
+
 ipcMain.handle('cancel-job', (event, jobId) => {
+  log.info('main', `cancel-job: jobId=${jobId}, killing ${allActiveProcs.size} tracked procs + orphans`);
+  // Kill the specific tracked proc if any
   const proc = activeProcs.get(jobId);
   if (proc) {
-    try {
-      // Windows: must kill child tree
-      if (process.platform === 'win32') {
-        execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], () => {});
-      } else {
-        proc.kill('SIGTERM');
-      }
-    } catch(e) {}
+    killProcTree(proc);
     activeProcs.delete(jobId);
-    return true;
   }
-  return false;
+  // Snapshot procs before iterating (the proc.on('exit') handler removes
+  // entries from allActiveProcs, which would mutate the set during iteration).
+  // We snapshot {pid, ref} pairs so we can compare and skip the SDXL server.
+  const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
+  const snapshot = Array.from(allActiveProcs);
+  for (const p of snapshot) {
+    if (!p || p.pid === sdxlPid) continue;
+    try { killProcTree(p); } catch (e) { /* already dead */ }
+    allActiveProcs.delete(p);
+  }
+  // Last resort: WMIC scan for any orphan python child of the main process
+  killOrphanPythonSubprocesses();
+  return true;
+});
+
+function killProcTree(proc) {
+  try {
+    if (process.platform === 'win32' && proc.pid) {
+      // Synchronous taskkill so the kill is done before we return
+      require('child_process').execFileSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      proc.kill('SIGKILL');
+    }
+  } catch (e) {
+    log.warn('main', 'killProcTree failed: ' + e.message);
+  }
+}
+
+// Kill every python.exe except the SDXL persistent server, SYNCHRONOUSLY.
+// This is brutal but reliable when a job won't stop responding to soft signals.
+function killOrphanPythonSubprocesses() {
+  if (process.platform !== 'win32') return;
+  const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
+  try {
+    // List all python.exe pids via tasklist (faster than wmic)
+    const out = require('child_process').execFileSync(
+      'tasklist', ['/FI', 'IMAGENAME eq python.exe', '/FO', 'CSV', '/NH'],
+      { encoding: 'utf-8' }
+    );
+    const pids = [];
+    out.split(/\r?\n/).forEach(line => {
+      const m = line.match(/^"python\.exe","(\d+)"/);
+      if (m) pids.push(parseInt(m[1]));
+    });
+    log.info('main', `killOrphanPython: found ${pids.length} python.exe (sdxl pid=${sdxlPid})`);
+    for (const pid of pids) {
+      if (pid === sdxlPid) continue;
+      try {
+        require('child_process').execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+        log.info('main', `Killed orphan python pid=${pid}`);
+      } catch (e) {
+        log.warn('main', `Could not kill pid=${pid}: ` + e.message);
+      }
+    }
+  } catch (e) {
+    log.error('main', 'killOrphanPythonSubprocesses failed: ' + e.message);
+  }
+}
+
+// IPC: count python.exe subprocesses currently running (excluding the SDXL server)
+ipcMain.handle('count-python', () => {
+  if (process.platform !== 'win32') return { count: 0, sdxl: false };
+  const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
+  try {
+    const out = require('child_process').execFileSync(
+      'tasklist', ['/FI', 'IMAGENAME eq python.exe', '/FO', 'CSV', '/NH'],
+      { encoding: 'utf-8' }
+    );
+    const pids = [];
+    out.split(/\r?\n/).forEach(line => {
+      const m = line.match(/^"python\.exe","(\d+)"/);
+      if (m) pids.push(parseInt(m[1]));
+    });
+    const others = pids.filter(p => p !== sdxlPid);
+    return { count: others.length, sdxl: pids.includes(sdxlPid), total: pids.length };
+  } catch (e) {
+    return { count: 0, sdxl: false, error: e.message };
+  }
+});
+
+// IPC: open the logs folder in the OS file explorer
+ipcMain.handle('open-logs-folder', () => {
+  try {
+    shell.openPath(LOGS_DIR);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// IPC: read the last N lines of the log file (for an in-app log viewer later)
+// Renderer -> file log passthrough for debug instrumentation
+ipcMain.handle('renderer-log', (event, { tag, msg } = {}) => {
+  try { logToFile('INFO', 'renderer:' + (tag || 'dbg'), String(msg || '')); } catch (e) {}
+  return true;
+});
+ipcMain.handle('read-log-tail', (event, { lines = 200 } = {}) => {
+  try {
+    if (!fs.existsSync(LOG_FILE)) return { success: true, lines: [] };
+    const content = fs.readFileSync(LOG_FILE, 'utf-8');
+    const all = content.split(/\r?\n/);
+    return { success: true, lines: all.slice(-lines) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 // Save a PNG dataUrl as a new versioned image next to basePath
@@ -474,7 +708,7 @@ ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
     return await new Promise((resolve) => {
       const proc = execFile('python', [script, operation, imagePath, newImagePath], {
         timeout: 60000,
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
         if (error) {
           resolve({ success: false, error: error.message, stderr });
@@ -597,8 +831,194 @@ ipcMain.handle('list-rig-templates', () => {
   }
 });
 
+// List animation FBX files for a given rig template (e.g. "orc_m1" → returns
+// the absolute paths of every .fbx in scripts/rig_templates/animations/<name>/)
+ipcMain.handle('list-rig-animations', (event, { templateName }) => {
+  try {
+    if (!templateName || !/^[a-z0-9_-]+$/i.test(templateName)) return [];
+    const dir = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'animations', templateName);
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return [];
+    return fs.readdirSync(dir)
+      .filter(f => /\.fbx$/i.test(f))
+      .map(f => ({
+        name: f.replace(/\.[^.]+$/, ''),
+        path: path.join(dir, f),
+      }));
+  } catch (e) {
+    console.error('list-rig-animations failed:', e);
+    return [];
+  }
+});
+
+// Auto-rigging via UniRig AI model → swap to orc_m1 UE5 skeleton (2-step pipeline)
+// OR via Meshy.ai cloud API (rigging + walk/run anims), depending on `engine`.
+ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
+  const _t0 = Date.now();
+  const rigEngine = engine || 'unirig';
+  console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} @${new Date(_t0).toISOString()}`);
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) {
+      return { success: false, error: 'Mesh not found' };
+    }
+    if (!isPathAllowed(meshPath)) {
+      return { success: false, error: 'Mesh path not allowed' };
+    }
+    const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
+
+    // ------------------------------------------------------------------
+    // MESHY.AI cloud rigging path
+    // ------------------------------------------------------------------
+    if (rigEngine === 'meshy') {
+      const cfg = loadConfig();
+      const key = (cfg && cfg.meshyApiKey) || '';
+      if (!key.trim()) {
+        return { success: false, error: 'Meshy.ai API key not configured. Open Settings and paste your key.' };
+      }
+      const meshyScript = path.join(scriptsDir, 'meshy_bridge.py');
+      if (!fs.existsSync(meshyScript)) {
+        return { success: false, error: 'meshy_bridge.py not found' };
+      }
+      const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_meshy_${Date.now()}.glb`);
+      const meshyResult = await new Promise((resolve) => {
+        safeSend('ai3d-progress', '[MeshyRig] Starting...');
+        const proc = execFile(
+          'python',
+          [meshyScript, 'rig', key, meshPath, outputGlb, '1.7'],
+          { timeout: 1800000, maxBuffer: 50 * 1024 * 1024 },
+          (error, stdout, stderr) => resolve({ error, stdout, stderr })
+        );
+        proc.stdout?.on('data', d => safeSend('ai3d-progress', `[MeshyRig] ${d.toString()}`));
+        proc.stderr?.on('data', d => safeSend('ai3d-progress', `[MeshyRig][stderr] ${d.toString()}`));
+      });
+      const durM = ((Date.now() - _t0) / 1000).toFixed(2);
+      console.log(`[auto-rig-ai meshy] END duration=${durM}s error=${!!meshyResult.error}`);
+      if (meshyResult.error || !fs.existsSync(outputGlb)) {
+        const errMsg = extractErrorDetail(meshyResult) || (meshyResult.error && meshyResult.error.message) || 'Meshy rigging failed';
+        return { success: false, error: errMsg, stdout: meshyResult.stdout, stderr: meshyResult.stderr };
+      }
+      const statsM = fs.statSync(outputGlb);
+      return { success: true, path: outputGlb, filename: path.basename(outputGlb), size: statsM.size };
+    }
+
+    // ------------------------------------------------------------------
+    // LOCAL: UniRig pipeline (3 steps: unirig -> swap_skeleton -> bake anims)
+    // ------------------------------------------------------------------
+    const unirigScript = path.join(scriptsDir, 'unirig_bridge.py');
+    const swapScript = path.join(scriptsDir, 'swap_skeleton.py');
+    const bakeAnimScript = path.join(scriptsDir, 'bake_procedural_anims.py');
+    const orcBones = path.join(scriptsDir, 'rig_templates', 'skm', 'orc_m1.bones.json');
+    if (!fs.existsSync(unirigScript)) {
+      return { success: false, error: 'unirig_bridge.py not found' };
+    }
+    if (!fs.existsSync(swapScript)) {
+      return { success: false, error: 'swap_skeleton.py not found' };
+    }
+    const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const rigTs = Date.now();
+    const tempUnirigGlb = path.join(MESHES_DIR, `${baseName}_unirig_temp_${rigTs}.glb`);
+    const tempSwapGlb = path.join(MESHES_DIR, `${baseName}_swap_temp_${rigTs}.glb`);
+    const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_unirig_${rigTs}.glb`);
+
+    // Helper: run a python script and stream progress
+    const runStep = (label, args) => new Promise((resolve) => {
+      safeSend('ai3d-progress', `[${label}] Starting...`);
+      const proc = execFile('python', args, {
+        timeout: 600000,
+        maxBuffer: 50 * 1024 * 1024,
+      }, (error, stdout, stderr) => {
+        resolve({ error, stdout, stderr });
+      });
+      proc.stdout?.on('data', d => safeSend('ai3d-progress', `[${label}] ${d.toString()}`));
+      proc.stderr?.on('data', d => safeSend('ai3d-progress', `[${label}][stderr] ${d.toString()}`));
+      proc.on('error', e => resolve({ error: e, stdout: '', stderr: '' }));
+    });
+
+    // Step 1: UniRig skeleton + skin prediction (34 bones) → temp GLB
+    const step1 = await runStep('UniRig', [unirigScript, meshPath, tempUnirigGlb]);
+    if (step1.error || !fs.existsSync(tempUnirigGlb)) {
+      const dur = ((Date.now() - _t0) / 1000).toFixed(2);
+      console.log(`[auto-rig-ai] Step 1 FAILED duration=${dur}s`);
+      try {
+        fs.writeFileSync(
+          path.join(__dirname, '..', '..', 'last_error.log'),
+          `[${new Date().toISOString()}] auto-rig-ai step1 (duration=${dur}s)\nmesh: ${meshPath}\n\n=== STDOUT ===\n${step1.stdout || ''}\n\n=== STDERR ===\n${step1.stderr || ''}\n`
+        );
+      } catch (_e) {}
+      const errMsg = extractErrorDetail(step1) || (step1.error && step1.error.message) || 'UniRig failed - no output';
+      return { success: false, error: errMsg, stdout: step1.stdout, stderr: step1.stderr };
+    }
+
+    // Step 2: Swap skeleton to orc_m1 (117 bones) → temp swap GLB
+    const step2 = await runStep('SwapSkeleton', [swapScript, tempUnirigGlb, orcBones, tempSwapGlb]);
+    // Clean up UniRig temp
+    try { fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
+
+    if (step2.error || !fs.existsSync(tempSwapGlb)) {
+      const dur2 = ((Date.now() - _t0) / 1000).toFixed(2);
+      console.log(`[auto-rig-ai] Step 2 FAILED duration=${dur2}s`);
+      try {
+        fs.writeFileSync(
+          path.join(__dirname, '..', '..', 'last_error.log'),
+          `[${new Date().toISOString()}] auto-rig-ai step2 (duration=${dur2}s)\nmesh: ${meshPath}\n\n=== STEP1 STDOUT ===\n${step1.stdout || ''}\n=== STEP1 STDERR ===\n${step1.stderr || ''}\n\n=== STEP2 STDOUT ===\n${step2.stdout || ''}\n=== STEP2 STDERR ===\n${step2.stderr || ''}\n`
+        );
+      } catch (_e) {}
+      const errMsg = extractErrorDetail(step2) || (step2.error && step2.error.message) || 'Skeleton swap failed - no output';
+      return { success: false, error: errMsg, stdout: step2.stdout, stderr: step2.stderr };
+    }
+
+    // Step 3: Bake procedural Idle/Walk/Run (CC0) animations into final GLB
+    let step3 = { error: null, stdout: '', stderr: '' };
+    if (fs.existsSync(bakeAnimScript)) {
+      step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, orcBones, outputGlb]);
+      if (step3.error || !fs.existsSync(outputGlb)) {
+        // Bake failed - fall back to the swap output so the user still gets a rigged mesh
+        console.log('[auto-rig-ai] Step 3 (bake anims) failed, falling back to non-animated rig');
+        try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+      }
+    } else {
+      // No bake script - ship the swap output as-is
+      try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+    }
+    // Clean up swap temp
+    try { if (fs.existsSync(tempSwapGlb)) fs.unlinkSync(tempSwapGlb); } catch (_e) {}
+
+    const dur = ((Date.now() - _t0) / 1000).toFixed(2);
+    console.log(`[auto-rig-ai] END duration=${dur}s error=${!!step3.error}`);
+    try {
+      fs.writeFileSync(
+        path.join(__dirname, '..', '..', 'last_error.log'),
+        `[${new Date().toISOString()}] auto-rig-ai (duration=${dur}s)\nmesh: ${meshPath}\noutput: ${outputGlb}\n\n=== STEP1 STDOUT ===\n${step1.stdout || ''}\n=== STEP1 STDERR ===\n${step1.stderr || ''}\n\n=== STEP2 STDOUT ===\n${step2.stdout || ''}\n=== STEP2 STDERR ===\n${step2.stderr || ''}\n\n=== STEP3 STDOUT ===\n${step3.stdout || ''}\n=== STEP3 STDERR ===\n${step3.stderr || ''}\n`
+      );
+    } catch (_e) {}
+
+    if (!fs.existsSync(outputGlb)) {
+      const errMsg = extractErrorDetail(step3) || (step3.error && step3.error.message) || 'Bake procedural anims failed - no output';
+      return { success: false, error: errMsg, stdout: step3.stdout, stderr: step3.stderr };
+    }
+    const stats = fs.statSync(outputGlb);
+    return { success: true, path: outputGlb, filename: path.basename(outputGlb), size: stats.size };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Extract last meaningful error line from a step's output
+function extractErrorDetail(step) {
+  const combined = (step.stdout || '') + '\n' + (step.stderr || '');
+  const lines = combined.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i].trim();
+    if (!ln) continue;
+    if (/AUTORIG_ERROR|Error|Exception|Traceback/i.test(ln)) return ln;
+  }
+  return lines.filter(l => l.trim()).slice(-3).join(' | ');
+}
+
 // Auto-rigging: applies a skeleton template to a mesh and exports rigged FBX
 ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) => {
+  const _autorigT0 = Date.now();
+  console.log(`[auto-rig] START mesh=${meshPath} template=${templateName} @${new Date(_autorigT0).toISOString()}`);
   try {
     if (!meshPath || !fs.existsSync(meshPath)) {
       return { success: false, error: 'Mesh not found' };
@@ -618,7 +1038,11 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) 
     }
 
     const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const outputFbx = path.join(MESHES_DIR, `${baseName}_rigged_${templateName}.fbx`);
+    // Include a timestamp so each generation creates a new version instead of
+    // silently overwriting the previous one. The versions-strip uses the file
+    // list from the meshes/ folder, so stable file names == 1 version only.
+    const rigTimestamp = Date.now();
+    const outputFbx = path.join(MESHES_DIR, `${baseName}_rigged_${templateName}_${rigTimestamp}.glb`);
 
     const script = path.join(__dirname, '..', '..', 'scripts', 'auto_rig_bridge.py');
 
@@ -637,8 +1061,33 @@ ipcMain.handle('auto-rig', async (event, { meshPath, templateName, landmarks }) 
         timeout: 300000,
         maxBuffer: 50 * 1024 * 1024
       }, (error, stdout, stderr) => {
+        const _dur = ((Date.now() - _autorigT0) / 1000).toFixed(2);
+        console.log(`[auto-rig] END duration=${_dur}s error=${!!error}`);
+        // Always write the full Python output to last_error.log so the user
+        // can inspect what went wrong (the styled customError modal only
+        // shows the truncated error message).
+        try {
+          fs.writeFileSync(
+            path.join(__dirname, '..', '..', 'last_error.log'),
+            `[${new Date().toISOString()}] auto-rig (duration=${_dur}s)\nmesh: ${meshPath}\noutput: ${outputFbx}\ntemplate: ${templateName}\n\n=== STDOUT ===\n${stdout || ''}\n\n=== STDERR ===\n${stderr || ''}\n`
+          );
+        } catch (_e) {}
         if (error) {
-          resolve({ success: false, error: error.message, stdout, stderr });
+          // Surface the last AUTORIG_ERROR / Traceback line so the user gets
+          // an actionable message rather than just "Command failed: python ...".
+          const combined = (stdout || '') + '\n' + (stderr || '');
+          const lines = combined.split(/\r?\n/);
+          let detail = '';
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const ln = lines[i].trim();
+            if (!ln) continue;
+            if (/AUTORIG_ERROR|Error|Exception|Traceback/i.test(ln)) {
+              detail = ln;
+              break;
+            }
+          }
+          if (!detail) detail = lines.filter(l => l.trim()).slice(-3).join(' | ');
+          resolve({ success: false, error: detail || error.message, stdout, stderr });
         } else if (fs.existsSync(outputFbx)) {
           const stats = fs.statSync(outputFbx);
           resolve({ success: true, path: outputFbx, filename: path.basename(outputFbx), size: stats.size });
@@ -1004,30 +1453,111 @@ ipcMain.handle('show-in-explorer', (event, filePath) => {
 
 // Check GPU status
 ipcMain.handle('check-gpu', async () => {
-  try {
-    const result = await new Promise((resolve, reject) => {
-      execFile('python', ['-c', `
-import torch
-total = torch.cuda.get_device_properties(0).total_memory
-used = torch.cuda.memory_allocated(0)
-reserved = torch.cuda.memory_reserved(0)
-print(f"{total},{used},{reserved}")
-`], { timeout: 10000 }, (error, stdout) => {
-        if (error) { resolve({ available: true, totalGB: 16, usedGB: 0, freeGB: 16 }); return; }
-        const [total, used, reserved] = stdout.trim().split(',').map(Number);
+  // Use nvidia-smi for instant GPU stats (no PyTorch load, ~50 ms)
+  return new Promise((resolve) => {
+    execFile('nvidia-smi',
+      ['--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu', '--format=csv,noheader,nounits'],
+      { timeout: 3000 },
+      (error, stdout) => {
+        if (error) {
+          resolve({ available: false, error: error.message });
+          return;
+        }
+        // Parse first GPU line: "GeForce RTX 5080, 16380, 1234, 15146, 12, 45"
+        const line = (stdout || '').split('\n').filter(l => l.trim())[0] || '';
+        const parts = line.split(',').map(s => s.trim());
+        if (parts.length < 4) {
+          resolve({ available: false, error: 'Unexpected nvidia-smi output' });
+          return;
+        }
+        const totalMB = parseFloat(parts[1]);
+        const usedMB  = parseFloat(parts[2]);
+        const freeMB  = parseFloat(parts[3]);
+        const util    = parseFloat(parts[4] || '0');
+        const temp    = parseFloat(parts[5] || '0');
         resolve({
           available: true,
-          totalGB: +(total / 1024**3).toFixed(1),
-          usedGB: +(used / 1024**3).toFixed(1),
-          reservedGB: +(reserved / 1024**3).toFixed(1),
-          freeGB: +((total - reserved) / 1024**3).toFixed(1)
+          name: parts[0],
+          totalGB: +(totalMB / 1024).toFixed(2),
+          usedGB:  +(usedMB / 1024).toFixed(2),
+          freeGB:  +(freeMB / 1024).toFixed(2),
+          gpuUtil: util,
+          tempC: temp,
         });
       });
-    });
-    return result;
-  } catch (e) {
-    return { available: false, totalGB: 0, usedGB: 0, freeGB: 0 };
+  });
+});
+
+// Set system RAM limit (called from renderer when user drags the RAM slider)
+ipcMain.handle('set-ram-limit', (event, limitPct) => {
+  // Convert percentage to absolute MB based on total system RAM
+  const totalMB = Math.round(os.totalmem() / (1024 * 1024));
+  const limitMB = Math.round(totalMB * (limitPct / 100));
+  process.env.FABMESH_RAM_LIMIT_MB = String(limitMB);
+  return { limitMB, totalMB };
+});
+
+// Set GPU util/temp/vram limits (called when user drags the GPU sliders in Settings).
+// We do THREE things so the throttle reacts for new AND running processes:
+//   1. process.env.FABMESH_GPU_LIMIT / FABMESH_TEMP_LIMIT / FABMESH_VRAM_FRACTION
+//      → inherited by new children subprocesses
+//   2. scripts/.gpu_limit.json → re-read every step by gpu_throttle.py in any
+//      already-running Python process (live slider behaviour for GPU/temp)
+//   3. If the VRAM slider moves, stop the SDXL server so that next time it's
+//      needed it respawns with the new fraction (VRAM hard cap is applied via
+//      torch.cuda.set_per_process_memory_fraction at process startup).
+ipcMain.handle('set-gpu-limits', (event, limits) => {
+  const l = limits || {};
+  if (typeof l.util === 'number' && l.util > 0 && l.util <= 100) {
+    process.env.FABMESH_GPU_LIMIT = String(Math.round(l.util));
   }
+  if (typeof l.temp === 'number' && l.temp > 0 && l.temp <= 120) {
+    process.env.FABMESH_TEMP_LIMIT = String(Math.round(l.temp));
+  }
+  let vramChanged = false;
+  if (typeof l.vram === 'number' && l.vram > 0 && l.vram <= 100) {
+    const newFrac = (Math.round(l.vram) / 100).toFixed(2);
+    if (process.env.FABMESH_VRAM_FRACTION !== newFrac) {
+      process.env.FABMESH_VRAM_FRACTION = newFrac;
+      vramChanged = true;
+    }
+  }
+  try {
+    const limitsFile = path.join(__dirname, '..', '..', 'scripts', '.gpu_limit.json');
+    const payload = {
+      gpu:  process.env.FABMESH_GPU_LIMIT  ? Number(process.env.FABMESH_GPU_LIMIT)  : null,
+      temp: process.env.FABMESH_TEMP_LIMIT ? Number(process.env.FABMESH_TEMP_LIMIT) : null,
+      vramFraction: process.env.FABMESH_VRAM_FRACTION ? Number(process.env.FABMESH_VRAM_FRACTION) : null,
+      updatedAt: Date.now(),
+    };
+    fs.writeFileSync(limitsFile, JSON.stringify(payload), 'utf-8');
+  } catch (e) {
+    console.error('[main] could not write gpu_limit.json:', e.message);
+  }
+  // If the VRAM fraction changed, kill the SDXL server so the next img2img /
+  // inpaint call respawns it with the new PyTorch memory cap. The idle timer
+  // would eventually do this anyway after 5 min, but an explicit stop here
+  // guarantees the new limit takes effect right now.
+  if (vramChanged && sdxlProc) {
+    console.log('[SDXL] VRAM slider changed to', process.env.FABMESH_VRAM_FRACTION, '- stopping server so it respawns with the new cap');
+    try { stopSdxlServer(); } catch (e) { console.error('[SDXL] stop on slider change failed:', e.message); }
+  }
+  return {
+    gpuLimit: process.env.FABMESH_GPU_LIMIT || null,
+    tempLimit: process.env.FABMESH_TEMP_LIMIT || null,
+    vramFraction: process.env.FABMESH_VRAM_FRACTION || null,
+  };
+});
+
+// Check system RAM stats
+ipcMain.handle('check-ram', () => {
+  const totalBytes = os.totalmem();
+  const freeBytes  = os.freemem();
+  const usedBytes  = totalBytes - freeBytes;
+  const totalGB    = +(totalBytes / (1024 ** 3)).toFixed(2);
+  const usedGB     = +(usedBytes / (1024 ** 3)).toFixed(2);
+  const freeGB     = +(freeBytes / (1024 ** 3)).toFixed(2);
+  return { totalGB, usedGB, freeGB };
 });
 
 // Flash taskbar when generation completes
@@ -1497,22 +2027,28 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
         continue;
       }
 
-      // Step 2: Convert image to 3D using Hunyuan3D (default)
+      // Step 2: Convert image to 3D (default: Stable Fast 3D — native PBR textures)
       const meshFilename = `${safeName}_${stage.name}_${timestamp}.glb`;
       const meshPath = path.join(MESHES_DIR, meshFilename);
-      const selectedEngine = engine || 'hunyuan';
+      let selectedEngine = engine || 'sf3d';
+      if (selectedEngine === 'hunyuan') {
+        console.warn('[image-to-3d] Hunyuan3D is disabled (license territorial restriction). Falling back to SF3D.');
+        selectedEngine = 'sf3d';
+      }
       const bridgeScripts = {
-        'hunyuan': path.join(__dirname, '..', '..', 'scripts', 'local_hunyuan3d_bridge.py'),
-        'local': path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
+        'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
+        'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
+        'triposg': path.join(__dirname, '..', '..', 'scripts', 'local_triposg_bridge.py'),
         'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
       };
-      const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['hunyuan'];
+      const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['sf3d'];
       const argsMap = {
-        'hunyuan': [bridgeScript, imgPath, meshPath, '50000', '2'],
-        'local': [bridgeScript, imgPath, meshPath, '512'],
+        'local':   [bridgeScript, imgPath, meshPath, '512'],
+        'sf3d':    [bridgeScript, imgPath, meshPath, '1024', '-1', 'none'],
+        'triposg': [bridgeScript, imgPath, meshPath, '30', '7.0'],
         'trellis': [bridgeScript, imgPath, meshPath, '0.95', '1024']
       };
-      const args = argsMap[selectedEngine] || argsMap['hunyuan'];
+      const args = argsMap[selectedEngine] || argsMap['sf3d'];
 
       try {
         await new Promise((resolve, reject) => {
@@ -1535,8 +2071,13 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
   }
 });
 
-// --- Text-to-3D: Step 1 - Generate images via Pollinations ---
-ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName, engine, quality, steps }) => {
+// --- Text-to-3D: Step 1 - Generate images ---
+// `prompt` is the FULL enriched prompt (user text + style suffix + type suffix)
+// that we send to the generator. `userPrompt` is the raw text the user typed,
+// WITHOUT any style/type decoration — this is what we persist to prompt.txt so
+// that re-opening the project rehydrates the textarea cleanly (no repeated
+// "single isolated 3D character, ..." suffixes each time).
+ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction }) => {
   try {
     const timestamp = Date.now();
     const safeName = (projectName || 'gen').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1544,16 +2085,38 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
     const imagesDir = path.join(IMAGES_DIR, safeName);
     fs.mkdirSync(imagesDir, { recursive: true });
 
-    // Save prompt history (append to prompts.json)
+    // Save prompt history (append to prompts.json). We keep both the raw
+    // user prompt and the enriched one for later inspection / versioning.
+    const rawPrompt = (typeof userPrompt === 'string' && userPrompt.trim()) ? userPrompt.trim() : prompt;
     const promptsFile = path.join(imagesDir, 'prompts.json');
     let promptsHistory = [];
     if (fs.existsSync(promptsFile)) {
       try { promptsHistory = JSON.parse(fs.readFileSync(promptsFile, 'utf-8')); } catch(e) {}
     }
-    promptsHistory.push({ prompt, timestamp });
+    promptsHistory.push({ prompt: rawPrompt, fullPrompt: prompt, timestamp });
     fs.writeFileSync(promptsFile, JSON.stringify(promptsHistory, null, 2));
-    // Latest prompt also in prompt.txt for backward compat
-    fs.writeFileSync(path.join(imagesDir, 'prompt.txt'), prompt, 'utf-8');
+    // prompt.txt holds the RAW user text so the workspace textarea can be
+    // rehydrated without accumulating style/type suffixes on each gen.
+    fs.writeFileSync(path.join(imagesDir, 'prompt.txt'), rawPrompt, 'utf-8');
+
+    // Build env with VRAM fraction for PyTorch hard cap + expandable segments allocator.
+    const fracVal = (typeof vramFraction === 'number' && vramFraction > 0 && vramFraction <= 1)
+      ? vramFraction : 0.95;
+    // Persist on main process env so future SDXL server restarts inherit the latest value
+    process.env.FABMESH_VRAM_FRACTION = String(fracVal);
+    const _prevAlloc = process.env.PYTORCH_CUDA_ALLOC_CONF || '';
+    const _allocConf = _prevAlloc.includes('expandable_segments') ? _prevAlloc : (_prevAlloc ? _prevAlloc + ',' : '') + 'expandable_segments:True';
+    const _ramLimitMB = process.env.FABMESH_RAM_LIMIT_MB || '';
+    const _gpuLimit = process.env.FABMESH_GPU_LIMIT || '';
+    const _tempLimit = process.env.FABMESH_TEMP_LIMIT || '';
+    const childEnv = {
+      ...process.env,
+      FABMESH_VRAM_FRACTION: String(fracVal),
+      PYTORCH_CUDA_ALLOC_CONF: _allocConf,
+      ..._ramLimitMB ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB } : {},
+      ..._gpuLimit   ? { FABMESH_GPU_LIMIT:   _gpuLimit   } : {},
+      ..._tempLimit  ? { FABMESH_TEMP_LIMIT:  _tempLimit  } : {},
+    };
 
     // LOCAL GPU: Juggernaut XL v9 (recommended, photorealistic SDXL fine-tune)
     if (engine === 'local-flux') {
@@ -1561,7 +2124,8 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       const stepsClamped = Math.max(4, Math.min(60, parseInt(steps) || 30));
       const result = await new Promise((resolve, reject) => {
         const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
-          timeout: 1800000, maxBuffer: 50 * 1024 * 1024
+          timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
+          env: childEnv,
         }, (error, stdout, stderr) => {
           if (error) { reject({ error: error.message, stdout, stderr }); return; }
           const imgs = fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f)).map(f => path.join(imagesDir, f));
@@ -1573,24 +2137,54 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
       return { success: true, images: result.images };
     }
 
-    // LOCAL GPU: Stable Diffusion XL Turbo (legacy fast option)
-    if (engine === 'local-sd') {
-      const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_image_bridge.py');
+    // CLOUD: Meshy.ai text-to-image (nano-banana). Uses the user's API key
+    // saved in config.json (set via Settings modal). Free tier = CC-BY 4.0.
+    if (engine === 'meshy') {
+      const cfg = loadConfig();
+      const key = (cfg && cfg.meshyApiKey) || '';
+      if (!key.trim()) {
+        return { success: false, error: 'Meshy.ai API key not configured. Open Settings and paste your key.' };
+      }
+      const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py');
       const result = await new Promise((resolve, reject) => {
-        const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4)], {
-          timeout: 1800000, maxBuffer: 50 * 1024 * 1024
-        }, (error, stdout, stderr) => {
-          if (error) { reject({ error: error.message, stdout, stderr }); return; }
-          // Collect generated images
-          const imgs = fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f)).map(f => path.join(imagesDir, f));
-          resolve({ images: imgs, stdout });
-        });
+        const proc = execFile(
+          'python',
+          [bridgeScript, 'text2image', key, prompt, imagesDir, String(numImages || 1)],
+          { timeout: 1800000, maxBuffer: 50 * 1024 * 1024, env: childEnv },
+          (error, stdout, stderr) => {
+            if (error) { reject({ error: error.message, stdout, stderr }); return; }
+            const imgs = fs.readdirSync(imagesDir)
+              .filter(f => /^meshy_.*\.png$/i.test(f))
+              .map(f => path.join(imagesDir, f));
+            resolve({ images: imgs, stdout });
+          }
+        );
         proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
+        proc.stderr?.on('data', d => { safeSend('ai3d-progress', '[stderr] ' + d.toString()); });
       });
       return { success: true, images: result.images };
     }
 
-    // CLOUD: Pollinations
+    // LOCAL GPU: Stable Diffusion XL Turbo — REMOVED.
+    // SDXL Turbo is distributed under the SAI Non-Commercial Research License,
+    // which disqualifies it from our "free AND commercially sellable" rule.
+    // Legacy saved projects that still reference engine='local-sd' silently
+    // fall back to RealVis XL (local-flux) above.
+    if (engine === 'local-sd') {
+      console.warn('[generate-images] local-sd (SDXL Turbo) is disabled (non-commercial license).');
+      return { success: false, error: 'SDXL Turbo is non-commercial. Please pick RealVis XL or Meshy.ai.' };
+    }
+
+    // Pollinations: community service without formal commercial ToS on outputs.
+    // Disabled for the Steam release. Legacy projects that still reference
+    // engine='pollinations' get a clear error directing them to RealVis or Meshy.
+    if (engine === 'pollinations') {
+      console.warn('[generate-images] pollinations disabled (no formal commercial ToS on outputs).');
+      return { success: false, error: 'Pollinations has been removed. Please pick RealVis XL (local) or Meshy.ai (cloud).' };
+    }
+
+    // CLOUD: Pollinations (legacy code path kept for reference; unreachable because
+    // the engine='pollinations' case above short-circuits before we get here)
     // Quality 1=Fast, 2=Medium, 3=High (default), 4=Ultra
     const qualityConfig = {
       1: { model: 'turbo',   width: 1024, height: 1024, enhance: false, suffix: '' },
@@ -1676,28 +2270,54 @@ ipcMain.handle('generate-images', async (event, { prompt, numImages, projectName
   }
 });
 
-// --- Image-to-3D: supports TRELLIS and TripoSG ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine, targetFaces, effort, jobId }) => {
+// --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction }) => {
   let imagePath = _imagePath;
+  let engine = _engine;
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
+    if (engine === 'hunyuan') {
+      console.warn('[image-to-3d] Hunyuan3D is disabled (license territorial restriction). Falling back to SF3D.');
+      engine = 'sf3d';
+    }
     const meshFilename = `${safeName}_${engine || 'ai'}_${timestamp}.glb`;
     const meshPath = path.join(MESHES_DIR, meshFilename);
     const bridgeScripts = {
-      'hunyuan': path.join(__dirname, '..', '..', 'scripts', 'local_hunyuan3d_bridge.py'),
-      'local': path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
-      'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
+      'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
+      'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
+      'triposg': path.join(__dirname, '..', '..', 'scripts', 'local_triposg_bridge.py'),
+      'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py'),
+      'meshy':   path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py')
     };
-    const bridgeScript = bridgeScripts[engine] || bridgeScripts['local'];
+    const bridgeScript = bridgeScripts[engine] || bridgeScripts['sf3d'];
+
+    // SF3D args: <img> <out> <tex_res> <vertex_count> <remesh>
+    // vertex_count=-1 => no reduction (SF3D default ~6k verts which is a good UE5 LOD)
+    const sf3dTexRes = String(textureSize || 1024);
+    const sf3dVerts = (targetFaces && Number(targetFaces) > 0) ? String(Math.max(500, Number(targetFaces) * 0.5)) : '-1';
+    const sf3dRemesh = (targetFaces && Number(targetFaces) > 0) ? 'triangle' : 'none';
+
+    // Meshy needs its API key as argv[2] — fetched from config.json.
+    // target_polycount is clamped to [100, 300000] inside the bridge.
+    const meshyApiKey = (loadConfig() || {}).meshyApiKey || '';
+    const meshyTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Math.min(300000, Number(targetFaces))) : '50000';
 
     const effortVal = String(effort || 2);
     const argsMap = {
-      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0), effortVal],
-      'local': [bridgeScript, imagePath, meshPath, '512'],
-      'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)]
+      'local':   [bridgeScript, imagePath, meshPath, '512'],
+      'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh],
+      'triposg': [bridgeScript, imagePath, meshPath, '30', '7.0'],
+      'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
+      'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
-    const args = argsMap[engine] || argsMap['local'];
+    const args = argsMap[engine] || argsMap['sf3d'];
+
+    // Meshy requires an API key — fail fast with a clear message rather than
+    // waiting for the Python bridge to explode on an empty argv.
+    if (engine === 'meshy' && !meshyApiKey.trim()) {
+      return { success: false, error: 'Meshy.ai API key not configured. Open Settings and paste your key.' };
+    }
 
     // Fix truncated image path (known bug: last char gets cut)
     if (!fs.existsSync(imagePath)) {
@@ -1714,21 +2334,46 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     }
     // Rebuild args with fixed path
     const fixedArgsMap = {
-      'hunyuan': [bridgeScript, imagePath, meshPath, String(targetFaces || 0), effortVal],
-      'local': [bridgeScript, imagePath, meshPath, '512'],
-      'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)]
+      'local':   [bridgeScript, imagePath, meshPath, '512'],
+      'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh],
+      'triposg': [bridgeScript, imagePath, meshPath, '30', '7.0'],
+      'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
+      'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
-    const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['local'];
+    const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['sf3d'];
 
     console.log('IMAGE-TO-3D fixedArgs:', JSON.stringify(fixedArgs));
     fs.writeFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `imagePath: ${imagePath}\nfixedArgs: ${JSON.stringify(fixedArgs)}\n`);
+    // VRAM fraction enforced in Python via torch.cuda.set_per_process_memory_fraction.
+    const fraction = (typeof vramFraction === 'number' && vramFraction > 0 && vramFraction <= 1)
+      ? vramFraction : 0.95;
+    // Persist on main process env so future SDXL server restarts inherit the latest value
+    process.env.FABMESH_VRAM_FRACTION = String(fraction);
+    const prevAlloc = process.env.PYTORCH_CUDA_ALLOC_CONF || '';
+    const allocConf = prevAlloc.includes('expandable_segments') ? prevAlloc : (prevAlloc ? prevAlloc + ',' : '') + 'expandable_segments:True';
+    const _ramLimitMB2 = process.env.FABMESH_RAM_LIMIT_MB || '';
+    const _gpuLimit2   = process.env.FABMESH_GPU_LIMIT   || '';
+    const _tempLimit2  = process.env.FABMESH_TEMP_LIMIT  || '';
+    const env = {
+      ...process.env,
+      // Unbuffered stdout so LOCAL_TRIPOSR_PROGRESS markers arrive in
+      // real time (not buffered in 4 KB chunks by the Python runtime).
+      PYTHONUNBUFFERED: '1',
+      FABMESH_VRAM_FRACTION: String(fraction),
+      PYTORCH_CUDA_ALLOC_CONF: allocConf,
+      ..._ramLimitMB2 ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB2 } : {},
+      ..._gpuLimit2   ? { FABMESH_GPU_LIMIT:   _gpuLimit2   } : {},
+      ..._tempLimit2  ? { FABMESH_TEMP_LIMIT:  _tempLimit2  } : {},
+    };
+    log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
     const result = await new Promise((resolve, reject) => {
       let stdoutBuf = '';
       let stderrBuf = '';
       let lastSent = 0;
       const proc = execFile('python', fixedArgs, {
         timeout: 1800000,
-        maxBuffer: 50 * 1024 * 1024
+        maxBuffer: 50 * 1024 * 1024,
+        env,
       }, (error, stdout, stderr) => {
         if (jobId) activeProcs.delete(jobId);
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
@@ -1767,7 +2412,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     return { success: true, ...result };
   } catch (err) {
     const errMsg = err.error || err.message || String(err);
-    fs.appendFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `\nERROR: ${errMsg}\nstdout: ${err.stdout || ''}\nstderr: ${err.stderr || ''}\n`);
+    // Overwrite (not append) so last_error.log doesn't grow unboundedly.
+    // The full history goes to fabmesh.log via the rotating logger anyway.
+    try {
+      fs.writeFileSync(
+        path.join(__dirname, '..', '..', 'last_error.log'),
+        `[${new Date().toISOString()}]\nERROR: ${errMsg}\nstdout: ${err.stdout || ''}\nstderr: ${err.stderr || ''}\n`
+      );
+    } catch (e) { /* disk full / readonly */ }
     return { success: false, error: errMsg, stdout: err.stdout, stderr: err.stderr };
   }
 });
@@ -1906,6 +2558,54 @@ ipcMain.handle('create-project-from-mesh', (event, { projectName, meshPath, mesh
 
 ipcMain.handle('get-config', () => loadConfig());
 
+// Patch-merge into config.json. Caller passes e.g. {meshyApiKey: 'msy_...'}.
+// Only whitelisted fields are accepted to avoid the renderer corrupting arbitrary keys.
+ipcMain.handle('set-config', (_event, patch) => {
+  if (!patch || typeof patch !== 'object') return { success: false, error: 'invalid patch' };
+  const config = loadConfig();
+  const ALLOWED = new Set(['blenderPath', 'meshyApiKey']);
+  for (const [k, v] of Object.entries(patch)) {
+    if (ALLOWED.has(k)) config[k] = v;
+  }
+  saveConfig(config);
+  return { success: true };
+});
+
+// Validate a Meshy.ai API key by hitting a cheap authenticated endpoint.
+// Returns { ok: true } on success, { ok: false, error } otherwise.
+ipcMain.handle('test-meshy-key', async (_event, apiKey) => {
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 8) {
+    return { ok: false, error: 'API key looks empty or too short' };
+  }
+  return await new Promise((resolve) => {
+    const https = require('https');
+    const req = https.request({
+      method: 'GET',
+      hostname: 'api.meshy.ai',
+      // This endpoint exists and requires auth — any 2xx means the key is valid.
+      // If the endpoint name changes, we simply fall back to checking the HTTP code.
+      path: '/openapi/v1/text-to-image?page_size=1',
+      headers: {
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'Accept': 'application/json',
+      },
+      timeout: 10000,
+    }, (resp) => {
+      const code = resp.statusCode || 0;
+      let body = '';
+      resp.on('data', (c) => { body += c.toString('utf-8'); });
+      resp.on('end', () => {
+        if (code >= 200 && code < 300) return resolve({ ok: true });
+        if (code === 401 || code === 403) return resolve({ ok: false, error: `Meshy rejected the key (HTTP ${code})` });
+        return resolve({ ok: false, error: `Meshy returned HTTP ${code}: ${body.slice(0, 200)}` });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Timed out contacting Meshy.ai' }); });
+    req.on('error', (err) => resolve({ ok: false, error: `Network error: ${err.message}` }));
+    req.end();
+  });
+});
+
 ipcMain.handle('set-blender-path', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Blender executable',
@@ -1919,6 +2619,52 @@ ipcMain.handle('set-blender-path', async () => {
     return config.blenderPath;
   }
   return null;
+});
+
+// Open a mesh file in Blender (foreground GUI). Used by the workspace
+// "Open in Blender" / "Edit in Blender" buttons.
+ipcMain.handle('open-in-blender', async (event, { meshPath }) => {
+  try {
+    if (!meshPath || !fs.existsSync(meshPath)) {
+      return { success: false, error: 'Mesh file not found' };
+    }
+    if (!isPathAllowed(meshPath)) {
+      return { success: false, error: 'Path not allowed' };
+    }
+    const config = loadConfig();
+    if (!config.blenderPath || !fs.existsSync(config.blenderPath)) {
+      return { success: false, error: 'Blender path not configured (Settings)' };
+    }
+    // Build a tiny Python launcher that imports the mesh and opens the GUI
+    const ext = path.extname(meshPath).slice(1).toLowerCase();
+    const importLine = {
+      'glb':  `bpy.ops.import_scene.gltf(filepath=${JSON.stringify(meshPath)})`,
+      'gltf': `bpy.ops.import_scene.gltf(filepath=${JSON.stringify(meshPath)})`,
+      'fbx':  `bpy.ops.import_scene.fbx(filepath=${JSON.stringify(meshPath)})`,
+      'obj':  `bpy.ops.wm.obj_import(filepath=${JSON.stringify(meshPath)})`,
+      'stl':  `bpy.ops.import_mesh.stl(filepath=${JSON.stringify(meshPath)})`,
+      'ply':  `bpy.ops.import_mesh.ply(filepath=${JSON.stringify(meshPath)})`,
+    }[ext];
+    if (!importLine) return { success: false, error: 'Unsupported mesh format: ' + ext };
+    const script = `import bpy
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete(use_global=False)
+${importLine}
+`;
+    const tmpScript = path.join(SCRIPTS_DIR, `_open_blender_${Date.now()}.py`);
+    fs.writeFileSync(tmpScript, script, 'utf-8');
+    // Spawn Blender in foreground (GUI mode), don't wait for it to close
+    const proc = spawn(config.blenderPath, ['--python', tmpScript], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    proc.unref();
+    // Cleanup the script file after a short delay (Blender has loaded it by then)
+    setTimeout(() => { try { fs.unlinkSync(tmpScript); } catch (e) {} }, 5000);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 ipcMain.handle('run-blender-script', async (event, { scriptContent, outputName, format }) => {
@@ -1968,29 +2714,36 @@ ipcMain.handle('run-blender-script', async (event, { scriptContent, outputName, 
   });
 });
 
-ipcMain.handle('list-meshes', () => {
+ipcMain.handle('list-meshes', async () => {
   if (!fs.existsSync(MESHES_DIR)) return [];
-  const files = fs.readdirSync(MESHES_DIR);
-  return files
-    .filter(f => /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f))
-    .map(f => {
-      const stats = fs.statSync(path.join(MESHES_DIR, f));
-      const thumbPath = path.join(MESHES_DIR, f.replace(/\.[^.]+$/, '_thumb.png'));
-      const sourcePath = path.join(MESHES_DIR, f) + '.source';
-      let source = null;
-      if (fs.existsSync(sourcePath)) {
-        try { source = fs.readFileSync(sourcePath, 'utf-8').trim(); } catch(e) {}
-      }
-      return {
-        filename: f,
-        path: path.join(MESHES_DIR, f),
-        size: stats.size,
-        created: stats.birthtime,
-        format: path.extname(f).slice(1).toUpperCase(),
-        thumb: fs.existsSync(thumbPath) ? 'file:///' + thumbPath.replace(/\\/g, '/') : null,
-        sourceImage: source
-      };
-    })
+  const fsp = fs.promises;
+  let files;
+  try { files = await fsp.readdir(MESHES_DIR); } catch (e) { return []; }
+  // Filter and stat in parallel — was sequential statSync which blocks main
+  // thread on slow disks / NAS / Windows Defender scans.
+  const candidates = files.filter(f => /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f));
+  const results = await Promise.all(candidates.map(async (f) => {
+    const fullPath = path.join(MESHES_DIR, f);
+    let stats;
+    try { stats = await fsp.stat(fullPath); } catch (e) { return null; }
+    const thumbPath = path.join(MESHES_DIR, f.replace(/\.[^.]+$/, '_thumb.png'));
+    const sourcePath = fullPath + '.source';
+    const [thumbExists, source] = await Promise.all([
+      fsp.access(thumbPath).then(() => true).catch(() => false),
+      fsp.readFile(sourcePath, 'utf-8').then(s => s.trim()).catch(() => null),
+    ]);
+    return {
+      filename: f,
+      path: fullPath,
+      size: stats.size,
+      created: stats.birthtime,
+      format: path.extname(f).slice(1).toUpperCase(),
+      thumb: thumbExists ? 'file:///' + thumbPath.replace(/\\/g, '/') : null,
+      sourceImage: source
+    };
+  }));
+  return results
+    .filter(Boolean)
     .sort((a, b) => new Date(b.created) - new Date(a.created));
 });
 
@@ -2177,23 +2930,32 @@ ipcMain.handle('read-mesh-file', (event, filePath) => {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 });
 
-ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat, customName }) => {
+ipcMain.handle('export-mesh', async (event, { sourcePath, targetFormat, customName, outputPath: customOutputPath }) => {
   const config = loadConfig();
   if (!config.blenderPath) throw new Error('Blender path not configured');
 
   // Validate inputs against injection
-  const validFormats = ['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply'];
-  if (!validFormats.includes(targetFormat)) throw new Error('Invalid target format');
+  const validFormats = ['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply', 'fbx_unreal'];
+  if (!validFormats.includes(targetFormat)) throw new Error('Invalid target format: ' + targetFormat);
   if (!isPathAllowed(sourcePath)) throw new Error('Source path not allowed');
+  // For Unreal export the actual file extension is .fbx
+  const realFormat = targetFormat === 'fbx_unreal' ? 'fbx' : targetFormat;
+  const isUnreal = targetFormat === 'fbx_unreal';
 
-  // Use customName if provided, else derive from source
-  let baseName;
-  if (customName) {
-    baseName = customName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  // Resolve the destination path
+  let outputPath;
+  if (customOutputPath) {
+    outputPath = customOutputPath;
   } else {
-    baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    let baseName;
+    if (customName) {
+      baseName = customName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+    } else {
+      baseName = path.basename(sourcePath, path.extname(sourcePath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+    outputPath = path.join(MESHES_DIR, `${baseName}.${realFormat}`);
   }
-  const outputPath = path.join(MESHES_DIR, `${baseName}.${targetFormat}`);
+  try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch (e) {}
 
   const exportScript = `
 import bpy
@@ -2215,17 +2977,269 @@ elif ext == 'fbx':
 elif ext == 'stl':
     bpy.ops.import_mesh.stl(filepath=src)
 
+# -------------------------------------------------------------------------
+# GLB import packs textures as in-memory bpy.data.images, but Blender's FBX
+# exporter with embed_textures=True only works reliably if each image has a
+# real filepath on disk. We save every image to a temp folder and assign
+# the filepath, so the exporter can read them back.
+#
+# Extra robustness for sources that are themselves broken FBXs: we try to
+# reload zero-sized images from their declared filepath, and skip images
+# whose filepath points to a missing .fbm sidecar.
+# -------------------------------------------------------------------------
+import os, tempfile
+tex_tmp_dir = os.path.join(tempfile.gettempdir(), "fabmesh_export_tex_" + str(os.getpid()))
+os.makedirs(tex_tmp_dir, exist_ok=True)
+saved = 0
+broken = 0
+for img in list(bpy.data.images):
+    if img is None or img.type != 'IMAGE':
+        continue
+    # If the image is 0x0 (e.g. came from a broken FBX referencing a missing
+    # .fbm folder), try to reload from its filepath. If that fails too, drop
+    # it so it doesn't confuse the exporter later.
+    if img.size[0] == 0 or img.size[1] == 0:
+        try:
+            img.reload()
+        except Exception:
+            pass
+        if img.size[0] == 0 or img.size[1] == 0:
+            print(f"EXPORT: skipping broken 0x0 image '{img.name}' (filepath='{img.filepath_raw}')")
+            try: bpy.data.images.remove(img)
+            except Exception: pass
+            broken += 1
+            continue
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in (img.name or "tex"))
+    if not safe_name.lower().endswith(('.png', '.jpg', '.jpeg', '.tga', '.bmp')):
+        safe_name += ".png"
+    target = os.path.join(tex_tmp_dir, safe_name)
+    try:
+        img.filepath_raw = target
+        img.file_format = 'PNG'
+        img.save()
+        # Re-pack so the image lives in the .blend AND has a real filepath
+        try: img.pack()
+        except Exception: pass
+        saved += 1
+        print(f"EXPORT: saved image '{img.name}' -> {target}")
+    except Exception as e:
+        print(f"EXPORT: could not save image '{img.name}': {e}")
+print(f"EXPORT: saved {saved} image(s), dropped {broken} broken, temp={tex_tmp_dir}")
+
+if saved == 0:
+    print("EXPORT: WARNING — no textures in source mesh, FBX will have black materials")
+
+try:
+    bpy.ops.file.pack_all()
+    print("EXPORT: pack_all() ok")
+except Exception as e:
+    print("EXPORT: pack_all() failed: " + str(e))
+
+# -------------------------------------------------------------------------
+# Auto-generate Normal + Roughness + Metalness from the baseColor texture.
+# The 3D engines (TripoSR, Trellis 2) only produce a diffuse/albedo map, so
+# Unreal's Material_0 ends up with no normal/roughness connected → characters
+# look flat or black depending on lighting. We synthesise:
+#   * Normal map via a height-to-normal Sobel pass on the baseColor luminance
+#   * Roughness map = 1.0 - clamped_luminance (dark = rough, bright = smooth)
+#   * Metalness map = solid black (non-metal — correct for organic chars)
+# These textures are created as packed in-memory Blender images so FBX
+# export's embed_textures=True will bake them into the .fbx.
+# -------------------------------------------------------------------------
+import math
+def _find_base_color_image(mat):
+    if not mat or not mat.use_nodes or not mat.node_tree:
+        return None, None
+    nt = mat.node_tree
+    for n in nt.nodes:
+        if n.type == 'BSDF_PRINCIPLED':
+            bc_input = n.inputs.get('Base Color')
+            if bc_input and bc_input.is_linked:
+                src = bc_input.links[0].from_node
+                if src.type == 'TEX_IMAGE' and src.image:
+                    return n, src.image
+    return None, None
+
+def _luminance_and_size(img, max_dim=256):
+    # Downsample to max_dim so the pure-Python pixel loops below finish in
+    # a few seconds instead of minutes. Derived PBR maps don't need higher.
+    w, h = img.size
+    scale = 1.0
+    if max(w, h) > max_dim:
+        scale = max_dim / max(w, h)
+        nw = max(8, int(w * scale))
+        nh = max(8, int(h * scale))
+    else:
+        nw, nh = w, h
+    px = list(img.pixels[:])
+    lum = [0.0] * (nw * nh)
+    for ny in range(nh):
+        sy = int(ny / scale) if scale < 1.0 else ny
+        if sy >= h: sy = h - 1
+        row_out = ny * nw
+        row_src = sy * w * 4
+        for nx in range(nw):
+            sx = int(nx / scale) if scale < 1.0 else nx
+            if sx >= w: sx = w - 1
+            i = row_src + sx * 4
+            lum[row_out + nx] = 0.2126*px[i] + 0.7152*px[i+1] + 0.0722*px[i+2]
+    return lum, nw, nh
+
+def _make_image(name, w, h, pixels_rgba):
+    img = bpy.data.images.new(name, width=w, height=h, alpha=False, float_buffer=False)
+    img.pixels = pixels_rgba
+    # Save to the same temp dir as the source textures so the FBX exporter
+    # can find a real file to copy/embed (generated-only images are skipped
+    # by export_scene.fbx's embed_textures=True path).
+    try:
+        safe = name + ".png"
+        target = os.path.join(tex_tmp_dir, safe)
+        img.filepath_raw = target
+        img.file_format = 'PNG'
+        img.save()
+        img.pack()
+    except Exception as e:
+        print(f"EXPORT: could not save generated image '{name}': {e}")
+    return img
+
+def _generate_normal(lum, w, h, strength=3.0):
+    # Sobel-ish: sample neighbours, convert to normal vector, pack as 0..1 RGB
+    out = [0.0] * (w * h * 4)
+    for y in range(h):
+        y0 = max(0, y-1)
+        y1 = min(h-1, y+1)
+        for x in range(w):
+            x0 = max(0, x-1)
+            x1 = min(w-1, x+1)
+            dx = (lum[y*w + x1] - lum[y*w + x0]) * strength
+            dy = (lum[y1*w + x] - lum[y0*w + x]) * strength
+            # Normal vector (invert Y for OpenGL / Blender convention)
+            nx = -dx
+            ny = -dy
+            nz = 1.0
+            l = math.sqrt(nx*nx + ny*ny + nz*nz) or 1.0
+            nx /= l; ny /= l; nz /= l
+            i = (y*w + x) * 4
+            out[i+0] = nx*0.5 + 0.5
+            out[i+1] = ny*0.5 + 0.5
+            out[i+2] = nz*0.5 + 0.5
+            out[i+3] = 1.0
+    return out
+
+def _generate_roughness(lum, w, h):
+    # Dark pixels → rough, bright pixels → smooth. Clamp to a reasonable range
+    # so fabrics don't become mirror-smooth and hair doesn't become sand.
+    out = [0.0] * (w * h * 4)
+    for i in range(w * h):
+        r = 1.0 - lum[i]
+        # Compress into 0.35..0.9 range (avoids extreme values)
+        r = 0.35 + r * 0.55
+        if r < 0.0: r = 0.0
+        if r > 1.0: r = 1.0
+        out[i*4+0] = r
+        out[i*4+1] = r
+        out[i*4+2] = r
+        out[i*4+3] = 1.0
+    return out
+
+def _hookup_maps(mat, principled, normal_img, rough_img):
+    if not mat or not principled:
+        return
+    nt = mat.node_tree
+    links = nt.links
+    # Normal map chain: Image -> Normal Map -> Principled.Normal
+    tex_n = nt.nodes.new('ShaderNodeTexImage')
+    tex_n.image = normal_img
+    tex_n.image.colorspace_settings.name = 'Non-Color'
+    tex_n.location = (principled.location[0] - 700, principled.location[1] - 300)
+    nmap = nt.nodes.new('ShaderNodeNormalMap')
+    nmap.location = (principled.location[0] - 350, principled.location[1] - 300)
+    nmap.inputs['Strength'].default_value = 1.0
+    links.new(tex_n.outputs['Color'], nmap.inputs['Color'])
+    links.new(nmap.outputs['Normal'], principled.inputs['Normal'])
+    # Roughness chain: Image -> Principled.Roughness (as non-color data)
+    tex_r = nt.nodes.new('ShaderNodeTexImage')
+    tex_r.image = rough_img
+    tex_r.image.colorspace_settings.name = 'Non-Color'
+    tex_r.location = (principled.location[0] - 700, principled.location[1] - 550)
+    links.new(tex_r.outputs['Color'], principled.inputs['Roughness'])
+    # Metalness: leave input at 0 (constant) — no map needed for organic chars
+
+try:
+    gen_count = 0
+    for mat in bpy.data.materials:
+        principled, bc_img = _find_base_color_image(mat)
+        if not bc_img:
+            continue
+        bw, bh = bc_img.size
+        if bw == 0 or bh == 0:
+            print(f"EXPORT: skipping material '{mat.name}', base color image is 0x0")
+            continue
+        print(f"EXPORT: generating PBR maps for material '{mat.name}' (source {bw}x{bh})")
+        lum, w, h = _luminance_and_size(bc_img, max_dim=256)
+        print(f"EXPORT:   working at {w}x{h}")
+        nrm_px = _generate_normal(lum, w, h, strength=3.0)
+        rgh_px = _generate_roughness(lum, w, h)
+        nrm_img = _make_image(mat.name + "_Normal", w, h, nrm_px)
+        rgh_img = _make_image(mat.name + "_Roughness", w, h, rgh_px)
+        _hookup_maps(mat, principled, nrm_img, rgh_img)
+        gen_count += 1
+    print(f"EXPORT: generated PBR maps for {gen_count} materials")
+    # Re-pack so the newly generated images are also embeddable
+    try: bpy.ops.file.pack_all()
+    except Exception: pass
+except Exception as e:
+    print("EXPORT: PBR map generation failed: " + str(e))
+
+# Unreal-specific transforms (cm units)
+unreal = ${isUnreal ? 'True' : 'False'}
+if unreal:
+    for obj in bpy.context.scene.objects:
+        if obj.type in ('MESH', 'ARMATURE'):
+            obj.scale = (100, 100, 100)
+    bpy.context.view_layer.update()
+
 # Export
 out = "${outputPath.replace(/\\/g, '/')}"
-fmt = "${targetFormat}"
+fmt = "${realFormat}"
 if fmt in ('glb', 'gltf'):
-    bpy.ops.export_scene.gltf(filepath=out, export_format='${ targetFormat === 'glb' ? 'GLB' : 'GLTF_SEPARATE'}')
+    bpy.ops.export_scene.gltf(filepath=out, export_format='${realFormat === 'glb' ? 'GLB' : 'GLTF_SEPARATE'}')
 elif fmt == 'obj':
     bpy.ops.wm.obj_export(filepath=out)
 elif fmt == 'fbx':
-    bpy.ops.export_scene.fbx(filepath=out)
+    # Debug: list images that will (hopefully) be embedded
+    print("EXPORT: images in bpy.data at export time:")
+    for _img in bpy.data.images:
+        if _img.type == 'IMAGE' and _img.size[0] > 0:
+            print(f"  - {_img.name} size={tuple(_img.size)} filepath='{_img.filepath_raw}' packed={bool(_img.packed_file)}")
+    if unreal:
+        bpy.ops.export_scene.fbx(
+            filepath=out,
+            apply_unit_scale=True,
+            apply_scale_options='FBX_SCALE_NONE',
+            axis_forward='-Z',
+            axis_up='Y',
+            bake_space_transform=True,
+            mesh_smooth_type='FACE',
+            # Embed textures inside the .fbx so Unreal imports a self-contained file
+            path_mode='COPY',
+            embed_textures=True,
+        )
+    else:
+        bpy.ops.export_scene.fbx(
+            filepath=out,
+            path_mode='COPY',
+            embed_textures=True,
+        )
+    # Report final FBX size to make sure textures were embedded
+    try:
+        _sz = os.path.getsize(out)
+        print(f"EXPORT: final FBX size = {_sz} bytes")
+    except Exception: pass
 elif fmt == 'stl':
     bpy.ops.export_mesh.stl(filepath=out)
+elif fmt == 'ply':
+    bpy.ops.export_mesh.ply(filepath=out)
 `;
 
   const tmpScript = path.join(SCRIPTS_DIR, `export_${Date.now()}.py`);
@@ -2234,13 +3248,74 @@ elif fmt == 'stl':
   return new Promise((resolve, reject) => {
     const cleanup = () => { try { if (fs.existsSync(tmpScript)) fs.unlinkSync(tmpScript); } catch(e) {} };
     const proc = execFile(config.blenderPath, ['--background', '--python', tmpScript], {
-      timeout: 60000
+      timeout: 60000,
+      maxBuffer: 50 * 1024 * 1024,
     }, (error, stdout, stderr) => {
       cleanup();
+      // Write Blender's full stdout/stderr to last_error.log so the user can
+      // inspect the EXPORT: lines that tell what textures were embedded.
+      try {
+        fs.writeFileSync(
+          path.join(__dirname, '..', '..', 'last_error.log'),
+          `[${new Date().toISOString()}] export-mesh\nsource: ${sourcePath}\noutput: ${outputPath}\nformat: ${targetFormat}\n\n=== STDOUT ===\n${stdout || ''}\n\n=== STDERR ===\n${stderr || ''}\n`
+        );
+      } catch (e) {}
+      // Also nuke any .fbm sidecar folder Blender created next to the FBX
+      // (it appears when embed_textures fails silently)
+      try {
+        const fbmDir = outputPath.replace(/\.[^.]+$/, '') + '.fbm';
+        if (fs.existsSync(fbmDir)) fs.rmSync(fbmDir, { recursive: true, force: true });
+      } catch (e) {}
       if (error) reject({ error: error.message, stderr });
       else if (!fs.existsSync(outputPath)) reject({ error: 'Export failed' });
       else resolve({ path: outputPath, filename: path.basename(outputPath) });
     });
     proc.on('error', err => { cleanup(); reject({ error: err.message }); });
   });
+});
+
+// Ask the user where to save an exported mesh (returns full file path or null)
+ipcMain.handle('pick-export-path', async (event, { defaultName, format }) => {
+  const extByFmt = {
+    glb: 'glb', gltf: 'gltf', obj: 'obj', fbx: 'fbx', stl: 'stl', ply: 'ply', fbx_unreal: 'fbx',
+  };
+  const ext = extByFmt[format] || 'glb';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export mesh as...',
+    defaultPath: (defaultName || 'mesh') + '.' + ext,
+    filters: [{ name: format.toUpperCase(), extensions: [ext] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  return result.filePath;
+});
+
+// Get basic file info (size, mtime, dimensions for images, tris for meshes)
+ipcMain.handle('get-file-info', async (event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Not found' };
+    const stat = fs.statSync(filePath);
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    const info = {
+      ok: true,
+      filename: path.basename(filePath),
+      path: filePath,
+      sizeBytes: stat.size,
+      sizeHuman: stat.size > 1048576 ? (stat.size/1048576).toFixed(1) + ' MB' : (stat.size/1024).toFixed(0) + ' KB',
+      modified: stat.mtime,
+      ext,
+    };
+    // Image dimensions via image-size lib if available, else skip
+    if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+      try {
+        const { imageSize } = require('image-size');
+        const buffer = fs.readFileSync(filePath);
+        const dim = imageSize(buffer);
+        info.width = dim.width;
+        info.height = dim.height;
+      } catch (e) { /* image-size not installed, skip */ }
+    }
+    return info;
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });

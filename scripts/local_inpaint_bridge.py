@@ -20,6 +20,16 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
     from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
     from diffusers import StableDiffusionXLInpaintPipeline
 
+    # Enforce VRAM cap from FabMesh settings
+    if torch.cuda.is_available():
+        _frac = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
+        if 0.1 <= _frac < 1.0:
+            try:
+                torch.cuda.set_per_process_memory_fraction(_frac)
+                print(f"INPAINT: VRAM hard cap set to {_frac*100:.0f}%", flush=True)
+            except Exception as e:
+                print(f"INPAINT: Could not set VRAM cap ({e})", flush=True)
+
     # Step 1: CLIPSeg - segment the target area
     print("INPAINT: Loading CLIPSeg...", flush=True)
     seg_processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
