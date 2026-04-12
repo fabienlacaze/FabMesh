@@ -159,7 +159,17 @@
                         <button id="ws-autoinpaint-btn" class="ghost-btn tool-btn">&#129668; Auto Inpaint</button>
                         <button id="ws-removebg-btn" class="ghost-btn tool-btn">&#9986; Remove BG</button>
                         <button id="ws-upscale-btn" class="ghost-btn tool-btn">&#128300; Upscale 2x</button>
-                        <button id="ws-style-btn" class="ghost-btn tool-btn">&#127912; Style Transfer</button>
+                        <select id="ws-style-btn" class="tool-btn" style="background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:var(--radius-sm); cursor:pointer;">
+                          <option value="" disabled selected>&#127912; Style...</option>
+                          <option value="anime style, cel shading, vibrant colors">Anime</option>
+                          <option value="cartoon style, bold outlines, flat colors">Cartoon</option>
+                          <option value="low-poly 3D art, flat shaded, geometric">Low-poly</option>
+                          <option value="pixel art, 16-bit retro, limited palette">Pixel art</option>
+                          <option value="painterly, brushstrokes, oil painting">Painterly</option>
+                          <option value="PBR materials, ultra detailed, 8k textures">PBR HD</option>
+                          <option value="voxel art, blocky 3D, cubic geometry">Voxel</option>
+                          <option value="realistic style, photorealistic, sharp details">Realistic</option>
+                        </select>
                         <button id="ws-extend-btn" class="ghost-btn tool-btn">&#8596; Extend Canvas</button>
                         <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
                         <button id="ws-symmetrize-btn" class="ghost-btn tool-btn">&#8651; Symmetrize</button>

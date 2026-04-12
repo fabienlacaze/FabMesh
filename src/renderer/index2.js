@@ -2247,18 +2247,31 @@ document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQu
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
 document.getElementById('ws-crop-btn')?.addEventListener('click', () => runQuickEdit('crop', { left: 0.1, top: 0.05, right: 0.9, bottom: 0.95 }));
 
-// Style Transfer: opens the Modify (img2img) modal with a style preset
-document.getElementById('ws-style-btn')?.addEventListener('click', () => {
+// Style Transfer: dropdown triggers img2img with the selected style prompt
+document.getElementById('ws-style-btn')?.addEventListener('change', async (e) => {
+  const style = e.target.value;
+  if (!style) return;
+  e.target.selectedIndex = 0; // reset to placeholder
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  // Open the modify modal with a style prompt pre-filled
-  const modPrompt = document.getElementById('mod-prompt');
-  if (modPrompt) modPrompt.value = 'anime style, cel shading, vibrant colors';
-  const modStrength = document.getElementById('mod-strength');
-  if (modStrength) { modStrength.value = '65'; document.getElementById('mod-strength-val').textContent = '65%'; }
-  document.getElementById('modal-modify-image')?.classList.remove('hidden');
-  const srcImg = document.getElementById('mod-source-img');
-  if (srcImg) srcImg.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  showToast(`Applying style: ${style.split(',')[0]}...`, 'info', 2000);
+  gatedRun('img2img', `Style: ${style.split(',')[0]}`, async () => {
+    const job = pushJob(`Style Transfer: ${p.name}`, null, { Style: style.split(',')[0] }, 30000);
+    try {
+      const r = await API.img2img({ imagePath: p.selectedImagePath, prompt: style, strength: 0.6, engine: 'local-sdxl' });
+      if (r?.success) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+        showToast('Style applied!', 'success');
+      } else {
+        completeJob(job.id, false, r?.error);
+        showToast('Style transfer failed: ' + (r?.error || 'unknown'), 'error');
+      }
+    } catch (err) {
+      completeJob(job.id, false, err?.message);
+      showToast('Style transfer error: ' + (err?.message || err), 'error');
+    }
+  });
 });
 
 // Color Picker: read pixel color from image and copy to clipboard
