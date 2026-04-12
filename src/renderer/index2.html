@@ -986,9 +986,6 @@
           <div id="clone-source-marker" style="position: fixed; pointer-events: none; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.15); display: none; z-index: 999; box-sizing: border-box;">
             <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:#00ff00; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
           </div>
-          <div id="clone-loupe" style="position:fixed; pointer-events:none; display:none; z-index:1001; width:120px; height:120px; border:2px solid var(--accent); border-radius:50%; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.5);">
-            <canvas id="clone-loupe-canvas" width="120" height="120" style="width:120px; height:120px;"></canvas>
-          </div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
@@ -1027,5 +1024,9 @@
   <script src="test_api_client.js"></script>
   <script src="index2-edit-tools.js"></script>
   <script type="module" src="index2.js"></script>
+  <!-- Global loupe magnifier (shared by Clone Stamp + Draw Mask) -->
+  <div id="clone-loupe" style="position:fixed; pointer-events:none; display:none; z-index:99999; width:120px; height:120px; border:3px solid #f59e0b; border-radius:50%; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.6);">
+    <canvas id="clone-loupe-canvas" width="120" height="120" style="width:120px; height:120px;"></canvas>
+  </div>
 </body>
 </html>
