@@ -988,25 +988,39 @@ ipcMain.handle('get-nsfw-keywords', () => {
   return NSFW_KEYWORDS;
 });
 
-// Scan an image file for NSFW content using skin-ratio heuristic.
-// Returns { nsfw: true/false, skinRatio: 0.XX }
+// Scan an image file for NSFW content using Falconsai/nsfw_image_detection (ViT).
+// Falls back to skin-ratio heuristic if the model isn't available.
+// Returns { nsfw: true/false, score: 0.XX }
 ipcMain.handle('check-image-nsfw', async (_event, { imagePath }) => {
-  if (isUnrestrictedMode()) return { nsfw: false, skinRatio: 0 };
-  if (!imagePath || !fs.existsSync(imagePath)) return { nsfw: false, skinRatio: 0 };
+  if (isUnrestrictedMode()) return { nsfw: false, score: 0 };
+  if (!imagePath || !fs.existsSync(imagePath)) return { nsfw: false, score: 0 };
   return new Promise((resolve) => {
     execFile('python', ['-c', `
-import sys, numpy as np
-from PIL import Image
-img = Image.open(r"${imagePath}").convert('RGB').resize((256,256))
-arr = np.array(img).astype(float)
-r,g,b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
-skin = ((r>95)&(g>40)&(b>20)&(r>g)&(r>b)&((r-g)>15)&(arr.max(2)-arr.min(2)>15))
-ratio = float(skin.sum()) / (256*256)
-print(f"{ratio:.4f}")
-`], { timeout: 10000 }, (error, stdout) => {
-      if (error) { resolve({ nsfw: false, skinRatio: 0 }); return; }
-      const ratio = parseFloat(stdout.trim()) || 0;
-      resolve({ nsfw: ratio > 0.40, skinRatio: ratio });
+import sys, json
+try:
+    from transformers import pipeline
+    from PIL import Image
+    clf = pipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
+    r = clf(Image.open(r"${imagePath}"))
+    nsfw_score = next((x['score'] for x in r if x['label'] == 'nsfw'), 0)
+    print(json.dumps({"nsfw": nsfw_score > 0.5, "score": round(nsfw_score, 3)}))
+except Exception as e:
+    # Fallback: skin ratio heuristic
+    import numpy as np
+    from PIL import Image
+    img = Image.open(r"${imagePath}").convert('RGB').resize((256,256))
+    arr = np.array(img).astype(float)
+    r,g,b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+    skin = ((r>95)&(g>40)&(b>20)&(r>g)&(r>b)&((r-g)>15)&(arr.max(2)-arr.min(2)>15))
+    ratio = float(skin.sum()) / (256*256)
+    print(json.dumps({"nsfw": ratio > 0.35, "score": round(ratio, 3)}))
+`], { timeout: 30000 }, (error, stdout) => {
+      if (error) { resolve({ nsfw: false, score: 0 }); return; }
+      try {
+        resolve(JSON.parse(stdout.trim()));
+      } catch (_) {
+        resolve({ nsfw: false, score: 0 });
+      }
     });
   });
 });
