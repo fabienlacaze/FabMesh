@@ -4037,18 +4037,10 @@ async function refreshPythonStats() {
     const r = await API.countPython();
     const countEl = document.getElementById('set-python-count');
     const sdxlEl = document.getElementById('set-python-sdxl');
-    if (countEl) {
-      const n = r.count || 0;
-      countEl.textContent = n + (n === 0 ? '  (none)' : (n === 1 ? '  process' : '  processes'));
-      countEl.classList.remove('warn', 'ok', 'error');
-      if (n === 0) countEl.classList.add('ok');
-      else if (n <= 2) countEl.classList.add('warn');
-      else countEl.classList.add('error');
-    }
+    if (countEl) countEl.textContent = String(r.count || 0);
     if (sdxlEl) {
-      sdxlEl.textContent = r.sdxl ? 'Running (loaded)' : 'Stopped';
-      sdxlEl.classList.remove('warn', 'ok', 'error');
-      sdxlEl.classList.add(r.sdxl ? 'warn' : 'ok');
+      sdxlEl.textContent = r.sdxl ? 'running' : 'stopped';
+      sdxlEl.style.color = r.sdxl ? 'var(--warning)' : 'var(--success)';
     }
   } catch (e) {}
 }
@@ -4301,10 +4293,12 @@ document.getElementById('job-gpu-monitor')?.addEventListener('click', (e) => {
   document.getElementById('modal-job-details')?.classList.add('hidden');
   openSettings();
 });
-document.getElementById('set-close')?.addEventListener('click', () => {
+function closeSettings() {
   document.getElementById('modal-settings').classList.add('hidden');
   if (_gpuPollTimer) { clearInterval(_gpuPollTimer); _gpuPollTimer = null; }
-});
+}
+document.getElementById('set-close')?.addEventListener('click', closeSettings);
+document.getElementById('set-close-x')?.addEventListener('click', closeSettings);
 document.getElementById('set-open-logs')?.addEventListener('click', async () => {
   if (API.openLogsFolder) await API.openLogsFolder();
 });

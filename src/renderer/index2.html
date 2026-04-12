@@ -624,21 +624,44 @@
          SETTINGS MODAL
          ============================================================ -->
     <div id="modal-settings" class="modal-overlay hidden">
-      <div class="modal-card">
-        <h2>Settings</h2>
-        <p class="modal-subtitle">Local environment configuration.</p>
-        <label>Meshy.ai API key <span style="font-weight:normal; color:var(--text-2); font-size:11px;">(optional, for cloud generation)</span></label>
-        <div style="display:flex; gap:8px;">
-          <input type="password" id="set-meshy-api-key" placeholder="msy_..." autocomplete="off" style="flex:1;" />
-          <button id="set-meshy-test" class="ghost-btn" style="white-space:nowrap;">Test</button>
+      <div class="modal-card settings-card">
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <button class="settings-close-x" id="set-close-x" title="Close">&#10005;</button>
         </div>
-        <div class="gpu-limits-hint">
-          Free tier: 200 credits/month, outputs under CC-BY 4.0 (commercial OK with attribution). Get a key at
-          <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">meshy.ai/api</a>.
+
+        <!-- ═══ CLOUD SERVICES ═══ -->
+        <div class="settings-section-header">Cloud Services</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Meshy.ai</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span class="settings-field-label">API key</span>
+            <input type="password" id="set-meshy-api-key" placeholder="msy_..." autocomplete="off" style="flex:1;" />
+            <button id="set-meshy-test" class="ghost-btn" style="white-space:nowrap; padding:4px 12px;">Test</button>
+          </div>
+          <div class="settings-box-footer">
+            Free &middot; CC-BY 4.0 &middot; <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">meshy.ai/api</a>
+          </div>
         </div>
-        <label>GPU</label>
-        <div id="set-gpu-card">
-          <div id="set-gpu-name">Loading...</div>
+
+        <!-- ═══ AI ASSISTANT ═══ -->
+        <div class="settings-section-header">AI Assistant</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Claude Desktop</div>
+          <div class="settings-box-desc">Let Claude generate batches of assets for you via text commands.</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <button id="set-claude-connect" class="ghost-btn" style="flex:1; padding:6px 12px;">&#129302; Connect to Claude Desktop</button>
+            <span id="set-claude-status" class="settings-status-dot"></span>
+          </div>
+          <div class="settings-box-footer">
+            Free &middot; <a href="https://claude.ai/download" target="_blank" rel="noopener">claude.ai/download</a>
+          </div>
+        </div>
+
+        <!-- ═══ HARDWARE ═══ -->
+        <div class="settings-section-header">Hardware</div>
+        <div class="settings-box" id="set-gpu-card">
+          <div class="settings-box-title" id="set-gpu-name">Loading...</div>
           <div class="gpu-stat">
             <div class="gpu-stat-row">
               <span class="gpu-stat-label">VRAM</span>
@@ -646,74 +669,57 @@
             </div>
             <div class="gpu-bar" data-stat="vram">
               <div class="gpu-bar-fill" id="set-gpu-vram-fill"></div>
-              <div class="gpu-bar-limit" id="set-gpu-vram-limit" style="left:90%" title="Drag to set max VRAM allowed"></div>
+              <div class="gpu-bar-limit" id="set-gpu-vram-limit" style="left:90%" title="Drag to set max VRAM"></div>
             </div>
           </div>
           <div class="gpu-stat">
             <div class="gpu-stat-row">
-              <span class="gpu-stat-label">GPU usage</span>
+              <span class="gpu-stat-label">GPU</span>
               <span class="gpu-stat-val" id="set-gpu-util-val">--</span>
             </div>
             <div class="gpu-bar" data-stat="util">
               <div class="gpu-bar-fill" id="set-gpu-util-fill"></div>
-              <div class="gpu-bar-limit" id="set-gpu-util-limit" style="left:95%" title="Drag to set max GPU usage allowed"></div>
+              <div class="gpu-bar-limit" id="set-gpu-util-limit" style="left:95%" title="Drag to set max GPU usage"></div>
             </div>
           </div>
           <div class="gpu-stat">
             <div class="gpu-stat-row">
-              <span class="gpu-stat-label">Temperature</span>
+              <span class="gpu-stat-label">Temp</span>
               <span class="gpu-stat-val" id="set-gpu-temp-val">--</span>
             </div>
             <div class="gpu-bar" data-stat="temp">
               <div class="gpu-bar-fill" id="set-gpu-temp-fill"></div>
-              <div class="gpu-bar-limit" id="set-gpu-temp-limit" style="left:80%" title="Drag to set max temperature allowed"></div>
+              <div class="gpu-bar-limit" id="set-gpu-temp-limit" style="left:80%" title="Drag to set max temperature"></div>
             </div>
           </div>
-          <div class="gpu-limits-hint">
-            Drag the white markers to set limits. Jobs are queued until all limits are satisfied. VRAM is also hard-capped in Python via PyTorch.
-          </div>
-        </div>
-        <label>System RAM</label>
-        <div id="set-ram-card">
-          <div class="gpu-stat">
+          <div class="settings-box-hint">Drag markers to set limits. Jobs queue until all limits are met.</div>
+
+          <div class="gpu-stat" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
             <div class="gpu-stat-row">
-              <span class="gpu-stat-label">RAM usage</span>
+              <span class="gpu-stat-label">RAM</span>
               <span class="gpu-stat-val" id="set-ram-val">--</span>
             </div>
             <div class="gpu-bar" data-stat="ram">
               <div class="gpu-bar-fill" id="set-ram-fill"></div>
-              <div class="gpu-bar-limit" id="set-ram-limit" style="left:85%" title="Drag to set max RAM usage allowed"></div>
+              <div class="gpu-bar-limit" id="set-ram-limit" style="left:85%" title="Drag to set max RAM usage"></div>
             </div>
           </div>
-          <div class="gpu-limits-hint">
-            Jobs are blocked when system RAM exceeds this limit. Python subprocesses receive a hard cap via FABMESH_RAM_LIMIT_MB.
-          </div>
-        </div>
-        <label>Claude Desktop <span style="font-weight:normal; color:var(--text-2); font-size:11px;">(optional, free)</span></label>
-        <div class="gpu-limits-hint" style="margin-bottom:8px;">
-          Connect FabMesh to <a href="https://claude.ai/download" target="_blank" rel="noopener">Claude Desktop</a> (free) so Claude can generate batches of assets for you via voice/text commands.
-        </div>
-        <div style="display:flex; gap:8px;">
-          <button id="set-claude-connect" class="ghost-btn" style="flex:1;">&#129302; Connect to Claude Desktop</button>
-          <span id="set-claude-status" style="font-size:11px; color:var(--text-2); align-self:center;"></span>
         </div>
 
-        <label>Logs</label>
-        <button id="set-open-logs" class="ghost-btn" style="width:100%;">&#128193; Open logs folder</button>
-
-        <label>Python processes</label>
-        <div id="set-python-status" class="python-status">
-          <div class="ps-row">
-            <span class="ps-label">Active subprocesses</span>
-            <span class="ps-val" id="set-python-count">--</span>
+        <!-- ═══ SYSTEM ═══ -->
+        <div class="settings-section-header">System</div>
+        <div class="settings-box">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <span class="settings-field-label">Processes</span>
+            <span style="font-size:11px; color:var(--text-2);"><span id="set-python-count">0</span> active &middot; SDXL <span id="set-python-sdxl">stopped</span></span>
           </div>
-          <div class="ps-row">
-            <span class="ps-label">SDXL server</span>
-            <span class="ps-val" id="set-python-sdxl">--</span>
+          <div style="display:flex; gap:8px;">
+            <button id="set-open-logs" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128193; Logs</button>
+            <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 12px;">&#128369; Kill stuck Python</button>
           </div>
         </div>
-        <button id="set-kill-python" class="ghost-btn danger" style="width:100%;">&#128369; Kill stuck Python (preserves SDXL)</button>
-        <div class="modal-actions">
+
+        <div class="modal-actions" style="justify-content:flex-end;">
           <button class="ghost-btn" id="set-close">Close</button>
         </div>
       </div>

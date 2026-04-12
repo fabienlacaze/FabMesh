@@ -1390,6 +1390,98 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   line-height: 1.4;
 }
 
+/* ============================================================
+   SETTINGS MODAL — reorganized with sections and cards
+   ============================================================ */
+.settings-card {
+  max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.settings-header h2 { margin: 0; }
+.settings-close-x {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.settings-close-x:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-0);
+}
+.settings-section-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--accent);
+  margin-top: 16px;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.25);
+}
+.settings-box {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.settings-box-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-0);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.settings-box-desc {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.settings-box-footer {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 8px;
+}
+.settings-box-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.settings-box-footer a:hover { text-decoration: underline; }
+.settings-box-hint {
+  font-size: 10px;
+  color: var(--text-3);
+  font-style: italic;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.settings-field-label {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 50px;
+}
+.settings-status-dot {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.settings-status-dot.connected { color: var(--success); }
+.settings-status-dot.disconnected { color: var(--text-3); }
+
 /* Danger ghost button (red) — for destructive actions like Kill stuck Python */
 .ghost-btn.danger {
   border-color: var(--error);
