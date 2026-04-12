@@ -885,15 +885,44 @@ function enableStep(stepNum) {
 // Two paths per project:
 //   previewImagePath: what is shown in the big preview (clicking a thumb updates it)
 //   selectedImagePath: the image that will be sent to the 3D step when the user clicks "Use this for 3D"
-function renderImageVersions(p) {
+async function renderImageVersions(p) {
   const strip = document.getElementById('ws-image-versions');
   strip.innerHTML = '';
-  // Default: latest version is both previewed AND selected for 3D
-  if (p.images.length > 0) {
-    if (!p.previewImagePath) p.previewImagePath = p.images[0].path;
-    if (!p.selectedImagePath) p.selectedImagePath = p.images[0].path;
+
+  // Check parental control status
+  let restricted = true;
+  try {
+    if (API.getParentalStatus) {
+      const ps = await API.getParentalStatus();
+      restricted = !ps.unrestricted;
+    }
+  } catch(_) {}
+
+  // Filter out NSFW images when restricted (check .nsfw tag files via IPC)
+  let images = p.images;
+  if (restricted && p.images.length > 0 && API.checkImagesNsfwTags) {
+    try {
+      const allPaths = p.images.map(img => img.path || img);
+      const tags = await API.checkImagesNsfwTags({ images: allPaths });
+      if (tags && typeof tags === 'object') {
+        images = p.images.filter(img => {
+          const imgPath = img.path || img;
+          return !tags[imgPath];
+        });
+      }
+    } catch(_) {}
   }
-  p.images.forEach((img, i) => {
+
+  // Default: latest version is both previewed AND selected for 3D
+  if (images.length > 0) {
+    if (!p.previewImagePath || !images.find(i => (i.path||i) === p.previewImagePath)) {
+      p.previewImagePath = images[0].path;
+    }
+    if (!p.selectedImagePath || !images.find(i => (i.path||i) === p.selectedImagePath)) {
+      p.selectedImagePath = images[0].path;
+    }
+  }
+  images.forEach((img, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
     if (img.path === p.previewImagePath) t.classList.add('selected');
@@ -904,7 +933,7 @@ function renderImageVersions(p) {
     const _cb = img.mtime || p._reloadTs || Date.now();
     t.innerHTML = `
       <img src="file:///${img.path.replace(/\\/g, '/')}?t=${_cb}">
-      <span class="v-label">v${p.images.length - 1 - i}</span>
+      <span class="v-label">v${images.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this version">&#10005;</button>
     `;
     t.addEventListener('click', () => {

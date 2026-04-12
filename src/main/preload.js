@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   toggleUnrestricted: (opts) => ipcRenderer.invoke('toggle-unrestricted', opts),
   getParentalStatus: () => ipcRenderer.invoke('get-parental-status'),
   checkProjectNsfw: (opts) => ipcRenderer.invoke('check-project-nsfw', opts),
+  checkImagesNsfwTags: (opts) => ipcRenderer.invoke('check-images-nsfw-tags', opts),
   getNsfwKeywords: () => ipcRenderer.invoke('get-nsfw-keywords'),
   checkImageNsfw: (opts) => ipcRenderer.invoke('check-image-nsfw', opts),
   batchCheckNsfw: (opts) => ipcRenderer.invoke('batch-check-nsfw', opts),

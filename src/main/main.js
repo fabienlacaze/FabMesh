@@ -999,6 +999,16 @@ ipcMain.handle('check-project-nsfw', (_event, { folderPath }) => {
   } catch (_) { return { nsfw: false }; }
 });
 
+// Return which images in a list have .nsfw tag files (instant, no AI)
+ipcMain.handle('check-images-nsfw-tags', (_event, { images }) => {
+  if (isUnrestrictedMode()) return {};
+  const results = {};
+  for (const imgPath of (images || [])) {
+    results[imgPath] = fs.existsSync(imgPath + '.nsfw');
+  }
+  return results;
+});
+
 ipcMain.handle('get-nsfw-keywords', () => {
   return NSFW_KEYWORDS;
 });
