@@ -210,6 +210,31 @@ async function showMeshyKeyMissingError(errorTitle) {
   }
 }
 
+// Inline toast banner — appears at the bottom of the screen for 3s then fades.
+// type: 'error' (red), 'success' (green), 'info' (blue)
+function showToast(message, type = 'info', durationMs = 3000) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:99999; display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none;';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  const colors = {
+    error: 'rgba(220,38,38,0.9)',
+    success: 'rgba(22,163,74,0.9)',
+    info: 'rgba(99,102,241,0.9)',
+  };
+  toast.style.cssText = `background:${colors[type] || colors.info}; color:white; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; pointer-events:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3); transition:opacity 0.3s; max-width:500px; text-align:center;`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, durationMs);
+}
+
 function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
   return new Promise((resolve) => {
     const modal = document.getElementById('modal-confirm');
@@ -2004,13 +2029,13 @@ function stripKnownPromptSuffixes(raw) {
 document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
   const textarea = document.getElementById('ws-prompt');
   const raw = textarea.value.trim();
-  if (!raw) { alert('Type a description first.'); return; }
+  if (!raw) { showToast('Type a description first.', 'error'); return; }
   const assetType = document.getElementById('ws-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
   // Check if the prompt already looks enhanced (contains known suffix keywords)
   const alreadyEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
   if (alreadyEnhanced) {
-    alert('Prompt already looks enhanced. Edit manually or clear it first.');
+    showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
     return;
   }
   const enhanced = buildFullPrompt(raw, assetType, assetStyle);
@@ -2033,7 +2058,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const p = state.currentProject;
   if (!p) return;
   const userPrompt = document.getElementById('ws-prompt').value.trim();
-  if (!userPrompt) { alert('Type a description first.'); return; }
+  if (!userPrompt) { showToast('Type a description first.', 'error'); return; }
   const assetType = document.getElementById('ws-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
   const prompt = buildFullPrompt(userPrompt, assetType, assetStyle);
@@ -2106,7 +2131,7 @@ modStrength.addEventListener('input', () => { modStrengthVal.textContent = modSt
 
 document.getElementById('ws-modify-btn').addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   // Show the source image inside the modal
   const srcImg = document.getElementById('mod-source-img');
   if (srcImg) srcImg.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
@@ -2120,7 +2145,7 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) return;
   const prompt = document.getElementById('mod-prompt').value.trim();
-  if (!prompt) { alert('Type a modification first.'); return; }
+  if (!prompt) { showToast('Type a modification first.', 'error'); return; }
   const engine = document.getElementById('mod-engine').value;
   const strength = parseInt(modStrength.value) / 100;
   modifyModal.classList.add('hidden');
@@ -2150,7 +2175,7 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
 
 document.getElementById('ws-removebg-btn').addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   gatedRun('bg', `Remove background: ${p.name}`, async () => {
     const job = pushJob(`Remove background: ${p.name}`);
     try {
@@ -2171,14 +2196,14 @@ document.getElementById('ws-removebg-btn').addEventListener('click', async () =>
 
 document.getElementById('ws-clone-btn').addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   window.openCloneToolFor(p.selectedImagePath, p.name, async () => {
     await reloadCurrentProject();
   });
 });
 document.getElementById('ws-mask-btn').addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   window.openMaskToolFor(p.selectedImagePath, p.name, async () => {
     await reloadCurrentProject();
   });
@@ -2470,7 +2495,7 @@ document.getElementById('ws-3d-triangles')?.addEventListener('change', updateMes
 
 document.getElementById('ws-generate-mesh').addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { alert('Pick an image first.'); return; }
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   const engine = document.getElementById('ws-3d-engine').value;
   const quality = document.getElementById('ws-3d-quality')?.value || 'standard';
   const triLevel = document.getElementById('ws-3d-triangles')?.value || '0';
@@ -2542,7 +2567,7 @@ function getCurrentMeshObj() {
 
 document.getElementById('ws-mesh-blender-btn')?.addEventListener('click', async () => {
   const m = getCurrentMeshObj();
-  if (!m) { alert('Pick a mesh first.'); return; }
+  if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   try {
     if (API.openInBlender) {
       const r = await API.openInBlender({ meshPath: m.path });
@@ -2558,13 +2583,13 @@ document.getElementById('ws-mesh-blender-btn')?.addEventListener('click', async 
 
 document.getElementById('ws-mesh-folder-btn')?.addEventListener('click', async () => {
   const m = getCurrentMeshObj();
-  if (!m) { alert('Pick a mesh first.'); return; }
+  if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   try { await API.showInExplorer(m.path); } catch (e) { alert(e.message); }
 });
 
 document.getElementById('ws-mesh-refine-btn')?.addEventListener('click', () => {
   const m = getCurrentMeshObj();
-  if (!m) { alert('Pick a mesh first.'); return; }
+  if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   document.getElementById('rfn-prompt').value = '';
   document.getElementById('modal-refine-mesh').classList.remove('hidden');
   setTimeout(() => document.getElementById('rfn-prompt').focus(), 50);
@@ -2577,7 +2602,7 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
   const m = getCurrentMeshObj();
   if (!p || !m) return;
   const modification = document.getElementById('rfn-prompt').value.trim();
-  if (!modification) { alert('Type a modification first.'); return; }
+  if (!modification) { showToast('Type a modification first.', 'error'); return; }
   const format = document.getElementById('rfn-format').value;
   const model = document.getElementById('rfn-model').value;
   document.getElementById('modal-refine-mesh').classList.add('hidden');
@@ -2608,7 +2633,7 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
 
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {
   const m = getCurrentMeshObj();
-  if (!m) { alert('Pick a mesh first.'); return; }
+  if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   const modal = document.getElementById('modal-export-mesh');
   document.getElementById('exp-path').value = '';
   document.getElementById('exp-path').placeholder = '(default: meshes/' + m.filename.replace(/\.[^.]+$/, '') + '.<ext>)';
@@ -3152,13 +3177,13 @@ function getCurrentRigObj() {
 
 document.getElementById('ws-rig-folder-btn')?.addEventListener('click', async () => {
   const r = getCurrentRigObj();
-  if (!r) { alert('No rig yet.'); return; }
+  if (!r) { showToast('No rig yet.', 'error'); return; }
   try { await API.showInExplorer(r.path); } catch (e) { alert(e.message); }
 });
 
 document.getElementById('ws-rig-blender-btn')?.addEventListener('click', async () => {
   const r = getCurrentRigObj();
-  if (!r) { alert('No rig yet.'); return; }
+  if (!r) { showToast('No rig yet.', 'error'); return; }
   try {
     if (API.openInBlender) {
       const res = await API.openInBlender({ meshPath: r.path });
@@ -3171,7 +3196,7 @@ document.getElementById('ws-rig-blender-btn')?.addEventListener('click', async (
 
 document.getElementById('ws-rig-unreal-btn')?.addEventListener('click', async () => {
   const r = getCurrentRigObj();
-  if (!r) { alert('No rig yet.'); return; }
+  if (!r) { showToast('No rig yet.', 'error'); return; }
   const job = pushJob(`Export to Unreal: ${r.filename}`);
   try {
     if (!API.exportToUnreal) {
@@ -3199,7 +3224,7 @@ document.getElementById('ws-rig-unreal-btn')?.addEventListener('click', async ()
 // to the animation toolbar so they can pick a different clip.
 document.getElementById('ws-rig-test-btn')?.addEventListener('click', () => {
   const r = getCurrentRigObj();
-  if (!r) { alert('No rig yet.'); return; }
+  if (!r) { showToast('No rig yet.', 'error'); return; }
   if (!rigVwMixer || rigVwClips.length === 0) {
     customError('This rig has no embedded animations to play. Re-generate the rig with an animated template, or use a clip-bearing FBX.', 'Test animation');
     return;
@@ -3832,7 +3857,7 @@ document.getElementById('jobs-close-2').addEventListener('click', () => {
 // ============================================================
 document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.previewImagePath) { alert('Pick an image first.'); return; }
+  if (!p || !p.previewImagePath) { showToast('Pick an image first.', 'error'); return; }
   document.getElementById('ai-target').value = '';
   document.getElementById('ai-replace').value = '';
   // Show the source image inside the modal
@@ -3851,7 +3876,11 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.previewImagePath) return;
   const target = document.getElementById('ai-target').value.trim();
-  if (!target) { alert('Type what to find first (e.g. "hat", "background")'); return; }
+  if (!target) {
+    showToast('Type what to find first (e.g. "hat", "background")', 'error');
+    document.getElementById('ai-target')?.focus();
+    return;
+  }
   const replace = document.getElementById('ai-replace').value.trim();
   const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
   document.getElementById('modal-auto-inpaint').classList.add('hidden');
@@ -4492,7 +4521,7 @@ if (skinSlider && skinSliderVal) {
 // ============================================================
 document.getElementById('ws-rig-reskin-btn')?.addEventListener('click', async () => {
   const r = getCurrentRigObj();
-  if (!r) { alert('No rig yet.'); return; }
+  if (!r) { showToast('No rig yet.', 'error'); return; }
   const ok = await customConfirm('Re-skin this rig with current skinning options? The rig structure stays unchanged.', 'Re-skin', 'Re-skin');
   if (!ok) return;
   const skinMethod = document.getElementById('ws-rig-skin-method')?.value || 'auto';
