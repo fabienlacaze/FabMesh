@@ -955,6 +955,10 @@ ipcMain.handle('toggle-unrestricted', (_event, { pin, enable }) => {
   return { success: true, unrestricted: !!enable };
 });
 
+ipcMain.handle('get-nsfw-keywords', () => {
+  return NSFW_KEYWORDS;
+});
+
 ipcMain.handle('get-parental-status', () => {
   const config = loadConfig();
   return {

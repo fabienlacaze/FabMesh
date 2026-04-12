@@ -1445,21 +1445,20 @@ button.tool-active {
   max-width: 480px;
   max-height: 85vh;
   overflow-y: auto;
+  position: relative;
 }
 .settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
   position: sticky;
-  top: -16px;
-  background: var(--bg-1);
+  top: -20px;
   z-index: 10;
-  padding: 16px 0 8px 0;
-  margin: -16px -20px 4px -20px;
-  padding-left: 20px;
-  padding-right: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  background: var(--bg-1);
+  margin: -20px -24px 4px -24px;
+  padding: 20px 24px 10px 24px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.7);
 }
 .settings-header h2 { margin: 0; }
 .settings-close-x {

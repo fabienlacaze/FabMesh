@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   stopSdxlServer: () => ipcRenderer.invoke('stop-sdxl-server'),
   toggleUnrestricted: (opts) => ipcRenderer.invoke('toggle-unrestricted', opts),
   getParentalStatus: () => ipcRenderer.invoke('get-parental-status'),
+  getNsfwKeywords: () => ipcRenderer.invoke('get-nsfw-keywords'),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),

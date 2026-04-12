@@ -365,25 +365,23 @@ async function refreshProjectsPage() {
 }
 
 // NSFW keywords for project name / prompt filtering (renderer-side).
-// Mirrors the main.js list but simplified for project name matching.
-const NSFW_PROJECT_KEYWORDS = [
-  'nude', 'naked', 'nsfw', 'porn', 'porno', 'sex', 'sexual', 'erotic',
-  'hentai', 'xxx', 'lewd', 'topless', 'strip', 'fetish', 'bdsm',
-  'bondage', 'prostitut', 'genital', 'penis', 'vagina', 'nipple',
-  'orgasm', 'masturb', 'dildo', 'lolicon', 'ahegao', 'ecchi',
-  'gore', 'gory', 'blood', 'bloody', 'murder', 'kill', 'torture',
-  'dismember', 'decapit', 'mutilat', 'cannibal', 'corpse', 'cadaver',
-  'execut', 'massacre', 'slaughter', 'snuff', 'brutal',
-  'child abuse', 'pedophil', 'underage', 'loli', 'shota',
-  'drug', 'cocaine', 'heroin', 'meth', 'crack', 'overdose',
-  'terrorist', 'bomb', 'genocide', 'nazi', 'swastika', 'isis',
-  'suicide', 'self-harm', 'hate speech',
-  'hard', 'hardcore', 'adult',
-  'nu', 'nue', 'sexe', 'erotique', 'meurtre', 'tuer', 'drogue',
-];
-function _isProjectNSFW(p) {
+// Fetched from main.js on first use so both sides share the same list.
+let _nsfwKeywordsCache = null;
+async function _getNsfwKeywords() {
+  if (_nsfwKeywordsCache) return _nsfwKeywordsCache;
+  try {
+    if (API.getNsfwKeywords) {
+      _nsfwKeywordsCache = await API.getNsfwKeywords();
+      return _nsfwKeywordsCache;
+    }
+  } catch (_) {}
+  // Fallback minimal list if IPC not available
+  return ['nude','naked','nsfw','porn','sex','gore','blood','murder','kill','drug','terrorist'];
+}
+async function _isProjectNSFW(p) {
+  const keywords = await _getNsfwKeywords();
   const text = ((p.name || '') + ' ' + (p.prompt || '')).toLowerCase();
-  return NSFW_PROJECT_KEYWORDS.some(kw => text.includes(kw));
+  return keywords.some(kw => text.includes(kw));
 }
 
 async function renderProjectsGrid() {
@@ -399,9 +397,11 @@ async function renderProjectsGrid() {
     }
   } catch(_) {}
 
-  const visibleProjects = restricted
-    ? state.projects.filter(p => !_isProjectNSFW(p))
-    : state.projects;
+  let visibleProjects = state.projects;
+  if (restricted) {
+    const checks = await Promise.all(state.projects.map(p => _isProjectNSFW(p)));
+    visibleProjects = state.projects.filter((_, i) => !checks[i]);
+  }
 
   if (visibleProjects.length === 0) {
     empty.classList.remove('hidden');
