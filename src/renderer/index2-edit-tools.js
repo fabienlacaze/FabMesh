@@ -67,6 +67,45 @@
   var cloneCtx2d = cloneCanvas ? cloneCanvas.getContext('2d', { willReadFrequently: true }) : null;
   // flipMode: 0=none, 1=horizontal, 2=vertical, 3=both
   var cloneFlipMode = 0;
+  // Loupe magnifier state (shared between clone stamp and draw mask)
+  var loupeEnabled = false;
+  var loupeEl = document.getElementById('clone-loupe');
+  var loupeCanvas = document.getElementById('clone-loupe-canvas');
+  var loupeCtx = loupeCanvas ? loupeCanvas.getContext('2d') : null;
+
+  function updateLoupe(e, sourceCanvas) {
+    if (!loupeEnabled || !loupeEl || !loupeCtx) {
+      if (loupeEl) loupeEl.style.display = 'none';
+      return;
+    }
+    var canvas = sourceCanvas || cloneCanvas;
+    if (!canvas) { if (loupeEl) loupeEl.style.display = 'none'; return; }
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width;
+    var cx = Math.round((e.clientX - rect.left) * scaleX);
+    var cy = Math.round((e.clientY - rect.top) * scaleX);
+    var srcSize = 40;
+    loupeCtx.clearRect(0, 0, 120, 120);
+    loupeCtx.save();
+    loupeCtx.beginPath();
+    loupeCtx.arc(60, 60, 58, 0, Math.PI * 2);
+    loupeCtx.clip();
+    loupeCtx.drawImage(canvas,
+      cx - srcSize, cy - srcSize, srcSize * 2, srcSize * 2,
+      0, 0, 120, 120
+    );
+    loupeCtx.strokeStyle = 'rgba(255,255,255,0.6)';
+    loupeCtx.lineWidth = 1;
+    loupeCtx.beginPath();
+    loupeCtx.moveTo(60, 50); loupeCtx.lineTo(60, 70);
+    loupeCtx.moveTo(50, 60); loupeCtx.lineTo(70, 60);
+    loupeCtx.stroke();
+    loupeCtx.restore();
+    loupeEl.style.left = (e.clientX + 20) + 'px';
+    loupeEl.style.top = (e.clientY - 140) + 'px';
+    loupeEl.style.display = 'block';
+  }
+
   var cloneState = {
     sourcePoint: null,
     sourceImageData: null,
@@ -284,8 +323,8 @@
     srcEl.style.top = (screenY - displaySize / 2) + 'px';
     srcEl.style.display = 'block';
 
-    // Update loupe magnifier if active (defined later, called via closure)
-    try { if (loupeEnabled && typeof updateLoupe !== 'undefined') updateLoupe(e); } catch(_) {}
+    // Update loupe magnifier if active
+    updateLoupe(e, cloneCanvas);
   }
 
   if (cloneCanvas) {
@@ -447,11 +486,7 @@
       }
     });
 
-    // Loupe toggle
-    var loupeEnabled = false;
-    var loupeEl = document.getElementById('clone-loupe');
-    var loupeCanvas = document.getElementById('clone-loupe-canvas');
-    var loupeCtx = loupeCanvas ? loupeCanvas.getContext('2d') : null;
+    // Loupe toggle (loupe state is declared at top of IIFE)
     var cLoupeBtn = document.getElementById('clone-loupe-toggle');
     if (cLoupeBtn) cLoupeBtn.addEventListener('click', function () {
       loupeEnabled = !loupeEnabled;
@@ -459,42 +494,6 @@
       cLoupeBtn.style.color = loupeEnabled ? 'var(--accent)' : '';
       if (!loupeEnabled && loupeEl) loupeEl.style.display = 'none';
     });
-
-    function updateLoupe(e) {
-      if (!loupeEnabled || !loupeEl || !loupeCtx || !cloneCanvas) {
-        if (loupeEl) loupeEl.style.display = 'none';
-        return;
-      }
-      var rect = cloneCanvas.getBoundingClientRect();
-      var scaleX = cloneCanvas.width / rect.width;
-      var cx = Math.round((e.clientX - rect.left) * scaleX);
-      var cy = Math.round((e.clientY - rect.top) * scaleX);
-      // Draw zoomed portion of the canvas (3x zoom, 40px radius in canvas coords)
-      var zoomFactor = 3;
-      var srcSize = 40;
-      loupeCtx.clearRect(0, 0, 120, 120);
-      loupeCtx.save();
-      // Clip to circle
-      loupeCtx.beginPath();
-      loupeCtx.arc(60, 60, 58, 0, Math.PI * 2);
-      loupeCtx.clip();
-      loupeCtx.drawImage(cloneCanvas,
-        cx - srcSize, cy - srcSize, srcSize * 2, srcSize * 2,
-        0, 0, 120, 120
-      );
-      // Draw crosshair at center
-      loupeCtx.strokeStyle = 'rgba(255,255,255,0.6)';
-      loupeCtx.lineWidth = 1;
-      loupeCtx.beginPath();
-      loupeCtx.moveTo(60, 50); loupeCtx.lineTo(60, 70);
-      loupeCtx.moveTo(50, 60); loupeCtx.lineTo(70, 60);
-      loupeCtx.stroke();
-      loupeCtx.restore();
-      // Position the loupe above-right of the cursor
-      loupeEl.style.left = (e.clientX + 20) + 'px';
-      loupeEl.style.top = (e.clientY - 140) + 'px';
-      loupeEl.style.display = 'block';
-    }
 
     // Flip toggle: cycles None / H / V / Both
     var cFlip = document.getElementById('clone-flip-toggle');
@@ -705,7 +704,21 @@
     cur.style.left = (e.clientX - displaySize / 2) + 'px';
     cur.style.top = (e.clientY - displaySize / 2) + 'px';
     cur.style.display = 'block';
+    // Loupe for mask: show the base canvas (not overlay) zoomed
+    updateLoupe(e, maskBaseCanvas);
   }
+
+  // Mask loupe toggle
+  var mLoupeBtn = document.getElementById('mask-loupe-toggle');
+  if (mLoupeBtn) mLoupeBtn.addEventListener('click', function () {
+    loupeEnabled = !loupeEnabled;
+    mLoupeBtn.style.borderColor = loupeEnabled ? 'var(--accent)' : '';
+    mLoupeBtn.style.color = loupeEnabled ? 'var(--accent)' : '';
+    // Sync the clone stamp loupe button if it exists
+    var cBtn = document.getElementById('clone-loupe-toggle');
+    if (cBtn) { cBtn.style.borderColor = mLoupeBtn.style.borderColor; cBtn.style.color = mLoupeBtn.style.color; }
+    if (!loupeEnabled && loupeEl) loupeEl.style.display = 'none';
+  });
 
   if (maskOverlayCanvas) {
     var maskContainer = document.getElementById('mask-canvas-container');
