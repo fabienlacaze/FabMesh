@@ -4242,7 +4242,9 @@ async function refreshPythonStats() {
       sdxlEl.textContent = r.sdxl ? 'running' : 'stopped';
       sdxlEl.style.color = r.sdxl ? 'var(--warning)' : '';
     }
-    if (killBtn) killBtn.disabled = (n === 0);
+    if (killBtn) killBtn.disabled = (n === 0 && !r.sdxl);
+    const killSdxlBtn = document.getElementById('set-kill-sdxl');
+    if (killSdxlBtn) killSdxlBtn.disabled = !r.sdxl;
   } catch (e) {}
 }
 
@@ -4522,16 +4524,29 @@ document.getElementById('set-close-x')?.addEventListener('click', closeSettings)
 document.getElementById('set-open-logs')?.addEventListener('click', async () => {
   if (API.openLogsFolder) await API.openLogsFolder();
 });
+// Kill SDXL server only (free ~6.6 GB VRAM)
+document.getElementById('set-kill-sdxl')?.addEventListener('click', async () => {
+  try {
+    if (API.stopSdxlServer) await API.stopSdxlServer();
+    showToast('SDXL server killed. VRAM freed.', 'success');
+    setTimeout(refreshPythonStats, 1000);
+  } catch(e) {
+    showToast('Kill SDXL failed: ' + e.message, 'error');
+  }
+});
+
+// Kill ALL Python processes (SDXL + any running generations)
 document.getElementById('set-kill-python')?.addEventListener('click', async () => {
-  const ok = await customConfirm('Kill all Python processes including the SDXL server?\nThis will free all VRAM and allow new jobs to start.', 'Kill processes', 'Kill all');
-  if (!ok) return;
-  // Kill SDXL server + all orphan python processes
-  try { if (API.stopSdxlServer) await API.stopSdxlServer(); } catch(_) {}
-  try { if (API.cancelJob) await API.cancelJob(0); } catch(_) {}
-  // Clear zombie job entries
+  try {
+    if (API.stopSdxlServer) await API.stopSdxlServer();
+  } catch(_) {}
+  try {
+    if (API.cancelJob) await API.cancelJob(0);
+  } catch(_) {}
   state.jobs = state.jobs.filter(j => j.status !== 'running');
   renderJobs();
-  showToast('All processes killed. VRAM freed.', 'success');
+  showToast('All processes killed.', 'success');
+  setTimeout(refreshPythonStats, 1000);
 });
 
 // Forward main process logs to the renderer console for live debugging
