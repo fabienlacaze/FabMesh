@@ -951,7 +951,7 @@
           <strong>Click & drag</strong> to clone &nbsp;|&nbsp;
           <strong>Z</strong> to undo
         </div>
-        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:12px;">
           <label style="display:flex; align-items:center; gap:6px;">Brush:
             <input type="range" id="clone-brush-size" min="5" max="200" value="50" style="vertical-align:middle;" />
             <span id="clone-brush-val" style="min-width:30px;">50</span>
@@ -960,8 +960,9 @@
             <input type="range" id="clone-hardness" min="0" max="100" value="50" style="vertical-align:middle;" />
             <span id="clone-hardness-val" style="min-width:30px;">50</span>
           </label>
+          <span style="flex:1;"></span>
           <button id="clone-flip-toggle" class="secondary-btn" style="padding: 4px 12px; min-width:80px;" title="Cycle flip mode: None / H / V / Both">Flip: Off</button>
-          <button id="clone-loupe-toggle" class="secondary-btn" style="padding: 4px 12px;" title="Toggle magnifier following the cursor">&#128270; Loupe</button>
+          <button id="clone-loupe-toggle" class="secondary-btn" style="padding: 4px 12px;" title="Toggle magnifier">&#128270; Loupe</button>
           <button id="clone-undo" class="secondary-btn" style="padding: 4px 12px;" disabled>Undo</button>
           <button id="clone-redo" class="secondary-btn" style="padding: 4px 12px;" disabled>Redo</button>
           <button id="clone-reset" class="secondary-btn" style="padding: 4px 12px;">Reset</button>
