@@ -2299,7 +2299,7 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => runQuick
 document.getElementById('ws-style-btn')?.addEventListener('change', async (e) => {
   const style = e.target.value;
   if (!style) return;
-  e.target.selectedIndex = 0; // reset to placeholder
+  // Keep the selected style visible instead of resetting to placeholder
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   showToast(`Applying style: ${style.split(',')[0]}...`, 'info', 2000);
