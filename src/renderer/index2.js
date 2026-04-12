@@ -5200,6 +5200,8 @@ document.getElementById('parental-toggle')?.addEventListener('click', async () =
       showToast('Parental control re-enabled.', 'success');
       if (pinEl) pinEl.value = '';
       refreshParentalStatus();
+      _nsfwKeywordsCache = null; // reset cache
+      renderProjectsGrid(); // refresh project list immediately
     }
   } else {
     // Unlock — requires PIN
@@ -5213,6 +5215,8 @@ document.getElementById('parental-toggle')?.addEventListener('click', async () =
       showToast('Unrestricted mode enabled. Content filter disabled.', 'info');
       if (pinEl) pinEl.value = '';
       refreshParentalStatus();
+      _nsfwKeywordsCache = null;
+      renderProjectsGrid();
     } else {
       showToast(r?.error || 'Wrong PIN', 'error');
     }
