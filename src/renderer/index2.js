@@ -3451,11 +3451,15 @@ function pushJob(name, onCancel, params, expectedMsOverride) {
     tickTimer: null,
     params: params || null,
   };
-  // Smoothly climb from 5 to 90% over expected duration
+  // Smoothly climb from 5 to 90% over expected duration.
+  // IMPORTANT: never DECREASE progress — the bridge Python may report real
+  // progress values (LOCAL_SF3D_PROGRESS: 50) that are ahead of our timer.
+  // Use Math.max to keep the highest value seen so far.
   job.tickTimer = setInterval(() => {
     if (job.status !== 'running') { clearInterval(job.tickTimer); return; }
     const elapsed = Date.now() - job.startedAt;
-    job.progress = Math.min(90, 5 + (elapsed / expected) * 85);
+    const estimated = Math.min(90, 5 + (elapsed / expected) * 85);
+    job.progress = Math.max(job.progress, estimated);
     renderJobs();
   }, 800);
   state.jobs.push(job);
