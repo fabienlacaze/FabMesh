@@ -1998,6 +1998,37 @@ function stripKnownPromptSuffixes(raw) {
   return txt;
 }
 
+// Enhance prompt: expand the user's short description into a rich, detailed
+// prompt by combining the raw text with the selected style + asset type keywords.
+// The user sees exactly what the AI engine will receive and can tweak it further.
+document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
+  const textarea = document.getElementById('ws-prompt');
+  const raw = textarea.value.trim();
+  if (!raw) { alert('Type a description first.'); return; }
+  const assetType = document.getElementById('ws-asset-type')?.value || 'character';
+  const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
+  // Check if the prompt already looks enhanced (contains known suffix keywords)
+  const alreadyEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
+  if (alreadyEnhanced) {
+    alert('Prompt already looks enhanced. Edit manually or clear it first.');
+    return;
+  }
+  const enhanced = buildFullPrompt(raw, assetType, assetStyle);
+  textarea.value = enhanced;
+  // Persist to localStorage
+  if (state.currentProject) {
+    try { localStorage.setItem('fabmesh-prompt-' + state.currentProject.name, enhanced); } catch (e) {}
+  }
+  // Brief visual feedback
+  const btn = document.getElementById('ws-enhance-prompt');
+  if (btn) {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; Enhanced';
+    btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 1500);
+  }
+});
+
 document.getElementById('ws-generate-image').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p) return;
