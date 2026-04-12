@@ -1025,18 +1025,23 @@ except Exception as e:
   });
 });
 
-// Batch scan multiple images for NSFW in one Python process (loads model once)
+// Batch scan multiple images for NSFW in one Python process (loads model once).
+// Paths are passed via a temp file to avoid Windows backslash escaping issues.
 ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   if (isUnrestrictedMode()) return {};
   if (!images || images.length === 0) return {};
   const imgList = images.filter(p => fs.existsSync(p));
   if (imgList.length === 0) return {};
-  const imgJson = JSON.stringify(imgList).replace(/\\/g, '\\\\');
-  return new Promise((resolve) => {
-    execFile('python', ['-c', `
+
+  // Write paths to a temp file
+  const tmpFile = path.join(LOGS_DIR, '_nsfw_scan_paths.json');
+  const outFile = path.join(LOGS_DIR, '_nsfw_scan_results.json');
+  fs.writeFileSync(tmpFile, JSON.stringify(imgList), 'utf-8');
+
+  const script = `
 import sys, json
 from PIL import Image
-paths = json.loads('${imgJson}')
+paths = json.load(open(r"${tmpFile.replace(/\\/g, '/')}"))
 results = {}
 try:
     from transformers import pipeline
@@ -1048,14 +1053,24 @@ try:
             results[p] = score > 0.5
         except:
             results[p] = False
-except:
+except Exception as e:
+    print("NSFW scan error:", e, file=sys.stderr)
     for p in paths:
         results[p] = False
-print(json.dumps(results))
-`], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout) => {
-      if (error) { resolve({}); return; }
-      try { resolve(JSON.parse(stdout.trim())); }
-      catch (_) { resolve({}); }
+with open(r"${outFile.replace(/\\/g, '/')}", 'w') as f:
+    json.dump(results, f)
+print("OK")
+`;
+
+  return new Promise((resolve) => {
+    execFile('python', ['-c', script], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error) => {
+      try { fs.unlinkSync(tmpFile); } catch(_) {}
+      if (error || !fs.existsSync(outFile)) { resolve({}); return; }
+      try {
+        const results = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
+        try { fs.unlinkSync(outFile); } catch(_) {}
+        resolve(results);
+      } catch (_) { resolve({}); }
     });
   });
 });
