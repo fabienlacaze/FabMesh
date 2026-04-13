@@ -4982,6 +4982,7 @@ document.getElementById('me-undo')?.addEventListener('click', _meUndo);
     ['sculpt', 'paint', 'select'].forEach(m => document.getElementById('me-tool-' + m)?.classList.toggle('tool-active', m === mode));
     document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
     document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
+    document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
   });
 });
 // Sculpt sub-modes
@@ -5002,6 +5003,54 @@ document.getElementById('me-strength')?.addEventListener('input', (e) => {
 });
 document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
   meState.color = e.target.value;
+});
+// Select actions
+document.getElementById('me-sel-delete')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.color) return;
+    const geom = c.geometry;
+    const pos = geom.attributes.position;
+    const color = geom.attributes.color;
+    // Find selected vertices (orange = r>0.9, g<0.5)
+    const keep = [];
+    if (geom.index) {
+      const idx = geom.index.array;
+      for (let i = 0; i < idx.length; i += 3) {
+        const a = idx[i], b = idx[i+1], ci2 = idx[i+2];
+        const sel = (color.getX(a) > 0.9 && color.getY(a) < 0.5) ||
+                    (color.getX(b) > 0.9 && color.getY(b) < 0.5) ||
+                    (color.getX(ci2) > 0.9 && color.getY(ci2) < 0.5);
+        if (!sel) keep.push(a, b, ci2);
+      }
+      geom.setIndex(keep);
+    }
+    geom.attributes.position.needsUpdate = true;
+  });
+  showToast('Selected faces deleted', 'success', 1500);
+});
+document.getElementById('me-sel-invert')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.color) return;
+    const color = c.geometry.attributes.color;
+    for (let i = 0; i < color.count; i++) {
+      const isSelected = color.getX(i) > 0.9 && color.getY(i) < 0.5;
+      if (isSelected) color.setXYZ(i, 0.7, 0.7, 0.7);
+      else color.setXYZ(i, 1.0, 0.3, 0.1);
+    }
+    color.needsUpdate = true;
+  });
+});
+document.getElementById('me-sel-clear')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.color) return;
+    const color = c.geometry.attributes.color;
+    for (let i = 0; i < color.count; i++) color.setXYZ(i, 0.7, 0.7, 0.7);
+    color.needsUpdate = true;
+    c.material.vertexColors = false;
+    c.material.needsUpdate = true;
+  });
 });
 // Keyboard
 document.addEventListener('keydown', (e) => {
