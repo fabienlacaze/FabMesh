@@ -472,6 +472,13 @@ async function renderProjectsGrid() {
     visibleProjects = state.projects.filter((_, i) => !checks[i]);
   }
 
+  // Apply search filter
+  const searchInput = document.getElementById('project-search');
+  const query = (searchInput?.value || '').trim().toLowerCase();
+  if (query) {
+    visibleProjects = visibleProjects.filter(p => p.name.toLowerCase().includes(query));
+  }
+
   if (visibleProjects.length === 0) {
     empty.classList.remove('hidden');
   } else {
@@ -544,6 +551,7 @@ function closeNewProjectModal() {
   document.getElementById('modal-new-project').classList.add('hidden');
 }
 document.getElementById('btn-new-project').addEventListener('click', openNewProjectModal);
+document.getElementById('project-search')?.addEventListener('input', () => renderProjectsGrid());
 document.getElementById('np-cancel').addEventListener('click', closeNewProjectModal);
 document.getElementById('np-create').addEventListener('click', async () => {
   const name = document.getElementById('np-name').value.trim() || 'project';
