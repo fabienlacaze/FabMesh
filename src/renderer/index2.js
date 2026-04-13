@@ -3418,6 +3418,8 @@ const paintState = {
   smudgeLastColor: null,
   // Selection state
   selection: null,        // Uint8Array (w*h), 255=selected, 0=not — null means no selection (= all selected)
+  selUndoStack: [],
+  selRedoStack: [],
   selRectStart: null,     // {x,y} for rect select drag
   selPreviewData: null,   // ImageData snapshot for rect select preview
   lassoPoints: null,      // [{x,y}, ...] for lasso
@@ -3431,23 +3433,34 @@ function _paintIsSelected(x, y) {
   const idx = Math.round(y) * _paintMgr.w + Math.round(x);
   return paintState.selection[idx] === 255;
 }
+function _paintPushSelUndo() {
+  paintState.selUndoStack.push(paintState.selection ? new Uint8Array(paintState.selection) : null);
+  if (paintState.selUndoStack.length > 20) paintState.selUndoStack.shift();
+  paintState.selRedoStack = [];
+}
+function _paintSelUndo() {
+  if (paintState.selUndoStack.length === 0) return;
+  paintState.selRedoStack.push(paintState.selection ? new Uint8Array(paintState.selection) : null);
+  paintState.selection = paintState.selUndoStack.pop();
+  _paintShowSelection();
+}
+function _paintSelRedo() {
+  if (paintState.selRedoStack.length === 0) return;
+  paintState.selUndoStack.push(paintState.selection ? new Uint8Array(paintState.selection) : null);
+  paintState.selection = paintState.selRedoStack.pop();
+  _paintShowSelection();
+}
 function _paintClearSelection() {
+  _paintPushSelUndo();
   paintState.selection = null;
-  _paintDrawSelectionOverlay();
+  const ov = document.getElementById('paint-sel-overlay');
+  if (ov) { const c = ov.getContext('2d'); c.clearRect(0, 0, ov.width, ov.height); }
 }
 function _paintSelectAll() {
-  paintState.selection = null; // null = all selected
-  _paintDrawSelectionOverlay();
-}
-
-// Draw marching ants overlay for selection
-function _paintDrawSelectionOverlay() {
-  const canvas = document.getElementById('paint-canvas');
-  if (!canvas || !_paintMgr) return;
-  const ctx = _paintMgr.ctx;
-  // Redraw image from undo-stack top or origData, then draw selection border
-  // We don't have a separate overlay canvas for paint, so we skip visual overlay for now
-  // The selection effect is applied on Delete/paint operations
+  _paintPushSelUndo();
+  paintState.selection = null;
+  const ov = document.getElementById('paint-sel-overlay');
+  if (ov) { const c = ov.getContext('2d'); c.clearRect(0, 0, ov.width, ov.height); }
 }
 
 // Fill selection mask using flood fill algorithm
@@ -3530,29 +3543,42 @@ function _paintDeleteSelection(ctx) {
   ctx.putImageData(imgData, 0, 0);
 }
 
-// Draw selection outline on canvas (dashed border)
-function _paintShowSelection(ctx) {
-  if (!paintState.selection || !_paintMgr) return;
+// Draw selection overlay on separate canvas
+function _paintShowSelection() {
+  const ov = document.getElementById('paint-sel-overlay');
+  if (!ov || !_paintMgr) return;
   const w = _paintMgr.w, h = _paintMgr.h;
-  // Draw semi-transparent blue overlay on selected pixels
-  ctx.save();
-  ctx.globalAlpha = 0.15;
-  ctx.fillStyle = '#4488ff';
+  if (ov.width !== w || ov.height !== h) { ov.width = w; ov.height = h; }
+  const octx = ov.getContext('2d');
+  octx.clearRect(0, 0, w, h);
+  if (!paintState.selection) return;
   const sel = paintState.selection;
-  // Use a temp canvas for performance
-  const tmp = document.createElement('canvas');
-  tmp.width = w; tmp.height = h;
-  const tc = tmp.getContext('2d');
-  const td = tc.createImageData(w, h);
+  const td = octx.createImageData(w, h);
   for (let i = 0; i < sel.length; i++) {
     if (sel[i] === 255) {
-      td.data[i*4] = 68; td.data[i*4+1] = 136; td.data[i*4+2] = 255; td.data[i*4+3] = 40;
+      td.data[i*4] = 80; td.data[i*4+1] = 140; td.data[i*4+2] = 255; td.data[i*4+3] = 120;
     }
   }
-  tc.putImageData(td, 0, 0);
-  ctx.globalAlpha = 1;
-  ctx.drawImage(tmp, 0, 0);
-  ctx.restore();
+  octx.putImageData(td, 0, 0);
+  // Draw marching ants border (simplified: dashed outline)
+  // Find selection boundary pixels and draw them
+  octx.strokeStyle = '#ffffff';
+  octx.lineWidth = 1;
+  octx.setLineDash([4, 4]);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (sel[y * w + x] !== 255) continue;
+      // Check if this is a border pixel
+      const isBorder = (x === 0 || sel[y * w + x - 1] === 0) ||
+                       (x === w-1 || sel[y * w + x + 1] === 0) ||
+                       (y === 0 || sel[(y-1) * w + x] === 0) ||
+                       (y === h-1 || sel[(y+1) * w + x] === 0);
+      if (isBorder) {
+        td.data[(y * w + x) * 4 + 3] = 200;
+      }
+    }
+  }
+  octx.putImageData(td, 0, 0);
 }
 
 function _paintDab(ctx, x, y, _lastPt, mgr) {
@@ -3738,8 +3764,9 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
           return false;
         }
         if (paintState.tool === 'wand') {
+          _paintPushSelUndo();
           _paintWandSelect(ctx, Math.round(x), Math.round(y), paintState.tolerance);
-          _paintShowSelection(ctx);
+          _paintShowSelection();
           return false;
         }
         if (paintState.tool === 'sel-rect') {
@@ -3802,18 +3829,19 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
           paintState.linePreviewData = null;
         }
         if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
-          // Restore image, create selection, show overlay
           if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
           const p = mgr.lastPaintPoint || paintState.selRectStart;
+          _paintPushSelUndo();
           _paintRectSelect(paintState.selRectStart.x, paintState.selRectStart.y, p.x, p.y);
-          _paintShowSelection(ctx);
+          _paintShowSelection();
           paintState.selRectStart = null;
           paintState.selPreviewData = null;
         }
         if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
           if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
+          _paintPushSelUndo();
           _paintLassoSelect(paintState.lassoPoints);
-          _paintShowSelection(ctx);
+          _paintShowSelection();
           paintState.lassoPoints = null;
           paintState.selPreviewData = null;
         }
@@ -3896,6 +3924,14 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+A = select all, Ctrl+D = deselect
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); _paintSelectAll(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); _paintClearSelection(); return; }
+  // Ctrl+Z/Y for selection tools — intercept before CanvasManager handles it
+  const isSelTool = ['sel-rect', 'sel-lasso', 'wand'].includes(paintState.tool);
+  if (isSelTool && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    e.preventDefault(); _paintSelUndo(); return;
+  }
+  if (isSelTool && (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+    e.preventDefault(); _paintSelRedo(); return;
+  }
   // [ / ] = decrease / increase brush size
   if (e.key === '[') {
     paintState.brushSize = Math.max(1, paintState.brushSize - (e.shiftKey ? 10 : 3));
