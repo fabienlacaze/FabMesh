@@ -4833,23 +4833,22 @@ function _meMouseDown(e) {
   _meApplyBrush(hit);
 }
 
+let _meLastBrushTime = 0;
 function _meMouseMove(e) {
-  // Update brush cursor
   const cursor = document.getElementById('me-brush-cursor');
   if (cursor) {
-    const hit = _meGetIntersection(e);
-    if (hit) {
-      const screenSize = meState.brushRadius * 500; // approximate screen size
-      cursor.style.width = screenSize + 'px';
-      cursor.style.height = screenSize + 'px';
-      cursor.style.left = (e.clientX - screenSize / 2) + 'px';
-      cursor.style.top = (e.clientY - screenSize / 2) + 'px';
-      cursor.style.display = 'block';
-    } else {
-      cursor.style.display = 'none';
-    }
+    const screenSize = meState.brushRadius * 500;
+    cursor.style.width = screenSize + 'px';
+    cursor.style.height = screenSize + 'px';
+    cursor.style.left = (e.clientX - screenSize / 2) + 'px';
+    cursor.style.top = (e.clientY - screenSize / 2) + 'px';
+    cursor.style.display = 'block';
   }
   if (!meState.painting) return;
+  // Throttle: max 30fps for brush application
+  const now = performance.now();
+  if (now - _meLastBrushTime < 33) return;
+  _meLastBrushTime = now;
   const hit = _meGetIntersection(e);
   if (hit) _meApplyBrush(hit);
 }
@@ -4866,18 +4865,22 @@ function _meApplyBrush(hit) {
   const pos = geom.attributes.position;
   const normals = geom.attributes.normal;
   const point = hit.point.clone();
-  // Transform hit point to local space
   hit.object.worldToLocal(point);
 
   const r = meState.brushRadius;
+  const rSq = r * r;
   const strength = meState.strength;
+  const px = point.x, py = point.y, pz = point.z;
 
   if (meState.mode === 'sculpt') {
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - point.x, dy = vy - point.y, dz = vz - point.z;
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (dist > r) continue;
+      const dx = vx - px, dy = vy - py, dz = vz - pz;
+      // Fast bounding box reject
+      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq > rSq) continue;
+      const dist = Math.sqrt(distSq);
       const falloff = 1 - (dist / r);
       const amount = falloff * falloff * strength * 0.01;
 
@@ -4912,9 +4915,11 @@ function _meApplyBrush(hit) {
     const c = new THREE.Color(meState.color);
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - point.x, dy = vy - point.y, dz = vz - point.z;
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (dist > r) continue;
+      const dx = vx - px, dy = vy - py, dz = vz - pz;
+      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq > rSq) continue;
+      const dist = Math.sqrt(distSq);
       const falloff = 1 - (dist / r);
       const blend = falloff * falloff * strength;
       const cr = colorAttr.getX(i), cg = colorAttr.getY(i), cb = colorAttr.getZ(i);
@@ -4935,12 +4940,11 @@ function _meApplyBrush(hit) {
       hit.object.material.needsUpdate = true;
     }
     const colorAttr = geom.attributes.color;
-    // Highlight vertices of the hit face + nearby faces
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - point.x, dy = vy - point.y, dz = vz - point.z;
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (dist > r) continue;
+      const dx = vx - px, dy = vy - py, dz = vz - pz;
+      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+      if (dx * dx + dy * dy + dz * dz > rSq) continue;
       colorAttr.setXYZ(i, 1.0, 0.3, 0.1); // orange highlight
     }
     colorAttr.needsUpdate = true;
@@ -4999,23 +5003,32 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
   showToast('Exporting edited mesh...', 'info', 2000);
-  // Export via GLTFExporter
-  const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
-  const exporter = new GLTFExporter();
-  exporter.parse(meState.mesh, (result) => {
-    const blob = new Blob([result], { type: 'application/octet-stream' });
-    blob.arrayBuffer().then(buf => {
-      const base = meState.meshPath.replace(/\.[^.]+$/, '');
-      const newPath = base + '_edited_' + Date.now() + '.glb';
-      window.meshyAPI.saveBuffer({ path: newPath, buffer: Array.from(new Uint8Array(buf)) })
-        .then(() => {
+  try {
+    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+    const exporter = new GLTFExporter();
+    exporter.parse(meState.mesh, async (result) => {
+      try {
+        const buf = result instanceof ArrayBuffer ? result : new Uint8Array(result).buffer;
+        const base = meState.meshPath.replace(/\.[^.]+$/, '');
+        const newPath = base + '_edited_' + Date.now() + '.glb';
+        const r = await API.saveBuffer({ path: newPath, buffer: Array.from(new Uint8Array(buf)) });
+        if (r && r.success) {
           showToast('Edited mesh saved!', 'success');
           _closeMeshEdit();
           populateWorkspace(state.currentProject);
-        })
-        .catch(err => showToast('Save failed: ' + err.message, 'error'));
-    });
-  }, { binary: true });
+        } else {
+          showToast('Save failed: ' + ((r && r.error) || 'unknown'), 'error');
+        }
+      } catch (err) {
+        console.error('[mesh-edit] save error:', err);
+        showToast('Save error: ' + err.message, 'error');
+      }
+    }, (err) => {
+      showToast('Export error: ' + err, 'error');
+    }, { binary: true });
+  } catch (err) {
+    showToast('Export failed: ' + err.message, 'error');
+  }
 });
 
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {

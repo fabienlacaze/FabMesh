@@ -3242,6 +3242,16 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   });
 });
 
+// --- Save Buffer IPC (for GLTFExporter output) ---
+ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer }) => {
+  try {
+    fs.writeFileSync(filePath, Buffer.from(buffer));
+    return { success: true, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // --- Mesh Tools IPC ---
 ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_tools.py');
