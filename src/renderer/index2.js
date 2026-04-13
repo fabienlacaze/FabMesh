@@ -3347,6 +3347,16 @@ document.getElementById('blur-strength')?.addEventListener('input', (e) => {
   document.getElementById('blur-strength-val').textContent = e.target.value;
 });
 
+// Global Escape handler for all tool modals that don't have their own
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const modals = ['modal-blur', 'modal-crop', 'modal-brightness', 'modal-colorpick', 'modal-resolution'];
+  for (const id of modals) {
+    const m = document.getElementById(id);
+    if (m && !m.classList.contains('hidden')) { m.classList.add('hidden'); e.preventDefault(); return; }
+  }
+});
+
 // Blur mode/slider handlers (CanvasManager handles undo/redo/loupe/zoom/cursor)
 document.getElementById('blur-cancel')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
 document.getElementById('blur-close-x')?.addEventListener('click', () => document.getElementById('modal-blur')?.classList.add('hidden'));
