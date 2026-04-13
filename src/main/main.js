@@ -3205,6 +3205,43 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
   }
 });
 
+// --- Multi-View Generation IPC ---
+ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
+  const timestamp = Date.now();
+  const outDir = path.join(IMAGES_DIR, '_multiview_' + timestamp);
+  return new Promise((resolve) => {
+    const proc = execFile('python', [script, imagePath, outDir], {
+      timeout: 600000, maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' }
+    }, (error, stdout, stderr) => {
+      if (stdout) {
+        log.info('multiview', stdout.trim());
+        safeSend('multiview-progress', stdout);
+      }
+      if (error) {
+        log.error('multiview', error.message);
+        resolve({ success: false, error: error.message });
+      } else {
+        // Collect output images
+        const views = [];
+        for (let i = 0; i < 6; i++) {
+          const vp = path.join(outDir, `view_${i}.png`);
+          if (fs.existsSync(vp)) views.push(vp);
+        }
+        const inputCopy = path.join(outDir, 'input.png');
+        resolve({ success: true, views, inputCopy, outDir });
+      }
+    });
+    // Forward progress
+    proc.stdout?.on('data', d => {
+      const txt = d.toString();
+      const m = txt.match(/MULTIVIEW_PROGRESS:\s*(\d+)/);
+      if (m) safeSend('multiview-progress', { progress: parseInt(m[1]) });
+    });
+  });
+});
+
 // --- Mesh Tools IPC ---
 ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_tools.py');
