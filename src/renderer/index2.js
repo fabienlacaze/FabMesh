@@ -591,10 +591,9 @@ document.getElementById('btn-import-image')?.addEventListener('click', async () 
   if (!filePath) return;
   const result = await API.importImageFile(filePath);
   if (!result || !result.path) { showToast('Import failed', 'error'); return; }
-  // Open the newly created project
   showToast('Image imported!', 'success', 1500);
-  await loadProjects();
-  // Find and open the project
+  // Refresh project list then open the new project
+  await renderProjectsGrid();
   const proj = state.projects.find(p => p.name === result.projectName);
   if (proj) {
     state.currentProject = proj;
