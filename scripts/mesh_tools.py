@@ -36,18 +36,29 @@ def smooth(input_path, output_path, iterations=3, lamb=0.5):
 
 
 def decimate(input_path, output_path, target_faces=5000):
-    """Reduce triangle count using quadric edge collapse."""
+    """Reduce triangle count."""
     import trimesh
     target_faces = int(target_faces)
     scene = trimesh.load(input_path)
     geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
     for g in geoms:
         if len(g.faces) > target_faces:
-            # Use trimesh simplify
-            g_new = g.simplify_quadric_decimation(target_faces)
-            g.vertices = g_new.vertices
-            g.faces = g_new.faces
-            log(f'decimated {len(g_new.faces)} faces (target: {target_faces})')
+            ratio = target_faces / len(g.faces)
+            try:
+                import fast_simplification
+                points, faces_out = fast_simplification.simplify(
+                    np.asarray(g.vertices, dtype=np.float32),
+                    np.asarray(g.faces, dtype=np.int32),
+                    target_reduction=1.0 - ratio
+                )
+                g.vertices = points
+                g.faces = faces_out
+            except ImportError:
+                # Fallback: use trimesh's built-in (slower, less quality)
+                g_new = g.simplify_quadric_decimation(target_faces)
+                g.vertices = g_new.vertices
+                g.faces = g_new.faces
+            log(f'decimated to {len(g.faces)} faces (target: {target_faces})')
     _export(scene, geoms, output_path)
 
 
