@@ -203,7 +203,7 @@ def subdivide_glb(input_path, output_path, levels=2):
         _ = new_mesh.vertex_normals
         result_meshes[name] = new_mesh
 
-    _export(result_meshes, output_path, t0, original_glb=input_path)
+    _export(result_meshes, output_path, t0)
     return True
 
 
@@ -219,140 +219,17 @@ def _fallback_uv(verts):
     return np.column_stack([u, v]).astype(np.float32)
 
 
-def _export(result_meshes, output_path, t0, original_glb=None):
-    """Export meshes to GLB preserving per-vertex UVs (no vertex merging).
-
-    Uses pygltflib for export to avoid trimesh's vertex deduplication
-    which breaks UV seams in subdivided meshes.
-    """
+def _export(result_meshes, output_path, t0):
+    """Export meshes to GLB."""
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-    total_v = sum(len(m.vertices) for m in result_meshes.values())
-    total_f = sum(len(m.faces) for m in result_meshes.values())
-
-    # Try pygltflib export (preserves exact vertex layout)
-    try:
-        from pygltflib import GLTF2, Buffer, BufferView, Accessor, Mesh as GLTFMesh
-        from pygltflib import Primitive, Material, Node, Scene as GLTFScene
-        from pygltflib import FLOAT, UNSIGNED_INT, SCALAR, VEC2, VEC3, ELEMENT_ARRAY_BUFFER, ARRAY_BUFFER
-        import struct, io
-
-        # If we have the original GLB, copy it and replace only the geometry
-        # This preserves textures and materials perfectly
-        if original_glb and os.path.exists(original_glb):
-            gltf = GLTF2.load(original_glb)
-            mesh = list(result_meshes.values())[0]
-            verts = np.asarray(mesh.vertices, dtype=np.float32)
-            faces = np.asarray(mesh.faces, dtype=np.uint32)
-            has_uv = hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None
-            uv = np.asarray(mesh.visual.uv, dtype=np.float32) if has_uv else None
-            normals = np.asarray(mesh.vertex_normals, dtype=np.float32)
-
-            # Build new binary buffer
-            buf = io.BytesIO()
-            # Write indices
-            idx_offset = buf.tell()
-            buf.write(faces.tobytes())
-            idx_len = buf.tell() - idx_offset
-            # Pad to 4 bytes
-            pad = (4 - (buf.tell() % 4)) % 4
-            buf.write(b'\x00' * pad)
-            # Write positions
-            pos_offset = buf.tell()
-            buf.write(verts.tobytes())
-            pos_len = buf.tell() - pos_offset
-            # Write normals
-            nrm_offset = buf.tell()
-            buf.write(normals.tobytes())
-            nrm_len = buf.tell() - nrm_offset
-            # Write UVs
-            uv_offset = buf.tell()
-            if uv is not None:
-                buf.write(uv.tobytes())
-            uv_len = buf.tell() - uv_offset
-
-            # Copy texture data from original buffer
-            orig_bin = gltf.binary_blob() or b''
-            # Find texture buffer views (not geometry)
-            tex_bv_indices = set()
-            for img in gltf.images:
-                if img.bufferView is not None:
-                    tex_bv_indices.add(img.bufferView)
-
-            tex_offset = buf.tell()
-            tex_bv_map = {}  # old_bv_idx -> new_offset
-            for bv_idx in sorted(tex_bv_indices):
-                bv = gltf.bufferViews[bv_idx]
-                old_data = orig_bin[bv.byteOffset : bv.byteOffset + bv.byteLength]
-                new_off = buf.tell() - tex_offset + tex_offset
-                tex_bv_map[bv_idx] = buf.tell()
-                buf.write(old_data)
-                # Pad
-                pad = (4 - (buf.tell() % 4)) % 4
-                buf.write(b'\x00' * pad)
-
-            new_bin = buf.getvalue()
-
-            # Rebuild buffer views and accessors
-            gltf.buffers = [Buffer(byteLength=len(new_bin))]
-            gltf.bufferViews = [
-                BufferView(buffer=0, byteOffset=idx_offset, byteLength=idx_len, target=ELEMENT_ARRAY_BUFFER),
-                BufferView(buffer=0, byteOffset=pos_offset, byteLength=pos_len, target=ARRAY_BUFFER),
-                BufferView(buffer=0, byteOffset=nrm_offset, byteLength=nrm_len, target=ARRAY_BUFFER),
-            ]
-            accessor_list = [
-                Accessor(bufferView=0, componentType=UNSIGNED_INT, count=faces.size, type=SCALAR,
-                         max=[int(faces.max())], min=[0]),
-                Accessor(bufferView=1, componentType=FLOAT, count=len(verts), type=VEC3,
-                         max=verts.max(axis=0).tolist(), min=verts.min(axis=0).tolist()),
-                Accessor(bufferView=2, componentType=FLOAT, count=len(normals), type=VEC3),
-            ]
-            uv_accessor = None
-            if uv is not None and uv_len > 0:
-                bv_uv = BufferView(buffer=0, byteOffset=uv_offset, byteLength=uv_len, target=ARRAY_BUFFER)
-                gltf.bufferViews.append(bv_uv)
-                uv_accessor = len(accessor_list)
-                accessor_list.append(
-                    Accessor(bufferView=len(gltf.bufferViews)-1, componentType=FLOAT, count=len(uv), type=VEC2)
-                )
-
-            # Rebuild texture buffer views
-            for bv_idx, new_off in tex_bv_map.items():
-                old_bv = gltf.bufferViews[bv_idx] if bv_idx < len(gltf.bufferViews) else None
-                new_bv_idx = len(gltf.bufferViews)
-                old_len = orig_bin[gltf.bufferViews[bv_idx].byteOffset:] if old_bv else b''
-                bv_new = BufferView(buffer=0, byteOffset=new_off, byteLength=len(orig_bin[gltf.bufferViews[bv_idx].byteOffset : gltf.bufferViews[bv_idx].byteOffset + gltf.bufferViews[bv_idx].byteLength]) if old_bv else 0)
-                gltf.bufferViews.append(bv_new)
-                # Update image references
-                for img in gltf.images:
-                    if img.bufferView == bv_idx:
-                        img.bufferView = new_bv_idx
-
-            gltf.accessors = accessor_list
-
-            # Rebuild primitive
-            attrs = {'POSITION': 1, 'NORMAL': 2}
-            if uv_accessor is not None:
-                attrs['TEXCOORD_0'] = uv_accessor
-            mat_idx = gltf.meshes[0].primitives[0].material if gltf.meshes else None
-            gltf.meshes = [GLTFMesh(primitives=[Primitive(attributes=attrs, indices=0, material=mat_idx)])]
-
-            gltf.set_binary_blob(new_bin)
-            gltf.save(output_path)
-            log(f'exported via pygltflib (preserving textures, {total_v} verts, {total_f} faces)')
-
-        else:
-            # No original GLB — fallback to trimesh export
-            raise ValueError('no original GLB for pygltflib export')
-
-    except Exception as e:
-        log(f'pygltflib export failed ({e}), falling back to trimesh')
-        if len(result_meshes) == 1:
-            list(result_meshes.values())[0].export(output_path)
-        else:
-            trimesh.Scene(geometry=result_meshes).export(output_path)
+    if len(result_meshes) == 1:
+        list(result_meshes.values())[0].export(output_path)
+    else:
+        trimesh.Scene(geometry=result_meshes).export(output_path)
 
     elapsed = time.time() - t0
+    total_v = sum(len(m.vertices) for m in result_meshes.values())
+    total_f = sum(len(m.faces) for m in result_meshes.values())
     print(f'SUBDIVIDE_STATS: verts={total_v} faces={total_f}', flush=True)
     print(f'SUBDIVIDE_SUCCESS: {output_path} ({os.path.getsize(output_path)} bytes) in {elapsed:.1f}s', flush=True)
 
