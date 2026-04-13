@@ -2334,6 +2334,13 @@ function stripKnownPromptSuffixes(raw) {
 // Enhance prompt: expand the user's short description into a rich, detailed
 // prompt by combining the raw text with the selected style + asset type keywords.
 // The user sees exactly what the AI engine will receive and can tweak it further.
+document.getElementById('ws-copy-prompt')?.addEventListener('click', () => {
+  const text = document.getElementById('ws-prompt')?.value?.trim();
+  if (!text) { showToast('No prompt to copy', 'error'); return; }
+  navigator.clipboard.writeText(text).then(() => showToast('Prompt copied!', 'success', 1500))
+    .catch(() => showToast('Copy failed', 'error'));
+});
+
 document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
   const textarea = document.getElementById('ws-prompt');
   const raw = textarea.value.trim();
