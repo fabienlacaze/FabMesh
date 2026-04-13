@@ -6,6 +6,9 @@ Improves SF3D's blurry baked textures by projecting the original high-res
 source photo back onto the mesh using SF3D's EXACT perspective camera
 (fov=40 deg, distance=1.6) so front-facing geometry gets sharp textures.
 
+Supports multi-view projection using Zero123++ generated views at 6 angles
+(30, 90, 150, 210, 270, 330 deg) plus the front input image (0 deg).
+
 Strategy:
   1. Undo SF3D's post-generation rotation (Rx(-90) * Ry(90) * invert)
      to recover the original camera-space coordinates
@@ -16,6 +19,7 @@ Strategy:
 
 Usage:
     python texture_project.py <mesh.glb> <source_image> <output.glb> [resolution]
+    python texture_project.py <mesh.glb> <source_image> <output.glb> [resolution] --multiview <dir>
 """
 import sys
 import os
@@ -31,12 +35,19 @@ def log(msg):
     print(f'[tex_project] {msg}', flush=True)
 
 
-def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
-    """Project source photo onto mesh UV atlas and save result."""
+def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
+                    multiview_dir=None):
+    """Project source photo onto mesh UV atlas and save result.
+
+    If multiview_dir is provided, also projects view_0..view_5.png at their
+    respective Zero123++ angles and blends all views weighted by visibility
+    and priority.
+    """
     import trimesh
 
     t0 = time.time()
-    log(f'mesh={mesh_path} src={source_image_path} out={output_path} res={tex_res}')
+    log(f'mesh={mesh_path} src={source_image_path} out={output_path} res={tex_res}'
+        f'{" multiview=" + multiview_dir if multiview_dir else ""}')
 
     # Load mesh
     scene = trimesh.load(mesh_path)
@@ -48,12 +59,6 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     uv = np.asarray(geom.visual.uv, dtype=np.float64)
 
     log(f'mesh: {len(vertices)} verts, {len(faces)} faces')
-
-    # Load source image
-    src_img = Image.open(source_image_path).convert('RGBA')
-    src_w, src_h = src_img.size
-    src_pixels = np.asarray(src_img)  # (H, W, 4)
-    log(f'source: {src_w}x{src_h}')
 
     # Load SF3D texture as fallback
     sf3d_tex = geom.visual.material.baseColorTexture
@@ -99,7 +104,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     norms_cam = -norms_cam
 
     # ---------------------------------------------------------------
-    # Step 2: Perspective projection using SF3D's exact camera
+    # Step 2: Camera parameters
     #
     # SF3D camera (system.py / utils.py):
     #   default_fovy_deg = 40.0
@@ -110,7 +115,6 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     # (the 4th column after the axis swap), camera Z axis = world X.
     #
     # The c2w columns map camera axes to world axes:
-    #   cam_X -> world_Z   (c2w col 0 = [0,0,1])... wait, let's be precise.
     #   Row 0: [0,0,1,d] means world_X = cam_Z * 1 + d
     #   Row 1: [1,0,0,0] means world_Y = cam_X * 1
     #   Row 2: [0,1,0,0] means world_Z = cam_Y * 1
@@ -131,87 +135,169 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     # ---------------------------------------------------------------
     fov_deg = 40.0
     distance = 1.6
+    fov_rad = np.radians(fov_deg)
+    focal = 0.5 / np.tan(0.5 * fov_rad)
 
-    # World-to-camera transform
+    # Base world-to-camera transform (front view, 0 degrees)
     # R_w2c = R_c2w^T where R_c2w = [[0,0,1],[1,0,0],[0,1,0]]
-    R_w2c = np.array([
+    R_w2c_base = np.array([
         [0, 1, 0],
         [0, 0, 1],
         [1, 0, 0]
     ], dtype=np.float64)
-    t_w2c = np.array([0, 0, -distance], dtype=np.float64)
+    t_w2c_base = np.array([0, 0, -distance], dtype=np.float64)
 
-    # Transform vertices to camera space
-    verts_cs = (R_w2c @ verts_cam.T).T + t_w2c  # (V, 3)
-    norms_cs = (R_w2c @ norms_cam.T).T
+    # -------------------------------------------------------------------
+    # Helper: project vertices from a rotated camera viewpoint
+    # angle_deg: Y-axis rotation angle (0 = front, 90 = right, etc.)
+    # Returns (vertex_colors, visibility) arrays for this view
+    # -------------------------------------------------------------------
+    def project_single_view(src_pixels, src_w, src_h, angle_deg):
+        """Project from a camera rotated angle_deg around Y axis.
 
-    # Camera looks along +Z in camera space (OpenGL convention: -Z, but
-    # SF3D uses +Z based on the c2w setup where cam_z = world_x and the
-    # object is at origin, camera at distance along world_x)
-    # verts_cs[:, 2] should be negative for points in front of camera
-    # (camera at z=0, object at z=-distance + world_x)
-    # Actually: cam_z = world_x - d. Object is near origin, so cam_z ~ -d < 0
-    # This means the camera looks along -Z (standard OpenCV/OpenGL convention)
+        Camera orbit math:
+          Base c2w has R_c2w_base and t_c2w_base = [d,0,0].
+          Orbiting by angle_deg around Y applies Ry(angle) to the whole c2w:
+            R_c2w_new = Ry(angle) @ R_c2w_base
+            t_c2w_new = Ry(angle) @ [d,0,0]
+          Inverting to get w2c:
+            R_w2c_new = R_c2w_new^T = R_c2w_base^T @ Ry(-angle) = R_w2c_base @ Ry(-angle)
+            t_w2c_new = -R_w2c_new @ t_c2w_new
+                      = -(R_w2c_base @ Ry(-angle)) @ (Ry(angle) @ [d,0,0])
+                      = -R_w2c_base @ [d,0,0] = t_w2c_base
+          The translation is angle-invariant because orbit rotation cancels out.
+        """
+        R_w2c = R_w2c_base @ rot_y(-angle_deg)
+        t_w2c = t_w2c_base  # angle-invariant (see derivation above)
 
-    # Perspective projection
-    # Focal length from SF3D: focal = 0.5 * H / tan(0.5 * fov)
-    # We project to normalized image coords [0, 1]
-    fov_rad = np.radians(fov_deg)
-    # Use unit image size for normalized coords
-    focal = 0.5 / np.tan(0.5 * fov_rad)
+        # Transform vertices to this camera's space
+        v_cs = (R_w2c @ verts_cam.T).T + t_w2c  # (V, 3)
+        n_cs = (R_w2c @ norms_cam.T).T
 
-    # Project: u = focal * x / (-z) + 0.5,  v = focal * y / (-z) + 0.5
-    # (negate z because camera looks along -Z)
-    z = verts_cs[:, 2]
-    safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
-    proj_u = focal * verts_cs[:, 0] / (-safe_z) + 0.5
-    proj_v = focal * verts_cs[:, 1] / (-safe_z) + 0.5
-    # Flip V because image Y goes top-to-bottom
-    proj_v = 1.0 - proj_v
+        # Perspective projection
+        z = v_cs[:, 2]
+        safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
+        p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
+        p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5
+        p_v = 1.0 - p_v  # flip V (image Y top-to-bottom)
 
-    # Check which vertices project within image bounds
-    in_bounds = (proj_u >= 0) & (proj_u <= 1) & (proj_v >= 0) & (proj_v <= 1)
+        # Bounds check
+        in_bounds = (p_u >= 0) & (p_u <= 1) & (p_v >= 0) & (p_v <= 1)
 
-    # Sample source image for each vertex
-    ix = np.clip((proj_u * src_w).astype(int), 0, src_w - 1)
-    iy = np.clip((proj_v * src_h).astype(int), 0, src_h - 1)
-    vertex_colors = src_pixels[iy, ix, :3].astype(np.float64)  # (V, 3) RGB
-    vertex_alpha = src_pixels[iy, ix, 3].astype(np.float64) / 255.0  # alpha from rembg
+        # Sample source image
+        ix = np.clip((p_u * src_w).astype(int), 0, src_w - 1)
+        iy = np.clip((p_v * src_h).astype(int), 0, src_h - 1)
+        v_colors = src_pixels[iy, ix, :3].astype(np.float64)
+        v_alpha = src_pixels[iy, ix, 3].astype(np.float64) / 255.0
 
-    # Visibility: front-facing check in camera space
-    # Camera direction for each vertex (from vertex toward camera origin)
-    cam_dirs = -verts_cs.copy()  # direction from vertex to camera (at origin in cam space... no, camera IS the origin)
-    # Actually in camera space, camera is at origin. Direction from vertex to camera = -vertex_pos
-    cam_dirs = -verts_cs
-    cam_dirs_norm = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
-    # Normalize surface normals in camera space
-    norms_cs_norm = norms_cs / (np.linalg.norm(norms_cs, axis=1, keepdims=True) + 1e-10)
-    # Dot product: positive = facing camera
-    visibility = np.sum(norms_cs_norm * cam_dirs_norm, axis=1)
-    visibility = np.clip(visibility, 0, 1)
+        # Visibility: dot(normal, cam_dir) where cam_dir = -vertex_pos (cam at origin)
+        cam_dirs = -v_cs
+        cam_dirs_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
+        norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
+        vis = np.sum(norms_n * cam_dirs_n, axis=1)
+        vis = np.clip(vis, 0, 1)
 
-    # Combine with alpha and bounds check
-    visibility *= vertex_alpha
-    visibility *= in_bounds.astype(np.float64)
+        # Combine with alpha and bounds
+        vis *= v_alpha
+        vis *= in_bounds.astype(np.float64)
 
-    # Power curve to sharpen the visibility falloff (reduce blending at edges)
-    visibility = visibility ** 1.5
+        # Power curve to sharpen visibility falloff
+        vis = vis ** 1.5
 
-    log(f'projection done, {(visibility > 0.1).sum()}/{len(vertices)} visible verts '
-        f'(in_bounds: {in_bounds.sum()}, z_range: {z.min():.2f} to {z.max():.2f})')
+        return v_colors, vis
 
-    # Debug: save projection overlay to visually verify alignment
+    # -------------------------------------------------------------------
+    # Build list of views to project
+    # -------------------------------------------------------------------
+    # Zero123++ view angles:
+    #   input.png: 0 deg (front)
+    #   view_0.png: 30, view_1: 90, view_2: 150, view_3: 210, view_4: 270, view_5: 330
+    MULTIVIEW_ANGLES = [30.0, 90.0, 150.0, 210.0, 270.0, 330.0]
+
+    # Priority weights: front=1.0, front-side=0.7, side=0.5, back-side=0.4, back views get less
+    # The priority downweights views so front dominates where multiple views see the same surface
+    PRIORITY_WEIGHTS = {
+        0.0:   1.0,   # front (input.png)
+        30.0:  0.7,   # front-right
+        330.0: 0.7,   # front-left
+        90.0:  0.5,   # right
+        270.0: 0.5,   # left
+        150.0: 0.4,   # back-right
+        210.0: 0.4,   # back-left
+    }
+
+    views = []  # list of (image_path, angle_deg, priority)
+
+    # Always include the front view
+    views.append((source_image_path, 0.0, PRIORITY_WEIGHTS[0.0]))
+
+    if multiview_dir:
+        for i, angle in enumerate(MULTIVIEW_ANGLES):
+            vpath = os.path.join(multiview_dir, f'view_{i}.png')
+            if os.path.exists(vpath):
+                views.append((vpath, angle, PRIORITY_WEIGHTS.get(angle, 0.4)))
+            else:
+                log(f'WARNING: missing {vpath}, skipping')
+
+    log(f'projecting {len(views)} view(s): ' +
+        ', '.join(f'{v[1]:.0f}deg(p={v[2]})' for v in views))
+
+    # -------------------------------------------------------------------
+    # Step 2b: Project all views and accumulate weighted colors per vertex
+    # -------------------------------------------------------------------
+    n_verts = len(vertices)
+    accum_color = np.zeros((n_verts, 3), dtype=np.float64)
+    accum_weight = np.zeros(n_verts, dtype=np.float64)
+
+    for img_path, angle_deg, priority in views:
+        src_img = Image.open(img_path).convert('RGBA')
+        sw, sh = src_img.size
+        sp = np.asarray(src_img)
+        log(f'  view {angle_deg:.0f}deg: {img_path} ({sw}x{sh})')
+
+        v_colors, vis = project_single_view(sp, sw, sh, angle_deg)
+
+        # Weight = visibility * priority
+        w = vis * priority
+        accum_color += v_colors * w[:, np.newaxis]
+        accum_weight += w
+
+        n_visible = (vis > 0.1).sum()
+        log(f'    {n_visible}/{n_verts} visible verts')
+
+    # Normalize accumulated colors
+    safe_w = np.where(accum_weight < 1e-8, 1.0, accum_weight)
+    vertex_colors = accum_color / safe_w[:, np.newaxis]
+    # Total visibility = clamped accumulated weight (for atlas blending vs SF3D)
+    visibility = np.clip(accum_weight, 0, 1)
+
+    log(f'multi-view projection done, {(visibility > 0.1).sum()}/{n_verts} verts covered')
+
+    # Debug: save projection overlay for front view
     try:
-        debug_img = src_img.copy().convert('RGB')
+        front_img = Image.open(source_image_path).convert('RGBA')
+        fw, fh = front_img.size
+        front_pixels = np.asarray(front_img)
+        _, front_vis = project_single_view(front_pixels, fw, fh, 0.0)
+        # Recompute front projection UVs for debug overlay
+        R_w2c = R_w2c_base
+        t_w2c = t_w2c_base
+        verts_cs_dbg = (R_w2c @ verts_cam.T).T + t_w2c
+        z_dbg = verts_cs_dbg[:, 2]
+        safe_z_dbg = np.where(np.abs(z_dbg) < 1e-8, -1e-8, z_dbg)
+        proj_u_dbg = focal * verts_cs_dbg[:, 0] / (-safe_z_dbg) + 0.5
+        proj_v_dbg = 1.0 - (focal * verts_cs_dbg[:, 1] / (-safe_z_dbg) + 0.5)
+
+        debug_img = front_img.copy().convert('RGB')
         debug_draw = ImageDraw.Draw(debug_img)
-        vis_mask = visibility > 0.1
+        vis_mask = front_vis > 0.1
         for vi in range(0, len(vertices), max(1, len(vertices) // 2000)):
             if not vis_mask[vi]:
                 continue
-            px = int(proj_u[vi] * src_w)
-            py = int(proj_v[vi] * src_h)
-            if 0 <= px < src_w and 0 <= py < src_h:
-                v = min(255, int(visibility[vi] * 255))
+            px = int(proj_u_dbg[vi] * fw)
+            py = int(proj_v_dbg[vi] * fh)
+            if 0 <= px < fw and 0 <= py < fh:
+                v = min(255, int(front_vis[vi] * 255))
                 debug_draw.ellipse([px-1, py-1, px+1, py+1], fill=(v, 255-v, 0))
         debug_path = output_path.replace('.glb', '_proj_debug.png')
         debug_img.save(debug_path)
@@ -380,12 +466,19 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print("Usage: python texture_project.py <mesh.glb> <source_image> <output.glb> [resolution]")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(description='FabMesh Texture Projection')
+    parser.add_argument('mesh', help='Input mesh GLB file')
+    parser.add_argument('source_image', help='Source photo (front view)')
+    parser.add_argument('output', help='Output GLB file')
+    parser.add_argument('resolution', nargs='?', type=int, default=1024,
+                        help='Texture resolution (default: 1024)')
+    parser.add_argument('--multiview', metavar='DIR', default=None,
+                        help='Directory with Zero123++ views (view_0.png..view_5.png)')
+    args = parser.parse_args()
     try:
-        ok = project_texture(sys.argv[1], sys.argv[2], sys.argv[3],
-                             int(sys.argv[4]) if len(sys.argv) > 4 else 1024)
+        ok = project_texture(args.mesh, args.source_image, args.output,
+                             args.resolution, multiview_dir=args.multiview)
         sys.exit(0 if ok else 1)
     except Exception as e:
         log(f'ERROR: {type(e).__name__}: {e}')
