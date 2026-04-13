@@ -318,30 +318,6 @@ def generate_3d(
         print(f"LOCAL_SF3D: texture post-process skipped ({_te})", flush=True)
         import traceback; traceback.print_exc()
 
-    # ------------------------------------------------------------------
-    # Texture projection: re-project source photo onto mesh for sharper texture
-    # ------------------------------------------------------------------
-    print(f"LOCAL_SF3D_PROGRESS: 92 texture_project", flush=True)
-    try:
-        tex_proj_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
-        if os.path.exists(tex_proj_script):
-            import subprocess as _sp_proj
-            _r_proj = _sp_proj.run(
-                [sys.executable, tex_proj_script, output_path, image_path, output_path, str(tex_res)],
-                capture_output=True, text=True, timeout=60
-            )
-            if _r_proj.stdout:
-                for line in _r_proj.stdout.strip().split('\n'):
-                    print(f"LOCAL_SF3D: {line}", flush=True)
-            if _r_proj.returncode != 0:
-                print(f"LOCAL_SF3D: texture projection failed (code {_r_proj.returncode})", flush=True)
-                if _r_proj.stderr:
-                    print(f"LOCAL_SF3D: {_r_proj.stderr[-300:]}", flush=True)
-            else:
-                print(f"LOCAL_SF3D: texture projection applied", flush=True)
-    except Exception as _tp_e:
-        print(f"LOCAL_SF3D: texture projection skipped ({_tp_e})", flush=True)
-
     size = os.path.getsize(output_path)
 
     # Read back the GLB to count verts/faces for the UI stats display.
@@ -473,7 +449,30 @@ def generate_3d(
             if os.path.exists(raw_glb) and not os.path.exists(output_path):
                 os.rename(raw_glb, output_path)
 
-    # Re-read final file size after possible subdivision
+    # ------------------------------------------------------------------
+    # Texture projection: LAST step — after subdivision/decimation.
+    # Re-project source photo onto the final mesh for sharp textures.
+    # ------------------------------------------------------------------
+    print(f"LOCAL_SF3D_PROGRESS: 97 texture_project", flush=True)
+    try:
+        tex_proj_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
+        if os.path.exists(tex_proj_script):
+            import subprocess as _sp_proj
+            _r_proj = _sp_proj.run(
+                [sys.executable, tex_proj_script, output_path, image_path, output_path, str(tex_res)],
+                capture_output=True, text=True, timeout=60
+            )
+            if _r_proj.stdout:
+                for line in _r_proj.stdout.strip().split('\n'):
+                    print(f"LOCAL_SF3D: {line}", flush=True)
+            if _r_proj.returncode != 0:
+                print(f"LOCAL_SF3D: texture projection failed (code {_r_proj.returncode})", flush=True)
+            else:
+                print(f"LOCAL_SF3D: texture projection applied", flush=True)
+    except Exception as _tp_e:
+        print(f"LOCAL_SF3D: texture projection skipped ({_tp_e})", flush=True)
+
+    # Re-read final file size
     size = os.path.getsize(output_path)
     print(f"LOCAL_SF3D_SUCCESS: {output_path} ({size} bytes)", flush=True)
     print(f"LOCAL_SF3D_PROGRESS: 100 done", flush=True)
