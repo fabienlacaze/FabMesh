@@ -2420,9 +2420,16 @@ const symState = {
   maskData: null,  // Uint8Array mask (255=symmetrize, 0=keep)
   dragging: false, rotating: false,
   painting: false,
-  undoStack: [],
+  undoStack: [], redoStack: [],
   zoom: 1, panX: 0, panY: 0, panning: false, panStart: null,
 };
+
+function _symUpdateUndoBtns() {
+  const u = document.getElementById('sym-undo');
+  const r = document.getElementById('sym-redo');
+  if (u) u.disabled = symState.undoStack.length === 0;
+  if (r) r.disabled = symState.redoStack.length === 0;
+}
 
 function _symApplyView() {
   const canvas = document.getElementById('sym-canvas');
@@ -2657,7 +2664,11 @@ if (_symOverlay) {
       // Near axis in full mode = drag axis
       symState.dragging = true;
     } else if (symState.mode === 'mask') {
-      // Paint mask
+      // Save undo before painting
+      symState.undoStack.push(new Uint8Array(symState.maskData));
+      if (symState.undoStack.length > 20) symState.undoStack.shift();
+      symState.redoStack = [];
+      _symUpdateUndoBtns();
       symState.painting = true;
       _symPaintMask(p.x, p.y);
       _symDrawPreview();
@@ -2764,10 +2775,20 @@ document.getElementById('sym-loupe-toggle')?.addEventListener('click', () => {
 // Set loupe button active by default
 (() => { const b = document.getElementById('sym-loupe-toggle'); if (b) b.classList.add('tool-active'); })();
 
-// Undo + Reset
+// Undo / Redo / Reset
 document.getElementById('sym-undo')?.addEventListener('click', () => {
   if (symState.undoStack.length > 0) {
+    symState.redoStack.push(new Uint8Array(symState.maskData));
     symState.maskData = symState.undoStack.pop();
+    _symUpdateUndoBtns();
+    _symDrawPreview();
+  }
+});
+document.getElementById('sym-redo')?.addEventListener('click', () => {
+  if (symState.redoStack.length > 0) {
+    symState.undoStack.push(new Uint8Array(symState.maskData));
+    symState.maskData = symState.redoStack.pop();
+    _symUpdateUndoBtns();
     _symDrawPreview();
   }
 });
@@ -2775,6 +2796,9 @@ document.getElementById('sym-reset')?.addEventListener('click', () => {
   symState.maskData = new Uint8Array(symState.w * symState.h);
   symState.axisX = 0.5;
   symState.axisAngle = 0;
+  symState.undoStack = [];
+  symState.redoStack = [];
+  _symUpdateUndoBtns();
   _symDrawPreview();
 });
 
