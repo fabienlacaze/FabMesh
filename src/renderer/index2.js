@@ -4436,6 +4436,45 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
   });
 });
 
+// ============================================================
+// MESH TOOLS — automated operations
+// ============================================================
+async function runMeshTool(operation, params = []) {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  const meshPath = p.selectedMeshPath;
+  showToast(`Running ${operation}...`, 'info', 2000);
+  try {
+    const result = await API.meshTool({ operation, meshPath, params });
+    if (result && result.success) {
+      showToast(`${operation} done!`, 'success');
+      // Refresh mesh list
+      await refreshProjectMeshes(p);
+    } else {
+      showToast(`${operation} failed: ${(result && result.error) || 'unknown'}`, 'error', 5000);
+    }
+  } catch (e) {
+    showToast(`${operation} error: ${e.message}`, 'error', 5000);
+  }
+}
+
+document.getElementById('ws-mesh-smooth-btn')?.addEventListener('click', () => runMeshTool('smooth', ['3', '0.5']));
+document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () => runMeshTool('decimate', ['5000']));
+document.getElementById('ws-mesh-subdivide-btn')?.addEventListener('click', () => runMeshTool('subdivide', ['1']));
+document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => runMeshTool('fix_normals'));
+document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => runMeshTool('fill_holes'));
+document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => runMeshTool('center'));
+document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
+  runMeshTool('retexture', [p.selectedImagePath, '2048']);
+});
+
+// Manual mesh tools (placeholders for now)
+document.getElementById('ws-mesh-sculpt-btn')?.addEventListener('click', () => showToast('Sculpt tool coming soon', 'info'));
+document.getElementById('ws-mesh-paintvert-btn')?.addEventListener('click', () => showToast('Vertex paint coming soon', 'info'));
+document.getElementById('ws-mesh-selectface-btn')?.addEventListener('click', () => showToast('Face select coming soon', 'info'));
+
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {
   const m = getCurrentMeshObj();
   if (!m) { showToast('Pick a mesh first.', 'error'); return; }

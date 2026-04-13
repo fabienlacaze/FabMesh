@@ -3205,6 +3205,37 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
   }
 });
 
+// --- Mesh Tools IPC ---
+ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_tools.py');
+  const timestamp = Date.now();
+  const ext = path.extname(meshPath);
+  const base = path.basename(meshPath, ext);
+  const outPath = path.join(path.dirname(meshPath), `${base}_${operation}_${timestamp}${ext}`);
+  const args = [script, operation, meshPath, outPath, ...(params || [])];
+
+  return new Promise((resolve) => {
+    execFile('python', args, { timeout: 300000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (stdout) log.info('mesh-tool', stdout.trim());
+      if (error) {
+        log.error('mesh-tool', error.message);
+        resolve({ success: false, error: error.message, stderr });
+      } else if (!fs.existsSync(outPath)) {
+        resolve({ success: false, error: 'Output file not created' });
+      } else {
+        const stats = fs.statSync(outPath);
+        resolve({
+          success: true,
+          newPath: outPath,
+          filename: path.basename(outPath),
+          size: stats.size,
+          operation,
+        });
+      }
+    });
+  });
+});
+
 // --- IPC Handlers ---
 
 ipcMain.handle('import-mesh', async () => {

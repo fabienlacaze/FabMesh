@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   pickExportPath: (opts) => ipcRenderer.invoke('pick-export-path', opts),
   getFileInfo: (filePath) => ipcRenderer.invoke('get-file-info', filePath),
   importMesh: () => ipcRenderer.invoke('import-mesh'),
+  meshTool: (opts) => ipcRenderer.invoke('mesh-tool', opts),
   copyMeshToProject: (srcPath) => ipcRenderer.invoke('copy-mesh-to-project', srcPath),
   createProjectFromMesh: (opts) => ipcRenderer.invoke('create-project-from-mesh', opts),
   flashTaskbar: () => ipcRenderer.invoke('flash-taskbar'),
