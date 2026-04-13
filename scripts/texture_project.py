@@ -173,7 +173,8 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     # Step 4: Write texture back into GLB in-place
     # ---------------------------------------------------------------
     import shutil
-    shutil.copy(mesh_path, output_path)
+    if os.path.abspath(mesh_path) != os.path.abspath(output_path):
+        shutil.copy(mesh_path, output_path)
 
     with open(output_path, 'rb') as f:
         data = bytearray(f.read())
