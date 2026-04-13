@@ -4449,7 +4449,7 @@ async function runMeshTool(operation, params = []) {
     if (result && result.success) {
       showToast(`${operation} done!`, 'success');
       // Refresh mesh list
-      await refreshProjectMeshes(p);
+      populateWorkspace(p);
     } else {
       showToast(`${operation} failed: ${(result && result.error) || 'unknown'}`, 'error', 5000);
     }
