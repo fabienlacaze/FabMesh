@@ -5903,11 +5903,27 @@ async function reloadCurrentProject() {
   await refreshProjectsPage();
   const refreshed = state.projects.find(p => p.name === name);
   if (refreshed) {
-    // Shared cache-buster timestamp so thumbnails force Electron to reread
-    // files that may have been overwritten by a new generation.
     refreshed._reloadTs = Date.now();
+    // Carry over multiview data
+    if (state.currentProject._multiviews) refreshed._multiviews = state.currentProject._multiviews;
     state.currentProject = refreshed;
     populateWorkspace(refreshed);
+
+    // Auto generate multi-views for the latest image if checkbox is checked
+    const autoMV = document.getElementById('ws-auto-multiview');
+    if (autoMV?.checked && refreshed.images?.length > 0) {
+      const latestImg = refreshed.previewImagePath || refreshed.images[0]?.path;
+      if (latestImg && !(refreshed._multiviews?.[latestImg])) {
+        try {
+          const result = await API.generateMultiview({ imagePath: latestImg });
+          if (result?.success) {
+            if (!refreshed._multiviews) refreshed._multiviews = {};
+            refreshed._multiviews[latestImg] = result.outDir;
+            _checkMultiviewForCurrentImage();
+          }
+        } catch (e) { console.warn('[auto-multiview]', e); }
+      }
+    }
   }
 }
 
