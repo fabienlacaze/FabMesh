@@ -217,13 +217,13 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # Priority weights: front=1.0, front-side=0.7, side=0.5, back-side=0.4, back views get less
     # The priority downweights views so front dominates where multiple views see the same surface
     PRIORITY_WEIGHTS = {
-        0.0:   1.0,   # front (input.png)
-        30.0:  0.7,   # front-right
-        330.0: 0.7,   # front-left
-        90.0:  0.5,   # right
-        270.0: 0.5,   # left
-        150.0: 0.4,   # back-right
-        210.0: 0.4,   # back-left
+        0.0:   1.0,   # front (input.png) — HD source image
+        30.0:  0.6,   # front-right
+        330.0: 0.6,   # front-left
+        90.0:  0.9,   # right — main side view
+        270.0: 0.9,   # left — main side view
+        150.0: 0.8,   # back-right — contributes to back coverage
+        210.0: 0.8,   # back-left — contributes to back coverage
     }
 
     views = []  # list of (image_path, angle_deg, priority)
