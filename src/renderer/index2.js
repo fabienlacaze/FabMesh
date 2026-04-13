@@ -5948,6 +5948,7 @@ async function reloadCurrentProject() {
     // Carry over multiview data
     if (state.currentProject._multiviews) refreshed._multiviews = state.currentProject._multiviews;
     state.currentProject = refreshed;
+    console.log('[reload] images:', refreshed.images?.length, 'meshes:', refreshed.meshes?.length);
     populateWorkspace(refreshed);
 
     // Open "Edit selected" stage for steps that have content.
