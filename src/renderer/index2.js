@@ -5936,6 +5936,24 @@ async function reloadCurrentProject() {
     state.currentProject = refreshed;
     populateWorkspace(refreshed);
 
+    // Open "Edit selected" stage for steps that have content
+    requestAnimationFrame(() => {
+      const steps = [
+        { id: 'step-card-image', has: refreshed.images?.length > 0 },
+        { id: 'step-card-mesh',  has: refreshed.meshes?.length > 0 },
+        { id: 'step-card-rig',   has: refreshed.rigs?.length > 0 },
+      ];
+      for (const s of steps) {
+        if (!s.has) continue;
+        const card = document.getElementById(s.id);
+        if (!card) continue;
+        const createStage = card.querySelector('.stage-create');
+        const editStage = card.querySelector('.stage-edit');
+        if (createStage) createStage.open = false;
+        if (editStage) editStage.open = true;
+      }
+    });
+
     // Auto generate multi-views in BACKGROUND (don't block UI refresh)
     const autoMV = document.getElementById('ws-auto-multiview');
     if (autoMV?.checked && refreshed.images?.length > 0) {
