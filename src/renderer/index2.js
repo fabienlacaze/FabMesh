@@ -592,6 +592,16 @@ document.getElementById('btn-import-image')?.addEventListener('click', async () 
   const result = await API.importImageFile(filePath);
   if (!result || !result.path) { showToast('Import failed', 'error'); return; }
   showToast('Image imported!', 'success', 1500);
+  // NSFW scan on imported image
+  if (API.batchCheckNsfw) {
+    try {
+      const nsfwResult = await API.batchCheckNsfw({ images: [result.path] });
+      const isNsfw = nsfwResult && nsfwResult[result.path] && nsfwResult[result.path].nsfw;
+      if (isNsfw) {
+        _nsfwScanCache[result.path.split(/[/\\]/).pop()] = true;
+      }
+    } catch (e) { console.warn('[import] NSFW scan failed:', e); }
+  }
   // Refresh project list then open the new project
   await renderProjectsGrid();
   const proj = state.projects.find(p => p.name === result.projectName);
