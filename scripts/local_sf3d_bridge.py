@@ -86,6 +86,10 @@ def generate_3d(
     image = resize_foreground(image, foreground_ratio)
     print(f"LOCAL_SF3D: image preprocessed {image.size}", flush=True)
 
+    # Save preprocessed image (with alpha) for texture projection later
+    _preprocessed_path = output_path + '.preprocessed.png'
+    image.save(_preprocessed_path)
+
     # ------------------------------------------------------------------
     # Download + load SF3D weights (~3 GB, one-time, gated on HF)
     # ------------------------------------------------------------------
@@ -459,7 +463,7 @@ def generate_3d(
         if os.path.exists(tex_proj_script):
             import subprocess as _sp_proj
             _r_proj = _sp_proj.run(
-                [sys.executable, tex_proj_script, output_path, image_path, output_path, str(tex_res)],
+                [sys.executable, tex_proj_script, output_path, _preprocessed_path, output_path, str(tex_res)],
                 capture_output=True, text=True, timeout=60
             )
             if _r_proj.stdout:
@@ -471,6 +475,9 @@ def generate_3d(
                 print(f"LOCAL_SF3D: texture projection applied", flush=True)
     except Exception as _tp_e:
         print(f"LOCAL_SF3D: texture projection skipped ({_tp_e})", flush=True)
+    finally:
+        try: os.remove(_preprocessed_path)
+        except: pass
 
     # Re-read final file size
     size = os.path.getsize(output_path)
