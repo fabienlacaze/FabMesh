@@ -4744,15 +4744,9 @@ function _meLoadMesh(meshPath) {
       meState.camera.position.set(0, size.y * 0.5, maxDim * 2);
       meState.controls.target.set(0, size.y * 0.5, 0);
 
-      // Enable vertex colors for paint mode
       meState.mesh.traverse(child => {
         if (child.isMesh && child.geometry) {
           child.geometry.computeVertexNormals();
-          // Ensure geometry is non-indexed for per-vertex operations
-          if (child.geometry.index) {
-            child.geometry = child.geometry.toNonIndexed();
-            child.geometry.computeVertexNormals();
-          }
         }
       });
     }, (err) => {
@@ -5017,8 +5011,10 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
     exporter.parse(meState.mesh, async (result) => {
       try {
         const buf = result instanceof ArrayBuffer ? new Uint8Array(result) : new Uint8Array(result);
-        const base = meState.meshPath.replace(/\.[^.]+$/, '');
-        const newPath = base + '_edited_' + Date.now() + '.glb';
+        // Build path: same directory as original mesh, with _edited_ suffix
+        const origName = meState.meshPath.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
+        const meshDir = meState.meshPath.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+        const newPath = meshDir + '/' + origName + '_edited_' + Date.now() + '.glb';
         // Send as base64 to avoid IPC array length limit
         let binary = '';
         const bytes = buf;
