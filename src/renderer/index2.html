@@ -137,6 +137,12 @@
                     Construction stages (3 progressive versions)
                   </label>
                 </div>
+                <div class="form-row check-row">
+                  <label class="inline-check">
+                    <input type="checkbox" id="ws-auto-multiview" checked />
+                    Auto Multi-Views (6 views for 3D texturing, ~70s)
+                  </label>
+                </div>
                 <button id="ws-generate-image" class="primary-btn">Generate</button>
               </div>
             </details>
@@ -213,10 +219,6 @@
                         <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
                         <button id="ws-symmetrize-auto-btn" class="ghost-btn tool-btn">&#8651; Sym. Auto</button>
                         <button id="ws-multiview-btn" class="ghost-btn tool-btn">&#128065; Multi-Views</button>
-                        <label style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-muted); cursor:pointer;">
-                          <input type="checkbox" id="ws-auto-multiview" checked style="cursor:pointer;" />
-                          Auto
-                        </label>
                       </div>
                     </div>
                     <div class="step-tools-group">
