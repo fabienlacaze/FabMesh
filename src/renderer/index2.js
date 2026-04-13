@@ -4622,13 +4622,13 @@ function openMeshEdit(mode) {
   document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
 
   // Wait for modal layout then init viewport
-  requestAnimationFrame(() => {
-    _meInitViewport();
+  requestAnimationFrame(async () => {
+    await _meInitViewport();
     _meLoadMesh(p.selectedMeshPath);
   });
 }
 
-function _meInitViewport() {
+async function _meInitViewport() {
   if (meState.renderer) return; // already init
   const container = document.getElementById('me-viewport');
   const canvas = document.getElementById('me-canvas');
@@ -4646,8 +4646,20 @@ function _meInitViewport() {
   meState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
   meState.camera.position.set(0, 0.5, 2);
 
-  meState.controls = new OrbitControls(meState.camera, canvas);
-  meState.controls.enableDamping = true;
+  try {
+    meState.controls = new OrbitControls(meState.camera, canvas);
+    meState.controls.enableDamping = true;
+  } catch (e) {
+    console.error('[mesh-edit] OrbitControls error:', e);
+    // Fallback: try from local lib
+    try {
+      const { OrbitControls: OC } = await import('./lib/controls/OrbitControls.js');
+      meState.controls = new OC(meState.camera, canvas);
+      meState.controls.enableDamping = true;
+    } catch (e2) {
+      console.error('[mesh-edit] OrbitControls fallback also failed:', e2);
+    }
+  }
 
   // Lights
   meState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
