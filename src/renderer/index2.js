@@ -4621,9 +4621,11 @@ function openMeshEdit(mode) {
   document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
   document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
 
-  // Init Three.js viewport
-  _meInitViewport();
-  _meLoadMesh(p.selectedMeshPath);
+  // Wait for modal layout then init viewport
+  requestAnimationFrame(() => {
+    _meInitViewport();
+    _meLoadMesh(p.selectedMeshPath);
+  });
 }
 
 function _meInitViewport() {
@@ -4644,7 +4646,6 @@ function _meInitViewport() {
   meState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
   meState.camera.position.set(0, 0.5, 2);
 
-  const { OrbitControls } = THREE;
   meState.controls = new OrbitControls(meState.camera, canvas);
   meState.controls.enableDamping = true;
 
