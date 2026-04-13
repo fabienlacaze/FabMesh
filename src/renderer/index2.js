@@ -5936,26 +5936,24 @@ async function reloadCurrentProject() {
     state.currentProject = refreshed;
     populateWorkspace(refreshed);
 
-    // Auto generate multi-views for the latest image if checkbox is checked
+    // Auto generate multi-views in BACKGROUND (don't block UI refresh)
     const autoMV = document.getElementById('ws-auto-multiview');
-    console.log('[auto-multiview] checkbox:', autoMV?.checked, 'images:', refreshed.images?.length);
     if (autoMV?.checked && refreshed.images?.length > 0) {
       const latestImg = refreshed.previewImagePath || refreshed.images[0]?.path;
-      console.log('[auto-multiview] latestImg:', latestImg, 'already done:', !!refreshed._multiviews?.[latestImg]);
       if (latestImg && !(refreshed._multiviews?.[latestImg])) {
-        try {
-          showToast('Generating multi-views...', 'info', 3000);
-          const result = await API.generateMultiview({ imagePath: latestImg });
-          console.log('[auto-multiview] result:', result);
-          if (result?.success) {
-            if (!refreshed._multiviews) refreshed._multiviews = {};
-            refreshed._multiviews[latestImg] = result.outDir;
-            _checkMultiviewForCurrentImage();
-            showToast('Multi-views ready!', 'success', 2000);
-          } else {
-            console.warn('[auto-multiview] failed:', result?.error);
-          }
-        } catch (e) { console.warn('[auto-multiview] error:', e); }
+        // Fire and forget — don't await
+        (async () => {
+          try {
+            showToast('Generating multi-views in background...', 'info', 3000);
+            const result = await API.generateMultiview({ imagePath: latestImg });
+            if (result?.success) {
+              if (!refreshed._multiviews) refreshed._multiviews = {};
+              refreshed._multiviews[latestImg] = result.outDir;
+              _checkMultiviewForCurrentImage();
+              showToast('Multi-views ready!', 'success', 2000);
+            }
+          } catch (e) { console.warn('[auto-multiview]', e); }
+        })();
       }
     }
   }
