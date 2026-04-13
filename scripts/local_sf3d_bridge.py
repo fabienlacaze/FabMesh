@@ -93,6 +93,33 @@ def generate_3d(
     image.save(_preprocessed_path)
 
     # ------------------------------------------------------------------
+    # Generate multi-view images (Zero123++) for full-coverage texture projection
+    # ------------------------------------------------------------------
+    _multiview_dir = output_path + '.multiview'
+    try:
+        print(f"LOCAL_SF3D_PROGRESS: 12 multiview_gen", flush=True)
+        import subprocess as _sp_mv
+        _mv_script = os.path.join(os.path.dirname(__file__), 'multiview_gen.py')
+        if os.path.exists(_mv_script):
+            _r_mv = _sp_mv.run(
+                [sys.executable, _mv_script, _preprocessed_path, _multiview_dir],
+                capture_output=True, text=True, timeout=600
+            )
+            if _r_mv.stdout:
+                for line in _r_mv.stdout.strip().split('\n'):
+                    print(f"LOCAL_SF3D: {line}", flush=True)
+            if _r_mv.returncode == 0:
+                print(f"LOCAL_SF3D: multi-view generated ({_multiview_dir})", flush=True)
+            else:
+                print(f"LOCAL_SF3D: multi-view failed (code {_r_mv.returncode}), continuing without", flush=True)
+                _multiview_dir = None
+        else:
+            _multiview_dir = None
+    except Exception as _mv_e:
+        print(f"LOCAL_SF3D: multi-view skipped ({_mv_e})", flush=True)
+        _multiview_dir = None
+
+    # ------------------------------------------------------------------
     # Download + load SF3D weights (~3 GB, one-time, gated on HF)
     # ------------------------------------------------------------------
     print(f"LOCAL_SF3D_PROGRESS: 25 load_pipeline", flush=True)
@@ -503,7 +530,8 @@ def generate_3d(
         if os.path.exists(tex_proj_script):
             import subprocess as _sp_proj
             _r_proj = _sp_proj.run(
-                [sys.executable, tex_proj_script, output_path, _preprocessed_path, output_path, str(tex_res)],
+                [sys.executable, tex_proj_script, output_path, _preprocessed_path, output_path, str(tex_res)]
+                + (['--multiview', _multiview_dir] if _multiview_dir and os.path.isdir(_multiview_dir) else []),
                 capture_output=True, text=True, timeout=60
             )
             if _r_proj.stdout:
@@ -518,6 +546,11 @@ def generate_3d(
     finally:
         try: os.remove(_preprocessed_path)
         except: pass
+        if _multiview_dir and os.path.isdir(_multiview_dir):
+            try:
+                import shutil
+                shutil.rmtree(_multiview_dir, ignore_errors=True)
+            except: pass
 
     # Re-read final file size
     size = os.path.getsize(output_path)
