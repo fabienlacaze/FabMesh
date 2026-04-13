@@ -82,20 +82,22 @@ def generate_multiview(input_image_path, output_dir, size=320):
     log(f'generation done in {time.time()-t0:.1f}s')
     log('MULTIVIEW_PROGRESS: 80')
 
-    # Zero123++ outputs a 2x3 grid of 320x320 images
-    # Layout: [front-right, right, back] / [back-left, left, front-left]
-    # Actually the layout is a single image with 3 cols x 2 rows
+    # Zero123++ v1.2 outputs a 640x960 grid = 2 columns x 3 rows of 320x320 tiles
+    # Layout (left to right, top to bottom):
+    #   [0] 30°  front-right   [1] 90°  right
+    #   [2] 150° back-right    [3] 210° back-left
+    #   [4] 270° left          [5] 330° front-left
     w, h = result.size
-    tile_w = w // 3
-    tile_h = h // 2
+    n_cols = 2
+    n_rows = 3
+    tile_w = w // n_cols
+    tile_h = h // n_rows
 
     view_names = ['view_0', 'view_1', 'view_2', 'view_3', 'view_4', 'view_5']
-    # Row 0: views 0, 1, 2 (front-right 30°, right 90°, back 150°)
-    # Row 1: views 3, 4, 5 (back 210°, left 270°, front-left 330°)
 
     for i in range(6):
-        row = i // 3
-        col = i % 3
+        row = i // n_cols
+        col = i % n_cols
         x = col * tile_w
         y = row * tile_h
         view = result.crop((x, y, x + tile_w, y + tile_h))
