@@ -3420,6 +3420,7 @@ const paintState = {
   selection: null,        // Uint8Array (w*h), 255=selected, 0=not — null means no selection (= all selected)
   selUndoStack: [],
   selRedoStack: [],
+  wandLastPoint: null,    // {x,y} last wand click for re-select on tolerance change
   selRectStart: null,     // {x,y} for rect select drag
   selPreviewData: null,   // ImageData snapshot for rect select preview
   lassoPoints: null,      // [{x,y}, ...] for lasso
@@ -3764,6 +3765,7 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         }
         if (paintState.tool === 'wand') {
           _paintPushSelUndo();
+          paintState.wandLastPoint = { x: Math.round(x), y: Math.round(y) };
           _paintWandSelect(ctx, Math.round(x), Math.round(y), paintState.tolerance);
           _paintShowSelection();
           return false;
@@ -3900,10 +3902,14 @@ document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
   document.getElementById('paint-opacity-val').textContent = e.target.value + '%';
 });
 
-// Tolerance (for Fill / Wand)
+// Tolerance (for Fill / Wand) — re-run wand selection live
 document.getElementById('paint-tolerance')?.addEventListener('input', (e) => {
   paintState.tolerance = parseInt(e.target.value);
   document.getElementById('paint-tolerance-val').textContent = e.target.value;
+  if (paintState.tool === 'wand' && paintState.wandLastPoint && _paintMgr) {
+    _paintWandSelect(_paintMgr.ctx, paintState.wandLastPoint.x, paintState.wandLastPoint.y, paintState.tolerance);
+    _paintShowSelection();
+  }
 });
 
 // Color picker
