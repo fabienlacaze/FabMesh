@@ -107,28 +107,51 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     avg_colors = face_colors.mean(axis=1)  # (N, 3)
     avg_vis = face_vis.mean(axis=1)  # (N,)
 
+    # Pre-compute UV triangle areas and filter degenerate ones
+    uv_px = face_uvs * tex_res  # (N, 3, 2) in pixel coords
+    uv_areas = 0.5 * np.abs(
+        (uv_px[:, 1, 0] - uv_px[:, 0, 0]) * (uv_px[:, 2, 1] - uv_px[:, 0, 1]) -
+        (uv_px[:, 2, 0] - uv_px[:, 0, 0]) * (uv_px[:, 1, 1] - uv_px[:, 0, 1])
+    )
+    # Compute edge lengths to filter very thin triangles
+    edges = np.stack([
+        np.linalg.norm(uv_px[:, 1] - uv_px[:, 0], axis=1),
+        np.linalg.norm(uv_px[:, 2] - uv_px[:, 1], axis=1),
+        np.linalg.norm(uv_px[:, 0] - uv_px[:, 2], axis=1),
+    ], axis=1)  # (N, 3)
+    max_edge = edges.max(axis=1)
+    min_edge = edges.min(axis=1)
+    # Aspect ratio: skip very thin slivers (max/min > 15)
+    aspect_ok = (min_edge > 0.5) & (max_edge / np.clip(min_edge, 0.01, None) < 15)
+    # Skip faces that span too much of the UV atlas (cross-island artifacts)
+    # Max edge length in UV pixels should be reasonable (< 20% of atlas)
+    edge_size_ok = max_edge < (tex_res * 0.2)
+
     n_drawn = 0
+    n_skipped = 0
     for fi in range(len(faces)):
         vis = avg_vis[fi]
         if vis < 0.05:
             continue
+        # Skip degenerate UV faces
+        if uv_areas[fi] < 1.0 or not aspect_ok[fi] or not edge_size_ok[fi]:
+            n_skipped += 1
+            continue
 
-        # UV triangle in pixel coords
-        # Note: UV v=0 is bottom of texture, v=1 is top
-        # PIL image y=0 is top, so flip: py = tex_res - 1 - v * tex_res
         tri = []
         for vi in range(3):
             px = int(face_uvs[fi, vi, 0] * tex_res)
             py = int((1.0 - face_uvs[fi, vi, 1]) * tex_res)
             tri.append((px, py))
 
-        # Draw filled triangle with projected color
         r, g, b = int(avg_colors[fi, 0]), int(avg_colors[fi, 1]), int(avg_colors[fi, 2])
         w = int(min(255, vis * 255))
 
-        proj_draw.polygon(tri, fill=(r, g, b))
-        weight_draw.polygon(tri, fill=w)
+        proj_draw.polygon(tri, fill=(r, g, b), outline=(r, g, b))
+        weight_draw.polygon(tri, fill=w, outline=w)
         n_drawn += 1
+
+    log(f'skipped {n_skipped} degenerate/thin UV faces')
 
     log(f'drew {n_drawn}/{len(faces)} faces ({100*n_drawn/len(faces):.1f}%)')
 
