@@ -5013,7 +5013,7 @@ document.addEventListener('keydown', (e) => {
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
-  showToast('Exporting edited mesh...', 'info', 2000);
+  showToast('Saving new version...', 'info', 2000);
   try {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const exporter = new GLTFExporter();
