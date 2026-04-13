@@ -4581,10 +4581,409 @@ document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () =
   runMeshTool('retexture', [p.selectedImagePath, '2048']);
 });
 
-// Manual mesh tools (placeholders for now)
-document.getElementById('ws-mesh-sculpt-btn')?.addEventListener('click', () => showToast('Sculpt tool coming soon', 'info'));
-document.getElementById('ws-mesh-paintvert-btn')?.addEventListener('click', () => showToast('Vertex paint coming soon', 'info'));
-document.getElementById('ws-mesh-selectface-btn')?.addEventListener('click', () => showToast('Face select coming soon', 'info'));
+// ============================================================
+// MESH EDIT TOOLS — Sculpt, Paint, Select (Three.js modal)
+// ============================================================
+const meState = {
+  mode: 'sculpt',        // sculpt | paint | select
+  sculptMode: 'push',    // push | pull | smooth | flatten
+  brushRadius: 0.05,
+  strength: 0.5,
+  color: '#ff0000',
+  painting: false,
+  renderer: null,
+  scene: null,
+  camera: null,
+  controls: null,
+  mesh: null,
+  meshPath: null,
+  raycaster: new THREE.Raycaster(),
+  mouse: new THREE.Vector2(),
+  undoStack: [],
+  redoStack: [],
+};
+
+function openMeshEdit(mode) {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  meState.mode = mode;
+  meState.meshPath = p.selectedMeshPath;
+
+  const modal = document.getElementById('modal-mesh-edit');
+  const title = document.getElementById('mesh-edit-title');
+  if (title) title.textContent = mode === 'sculpt' ? 'Sculpt Mesh' : mode === 'paint' ? 'Vertex Paint' : 'Select Faces';
+  modal.classList.remove('hidden');
+
+  // Update tool buttons
+  ['sculpt', 'paint', 'select'].forEach(t => {
+    document.getElementById('me-tool-' + t)?.classList.toggle('tool-active', t === mode);
+  });
+  document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
+  document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
+
+  // Init Three.js viewport
+  _meInitViewport();
+  _meLoadMesh(p.selectedMeshPath);
+}
+
+function _meInitViewport() {
+  if (meState.renderer) return; // already init
+  const container = document.getElementById('me-viewport');
+  const canvas = document.getElementById('me-canvas');
+  const w = container.clientWidth || 800;
+  const h = container.clientHeight || 600;
+
+  meState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  meState.renderer.setSize(w, h, false);
+  meState.renderer.setPixelRatio(window.devicePixelRatio);
+  meState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  meState.renderer.toneMappingExposure = 1.4;
+
+  meState.scene = new THREE.Scene();
+  meState.scene.background = new THREE.Color(0x1a1a2e);
+  meState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+  meState.camera.position.set(0, 0.5, 2);
+
+  const { OrbitControls } = THREE;
+  meState.controls = new OrbitControls(meState.camera, canvas);
+  meState.controls.enableDamping = true;
+
+  // Lights
+  meState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(5, 8, 5);
+  meState.scene.add(dir);
+  meState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+  // Grid
+  meState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
+
+  // Render loop
+  function tick() {
+    if (!document.getElementById('modal-mesh-edit')?.classList.contains('hidden')) {
+      meState.controls.update();
+      meState.renderer.render(meState.scene, meState.camera);
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  // Resize
+  new ResizeObserver(() => {
+    const cw = container.clientWidth, ch = container.clientHeight;
+    if (cw > 0 && ch > 0) {
+      meState.renderer.setSize(cw, ch, false);
+      meState.camera.aspect = cw / ch;
+      meState.camera.updateProjectionMatrix();
+    }
+  }).observe(container);
+
+  // Mouse events for brush
+  canvas.addEventListener('mousedown', _meMouseDown);
+  canvas.addEventListener('mousemove', _meMouseMove);
+  canvas.addEventListener('mouseup', _meMouseUp);
+}
+
+function _meLoadMesh(meshPath) {
+  // Remove old mesh
+  if (meState.mesh && meState.scene) {
+    meState.scene.remove(meState.mesh);
+  }
+  meState.undoStack = [];
+  meState.redoStack = [];
+
+  const loader = new GLTFLoader();
+  const url = 'file:///' + meshPath.replace(/\\/g, '/');
+  fetch(url).then(r => r.arrayBuffer()).then(buffer => {
+    loader.parse(buffer, '', (gltf) => {
+      meState.mesh = gltf.scene;
+      meState.scene.add(meState.mesh);
+
+      // Center and scale
+      const box = new THREE.Box3().setFromObject(meState.mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      meState.mesh.position.sub(center);
+      meState.mesh.position.y += size.y / 2;
+      meState.camera.position.set(0, size.y * 0.5, maxDim * 2);
+      meState.controls.target.set(0, size.y * 0.5, 0);
+
+      // Enable vertex colors for paint mode
+      meState.mesh.traverse(child => {
+        if (child.isMesh && child.geometry) {
+          child.geometry.computeVertexNormals();
+          // Ensure geometry is non-indexed for per-vertex operations
+          if (child.geometry.index) {
+            child.geometry = child.geometry.toNonIndexed();
+            child.geometry.computeVertexNormals();
+          }
+        }
+      });
+    });
+  });
+}
+
+function _meGetIntersection(e) {
+  const canvas = document.getElementById('me-canvas');
+  const rect = canvas.getBoundingClientRect();
+  meState.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  meState.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  meState.raycaster.setFromCamera(meState.mouse, meState.camera);
+  if (!meState.mesh) return null;
+  const meshes = [];
+  meState.mesh.traverse(c => { if (c.isMesh) meshes.push(c); });
+  const hits = meState.raycaster.intersectObjects(meshes, false);
+  return hits.length > 0 ? hits[0] : null;
+}
+
+function _mePushUndo() {
+  // Save vertex positions of all meshes
+  const snapshot = [];
+  meState.mesh?.traverse(c => {
+    if (c.isMesh && c.geometry) {
+      snapshot.push({
+        mesh: c,
+        positions: c.geometry.attributes.position.array.slice(),
+        colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
+      });
+    }
+  });
+  meState.undoStack.push(snapshot);
+  if (meState.undoStack.length > 20) meState.undoStack.shift();
+  meState.redoStack = [];
+  _meUpdateUndoBtns();
+}
+
+function _meUndo() {
+  if (meState.undoStack.length === 0) return;
+  // Save current for redo
+  const current = [];
+  meState.mesh?.traverse(c => {
+    if (c.isMesh && c.geometry) {
+      current.push({
+        mesh: c,
+        positions: c.geometry.attributes.position.array.slice(),
+        colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
+      });
+    }
+  });
+  meState.redoStack.push(current);
+  // Restore
+  const snapshot = meState.undoStack.pop();
+  for (const s of snapshot) {
+    s.mesh.geometry.attributes.position.array.set(s.positions);
+    s.mesh.geometry.attributes.position.needsUpdate = true;
+    if (s.colors && s.mesh.geometry.attributes.color) {
+      s.mesh.geometry.attributes.color.array.set(s.colors);
+      s.mesh.geometry.attributes.color.needsUpdate = true;
+    }
+    s.mesh.geometry.computeVertexNormals();
+  }
+  _meUpdateUndoBtns();
+}
+
+function _meUpdateUndoBtns() {
+  const u = document.getElementById('me-undo');
+  const r = document.getElementById('me-redo');
+  if (u) u.disabled = meState.undoStack.length === 0;
+  if (r) r.disabled = meState.redoStack.length === 0;
+}
+
+function _meMouseDown(e) {
+  if (e.button !== 0 || e.altKey) return;
+  const hit = _meGetIntersection(e);
+  if (!hit) return;
+  meState.painting = true;
+  _mePushUndo();
+  meState.controls.enabled = false;
+  _meApplyBrush(hit);
+}
+
+function _meMouseMove(e) {
+  // Update brush cursor
+  const cursor = document.getElementById('me-brush-cursor');
+  if (cursor) {
+    const hit = _meGetIntersection(e);
+    if (hit) {
+      const screenSize = meState.brushRadius * 500; // approximate screen size
+      cursor.style.width = screenSize + 'px';
+      cursor.style.height = screenSize + 'px';
+      cursor.style.left = (e.clientX - screenSize / 2) + 'px';
+      cursor.style.top = (e.clientY - screenSize / 2) + 'px';
+      cursor.style.display = 'block';
+    } else {
+      cursor.style.display = 'none';
+    }
+  }
+  if (!meState.painting) return;
+  const hit = _meGetIntersection(e);
+  if (hit) _meApplyBrush(hit);
+}
+
+function _meMouseUp() {
+  if (meState.painting) {
+    meState.painting = false;
+    meState.controls.enabled = true;
+  }
+}
+
+function _meApplyBrush(hit) {
+  const geom = hit.object.geometry;
+  const pos = geom.attributes.position;
+  const normals = geom.attributes.normal;
+  const point = hit.point.clone();
+  // Transform hit point to local space
+  hit.object.worldToLocal(point);
+
+  const r = meState.brushRadius;
+  const strength = meState.strength;
+
+  if (meState.mode === 'sculpt') {
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+      const dx = vx - point.x, dy = vy - point.y, dz = vz - point.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist > r) continue;
+      const falloff = 1 - (dist / r);
+      const amount = falloff * falloff * strength * 0.01;
+
+      if (meState.sculptMode === 'push' || meState.sculptMode === 'pull') {
+        const nx = normals.getX(i), ny = normals.getY(i), nz = normals.getZ(i);
+        const dir = meState.sculptMode === 'push' ? 1 : -1;
+        pos.setXYZ(i, vx + nx * amount * dir, vy + ny * amount * dir, vz + nz * amount * dir);
+      } else if (meState.sculptMode === 'smooth') {
+        // Move vertex toward local average (simplified)
+        pos.setXYZ(i, vx * (1 - amount * 0.5) + point.x * amount * 0.5,
+                      vy * (1 - amount * 0.5) + point.y * amount * 0.5,
+                      vz * (1 - amount * 0.5) + point.z * amount * 0.5);
+      } else if (meState.sculptMode === 'flatten') {
+        // Project vertex onto the plane defined by hit point + hit normal
+        const hn = hit.face.normal.clone();
+        hit.object.worldToLocal(hn.add(hit.point)).sub(point);
+        const d = dx * hn.x + dy * hn.y + dz * hn.z;
+        pos.setXYZ(i, vx - hn.x * d * amount, vy - hn.y * d * amount, vz - hn.z * d * amount);
+      }
+    }
+    pos.needsUpdate = true;
+    geom.computeVertexNormals();
+  } else if (meState.mode === 'paint') {
+    // Ensure vertex colors exist
+    if (!geom.attributes.color) {
+      const colors = new Float32Array(pos.count * 3).fill(1);
+      geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      hit.object.material.vertexColors = true;
+      hit.object.material.needsUpdate = true;
+    }
+    const colorAttr = geom.attributes.color;
+    const c = new THREE.Color(meState.color);
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+      const dx = vx - point.x, dy = vy - point.y, dz = vz - point.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist > r) continue;
+      const falloff = 1 - (dist / r);
+      const blend = falloff * falloff * strength;
+      const cr = colorAttr.getX(i), cg = colorAttr.getY(i), cb = colorAttr.getZ(i);
+      colorAttr.setXYZ(i,
+        cr * (1 - blend) + c.r * blend,
+        cg * (1 - blend) + c.g * blend,
+        cb * (1 - blend) + c.b * blend
+      );
+    }
+    colorAttr.needsUpdate = true;
+  } else if (meState.mode === 'select') {
+    // Highlight face
+    const faceIndex = hit.faceIndex;
+    if (!geom.attributes.color) {
+      const colors = new Float32Array(pos.count * 3).fill(0.7);
+      geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      hit.object.material.vertexColors = true;
+      hit.object.material.needsUpdate = true;
+    }
+    const colorAttr = geom.attributes.color;
+    // Highlight vertices of the hit face + nearby faces
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+      const dx = vx - point.x, dy = vy - point.y, dz = vz - point.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist > r) continue;
+      colorAttr.setXYZ(i, 1.0, 0.3, 0.1); // orange highlight
+    }
+    colorAttr.needsUpdate = true;
+  }
+}
+
+// Close mesh edit
+function _closeMeshEdit() {
+  document.getElementById('modal-mesh-edit')?.classList.add('hidden');
+}
+
+// Wire buttons
+document.getElementById('ws-mesh-sculpt-btn')?.addEventListener('click', () => openMeshEdit('sculpt'));
+document.getElementById('ws-mesh-paintvert-btn')?.addEventListener('click', () => openMeshEdit('paint'));
+document.getElementById('ws-mesh-selectface-btn')?.addEventListener('click', () => openMeshEdit('select'));
+document.getElementById('me-close-x')?.addEventListener('click', _closeMeshEdit);
+document.getElementById('me-cancel')?.addEventListener('click', _closeMeshEdit);
+document.getElementById('me-undo')?.addEventListener('click', _meUndo);
+
+// Mode switching
+['sculpt', 'paint', 'select'].forEach(mode => {
+  document.getElementById('me-tool-' + mode)?.addEventListener('click', () => {
+    meState.mode = mode;
+    ['sculpt', 'paint', 'select'].forEach(m => document.getElementById('me-tool-' + m)?.classList.toggle('tool-active', m === mode));
+    document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
+    document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
+  });
+});
+// Sculpt sub-modes
+['push', 'pull', 'smooth', 'flatten'].forEach(sm => {
+  document.getElementById('me-sculpt-' + sm)?.addEventListener('click', () => {
+    meState.sculptMode = sm;
+    ['push', 'pull', 'smooth', 'flatten'].forEach(s => document.getElementById('me-sculpt-' + s)?.classList.toggle('tool-active', s === sm));
+  });
+});
+// Sliders
+document.getElementById('me-brush-size')?.addEventListener('input', (e) => {
+  meState.brushRadius = parseInt(e.target.value) / 500;
+  document.getElementById('me-brush-val').textContent = meState.brushRadius.toFixed(3);
+});
+document.getElementById('me-strength')?.addEventListener('input', (e) => {
+  meState.strength = parseInt(e.target.value) / 100;
+  document.getElementById('me-strength-val').textContent = meState.strength.toFixed(2);
+});
+document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
+  meState.color = e.target.value;
+});
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal-mesh-edit');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (e.key === 'Escape') _closeMeshEdit();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); _meUndo(); }
+});
+// Save
+document.getElementById('me-save')?.addEventListener('click', async () => {
+  if (!meState.mesh || !meState.meshPath) return;
+  showToast('Exporting edited mesh...', 'info', 2000);
+  // Export via GLTFExporter
+  const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+  const exporter = new GLTFExporter();
+  exporter.parse(meState.mesh, (result) => {
+    const blob = new Blob([result], { type: 'application/octet-stream' });
+    blob.arrayBuffer().then(buf => {
+      const base = meState.meshPath.replace(/\.[^.]+$/, '');
+      const newPath = base + '_edited_' + Date.now() + '.glb';
+      window.meshyAPI.saveBuffer({ path: newPath, buffer: Array.from(new Uint8Array(buf)) })
+        .then(() => {
+          showToast('Edited mesh saved!', 'success');
+          _closeMeshEdit();
+          populateWorkspace(state.currentProject);
+        })
+        .catch(err => showToast('Save failed: ' + err.message, 'error'));
+    });
+  }, { binary: true });
+});
 
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {
   const m = getCurrentMeshObj();
