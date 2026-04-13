@@ -5936,8 +5936,9 @@ async function reloadCurrentProject() {
     state.currentProject = refreshed;
     populateWorkspace(refreshed);
 
-    // Open "Edit selected" stage for steps that have content
-    requestAnimationFrame(() => {
+    // Open "Edit selected" stage for steps that have content.
+    // Use a short timeout (not rAF) so populateWorkspace's own rAFs finish first.
+    setTimeout(() => {
       const steps = [
         { id: 'step-card-image', has: refreshed.images?.length > 0 },
         { id: 'step-card-mesh',  has: refreshed.meshes?.length > 0 },
@@ -5947,12 +5948,13 @@ async function reloadCurrentProject() {
         if (!s.has) continue;
         const card = document.getElementById(s.id);
         if (!card) continue;
+        card.classList.remove('collapsed', 'disabled');
         const createStage = card.querySelector('.stage-create');
         const editStage = card.querySelector('.stage-edit');
         if (createStage) createStage.open = false;
         if (editStage) editStage.open = true;
       }
-    });
+    }, 150);
 
     // Auto generate multi-views in BACKGROUND (don't block UI refresh)
     const autoMV = document.getElementById('ws-auto-multiview');
