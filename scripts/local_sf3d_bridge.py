@@ -307,7 +307,7 @@ def generate_3d(
 
             return modified
 
-        did_enhance = _modify_glb_textures(output_path, enhance=True, upscale_to=upscale_tex_to)
+        did_enhance = _modify_glb_textures(output_path, enhance=False, upscale_to=upscale_tex_to)
         if did_enhance:
             msgs = ["contrast +30%, saturation +40%, brightness +5%"]
             if upscale_tex_to > 0:
