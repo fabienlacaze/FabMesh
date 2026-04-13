@@ -1194,6 +1194,8 @@ function showStep1Preview(imgPath) {
     expandBtn.classList.remove('hidden');
     expandBtn.onclick = (e) => { e.stopPropagation(); openLightbox(imgPath); };
   }
+  // Update navigation arrows
+  _updateImageNav();
   // Show the "use for 3D" helper bar — always clickable, even when already selected
   const useBar = document.getElementById('ws-use-for-3d-bar');
   if (useBar) {
@@ -1208,6 +1210,46 @@ function showStep1Preview(imgPath) {
     }
   }
 }
+
+// Image navigation arrows
+function _updateImageNav() {
+  const p = state.currentProject;
+  const prevBtn = document.getElementById('ws-img-prev');
+  const nextBtn = document.getElementById('ws-img-next');
+  const counter = document.getElementById('ws-img-counter');
+  if (!p || !p.images || p.images.length <= 1) {
+    if (prevBtn) prevBtn.classList.add('hidden');
+    if (nextBtn) nextBtn.classList.add('hidden');
+    if (counter) counter.classList.add('hidden');
+    return;
+  }
+  const images = p.images;
+  const curIdx = images.findIndex(i => (i.path || i) === p.previewImagePath);
+  if (prevBtn) { prevBtn.classList.remove('hidden'); prevBtn.disabled = curIdx <= 0; }
+  if (nextBtn) { nextBtn.classList.remove('hidden'); nextBtn.disabled = curIdx >= images.length - 1; }
+  if (counter) { counter.classList.remove('hidden'); counter.textContent = `${curIdx + 1} / ${images.length}`; }
+}
+function _navigateImage(delta) {
+  const p = state.currentProject;
+  if (!p || !p.images || p.images.length <= 1) return;
+  const images = p.images;
+  const curIdx = images.findIndex(i => (i.path || i) === p.previewImagePath);
+  const newIdx = Math.max(0, Math.min(images.length - 1, curIdx + delta));
+  if (newIdx === curIdx) return;
+  const newImg = images[newIdx];
+  p.previewImagePath = newImg.path || newImg;
+  showStep1Preview(p.previewImagePath);
+  _updateImageNav();
+  // Sync version strip selection
+  const strip = document.getElementById('ws-image-versions');
+  if (strip) {
+    strip.querySelectorAll('.version-thumb').forEach((t, i) => {
+      t.classList.toggle('selected', i === newIdx);
+    });
+  }
+}
+document.getElementById('ws-img-prev')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(-1); });
+document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(1); });
 
 // ============================================================
 // MESH VIEWER CONTROLS (toolbar logic shared between mini + lightbox)
