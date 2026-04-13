@@ -3553,32 +3553,31 @@ function _paintShowSelection() {
   octx.clearRect(0, 0, w, h);
   if (!paintState.selection) return;
   const sel = paintState.selection;
+  // Draw dark overlay on NON-selected pixels (selected area stays clear)
   const td = octx.createImageData(w, h);
   for (let i = 0; i < sel.length; i++) {
-    if (sel[i] === 255) {
-      td.data[i*4] = 80; td.data[i*4+1] = 140; td.data[i*4+2] = 255; td.data[i*4+3] = 120;
+    if (sel[i] === 0) {
+      // Darken non-selected area
+      td.data[i*4] = 0; td.data[i*4+1] = 0; td.data[i*4+2] = 0; td.data[i*4+3] = 140;
     }
   }
   octx.putImageData(td, 0, 0);
-  // Draw marching ants border (simplified: dashed outline)
-  // Find selection boundary pixels and draw them
+  // Draw dashed border around selection
   octx.strokeStyle = '#ffffff';
-  octx.lineWidth = 1;
-  octx.setLineDash([4, 4]);
+  octx.lineWidth = 1.5;
+  octx.setLineDash([5, 5]);
+  octx.beginPath();
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (sel[y * w + x] !== 255) continue;
-      // Check if this is a border pixel
       const isBorder = (x === 0 || sel[y * w + x - 1] === 0) ||
                        (x === w-1 || sel[y * w + x + 1] === 0) ||
                        (y === 0 || sel[(y-1) * w + x] === 0) ||
                        (y === h-1 || sel[(y+1) * w + x] === 0);
-      if (isBorder) {
-        td.data[(y * w + x) * 4 + 3] = 200;
-      }
+      if (isBorder) octx.rect(x, y, 1, 1);
     }
   }
-  octx.putImageData(td, 0, 0);
+  octx.stroke();
 }
 
 function _paintDab(ctx, x, y, _lastPt, mgr) {
@@ -3772,11 +3771,13 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         if (paintState.tool === 'sel-rect') {
           paintState.selRectStart = { x: Math.round(x), y: Math.round(y) };
           paintState.selPreviewData = ctx.getImageData(0, 0, mgr.w, mgr.h);
+          paintState._selDragging = true;
           return false;
         }
         if (paintState.tool === 'sel-lasso') {
           paintState.lassoPoints = [{ x: Math.round(x), y: Math.round(y) }];
           paintState.selPreviewData = ctx.getImageData(0, 0, mgr.w, mgr.h);
+          paintState._selDragging = true;
           return false;
         }
         if (paintState.tool === 'line') {
@@ -3787,63 +3788,16 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
         return undefined;
       },
-      onPaint: (ctx, x, y, lastPt, mgr) => {
-        // Handle selection tool drags
-        if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
-          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
-          ctx.save();
-          ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
-          const rx = Math.min(paintState.selRectStart.x, Math.round(x));
-          const ry = Math.min(paintState.selRectStart.y, Math.round(y));
-          const rw = Math.abs(Math.round(x) - paintState.selRectStart.x);
-          const rh = Math.abs(Math.round(y) - paintState.selRectStart.y);
-          ctx.strokeRect(rx, ry, rw, rh);
-          ctx.restore();
-          return;
-        }
-        if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
-          paintState.lassoPoints.push({ x: Math.round(x), y: Math.round(y) });
-          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
-          ctx.save();
-          ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
-          ctx.beginPath();
-          ctx.moveTo(paintState.lassoPoints[0].x, paintState.lassoPoints[0].y);
-          for (let i = 1; i < paintState.lassoPoints.length; i++) {
-            ctx.lineTo(paintState.lassoPoints[i].x, paintState.lassoPoints[i].y);
-          }
-          ctx.stroke();
-          ctx.restore();
-          return;
-        }
-        _paintStroke(ctx, x, y, lastPt, mgr);
-      },
+      onPaint: _paintStroke,
       onBrushResize: (delta, mgr) => {
         paintState.brushSize = Math.max(1, Math.min(200, paintState.brushSize + delta));
         document.getElementById('paint-brush-size').value = paintState.brushSize;
         document.getElementById('paint-brush-val').textContent = paintState.brushSize;
       },
       onMouseUp: (mgr) => {
-        const ctx = mgr.ctx;
         if (paintState.tool === 'line' && paintState.lineStart) {
           paintState.lineStart = null;
           paintState.linePreviewData = null;
-        }
-        if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
-          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
-          const p = mgr.lastPaintPoint || paintState.selRectStart;
-          _paintPushSelUndo();
-          _paintRectSelect(paintState.selRectStart.x, paintState.selRectStart.y, p.x, p.y);
-          _paintShowSelection();
-          paintState.selRectStart = null;
-          paintState.selPreviewData = null;
-        }
-        if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
-          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
-          _paintPushSelUndo();
-          _paintLassoSelect(paintState.lassoPoints);
-          _paintShowSelection();
-          paintState.lassoPoints = null;
-          paintState.selPreviewData = null;
         }
       },
     });
@@ -3856,6 +3810,64 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
   requestAnimationFrame(() => {
     _paintMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
   });
+});
+
+// Selection drag: global mousemove + mouseup for rect/lasso (runs outside CanvasManager)
+document.getElementById('paint-canvas')?.addEventListener('mousemove', (e) => {
+  if (!paintState._selDragging || !_paintMgr) return;
+  const p = _paintMgr.getCanvasCoords(e);
+  const ov = document.getElementById('paint-sel-overlay');
+  if (!ov) return;
+  if (ov.width !== _paintMgr.w || ov.height !== _paintMgr.h) { ov.width = _paintMgr.w; ov.height = _paintMgr.h; }
+  const octx = ov.getContext('2d');
+  octx.clearRect(0, 0, ov.width, ov.height);
+  octx.save();
+  octx.strokeStyle = '#4488ff'; octx.lineWidth = 2; octx.setLineDash([6, 3]);
+  if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
+    paintState._selLastX = Math.round(p.x);
+    paintState._selLastY = Math.round(p.y);
+    const rx = Math.min(paintState.selRectStart.x, paintState._selLastX);
+    const ry = Math.min(paintState.selRectStart.y, paintState._selLastY);
+    const rw = Math.abs(paintState._selLastX - paintState.selRectStart.x);
+    const rh = Math.abs(paintState._selLastY - paintState.selRectStart.y);
+    octx.strokeRect(rx, ry, rw, rh);
+    octx.fillStyle = 'rgba(80,140,255,0.15)';
+    octx.fillRect(rx, ry, rw, rh);
+  }
+  if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
+    paintState.lassoPoints.push({ x: Math.round(p.x), y: Math.round(p.y) });
+    octx.beginPath();
+    octx.moveTo(paintState.lassoPoints[0].x, paintState.lassoPoints[0].y);
+    for (let i = 1; i < paintState.lassoPoints.length; i++) {
+      octx.lineTo(paintState.lassoPoints[i].x, paintState.lassoPoints[i].y);
+    }
+    octx.stroke();
+  }
+  octx.restore();
+});
+window.addEventListener('mouseup', () => {
+  if (!paintState._selDragging || !_paintMgr) return;
+  paintState._selDragging = false;
+  if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
+    // Get last mouse position from overlay
+    _paintPushSelUndo();
+    const ov = document.getElementById('paint-sel-overlay');
+    // We need the end point — use the selPreviewData trick or just read from overlay bounds
+    // Actually, we can read the current overlay drawing to find the rect
+    // Simpler: store the last point during mousemove
+    _paintRectSelect(paintState.selRectStart.x, paintState.selRectStart.y,
+      paintState._selLastX || paintState.selRectStart.x, paintState._selLastY || paintState.selRectStart.y);
+    _paintShowSelection();
+    paintState.selRectStart = null;
+    paintState.selPreviewData = null;
+  }
+  if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
+    _paintPushSelUndo();
+    _paintLassoSelect(paintState.lassoPoints);
+    _paintShowSelection();
+    paintState.lassoPoints = null;
+    paintState.selPreviewData = null;
+  }
 });
 
 // Tool selection buttons
