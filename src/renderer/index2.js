@@ -1307,13 +1307,17 @@ function _hideMultiviewBar() {
   if (bar) bar.classList.add('hidden');
 }
 
+function _normPath(p) { return (p || '').replace(/\\/g, '/'); }
+
 function _checkMultiviewForCurrentImage() {
   const p = state.currentProject;
   if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
-  // Check if this image has multiview data stored on the project
-  const key = p.previewImagePath;
-  if (p._multiviews && p._multiviews[key]) {
-    _showMultiviewBar(p._multiviews[key]);
+  if (!p._multiviews) { _hideMultiviewBar(); return; }
+  // Normalize paths for comparison (Windows backslash vs forward slash)
+  const key = _normPath(p.previewImagePath);
+  const found = Object.keys(p._multiviews).find(k => _normPath(k) === key);
+  if (found) {
+    _showMultiviewBar(p._multiviews[found]);
   } else {
     _hideMultiviewBar();
   }
