@@ -148,6 +148,33 @@
                     <button id="ws-img-prev" class="nav-arrow nav-arrow-left hidden" title="Previous version">&#10094;</button>
                     <button id="ws-img-next" class="nav-arrow nav-arrow-right hidden" title="Next version">&#10095;</button>
                     <div id="ws-img-counter" class="nav-counter hidden"></div>
+                    <!-- Multi-view face selector (shown when multi-views are generated) -->
+                    <div id="ws-multiview-bar" class="multiview-bar hidden">
+                      <button data-view="front" class="mv-btn mv-active" title="Front">
+                        <svg width="24" height="28" viewBox="0 0 24 28"><rect x="2" y="2" width="20" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="2" x2="12" y2="26" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/><line x1="2" y1="10" x2="22" y2="10" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/><line x1="2" y1="18" x2="22" y2="18" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg>
+                        <span>Face</span>
+                      </button>
+                      <button data-view="right" class="mv-btn" title="Right">
+                        <svg width="24" height="28" viewBox="0 0 24 28"><rect x="2" y="2" width="20" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="8" y1="2" x2="2" y2="8" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg>
+                        <span>Droite</span>
+                      </button>
+                      <button data-view="back" class="mv-btn" title="Back">
+                        <svg width="24" height="28" viewBox="0 0 24 28"><rect x="2" y="2" width="20" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="2" x2="12" y2="26" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg>
+                        <span>Dos</span>
+                      </button>
+                      <button data-view="left" class="mv-btn" title="Left">
+                        <svg width="24" height="28" viewBox="0 0 24 28"><rect x="2" y="2" width="20" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="16" y1="2" x2="22" y2="8" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg>
+                        <span>Gauche</span>
+                      </button>
+                      <button data-view="top" class="mv-btn" title="Top">
+                        <svg width="24" height="20" viewBox="0 0 24 20"><rect x="2" y="2" width="20" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="2" x2="12" y2="18" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg>
+                        <span>Dessus</span>
+                      </button>
+                      <button data-view="bottom" class="mv-btn" title="Bottom">
+                        <svg width="24" height="20" viewBox="0 0 24 20"><rect x="2" y="2" width="20" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="10" r="3" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+                        <span>Dessous</span>
+                      </button>
+                    </div>
                   </div>
                   <div id="ws-image-filename" class="viewer-filename"></div>
                   <div id="ws-use-for-3d-bar" class="use-for-bar hidden">
@@ -177,6 +204,7 @@
                         </select>
                         <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
                         <button id="ws-symmetrize-auto-btn" class="ghost-btn tool-btn">&#8651; Sym. Auto</button>
+                        <button id="ws-multiview-btn" class="ghost-btn tool-btn">&#128065; Multi-Views</button>
                       </div>
                     </div>
                     <div class="step-tools-group">

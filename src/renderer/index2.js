@@ -1251,6 +1251,75 @@ function _navigateImage(delta) {
 document.getElementById('ws-img-prev')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(-1); });
 document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(1); });
 
+// Generate Multi-Views button
+document.getElementById('ws-multiview-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  showToast('Generating 6 multi-views... (first run downloads ~4GB model)', 'info', 5000);
+  try {
+    const result = await API.generateMultiview({ imagePath: p.selectedImagePath });
+    if (result && result.success) {
+      showToast('Multi-views generated!', 'success');
+      p.multiviewDir = result.outDir;
+      _showMultiviewBar(result.outDir);
+    } else {
+      showToast('Multi-view failed: ' + ((result && result.error) || 'unknown'), 'error', 5000);
+    }
+  } catch (e) {
+    showToast('Multi-view error: ' + e.message, 'error', 5000);
+  }
+});
+
+// Multi-view face selector
+// Maps Zero123++ view indices to face names
+// Zero123++ outputs: view_0=30°, view_1=90°, view_2=150°, view_3=210°, view_4=270°, view_5=330°
+const _mvViewMap = {
+  front: 'input',    // original image
+  right: 'view_1',   // 90°
+  back: 'view_2',    // 150° (closest to back — actually view_3=210° is more "back")
+  left: 'view_4',    // 270°
+  top: 'view_0',     // 30° (front-right, used as top approximation)
+  bottom: 'view_5',  // 330° (front-left, used as bottom approximation)
+};
+
+function _showMultiviewBar(multiviewDir) {
+  const bar = document.getElementById('ws-multiview-bar');
+  if (!bar) return;
+  bar.classList.remove('hidden');
+  bar.dataset.dir = multiviewDir;
+  // Reset active
+  bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+  bar.querySelector('[data-view="front"]')?.classList.add('mv-active');
+}
+
+function _hideMultiviewBar() {
+  const bar = document.getElementById('ws-multiview-bar');
+  if (bar) bar.classList.add('hidden');
+}
+
+document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.mv-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  const view = btn.dataset.view;
+  const bar = document.getElementById('ws-multiview-bar');
+  const dir = bar?.dataset.dir;
+  if (!dir || !view) return;
+
+  // Update active button
+  bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+  btn.classList.add('mv-active');
+
+  // Switch image in viewer
+  const filename = _mvViewMap[view] || 'input';
+  const imgPath = dir + '/' + filename + '.png';
+  const preview = document.getElementById('step1-preview');
+  let imgEl = preview?.querySelector('img');
+  if (imgEl) {
+    imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  }
+});
+
 // ============================================================
 // MESH VIEWER CONTROLS (toolbar logic shared between mini + lightbox)
 // ============================================================
