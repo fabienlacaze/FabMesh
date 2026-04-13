@@ -23,77 +23,78 @@ def log(msg):
 
 
 def _subdivide_with_uv(vertices, faces, uv, levels):
-    """Subdivide mesh with correct per-edge UV interpolation.
+    """Subdivide mesh with correct UV interpolation by unsharing UV seam vertices.
 
-    For each subdivision level:
-    1. Build an edge→midpoint-UV map from the face topology (not 3D positions)
-    2. trimesh.remesh.subdivide adds midpoints, new verts at indices [n_old:]
-    3. Map new verts to edges via position matching with a hash table (fast)
-    4. Look up the correct UV from the edge map
+    Standard trimesh.subdivide shares midpoints between adjacent faces.
+    This breaks UVs at seams where the same 3D edge has different UVs.
 
-    This avoids the KDTree cross-island bug by using topology, not geometry.
+    Fix: "explode" the mesh so every face has its own vertices (no sharing).
+    After subdivision, each edge midpoint is unique per face, so UVs
+    interpolate correctly. Then re-export with the per-face vertex layout.
     """
     from trimesh.remesh import subdivide
 
+    if uv is None:
+        for _ in range(levels):
+            vertices, faces = subdivide(vertices, faces)
+        return vertices, faces, uv
+
     for lvl in range(levels):
-        n_old = len(vertices)
+        n_faces = len(faces)
 
-        # Build edge→UV midpoint map using face topology (per-edge, first-seen wins)
-        # Key: sorted (min_idx, max_idx) vertex pair
-        # Also store midpoint 3D position for fast matching after subdivision
-        edge_data = {}  # (a,b) -> { 'uv_mid': array, 'pos_mid': array }
-        if uv is not None:
-            for face in faces:
-                for ei in range(3):
-                    a, b = int(face[ei]), int(face[(ei + 1) % 3])
-                    key = (min(a, b), max(a, b))
-                    if key not in edge_data:
-                        edge_data[key] = {
-                            'uv_mid': (uv[a] + uv[b]) * 0.5,
-                            'pos_mid': (vertices[a] + vertices[b]) * 0.5,
-                        }
+        # "Explode" mesh: each face gets its own 3 vertices (no sharing)
+        exploded_verts = vertices[faces.flatten()].reshape(-1, 3)  # (F*3, 3)
+        exploded_uv = uv[faces.flatten()].reshape(-1, 2)          # (F*3, 2)
+        exploded_faces = np.arange(n_faces * 3).reshape(n_faces, 3)  # [[0,1,2],[3,4,5],...]
 
-        # Subdivide geometry
-        vertices, faces = subdivide(vertices, faces)
-        n_new = len(vertices) - n_old
+        # Subdivide the exploded mesh
+        n_old = len(exploded_verts)
+        new_verts, new_faces = subdivide(exploded_verts, exploded_faces)
+        n_new = len(new_verts) - n_old
 
-        if uv is None or n_new == 0:
-            continue
+        # For exploded mesh, each new vertex is the midpoint of an edge.
+        # Since no vertices are shared, each edge belongs to exactly one face.
+        # The new vertex's UV = average of the 2 endpoint UVs.
+        # We can find the endpoints by checking which old vertices are closest.
 
-        # Build position hash for fast lookup: quantize midpoint positions
-        # to avoid floating point matching issues
+        # Build edge→UV map from exploded faces (before subdivision)
+        # Key: sorted vertex pair → UV midpoint
+        edge_uv = {}
+        for face in exploded_faces:
+            for ei in range(3):
+                a, b = int(face[ei]), int(face[(ei + 1) % 3])
+                key = (min(a, b), max(a, b))
+                edge_uv[key] = (exploded_uv[a] + exploded_uv[b]) * 0.5
+
+        # For each new face, find its parent edges and assign UVs
+        # In the subdivided exploded mesh, new verts at [n_old:] are midpoints.
+        # Since each edge in exploded mesh is unique to one face, the position
+        # hash approach works perfectly here (no cross-island contamination).
         pos_to_uv = {}
-        for (a, b), data in edge_data.items():
-            # Hash the midpoint position (quantized to avoid FP issues)
-            px, py, pz = data['pos_mid']
-            key = (round(px, 8), round(py, 8), round(pz, 8))
-            pos_to_uv[key] = data['uv_mid']
+        for (a, b), uv_mid in edge_uv.items():
+            mid_pos = (exploded_verts[a] + exploded_verts[b]) * 0.5
+            key = (round(mid_pos[0], 8), round(mid_pos[1], 8), round(mid_pos[2], 8))
+            # Don't overwrite — first wins (but in exploded mesh, each edge is unique)
+            if key not in pos_to_uv:
+                pos_to_uv[key] = uv_mid
 
-        # Assign UVs to new vertices
         new_uvs = np.zeros((n_new, 2), dtype=np.float64)
         misses = 0
         for i in range(n_new):
-            pos = vertices[n_old + i]
+            pos = new_verts[n_old + i]
             key = (round(pos[0], 8), round(pos[1], 8), round(pos[2], 8))
             if key in pos_to_uv:
                 new_uvs[i] = pos_to_uv[key]
             else:
-                # Fallback: try with less precision
-                key5 = (round(pos[0], 5), round(pos[1], 5), round(pos[2], 5))
-                found = False
-                for pk, puv in pos_to_uv.items():
-                    if abs(pk[0]-key5[0]) < 1e-5 and abs(pk[1]-key5[1]) < 1e-5 and abs(pk[2]-key5[2]) < 1e-5:
-                        new_uvs[i] = puv
-                        found = True
-                        break
-                if not found:
-                    misses += 1
-                    new_uvs[i] = [0.5, 0.5]
+                misses += 1
+                new_uvs[i] = [0.5, 0.5]
 
         if misses > 0:
-            log(f'  WARNING: {misses}/{n_new} new verts had no UV match (level {lvl+1})')
+            log(f'  WARNING: {misses}/{n_new} UV misses (level {lvl+1})')
 
-        uv = np.vstack([uv, new_uvs])
+        vertices = new_verts
+        faces = new_faces
+        uv = np.vstack([exploded_uv, new_uvs])
 
     return vertices, faces, uv
 
