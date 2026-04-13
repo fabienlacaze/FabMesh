@@ -184,6 +184,44 @@ def generate_3d(
     mesh.export(output_path, include_normals=True)
 
     # ------------------------------------------------------------------
+    # Fix PBR material: SF3D sets low roughness/high metallic which makes
+    # the mesh look glossy. Override to matte for realistic appearance.
+    # ------------------------------------------------------------------
+    try:
+        import struct as _st, json as _js
+        with open(output_path, 'rb') as _f:
+            _glb = bytearray(_f.read())
+        _off = 12
+        while _off < len(_glb):
+            _cl, _ct = _st.unpack_from('<II', _glb, _off)
+            if _ct == 0x4E4F534A:  # JSON chunk
+                _json = _js.loads(_glb[_off+8 : _off+8+_cl].decode('utf-8'))
+                for _mat in _json.get('materials', []):
+                    pbr = _mat.get('pbrMetallicRoughness', {})
+                    pbr['roughnessFactor'] = 0.85
+                    pbr['metallicFactor'] = 0.0
+                    _mat['pbrMetallicRoughness'] = pbr
+                _new_json = _js.dumps(_json).encode('utf-8')
+                _pad = (4 - (len(_new_json) % 4)) % 4
+                _new_json_padded = _new_json + b' ' * _pad
+                # Rebuild GLB with new JSON
+                _bin_off = _off + 8 + _cl
+                _bin_data = bytes(_glb[_bin_off:])
+                _glb = bytearray()
+                _glb += _st.pack('<III', 0x46546C67, 2, 0)
+                _glb += _st.pack('<II', len(_new_json_padded), 0x4E4F534A)
+                _glb += _new_json_padded
+                _glb += _bin_data
+                _st.pack_into('<I', _glb, 8, len(_glb))
+                with open(output_path, 'wb') as _f:
+                    _f.write(_glb)
+                print(f"LOCAL_SF3D: PBR fixed (roughness=0.85, metallic=0.0)", flush=True)
+                break
+            _off += 8 + _cl
+    except Exception as _pe:
+        print(f"LOCAL_SF3D: PBR fix skipped ({_pe})", flush=True)
+
+    # ------------------------------------------------------------------
     # Post-process textures IN-PLACE in the GLB binary.
     # IMPORTANT: Do NOT use trimesh load+export here — it corrupts
     # per-corner (wedge) UVs by merging duplicate vertices at seams.
