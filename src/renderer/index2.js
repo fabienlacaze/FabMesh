@@ -2465,11 +2465,20 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
             _saveImageStyle(imgPath, stylePrompt);
           }
         }
+        // Generate multi-views if checkbox is checked (inside the job)
+        if (multiView && r.images?.length > 0) {
+          try {
+            showToast('Generating multi-views...', 'info', 5000);
+            const mvResult = await API.generateMultiview({ imagePath: r.images[0] });
+            if (mvResult?.success) {
+              if (!p._multiviews) p._multiviews = {};
+              p._multiviews[r.images[0]] = mvResult.outDir;
+            }
+          } catch (e) { console.warn('[multiview in job]', e); }
+        }
         completeJob(job.id, true);
         await reloadCurrentProject();
         // After successful image generation, open the Edit stage and scroll
-        // to show the newly generated images. Without this the user stays
-        // on the "Create new" form and doesn't see the results.
         const imgCard = document.getElementById('step-card-image');
         if (imgCard) {
           imgCard.classList.remove('collapsed', 'disabled');
@@ -5956,26 +5965,9 @@ async function reloadCurrentProject() {
       }
     }, 150);
 
-    // Auto generate multi-views in BACKGROUND (don't block UI refresh)
-    const autoMV = document.getElementById('ws-auto-multiview');
-    if (autoMV?.checked && refreshed.images?.length > 0) {
-      const latestImg = refreshed.previewImagePath || refreshed.images[0]?.path;
-      if (latestImg && !(refreshed._multiviews?.[latestImg])) {
-        // Fire and forget — don't await
-        (async () => {
-          try {
-            showToast('Generating multi-views in background...', 'info', 3000);
-            const result = await API.generateMultiview({ imagePath: latestImg });
-            if (result?.success) {
-              if (!refreshed._multiviews) refreshed._multiviews = {};
-              refreshed._multiviews[latestImg] = result.outDir;
-              _checkMultiviewForCurrentImage();
-              showToast('Multi-views ready!', 'success', 2000);
-            }
-          } catch (e) { console.warn('[auto-multiview]', e); }
-        })();
-      }
-    }
+    // Multi-view data is now generated inside the image generation job.
+    // Just check if we should show the multiview bar for the current image.
+    _checkMultiviewForCurrentImage();
   }
 }
 
