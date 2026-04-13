@@ -3402,21 +3402,158 @@ document.getElementById('blur-save')?.addEventListener('click', async () => {
 });
 
 // ============================================================
-// PAINT TOOLS — Pen, Spray, Ink, Line, Fill, Wand, Smudge, Eraser
+// PAINT TOOLS — Selection + Drawing tools
 // ============================================================
 let _paintMgr = null;
 const paintState = {
-  tool: 'pen',      // pen | spray | ink | line | fill | wand | smudge | eraser
+  tool: 'pen',
   brushSize: 20,
   opacity: 100,
   color: '#ff0000',
   tolerance: 32,
   eyedropping: false,
   imgPath: null,
-  lineStart: null,        // {x,y} for line tool
-  linePreviewData: null,  // ImageData snapshot before line preview
-  smudgeLastColor: null,  // last sampled color for smudge
+  lineStart: null,
+  linePreviewData: null,
+  smudgeLastColor: null,
+  // Selection state
+  selection: null,        // Uint8Array (w*h), 255=selected, 0=not — null means no selection (= all selected)
+  selRectStart: null,     // {x,y} for rect select drag
+  selPreviewData: null,   // ImageData snapshot for rect select preview
+  lassoPoints: null,      // [{x,y}, ...] for lasso
 };
+
+function _paintHasSelection() {
+  return paintState.selection !== null;
+}
+function _paintIsSelected(x, y) {
+  if (!paintState.selection) return true; // no selection = everything is selected
+  const idx = Math.round(y) * _paintMgr.w + Math.round(x);
+  return paintState.selection[idx] === 255;
+}
+function _paintClearSelection() {
+  paintState.selection = null;
+  _paintDrawSelectionOverlay();
+}
+function _paintSelectAll() {
+  paintState.selection = null; // null = all selected
+  _paintDrawSelectionOverlay();
+}
+
+// Draw marching ants overlay for selection
+function _paintDrawSelectionOverlay() {
+  const canvas = document.getElementById('paint-canvas');
+  if (!canvas || !_paintMgr) return;
+  const ctx = _paintMgr.ctx;
+  // Redraw image from undo-stack top or origData, then draw selection border
+  // We don't have a separate overlay canvas for paint, so we skip visual overlay for now
+  // The selection effect is applied on Delete/paint operations
+}
+
+// Fill selection mask using flood fill algorithm
+function _paintWandSelect(ctx, startX, startY, tolerance) {
+  const w = _paintMgr.w, h = _paintMgr.h;
+  const imgData = ctx.getImageData(0, 0, w, h).data;
+  const idx = (startY * w + startX) * 4;
+  const sr = imgData[idx], sg = imgData[idx+1], sb = imgData[idx+2], sa = imgData[idx+3];
+  const tol = tolerance;
+  const sel = new Uint8Array(w * h);
+  const stack = [[startX, startY]];
+  while (stack.length > 0) {
+    const [cx, cy] = stack.pop();
+    const ci = cy * w + cx;
+    if (cx < 0 || cx >= w || cy < 0 || cy >= h || sel[ci]) continue;
+    const pi = ci * 4;
+    if (Math.abs(imgData[pi] - sr) > tol || Math.abs(imgData[pi+1] - sg) > tol ||
+        Math.abs(imgData[pi+2] - sb) > tol || Math.abs(imgData[pi+3] - sa) > tol) continue;
+    sel[ci] = 255;
+    stack.push([cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]);
+  }
+  paintState.selection = sel;
+}
+
+// Rectangle select: fill mask for rect region
+function _paintRectSelect(x1, y1, x2, y2) {
+  const w = _paintMgr.w, h = _paintMgr.h;
+  const sel = new Uint8Array(w * h);
+  const minX = Math.max(0, Math.min(Math.round(x1), Math.round(x2)));
+  const maxX = Math.min(w - 1, Math.max(Math.round(x1), Math.round(x2)));
+  const minY = Math.max(0, Math.min(Math.round(y1), Math.round(y2)));
+  const maxY = Math.min(h - 1, Math.max(Math.round(y1), Math.round(y2)));
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      sel[y * w + x] = 255;
+    }
+  }
+  paintState.selection = sel;
+}
+
+// Lasso select: fill mask using polygon
+function _paintLassoSelect(points) {
+  if (!points || points.length < 3) return;
+  const w = _paintMgr.w, h = _paintMgr.h;
+  const sel = new Uint8Array(w * h);
+  // Find bounding box
+  let minX = w, maxX = 0, minY = h, maxY = 0;
+  for (const p of points) {
+    minX = Math.min(minX, Math.round(p.x)); maxX = Math.max(maxX, Math.round(p.x));
+    minY = Math.min(minY, Math.round(p.y)); maxY = Math.max(maxY, Math.round(p.y));
+  }
+  minX = Math.max(0, minX); maxX = Math.min(w - 1, maxX);
+  minY = Math.max(0, minY); maxY = Math.min(h - 1, maxY);
+  // Point-in-polygon (ray casting) for each pixel in bbox
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      let inside = false;
+      for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+        const yi = points[i].y, yj = points[j].y, xi = points[i].x, xj = points[j].x;
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+          inside = !inside;
+        }
+      }
+      if (inside) sel[y * w + x] = 255;
+    }
+  }
+  paintState.selection = sel;
+}
+
+// Delete selected pixels (make transparent)
+function _paintDeleteSelection(ctx) {
+  if (!paintState.selection) return; // no selection = don't delete everything
+  const w = _paintMgr.w, h = _paintMgr.h;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  for (let i = 0; i < paintState.selection.length; i++) {
+    if (paintState.selection[i] === 255) {
+      imgData.data[i * 4 + 3] = 0; // set alpha to 0
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+// Draw selection outline on canvas (dashed border)
+function _paintShowSelection(ctx) {
+  if (!paintState.selection || !_paintMgr) return;
+  const w = _paintMgr.w, h = _paintMgr.h;
+  // Draw semi-transparent blue overlay on selected pixels
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = '#4488ff';
+  const sel = paintState.selection;
+  // Use a temp canvas for performance
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const tc = tmp.getContext('2d');
+  const td = tc.createImageData(w, h);
+  for (let i = 0; i < sel.length; i++) {
+    if (sel[i] === 255) {
+      td.data[i*4] = 68; td.data[i*4+1] = 136; td.data[i*4+2] = 255; td.data[i*4+3] = 40;
+    }
+  }
+  tc.putImageData(td, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(tmp, 0, 0);
+  ctx.restore();
+}
 
 function _paintDab(ctx, x, y, _lastPt, mgr) {
   x = Math.round(x); y = Math.round(y);
@@ -3558,11 +3695,7 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
   ctx.putImageData(imgData, 0, 0);
 }
 
-// --- Magic Wand: select similar color region, paint with fill color ---
-function _paintMagicWand(ctx, startX, startY, fillColor, tolerance) {
-  // Same as flood fill but highlights selection then fills
-  _paintFloodFill(ctx, startX, startY, fillColor, tolerance);
-}
+// --- Magic Wand is now in the selection system above (_paintWandSelect) ---
 
 function _closePaint() {
   document.getElementById('modal-paint')?.classList.add('hidden');
@@ -3605,8 +3738,18 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
           return false;
         }
         if (paintState.tool === 'wand') {
-          mgr.pushUndo();
-          _paintMagicWand(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance);
+          _paintWandSelect(ctx, Math.round(x), Math.round(y), paintState.tolerance);
+          _paintShowSelection(ctx);
+          return false;
+        }
+        if (paintState.tool === 'sel-rect') {
+          paintState.selRectStart = { x: Math.round(x), y: Math.round(y) };
+          paintState.selPreviewData = ctx.getImageData(0, 0, mgr.w, mgr.h);
+          return false;
+        }
+        if (paintState.tool === 'sel-lasso') {
+          paintState.lassoPoints = [{ x: Math.round(x), y: Math.round(y) }];
+          paintState.selPreviewData = ctx.getImageData(0, 0, mgr.w, mgr.h);
           return false;
         }
         if (paintState.tool === 'line') {
@@ -3617,17 +3760,62 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
         return undefined;
       },
-      onPaint: _paintStroke,
+      onPaint: (ctx, x, y, lastPt, mgr) => {
+        // Handle selection tool drags
+        if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
+          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
+          ctx.save();
+          ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
+          const rx = Math.min(paintState.selRectStart.x, Math.round(x));
+          const ry = Math.min(paintState.selRectStart.y, Math.round(y));
+          const rw = Math.abs(Math.round(x) - paintState.selRectStart.x);
+          const rh = Math.abs(Math.round(y) - paintState.selRectStart.y);
+          ctx.strokeRect(rx, ry, rw, rh);
+          ctx.restore();
+          return;
+        }
+        if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
+          paintState.lassoPoints.push({ x: Math.round(x), y: Math.round(y) });
+          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
+          ctx.save();
+          ctx.strokeStyle = '#4488ff'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
+          ctx.beginPath();
+          ctx.moveTo(paintState.lassoPoints[0].x, paintState.lassoPoints[0].y);
+          for (let i = 1; i < paintState.lassoPoints.length; i++) {
+            ctx.lineTo(paintState.lassoPoints[i].x, paintState.lassoPoints[i].y);
+          }
+          ctx.stroke();
+          ctx.restore();
+          return;
+        }
+        _paintStroke(ctx, x, y, lastPt, mgr);
+      },
       onBrushResize: (delta, mgr) => {
         paintState.brushSize = Math.max(1, Math.min(200, paintState.brushSize + delta));
         document.getElementById('paint-brush-size').value = paintState.brushSize;
         document.getElementById('paint-brush-val').textContent = paintState.brushSize;
       },
       onMouseUp: (mgr) => {
+        const ctx = mgr.ctx;
         if (paintState.tool === 'line' && paintState.lineStart) {
-          // Line finalized on mouseup (preview already drawn by _paintStroke)
           paintState.lineStart = null;
           paintState.linePreviewData = null;
+        }
+        if (paintState.tool === 'sel-rect' && paintState.selRectStart) {
+          // Restore image, create selection, show overlay
+          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
+          const p = mgr.lastPaintPoint || paintState.selRectStart;
+          _paintRectSelect(paintState.selRectStart.x, paintState.selRectStart.y, p.x, p.y);
+          _paintShowSelection(ctx);
+          paintState.selRectStart = null;
+          paintState.selPreviewData = null;
+        }
+        if (paintState.tool === 'sel-lasso' && paintState.lassoPoints) {
+          if (paintState.selPreviewData) ctx.putImageData(paintState.selPreviewData, 0, 0);
+          _paintLassoSelect(paintState.lassoPoints);
+          _paintShowSelection(ctx);
+          paintState.lassoPoints = null;
+          paintState.selPreviewData = null;
         }
       },
     });
@@ -3643,19 +3831,20 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
 });
 
 // Tool selection buttons
-const _paintTools = ['pen', 'spray', 'ink', 'line', 'fill', 'wand', 'smudge', 'eraser'];
+const _paintTools = ['sel-rect', 'sel-lasso', 'wand', 'pen', 'spray', 'ink', 'line', 'smudge', 'fill', 'eraser'];
+const _selectionTools = ['sel-rect', 'sel-lasso', 'wand'];
 _paintTools.forEach(tool => {
   document.getElementById('paint-tool-' + tool)?.addEventListener('click', () => {
     paintState.tool = tool;
     _paintTools.forEach(t => {
       document.getElementById('paint-tool-' + t)?.classList.toggle('tool-active', t === tool);
     });
-    // Show tolerance slider only for fill/wand
+    // Show tolerance slider for fill/wand
     const tolGroup = document.getElementById('paint-tolerance-group');
     if (tolGroup) tolGroup.style.display = (tool === 'fill' || tool === 'wand') ? 'flex' : 'none';
-    // Cursor: crosshair for fill/wand, none for brush tools
+    // Cursor: crosshair for selection/fill tools, none for brush tools
     const canvas = document.getElementById('paint-canvas');
-    if (canvas) canvas.style.cursor = (tool === 'fill' || tool === 'wand') ? 'crosshair' : 'none';
+    if (canvas) canvas.style.cursor = (_selectionTools.includes(tool) || tool === 'fill') ? 'crosshair' : 'none';
   });
 });
 
@@ -3697,6 +3886,16 @@ document.addEventListener('keydown', (e) => {
   const modal = document.getElementById('modal-paint');
   if (!modal || modal.classList.contains('hidden')) return;
   if (e.key === 'Escape') { _closePaint(); return; }
+  // Delete = erase selected pixels
+  if (e.key === 'Delete' && _paintHasSelection()) {
+    _paintMgr.pushUndo();
+    _paintDeleteSelection(_paintMgr.ctx);
+    _paintClearSelection();
+    return;
+  }
+  // Ctrl+A = select all, Ctrl+D = deselect
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); _paintSelectAll(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); _paintClearSelection(); return; }
   // [ / ] = decrease / increase brush size
   if (e.key === '[') {
     paintState.brushSize = Math.max(1, paintState.brushSize - (e.shiftKey ? 10 : 3));
