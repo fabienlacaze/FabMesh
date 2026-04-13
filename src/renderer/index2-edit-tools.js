@@ -198,9 +198,8 @@
           dx: cloneState.sourcePoint.x - Math.round(x),
           dy: cloneState.sourcePoint.y - Math.round(y),
         };
-        // Paint first dab
-        cloneStampPaint(ctx, Math.round(x), Math.round(y));
-        return undefined; // let CanvasManager pushUndo + start painting
+        // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
+        return undefined;
       },
       // Line interpolation between points
       onPaint: function (ctx, x, y, lastPt, mgr) {
@@ -396,9 +395,8 @@
           return false; // skip default paint
         }
         maskIsErasing = false;
-        // Normal left click — paint red mask dab
-        maskPaintDab(ctx, Math.round(x), Math.round(y), false);
-        return undefined; // let CanvasManager pushUndo
+        // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
+        return undefined;
       },
       onPaint: function (ctx, x, y, lastPt, mgr) {
         x = Math.round(x); y = Math.round(y);

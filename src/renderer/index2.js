@@ -3577,7 +3577,7 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
           paintState.linePreviewData = ctx.getImageData(0, 0, mgr.w, mgr.h);
           return undefined; // let CanvasManager pushUndo
         }
-        _paintDab(ctx, Math.round(x), Math.round(y), null, mgr);
+        // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
         return undefined;
       },
       onPaint: _paintStroke,
