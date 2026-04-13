@@ -2192,8 +2192,35 @@ async function openLightbox(imgPath) {
   img.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   updateLightboxBottom(imgPath);
   updateLightboxNavButtons();
+  // Show multiview bar in lightbox if available for this image
+  const lbMvBar = document.getElementById('lb-multiview-bar');
+  if (lbMvBar) {
+    if (p?._multiviews?.[imgPath]) {
+      lbMvBar.classList.remove('hidden');
+      lbMvBar.dataset.dir = p._multiviews[imgPath];
+      lbMvBar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+      lbMvBar.querySelector('[data-view="front"]')?.classList.add('mv-active');
+    } else {
+      lbMvBar.classList.add('hidden');
+    }
+  }
   lb.classList.remove('hidden');
 }
+// Lightbox multiview click handler
+document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.mv-btn');
+  if (!btn) return;
+  const bar = document.getElementById('lb-multiview-bar');
+  const dir = bar?.dataset.dir;
+  const view = btn.dataset.view;
+  if (!dir || !view) return;
+  bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+  btn.classList.add('mv-active');
+  const filename = _mvViewMap[view] || 'input';
+  const imgPath = dir + '/' + filename + '.png';
+  document.getElementById('lightbox-2-img').src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+});
+
 function closeLightbox() {
   document.getElementById('lightbox-2').classList.add('hidden');
   const infoEl = document.getElementById('lightbox-2-info');
