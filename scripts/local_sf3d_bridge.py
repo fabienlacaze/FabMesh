@@ -239,9 +239,9 @@ def generate_3d(
 
                 # Enhance
                 if enhance:
-                    pil_img = ImageEnhance.Contrast(pil_img).enhance(1.3)
-                    pil_img = ImageEnhance.Color(pil_img).enhance(1.4)
-                    pil_img = ImageEnhance.Brightness(pil_img).enhance(1.05)
+                    pil_img = ImageEnhance.Contrast(pil_img).enhance(1.5)
+                    pil_img = ImageEnhance.Color(pil_img).enhance(1.6)
+                    pil_img = ImageEnhance.Sharpness(pil_img).enhance(1.3)
                     changed = True
 
                 # Upscale
@@ -307,7 +307,7 @@ def generate_3d(
 
             return modified
 
-        did_enhance = _modify_glb_textures(output_path, enhance=False, upscale_to=upscale_tex_to)
+        did_enhance = _modify_glb_textures(output_path, enhance=True, upscale_to=upscale_tex_to)
         if did_enhance:
             msgs = ["contrast +30%, saturation +40%, brightness +5%"]
             if upscale_tex_to > 0:
