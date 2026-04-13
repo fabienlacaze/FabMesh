@@ -5016,10 +5016,18 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
     const exporter = new GLTFExporter();
     exporter.parse(meState.mesh, async (result) => {
       try {
-        const buf = result instanceof ArrayBuffer ? result : new Uint8Array(result).buffer;
+        const buf = result instanceof ArrayBuffer ? new Uint8Array(result) : new Uint8Array(result);
         const base = meState.meshPath.replace(/\.[^.]+$/, '');
         const newPath = base + '_edited_' + Date.now() + '.glb';
-        const r = await API.saveBuffer({ path: newPath, buffer: Array.from(new Uint8Array(buf)) });
+        // Send as base64 to avoid IPC array length limit
+        let binary = '';
+        const bytes = buf;
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+        }
+        const b64 = btoa(binary);
+        const r = await API.saveBuffer({ path: newPath, base64: b64 });
         if (r && r.success) {
           showToast('Edited mesh saved!', 'success');
           _closeMeshEdit();

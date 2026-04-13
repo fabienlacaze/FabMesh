@@ -3243,9 +3243,13 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
 });
 
 // --- Save Buffer IPC (for GLTFExporter output) ---
-ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer }) => {
+ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer, base64 }) => {
   try {
-    fs.writeFileSync(filePath, Buffer.from(buffer));
+    if (base64) {
+      fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+    } else {
+      fs.writeFileSync(filePath, Buffer.from(buffer));
+    }
     return { success: true, path: filePath };
   } catch (e) {
     return { success: false, error: e.message };
