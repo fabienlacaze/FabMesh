@@ -1,0 +1,42 @@
+{
+  "armature_name": "humanoid_basic",
+  "license": "CC0",
+  "source": "FabMesh-authored generic humanoid skeleton (A-pose, 2 m tall, Mixamo-style naming)",
+  "category": "humanoid",
+  "up_axis": "Z",
+  "unit": "meters",
+  "bone_count": 25,
+  "bones": [
+    { "name": "Hips",          "head": [0.00,  0.00, 1.05], "tail": [0.00,  0.00, 1.15], "parent": null },
+    { "name": "Spine",         "head": [0.00,  0.00, 1.15], "tail": [0.00,  0.00, 1.28], "parent": "Hips" },
+    { "name": "Spine1",        "head": [0.00,  0.00, 1.28], "tail": [0.00,  0.00, 1.42], "parent": "Spine" },
+    { "name": "Spine2",        "head": [0.00,  0.00, 1.42], "tail": [0.00,  0.00, 1.55], "parent": "Spine1" },
+    { "name": "Neck",          "head": [0.00,  0.00, 1.55], "tail": [0.00,  0.00, 1.66], "parent": "Spine2" },
+    { "name": "Head",          "head": [0.00,  0.00, 1.66], "tail": [0.00,  0.00, 1.85], "parent": "Neck" },
+
+    { "name": "LeftShoulder",  "head": [0.05,  0.00, 1.52], "tail": [0.17,  0.00, 1.52], "parent": "Spine2" },
+    { "name": "LeftArm",       "head": [0.17,  0.00, 1.52], "tail": [0.45,  0.00, 1.35], "parent": "LeftShoulder" },
+    { "name": "LeftForeArm",   "head": [0.45,  0.00, 1.35], "tail": [0.70,  0.00, 1.18], "parent": "LeftArm" },
+    { "name": "LeftHand",      "head": [0.70,  0.00, 1.18], "tail": [0.82,  0.00, 1.10], "parent": "LeftForeArm" },
+
+    { "name": "RightShoulder", "head": [-0.05, 0.00, 1.52], "tail": [-0.17, 0.00, 1.52], "parent": "Spine2" },
+    { "name": "RightArm",      "head": [-0.17, 0.00, 1.52], "tail": [-0.45, 0.00, 1.35], "parent": "RightShoulder" },
+    { "name": "RightForeArm",  "head": [-0.45, 0.00, 1.35], "tail": [-0.70, 0.00, 1.18], "parent": "RightArm" },
+    { "name": "RightHand",     "head": [-0.70, 0.00, 1.18], "tail": [-0.82, 0.00, 1.10], "parent": "RightForeArm" },
+
+    { "name": "LeftUpLeg",     "head": [0.10,  0.00, 1.02], "tail": [0.10,  0.00, 0.58], "parent": "Hips" },
+    { "name": "LeftLeg",       "head": [0.10,  0.00, 0.58], "tail": [0.10,  0.00, 0.12], "parent": "LeftUpLeg" },
+    { "name": "LeftFoot",      "head": [0.10,  0.00, 0.12], "tail": [0.10,  0.18, 0.02], "parent": "LeftLeg" },
+    { "name": "LeftToeBase",   "head": [0.10,  0.18, 0.02], "tail": [0.10,  0.25, 0.02], "parent": "LeftFoot" },
+
+    { "name": "RightUpLeg",    "head": [-0.10, 0.00, 1.02], "tail": [-0.10, 0.00, 0.58], "parent": "Hips" },
+    { "name": "RightLeg",      "head": [-0.10, 0.00, 0.58], "tail": [-0.10, 0.00, 0.12], "parent": "RightUpLeg" },
+    { "name": "RightFoot",     "head": [-0.10, 0.00, 0.12], "tail": [-0.10, 0.18, 0.02], "parent": "RightLeg" },
+    { "name": "RightToeBase",  "head": [-0.10, 0.18, 0.02], "tail": [-0.10, 0.25, 0.02], "parent": "RightFoot" },
+
+    { "name": "LeftHandThumb",  "head": [0.72, 0.03, 1.17], "tail": [0.78, 0.05, 1.15], "parent": "LeftHand" },
+    { "name": "RightHandThumb", "head": [-0.72, 0.03, 1.17], "tail": [-0.78, 0.05, 1.15], "parent": "RightHand" },
+
+    { "name": "Root",          "head": [0.00, 0.00, 0.00], "tail": [0.00, 0.00, 0.10], "parent": null }
+  ]
+}

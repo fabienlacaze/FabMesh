@@ -1,0 +1,44 @@
+{
+  "armature_name": "hexaped_basic",
+  "license": "CC0",
+  "source": "FabMesh-authored generic 6-legged creature (insect/spider-like, symmetrical about Y axis)",
+  "category": "hexapod",
+  "up_axis": "Z",
+  "unit": "meters",
+  "bone_count": 25,
+  "bones": [
+    { "name": "Root",          "head": [0.00,  0.00, 0.00], "tail": [0.00,  0.00, 0.05], "parent": null },
+
+    { "name": "Body",          "head": [0.00,  0.00, 0.15], "tail": [0.00,  0.15, 0.15], "parent": "Root" },
+    { "name": "Thorax",        "head": [0.00,  0.15, 0.15], "tail": [0.00,  0.30, 0.17], "parent": "Body" },
+    { "name": "Head",          "head": [0.00,  0.30, 0.17], "tail": [0.00,  0.42, 0.18], "parent": "Thorax" },
+    { "name": "Abdomen",       "head": [0.00,  0.00, 0.15], "tail": [0.00, -0.25, 0.13], "parent": "Body" },
+
+    { "name": "FrontLeft_Coxa",   "head": [0.08,  0.25, 0.15], "tail": [0.20,  0.28, 0.15], "parent": "Thorax" },
+    { "name": "FrontLeft_Femur",  "head": [0.20,  0.28, 0.15], "tail": [0.30,  0.30, 0.10], "parent": "FrontLeft_Coxa" },
+    { "name": "FrontLeft_Tibia",  "head": [0.30,  0.30, 0.10], "tail": [0.35,  0.32, 0.00], "parent": "FrontLeft_Femur" },
+
+    { "name": "MidLeft_Coxa",     "head": [0.08,  0.10, 0.15], "tail": [0.22,  0.10, 0.15], "parent": "Body" },
+    { "name": "MidLeft_Femur",    "head": [0.22,  0.10, 0.15], "tail": [0.34,  0.10, 0.10], "parent": "MidLeft_Coxa" },
+    { "name": "MidLeft_Tibia",    "head": [0.34,  0.10, 0.10], "tail": [0.40,  0.10, 0.00], "parent": "MidLeft_Femur" },
+
+    { "name": "BackLeft_Coxa",    "head": [0.08, -0.05, 0.15], "tail": [0.22, -0.08, 0.15], "parent": "Body" },
+    { "name": "BackLeft_Femur",   "head": [0.22, -0.08, 0.15], "tail": [0.34, -0.14, 0.10], "parent": "BackLeft_Coxa" },
+    { "name": "BackLeft_Tibia",   "head": [0.34, -0.14, 0.10], "tail": [0.40, -0.20, 0.00], "parent": "BackLeft_Femur" },
+
+    { "name": "FrontRight_Coxa",  "head": [-0.08, 0.25, 0.15], "tail": [-0.20, 0.28, 0.15], "parent": "Thorax" },
+    { "name": "FrontRight_Femur", "head": [-0.20, 0.28, 0.15], "tail": [-0.30, 0.30, 0.10], "parent": "FrontRight_Coxa" },
+    { "name": "FrontRight_Tibia", "head": [-0.30, 0.30, 0.10], "tail": [-0.35, 0.32, 0.00], "parent": "FrontRight_Femur" },
+
+    { "name": "MidRight_Coxa",    "head": [-0.08, 0.10, 0.15], "tail": [-0.22, 0.10, 0.15], "parent": "Body" },
+    { "name": "MidRight_Femur",   "head": [-0.22, 0.10, 0.15], "tail": [-0.34, 0.10, 0.10], "parent": "MidRight_Coxa" },
+    { "name": "MidRight_Tibia",   "head": [-0.34, 0.10, 0.10], "tail": [-0.40, 0.10, 0.00], "parent": "MidRight_Femur" },
+
+    { "name": "BackRight_Coxa",   "head": [-0.08,-0.05, 0.15], "tail": [-0.22,-0.08, 0.15], "parent": "Body" },
+    { "name": "BackRight_Femur",  "head": [-0.22,-0.08, 0.15], "tail": [-0.34,-0.14, 0.10], "parent": "BackRight_Coxa" },
+    { "name": "BackRight_Tibia",  "head": [-0.34,-0.14, 0.10], "tail": [-0.40,-0.20, 0.00], "parent": "BackRight_Femur" },
+
+    { "name": "Antenna_L",        "head": [0.03,  0.40, 0.20], "tail": [0.06,  0.50, 0.25], "parent": "Head" },
+    { "name": "Antenna_R",        "head": [-0.03, 0.40, 0.20], "tail": [-0.06, 0.50, 0.25], "parent": "Head" }
+  ]
+}

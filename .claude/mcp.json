@@ -1,9 +1,3 @@
 {
-  "mcpServers": {
-    "fabmesh": {
-      "command": "python",
-      "args": ["scripts/mcp_server.py"],
-      "cwd": "c:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself"
-    }
-  }
+  "mcpServers": {}
 }

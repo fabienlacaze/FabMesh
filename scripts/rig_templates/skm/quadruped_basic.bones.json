@@ -1,0 +1,38 @@
+{
+  "armature_name": "quadruped_basic",
+  "license": "CC0",
+  "source": "FabMesh-authored generic quadruped skeleton (idle stance, ~1.2 m at shoulder)",
+  "category": "quadruped",
+  "up_axis": "Z",
+  "unit": "meters",
+  "bone_count": 22,
+  "bones": [
+    { "name": "Root",          "head": [0.00,  0.00, 0.00], "tail": [0.00,  0.00, 0.10], "parent": null },
+
+    { "name": "Pelvis",        "head": [0.00, -0.45, 0.80], "tail": [0.00, -0.25, 0.85], "parent": "Root" },
+    { "name": "Spine",         "head": [0.00, -0.25, 0.85], "tail": [0.00,  0.00, 0.90], "parent": "Pelvis" },
+    { "name": "Spine1",        "head": [0.00,  0.00, 0.90], "tail": [0.00,  0.25, 0.95], "parent": "Spine" },
+    { "name": "Chest",         "head": [0.00,  0.25, 0.95], "tail": [0.00,  0.50, 1.00], "parent": "Spine1" },
+    { "name": "Neck",          "head": [0.00,  0.50, 1.00], "tail": [0.00,  0.65, 1.15], "parent": "Chest" },
+    { "name": "Head",          "head": [0.00,  0.65, 1.15], "tail": [0.00,  0.85, 1.18], "parent": "Neck" },
+    { "name": "Jaw",           "head": [0.00,  0.80, 1.14], "tail": [0.00,  0.92, 1.12], "parent": "Head" },
+    { "name": "Tail1",         "head": [0.00, -0.45, 0.80], "tail": [0.00, -0.70, 0.78], "parent": "Pelvis" },
+    { "name": "Tail2",         "head": [0.00, -0.70, 0.78], "tail": [0.00, -0.95, 0.72], "parent": "Tail1" },
+
+    { "name": "FrontLeft_Shoulder", "head": [0.18,  0.35, 0.95], "tail": [0.20,  0.35, 0.60], "parent": "Chest" },
+    { "name": "FrontLeft_Knee",     "head": [0.20,  0.35, 0.60], "tail": [0.22,  0.35, 0.30], "parent": "FrontLeft_Shoulder" },
+    { "name": "FrontLeft_Ankle",    "head": [0.22,  0.35, 0.30], "tail": [0.22,  0.40, 0.00], "parent": "FrontLeft_Knee" },
+
+    { "name": "FrontRight_Shoulder","head": [-0.18, 0.35, 0.95], "tail": [-0.20, 0.35, 0.60], "parent": "Chest" },
+    { "name": "FrontRight_Knee",    "head": [-0.20, 0.35, 0.60], "tail": [-0.22, 0.35, 0.30], "parent": "FrontRight_Shoulder" },
+    { "name": "FrontRight_Ankle",   "head": [-0.22, 0.35, 0.30], "tail": [-0.22, 0.40, 0.00], "parent": "FrontRight_Knee" },
+
+    { "name": "BackLeft_Hip",       "head": [0.18, -0.35, 0.85], "tail": [0.20, -0.35, 0.55], "parent": "Pelvis" },
+    { "name": "BackLeft_Knee",      "head": [0.20, -0.35, 0.55], "tail": [0.22, -0.30, 0.25], "parent": "BackLeft_Hip" },
+    { "name": "BackLeft_Ankle",     "head": [0.22, -0.30, 0.25], "tail": [0.22, -0.20, 0.00], "parent": "BackLeft_Knee" },
+
+    { "name": "BackRight_Hip",      "head": [-0.18,-0.35, 0.85], "tail": [-0.20,-0.35, 0.55], "parent": "Pelvis" },
+    { "name": "BackRight_Knee",     "head": [-0.20,-0.35, 0.55], "tail": [-0.22,-0.30, 0.25], "parent": "BackRight_Hip" },
+    { "name": "BackRight_Ankle",    "head": [-0.22,-0.30, 0.25], "tail": [-0.22,-0.20, 0.00], "parent": "BackRight_Knee" }
+  ]
+}
