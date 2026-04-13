@@ -585,6 +585,24 @@ document.getElementById('np-create').addEventListener('click', async () => {
   }
 });
 
+// Import Image → create project with imported image
+document.getElementById('btn-import-image')?.addEventListener('click', async () => {
+  const filePath = await API.importImage();
+  if (!filePath) return;
+  const result = await API.importImageFile(filePath);
+  if (!result || !result.path) { showToast('Import failed', 'error'); return; }
+  // Open the newly created project
+  showToast('Image imported!', 'success', 1500);
+  await loadProjects();
+  // Find and open the project
+  const proj = state.projects.find(p => p.name === result.projectName);
+  if (proj) {
+    state.currentProject = proj;
+    showPage('workspace');
+    populateWorkspace(proj);
+  }
+});
+
 // ============================================================
 // PAGE 2: PROJECT WORKSPACE
 // ============================================================
