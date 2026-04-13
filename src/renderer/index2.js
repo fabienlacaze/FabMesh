@@ -1202,8 +1202,9 @@ function showStep1Preview(imgPath) {
     expandBtn.classList.remove('hidden');
     expandBtn.onclick = (e) => { e.stopPropagation(); openLightbox(imgPath); };
   }
-  // Update navigation arrows
+  // Update navigation arrows + multiview bar
   _updateImageNav();
+  _checkMultiviewForCurrentImage();
   // Show the "use for 3D" helper bar — always clickable, even when already selected
   const useBar = document.getElementById('ws-use-for-3d-bar');
   if (useBar) {
@@ -1265,10 +1266,12 @@ document.getElementById('ws-multiview-btn')?.addEventListener('click', async () 
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   showToast('Generating 6 multi-views... (first run downloads ~4GB model)', 'info', 5000);
   try {
-    const result = await API.generateMultiview({ imagePath: p.selectedImagePath });
+    const imgPath = p.previewImagePath || p.selectedImagePath;
+    const result = await API.generateMultiview({ imagePath: imgPath });
     if (result && result.success) {
       showToast('Multi-views generated!', 'success');
-      p.multiviewDir = result.outDir;
+      if (!p._multiviews) p._multiviews = {};
+      p._multiviews[imgPath] = result.outDir;
       _showMultiviewBar(result.outDir);
     } else {
       showToast('Multi-view failed: ' + ((result && result.error) || 'unknown'), 'error', 5000);
@@ -1295,7 +1298,6 @@ function _showMultiviewBar(multiviewDir) {
   if (!bar) return;
   bar.classList.remove('hidden');
   bar.dataset.dir = multiviewDir;
-  // Reset active
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
   bar.querySelector('[data-view="front"]')?.classList.add('mv-active');
 }
@@ -1303,6 +1305,18 @@ function _showMultiviewBar(multiviewDir) {
 function _hideMultiviewBar() {
   const bar = document.getElementById('ws-multiview-bar');
   if (bar) bar.classList.add('hidden');
+}
+
+function _checkMultiviewForCurrentImage() {
+  const p = state.currentProject;
+  if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
+  // Check if this image has multiview data stored on the project
+  const key = p.previewImagePath;
+  if (p._multiviews && p._multiviews[key]) {
+    _showMultiviewBar(p._multiviews[key]);
+  } else {
+    _hideMultiviewBar();
+  }
 }
 
 document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {

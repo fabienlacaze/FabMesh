@@ -3209,7 +3209,7 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
 ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
   const timestamp = Date.now();
-  const outDir = path.join(IMAGES_DIR, '_multiview_' + timestamp);
+  const outDir = path.join(path.dirname(IMAGES_DIR), 'logs', '_multiview_' + timestamp);
   return new Promise((resolve) => {
     const proc = execFile('python', [script, imagePath, outDir], {
       timeout: 600000, maxBuffer: 10 * 1024 * 1024,
