@@ -33,11 +33,15 @@
          PAGE 1: PROJECTS HOME (grid of project cards)
          ============================================================ -->
     <section id="page-projects" class="page">
-      <div class="page-header">
-        <h2>Your projects</h2>
-        <input type="text" id="project-search" placeholder="&#128269; Search projects..." style="flex:1; max-width:300px; margin-left:16px; padding:6px 12px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:var(--radius-sm); font-size:13px;" />
-        <button id="btn-new-project" class="primary-btn">+ New project</button>
-        <button id="btn-import-image" class="ghost-btn" style="margin-left:8px;">&#128230; Import Image</button>
+      <div class="page-header" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <h2 style="margin:0; white-space:nowrap;">Your projects</h2>
+        <div style="flex:1; display:flex; justify-content:center;">
+          <input type="text" id="project-search" placeholder="&#128269; Search projects..." style="width:100%; max-width:350px; padding:8px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:20px; font-size:13px; outline:none;" />
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <button id="btn-new-project" class="primary-btn" style="white-space:nowrap;">+ New project</button>
+          <button id="btn-import-image" class="ghost-btn" style="white-space:nowrap;">&#128230; Import</button>
+        </div>
       </div>
       <div id="projects-grid" class="projects-grid">
         <!-- project cards injected here -->
