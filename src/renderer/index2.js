@@ -3618,6 +3618,11 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         return undefined;
       },
       onPaint: _paintStroke,
+      onBrushResize: (delta, mgr) => {
+        paintState.brushSize = Math.max(1, Math.min(200, paintState.brushSize + delta));
+        document.getElementById('paint-brush-size').value = paintState.brushSize;
+        document.getElementById('paint-brush-val').textContent = paintState.brushSize;
+      },
       onMouseUp: (mgr) => {
         if (paintState.tool === 'line' && paintState.lineStart) {
           // Line finalized on mouseup (preview already drawn by _paintStroke)
@@ -3691,7 +3696,27 @@ document.getElementById('paint-cancel')?.addEventListener('click', _closePaint);
 document.addEventListener('keydown', (e) => {
   const modal = document.getElementById('modal-paint');
   if (!modal || modal.classList.contains('hidden')) return;
-  if (e.key === 'Escape') _closePaint();
+  if (e.key === 'Escape') { _closePaint(); return; }
+  // [ / ] = decrease / increase brush size
+  if (e.key === '[') {
+    paintState.brushSize = Math.max(1, paintState.brushSize - (e.shiftKey ? 10 : 3));
+    document.getElementById('paint-brush-size').value = paintState.brushSize;
+    document.getElementById('paint-brush-val').textContent = paintState.brushSize;
+    return;
+  }
+  if (e.key === ']') {
+    paintState.brushSize = Math.min(200, paintState.brushSize + (e.shiftKey ? 10 : 3));
+    document.getElementById('paint-brush-size').value = paintState.brushSize;
+    document.getElementById('paint-brush-val').textContent = paintState.brushSize;
+    return;
+  }
+  // 1-9 = opacity 10%-90%, 0 = 100%
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key >= '0' && e.key <= '9') {
+    paintState.opacity = e.key === '0' ? 100 : parseInt(e.key) * 10;
+    document.getElementById('paint-opacity').value = paintState.opacity;
+    document.getElementById('paint-opacity-val').textContent = paintState.opacity + '%';
+    return;
+  }
 });
 
 // Save

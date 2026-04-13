@@ -34,6 +34,7 @@ class CanvasManager {
     this.onMouseMove = opts.onMouseMove || null;
     this.onMouseDown = opts.onMouseDown || null;  // (ctx, x, y, e, mgr) → false to skip auto-paint
     this.onMouseUp = opts.onMouseUp || null;
+    this.onBrushResize = opts.onBrushResize || null;
     this.paintCanvas = opts.paintCanvas || null;   // optional: paint on a different canvas (e.g. overlay)
     this.lastPaintPoint = null;
     this.rightClickPan = !!opts.rightClickPan;     // use right-click for pan instead of middle-click
@@ -292,14 +293,24 @@ class CanvasManager {
       }
     });
 
-    // Zoom (wheel)
+    // Wheel: Ctrl+wheel = brush size, plain wheel = zoom
     this.container.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      this.zoom = Math.max(0.2, Math.min(10, this.zoom * factor));
-      this._applyTransform();
-      this._updateBrushCursor(e);
-      this._updateLoupe(e);
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+wheel = change brush size
+        if (this.onBrushResize) {
+          const delta = e.deltaY < 0 ? 3 : -3;
+          this.onBrushResize(delta, this);
+          this._updateBrushCursor(e);
+        }
+      } else {
+        // Plain wheel = zoom
+        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+        this.zoom = Math.max(0.2, Math.min(10, this.zoom * factor));
+        this._applyTransform();
+        this._updateBrushCursor(e);
+        this._updateLoupe(e);
+      }
     }, { passive: false });
 
     // Keyboard: Ctrl+Z/Y
