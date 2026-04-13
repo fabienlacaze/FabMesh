@@ -1285,12 +1285,13 @@ document.getElementById('ws-multiview-btn')?.addEventListener('click', async () 
 // Maps Zero123++ view indices to face names
 // Zero123++ outputs: view_0=30°, view_1=90°, view_2=150°, view_3=210°, view_4=270°, view_5=330°
 const _mvViewMap = {
-  front: 'input',    // original image
-  right: 'view_1',   // 90°
-  back: 'view_2',    // 150° (closest to back — actually view_3=210° is more "back")
-  left: 'view_4',    // 270°
-  top: 'view_0',     // 30° (front-right, used as top approximation)
-  bottom: 'view_5',  // 330° (front-left, used as bottom approximation)
+  front: 'input',    // original image (0°)
+  'fr': 'view_0',    // 30° front-right
+  right: 'view_1',   // 90° right
+  'br': 'view_2',    // 150° back-right
+  'bl': 'view_3',    // 210° back-left
+  left: 'view_4',    // 270° left
+  'fl': 'view_5',    // 330° front-left
 };
 
 function _showMultiviewBar(multiviewDir) {
