@@ -3,11 +3,13 @@ FabMesh Texture Projection — re-project source photo onto 3D mesh UV atlas.
 ===========================================================================
 
 Improves SF3D's blurry baked textures by projecting the original high-res
-source photo back onto the mesh. Uses numpy vectorized operations for speed.
+source photo back onto the mesh using SF3D's EXACT perspective camera
+(fov=40 deg, distance=1.6) so front-facing geometry gets sharp textures.
 
 Strategy:
-  1. For each vertex: project 3D position onto source image (orthographic)
-  2. Sample source image color at projected position
+  1. Undo SF3D's post-generation rotation (Rx(-90) * Ry(90) * invert)
+     to recover the original camera-space coordinates
+  2. For each vertex: perspective-project 3D position using SF3D's camera
   3. Visibility weight: dot(normal, camera_dir) — front-facing = high weight
   4. Render the UV atlas by rasterizing each face with interpolated colors
   5. Blend: visible areas get source photo, hidden areas keep SF3D texture
@@ -60,40 +62,170 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     sf3d_tex = sf3d_tex.convert('RGB').resize((tex_res, tex_res), Image.LANCZOS)
 
     # ---------------------------------------------------------------
-    # Step 1: Per-vertex projection from 3D to source image
-    # Orthographic front view: camera at +Z looking at -Z, Y up
+    # Step 1: Undo SF3D's post-generation transforms
+    #
+    # SF3D applies these AFTER mesh generation (system.py lines 518-528):
+    #   1. Rx(-90): rotate -90 deg around X
+    #   2. Ry(+90): rotate +90 deg around Y
+    #   3. invert(): flip face winding (normals flip)
+    #
+    # To go from exported GLB coords back to SF3D's internal coords
+    # (where the camera was), we must apply the INVERSE in reverse order:
+    #   1. un-invert (flip normals back — we handle this via normal sign)
+    #   2. Ry(-90)^-1 = Ry(-90)
+    #   3. Rx(-90)^-1 = Rx(+90)
     # ---------------------------------------------------------------
-    bounds = geom.bounds
-    extents = bounds[1] - bounds[0]
-    view_dir = np.array([0.0, 0.0, -1.0])
+    def rot_x(deg):
+        r = np.radians(deg)
+        return np.array([
+            [1, 0, 0],
+            [0, np.cos(r), -np.sin(r)],
+            [0, np.sin(r),  np.cos(r)]
+        ])
 
-    # Project: x -> u [0,1], y -> v [0,1] (image space, top=0)
-    proj_u = (vertices[:, 0] - bounds[0][0]) / max(extents[0], 1e-8)
-    proj_v = 1.0 - (vertices[:, 1] - bounds[0][1]) / max(extents[1], 1e-8)
+    def rot_y(deg):
+        r = np.radians(deg)
+        return np.array([
+            [ np.cos(r), 0, np.sin(r)],
+            [ 0,         1, 0        ],
+            [-np.sin(r), 0, np.cos(r)]
+        ])
+
+    # Inverse of: Rx(-90) then Ry(+90) = undo Ry(+90) then undo Rx(-90)
+    R_undo = rot_x(90) @ rot_y(-90)
+    verts_cam = (R_undo @ vertices.T).T  # (V, 3) in SF3D's internal coords
+    norms_cam = (R_undo @ normals.T).T
+    # The invert() call flips normals; undo that
+    norms_cam = -norms_cam
+
+    # ---------------------------------------------------------------
+    # Step 2: Perspective projection using SF3D's exact camera
+    #
+    # SF3D camera (system.py / utils.py):
+    #   default_fovy_deg = 40.0
+    #   default_distance = 1.6
+    #   c2w = [[0,0,1,d], [1,0,0,0], [0,1,0,0], [0,0,0,1]]
+    #
+    # This c2w means: camera position = (d, 0, 0) in world coords
+    # (the 4th column after the axis swap), camera Z axis = world X.
+    #
+    # The c2w columns map camera axes to world axes:
+    #   cam_X -> world_Z   (c2w col 0 = [0,0,1])... wait, let's be precise.
+    #   Row 0: [0,0,1,d] means world_X = cam_Z * 1 + d
+    #   Row 1: [1,0,0,0] means world_Y = cam_X * 1
+    #   Row 2: [0,1,0,0] means world_Z = cam_Y * 1
+    #
+    # Actually c2w maps camera coords to world:
+    #   world = R_c2w * cam + t_c2w
+    #   R_c2w = [[0,0,1],[1,0,0],[0,1,0]], t_c2w = [d,0,0]
+    #
+    # So w2c (world to camera) = inv(c2w):
+    #   R_w2c = R_c2w^T = [[0,1,0],[0,0,1],[1,0,0]]
+    #   t_w2c = -R_w2c * t_c2w = -[[0,1,0],[0,0,1],[1,0,0]] * [d,0,0]
+    #         = [0, 0, -d]
+    #
+    # So in camera coords: cam = R_w2c * world + [0, 0, -d]
+    #   cam_x = world_y
+    #   cam_y = world_z
+    #   cam_z = world_x - d
+    # ---------------------------------------------------------------
+    fov_deg = 40.0
+    distance = 1.6
+
+    # World-to-camera transform
+    # R_w2c = R_c2w^T where R_c2w = [[0,0,1],[1,0,0],[0,1,0]]
+    R_w2c = np.array([
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 0, 0]
+    ], dtype=np.float64)
+    t_w2c = np.array([0, 0, -distance], dtype=np.float64)
+
+    # Transform vertices to camera space
+    verts_cs = (R_w2c @ verts_cam.T).T + t_w2c  # (V, 3)
+    norms_cs = (R_w2c @ norms_cam.T).T
+
+    # Camera looks along +Z in camera space (OpenGL convention: -Z, but
+    # SF3D uses +Z based on the c2w setup where cam_z = world_x and the
+    # object is at origin, camera at distance along world_x)
+    # verts_cs[:, 2] should be negative for points in front of camera
+    # (camera at z=0, object at z=-distance + world_x)
+    # Actually: cam_z = world_x - d. Object is near origin, so cam_z ~ -d < 0
+    # This means the camera looks along -Z (standard OpenCV/OpenGL convention)
+
+    # Perspective projection
+    # Focal length from SF3D: focal = 0.5 * H / tan(0.5 * fov)
+    # We project to normalized image coords [0, 1]
+    fov_rad = np.radians(fov_deg)
+    # Use unit image size for normalized coords
+    focal = 0.5 / np.tan(0.5 * fov_rad)
+
+    # Project: u = focal * x / (-z) + 0.5,  v = focal * y / (-z) + 0.5
+    # (negate z because camera looks along -Z)
+    z = verts_cs[:, 2]
+    safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
+    proj_u = focal * verts_cs[:, 0] / (-safe_z) + 0.5
+    proj_v = focal * verts_cs[:, 1] / (-safe_z) + 0.5
+    # Flip V because image Y goes top-to-bottom
+    proj_v = 1.0 - proj_v
+
+    # Check which vertices project within image bounds
+    in_bounds = (proj_u >= 0) & (proj_u <= 1) & (proj_v >= 0) & (proj_v <= 1)
 
     # Sample source image for each vertex
     ix = np.clip((proj_u * src_w).astype(int), 0, src_w - 1)
     iy = np.clip((proj_v * src_h).astype(int), 0, src_h - 1)
     vertex_colors = src_pixels[iy, ix, :3].astype(np.float64)  # (V, 3) RGB
-    vertex_alpha = src_pixels[iy, ix, 3].astype(np.float64) / 255.0  # (V,) alpha from rembg
+    vertex_alpha = src_pixels[iy, ix, 3].astype(np.float64) / 255.0  # alpha from rembg
 
-    # Visibility: how much the vertex faces the camera
-    # dot(normal, -view_dir) = normal_z (since view_dir = [0,0,-1])
-    visibility = normals[:, 2].copy()  # positive = facing front
+    # Visibility: front-facing check in camera space
+    # Camera direction for each vertex (from vertex toward camera origin)
+    cam_dirs = -verts_cs.copy()  # direction from vertex to camera (at origin in cam space... no, camera IS the origin)
+    # Actually in camera space, camera is at origin. Direction from vertex to camera = -vertex_pos
+    cam_dirs = -verts_cs
+    cam_dirs_norm = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
+    # Normalize surface normals in camera space
+    norms_cs_norm = norms_cs / (np.linalg.norm(norms_cs, axis=1, keepdims=True) + 1e-10)
+    # Dot product: positive = facing camera
+    visibility = np.sum(norms_cs_norm * cam_dirs_norm, axis=1)
     visibility = np.clip(visibility, 0, 1)
-    # Combine with alpha from source (rembg: 0 = background, 1 = foreground)
-    visibility *= vertex_alpha
 
-    log(f'projection done, {(visibility > 0.1).sum()}/{len(vertices)} visible verts')
+    # Combine with alpha and bounds check
+    visibility *= vertex_alpha
+    visibility *= in_bounds.astype(np.float64)
+
+    # Power curve to sharpen the visibility falloff (reduce blending at edges)
+    visibility = visibility ** 1.5
+
+    log(f'projection done, {(visibility > 0.1).sum()}/{len(vertices)} visible verts '
+        f'(in_bounds: {in_bounds.sum()}, z_range: {z.min():.2f} to {z.max():.2f})')
+
+    # Debug: save projection overlay to visually verify alignment
+    try:
+        debug_img = src_img.copy().convert('RGB')
+        debug_draw = ImageDraw.Draw(debug_img)
+        vis_mask = visibility > 0.1
+        for vi in range(0, len(vertices), max(1, len(vertices) // 2000)):
+            if not vis_mask[vi]:
+                continue
+            px = int(proj_u[vi] * src_w)
+            py = int(proj_v[vi] * src_h)
+            if 0 <= px < src_w and 0 <= py < src_h:
+                v = min(255, int(visibility[vi] * 255))
+                debug_draw.ellipse([px-1, py-1, px+1, py+1], fill=(v, 255-v, 0))
+        debug_path = output_path.replace('.glb', '_proj_debug.png')
+        debug_img.save(debug_path)
+        log(f'debug overlay saved: {debug_path}')
+    except Exception as _dbg_e:
+        log(f'debug overlay failed: {_dbg_e}')
 
     # ---------------------------------------------------------------
-    # Step 2: Rasterize UV atlas using PIL (fast polygon fill)
+    # Step 3: Rasterize UV atlas using PIL
     # For each face, draw a filled triangle in the UV atlas with
     # the projected color (blended with SF3D based on visibility)
     # ---------------------------------------------------------------
     log('rasterizing UV atlas...')
 
-    # Create projected color atlas and weight atlas
     proj_atlas = Image.new('RGB', (tex_res, tex_res), (0, 0, 0))
     weight_atlas = Image.new('L', (tex_res, tex_res), 0)
     proj_draw = ImageDraw.Draw(proj_atlas)
@@ -108,23 +240,19 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     avg_vis = face_vis.mean(axis=1)  # (N,)
 
     # Pre-compute UV triangle areas and filter degenerate ones
-    uv_px = face_uvs * tex_res  # (N, 3, 2) in pixel coords
+    uv_px = face_uvs * tex_res
     uv_areas = 0.5 * np.abs(
         (uv_px[:, 1, 0] - uv_px[:, 0, 0]) * (uv_px[:, 2, 1] - uv_px[:, 0, 1]) -
         (uv_px[:, 2, 0] - uv_px[:, 0, 0]) * (uv_px[:, 1, 1] - uv_px[:, 0, 1])
     )
-    # Compute edge lengths to filter very thin triangles
     edges = np.stack([
         np.linalg.norm(uv_px[:, 1] - uv_px[:, 0], axis=1),
         np.linalg.norm(uv_px[:, 2] - uv_px[:, 1], axis=1),
         np.linalg.norm(uv_px[:, 0] - uv_px[:, 2], axis=1),
-    ], axis=1)  # (N, 3)
+    ], axis=1)
     max_edge = edges.max(axis=1)
     min_edge = edges.min(axis=1)
-    # Aspect ratio: skip very thin slivers (max/min > 15)
     aspect_ok = (min_edge > 0.5) & (max_edge / np.clip(min_edge, 0.01, None) < 15)
-    # Skip faces that span too much of the UV atlas (cross-island artifacts)
-    # Max edge length in UV pixels should be reasonable (< 20% of atlas)
     edge_size_ok = max_edge < (tex_res * 0.2)
 
     n_drawn = 0
@@ -133,7 +261,6 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
         vis = avg_vis[fi]
         if vis < 0.05:
             continue
-        # Skip degenerate UV faces
         if uv_areas[fi] < 1.0 or not aspect_ok[fi] or not edge_size_ok[fi]:
             n_skipped += 1
             continue
@@ -152,11 +279,10 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
         n_drawn += 1
 
     log(f'skipped {n_skipped} degenerate/thin UV faces')
-
     log(f'drew {n_drawn}/{len(faces)} faces ({100*n_drawn/len(faces):.1f}%)')
 
     # ---------------------------------------------------------------
-    # Step 3: Blend projected atlas with SF3D atlas based on weights
+    # Step 4: Blend projected atlas with SF3D atlas based on weights
     # ---------------------------------------------------------------
     proj_arr = np.asarray(proj_atlas, dtype=np.float64)
     sf3d_arr = np.asarray(sf3d_tex, dtype=np.float64)
@@ -170,7 +296,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
     log(f'blended, saving...')
 
     # ---------------------------------------------------------------
-    # Step 4: Write texture back into GLB in-place
+    # Step 5: Write texture back into GLB in-place
     # ---------------------------------------------------------------
     import shutil
     if os.path.abspath(mesh_path) != os.path.abspath(output_path):
@@ -211,34 +337,28 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
             new_mime = 'image/jpeg'
 
             if len(new_bytes) > img_length:
-                # Try lower quality
                 buf2 = io.BytesIO()
                 result_img.save(buf2, format='JPEG', quality=85)
                 new_bytes = buf2.getvalue()
 
             if len(new_bytes) <= img_length:
-                # Fits in slot — overwrite in place
                 data[img_offset : img_offset + len(new_bytes)] = new_bytes
                 data[img_offset + len(new_bytes) : img_offset + img_length] = b'\x00' * (img_length - len(new_bytes))
                 img_info['mimeType'] = new_mime
                 log(f'texture replaced in-place ({len(new_bytes)}/{img_length} bytes)')
             else:
-                # Doesn't fit — rebuild GLB with larger binary chunk
                 old_bin_len = struct.unpack_from('<I', data, bin_chunk_offset - 8)[0]
-                # Append new texture at end of binary chunk
                 new_tex_offset = old_bin_len
                 pad = (4 - (len(new_bytes) % 4)) % 4
                 new_bin = bytes(data[bin_chunk_offset : bin_chunk_offset + old_bin_len]) + new_bytes + b'\x00' * pad
-                # Update buffer view
                 bv['byteOffset'] = new_tex_offset
                 bv['byteLength'] = len(new_bytes)
                 img_info['mimeType'] = new_mime
-                # Rebuild GLB
                 json_str = json.dumps(json_chunk).encode('utf-8')
                 json_pad = (4 - (len(json_str) % 4)) % 4
                 json_chunk_data = json_str + b' ' * json_pad
                 data = bytearray()
-                data += struct.pack('<III', 0x46546C67, 2, 0)  # header
+                data += struct.pack('<III', 0x46546C67, 2, 0)
                 data += struct.pack('<II', len(json_chunk_data), 0x4E4F534A)
                 data += json_chunk_data
                 data += struct.pack('<II', len(new_bin), 0x004E4942)

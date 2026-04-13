@@ -86,10 +86,11 @@ def generate_3d(
     image = resize_foreground(image, foreground_ratio)
     print(f"LOCAL_SF3D: image preprocessed {image.size}", flush=True)
 
-    # Save rembg image (before resize_foreground) for texture projection later
-    # resize_foreground changes the aspect ratio to square, which breaks projection alignment
+    # Save the SAME image that SF3D sees (after resize_foreground) for texture
+    # projection. The projection must match SF3D's perspective camera exactly,
+    # and that camera sees the resize_foreground output, not the raw rembg image.
     _preprocessed_path = output_path + '.preprocessed.png'
-    remove_background(raw, rembg_session).save(_preprocessed_path)
+    image.save(_preprocessed_path)
 
     # ------------------------------------------------------------------
     # Download + load SF3D weights (~3 GB, one-time, gated on HF)
