@@ -2575,17 +2575,16 @@ function _symDrawPreview() {
   octx.lineWidth = 3;
   octx.setLineDash([8, 4]);
   octx.beginPath();
-  const ax = axisPixel;
-  // Rotated line
+  // Rotated line (ax, ay already defined above)
   const cos = Math.cos(symState.axisAngle);
   const sin = Math.sin(symState.axisAngle);
   const len = Math.max(w, h);
-  octx.moveTo(ax - sin * len, -cos * len + h/2);
-  octx.lineTo(ax + sin * len, cos * len + h/2);
+  octx.moveTo(ax - sin * len, -cos * len + ay);
+  octx.lineTo(ax + sin * len, cos * len + ay);
   octx.stroke();
   // Draw axis handle (circle at center)
   octx.beginPath();
-  octx.arc(ax, h/2, 8, 0, Math.PI * 2);
+  octx.arc(ax, ay, 8, 0, Math.PI * 2);
   octx.fillStyle = 'rgba(34,197,94,0.5)';
   octx.fill();
   octx.strokeStyle = '#22c55e';
