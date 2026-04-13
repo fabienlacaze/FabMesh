@@ -4692,11 +4692,18 @@ function _meLoadMesh(meshPath) {
   }
   meState.undoStack = [];
   meState.redoStack = [];
+  _meUpdateUndoBtns();
 
   const loader = new GLTFLoader();
   const url = 'file:///' + meshPath.replace(/\\/g, '/');
-  fetch(url).then(r => r.arrayBuffer()).then(buffer => {
+  console.log('[mesh-edit] loading', url);
+  fetch(url).then(r => {
+    if (!r.ok) throw new Error('fetch failed: ' + r.status);
+    return r.arrayBuffer();
+  }).then(buffer => {
+    console.log('[mesh-edit] buffer size:', buffer.byteLength);
     loader.parse(buffer, '', (gltf) => {
+      console.log('[mesh-edit] GLTF parsed, children:', gltf.scene.children.length);
       meState.mesh = gltf.scene;
       meState.scene.add(meState.mesh);
 
@@ -4721,7 +4728,13 @@ function _meLoadMesh(meshPath) {
           }
         }
       });
+    }, (err) => {
+      console.error('[mesh-edit] GLTF parse error:', err);
+      showToast('Failed to load mesh: ' + err, 'error');
     });
+  }).catch(err => {
+    console.error('[mesh-edit] fetch error:', err);
+    showToast('Failed to fetch mesh: ' + err.message, 'error');
   });
 }
 
