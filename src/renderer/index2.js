@@ -2810,6 +2810,21 @@ function _closeSym() {
 document.getElementById('sym-close')?.addEventListener('click', _closeSym);
 document.getElementById('sym-cancel')?.addEventListener('click', _closeSym);
 
+// Keyboard: Ctrl+Z undo, Ctrl+Y redo, Esc close
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal-symmetrize');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('sym-undo')?.click();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+    e.preventDefault();
+    document.getElementById('sym-redo')?.click();
+  } else if (e.key === 'Escape') {
+    _closeSym();
+  }
+});
+
 // Apply: save the symmetrized image as a new version
 document.getElementById('sym-apply')?.addEventListener('click', async () => {
   const canvas = document.getElementById('sym-canvas');
