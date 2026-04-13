@@ -2429,7 +2429,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
   const steps = parseInt(document.getElementById('ws-quality').value) || 30;
-  const multiView = document.getElementById('ws-multiview')?.checked || false;
+  const multiView = document.getElementById('ws-auto-multiview')?.checked || false;
   const buildStages = document.getElementById('ws-img-buildstages')?.checked || false;
   // Estimate: Juggernaut ~0.5s/step on RTX 5080, plus model load ~10s on first call.
   // SDXL Turbo ~0.2s/step. Pollinations ~5s/image.
