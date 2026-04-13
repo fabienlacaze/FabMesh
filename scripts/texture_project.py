@@ -204,28 +204,47 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024):
             img_offset = bin_chunk_offset + bv.get('byteOffset', 0)
             img_length = bv['byteLength']
 
+            # Try JPEG first (smaller, good quality)
             buf = io.BytesIO()
-            result_img.save(buf, format='PNG', optimize=True)
+            result_img.save(buf, format='JPEG', quality=95)
             new_bytes = buf.getvalue()
+            new_mime = 'image/jpeg'
+
+            if len(new_bytes) > img_length:
+                # Try lower quality
+                buf2 = io.BytesIO()
+                result_img.save(buf2, format='JPEG', quality=85)
+                new_bytes = buf2.getvalue()
 
             if len(new_bytes) <= img_length:
+                # Fits in slot — overwrite in place
                 data[img_offset : img_offset + len(new_bytes)] = new_bytes
                 data[img_offset + len(new_bytes) : img_offset + img_length] = b'\x00' * (img_length - len(new_bytes))
-                log(f'texture replaced ({len(new_bytes)}/{img_length} bytes)')
+                img_info['mimeType'] = new_mime
+                log(f'texture replaced in-place ({len(new_bytes)}/{img_length} bytes)')
             else:
-                # Try with JPEG instead (smaller)
-                buf2 = io.BytesIO()
-                result_img.save(buf2, format='JPEG', quality=92)
-                jpg_bytes = buf2.getvalue()
-                if len(jpg_bytes) <= img_length:
-                    data[img_offset : img_offset + len(jpg_bytes)] = jpg_bytes
-                    data[img_offset + len(jpg_bytes) : img_offset + img_length] = b'\x00' * (img_length - len(jpg_bytes))
-                    img_info['mimeType'] = 'image/jpeg'
-                    # Re-encode JSON
-                    json_str = json.dumps(json_chunk).encode('utf-8')
-                    log(f'texture replaced as JPEG ({len(jpg_bytes)}/{img_length} bytes)')
-                else:
-                    log(f'WARNING: texture too large ({len(new_bytes)} > {img_length}), keeping SF3D texture')
+                # Doesn't fit — rebuild GLB with larger binary chunk
+                old_bin_len = struct.unpack_from('<I', data, bin_chunk_offset - 8)[0]
+                # Append new texture at end of binary chunk
+                new_tex_offset = old_bin_len
+                pad = (4 - (len(new_bytes) % 4)) % 4
+                new_bin = bytes(data[bin_chunk_offset : bin_chunk_offset + old_bin_len]) + new_bytes + b'\x00' * pad
+                # Update buffer view
+                bv['byteOffset'] = new_tex_offset
+                bv['byteLength'] = len(new_bytes)
+                img_info['mimeType'] = new_mime
+                # Rebuild GLB
+                json_str = json.dumps(json_chunk).encode('utf-8')
+                json_pad = (4 - (len(json_str) % 4)) % 4
+                json_chunk_data = json_str + b' ' * json_pad
+                data = bytearray()
+                data += struct.pack('<III', 0x46546C67, 2, 0)  # header
+                data += struct.pack('<II', len(json_chunk_data), 0x4E4F534A)
+                data += json_chunk_data
+                data += struct.pack('<II', len(new_bin), 0x004E4942)
+                data += new_bin
+                struct.pack_into('<I', data, 8, len(data))
+                log(f'texture replaced (GLB rebuilt, +{len(new_bytes)-img_length} bytes)')
             break
 
         struct.pack_into('<I', data, 8, len(data))
