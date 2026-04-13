@@ -1079,11 +1079,11 @@ function initRigSrcViewer() {
   rigSrcCamera.position.set(2, 2, 3);
   rigSrcControls = new OrbitControls(rigSrcCamera, canvas);
   rigSrcControls.enableDamping = true;
-  rigSrcScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 2.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  rigSrcScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   rigSrcScene.add(dir);
-  rigSrcScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  rigSrcScene.add(new THREE.AmbientLight(0xffffff, 0.3));
   function tick() {
     const visible = canvas.offsetParent !== null && document.visibilityState !== 'hidden';
     if (visible) {
@@ -1770,14 +1770,14 @@ function init3DLightbox() {
   lb3dControls = new OrbitControls(lb3dCamera, canvas);
   lb3dControls.enableDamping = true;
   // Bright base lighting
-  lb3dScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 2.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  lb3dScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   lb3dScene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
   fill.position.set(-5, 3, -5);
   lb3dScene.add(fill);
-  lb3dScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  lb3dScene.add(new THREE.AmbientLight(0xffffff, 0.3));
 }
 function resize3DLightbox() {
   if (!lb3dRenderer) return;
@@ -4008,16 +4008,16 @@ function initWsThree() {
   wsCamera.position.set(2, 2, 3);
   wsControls = new OrbitControls(wsCamera, canvas);
   wsControls.enableDamping = true;
-  // Bright base lighting so the slider has plenty of headroom
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 2.0);
+  // Balanced PBR lighting — avoid over-exposing textures
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0);
   wsScene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   wsScene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
   fill.position.set(-5, 3, -5);
   wsScene.add(fill);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.3);
   wsScene.add(ambient);
   function tick() {
     // Pause rendering when the canvas is offscreen / hidden — saves ~5% CPU
@@ -4567,14 +4567,14 @@ function initRigViewer() {
   rigVwCamera.position.set(2, 2, 3);
   rigVwControls = new OrbitControls(rigVwCamera, canvas);
   rigVwControls.enableDamping = true;
-  rigVwScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 2.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  rigVwScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   rigVwScene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
   fill.position.set(-5, 3, -5);
   rigVwScene.add(fill);
-  rigVwScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  rigVwScene.add(new THREE.AmbientLight(0xffffff, 0.3));
   function tick() {
     const visible = canvas.offsetParent !== null && document.visibilityState !== 'hidden';
     if (visible) {
@@ -7320,12 +7320,12 @@ function initLmFullscreen() {
   // Shared scene + lights
   lmFsScene = new THREE.Scene();
   lmFsScene.background = new THREE.Color(0x0b0b14);
-  lmFsScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 2.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 2.5);
+  lmFsScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   lmFsScene.add(dir);
-  lmFsScene.add(new THREE.DirectionalLight(0xffffff, 1.0).translateX(-5).translateY(3).translateZ(-5));
-  lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  lmFsScene.add(new THREE.DirectionalLight(0xffffff, 0.5).translateX(-5).translateY(3).translateZ(-5));
+  lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.3));
   // Pane A (Front by default)
   lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: true });
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
