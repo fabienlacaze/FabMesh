@@ -185,7 +185,7 @@
                         <button id="ws-picker-btn" class="ghost-btn tool-btn">&#128167; Color Pick</button>
                         <button id="ws-blur-btn" class="ghost-btn tool-btn">&#128168; Blur Brush</button>
                         <button id="ws-symmetrize-btn" class="ghost-btn tool-btn">&#8651; Symmetrize</button>
-                        <button id="ws-eraser-btn" class="ghost-btn tool-btn">&#9003; Eraser</button>
+                        <button id="ws-paint-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
                       </div>
                     </div>
                   </div>
@@ -951,15 +951,18 @@
           <strong>Right-click drag</strong> to erase &nbsp;|&nbsp;
           <strong>Z</strong> to undo
         </div>
-        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-          <label style="display:flex; align-items:center; gap:6px;">Brush:
-            <input type="range" id="mask-brush-size" min="5" max="200" value="50" />
-            <span id="mask-brush-val" style="min-width:30px;">50</span>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:4px; min-width:0; flex:1 1 140px;">
+            <span style="font-size:11px; white-space:nowrap;">Brush:</span>
+            <input type="range" id="mask-brush-size" min="5" max="200" value="50" style="flex:1; min-width:60px;" />
+            <span id="mask-brush-val" style="min-width:24px; font-size:11px;">50</span>
           </label>
-          <button id="mask-loupe-toggle" class="secondary-btn" style="padding: 4px 12px;" title="Toggle magnifier">&#128270; Loupe</button>
-          <button id="mask-undo" class="secondary-btn" style="padding: 4px 8px;" title="Undo">&#8630;</button>
-          <button id="mask-redo" class="secondary-btn" style="padding: 4px 8px;" title="Redo">&#8631;</button>
-          <button id="mask-clear" class="secondary-btn" style="padding: 4px 8px;" title="Clear">&#8634;</button>
+          <div style="display:flex; gap:4px; flex-shrink:0;">
+            <button id="mask-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+            <button id="mask-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+            <button id="mask-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+            <button id="mask-clear" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+          </div>
         </div>
         <div id="mask-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
           <canvas id="mask-base-canvas" style="position: absolute; left: 0; top: 0;"></canvas>
@@ -1005,11 +1008,11 @@
             <span id="clone-hardness-val" style="min-width:24px; font-size:11px;">50</span>
           </label>
           <div style="display:flex; gap:4px; flex-shrink:0;">
-            <button id="clone-flip-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Flip mode">Flip: Off</button>
-            <button id="clone-loupe-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Magnifier">&#128270;</button>
-            <button id="clone-undo" class="secondary-btn" style="padding:4px 6px;" disabled title="Undo">&#8630;</button>
-            <button id="clone-redo" class="secondary-btn" style="padding:4px 6px;" disabled title="Redo">&#8631;</button>
-            <button id="clone-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
+            <button id="clone-flip-toggle" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px;" title="Flip mode">Flip: Off</button>
+            <button id="clone-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+            <button id="clone-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+            <button id="clone-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+            <button id="clone-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
           </div>
         </div>
         <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
@@ -1063,7 +1066,7 @@
   <div id="modal-resolution" class="modal-overlay hidden">
     <div class="modal-card" style="max-width:400px; text-align:center;">
       <h2>Resolution</h2>
-      <img id="res-preview" alt="" style="max-width:200px; max-height:200px; border-radius:8px; margin:12px auto; display:block; border:1px solid var(--border);" />
+      <img id="res-preview" alt="" style="max-width:300px; max-height:300px; border-radius:8px; margin:12px auto; display:block; border:1px solid var(--border);" />
       <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin:8px 0 12px 0;">
         <span id="res-current" style="font-size:16px; font-weight:700; color:var(--text-0);"></span>
         <span id="res-arrow" style="font-size:16px; display:none;">→</span>
@@ -1081,12 +1084,14 @@
 
   <!-- Brightness/Contrast modal -->
   <div id="modal-brightness" class="modal-overlay hidden">
-    <div class="modal-card" style="max-width:450px;">
+    <div class="modal-card" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h2>Brightness / Contrast</h2>
+        <h3 style="margin:0;">Brightness / Contrast</h3>
         <button class="settings-close-x" id="bright-close-x">&#10005;</button>
       </div>
-      <img id="bright-preview" alt="" style="max-width:100%; max-height:250px; border-radius:8px; margin:8px auto; display:block; border:1px solid var(--border);" />
+      <div style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px; display:flex; align-items:center; justify-content:center;">
+        <img id="bright-preview" alt="" style="max-width:100%; max-height:100%; border-radius:4px; object-fit:contain;" />
+      </div>
       <div style="display:flex; flex-direction:column; gap:10px; margin:12px 0;">
         <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
           <span style="min-width:70px;">Brightness</span>
@@ -1121,14 +1126,14 @@
 
   <!-- Color Picker modal -->
   <div id="modal-colorpick" class="modal-overlay hidden">
-    <div class="modal-card" style="max-width:500px;">
+    <div class="modal-card" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h2>Color Picker</h2>
+        <h3 style="margin:0;">Color Picker</h3>
         <button class="settings-close-x" id="cpick-close-x">&#10005;</button>
       </div>
-      <p class="modal-subtitle">Click anywhere on the image to pick a color.</p>
-      <div id="cpick-canvas-container" style="position:relative; overflow:hidden; background:#1a1a2e; border-radius:8px; min-height:300px; cursor:crosshair;">
-        <canvas id="cpick-canvas" style="width:100%; display:block;"></canvas>
+      <div style="font-size:11px; color:var(--text-muted);">Click anywhere on the image to pick a color.</div>
+      <div id="cpick-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px; cursor:crosshair;">
+        <canvas id="cpick-canvas" style="position:absolute; left:0; top:0;"></canvas>
         <div id="cpick-cursor" style="position:absolute; pointer-events:none; width:20px; height:20px; border:2px solid white; border-radius:50%; box-shadow:0 0 0 1px black; display:none; transform:translate(-50%,-50%);">
           <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%);"></div>
         </div>
@@ -1137,7 +1142,7 @@
         <div id="cpick-swatch" style="width:48px; height:48px; border-radius:8px; border:2px solid var(--border);"></div>
         <div>
           <div id="cpick-hex" style="font-size:18px; font-weight:700; font-family:monospace;"></div>
-          <div id="cpick-rgb" style="font-size:11px; color:var(--text-2);"></div>
+          <div id="cpick-rgb" style="font-size:11px; color:var(--text-2); white-space:nowrap;"></div>
         </div>
         <span style="flex:1;"></span>
         <button id="cpick-copy" class="primary-btn" style="padding:6px 16px;">Copy HEX</button>
@@ -1167,12 +1172,12 @@
           <span id="blur-strength-val" style="min-width:24px; font-size:11px;">5</span>
         </label>
         <div style="display:flex; gap:4px; flex-shrink:0;">
-          <button id="blur-mode-blur" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Blur</button>
-          <button id="blur-mode-sharpen" class="secondary-btn" style="padding:4px 10px; font-size:11px;">Sharpen</button>
-          <button id="blur-loupe-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Magnifier">&#128270;</button>
-          <button id="blur-undo" class="secondary-btn" style="padding:4px 6px;" disabled title="Undo">&#8630;</button>
-          <button id="blur-redo" class="secondary-btn" style="padding:4px 6px;" disabled title="Redo">&#8631;</button>
-          <button id="blur-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
+          <button id="blur-mode-blur" class="secondary-btn tool-btn tool-active" style="padding:4px 10px; font-size:11px;">Blur</button>
+          <button id="blur-mode-sharpen" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:11px;">Sharpen</button>
+          <button id="blur-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="blur-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="blur-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="blur-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
         </div>
       </div>
       <div id="blur-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
@@ -1240,12 +1245,15 @@
           <span id="sym-brush-val">40</span>
         </label>
         <span style="flex:1;"></span>
-        <button id="sym-loupe-toggle" class="secondary-btn" style="padding:4px 8px; font-size:11px;" title="Magnifier">&#128270;</button>
-        <button id="sym-undo" class="secondary-btn" style="padding:4px 6px;" title="Undo">&#8630;</button>
-        <button id="sym-reset" class="secondary-btn" style="padding:4px 6px;" title="Reset">&#8634;</button>
+        <div style="display:flex; gap:4px; flex-shrink:0;">
+          <button id="sym-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="sym-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="sym-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="sym-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+        </div>
       </div>
       <div style="font-size:10px; color:var(--text-3);">
-        Drag the <strong style="color:#22c55e;">green line</strong> to move the axis. Hold <strong>Shift+drag</strong> to rotate. In Mask mode, paint the area to symmetrize.
+        Drag the <strong style="color:#22c55e;">green line</strong> to move the axis. <strong>Shift+drag</strong> to rotate. In Mask mode: paint to select, <strong>Ctrl+drag</strong> to move axis, <strong>Shift+drag</strong> to rotate.
       </div>
       <div id="sym-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
         <canvas id="sym-canvas" style="position:absolute; left:0; top:0;"></canvas>
@@ -1257,6 +1265,73 @@
       <div style="display:flex; justify-content:flex-end; gap:8px;">
         <button id="sym-cancel" class="secondary-btn">Cancel</button>
         <button id="sym-apply" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Apply Symmetrize</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Paint Tools modal -->
+  <div id="modal-paint" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <h3 style="margin:0; white-space:nowrap;">Paint Tools</h3>
+        <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+          <button id="paint-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="paint-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="paint-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="paint-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+          <button id="paint-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
+        </div>
+      </div>
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
+        <!-- Left panel: tools -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+          <!-- Tool buttons -->
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tools</span>
+            <button id="paint-tool-pen" class="secondary-btn tool-btn tool-active" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9998; Pen</button>
+            <button id="paint-tool-spray" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#128168; Spray</button>
+            <button id="paint-tool-ink" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#128396; Ink</button>
+            <button id="paint-tool-line" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9585; Line</button>
+            <button id="paint-tool-fill" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9781; Fill</button>
+            <button id="paint-tool-wand" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#10022; Wand</button>
+            <button id="paint-tool-smudge" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9775; Smudge</button>
+            <button id="paint-tool-eraser" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9003; Eraser</button>
+          </div>
+          <!-- Color -->
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <input type="color" id="paint-color" value="#ff0000" style="width:36px; height:36px; border:none; padding:0; cursor:pointer; border-radius:6px;" title="Pick color" />
+              <button id="paint-eyedropper" class="secondary-btn tool-btn" style="padding:6px 8px; font-size:11px;" title="Pick from image"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><path d="M2 22l1-1h3l9-9"/><path d="M3 21v-3l9-9"/><circle cx="17.5" cy="6.5" r="3.5"/></svg></button>
+            </div>
+          </div>
+          <!-- Brush size -->
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Brush <span id="paint-brush-val" style="color:var(--text-1);">20</span></span>
+            <input type="range" id="paint-brush-size" min="1" max="200" value="20" style="width:100%;" />
+          </div>
+          <!-- Opacity -->
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Opacity <span id="paint-opacity-val" style="color:var(--text-1);">100%</span></span>
+            <input type="range" id="paint-opacity" min="5" max="100" value="100" style="width:100%;" />
+          </div>
+          <!-- Tolerance (for Wand/Fill) -->
+          <div id="paint-tolerance-group" style="display:none; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tolerance <span id="paint-tolerance-val" style="color:var(--text-1);">32</span></span>
+            <input type="range" id="paint-tolerance" min="1" max="128" value="32" style="width:100%;" />
+          </div>
+        </div>
+        <!-- Right: canvas -->
+        <div id="paint-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+          <canvas id="paint-canvas" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+          <div id="paint-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid white; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,0.7); display:none; z-index:1000;">
+            <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="paint-cancel" class="secondary-btn">Cancel</button>
+        <button id="paint-save" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Save as new version</button>
       </div>
     </div>
   </div>

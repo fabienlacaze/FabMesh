@@ -32,6 +32,11 @@ class CanvasManager {
     this.brushSizeGetter = opts.brushSizeGetter || (() => 50);
     this.onPaint = opts.onPaint || null;
     this.onMouseMove = opts.onMouseMove || null;
+    this.onMouseDown = opts.onMouseDown || null;  // (ctx, x, y, e, mgr) → false to skip auto-paint
+    this.onMouseUp = opts.onMouseUp || null;
+    this.paintCanvas = opts.paintCanvas || null;   // optional: paint on a different canvas (e.g. overlay)
+    this.lastPaintPoint = null;
+    this.rightClickPan = !!opts.rightClickPan;     // use right-click for pan instead of middle-click
 
     this.origData = null;
     this.undoStack = [];
@@ -42,12 +47,19 @@ class CanvasManager {
     this.painting = false;
     this.panning = false;
     this.panStart = null;
-    this.loupeEnabled = false;
+    this.loupeEnabled = true;
     this.w = 0;
     this.h = 0;
 
     this._bindEvents();
     this._updateBtns();
+    if (this.loupeBtn) this.loupeBtn.classList.add('tool-active');
+  }
+
+  /** Call when (re-)opening the modal to ensure loupe is on + button synced */
+  activate() {
+    this.loupeEnabled = true;
+    if (this.loupeBtn) this.loupeBtn.classList.add('tool-active');
   }
 
   loadImage(src) {
@@ -85,11 +97,14 @@ class CanvasManager {
     this.canvas.style.position = 'absolute';
     this.canvas.style.left = Math.round((cw - dw) / 2 + this.panX) + 'px';
     this.canvas.style.top = Math.round((ch - dh) / 2 + this.panY) + 'px';
-    // Also position any overlay canvas (sibling)
+    // Also position any overlay canvas (sibling) — only resize on first load,
+    // NOT on every zoom/pan, because setting .width clears canvas content.
     const overlay = this.canvas.nextElementSibling;
     if (overlay && overlay.tagName === 'CANVAS') {
-      overlay.width = this.w;
-      overlay.height = this.h;
+      if (overlay.width !== this.w || overlay.height !== this.h) {
+        overlay.width = this.w;
+        overlay.height = this.h;
+      }
       overlay.style.width = dw + 'px';
       overlay.style.height = dh + 'px';
       overlay.style.position = 'absolute';
@@ -108,8 +123,13 @@ class CanvasManager {
     };
   }
 
+  _undoCtx() {
+    return this.paintCanvas ? this.paintCanvas.getContext('2d', { willReadFrequently: true }) : this.ctx;
+  }
+
   pushUndo() {
-    this.undoStack.push(this.ctx.getImageData(0, 0, this.w, this.h));
+    const c = this._undoCtx();
+    this.undoStack.push(c.getImageData(0, 0, this.w, this.h));
     if (this.undoStack.length > 20) this.undoStack.shift();
     this.redoStack = [];
     this._updateBtns();
@@ -117,25 +137,31 @@ class CanvasManager {
 
   undo() {
     if (this.undoStack.length === 0) return;
-    this.redoStack.push(this.ctx.getImageData(0, 0, this.w, this.h));
-    this.ctx.putImageData(this.undoStack.pop(), 0, 0);
+    const c = this._undoCtx();
+    this.redoStack.push(c.getImageData(0, 0, this.w, this.h));
+    c.putImageData(this.undoStack.pop(), 0, 0);
     this._updateBtns();
   }
 
   redo() {
     if (this.redoStack.length === 0) return;
-    this.undoStack.push(this.ctx.getImageData(0, 0, this.w, this.h));
-    this.ctx.putImageData(this.redoStack.pop(), 0, 0);
+    const c = this._undoCtx();
+    this.undoStack.push(c.getImageData(0, 0, this.w, this.h));
+    c.putImageData(this.redoStack.pop(), 0, 0);
     this._updateBtns();
   }
 
   reset() {
-    if (this.origData) {
+    if (this.paintCanvas) {
+      // For overlay-based tools: clear the overlay
+      const c = this.paintCanvas.getContext('2d');
+      c.clearRect(0, 0, this.w, this.h);
+    } else if (this.origData) {
       this.ctx.putImageData(this.origData, 0, 0);
-      this.undoStack = [];
-      this.redoStack = [];
-      this._updateBtns();
     }
+    this.undoStack = [];
+    this.redoStack = [];
+    this._updateBtns();
   }
 
   _updateBtns() {
@@ -169,7 +195,8 @@ class CanvasManager {
     const sx = this.w / rect.width;
     const cx = Math.round((e.clientX - rect.left) * sx);
     const cy = Math.round((e.clientY - rect.top) * sx);
-    const srcSize = 40;
+    // srcSize adapts to zoom level: fewer source pixels when zoomed in → more detail in loupe
+    const srcSize = Math.max(8, Math.round(20 / this.zoom));
     lCtx.clearRect(0, 0, 120, 120);
     lCtx.save();
     lCtx.beginPath();
@@ -196,25 +223,36 @@ class CanvasManager {
   }
 
   _bindEvents() {
-    // Mouse events on canvas
-    this.canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 1 || (e.button === 0 && e.altKey)) {
-        // Middle click or Alt+click = pan
+    // Mouse events on canvas (listen on paintCanvas too if it's an overlay)
+    const evtTarget = this.paintCanvas || this.canvas;
+    evtTarget.addEventListener('contextmenu', (e) => { if (this.rightClickPan) e.preventDefault(); });
+    evtTarget.addEventListener('mousedown', (e) => {
+      if (e.button === 1 || (e.button === 0 && e.altKey) || (this.rightClickPan && e.button === 2)) {
+        // Middle click, Alt+click, or right-click (when enabled) = pan
         this.panning = true;
         this.panStart = { x: e.clientX - this.panX, y: e.clientY - this.panY };
-        this.canvas.style.cursor = 'grabbing';
+        evtTarget.style.cursor = 'grabbing';
         e.preventDefault();
         return;
       }
-      if (e.button === 0 && this.onPaint) {
-        this.painting = true;
-        this.pushUndo();
+      if (e.button === 0) {
         const p = this.getCanvasCoords(e);
-        this.onPaint(this.ctx, p.x, p.y, this);
+        // Let onMouseDown intercept (return false to skip auto-paint)
+        if (this.onMouseDown) {
+          const pCtx = this.paintCanvas ? this.paintCanvas.getContext('2d', { willReadFrequently: true }) : this.ctx;
+          if (this.onMouseDown(pCtx, p.x, p.y, e, this) === false) return;
+        }
+        if (this.onPaint) {
+          this.painting = true;
+          this.pushUndo();
+          this.lastPaintPoint = p;
+          const pCtx = this.paintCanvas ? this.paintCanvas.getContext('2d', { willReadFrequently: true }) : this.ctx;
+          this.onPaint(pCtx, p.x, p.y, null, this);
+        }
       }
     });
 
-    this.canvas.addEventListener('mousemove', (e) => {
+    evtTarget.addEventListener('mousemove', (e) => {
       if (this.panning && this.panStart) {
         this.panX = e.clientX - this.panStart.x;
         this.panY = e.clientY - this.panStart.y;
@@ -225,7 +263,9 @@ class CanvasManager {
       this._updateLoupe(e);
       if (this.painting && this.onPaint) {
         const p = this.getCanvasCoords(e);
-        this.onPaint(this.ctx, p.x, p.y, this);
+        const pCtx = this.paintCanvas ? this.paintCanvas.getContext('2d', { willReadFrequently: true }) : this.ctx;
+        this.onPaint(pCtx, p.x, p.y, this.lastPaintPoint, this);
+        this.lastPaintPoint = p;
       }
       if (this.onMouseMove) {
         const p = this.getCanvasCoords(e);
@@ -233,18 +273,22 @@ class CanvasManager {
       }
     });
 
-    this.canvas.addEventListener('mouseleave', () => {
+    evtTarget.addEventListener('mouseleave', () => {
       if (this.brushCursor) this.brushCursor.style.display = 'none';
       const loupeEl = document.getElementById('clone-loupe');
       if (loupeEl) loupeEl.style.display = 'none';
     });
 
     window.addEventListener('mouseup', () => {
-      this.painting = false;
+      if (this.painting) {
+        this.painting = false;
+        this.lastPaintPoint = null;
+        if (this.onMouseUp) this.onMouseUp(this);
+      }
       if (this.panning) {
         this.panning = false;
         this.panStart = null;
-        this.canvas.style.cursor = '';
+        evtTarget.style.cursor = '';
       }
     });
 
@@ -254,6 +298,8 @@ class CanvasManager {
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
       this.zoom = Math.max(0.2, Math.min(10, this.zoom * factor));
       this._applyTransform();
+      this._updateBrushCursor(e);
+      this._updateLoupe(e);
     }, { passive: false });
 
     // Keyboard: Ctrl+Z/Y

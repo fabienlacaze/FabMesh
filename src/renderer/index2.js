@@ -2421,7 +2421,60 @@ const symState = {
   dragging: false, rotating: false,
   painting: false,
   undoStack: [],
+  zoom: 1, panX: 0, panY: 0, panning: false, panStart: null,
 };
+
+function _symApplyView() {
+  const canvas = document.getElementById('sym-canvas');
+  const overlay = document.getElementById('sym-overlay');
+  const container = document.getElementById('sym-canvas-container');
+  if (!canvas || !overlay || !container) return;
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const baseScale = Math.min(cw / symState.w, ch / symState.h, 1);
+  const totalScale = baseScale * symState.zoom;
+  const dw = Math.round(symState.w * totalScale), dh = Math.round(symState.h * totalScale);
+  const left = Math.round((cw - dw) / 2 + symState.panX);
+  const top = Math.round((ch - dh) / 2 + symState.panY);
+  canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+  overlay.style.width = dw + 'px'; overlay.style.height = dh + 'px';
+  canvas.style.left = left + 'px'; canvas.style.top = top + 'px';
+  overlay.style.left = left + 'px'; overlay.style.top = top + 'px';
+}
+
+// Zoom + pan for Symmetrize
+(() => {
+  const container = document.getElementById('sym-canvas-container');
+  if (!container) return;
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    symState.zoom = Math.max(0.2, Math.min(10, symState.zoom * factor));
+    _symApplyView();
+  }, { passive: false });
+  container.addEventListener('mousedown', (e) => {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      symState.panning = true;
+      symState.panStart = { x: e.clientX - symState.panX, y: e.clientY - symState.panY };
+      container.style.cursor = 'grabbing';
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (symState.panning && symState.panStart) {
+      symState.panX = e.clientX - symState.panStart.x;
+      symState.panY = e.clientY - symState.panStart.y;
+      _symApplyView();
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    if (symState.panning) {
+      symState.panning = false;
+      symState.panStart = null;
+      const c = document.getElementById('sym-canvas-container');
+      if (c) c.style.cursor = '';
+    }
+  });
+})();
 
 function openSymmetrize() {
   const p = state.currentProject;
@@ -2433,30 +2486,20 @@ function openSymmetrize() {
   if (!modal || !canvas || !overlay) return;
   const ctx = canvas.getContext('2d');
   const octx = overlay.getContext('2d');
+  modal.classList.remove('hidden');
   const img = new Image();
   img.onload = () => {
-    const container = document.getElementById('sym-canvas-container');
-    const cw = container.clientWidth || 800;
-    const ch = container.clientHeight || 600;
-    const scale = Math.min(cw / img.width, ch / img.height, 1);
-    const dw = Math.round(img.width * scale);
-    const dh = Math.round(img.height * scale);
     canvas.width = img.width; canvas.height = img.height;
     overlay.width = img.width; overlay.height = img.height;
-    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
-    overlay.style.width = dw + 'px'; overlay.style.height = dh + 'px';
-    const left = Math.round((cw - dw) / 2);
-    const top = Math.round((ch - dh) / 2);
-    canvas.style.left = left + 'px'; canvas.style.top = top + 'px';
-    overlay.style.left = left + 'px'; overlay.style.top = top + 'px';
     ctx.drawImage(img, 0, 0);
-    symState.origData = ctx.getImageData(0, 0, img.width, img.height);
     symState.w = img.width; symState.h = img.height;
+    symState.zoom = 1; symState.panX = 0; symState.panY = 0;
+    _symApplyView();
+    symState.origData = ctx.getImageData(0, 0, img.width, img.height);
     symState.axisX = 0.5; symState.axisAngle = 0;
     symState.maskData = new Uint8Array(img.width * img.height);
     symState.undoStack = [];
     _symDrawPreview();
-    modal.classList.remove('hidden');
   };
   img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
 }
@@ -2470,32 +2513,39 @@ function _symDrawPreview() {
   const w = symState.w, h = symState.h;
   const orig = symState.origData;
 
-  // Draw symmetrized image
+  // Draw symmetrized image — mirror across rotated axis line
   const result = ctx.createImageData(w, h);
   result.data.set(orig.data);
-  const axisPixel = Math.round(symState.axisX * w);
+  const ax = symState.axisX * w;       // axis point X
+  const ay = h / 2;                     // axis point Y (center)
+  const angle = symState.axisAngle;
+  // Direction vector of the axis line (from the drawing code)
+  const dx = Math.sin(angle);
+  const dy = Math.cos(angle);
+  const dLen2 = dx * dx + dy * dy; // always 1 for unit vector, but keep for clarity
+  // Normal to the axis (points to the "right" side)
+  const nx = dy, ny = -dx;
   const useMask = symState.mode === 'mask';
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const idx = (y * w + x) * 4;
-      // Check mask if in mask mode
-      if (useMask && symState.maskData[y * w + x] === 0) continue;
+      // Signed distance from axis: positive = right side, negative = left side
+      const side = (x - ax) * nx + (y - ay) * ny;
 
-      let srcX;
-      if (symState.direction === 'lr') {
-        // Left → Right: mirror left side to right
-        if (x > axisPixel) {
-          srcX = axisPixel - (x - axisPixel);
-        } else continue;
+      if (useMask) {
+        if (symState.maskData[y * w + x] === 0) continue;
       } else {
-        // Right → Left: mirror right side to left
-        if (x < axisPixel) {
-          srcX = axisPixel + (axisPixel - x);
-        } else continue;
+        // In full mode: only replace destination side
+        if (symState.direction === 'lr' && side <= 0) continue;
+        if (symState.direction === 'rl' && side >= 0) continue;
       }
-      if (srcX < 0 || srcX >= w) continue;
-      const srcIdx = (y * w + Math.round(srcX)) * 4;
+      // Reflect (x,y) across the axis line
+      const t = ((x - ax) * dx + (y - ay) * dy) / dLen2;
+      const srcX = Math.round(2 * (ax + t * dx) - x);
+      const srcY = Math.round(2 * (ay + t * dy) - y);
+      if (srcX < 0 || srcX >= w || srcY < 0 || srcY >= h) continue;
+      const srcIdx = (srcY * w + srcX) * 4;
       result.data[idx] = orig.data[srcIdx];
       result.data[idx+1] = orig.data[srcIdx+1];
       result.data[idx+2] = orig.data[srcIdx+2];
@@ -2599,10 +2649,13 @@ if (_symOverlay) {
     const p = _symCanvasCoords(e);
     const axPx = symState.axisX * symState.w;
     if (e.shiftKey) {
-      // Shift+drag = rotate axis
+      // Shift+drag = rotate axis (works in both modes)
       symState.rotating = true;
-    } else if (Math.abs(p.x - axPx) < 20 && symState.mode === 'full') {
-      // Drag axis
+    } else if (e.ctrlKey || e.metaKey) {
+      // Ctrl+drag = move axis (works in both modes)
+      symState.dragging = true;
+    } else if (symState.mode === 'full' && Math.abs(p.x - axPx) < 20) {
+      // Near axis in full mode = drag axis
       symState.dragging = true;
     } else if (symState.mode === 'mask') {
       // Paint mask
@@ -2643,8 +2696,8 @@ if (_symOverlay) {
       const axPx = symState.axisX * symState.w;
       _symOverlay.style.cursor = Math.abs(p.x - axPx) < 20 ? 'ew-resize' : 'default';
     }
-    // Loupe
-    updateLoupe(e, document.getElementById('sym-canvas'));
+    // Loupe (inline — Symmetrize doesn't use CanvasManager yet)
+    _symUpdateLoupe(e);
   });
 
   _symOverlay.addEventListener('mouseleave', () => {
@@ -2673,13 +2726,44 @@ function _symPaintMask(cx, cy) {
   }
 }
 
-// Sym loupe toggle (shares loupeEnabled from clone/mask tools)
+// Sym loupe state + toggle
+let _symLoupeEnabled = true;
+function _symUpdateLoupe(e) {
+  const loupeEl = document.getElementById('clone-loupe');
+  if (!_symLoupeEnabled || !loupeEl) { if (loupeEl) loupeEl.style.display = 'none'; return; }
+  const loupeCanvas = document.getElementById('clone-loupe-canvas');
+  if (!loupeCanvas) return;
+  const lCtx = loupeCanvas.getContext('2d');
+  const canvas = document.getElementById('sym-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = symState.w / rect.width;
+  const cx = Math.round((e.clientX - rect.left) * sx);
+  const cy = Math.round((e.clientY - rect.top) * sx);
+  const srcSize = Math.max(8, 20);
+  lCtx.clearRect(0, 0, 120, 120);
+  lCtx.save();
+  lCtx.beginPath(); lCtx.arc(60, 60, 58, 0, Math.PI * 2); lCtx.clip();
+  lCtx.drawImage(canvas, cx - srcSize, cy - srcSize, srcSize * 2, srcSize * 2, 0, 0, 120, 120);
+  lCtx.strokeStyle = 'rgba(255,255,255,0.6)'; lCtx.lineWidth = 1;
+  lCtx.beginPath(); lCtx.moveTo(60, 50); lCtx.lineTo(60, 70); lCtx.moveTo(50, 60); lCtx.lineTo(70, 60); lCtx.stroke();
+  lCtx.restore();
+  const cRect = canvas.parentElement.getBoundingClientRect();
+  let lx = e.clientX + 20, ly = e.clientY - 140;
+  if (lx + 120 > cRect.right) lx = e.clientX - 140;
+  if (ly < cRect.top) ly = e.clientY + 20;
+  if (lx < cRect.left) lx = cRect.left + 4;
+  if (ly + 120 > cRect.bottom) ly = cRect.bottom - 124;
+  loupeEl.style.left = lx + 'px'; loupeEl.style.top = ly + 'px'; loupeEl.style.display = 'block';
+}
 document.getElementById('sym-loupe-toggle')?.addEventListener('click', () => {
-  loupeEnabled = !loupeEnabled;
+  _symLoupeEnabled = !_symLoupeEnabled;
   const btn = document.getElementById('sym-loupe-toggle');
-  if (btn) btn.classList.toggle('tool-active', loupeEnabled);
-  if (!loupeEnabled) { const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none'; }
+  if (btn) btn.classList.toggle('tool-active', _symLoupeEnabled);
+  if (!_symLoupeEnabled) { const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none'; }
 });
+// Set loupe button active by default
+(() => { const b = document.getElementById('sym-loupe-toggle'); if (b) b.classList.add('tool-active'); })();
 
 // Undo + Reset
 document.getElementById('sym-undo')?.addEventListener('click', () => {
@@ -2696,12 +2780,12 @@ document.getElementById('sym-reset')?.addEventListener('click', () => {
 });
 
 // Close / Cancel
-document.getElementById('sym-close')?.addEventListener('click', () => {
+function _closeSym() {
   document.getElementById('modal-symmetrize')?.classList.add('hidden');
-});
-document.getElementById('sym-cancel')?.addEventListener('click', () => {
-  document.getElementById('modal-symmetrize')?.classList.add('hidden');
-});
+  const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none';
+}
+document.getElementById('sym-close')?.addEventListener('click', _closeSym);
+document.getElementById('sym-cancel')?.addEventListener('click', _closeSym);
 
 // Apply: save the symmetrized image as a new version
 document.getElementById('sym-apply')?.addEventListener('click', async () => {
@@ -3092,14 +3176,23 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
   const canvas = document.getElementById('cpick-canvas');
   if (!modal || !canvas) return;
   const ctx = canvas.getContext('2d');
+  modal.classList.remove('hidden');
   const img = new Image();
   img.onload = () => {
     canvas.width = img.width; canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
+    // Center canvas in container
+    const container = document.getElementById('cpick-canvas-container');
+    const cw = container.clientWidth || 800;
+    const ch = container.clientHeight || 600;
+    const scale = Math.min(cw / img.width, ch / img.height, 1);
+    const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
+    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+    canvas.style.left = Math.round((cw - dw) / 2) + 'px';
+    canvas.style.top = Math.round((ch - dh) / 2) + 'px';
     document.getElementById('cpick-swatch').style.background = '#000';
     document.getElementById('cpick-hex').textContent = '';
     document.getElementById('cpick-rgb').textContent = 'Move cursor over image';
-    modal.classList.remove('hidden');
   };
   img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
 });
@@ -3156,7 +3249,7 @@ document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
       loupeBtn: document.getElementById('blur-loupe-toggle'),
       brushCursor: document.getElementById('blur-brush-cursor'),
       brushSizeGetter: () => blurState.brushSize,
-      onPaint: (ctx, x, y, mgr) => {
+      onPaint: (ctx, x, y, _lastPt, mgr) => {
         const r = blurState.brushSize / 2;
         const s = blurState.strength;
         const ax = Math.max(0, Math.round(x - r));
@@ -3191,6 +3284,7 @@ document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
     });
   }
   modal.classList.remove('hidden');
+  _blurMgr.activate();
   // Load AFTER modal is visible so container has real dimensions
   await _blurMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
 });
@@ -3232,11 +3326,314 @@ document.getElementById('blur-save')?.addEventListener('click', async () => {
   } catch (e) { showToast('Error: ' + e.message, 'error'); }
 });
 
-// Eraser: guide to Remove BG + Draw Mask
-document.getElementById('ws-eraser-btn')?.addEventListener('click', () => {
+// ============================================================
+// PAINT TOOLS — Pen, Spray, Ink, Line, Fill, Wand, Smudge, Eraser
+// ============================================================
+let _paintMgr = null;
+const paintState = {
+  tool: 'pen',      // pen | spray | ink | line | fill | wand | smudge | eraser
+  brushSize: 20,
+  opacity: 100,
+  color: '#ff0000',
+  tolerance: 32,
+  eyedropping: false,
+  imgPath: null,
+  lineStart: null,        // {x,y} for line tool
+  linePreviewData: null,  // ImageData snapshot before line preview
+  smudgeLastColor: null,  // last sampled color for smudge
+};
+
+function _paintDab(ctx, x, y, _lastPt, mgr) {
+  x = Math.round(x); y = Math.round(y);
+  const r = paintState.brushSize / 2;
+  const alpha = paintState.opacity / 100;
+
+  if (paintState.tool === 'eraser') {
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (paintState.tool === 'smudge') {
+    _paintSmudgeDab(ctx, x, y, r);
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = paintState.color;
+
+  if (paintState.tool === 'pen') {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (paintState.tool === 'spray') {
+    const dots = Math.round(r * r * 0.15);
+    for (let i = 0; i < dots; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * r;
+      ctx.fillRect(Math.round(x + Math.cos(angle) * dist), Math.round(y + Math.sin(angle) * dist), 1, 1);
+    }
+  } else if (paintState.tool === 'ink') {
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, paintState.color);
+    grad.addColorStop(0.6, paintState.color);
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function _paintStroke(ctx, x, y, lastPt, mgr) {
+  x = Math.round(x); y = Math.round(y);
+  if (paintState.tool === 'line') {
+    // Line tool: preview rubber band line
+    if (paintState.linePreviewData) ctx.putImageData(paintState.linePreviewData, 0, 0);
+    if (paintState.lineStart) {
+      ctx.save();
+      ctx.globalAlpha = paintState.opacity / 100;
+      ctx.strokeStyle = paintState.color;
+      ctx.lineWidth = paintState.brushSize;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(paintState.lineStart.x, paintState.lineStart.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.restore();
+    }
+    return;
+  }
+  if (!lastPt) { _paintDab(ctx, x, y, null, mgr); return; }
+  const dx = x - Math.round(lastPt.x), dy = y - Math.round(lastPt.y);
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const step = Math.max(1, paintState.brushSize / (paintState.tool === 'spray' ? 2 : (paintState.tool === 'smudge' ? 2 : 4)));
+  const steps = Math.ceil(dist / step);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    _paintDab(ctx, Math.round(lastPt.x + dx * t), Math.round(lastPt.y + dy * t), null, mgr);
+  }
+}
+
+// --- Smudge: sample average color under brush, paint it shifted ---
+function _paintSmudgeDab(ctx, x, y, r) {
+  const sr = Math.max(2, Math.round(r * 0.6));
+  const w = _paintMgr.w, h = _paintMgr.h;
+  const sx = Math.max(0, x - sr), sy = Math.max(0, y - sr);
+  const sw = Math.min(w - sx, sr * 2), sh = Math.min(h - sy, sr * 2);
+  if (sw <= 0 || sh <= 0) return;
+  const data = ctx.getImageData(sx, sy, sw, sh).data;
+  let tr = 0, tg = 0, tb = 0, cnt = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] > 30) { tr += data[i]; tg += data[i+1]; tb += data[i+2]; cnt++; }
+  }
+  if (cnt === 0) return;
+  const avg = `rgba(${Math.round(tr/cnt)},${Math.round(tg/cnt)},${Math.round(tb/cnt)},${paintState.opacity / 100})`;
+  ctx.save();
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+  grad.addColorStop(0, avg);
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// --- Flood fill (paint bucket) ---
+function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
+  const w = _paintMgr.w, h = _paintMgr.h;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const idx = (startY * w + startX) * 4;
+  const sr = data[idx], sg = data[idx+1], sb = data[idx+2], sa = data[idx+3];
+  // Parse fill color
+  const tmp = document.createElement('canvas'); tmp.width = 1; tmp.height = 1;
+  const tc = tmp.getContext('2d'); tc.fillStyle = fillColor; tc.fillRect(0, 0, 1, 1);
+  const fc = tc.getImageData(0, 0, 1, 1).data;
+  const fr = fc[0], fg = fc[1], fb = fc[2];
+  // Already same color?
+  if (Math.abs(sr - fr) + Math.abs(sg - fg) + Math.abs(sb - fb) < 3) return;
+  const tol = tolerance;
+  function match(i) {
+    return Math.abs(data[i] - sr) <= tol && Math.abs(data[i+1] - sg) <= tol && Math.abs(data[i+2] - sb) <= tol && Math.abs(data[i+3] - sa) <= tol;
+  }
+  const stack = [[startX, startY]];
+  const visited = new Uint8Array(w * h);
+  const alpha = paintState.opacity / 100;
+  while (stack.length > 0) {
+    const [cx, cy] = stack.pop();
+    const ci = cy * w + cx;
+    if (cx < 0 || cx >= w || cy < 0 || cy >= h || visited[ci]) continue;
+    const pi = ci * 4;
+    if (!match(pi)) continue;
+    visited[ci] = 1;
+    data[pi]   = Math.round(data[pi]   * (1 - alpha) + fr * alpha);
+    data[pi+1] = Math.round(data[pi+1] * (1 - alpha) + fg * alpha);
+    data[pi+2] = Math.round(data[pi+2] * (1 - alpha) + fb * alpha);
+    data[pi+3] = 255;
+    stack.push([cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]);
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+// --- Magic Wand: select similar color region, paint with fill color ---
+function _paintMagicWand(ctx, startX, startY, fillColor, tolerance) {
+  // Same as flood fill but highlights selection then fills
+  _paintFloodFill(ctx, startX, startY, fillColor, tolerance);
+}
+
+function _closePaint() {
+  document.getElementById('modal-paint')?.classList.add('hidden');
+  if (_paintMgr) _paintMgr.loupeEnabled = false;
+  const l = document.getElementById('clone-loupe'); if (l) l.style.display = 'none';
+}
+
+// Open Paint Tools
+document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  showToast('Use Remove BG first, then Draw Mask to clean edges', 'info', 4000);
+  paintState.imgPath = p.selectedImagePath;
+  const modal = document.getElementById('modal-paint');
+  if (!modal) return;
+
+  if (!_paintMgr) {
+    _paintMgr = new CanvasManager({
+      canvas: document.getElementById('paint-canvas'),
+      container: document.getElementById('paint-canvas-container'),
+      undoBtn: document.getElementById('paint-undo'),
+      redoBtn: document.getElementById('paint-redo'),
+      resetBtn: document.getElementById('paint-reset'),
+      loupeBtn: document.getElementById('paint-loupe-toggle'),
+      brushCursor: document.getElementById('paint-brush-cursor'),
+      brushSizeGetter: () => paintState.brushSize,
+      onMouseDown: (ctx, x, y, e, mgr) => {
+        if (paintState.eyedropping) {
+          const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+          const hex = '#' + [px[0], px[1], px[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+          paintState.color = hex;
+          document.getElementById('paint-color').value = hex;
+          paintState.eyedropping = false;
+          document.getElementById('paint-eyedropper')?.classList.remove('tool-active');
+          document.getElementById('paint-canvas').style.cursor = 'none';
+          return false;
+        }
+        if (paintState.tool === 'fill') {
+          mgr.pushUndo();
+          _paintFloodFill(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance);
+          return false;
+        }
+        if (paintState.tool === 'wand') {
+          mgr.pushUndo();
+          _paintMagicWand(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance);
+          return false;
+        }
+        if (paintState.tool === 'line') {
+          paintState.lineStart = { x: Math.round(x), y: Math.round(y) };
+          paintState.linePreviewData = ctx.getImageData(0, 0, mgr.w, mgr.h);
+          return undefined; // let CanvasManager pushUndo
+        }
+        _paintDab(ctx, Math.round(x), Math.round(y), null, mgr);
+        return undefined;
+      },
+      onPaint: _paintStroke,
+      onMouseUp: (mgr) => {
+        if (paintState.tool === 'line' && paintState.lineStart) {
+          // Line finalized on mouseup (preview already drawn by _paintStroke)
+          paintState.lineStart = null;
+          paintState.linePreviewData = null;
+        }
+      },
+    });
+  }
+
+  modal.classList.remove('hidden');
+  _paintMgr.activate();
+  paintState.eyedropping = false;
+  document.getElementById('paint-eyedropper')?.classList.remove('tool-active');
+  requestAnimationFrame(() => {
+    _paintMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
+  });
+});
+
+// Tool selection buttons
+const _paintTools = ['pen', 'spray', 'ink', 'line', 'fill', 'wand', 'smudge', 'eraser'];
+_paintTools.forEach(tool => {
+  document.getElementById('paint-tool-' + tool)?.addEventListener('click', () => {
+    paintState.tool = tool;
+    _paintTools.forEach(t => {
+      document.getElementById('paint-tool-' + t)?.classList.toggle('tool-active', t === tool);
+    });
+    // Show tolerance slider only for fill/wand
+    const tolGroup = document.getElementById('paint-tolerance-group');
+    if (tolGroup) tolGroup.style.display = (tool === 'fill' || tool === 'wand') ? 'flex' : 'none';
+    // Cursor: crosshair for fill/wand, none for brush tools
+    const canvas = document.getElementById('paint-canvas');
+    if (canvas) canvas.style.cursor = (tool === 'fill' || tool === 'wand') ? 'crosshair' : 'none';
+  });
+});
+
+// Brush size
+document.getElementById('paint-brush-size')?.addEventListener('input', (e) => {
+  paintState.brushSize = parseInt(e.target.value);
+  document.getElementById('paint-brush-val').textContent = e.target.value;
+});
+
+// Opacity
+document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
+  paintState.opacity = parseInt(e.target.value);
+  document.getElementById('paint-opacity-val').textContent = e.target.value + '%';
+});
+
+// Tolerance (for Fill / Wand)
+document.getElementById('paint-tolerance')?.addEventListener('input', (e) => {
+  paintState.tolerance = parseInt(e.target.value);
+  document.getElementById('paint-tolerance-val').textContent = e.target.value;
+});
+
+// Color picker
+document.getElementById('paint-color')?.addEventListener('input', (e) => {
+  paintState.color = e.target.value;
+});
+
+// Eyedropper (pick from image)
+document.getElementById('paint-eyedropper')?.addEventListener('click', () => {
+  paintState.eyedropping = !paintState.eyedropping;
+  document.getElementById('paint-eyedropper')?.classList.toggle('tool-active', paintState.eyedropping);
+  const canvas = document.getElementById('paint-canvas');
+  if (canvas) canvas.style.cursor = paintState.eyedropping ? 'crosshair' : 'none';
+});
+
+// Close / Cancel
+document.getElementById('paint-close-x')?.addEventListener('click', _closePaint);
+document.getElementById('paint-cancel')?.addEventListener('click', _closePaint);
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal-paint');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (e.key === 'Escape') _closePaint();
+});
+
+// Save
+document.getElementById('paint-save')?.addEventListener('click', () => {
+  if (!paintState.imgPath || !_paintMgr) return;
+  const dataUrl = _paintMgr.toDataURL();
+  window.meshyAPI.saveImageDataUrl({ basePath: paintState.imgPath, dataUrl, suffix: 'painted' })
+    .then(result => {
+      if (result && result.success) {
+        showToast('Painted version saved!', 'success');
+        _closePaint();
+        if (state.currentProject) refreshProjectImages(state.currentProject);
+      } else {
+        showToast('Save failed: ' + ((result && result.error) || 'unknown'), 'error');
+      }
+    })
+    .catch(e => showToast('Save error: ' + e.message, 'error'));
 });
 
 // ----- Mesh step -----
