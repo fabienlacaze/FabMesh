@@ -23,22 +23,35 @@ def log(msg):
 
 
 def _subdivide_with_uv(vertices, faces, uv, levels):
-    """Subdivide mesh geometry and interpolate UVs via barycentric coords.
+    """Subdivide mesh with correct per-edge UV interpolation.
 
-    For each subdivision step:
-    1. trimesh.remesh.subdivide splits each triangle into 4 by adding
-       midpoints on edges. New verts are at indices [n_old:].
-    2. For each new vertex, we find which original triangle it falls in
-       and compute its UV by averaging the UVs of the edge endpoints.
+    For each subdivision level:
+    1. Build an edge→midpoint-UV map from the face topology (not 3D positions)
+    2. trimesh.remesh.subdivide adds midpoints, new verts at indices [n_old:]
+    3. Map new verts to edges via position matching with a hash table (fast)
+    4. Look up the correct UV from the edge map
 
-    This is exact for midpoint subdivision (each new vert IS the midpoint
-    of an edge, so its UV is exactly the average of the 2 endpoint UVs).
+    This avoids the KDTree cross-island bug by using topology, not geometry.
     """
     from trimesh.remesh import subdivide
 
     for lvl in range(levels):
         n_old = len(vertices)
-        old_verts = vertices.copy()
+
+        # Build edge→UV midpoint map using face topology (per-edge, first-seen wins)
+        # Key: sorted (min_idx, max_idx) vertex pair
+        # Also store midpoint 3D position for fast matching after subdivision
+        edge_data = {}  # (a,b) -> { 'uv_mid': array, 'pos_mid': array }
+        if uv is not None:
+            for face in faces:
+                for ei in range(3):
+                    a, b = int(face[ei]), int(face[(ei + 1) % 3])
+                    key = (min(a, b), max(a, b))
+                    if key not in edge_data:
+                        edge_data[key] = {
+                            'uv_mid': (uv[a] + uv[b]) * 0.5,
+                            'pos_mid': (vertices[a] + vertices[b]) * 0.5,
+                        }
 
         # Subdivide geometry
         vertices, faces = subdivide(vertices, faces)
@@ -47,22 +60,40 @@ def _subdivide_with_uv(vertices, faces, uv, levels):
         if uv is None or n_new == 0:
             continue
 
-        # For each new vertex (midpoint of an edge), find the 2 original
-        # vertices it came from by checking which edges in the new faces
-        # connect an old vertex to this new one.
-        #
-        # Faster approach: use scipy KDTree to find the 2 nearest original
-        # vertices for each new vertex (they're the edge endpoints).
-        from scipy.spatial import cKDTree
-        tree = cKDTree(old_verts)
+        # Build position hash for fast lookup: quantize midpoint positions
+        # to avoid floating point matching issues
+        pos_to_uv = {}
+        for (a, b), data in edge_data.items():
+            # Hash the midpoint position (quantized to avoid FP issues)
+            px, py, pz = data['pos_mid']
+            key = (round(px, 8), round(py, 8), round(pz, 8))
+            pos_to_uv[key] = data['uv_mid']
 
-        new_verts = vertices[n_old:]
-        # Query 2 nearest neighbors from the ORIGINAL vertex set
-        dists, indices = tree.query(new_verts, k=2)
+        # Assign UVs to new vertices
+        new_uvs = np.zeros((n_new, 2), dtype=np.float64)
+        misses = 0
+        for i in range(n_new):
+            pos = vertices[n_old + i]
+            key = (round(pos[0], 8), round(pos[1], 8), round(pos[2], 8))
+            if key in pos_to_uv:
+                new_uvs[i] = pos_to_uv[key]
+            else:
+                # Fallback: try with less precision
+                key5 = (round(pos[0], 5), round(pos[1], 5), round(pos[2], 5))
+                found = False
+                for pk, puv in pos_to_uv.items():
+                    if abs(pk[0]-key5[0]) < 1e-5 and abs(pk[1]-key5[1]) < 1e-5 and abs(pk[2]-key5[2]) < 1e-5:
+                        new_uvs[i] = puv
+                        found = True
+                        break
+                if not found:
+                    misses += 1
+                    new_uvs[i] = [0.5, 0.5]
 
-        # New UV = average of the 2 endpoint UVs
-        new_uv = (uv[indices[:, 0]] + uv[indices[:, 1]]) / 2.0
-        uv = np.vstack([uv, new_uv])
+        if misses > 0:
+            log(f'  WARNING: {misses}/{n_new} new verts had no UV match (level {lvl+1})')
+
+        uv = np.vstack([uv, new_uvs])
 
     return vertices, faces, uv
 
@@ -126,7 +157,7 @@ def subdivide_glb(input_path, output_path, levels=2):
         return True
 
     # ==================================================================
-    # SUBDIVISION (levels > 0)
+    # SUBDIVISION (levels > 0) — edge-based UV interpolation
     # ==================================================================
     result_meshes = {}
     for idx, geom in enumerate(geometries):
@@ -135,16 +166,12 @@ def subdivide_glb(input_path, output_path, levels=2):
         faces = np.asarray(geom.faces, dtype=np.int32)
         log(f'  {name}: {len(verts)} verts, {len(faces)} faces before subdivision')
 
-        # Extract UVs
         has_uv = hasattr(geom.visual, 'uv') and geom.visual.uv is not None and len(geom.visual.uv) > 0
         uv = np.asarray(geom.visual.uv, dtype=np.float64) if has_uv else None
 
-        # Subdivide with UV interpolation
         verts, faces, uv = _subdivide_with_uv(verts, faces, uv, levels)
-
         log(f'  {name}: {len(verts)} verts, {len(faces)} faces after subdivision')
 
-        # Rebuild mesh with original material
         new_verts = np.asarray(verts, dtype=np.float32)
         new_faces = np.asarray(faces, dtype=np.int32)
         mat = geom.visual.material if hasattr(geom.visual, 'material') else None
