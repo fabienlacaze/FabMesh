@@ -4612,7 +4612,7 @@ const meState = {
   controls: null,
   mesh: null,
   meshPath: null,
-  raycaster: new THREE.Raycaster(),
+  raycaster: (() => { const r = new THREE.Raycaster(); r.firstHitOnly = true; return r; })(),
   mouse: new THREE.Vector2(),
   undoStack: [],
   redoStack: [],
@@ -4837,6 +4837,7 @@ function _meMouseDown(e) {
 
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
+  // Always update cursor position (cheap, no raycasting)
   const cursor = document.getElementById('me-brush-cursor');
   if (cursor) {
     const screenSize = meState.brushRadius * 500;
@@ -4847,9 +4848,9 @@ function _meMouseMove(e) {
     cursor.style.display = 'block';
   }
   if (!meState.painting) return;
-  // Throttle: max 30fps for brush application
+  // Throttle: max 15fps for brush (raycasting is expensive)
   const now = performance.now();
-  if (now - _meLastBrushTime < 33) return;
+  if (now - _meLastBrushTime < 66) return;
   _meLastBrushTime = now;
   const hit = _meGetIntersection(e);
   if (hit) _meApplyBrush(hit);
@@ -4859,6 +4860,13 @@ function _meMouseUp() {
   if (meState.painting) {
     meState.painting = false;
     meState.controls.enabled = true;
+    // Recompute normals after sculpt stroke
+    meState.mesh?.traverse(c => {
+      if (c.isMesh && c.geometry?._normsDirty) {
+        c.geometry.computeVertexNormals();
+        c.geometry._normsDirty = false;
+      }
+    });
   }
 }
 
@@ -4904,7 +4912,8 @@ function _meApplyBrush(hit) {
       }
     }
     pos.needsUpdate = true;
-    geom.computeVertexNormals();
+    // Defer normal recompute to mouseup (expensive)
+    geom._normsDirty = true;
   } else if (meState.mode === 'paint') {
     // Ensure vertex colors exist
     if (!geom.attributes.color) {
@@ -5026,6 +5035,18 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
         const r = await API.saveBuffer({ path: newPath, base64: b64 });
         if (r && r.success) {
           showToast('Edited mesh saved!', 'success');
+          // Add to project mesh list
+          const p = state.currentProject;
+          if (p) {
+            const filename = newPath.replace(/\\/g, '/').split('/').pop();
+            const info = await API.getFileInfo(newPath);
+            p.meshes.unshift({
+              path: newPath,
+              filename,
+              size: info?.size || 0,
+              mtime: Date.now(),
+            });
+          }
           _closeMeshEdit();
           populateWorkspace(state.currentProject);
         } else {
