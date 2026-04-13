@@ -2859,6 +2859,8 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
   const overlay = document.getElementById('crop-overlay');
   if (!modal || !canvas || !overlay) return;
   const ctx = canvas.getContext('2d');
+  // Show modal FIRST so container has real dimensions for centering
+  modal.classList.remove('hidden');
   const img = new Image();
   img.onload = () => {
     const container = document.getElementById('crop-canvas-container');
@@ -2882,7 +2884,6 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
     // Reset preset buttons
     document.querySelectorAll('[id^="crop-preset-"]').forEach(b => b.classList.remove('tool-active'));
     document.getElementById('crop-preset-free')?.classList.add('tool-active');
-    modal.classList.remove('hidden');
   };
   img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
 });
@@ -3189,8 +3190,9 @@ document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
       },
     });
   }
-  await _blurMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
   modal.classList.remove('hidden');
+  // Load AFTER modal is visible so container has real dimensions
+  await _blurMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
 });
 
 // Mode toggle
