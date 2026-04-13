@@ -178,68 +178,145 @@ def generate_3d(
     mesh.export(output_path, include_normals=True)
 
     # ------------------------------------------------------------------
-    # Post-process texture: SF3D tends to produce washed-out / desaturated
-    # textures (especially on buildings and props). Boost contrast and
-    # saturation on the baseColorTexture to get vivid, game-ready colors.
+    # Post-process textures IN-PLACE in the GLB binary.
+    # IMPORTANT: Do NOT use trimesh load+export here — it corrupts
+    # per-corner (wedge) UVs by merging duplicate vertices at seams.
+    # Instead, we parse the GLB binary, extract embedded PNG textures,
+    # modify them with PIL, and write them back at the same offsets.
     # ------------------------------------------------------------------
     try:
-        import trimesh as _tmesh
-        from PIL import ImageEnhance
-        _scene = _tmesh.load(output_path)
-        _geoms = list(_scene.geometry.values()) if hasattr(_scene, 'geometry') else [_scene]
-        _touched = False
-        for _g in _geoms:
-            if hasattr(_g.visual, 'material') and hasattr(_g.visual.material, 'baseColorTexture'):
-                _tex = _g.visual.material.baseColorTexture
-                if _tex is not None:
-                    _tex = ImageEnhance.Contrast(_tex).enhance(1.3)
-                    _tex = ImageEnhance.Color(_tex).enhance(1.4)
-                    _tex = ImageEnhance.Brightness(_tex).enhance(1.05)
-                    _g.visual.material.baseColorTexture = _tex
-                    _touched = True
-        if _touched:
-            if len(_geoms) == 1:
-                _geoms[0].export(output_path)
-            else:
-                _scene.export(output_path)
-            print(f"LOCAL_SF3D: texture enhanced (contrast +30%, saturation +40%, brightness +5%)", flush=True)
-    except Exception as _te:
-        print(f"LOCAL_SF3D: texture enhance skipped ({_te})", flush=True)
+        import struct, json, io
+        from PIL import ImageEnhance, Image as _PILImg
 
-    # ------------------------------------------------------------------
-    # Upscale texture if we clamped it for VRAM safety.
-    # E.g. user requested 4096 but SF3D baked at 2048 -> upscale to 4096
-    # via PIL Lanczos (CPU, ~0.1s). Not AI super-resolution, but on a
-    # clean PBR texture the visual difference is negligible.
-    # ------------------------------------------------------------------
-    if upscale_tex_to > 0:
-        try:
-            import trimesh as _tmesh_up
-            from PIL import Image as _PILImg
-            _scene_up = _tmesh_up.load(output_path)
-            _geoms_up = list(_scene_up.geometry.values()) if hasattr(_scene_up, 'geometry') else [_scene_up]
-            _upscaled = False
-            for _g_up in _geoms_up:
-                if hasattr(_g_up.visual, 'material') and hasattr(_g_up.visual.material, 'baseColorTexture'):
-                    _tex_up = _g_up.visual.material.baseColorTexture
-                    if _tex_up is not None and max(_tex_up.size) < upscale_tex_to:
-                        _tex_up = _tex_up.resize((upscale_tex_to, upscale_tex_to), _PILImg.LANCZOS)
-                        _g_up.visual.material.baseColorTexture = _tex_up
-                        _upscaled = True
-                # Also upscale normal map if present
-                if hasattr(_g_up.visual, 'material') and hasattr(_g_up.visual.material, 'normalTexture'):
-                    _nrm = _g_up.visual.material.normalTexture
-                    if _nrm is not None and max(_nrm.size) < upscale_tex_to:
-                        _nrm = _nrm.resize((upscale_tex_to, upscale_tex_to), _PILImg.LANCZOS)
-                        _g_up.visual.material.normalTexture = _nrm
-            if _upscaled:
-                if len(_geoms_up) == 1:
-                    _geoms_up[0].export(output_path)
+        def _modify_glb_textures(glb_path, enhance=True, upscale_to=0):
+            """Modify textures embedded in a GLB file without touching mesh data."""
+            with open(glb_path, 'rb') as f:
+                data = bytearray(f.read())
+
+            # Parse GLB header
+            magic, version, total_len = struct.unpack_from('<III', data, 0)
+            if magic != 0x46546C67:  # 'glTF'
+                print("LOCAL_SF3D: not a valid GLB, skipping texture post-process", flush=True)
+                return
+
+            # Parse chunks
+            offset = 12
+            json_chunk = None
+            bin_chunk_offset = None
+            while offset < len(data):
+                chunk_len, chunk_type = struct.unpack_from('<II', data, offset)
+                if chunk_type == 0x4E4F534A:  # JSON
+                    json_chunk = json.loads(data[offset+8 : offset+8+chunk_len].decode('utf-8'))
+                elif chunk_type == 0x004E4942:  # BIN
+                    bin_chunk_offset = offset + 8
+                offset += 8 + chunk_len
+
+            if json_chunk is None or bin_chunk_offset is None:
+                return
+
+            # Find all images in the glTF JSON
+            images = json_chunk.get('images', [])
+            buffer_views = json_chunk.get('bufferViews', [])
+            modified = False
+
+            for img_info in images:
+                bv_idx = img_info.get('bufferView')
+                if bv_idx is None:
+                    continue
+                bv = buffer_views[bv_idx]
+                img_offset = bin_chunk_offset + bv.get('byteOffset', 0)
+                img_length = bv['byteLength']
+
+                # Extract image bytes
+                img_bytes = bytes(data[img_offset : img_offset + img_length])
+                try:
+                    pil_img = _PILImg.open(io.BytesIO(img_bytes))
+                except:
+                    continue
+
+                orig_size = pil_img.size
+                changed = False
+
+                # Enhance
+                if enhance:
+                    pil_img = ImageEnhance.Contrast(pil_img).enhance(1.3)
+                    pil_img = ImageEnhance.Color(pil_img).enhance(1.4)
+                    pil_img = ImageEnhance.Brightness(pil_img).enhance(1.05)
+                    changed = True
+
+                # Upscale
+                if upscale_to > 0 and max(pil_img.size) < upscale_to:
+                    pil_img = pil_img.resize((upscale_to, upscale_to), _PILImg.LANCZOS)
+                    changed = True
+
+                if not changed:
+                    continue
+
+                # Encode back to PNG
+                buf = io.BytesIO()
+                pil_img.save(buf, format='PNG')
+                new_bytes = buf.getvalue()
+
+                if len(new_bytes) <= img_length:
+                    # Fits in the same slot: overwrite + zero-pad
+                    data[img_offset : img_offset + len(new_bytes)] = new_bytes
+                    data[img_offset + len(new_bytes) : img_offset + img_length] = b'\x00' * (img_length - len(new_bytes))
                 else:
-                    _scene_up.export(output_path)
-                print(f"LOCAL_SF3D: texture upscaled {tex_res}->{upscale_tex_to} px (Lanczos, CPU)", flush=True)
-        except Exception as _ue:
-            print(f"LOCAL_SF3D: texture upscale skipped ({_ue})", flush=True)
+                    # New image is larger: append to binary chunk and update buffer view
+                    # Pad binary chunk to 4-byte alignment
+                    old_bin_len = struct.unpack_from('<I', data, bin_chunk_offset - 8)[0]
+                    new_offset = old_bin_len
+                    pad = (4 - (len(new_bytes) % 4)) % 4
+                    data[bin_chunk_offset + old_bin_len : bin_chunk_offset + old_bin_len] = new_bytes + b'\x00' * pad
+                    new_bin_len = old_bin_len + len(new_bytes) + pad
+
+                    # Update buffer view to point to new location
+                    bv['byteOffset'] = new_offset
+                    bv['byteLength'] = len(new_bytes)
+
+                    # Update binary chunk length
+                    struct.pack_into('<I', data, bin_chunk_offset - 8, new_bin_len)
+
+                    # Update total GLB length
+                    # (re-encode JSON since we changed buffer views)
+                    # This is complex, so for now only support in-place replacement
+                    print(f"LOCAL_SF3D: texture larger after enhance ({len(new_bytes)} > {img_length}), re-encoding GLB", flush=True)
+                    # Fall back to simple approach: just re-encode everything
+                    json_str = json.dumps(json_chunk).encode('utf-8')
+                    json_pad = (4 - (len(json_str) % 4)) % 4
+                    json_chunk_data = json_str + b' ' * json_pad
+                    bin_data = bytes(data[bin_chunk_offset : bin_chunk_offset + new_bin_len])
+
+                    new_data = bytearray()
+                    new_data += struct.pack('<III', 0x46546C67, 2, 0)  # header (length filled later)
+                    new_data += struct.pack('<II', len(json_chunk_data), 0x4E4F534A)
+                    new_data += json_chunk_data
+                    new_data += struct.pack('<II', len(bin_data), 0x004E4942)
+                    new_data += bin_data
+                    struct.pack_into('<I', new_data, 8, len(new_data))
+                    data = new_data
+                    bin_chunk_offset = 12 + 8 + len(json_chunk_data) + 8
+
+                modified = True
+
+            if modified:
+                # Update total GLB length in header
+                struct.pack_into('<I', data, 8, len(data))
+                with open(glb_path, 'wb') as f:
+                    f.write(data)
+
+            return modified
+
+        did_enhance = _modify_glb_textures(output_path, enhance=True, upscale_to=upscale_tex_to)
+        if did_enhance:
+            msgs = ["contrast +30%, saturation +40%, brightness +5%"]
+            if upscale_tex_to > 0:
+                msgs.append(f"upscaled to {upscale_tex_to}px")
+            print(f"LOCAL_SF3D: texture post-processed ({', '.join(msgs)})", flush=True)
+
+    except Exception as _te:
+        print(f"LOCAL_SF3D: texture post-process skipped ({_te})", flush=True)
+        import traceback; traceback.print_exc()
 
     size = os.path.getsize(output_path)
 
