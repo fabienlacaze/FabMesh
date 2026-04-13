@@ -2110,7 +2110,10 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
         cleanup();
         resolve({ success: false, error: error.message, stderr });
       } else {
-        resolve({ success: true, newPath: newImagePath });
+        // Script may output a different path (e.g. .png instead of .jpeg)
+        const outMatch = (stdout || '').match(/OK:\s*(.+)/);
+        const actualPath = outMatch ? outMatch[1].trim() : newImagePath;
+        resolve({ success: true, newPath: actualPath });
       }
     });
     proc.stderr?.on('data', d => {
