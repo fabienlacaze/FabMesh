@@ -16,6 +16,27 @@ const API = window.meshyAPI;
 
 // Forward all console.log/warn/error to main process log file for debugging.
 // test_api_client.js already wrapped console.* — we wrap their wrapped versions.
+// Helper for action logging — called from button handlers
+function logAction(action, details) {
+  const ts = new Date().toISOString();
+  const msg = `[ACTION] ${action}` + (details ? ' ' + JSON.stringify(details) : '');
+  try { window.meshyAPI?.logToFile?.(msg); } catch(_){}
+  console.log(msg);
+}
+
+// Auto-log all clicks on important buttons (those with data-log-action attr)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('button, [data-log-action]');
+  if (!btn) return;
+  const id = btn.id || btn.getAttribute('data-log-action') || btn.className;
+  // Only log buttons that look like meaningful actions (skip nav, toolbar etc)
+  if (id && (id.includes('generate') || id.includes('save') || id.includes('use-for') ||
+             id.includes('-btn') || id.includes('export') || id.includes('apply') ||
+             id.includes('mv-btn'))) {
+    logAction('click:' + (btn.id || id.slice(0,40)));
+  }
+}, true);
+
 function _installLogForwarder() {
   if (!API?.logToFile) return;
   const origLog = console.log, origWarn = console.warn, origErr = console.error, origInfo = console.info;

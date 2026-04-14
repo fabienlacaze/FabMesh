@@ -76,7 +76,8 @@ def generate_multiview(input_image_path, output_dir, size=320):
     with torch.no_grad():
         result = pipeline(
             input_img_resized,
-            num_inference_steps=75,
+            num_inference_steps=100,
+            guidance_scale=4.0,
         ).images[0]
 
     log(f'generation done in {time.time()-t0:.1f}s')
