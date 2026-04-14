@@ -7056,6 +7056,130 @@ document.getElementById('set-close-x')?.addEventListener('click', closeSettings)
 document.getElementById('set-open-logs')?.addEventListener('click', async () => {
   if (API.openLogsFolder) await API.openLogsFolder();
 });
+
+// ============================================================
+// LIVE LOGS VIEWER — streams logs/fabmesh.log (or any registered file)
+// via the Control API SSE endpoint. Reuses the same token the control
+// API wrote to .fabmesh/test_api_token.txt at startup.
+// ============================================================
+(() => {
+  const modal = document.getElementById('modal-live-logs');
+  const output = document.getElementById('ll-output');
+  const fileSel = document.getElementById('ll-file');
+  const filterInput = document.getElementById('ll-filter');
+  const autoscrollCb = document.getElementById('ll-autoscroll');
+  const pauseBtn = document.getElementById('ll-pause');
+  const clearBtn = document.getElementById('ll-clear');
+  const closeBtn = document.getElementById('ll-close');
+  const statusEl = document.getElementById('ll-status');
+  const countEl = document.getElementById('ll-count');
+  if (!modal || !output) return;
+
+  let eventSource = null;
+  let paused = false;
+  let buffered = []; // lines received while paused
+  let lineCount = 0;
+  let filterRe = null;
+
+  function setStatus(txt, color) {
+    if (statusEl) { statusEl.textContent = txt; statusEl.style.color = color || ''; }
+  }
+
+  function appendLine(line) {
+    if (filterRe && !filterRe.test(line)) return;
+    // Syntax-highlight by level
+    const span = document.createElement('span');
+    if (/level=ERROR|\bERROR\b/i.test(line)) span.style.color = '#ff6b6b';
+    else if (/level=WARN|\bWARN\b/i.test(line)) span.style.color = '#ffd166';
+    else if (/level=INFO/.test(line)) span.style.color = '#8ecae6';
+    else span.style.color = '#ddd';
+    span.textContent = line + '\n';
+    output.appendChild(span);
+    lineCount++;
+    if (countEl) countEl.textContent = lineCount + ' lines';
+    // Cap at 5000 lines to avoid runaway memory
+    while (output.childNodes.length > 5000) output.removeChild(output.firstChild);
+    if (autoscrollCb?.checked) output.scrollTop = output.scrollHeight;
+  }
+
+  async function readToken() {
+    // The main process writes the token to .fabmesh/test_api_token.txt
+    // and to <root>/.test_api_token. We can't read files from the
+    // renderer directly, but main.js exposes a read-log-tail IPC we
+    // can repurpose. Simpler: ask main via a tiny new IPC.
+    try {
+      const r = await API.getControlApiToken?.();
+      return r || null;
+    } catch { return null; }
+  }
+
+  async function openStream() {
+    const file = fileSel?.value || 'fabmesh';
+    const token = await readToken();
+    if (!token) {
+      setStatus('no token — is the Control API enabled?', '#ff6b6b');
+      return;
+    }
+    closeStream();
+    setStatus('connecting to ' + file + '...', '#8ecae6');
+    // EventSource doesn't support custom headers; use ?token= fallback.
+    const url = `http://127.0.0.1:7331/logs/stream?file=${encodeURIComponent(file)}&token=${encodeURIComponent(token)}`;
+    eventSource = new EventSource(url);
+    eventSource.onopen = () => setStatus('live: ' + file, '#06d6a0');
+    eventSource.onerror = () => setStatus('disconnected — retrying...', '#ff6b6b');
+    eventSource.onmessage = (ev) => {
+      const line = (ev.data || '').replace(/\\n/g, '\n');
+      if (paused) { buffered.push(line); if (buffered.length > 1000) buffered.shift(); return; }
+      appendLine(line);
+    };
+  }
+  function closeStream() {
+    if (eventSource) { try { eventSource.close(); } catch {} eventSource = null; }
+    setStatus('disconnected');
+  }
+
+  document.getElementById('set-live-logs')?.addEventListener('click', () => {
+    modal.classList.remove('hidden');
+    document.getElementById('modal-settings')?.classList.add('hidden');
+    output.innerHTML = '';
+    lineCount = 0;
+    if (countEl) countEl.textContent = '0 lines';
+    openStream();
+  });
+
+  closeBtn?.addEventListener('click', () => {
+    closeStream();
+    modal.classList.add('hidden');
+  });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) { closeStream(); modal.classList.add('hidden'); }
+  });
+
+  fileSel?.addEventListener('change', () => {
+    output.innerHTML = ''; lineCount = 0;
+    if (countEl) countEl.textContent = '0 lines';
+    openStream();
+  });
+
+  filterInput?.addEventListener('input', () => {
+    try { filterRe = filterInput.value ? new RegExp(filterInput.value, 'i') : null; }
+    catch { filterRe = null; }
+  });
+
+  pauseBtn?.addEventListener('click', () => {
+    paused = !paused;
+    pauseBtn.innerHTML = paused ? '\u25B6\uFE0F Resume' : '\u23F8\uFE0F Pause';
+    if (!paused && buffered.length) {
+      for (const l of buffered) appendLine(l);
+      buffered = [];
+    }
+  });
+
+  clearBtn?.addEventListener('click', () => {
+    output.innerHTML = ''; lineCount = 0;
+    if (countEl) countEl.textContent = '0 lines';
+  });
+})();
 // ============================================================
 // PARENTAL CONTROL
 // ============================================================

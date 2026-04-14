@@ -3362,6 +3362,16 @@ ipcMain.handle('create-project-from-mesh', (event, { projectName, meshPath, mesh
 
 ipcMain.handle('get-config', () => loadConfig());
 
+// Return the Control API Bearer token so the renderer's live-logs viewer
+// can open an authenticated EventSource to /logs/stream.
+ipcMain.handle('get-control-api-token', () => {
+  try {
+    const p = path.join(__dirname, '..', '..', '.test_api_token');
+    if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8').trim();
+  } catch (_) {}
+  return null;
+});
+
 // Patch-merge into config.json. Caller passes e.g. {meshyApiKey: 'msy_...'}.
 // Only whitelisted fields are accepted to avoid the renderer corrupting arbitrary keys.
 ipcMain.handle('set-config', (_event, patch) => {

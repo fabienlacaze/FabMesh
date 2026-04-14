@@ -855,6 +855,36 @@
         </div>
 
         <button id="set-open-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:8px;">&#128193; Open logs folder</button>
+        <button id="set-live-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:6px;">&#128269; Live logs viewer</button>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         LIVE LOGS VIEWER MODAL
+         ============================================================ -->
+    <div id="modal-live-logs" class="modal-overlay hidden">
+      <div class="modal-card" style="width:95vw; height:90vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <strong style="font-size:13px;">&#128269; Live logs</strong>
+          <select id="ll-file" style="background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:4px; padding:3px 6px; font-size:12px;">
+            <option value="fabmesh" selected>fabmesh (main)</option>
+            <option value="renderer">renderer</option>
+            <option value="error">error</option>
+            <option value="agent">agent</option>
+          </select>
+          <input id="ll-filter" type="text" placeholder="filter (regex)..." style="flex:1; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:4px; padding:4px 8px; font-size:12px;">
+          <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-2);">
+            <input id="ll-autoscroll" type="checkbox" checked> Auto-scroll
+          </label>
+          <button id="ll-pause" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#9208;&#65039; Pause</button>
+          <button id="ll-clear" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#128465;&#65039; Clear</button>
+          <button id="ll-close" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#10005; Close</button>
+        </div>
+        <pre id="ll-output" style="flex:1; margin:0; padding:10px 14px; overflow:auto; font-family:'Cascadia Code','Consolas','Monaco',monospace; font-size:11px; line-height:1.4; color:#ddd; background:#0a0a0a; white-space:pre-wrap; word-break:break-all;"></pre>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 14px; border-top:1px solid var(--border); background:var(--bg-1); font-size:10px; color:var(--text-3);">
+          <span id="ll-status">disconnected</span>
+          <span id="ll-count">0 lines</span>
+        </div>
       </div>
     </div>
 
