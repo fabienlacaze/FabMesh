@@ -525,28 +525,43 @@ def generate_3d(
     # Re-project source photo onto the final mesh for sharp textures.
     # ------------------------------------------------------------------
     print(f"LOCAL_SF3D_PROGRESS: 97 texture_project", flush=True)
-    # Default: vertex-color projection (clean rendering on SF3D's
-    # micro-island UV layout). Switch back to UV atlas projection by
-    # setting FABMESH_PROJECT_MODE=atlas.
-    _proj_mode = os.environ.get('FABMESH_PROJECT_MODE', 'vc').lower()
+    # Modes:
+    #   upscale (DEFAULT) — keep SF3D's native baked atlas (correct UV
+    #     layout, just blurry) and run RealESRGAN x4 on it. Cleanest
+    #     result: no UV mosaic, no vertex-color flou, just sharper.
+    #   atlas — multi-view UV projection (tends to mosaic on SF3D UVs)
+    #   vc    — vertex-color projection (smooth but low-detail)
+    #   none  — skip post-processing entirely
+    _proj_mode = os.environ.get('FABMESH_PROJECT_MODE', 'upscale').lower()
     _vc_script = os.path.join(os.path.dirname(__file__), 'texture_project_vc.py')
     _atlas_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
+    _upscale_script = os.path.join(os.path.dirname(__file__), 'upscale_atlas.py')
     try:
         import subprocess as _sp_proj
-        if _proj_mode == 'vc' and os.path.exists(_vc_script):
+        _cmd = None
+        _label = None
+        if _proj_mode == 'upscale' and os.path.exists(_upscale_script):
+            # Atlas-only sharpener: keep SF3D's UV mapping and texture
+            # data, just run RealESRGAN x4 on the baked image. This
+            # avoids the multi-view UV mosaic problem entirely.
+            _target = max(int(tex_res), 2048)
+            _cmd = [sys.executable, _upscale_script, output_path,
+                    output_path, '--target', str(_target)]
+            _label = f'atlas upscale -> {_target}px'
+        elif _proj_mode == 'vc' and os.path.exists(_vc_script):
             _cmd = ([sys.executable, _vc_script, output_path,
                      _preprocessed_path, output_path]
                     + (['--multiview', _multiview_dir]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'vertex-color projection'
-        elif os.path.exists(_atlas_script):
+        elif _proj_mode == 'atlas' and os.path.exists(_atlas_script):
             _cmd = ([sys.executable, _atlas_script, output_path,
                      _preprocessed_path, output_path, str(tex_res)]
                     + (['--multiview', _multiview_dir]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'UV atlas projection'
-        else:
-            _cmd = None
+        elif _proj_mode == 'none':
+            print('LOCAL_SF3D: native SF3D atlas kept (FABMESH_PROJECT_MODE=none)', flush=True)
         if _cmd:
             _r_proj = _sp_proj.run(_cmd, capture_output=True, text=True, timeout=120)
             if _r_proj.stdout:

@@ -50,6 +50,27 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Atlas-only RealESRGAN upscale — NEW DEFAULT
+
+**Insight**: we kept replacing SF3D's native atlas (which has CORRECT
+UV layout — SF3D made it). The replacement (multi-view projection)
+is what created the mosaic. Just keep SF3D's atlas + sharpen it.
+
+**New script**: `scripts/upscale_atlas.py`. Takes a GLB, finds the
+embedded baseColorTexture, runs RealESRGAN x4plus on it, writes back
+to the same GLB (rebuilds binary chunk). 15 s on a 2048 atlas.
+
+**SF3D bridge**: default mode now `FABMESH_PROJECT_MODE=upscale`. The
+old multi-view UV projection lives behind `=atlas`, vertex-color
+behind `=vc`, no post behind `=none`.
+
+**Smoke test on man mesh**: 2048 -> upscale x4 -> resize 2048. Subtle
+sharpening but limited because input is already 2048. Real benefit
+when SF3D bake at 1024 then upscale to 2048 or 4096.
+
+**Status**: not yet visually validated by user end-to-end through
+FabMesh.
+
 ### 2026-04-14 — InstantMesh as alternative texture-aware mesh generator — STARTED
 
 **Why**: SF3D ceiling reached. All atlas-based projections (mosaic),
