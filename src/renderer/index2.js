@@ -1312,11 +1312,12 @@ function _normPath(p) { return (p || '').replace(/\\/g, '/'); }
 
 function _checkMultiviewForCurrentImage() {
   const p = state.currentProject;
+  console.log('[mv-check] previewImagePath:', p?.previewImagePath, 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none');
   if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
   if (!p._multiviews) { _hideMultiviewBar(); return; }
-  // Normalize paths for comparison (Windows backslash vs forward slash)
   const key = _normPath(p.previewImagePath);
   const found = Object.keys(p._multiviews).find(k => _normPath(k) === key);
+  console.log('[mv-check] key:', key, 'found:', found);
   if (found) {
     _showMultiviewBar(p._multiviews[found]);
   } else {
@@ -5969,10 +5970,10 @@ async function reloadCurrentProject() {
         if (createStage) createStage.open = false;
         if (editStage) editStage.open = true;
       }
+      // Check multiview after the stage is opened (previewImagePath is now set)
+      _checkMultiviewForCurrentImage();
     }, 150);
 
-    // Multi-view data is now generated inside the image generation job.
-    // Just check if we should show the multiview bar for the current image.
     _checkMultiviewForCurrentImage();
   }
 }
