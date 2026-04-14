@@ -2552,6 +2552,15 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
 });
 
 // ----- Image edit tools -----
+// Image tools operate on the image currently shown in the preview
+// (previewImagePath), not the one tagged "used for 3D" (selectedImagePath).
+// When the user navigates versions via thumbs/arrows, previewImagePath
+// tracks what they SEE — that's what they expect a tool to modify.
+// Falls back to selectedImagePath only when no preview is set (first load).
+function editTarget(p) {
+  return p && (p.previewImagePath || p.selectedImagePath);
+}
+
 // Modify image: opens a popup (consistent with Clone Stamp / Draw Mask)
 const modifyModal = document.getElementById('modal-modify-image');
 const modStrength = document.getElementById('mod-strength');
@@ -2560,10 +2569,12 @@ modStrength.addEventListener('input', () => { modStrengthVal.textContent = modSt
 
 document.getElementById('ws-modify-btn').addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
   // Show the source image inside the modal
   const srcImg = document.getElementById('mod-source-img');
-  if (srcImg) srcImg.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
+  modifyModal.dataset.targetPath = target;
   modifyModal.classList.remove('hidden');
   setTimeout(() => document.getElementById('mod-prompt').focus(), 50);
 });
@@ -2572,7 +2583,8 @@ document.getElementById('mod-cancel').addEventListener('click', () => {
 });
 document.getElementById('mod-apply').addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) return;
+  const target = modifyModal.dataset.targetPath || editTarget(p);
+  if (!target) return;
   const prompt = document.getElementById('mod-prompt').value.trim();
   if (!prompt) { showToast('Type a modification first.', 'error'); return; }
   const engine = document.getElementById('mod-engine').value;
@@ -2587,7 +2599,7 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
       Prompt: prompt,
     }, modifyExpected);
     try {
-      const r = await API.img2img({ imagePath: p.selectedImagePath, prompt, strength, engine, jobId: job.id });
+      const r = await API.img2img({ imagePath: target, prompt, strength, engine, jobId: job.id });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
@@ -2604,10 +2616,11 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
 
 document.getElementById('ws-export-img-btn')?.addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
   try {
-    const base = (p.name || 'image') + '_' + (p.selectedImagePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
-    const r = await API.exportImage({ srcPath: p.selectedImagePath, defaultName: base });
+    const base = (p.name || 'image') + '_' + (target.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
+    const r = await API.exportImage({ srcPath: target, defaultName: base });
     if (r?.ok) showToast('Image exported: ' + r.path, 'success');
     else if (!r?.cancelled) showToast('Export failed: ' + (r?.error || 'unknown'), 'error');
   } catch (e) {
@@ -2617,11 +2630,12 @@ document.getElementById('ws-export-img-btn')?.addEventListener('click', async ()
 
 document.getElementById('ws-removebg-btn').addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
   gatedRun('bg', `Remove background: ${p.name}`, async () => {
     const job = pushJob(`Remove background: ${p.name}`);
     try {
-      const r = await API.removeBackground(p.selectedImagePath);
+      const r = await API.removeBackground(target);
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
@@ -2638,15 +2652,17 @@ document.getElementById('ws-removebg-btn').addEventListener('click', async () =>
 
 document.getElementById('ws-clone-btn').addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  window.openCloneToolFor(p.selectedImagePath, p.name, async () => {
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  window.openCloneToolFor(target, p.name, async () => {
     await reloadCurrentProject();
   });
 });
 document.getElementById('ws-mask-btn').addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  window.openMaskToolFor(p.selectedImagePath, p.name, async () => {
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  window.openMaskToolFor(target, p.name, async () => {
     await reloadCurrentProject();
   });
 });
@@ -2656,10 +2672,11 @@ document.getElementById('ws-mask-btn').addEventListener('click', () => {
 // Helper: run a quick image edit via Python PIL and reload the project
 async function runQuickEdit(operation, params) {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
   showToast(`${operation}...`, 'info', 1500);
   try {
-    const r = await API.imageQuickEdit({ imagePath: p.selectedImagePath, operation, params });
+    const r = await API.imageQuickEdit({ imagePath: target, operation, params });
     if (r?.success) {
       showToast(`${operation} done`, 'success');
       await reloadCurrentProject();
@@ -2749,8 +2766,9 @@ function _symApplyView() {
 
 function openSymmetrize() {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  symState.imgPath = p.selectedImagePath;
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  symState.imgPath = target;
   const modal = document.getElementById('modal-symmetrize');
   const canvas = document.getElementById('sym-canvas');
   const overlay = document.getElementById('sym-overlay');
@@ -2772,7 +2790,7 @@ function openSymmetrize() {
     symState.undoStack = [];
     _symDrawPreview();
   };
-  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  img.src = 'file:///' + symState.imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
 }
 
 function _symDrawPreview() {
@@ -3116,13 +3134,14 @@ document.getElementById('sym-apply')?.addEventListener('click', async () => {
 let _resW = 0, _resH = 0;
 function openResolutionModal() {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   const modal = document.getElementById('modal-resolution');
   const preview = document.getElementById('res-preview');
   const current = document.getElementById('res-current');
   const target = document.getElementById('res-target');
   if (!modal) return;
-  preview.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  preview.src = 'file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now();
   const img = new Image();
   img.onload = () => {
     _resW = img.naturalWidth; _resH = img.naturalHeight;
@@ -3150,9 +3169,10 @@ document.getElementById('res-downscale')?.addEventListener('click', async () => 
   const nw = Math.round(_resW / 2), nh = Math.round(_resH / 2);
   showToast(`Downscaling ${_resW}x${_resH} -> ${nw}x${nh}...`, 'info', 2000);
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) return;
+  const tgt = editTarget(p);
+  if (!tgt) return;
   try {
-    const r = await API.imageQuickEdit({ imagePath: p.selectedImagePath, operation: 'downscale', params: {} });
+    const r = await API.imageQuickEdit({ imagePath: tgt, operation: 'downscale', params: {} });
     if (r?.success) { showToast('Downscale done', 'success'); await reloadCurrentProject(); }
     else showToast('Downscale failed: ' + (r?.error || ''), 'error');
   } catch (e) { showToast('Downscale error: ' + e.message, 'error'); }
@@ -3177,11 +3197,13 @@ document.querySelectorAll('#res-upscale, #res-downscale').forEach(el => el.addEv
 // ============================================================
 document.getElementById('ws-brightness-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   const modal = document.getElementById('modal-brightness');
   const preview = document.getElementById('bright-preview');
   if (!modal || !preview) return;
-  preview.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  modal.dataset.targetPath = tgt;
+  preview.src = 'file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now();
   // Reset sliders
   ['brightness', 'contrast', 'saturation', 'sharpness'].forEach(k => {
     const sl = document.getElementById('bright-' + k);
@@ -3238,8 +3260,9 @@ const cropState = { x1: 0, y1: 0, x2: 1, y2: 1, dragging: false, aspect: null, w
 
 document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  cropState.imgPath = p.selectedImagePath;
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
+  cropState.imgPath = tgt;
   const modal = document.getElementById('modal-crop');
   const canvas = document.getElementById('crop-canvas');
   const overlay = document.getElementById('crop-overlay');
@@ -3271,7 +3294,7 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
     document.querySelectorAll('[id^="crop-preset-"]').forEach(b => b.classList.remove('tool-active'));
     document.getElementById('crop-preset-free')?.classList.add('tool-active');
   };
-  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  img.src = 'file:///' + cropState.imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
 });
 
 function _cropDrawOverlay() {
@@ -3443,17 +3466,18 @@ document.getElementById('ws-style-btn')?.addEventListener('change', async (e) =>
   // Save last used style so it persists across reloads
   try { localStorage.setItem('fabmesh-last-style', style); } catch(_) {}
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   showToast(`Applying style: ${style.split(',')[0]}...`, 'info', 2000);
   gatedRun('img2img', `Style: ${style.split(',')[0]}`, async () => {
     const job = pushJob(`Style Transfer: ${p.name}`, null, { Style: style.split(',')[0] }, 30000);
     try {
-      const r = await API.img2img({ imagePath: p.selectedImagePath, prompt: style, strength: 0.6, engine: 'local-sdxl' });
+      const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'local-sdxl' });
       if (r?.success) {
         // Remember which style was applied to this new image version
         if (r.newPath) _saveImageStyle(r.newPath, style);
         // Also tag the source image with its style (it was the input)
-        _saveImageStyle(p.selectedImagePath, style);
+        _saveImageStyle(tgt, style);
         completeJob(job.id, true);
         await reloadCurrentProject();
         showToast('Style applied!', 'success');
@@ -3473,7 +3497,8 @@ document.getElementById('ws-style-btn')?.addEventListener('change', async (e) =>
 // ============================================================
 document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   const modal = document.getElementById('modal-colorpick');
   const canvas = document.getElementById('cpick-canvas');
   if (!modal || !canvas) return;
@@ -3496,7 +3521,7 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
     document.getElementById('cpick-hex').textContent = '';
     document.getElementById('cpick-rgb').textContent = 'Move cursor over image';
   };
-  img.src = 'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  img.src = 'file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now();
 });
 (() => {
   const cpCanvas = document.getElementById('cpick-canvas');
@@ -3538,8 +3563,10 @@ let _blurMgr = null;
 
 document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   const modal = document.getElementById('modal-blur');
+  modal && (modal.dataset.targetPath = tgt);
   if (!modal) return;
   if (!_blurMgr) {
     _blurMgr = new CanvasManager({
@@ -3588,7 +3615,7 @@ document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
   modal.classList.remove('hidden');
   _blurMgr.activate();
   // Load AFTER modal is visible so container has real dimensions
-  await _blurMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
+  await _blurMgr.loadImage('file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now());
 });
 
 // Mode toggle
@@ -3627,12 +3654,14 @@ document.getElementById('blur-close-x')?.addEventListener('click', () => documen
 document.getElementById('blur-save')?.addEventListener('click', async () => {
   const bCanvas = _blurMgr?.canvas || document.getElementById('blur-canvas');
   const p = state.currentProject;
-  if (!bCanvas || !p?.selectedImagePath) return;
-  document.getElementById('modal-blur')?.classList.add('hidden');
+  const modal = document.getElementById('modal-blur');
+  const tgt = (modal && modal.dataset.targetPath) || editTarget(p);
+  if (!bCanvas || !tgt) return;
+  modal?.classList.add('hidden');
   showToast('Saving...', 'info', 1500);
   try {
     const dataUrl = bCanvas.toDataURL('image/png');
-    const r = await API.saveImageDataUrl({ imagePath: p.selectedImagePath, dataUrl, suffix: 'blur' });
+    const r = await API.saveImageDataUrl({ imagePath: tgt, dataUrl, suffix: 'blur' });
     if (r?.success) { showToast('Saved!', 'success'); await reloadCurrentProject(); }
     else showToast('Save failed: ' + (r?.error || ''), 'error');
   } catch (e) { showToast('Error: ' + e.message, 'error'); }
@@ -3969,8 +3998,9 @@ function _closePaint() {
 // Open Paint Tools
 document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  paintState.imgPath = p.selectedImagePath;
+  const tgt = editTarget(p);
+  if (!tgt) { showToast('Pick an image first.', 'error'); return; }
+  paintState.imgPath = tgt;
   const modal = document.getElementById('modal-paint');
   if (!modal) return;
 
@@ -4047,7 +4077,7 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
   paintState.eyedropping = false;
   document.getElementById('paint-eyedropper')?.classList.remove('tool-active');
   requestAnimationFrame(() => {
-    _paintMgr.loadImage('file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now());
+    _paintMgr.loadImage('file:///' + paintState.imgPath.replace(/\\/g, '/') + '?t=' + Date.now());
   });
 });
 
