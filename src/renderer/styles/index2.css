@@ -573,6 +573,10 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border-top: none;
   padding-top: 0;
   margin-top: 0;
+  padding-right: 8px;
+  max-height: 128px;         /* ~2 rows of 56px thumbs + gap */
+  overflow-y: scroll;
+  align-content: flex-start;
 }
 .stage .stage-body.stage-edit-rig-body #ws-rig-versions .version-thumb {
   width: 56px;
@@ -999,7 +1003,11 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-wrap: wrap;
   margin-top: 10px;
   padding-top: 10px;
+  padding-right: 8px;            /* leave room for the always-on scrollbar */
   border-top: 1px solid var(--border);
+  max-height: 160px;             /* ~2 rows of 72px thumbs + gap */
+  overflow-y: scroll;            /* always-on bar, matches tool panels */
+  align-content: flex-start;     /* pack rows at the top instead of stretching */
 }
 .versions-strip .version-thumb {
   width: 72px;
