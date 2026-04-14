@@ -221,7 +221,12 @@ function startControlApi(mainWindow, opts = {}) {
           'GET  /',
           'GET  /state',
           'GET  /screenshot',
-          'GET  /logs?lines=200',
+          'GET  /logs?file=&lines=200       (file optional; back-compat default: fabmesh + error)',
+          'GET  /logs/list',
+          'POST /logs/clear                 {file}',
+          'POST /logs/append                {file, line | content}',
+          'POST /logs/rotate                {file}',
+          'GET  /logs/stream?file=fabmesh   (Server-Sent Events live tail)',
           'GET  /console',
           'GET  /ipc/methods                   (list every window.meshyAPI.* method)',
           'POST /ipc                {method, args?: [...] | arg?: ...}  generic IPC dispatch',
@@ -262,15 +267,138 @@ function startControlApi(mainWindow, opts = {}) {
       } catch (e) { sendErr(res, e); }
     },
 
-    'GET /logs': async (req, res, url) => {
-      try {
-        const lines = parseInt(url.searchParams.get('lines') || '200', 10);
-        sendOk(res, {
-          fabmesh_log: tailFile(LOG_FILE, lines),
-          last_error:  tailFile(LAST_ERROR, lines)
-        });
-      } catch (e) { sendErr(res, e); }
-    },
+    // Log registry — short name -> absolute path.
+    // Extend here if you add new log streams; the endpoints below accept
+    // any registered name via ?file=<name>.
+    ...(function() {
+      const logsDir = path.join(rootDir, 'logs');
+      const REGISTRY = {
+        fabmesh:  LOG_FILE,                            // main process log
+        renderer: path.join(logsDir, 'renderer.log'),  // renderer console mirror
+        error:    LAST_ERROR,                          // latest error dump
+        agent:    path.join(rootDir, 'AGENT_LOG.md'),  // claude's durable notes
+      };
+      function resolveLog(name) {
+        const f = REGISTRY[name || 'fabmesh'];
+        if (!f) throw new Error('unknown log file: ' + name);
+        return f;
+      }
+
+      return {
+        // GET /logs?file=fabmesh&lines=200   (file optional, default fabmesh)
+        // Back-compat: with no file param returns { fabmesh_log, last_error }.
+        'GET /logs': async (req, res, url) => {
+          try {
+            const lines = parseInt(url.searchParams.get('lines') || '200', 10);
+            const file = url.searchParams.get('file');
+            if (!file) {
+              // Legacy shape
+              return sendOk(res, {
+                fabmesh_log: tailFile(LOG_FILE, lines),
+                last_error:  tailFile(LAST_ERROR, lines),
+              });
+            }
+            const target = resolveLog(file);
+            sendOk(res, { file, path: target, content: tailFile(target, lines) });
+          } catch (e) { sendErr(res, e); }
+        },
+
+        // GET /logs/list — registered log names + current sizes.
+        'GET /logs/list': async (req, res) => {
+          const out = {};
+          for (const [name, p] of Object.entries(REGISTRY)) {
+            try {
+              const st = fs.statSync(p);
+              out[name] = { path: p, sizeBytes: st.size, modified: st.mtime };
+            } catch (_) {
+              out[name] = { path: p, sizeBytes: 0, modified: null, missing: true };
+            }
+          }
+          sendOk(res, out);
+        },
+
+        // POST /logs/clear {file} — truncate to empty.
+        'POST /logs/clear': async (req, res) => {
+          try {
+            const body = await readBody(req);
+            const target = resolveLog(body.file);
+            fs.writeFileSync(target, '');
+            sendOk(res, { file: body.file || 'fabmesh', cleared: target });
+          } catch (e) { sendErr(res, e); }
+        },
+
+        // POST /logs/append {file, line}  — append a single line with LF.
+        //   {file, content} — append arbitrary content verbatim.
+        'POST /logs/append': async (req, res) => {
+          try {
+            const body = await readBody(req);
+            const target = resolveLog(body.file);
+            const text = body.content != null
+              ? String(body.content)
+              : (body.line != null ? String(body.line) + '\n' : '');
+            if (!text) return sendErr(res, 'missing line or content', 400);
+            fs.appendFileSync(target, text);
+            sendOk(res, { file: body.file || 'fabmesh', appended: text.length });
+          } catch (e) { sendErr(res, e); }
+        },
+
+        // POST /logs/rotate {file}  — move current log to <name>.<ts>.log
+        // and start a fresh empty file.
+        'POST /logs/rotate': async (req, res) => {
+          try {
+            const body = await readBody(req);
+            const target = resolveLog(body.file);
+            const ts = new Date().toISOString().replace(/[:.]/g, '-');
+            const archived = target + '.' + ts;
+            if (fs.existsSync(target)) {
+              fs.renameSync(target, archived);
+            }
+            fs.writeFileSync(target, '');
+            sendOk(res, { file: body.file || 'fabmesh', archived });
+          } catch (e) { sendErr(res, e); }
+        },
+
+        // GET /logs/stream?file=fabmesh — Server-Sent Events of new lines.
+        // Clients get one `data: <line>\n\n` per appended line until they
+        // disconnect. Useful for live-tailing during a batch run.
+        'GET /logs/stream': async (req, res, url) => {
+          try {
+            const file = url.searchParams.get('file') || 'fabmesh';
+            const target = resolveLog(file);
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*',
+            });
+            res.write(': fabmesh log stream started\n\n');
+
+            let pos = 0;
+            try { pos = fs.statSync(target).size; } catch (_) {}
+            let closed = false;
+            const interval = setInterval(() => {
+              if (closed) return;
+              try {
+                const st = fs.statSync(target);
+                if (st.size < pos) { pos = 0; }       // log was rotated
+                if (st.size === pos) return;
+                const fd = fs.openSync(target, 'r');
+                const buf = Buffer.alloc(st.size - pos);
+                fs.readSync(fd, buf, 0, buf.length, pos);
+                fs.closeSync(fd);
+                pos = st.size;
+                const text = buf.toString('utf8');
+                for (const line of text.split(/\r?\n/)) {
+                  if (line) res.write('data: ' + line.replace(/\n/g, '\\n') + '\n\n');
+                }
+              } catch (_) { /* ignore transient read errors */ }
+            }, 500);
+
+            req.on('close', () => { closed = true; clearInterval(interval); });
+          } catch (e) { sendErr(res, e); }
+        },
+      };
+    })(),
 
     'GET /console': async (req, res, url) => {
       const lines = parseInt(url.searchParams.get('lines') || '500', 10);
