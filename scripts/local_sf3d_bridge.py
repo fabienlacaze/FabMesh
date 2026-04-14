@@ -525,22 +525,40 @@ def generate_3d(
     # Re-project source photo onto the final mesh for sharp textures.
     # ------------------------------------------------------------------
     print(f"LOCAL_SF3D_PROGRESS: 97 texture_project", flush=True)
+    # Default: vertex-color projection (clean rendering on SF3D's
+    # micro-island UV layout). Switch back to UV atlas projection by
+    # setting FABMESH_PROJECT_MODE=atlas.
+    _proj_mode = os.environ.get('FABMESH_PROJECT_MODE', 'vc').lower()
+    _vc_script = os.path.join(os.path.dirname(__file__), 'texture_project_vc.py')
+    _atlas_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
     try:
-        tex_proj_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
-        if os.path.exists(tex_proj_script):
-            import subprocess as _sp_proj
-            _r_proj = _sp_proj.run(
-                [sys.executable, tex_proj_script, output_path, _preprocessed_path, output_path, str(tex_res)]
-                + (['--multiview', _multiview_dir] if _multiview_dir and os.path.isdir(_multiview_dir) else []),
-                capture_output=True, text=True, timeout=60
-            )
+        import subprocess as _sp_proj
+        if _proj_mode == 'vc' and os.path.exists(_vc_script):
+            _cmd = ([sys.executable, _vc_script, output_path,
+                     _preprocessed_path, output_path]
+                    + (['--multiview', _multiview_dir]
+                       if _multiview_dir and os.path.isdir(_multiview_dir) else []))
+            _label = 'vertex-color projection'
+        elif os.path.exists(_atlas_script):
+            _cmd = ([sys.executable, _atlas_script, output_path,
+                     _preprocessed_path, output_path, str(tex_res)]
+                    + (['--multiview', _multiview_dir]
+                       if _multiview_dir and os.path.isdir(_multiview_dir) else []))
+            _label = 'UV atlas projection'
+        else:
+            _cmd = None
+        if _cmd:
+            _r_proj = _sp_proj.run(_cmd, capture_output=True, text=True, timeout=120)
             if _r_proj.stdout:
                 for line in _r_proj.stdout.strip().split('\n'):
                     print(f"LOCAL_SF3D: {line}", flush=True)
             if _r_proj.returncode != 0:
-                print(f"LOCAL_SF3D: texture projection failed (code {_r_proj.returncode})", flush=True)
+                print(f"LOCAL_SF3D: {_label} failed (code {_r_proj.returncode})", flush=True)
+                if _r_proj.stderr:
+                    for line in _r_proj.stderr.strip().split('\n')[:20]:
+                        print(f"LOCAL_SF3D: {line}", flush=True)
             else:
-                print(f"LOCAL_SF3D: texture projection applied", flush=True)
+                print(f"LOCAL_SF3D: {_label} applied", flush=True)
     except Exception as _tp_e:
         print(f"LOCAL_SF3D: texture projection skipped ({_tp_e})", flush=True)
     finally:

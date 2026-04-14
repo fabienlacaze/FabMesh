@@ -222,14 +222,13 @@ def project_vertex_colors(mesh_path, source_image_path, output_path,
     new_mesh = trimesh.Trimesh(
         vertices=vertices, faces=faces,
         vertex_normals=normals,
-        vertex_colors=colors_rgba,
         process=False, validate=False,
     )
-    # Override material to plain PBR with no texture, slightly rough
-    new_mesh.visual.material = trimesh.visual.material.PBRMaterial(
-        metallicFactor=0.0,
-        roughnessFactor=0.85,
-    )
+    # Use ColorVisuals (vertex colors) explicitly so the GLB exporter
+    # writes a COLOR_0 attribute. Assigning a PBRMaterial after would
+    # silently swap it for TextureVisuals and drop the colors.
+    new_mesh.visual = trimesh.visual.ColorVisuals(
+        mesh=new_mesh, vertex_colors=colors_rgba)
     new_mesh.export(output_path, file_type='glb')
     sz = os.path.getsize(output_path)
     log(f'GLB exported with vertex colours ({sz} bytes) in {time.time()-t0:.1f}s')
