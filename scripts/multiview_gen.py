@@ -95,16 +95,55 @@ def generate_multiview(input_image_path, output_dir, size=320):
     tile_h = h // n_rows
 
     view_names = ['view_0', 'view_1', 'view_2', 'view_3', 'view_4', 'view_5']
-
+    view_tiles = []
     for i in range(6):
         row = i // n_cols
         col = i % n_cols
         x = col * tile_w
         y = row * tile_h
-        view = result.crop((x, y, x + tile_w, y + tile_h))
+        view_tiles.append(result.crop((x, y, x + tile_w, y + tile_h)))
+
+    # ---------------------------------------------------------------
+    # Upscale views 320 → 1280 using RealESRGAN (BSD-3, commercial-safe)
+    # Preserves fine details (faces, patterns) that would otherwise be
+    # blurry when projected onto the 2048px texture atlas.
+    # ---------------------------------------------------------------
+    upscaled_tiles = view_tiles
+    try:
+        log('MULTIVIEW_PROGRESS: 85 upscaling')
+        from realesrgan import RealESRGANer
+        from basicsr.archs.rrdbnet_arch import RRDBNet
+        import numpy as np
+
+        # RealESRGAN x4plus (general purpose, 4x upscale)
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+        model_path = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
+        upsampler = RealESRGANer(
+            scale=4, model_path=model_path, model=model,
+            tile=0, tile_pad=10, pre_pad=0, half=True,
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+        )
+        upscaled_tiles = []
+        target_size = 1024
+        outscale = target_size / tile_w
+        for i, tile in enumerate(view_tiles):
+            arr = np.asarray(tile.convert('RGB'))
+            out, _ = upsampler.enhance(arr, outscale=outscale)
+            up = Image.fromarray(out)
+            if up.size != (target_size, target_size):
+                up = up.resize((target_size, target_size), Image.LANCZOS)
+            upscaled_tiles.append(up)
+            log(f'upscaled view_{i} to {up.size}')
+        del upsampler, model
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
+    except Exception as ue:
+        log(f'RealESRGAN upscale skipped ({ue}); using raw 320px tiles')
+        upscaled_tiles = view_tiles
+
+    for i, tile in enumerate(upscaled_tiles):
         view_path = os.path.join(output_dir, f'{view_names[i]}.png')
-        view.save(view_path)
-        log(f'saved {view_names[i]}.png ({view.size})')
+        tile.save(view_path)
+        log(f'saved {view_names[i]}.png ({tile.size})')
 
     log('MULTIVIEW_PROGRESS: 90')
 

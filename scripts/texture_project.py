@@ -341,6 +341,44 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     aspect_ok = (min_edge > 0.5) & (max_edge / np.clip(min_edge, 0.01, None) < 15)
     edge_size_ok = max_edge < (tex_res * 0.2)
 
+    # Per-pixel rasterization: sample source image at projected vertex
+    # coords (via barycentric interp) instead of using face avg color.
+    # This preserves the full detail of the source image in the atlas.
+    proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
+    weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)
+
+    # Precompute per-vertex projected image coords (normalized 0..1)
+    # We need to pick ONE source view per vertex — pick the one with highest visibility
+    # Simpler: use the accumulated color we already computed (from all views)
+    # But to get sharpness, we need the PROJECTED POSITIONS not just the sampled color.
+    #
+    # For sharpness: for each face, rasterize its UV triangle in the atlas,
+    # and for each atlas pixel, interpolate the source image UVs via barycentric,
+    # then sample the source image at that position (with bilinear).
+
+    # We'll use the FRONT view (index 0) for this — it's the HD source.
+    # The multi-view accumulation is still used as fallback for weights/visibility.
+    # But the actual color comes from sampling the source image per-pixel.
+    if len(views) > 0:
+        front_src_img = Image.open(views[0][0]).convert('RGBA')
+        front_src_w, front_src_h = front_src_img.size
+        front_src_pixels = np.asarray(front_src_img)
+
+        # For each vertex, compute its projected (u, v) in the front view
+        front_verts_cs = (R_w2c_base @ verts_cam.T).T + t_w2c_base
+        front_z = front_verts_cs[:, 2]
+        front_safe_z = np.where(np.abs(front_z) < 1e-8, -1e-8, front_z)
+        front_proj_u = focal * front_verts_cs[:, 0] / (-front_safe_z) + 0.5
+        front_proj_v = 1.0 - (focal * front_verts_cs[:, 1] / (-front_safe_z) + 0.5)
+        front_vis = normalized[:, 2] if 'normalized' in dir() else None
+        # Visibility for front: dot(normal, -view_dir) in world coords after rotation
+        front_norms_cs = (R_w2c_base @ norms_cam.T).T
+        front_cam_dirs = -front_verts_cs
+        front_cam_dirs_n = front_cam_dirs / (np.linalg.norm(front_cam_dirs, axis=1, keepdims=True) + 1e-10)
+        front_norms_n = front_norms_cs / (np.linalg.norm(front_norms_cs, axis=1, keepdims=True) + 1e-10)
+        front_vis = np.sum(front_norms_n * front_cam_dirs_n, axis=1)
+        front_vis = np.clip(front_vis, 0, 1)
+
     n_drawn = 0
     n_skipped = 0
     for fi in range(len(faces)):
@@ -351,21 +389,79 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             n_skipped += 1
             continue
 
-        tri = []
+        # UV triangle in atlas pixel coords
+        tri_uv = []
         for vi in range(3):
-            px = int(face_uvs[fi, vi, 0] * tex_res)
-            py = int((1.0 - face_uvs[fi, vi, 1]) * tex_res)
-            tri.append((px, py))
+            px = face_uvs[fi, vi, 0] * tex_res
+            py = (1.0 - face_uvs[fi, vi, 1]) * tex_res
+            tri_uv.append((px, py))
 
-        r, g, b = int(avg_colors[fi, 0]), int(avg_colors[fi, 1]), int(avg_colors[fi, 2])
-        w = int(min(255, vis * 255))
+        # Source image coords for each vertex (normalized)
+        v_idx = faces[fi]
+        tri_src_u = [front_proj_u[v_idx[vi]] for vi in range(3)]
+        tri_src_v = [front_proj_v[v_idx[vi]] for vi in range(3)]
+        tri_vis = [front_vis[v_idx[vi]] for vi in range(3)]
 
-        proj_draw.polygon(tri, fill=(r, g, b), outline=(r, g, b))
-        weight_draw.polygon(tri, fill=w, outline=w)
+        # Rasterize: compute bounding box in atlas
+        min_x = max(0, int(min(tri_uv[0][0], tri_uv[1][0], tri_uv[2][0])))
+        max_x = min(tex_res - 1, int(max(tri_uv[0][0], tri_uv[1][0], tri_uv[2][0])) + 1)
+        min_y = max(0, int(min(tri_uv[0][1], tri_uv[1][1], tri_uv[2][1])))
+        max_y = min(tex_res - 1, int(max(tri_uv[0][1], tri_uv[1][1], tri_uv[2][1])) + 1)
+        if max_x <= min_x or max_y <= min_y:
+            continue
+
+        # Barycentric setup
+        x0, y0 = tri_uv[0]
+        x1, y1 = tri_uv[1]
+        x2, y2 = tri_uv[2]
+        denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if abs(denom) < 1e-10:
+            continue
+        inv_denom = 1.0 / denom
+
+        # Create pixel coord grids
+        ys, xs = np.mgrid[min_y:max_y+1, min_x:max_x+1]
+        xsf = xs.astype(np.float64) + 0.5
+        ysf = ys.astype(np.float64) + 0.5
+
+        # Barycentric coords
+        w0 = ((y1 - y2) * (xsf - x2) + (x2 - x1) * (ysf - y2)) * inv_denom
+        w1 = ((y2 - y0) * (xsf - x2) + (x0 - x2) * (ysf - y2)) * inv_denom
+        w2 = 1.0 - w0 - w1
+
+        mask = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
+        if not mask.any():
+            continue
+
+        # Interpolate source image coords
+        src_u = w0 * tri_src_u[0] + w1 * tri_src_u[1] + w2 * tri_src_u[2]
+        src_v = w0 * tri_src_v[0] + w1 * tri_src_v[1] + w2 * tri_src_v[2]
+        # Interpolate visibility
+        pt_vis = w0 * tri_vis[0] + w1 * tri_vis[1] + w2 * tri_vis[2]
+
+        # Sample source image (nearest for speed, could do bilinear)
+        src_ix = np.clip((src_u * front_src_w).astype(int), 0, front_src_w - 1)
+        src_iy = np.clip((src_v * front_src_h).astype(int), 0, front_src_h - 1)
+
+        # Write to atlas
+        sampled = front_src_pixels[src_iy, src_ix]
+        src_alpha = sampled[..., 3] / 255.0 if sampled.shape[-1] == 4 else 1.0
+        final_weight = pt_vis * src_alpha * mask.astype(np.float64)
+
+        # Only write where weight is higher than existing
+        for c in range(3):
+            proj_arr[ys, xs, c] = np.where(final_weight > weight_arr[ys, xs],
+                                             sampled[..., c],
+                                             proj_arr[ys, xs, c])
+        weight_arr[ys, xs] = np.maximum(weight_arr[ys, xs], final_weight)
+
         n_drawn += 1
 
-    log(f'skipped {n_skipped} degenerate/thin UV faces')
-    log(f'drew {n_drawn}/{len(faces)} faces ({100*n_drawn/len(faces):.1f}%)')
+    log(f'per-pixel rasterization: {n_drawn}/{len(faces)} faces, {n_skipped} skipped')
+
+    # Reconstruct PIL images from numpy arrays
+    proj_atlas = Image.fromarray(proj_arr.astype(np.uint8))
+    weight_atlas = Image.fromarray((weight_arr * 255).clip(0, 255).astype(np.uint8), mode='L')
 
     # ---------------------------------------------------------------
     # Step 4: Blend projected atlas with SF3D atlas based on weights
@@ -374,10 +470,18 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     sf3d_arr = np.asarray(sf3d_tex, dtype=np.float64)
     weight_arr = np.asarray(weight_atlas, dtype=np.float64) / 255.0
 
-    # Expand weight to 3 channels
-    w3 = weight_arr[:, :, np.newaxis]
+    # Blend: where visibility is high (>0.2), use 100% projected texture (sharp).
+    # Where very low (<0.05), use SF3D fallback.
+    # In between, smooth transition.
+    # This preserves sharpness on visible areas instead of averaging with SF3D blur.
+    sharp_mask = weight_arr > 0.2  # high-confidence projection areas
+    fallback_mask = weight_arr < 0.05  # use SF3D
+    # Boost weight curve: w' = smoothstep(0.05, 0.2, w) then clamp to [0, 1]
+    w_boosted = np.clip((weight_arr - 0.05) / 0.15, 0, 1)
+    w3 = w_boosted[:, :, np.newaxis]
     result_arr = (proj_arr * w3 + sf3d_arr * (1.0 - w3)).astype(np.uint8)
     result_img = Image.fromarray(result_arr)
+    log(f'blend: sharp={sharp_mask.sum()} fallback={fallback_mask.sum()} total={tex_res*tex_res}')
 
     log(f'blended, saving...')
 
