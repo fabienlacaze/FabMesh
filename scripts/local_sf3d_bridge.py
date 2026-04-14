@@ -551,6 +551,7 @@ def generate_3d(
     _atlas_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
     _upscale_script = os.path.join(os.path.dirname(__file__), 'upscale_atlas.py')
     _augment_script = os.path.join(os.path.dirname(__file__), 'texture_augment.py')
+    _refine_script = os.path.join(os.path.dirname(__file__), 'texture_refine.py')
     try:
         import subprocess as _sp_proj
         _cmd = None
@@ -563,6 +564,16 @@ def generate_3d(
             _cmd = [sys.executable, _upscale_script, output_path,
                     output_path, '--target', str(_target)]
             _label = f'atlas upscale -> {_target}px'
+        elif _proj_mode == 'refine' and os.path.exists(_refine_script):
+            # Meshy-style: pass the SF3D atlas through SDXL img2img at
+            # low strength to add micro-detail without changing layout.
+            # Talks to the always-on SDXL server (~1 GB VRAM persisted)
+            # to avoid loading a 6 GB pipeline per generation.
+            _target = max(int(tex_res), 2048)
+            _cmd = [sys.executable, _refine_script, output_path,
+                    output_path, '--strength', '0.25',
+                    '--target', str(_target)]
+            _label = f'SDXL atlas refine -> {_target}px'
         elif _proj_mode == 'augment' and os.path.exists(_augment_script):
             # Keep SF3D's atlas where it's good (front), additively
             # rewrite back/sides from multi-views where they see better.
