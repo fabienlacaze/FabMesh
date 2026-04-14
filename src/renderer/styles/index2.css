@@ -1181,7 +1181,7 @@ button.tool-active {
 .step-tools-scroll::-webkit-scrollbar,
 .versions-strip::-webkit-scrollbar,
 #ws-rig-versions::-webkit-scrollbar {
-  width: 12px;
+  width: 8px;
   background: rgba(255,255,255,0.18);
 }
 .step-tools-scroll::-webkit-scrollbar-track,
@@ -1194,7 +1194,7 @@ button.tool-active {
 #ws-rig-versions::-webkit-scrollbar-thumb {
   background: #fff;
   min-height: 40px;
-  border: 2px solid rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,0,0,0.35);
   background-clip: padding-box;
 }
 .step-tools-scroll::-webkit-scrollbar-button,
