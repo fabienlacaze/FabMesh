@@ -59,16 +59,49 @@ def generate_multiview(input_image_path, output_dir, size=320):
     log(f'output_dir={output_dir}')
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load input image
-    input_img = Image.open(input_image_path).convert('RGB')
-    slog.info('input_loaded', w=input_img.size[0], h=input_img.size[1])
-    log(f'input size: {input_img.size}')
+    # Load input image. If it still has a background (RGB or RGBA where the
+    # alpha is fully opaque), run rembg on it BEFORE Zero123++ so the model
+    # doesn't hallucinate the backdrop into the 6 generated views and so
+    # texture_project.py samples transparent-away-from-subject pixels.
+    raw_input = Image.open(input_image_path)
+    needs_rembg = True
+    if raw_input.mode == 'RGBA':
+        # If alpha is already non-trivial (not all 255), skip rembg
+        alpha = np.asarray(raw_input.split()[-1])
+        if (alpha < 255).any():
+            needs_rembg = False
+            slog.info('input_has_alpha_already', min_alpha=int(alpha.min()))
+
+    if needs_rembg:
+        try:
+            with slog.timed('rembg_input'):
+                from rembg import remove as rembg_remove
+                raw_input_rgb = raw_input.convert('RGB')
+                input_img_rgba = rembg_remove(raw_input_rgb)
+            slog.info('rembg_input_done', mode=input_img_rgba.mode)
+        except Exception as re_err:
+            slog.warn('rembg_input_failed', reason=str(re_err)[:200])
+            input_img_rgba = raw_input.convert('RGBA')
+    else:
+        input_img_rgba = raw_input.convert('RGBA')
+
+    # Zero123++ wants RGB; composite the transparent input onto white so the
+    # remaining pixels stay photometric while the background is now neutral
+    # and small, not a distracting grey studio floor.
+    bg = Image.new('RGB', input_img_rgba.size, (255, 255, 255))
+    bg.paste(input_img_rgba, mask=input_img_rgba.split()[-1])
+    input_img = bg
+    slog.info('input_loaded', w=input_img.size[0], h=input_img.size[1],
+              rembg=needs_rembg)
+    log(f'input size: {input_img.size} (rembg={needs_rembg})')
 
     # Resize to expected input size (320x320 for Zero123++)
     input_img_resized = input_img.resize((size, size), Image.LANCZOS)
 
-    # Save input copy
-    input_img.save(os.path.join(output_dir, 'input.png'))
+    # Save the CLEAN RGBA input (alpha intact) so downstream tools —
+    # texture_project.py in particular — can use its alpha to mask away
+    # background pixels when sampling.
+    input_img_rgba.save(os.path.join(output_dir, 'input.png'))
 
     log('loading Zero123++ v1.2 pipeline...')
     slog.progress(10, 'load_pipeline')
