@@ -95,14 +95,21 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
     print("LOCAL_REALVIS: Loaded with CPU offload (VAE decodes on CPU if needed)")
     sys.stdout.flush()
 
+    # Three-quarter view bias: SF3D textures only what the front shows
+    # and "invents" the back/sides as a duller version of the front. By
+    # asking RealVisXL for a 3/4 angle we expose the side of the subject
+    # in the source image itself, so SF3D bakes a richer, more accurate
+    # texture for the back half of the mesh.
     optimized_prompt = (
-        f"{prompt}, single object centered on plain white background, "
+        f"{prompt}, three-quarter view showing one side, slight rotation, "
+        f"single object centered on plain white background, "
         f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
         f"masterpiece, no text, no watermark"
     )
     negative_prompt = (
         "blurry, low quality, text, watermark, signature, deformed, "
-        "extra limbs, bad anatomy, distorted, cropped, worst quality"
+        "extra limbs, bad anatomy, distorted, cropped, worst quality, "
+        "strict frontal view, flat profile"
     )
 
     _throttle_cb = make_throttle_callback()  # None if disabled
