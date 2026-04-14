@@ -7121,6 +7121,23 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
       return;
     }
     closeStream();
+    setStatus('loading history...', '#8ecae6');
+
+    // Load the last 300 lines as initial context so the window isn't empty
+    // before the first new log event arrives.
+    try {
+      const r = await fetch(`http://127.0.0.1:7331/logs?file=${encodeURIComponent(file)}&lines=300`, {
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      const j = await r.json();
+      const text = (j && j.data && j.data.content) || '';
+      for (const line of text.split(/\r?\n/)) {
+        if (line) appendLine(line);
+      }
+    } catch (e) {
+      appendLine('[viewer] failed to load history: ' + e.message);
+    }
+
     setStatus('connecting to ' + file + '...', '#8ecae6');
     // EventSource doesn't support custom headers; use ?token= fallback.
     const url = `http://127.0.0.1:7331/logs/stream?file=${encodeURIComponent(file)}&token=${encodeURIComponent(token)}`;
