@@ -5963,8 +5963,14 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
 async function reloadCurrentProject() {
   if (!state.currentProject) return;
   const name = state.currentProject.name;
+  const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
   await refreshProjectsPage();
-  const refreshed = state.projects.find(p => p.name === name);
+  // Try exact match first, then sanitized match (spaces → underscores)
+  const refreshed = state.projects.find(p => p.name === name)
+    || state.projects.find(p => p.name === sanitizedName)
+    || state.projects.find(p => p.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedName);
+  if (refreshed) console.log('[reload] matched project:', refreshed.name, 'for requested:', name);
+  else console.log('[reload] NO MATCH for project:', name, '(sanitized:', sanitizedName, ') in:', state.projects.map(p => p.name).slice(0, 10));
   if (refreshed) {
     refreshed._reloadTs = Date.now();
     // Carry over multiview data
