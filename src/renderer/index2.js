@@ -14,16 +14,24 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 const API = window.meshyAPI;
 
-// Forward all console.log/warn/error to main process log file for debugging
-(() => {
+// Forward all console.log/warn/error to main process log file for debugging.
+// test_api_client.js already wrapped console.* — we wrap their wrapped versions.
+function _installLogForwarder() {
   if (!API?.logToFile) return;
-  const origLog = console.log, origWarn = console.warn, origErr = console.error;
-  const fmt = (args) => args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-  console.log = (...args) => { try { API.logToFile('[log] ' + fmt(args)); } catch(_){} origLog.apply(console, args); };
-  console.warn = (...args) => { try { API.logToFile('[warn] ' + fmt(args)); } catch(_){} origWarn.apply(console, args); };
-  console.error = (...args) => { try { API.logToFile('[err] ' + fmt(args)); } catch(_){} origErr.apply(console, args); };
+  const origLog = console.log, origWarn = console.warn, origErr = console.error, origInfo = console.info;
+  const fmt = (args) => args.map(a => {
+    if (a instanceof Error) return a.message + '\n' + (a.stack || '');
+    if (typeof a === 'object') { try { return JSON.stringify(a); } catch(_) { return String(a); } }
+    return String(a);
+  }).join(' ');
+  console.log = function (...args) { try { API.logToFile('[log] ' + fmt(args)); } catch(_){} return origLog.apply(console, args); };
+  console.info = function (...args) { try { API.logToFile('[info] ' + fmt(args)); } catch(_){} return origInfo.apply(console, args); };
+  console.warn = function (...args) { try { API.logToFile('[warn] ' + fmt(args)); } catch(_){} return origWarn.apply(console, args); };
+  console.error = function (...args) { try { API.logToFile('[err] ' + fmt(args)); } catch(_){} return origErr.apply(console, args); };
   window.addEventListener('error', (e) => { try { API.logToFile('[uncaught] ' + e.message + ' @ ' + e.filename + ':' + e.lineno); } catch(_){} });
-})();
+  window.addEventListener('unhandledrejection', (e) => { try { API.logToFile('[unhandledrejection] ' + (e.reason?.message || e.reason)); } catch(_){} });
+}
+_installLogForwarder();
 
 // ============================================================
 // STATE
