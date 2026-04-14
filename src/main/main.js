@@ -3242,6 +3242,14 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   });
 });
 
+// --- Renderer log forwarding (for Claude Code debugging) ---
+const RENDERER_LOG = path.join(__dirname, '..', '..', 'logs', 'renderer.log');
+ipcMain.on('renderer-log', (_event, line) => {
+  try {
+    fs.appendFileSync(RENDERER_LOG, `[${new Date().toISOString()}] ${line}\n`);
+  } catch (_) {}
+});
+
 // --- Save Buffer IPC (for GLTFExporter output) ---
 ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer, base64 }) => {
   try {
