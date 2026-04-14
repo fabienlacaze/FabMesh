@@ -212,6 +212,15 @@ def augment(mesh_path, front_image_path, output_path, multiview_dir=None,
         # Average front score for this face
         f_front = front_vis[v_idx].mean()
 
+        # Hard guard: if SF3D saw this face well from the front, NEVER
+        # touch it. The user noted that the previous augment was
+        # degrading the front because slightly-better multi-views were
+        # still being blended in. Front is the ground-truth source —
+        # respect it where it had a clean view.
+        FRONT_PROTECT = 0.45  # face well-lit from front -> SF3D wins
+        if f_front >= FRONT_PROTECT:
+            continue
+
         # UV triangle in atlas pixel coords
         x0 = uv_px[fi, 0, 0]; y0 = (1.0 - uv[faces[fi, 0], 1]) * tex_res
         x1 = uv_px[fi, 1, 0]; y1 = (1.0 - uv[faces[fi, 1], 1]) * tex_res
