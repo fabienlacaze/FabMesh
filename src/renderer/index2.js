@@ -879,6 +879,7 @@ function populateWorkspace(p) {
   // The renderXxxVersions() functions will then auto-select the latest item
   // (index 0 because the lists are sorted newest first).
   p.selectedImagePath = null;
+  p._activeMultiview = null;
   p.previewImagePath = null;
   p.selectedMeshPath = null;
   p.previewMeshPath = null;
@@ -1034,6 +1035,9 @@ async function renderImageVersions(p) {
       strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected'));
       t.classList.add('selected');
       p.previewImagePath = img.path;
+      // Switching version drops any multi-view focus — the multi-view bar
+      // will be re-evaluated for the new image by showStep1Preview.
+      p._activeMultiview = null;
       showStep1Preview(img.path);
       // Restore the style that was applied to this specific image
       _restoreStyleDropdown(img.path);
@@ -1287,6 +1291,7 @@ function _navigateImage(delta) {
   if (newIdx === curIdx) return;
   const newImg = images[newIdx];
   p.previewImagePath = newImg.path || newImg;
+  p._activeMultiview = null;
   showStep1Preview(p.previewImagePath);
   _updateImageNav();
   // Sync version strip selection
@@ -1380,11 +1385,24 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
   btn.classList.add('mv-active');
 
-  // Switch image in viewer
-  const filename = _mvViewMap[view] || 'input';
-  const imgPath = dir + '/' + filename + '.png';
+  // Resolve the view's on-disk path. 'front' = the project's original
+  // image (kept on its own path); other views live inside the multiview
+  // dir alongside the 'input.png' copy.
+  const p = state.currentProject;
+  let imgPath;
+  if (view === 'front') {
+    imgPath = p?.previewImagePath || (dir + '/input.png');
+    if (p) p._activeMultiview = null;
+  } else {
+    const filename = _mvViewMap[view] || 'input';
+    imgPath = dir + '/' + filename + '.png';
+    // Remember which multiview the user is currently focused on so tools
+    // (Draw Mask, Paint, etc.) operate on that view instead of the front.
+    if (p) p._activeMultiview = imgPath;
+  }
+
   const preview = document.getElementById('step1-preview');
-  let imgEl = preview?.querySelector('img');
+  const imgEl = preview?.querySelector('img');
   if (imgEl) {
     imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   }
@@ -2264,8 +2282,16 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
   if (!dir || !view) return;
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
   btn.classList.add('mv-active');
-  const filename = _mvViewMap[view] || 'input';
-  const imgPath = dir + '/' + filename + '.png';
+  const p = state.currentProject;
+  let imgPath;
+  if (view === 'front') {
+    imgPath = _lightboxImages[_lightboxIndex] || (dir + '/input.png');
+    if (p) p._activeMultiview = null;
+  } else {
+    const filename = _mvViewMap[view] || 'input';
+    imgPath = dir + '/' + filename + '.png';
+    if (p) p._activeMultiview = imgPath;
+  }
   document.getElementById('lightbox-2-img').src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
 });
 
@@ -2552,13 +2578,13 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
 });
 
 // ----- Image edit tools -----
-// Image tools operate on the image currently shown in the preview
-// (previewImagePath), not the one tagged "used for 3D" (selectedImagePath).
-// When the user navigates versions via thumbs/arrows, previewImagePath
-// tracks what they SEE — that's what they expect a tool to modify.
-// Falls back to selectedImagePath only when no preview is set (first load).
+// Image tools operate on whatever the user is CURRENTLY LOOKING AT:
+//   1. An active multi-view (e.g. "Right" button clicked) -> that view
+//   2. Otherwise the previewed image version (thumb strip / arrows)
+//   3. Otherwise the image tagged "used for 3D" (first-load fallback)
 function editTarget(p) {
-  return p && (p.previewImagePath || p.selectedImagePath);
+  if (!p) return null;
+  return p._activeMultiview || p.previewImagePath || p.selectedImagePath;
 }
 
 // Modify image: opens a popup (consistent with Clone Stamp / Draw Mask)
