@@ -50,6 +50,43 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-14 — InstantMesh as alternative texture-aware mesh generator — STARTED
+
+**Why**: SF3D ceiling reached. All atlas-based projections (mosaic),
+xatlas re-pack (mosaic), vertex coloring (15k verts → flou granuleux).
+User suggested using a dedicated texturing AI.
+
+**Audit of texturing/mesh AIs (EU + commercial constraints)**:
+- ❌ Paint3D, TexFusion, Text2Tex, MeshAnything: research only or
+  Tencent Community license
+- ❌ Hunyuan3D-2: EU-excluded
+- ✅ InstantMesh (`external/InstantMesh/`): Apache 2.0, takes Zero123++
+  multi-views as input, generates mesh + texture in single forward pass
+- ✅ TripoSR (already in repo via `local_triposr_bridge.py`): MIT, but
+  texture native ~SF3D quality
+
+**Next experiment**: bridge InstantMesh as alternative engine.
+External repo present, CLI at `external/InstantMesh/run.py`, takes
+`config + input_path` and exports OBJ/GLB. `--export_texmap` flag.
+
+### 2026-04-14 — Vertex coloring pipeline (no UV atlas) — DONE, REJECTED VISUALLY
+
+**Result**: GLB 660 KB (vs 4 MB atlas), pipeline 0.1 s. Code clean,
+camera math correct, 97% of verts covered by multi-view, 478 fall
+back to SF3D atlas.
+
+**Visual**: smooth, no mosaic — but **flou granuleux**. SF3D's 15k
+vertices = ~128×128 effective texture resolution stretched on full
+mesh surface. Not enough density for fine details (face, ornaments).
+**User rejected**.
+
+**Conclusion**: vertex coloring is structurally limited by mesh
+density. Would need ≥60k verts (subdivide + paint) to compete with a
+2048 atlas.
+
+**File preserved**: `scripts/texture_project_vc.py` (gated by
+`FABMESH_PROJECT_MODE=vc` env var).
+
 ### 2026-04-14 — Vertex coloring pipeline (no UV atlas) — IN PROGRESS
 
 **Why**: 3 agents diagnosed the fragmented-mosaic atlas. Agreed strategy
