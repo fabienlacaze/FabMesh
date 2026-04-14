@@ -7196,6 +7196,25 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     output.innerHTML = ''; lineCount = 0;
     if (countEl) countEl.textContent = '0 lines';
   });
+
+  document.getElementById('ll-copy')?.addEventListener('click', async () => {
+    const text = output.innerText || output.textContent || '';
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('ll-copy');
+      if (btn) {
+        const prev = btn.innerHTML;
+        btn.innerHTML = '\u2713 Copied';
+        setTimeout(() => { btn.innerHTML = prev; }, 1400);
+      }
+    } catch (e) {
+      // Fallback: use a hidden textarea
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy');
+      ta.remove();
+    }
+  });
 })();
 // ============================================================
 // PARENTAL CONTROL
