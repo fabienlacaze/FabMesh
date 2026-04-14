@@ -220,7 +220,10 @@ function startControlApi(mainWindow, opts = {}) {
         endpoints: [
           'GET  /',
           'GET  /state',
-          'GET  /screenshot',
+          'GET  /screenshot                 (full Electron window PNG)',
+          'GET  /screenshot-file?path=      (stream any PNG/JPG inside project root)',
+          'GET  /thumbs?project=&kind=      (list image|mesh versions + paths)',
+          'POST /compare-thumbs             {a, b, threshold?}  pixel-diff two files',
           'GET  /logs?file=&lines=200       (file optional; back-compat default: fabmesh + error)',
           'GET  /logs/list',
           'POST /logs/clear                 {file}',
@@ -264,6 +267,116 @@ function startControlApi(mainWindow, opts = {}) {
           'Access-Control-Allow-Origin': '*'
         });
         res.end(png);
+      } catch (e) { sendErr(res, e); }
+    },
+
+    // GET /screenshot-file?path=<abs path>
+    // Stream any PNG/JPG on disk directly. Useful for fetching a version
+    // thumbnail (e.g. images/<project>/ref_2.png) without going through
+    // the Electron webContents capture (which captures the whole window).
+    'GET /screenshot-file': async (req, res, url) => {
+      try {
+        const p = url.searchParams.get('path');
+        if (!p) return sendErr(res, 'missing path', 400);
+        if (!fs.existsSync(p)) return sendErr(res, 'not found: ' + p, 404);
+        // Allow only paths INSIDE the project root to prevent arbitrary reads
+        const abs = path.resolve(p);
+        if (!abs.startsWith(rootDir)) {
+          return sendErr(res, 'path outside project root', 400);
+        }
+        const ext = path.extname(abs).slice(1).toLowerCase();
+        const mime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                       webp: 'image/webp', gif: 'image/gif' }[ext] || 'application/octet-stream';
+        const data = fs.readFileSync(abs);
+        res.writeHead(200, {
+          'Content-Type': mime,
+          'Content-Length': data.length,
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(data);
+      } catch (e) { sendErr(res, e); }
+    },
+
+    // GET /thumbs?project=<name>&kind=image|mesh
+    // List every version's on-disk file + size + mtime for a project.
+    // Lets a remote analyser iterate versions and pull their bytes via
+    // /screenshot-file.
+    'GET /thumbs': async (req, res, url) => {
+      try {
+        const project = url.searchParams.get('project');
+        const kind = (url.searchParams.get('kind') || 'image').toLowerCase();
+        if (!project) return sendErr(res, 'missing project', 400);
+        let dir, filter;
+        if (kind === 'image') {
+          dir = path.join(rootDir, 'images', project);
+          filter = f => /\.(png|jpe?g|webp)$/i.test(f);
+        } else if (kind === 'mesh') {
+          dir = path.join(rootDir, 'meshes');
+          filter = f => f.toLowerCase().includes(project.toLowerCase()) && /\.glb$/i.test(f);
+        } else {
+          return sendErr(res, 'kind must be image or mesh', 400);
+        }
+        if (!fs.existsSync(dir)) return sendOk(res, { project, kind, items: [] });
+        const files = fs.readdirSync(dir).filter(filter).map(f => {
+          const abs = path.join(dir, f);
+          const st = fs.statSync(abs);
+          return { name: f, path: abs, sizeBytes: st.size, modified: st.mtime };
+        }).sort((a, b) => a.modified - b.modified);
+        sendOk(res, { project, kind, items: files });
+      } catch (e) { sendErr(res, e); }
+    },
+
+    // POST /compare-thumbs {a, b, threshold?}
+    // Pixel-diff between two images. Returns
+    //   { widthA, heightA, widthB, heightB,
+    //     comparable, pixelCount, diffPixels, diffRatio }
+    // 'comparable' is false when dimensions differ. threshold is the
+    // per-channel delta below which a pixel is considered unchanged
+    // (default 4). Uses plain Node Buffer reads — no external deps.
+    'POST /compare-thumbs': async (req, res) => {
+      try {
+        const body = await readBody(req);
+        const a = body && body.a, b = body && body.b;
+        if (!a || !b) return sendErr(res, 'missing a and b paths', 400);
+        const absA = path.resolve(a);
+        const absB = path.resolve(b);
+        if (!absA.startsWith(rootDir) || !absB.startsWith(rootDir)) {
+          return sendErr(res, 'paths must be inside project root', 400);
+        }
+        if (!fs.existsSync(absA) || !fs.existsSync(absB)) {
+          return sendErr(res, 'one or both files missing', 404);
+        }
+        const threshold = Math.max(0, parseInt(body.threshold || '4', 10));
+        // Decode via Electron's nativeImage (bundled, no deps).
+        const { nativeImage } = require('electron');
+        const imgA = nativeImage.createFromPath(absA);
+        const imgB = nativeImage.createFromPath(absB);
+        const sizeA = imgA.getSize(), sizeB = imgB.getSize();
+        if (sizeA.width !== sizeB.width || sizeA.height !== sizeB.height) {
+          return sendOk(res, {
+            comparable: false,
+            widthA: sizeA.width, heightA: sizeA.height,
+            widthB: sizeB.width, heightB: sizeB.height,
+          });
+        }
+        const bufA = imgA.toBitmap();   // BGRA, same layout both sides
+        const bufB = imgB.toBitmap();
+        const pixelCount = sizeA.width * sizeA.height;
+        let diff = 0;
+        for (let i = 0; i < bufA.length; i += 4) {
+          const db = Math.abs(bufA[i]   - bufB[i]);
+          const dg = Math.abs(bufA[i+1] - bufB[i+1]);
+          const dr = Math.abs(bufA[i+2] - bufB[i+2]);
+          if (db > threshold || dg > threshold || dr > threshold) diff++;
+        }
+        sendOk(res, {
+          comparable: true,
+          widthA: sizeA.width, heightA: sizeA.height,
+          widthB: sizeB.width, heightB: sizeB.height,
+          pixelCount, diffPixels: diff,
+          diffRatio: diff / pixelCount,
+          threshold,
+        });
       } catch (e) { sendErr(res, e); }
     },
 
