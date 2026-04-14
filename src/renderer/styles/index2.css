@@ -1158,8 +1158,8 @@ button.tool-active {
 }
 
 .step-tools-scroll {
-  max-height: 220px;
-  overflow-y: auto;
+  height: 380px;             /* fixed height so mesh/rig/image panels match */
+  overflow-y: scroll;        /* always show the track so layout never shifts */
   padding-right: 8px;
   /* scrollbar styling inherits from the global rule in main.css */
 }
@@ -1187,9 +1187,10 @@ button.tool-active {
   font-size: 11px !important;
   padding: 6px 4px !important;
   text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;       /* allow long labels to wrap instead of being cut */
+  line-height: 1.15;
+  min-height: 30px;
+  word-break: break-word;
 }
 .step-tools-row {
   display: flex;
