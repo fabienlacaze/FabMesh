@@ -856,6 +856,28 @@
 
         <button id="set-open-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:8px;">&#128193; Open logs folder</button>
         <button id="set-live-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:6px;">&#128269; Live logs viewer</button>
+
+        <div class="settings-section-header" style="margin-top:14px;">Control API</div>
+        <div class="settings-box" id="set-control-api-box">
+          <div class="settings-box-title">
+            <span id="set-api-dot" style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#666; margin-right:6px; vertical-align:middle;"></span>
+            <span id="set-api-status">Checking...</span>
+          </div>
+          <div class="settings-box-desc" id="set-api-detail" style="font-size:11px; color:var(--text-2);">
+            Local HTTP control plane on 127.0.0.1:7331. Drive FabMesh from scripts.
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:6px; font-size:11px;">
+            <span class="settings-field-label" style="min-width:50px;">Token</span>
+            <input id="set-api-token" type="text" readonly style="flex:1; background:var(--bg-0); border:1px solid var(--border); color:var(--text-2); border-radius:4px; padding:3px 6px; font-size:11px; font-family:monospace;">
+            <button id="set-api-copy-token" class="ghost-btn" style="padding:3px 8px; font-size:11px;">&#128203; Copy</button>
+          </div>
+          <div id="set-api-traffic" style="margin-top:8px; font-size:11px; color:var(--text-2);"></div>
+          <details style="margin-top:6px;">
+            <summary style="cursor:pointer; font-size:10px; color:var(--text-3);">Recent requests</summary>
+            <pre id="set-api-recent" style="margin:4px 0 0 0; padding:6px 8px; background:#000; border-radius:4px; font-size:10px; max-height:140px; overflow:auto; color:#9bbac8; line-height:1.35;"></pre>
+          </details>
+          <a href="FABMESH_API.md" id="set-api-docs" style="display:inline-block; margin-top:8px; font-size:10px; color:var(--accent);">View API docs (FABMESH_API.md)</a>
+        </div>
       </div>
     </div>
 

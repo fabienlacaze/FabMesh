@@ -7257,6 +7257,105 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     }
   });
 })();
+
+// ============================================================
+// CONTROL API STATUS PANEL — Settings → Control API
+// ============================================================
+// Polls GET /status every 2 s while the Settings modal is open and
+// fills in the Control API box with: green/red dot, full bearer
+// token (read-only + copy), traffic counters, last 10 requests.
+(() => {
+  const dot   = document.getElementById('set-api-dot');
+  const stat  = document.getElementById('set-api-status');
+  const det   = document.getElementById('set-api-detail');
+  const tok   = document.getElementById('set-api-token');
+  const cpy   = document.getElementById('set-api-copy-token');
+  const traf  = document.getElementById('set-api-traffic');
+  const recent = document.getElementById('set-api-recent');
+  const settingsModal = document.getElementById('modal-settings');
+  if (!dot || !settingsModal) return;
+
+  let _timer = null;
+  let _token = null;
+
+  async function fetchToken() {
+    if (_token) return _token;
+    try { _token = await API.getControlApiToken?.(); } catch { _token = null; }
+    if (_token && tok) tok.value = _token;
+    return _token;
+  }
+
+  function fmtTimeAgo(ms) {
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.round(s / 60) + 'm ago';
+    return Math.round(s / 3600) + 'h ago';
+  }
+
+  async function poll() {
+    const t = await fetchToken();
+    if (!t) {
+      dot.style.background = '#666';
+      stat.textContent = 'Disabled (no token)';
+      if (det) det.textContent = 'Set FABMESH_CONTROL_API=1 (or just relaunch FabMesh) to enable.';
+      return;
+    }
+    try {
+      const r = await fetch('http://127.0.0.1:7331/status',
+        { headers: { 'Authorization': 'Bearer ' + t } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      const d = j.data;
+      dot.style.background = '#06d6a0';
+      stat.textContent = `Listening on ${d.host}:${d.port}`;
+      if (det) det.textContent = `v${d.version} · uptime ${Math.floor((d.uptime_s||0)/60)}m${(d.uptime_s||0)%60}s`;
+      if (traf) {
+        const clients = Object.keys(d.recent_clients || {}).length;
+        traf.innerHTML = `<strong style="color:#9bbac8;">Traffic:</strong> ${d.request_count_5min} requests in last 5min, ${d.request_count_total} total · ${clients} distinct client${clients>1?'s':''}`;
+      }
+      if (recent) {
+        const rows = (d.recent_requests || []).slice().reverse().map(r =>
+          `${fmtTimeAgo(r.ts).padStart(7)}  ${String(r.status).padEnd(3)} ${r.method.padEnd(4)} ${r.path}`
+        );
+        recent.textContent = rows.length ? rows.join('\n') : '(no requests yet)';
+      }
+    } catch (e) {
+      dot.style.background = '#ef4444';
+      stat.textContent = 'Unreachable';
+      if (det) det.textContent = 'Server not responding: ' + (e.message || e);
+    }
+  }
+
+  // Poll only while Settings modal is visible
+  function startPolling() {
+    if (_timer) return;
+    poll();
+    _timer = setInterval(poll, 2000);
+  }
+  function stopPolling() {
+    if (_timer) { clearInterval(_timer); _timer = null; }
+  }
+  // MutationObserver on the modal's hidden class
+  const mo = new MutationObserver(() => {
+    if (!settingsModal.classList.contains('hidden')) startPolling();
+    else stopPolling();
+  });
+  mo.observe(settingsModal, { attributes: true, attributeFilter: ['class'] });
+  // First check at page load if modal is already open
+  if (!settingsModal.classList.contains('hidden')) startPolling();
+
+  // Copy token button
+  cpy?.addEventListener('click', async () => {
+    if (!_token) return;
+    try {
+      await navigator.clipboard.writeText(_token);
+      const prev = cpy.textContent;
+      cpy.textContent = '\u2713 Copied';
+      setTimeout(() => { cpy.textContent = prev; }, 1400);
+    } catch { /* clipboard refused */ }
+  });
+})();
+
 // ============================================================
 // PARENTAL CONTROL
 // ============================================================

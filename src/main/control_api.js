@@ -77,6 +77,25 @@ let _cmdCounter = 0;
 const _consoleBuf = [];
 const CONSOLE_MAX = 1000;
 
+// Recent request tracker — ring buffer of the last N hits, used by the
+// /status endpoint and the Settings UI to show whether external clients
+// are actually using the API.
+const _reqHistory = [];
+const REQ_HISTORY_MAX = 50;
+function _recordRequest(req, statusCode) {
+  try {
+    _reqHistory.push({
+      ts: Date.now(),
+      method: req.method,
+      path: (req.url || '').split('?')[0],
+      remote: (req.socket && req.socket.remoteAddress) || 'unknown',
+      ua: (req.headers && req.headers['user-agent']) || '',
+      status: statusCode,
+    });
+    while (_reqHistory.length > REQ_HISTORY_MAX) _reqHistory.shift();
+  } catch (_) {}
+}
+
 // Cached last known renderer state (filled by test:state-push)
 let _lastState = null;
 
@@ -247,6 +266,39 @@ function startControlApi(mainWindow, opts = {}) {
           'GET  /last-error',
           'GET  /devtools-open'
         ]
+      });
+    },
+
+    // Status endpoint for the in-app Settings panel. Returns the
+    // server's "I'm alive" info plus recent request history so the UI
+    // can show whether external clients are currently using the API.
+    'GET /status': async (req, res) => {
+      const now = Date.now();
+      const last5min = _reqHistory.filter(r => now - r.ts < 5 * 60 * 1000);
+      // Distinct user-agents (truncated) seen in last 5 min — gives a
+      // hint of what clients are talking to us.
+      const ua_set = {};
+      for (const r of last5min) {
+        const k = (r.ua || 'unknown').slice(0, 60);
+        ua_set[k] = (ua_set[k] || 0) + 1;
+      }
+      sendOk(res, {
+        listening: true,
+        host: HOST,
+        port: PORT,
+        version: 2,
+        uptime_s: process.uptime ? Math.floor(process.uptime()) : null,
+        token_hint: _authToken ? (_authToken.slice(0, 8) + '...' + _authToken.slice(-4)) : null,
+        request_count_total: _reqHistory.length,
+        request_count_5min: last5min.length,
+        recent_clients: ua_set,
+        recent_requests: _reqHistory.slice(-10).map(r => ({
+          ts: r.ts,
+          method: r.method,
+          path: r.path,
+          remote: r.remote,
+          status: r.status,
+        })),
       });
     },
 
@@ -704,6 +756,14 @@ function startControlApi(mainWindow, opts = {}) {
   };
 
   const server = http.createServer(async (req, res) => {
+    let _statusForLog = 0;
+    // Wrap writeHead so we can capture the final status without
+    // touching every handler.
+    const _origWriteHead = res.writeHead.bind(res);
+    res.writeHead = function (code, ...rest) {
+      _statusForLog = code;
+      return _origWriteHead(code, ...rest);
+    };
     try {
       const url = new URL(req.url, 'http://' + HOST + ':' + PORT);
       const key = req.method + ' ' + url.pathname;
@@ -711,13 +771,20 @@ function startControlApi(mainWindow, opts = {}) {
       if (!_checkAuth(req)) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'unauthorized — missing or invalid Authorization: Bearer <token> header' }));
+        _recordRequest(req, 401);
         return;
       }
       const handler = routes[key];
-      if (!handler) return sendErr(res, 'not found: ' + key, 404);
+      if (!handler) {
+        sendErr(res, 'not found: ' + key, 404);
+        _recordRequest(req, 404);
+        return;
+      }
       await handler(req, res, url);
+      _recordRequest(req, _statusForLog || 200);
     } catch (e) {
       try { sendErr(res, e); } catch (_) {}
+      _recordRequest(req, _statusForLog || 500);
     }
   });
 
