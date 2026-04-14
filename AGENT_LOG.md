@@ -50,6 +50,28 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-14 — Alpha-aware multiview input — SUSPECTED FIX
+
+**Problem**: orc_blue_crown texture came out as a broken voronoi mosaic
+(blue leaking everywhere, no recognizable silhouette in atlas, face
+missing). Debug overlay showed projection math was correct.
+
+**Root cause found**: `multiview_gen.py` opened the preprocessed input
+and did `convert('RGB')` before saving `input.png`. That stripped the
+alpha channel produced by SF3D's `remove_background`. When
+`texture_project.py` later loaded that input.png to sample colours, it
+had no alpha to gate with — so background pixels were sampled onto the
+mesh, then EDT dilation smeared them across the full UV atlas.
+
+**Fix**: preserve alpha end-to-end. If the input has no alpha, run rembg
+on it (new code path). Save the RGBA result as input.png. Zero123++
+still gets an RGB composite (paste on white).
+
+**Expected**: atlas should now have clean silhouettes; background weight
+is zero because texture_project.py already multiplies by src_alpha.
+
+**Not yet visually verified by user** — needs a fresh end-to-end run.
+
 ### 2026-04-14 — Atlas 2048 + EDT dilation — WIN (needs user visual check)
 
 **Tried**: two changes to `scripts/texture_project.py`:
