@@ -1124,7 +1124,7 @@ function initRigSrcViewer() {
   rigSrcRenderer.setSize(w, h, false);
   rigSrcRenderer.setPixelRatio(window.devicePixelRatio);
   rigSrcRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  rigSrcRenderer.toneMappingExposure = 1.4;
+  rigSrcRenderer.toneMappingExposure = 1.0;
   rigSrcScene = new THREE.Scene();
   rigSrcScene.background = new THREE.Color(0x0b0b14);
   rigSrcCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
@@ -1205,7 +1205,7 @@ async function showRigSourceMesh(meshPath) {
     const buffer = await API.readMeshFile(meshPath);
     if (!buffer) return;
     const loader = new GLTFLoader();
-    loader.parse(buffer, '', (gltf) => applyLoadedModel(gltf.scene),
+    loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); applyLoadedModel(gltf.scene); },
       (err) => console.error('GLTF parse error in rig source viewer', err));
   }
 }
@@ -1961,7 +1961,7 @@ function init3DLightbox() {
   lb3dRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   lb3dRenderer.setPixelRatio(window.devicePixelRatio);
   lb3dRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  lb3dRenderer.toneMappingExposure = 1.4;
+  lb3dRenderer.toneMappingExposure = 1.0;
   lb3dScene = new THREE.Scene();
   lb3dScene.background = new THREE.Color(0x0b0b14);
   lb3dCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 5000);
@@ -2154,7 +2154,7 @@ async function _lb3dLoadAt(meshPath) {
       const buffer = await API.readMeshFile(meshPath);
       if (!buffer) { customError('Could not read mesh file', 'Lightbox error'); return; }
       const loader = new GLTFLoader();
-      loader.parse(buffer, '', (gltf) => fitAndApply(gltf.scene),
+      loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); fitAndApply(gltf.scene); },
         (err) => console.error('GLTF parse error in lightbox', err));
     }
   } catch (e) {
@@ -4309,7 +4309,7 @@ function initWsThree() {
   wsRenderer.setSize(w, h, false);
   wsRenderer.setPixelRatio(window.devicePixelRatio);
   wsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  wsRenderer.toneMappingExposure = 1.4;
+  wsRenderer.toneMappingExposure = 1.0;
   wsScene = new THREE.Scene();
   wsScene.background = new THREE.Color(0x1d1d2c);
   wsCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
@@ -4377,6 +4377,7 @@ async function showStep2Preview(mesh) {
   loader.parse(buffer, '', (gltf) => {
     wsModel = gltf.scene;
     wsScene.add(wsModel);
+    _applyMeshTextureFilter(wsModel);
     fitWsCamera(wsModel);
     // Count verts/triangles and display under the filename
     let totalVerts = 0, totalTris = 0;
@@ -4427,6 +4428,31 @@ async function showStep2Preview(mesh) {
     };
     requestAnimationFrame(_capture);
   }, (err) => { console.error('GLTF parse error', err); });
+}
+
+// Walk a loaded GLTF scene and force NEAREST filtering on every base
+// color texture. Default Three.js bilinear filtering bleeds across UV
+// island borders — on SF3D meshes (1000+ micro-islands) this produces
+// a checkerboard / mosaic of neighbouring island colours. NEAREST
+// samples a single texel, no border artifacts. Mipmaps off for the
+// same reason.
+function _applyMeshTextureFilter(root) {
+  if (!root || typeof root.traverse !== 'function') return;
+  root.traverse((child) => {
+    if (!child.isMesh || !child.material) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (const mat of mats) {
+      if (!mat) continue;
+      const tex = mat.map || mat.baseColorTexture || null;
+      if (tex) {
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.LinearFilter;   // mipless linear is fine for minify
+        tex.generateMipmaps = false;
+        tex.anisotropy = 1;
+        tex.needsUpdate = true;
+      }
+    }
+  });
 }
 
 function fitWsCamera(obj) {
@@ -4849,7 +4875,7 @@ async function _meInitViewport() {
   meState.renderer.setSize(w, h, false);
   meState.renderer.setPixelRatio(window.devicePixelRatio);
   meState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  meState.renderer.toneMappingExposure = 1.4;
+  meState.renderer.toneMappingExposure = 1.0;
 
   meState.scene = new THREE.Scene();
   meState.scene.background = new THREE.Color(0x1a1a2e);
@@ -4927,6 +4953,7 @@ function _meLoadMesh(meshPath) {
     loader.parse(buffer, '', (gltf) => {
       console.log('[mesh-edit] GLTF parsed, children:', gltf.scene.children.length);
       meState.mesh = gltf.scene;
+      _applyMeshTextureFilter(meState.mesh);
       meState.scene.add(meState.mesh);
 
       // Center and scale
@@ -5432,7 +5459,7 @@ function initRigViewer() {
   rigVwRenderer.setSize(w, h, false);
   rigVwRenderer.setPixelRatio(window.devicePixelRatio);
   rigVwRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  rigVwRenderer.toneMappingExposure = 1.4;
+  rigVwRenderer.toneMappingExposure = 1.0;
   rigVwScene = new THREE.Scene();
   rigVwScene.background = new THREE.Color(0x1d1d2c);
   rigVwCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 5000);
@@ -5596,6 +5623,7 @@ async function showStep3Preview(rig) {
       const loader = new GLTFLoader();
       loader.parse(buffer, '', (gltf) => {
         rigVwModel = gltf.scene;
+        _applyMeshTextureFilter(rigVwModel);
         let skinnedCount = 0;
         // Add model to scene FIRST (like the FBX path) so that
         // updateMatrixWorld propagates correct bone world matrices.
@@ -8393,7 +8421,7 @@ function initLmFullscreen() {
   lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: true });
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
   lmFsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  lmFsRenderer.toneMappingExposure = 1.4;
+  lmFsRenderer.toneMappingExposure = 1.0;
   lmFsCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
   lmFsControls = new OrbitControls(lmFsCamera, canvasA);
   lmFsControls.enableDamping = true;
@@ -8409,7 +8437,7 @@ function initLmFullscreen() {
     lmFsRendererB = new THREE.WebGLRenderer({ canvas: canvasB, antialias: true, alpha: true });
     lmFsRendererB.setPixelRatio(window.devicePixelRatio);
     lmFsRendererB.toneMapping = THREE.ACESFilmicToneMapping;
-    lmFsRendererB.toneMappingExposure = 1.4;
+    lmFsRendererB.toneMappingExposure = 1.0;
     lmFsCameraB = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
     lmFsControlsB = new OrbitControls(lmFsCameraB, canvasB);
     lmFsControlsB.enableDamping = true;
