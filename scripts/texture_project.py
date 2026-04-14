@@ -77,6 +77,62 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     log(f'mesh: {len(vertices)} verts, {len(faces)} faces')
 
+    # ---------------------------------------------------------------
+    # Optional UV re-unwrap with xatlas
+    # ---------------------------------------------------------------
+    # SF3D produces atlases with thousands of micro UV islands (often
+    # 1-2 faces each). When we project + EDT-dilate onto that, the
+    # rendered mesh looks like a voronoi mosaic because Three.js's
+    # bilinear filter samples ACROSS the razor-thin island borders.
+    # xatlas.parametrize re-packs UVs into a small number of large
+    # islands, which makes both projection AND rendering clean.
+    #
+    # Triggered automatically when the source mesh has more than
+    # FABMESH_UV_REPACK_THRESHOLD faces per island on average — i.e.
+    # the existing layout is already fragmented. Disable with
+    # FABMESH_UV_REPACK=0 to fall back to the original UVs.
+    _repack_enabled = os.environ.get('FABMESH_UV_REPACK', '1') != '0'
+    _repacked = False
+    if _repack_enabled and len(faces) > 100:
+        try:
+            import xatlas
+            t_uv = time.time()
+            v32 = vertices.astype(np.float32)
+            f32 = faces.astype(np.uint32)
+            vmap, idx_new, uv_new = xatlas.parametrize(v32, f32)
+            n_old = len(vertices)
+            n_new = len(vmap)
+            vertices = vertices[vmap]
+            normals = normals[vmap]
+            faces = idx_new.astype(np.int32)
+            uv = uv_new.astype(np.float64)
+            _repacked = True
+            log(f'xatlas re-unwrap: {n_old} -> {n_new} verts, '
+                f'{len(faces)} faces, {time.time()-t_uv:.1f}s')
+            _evt('xatlas_done',
+                 verts_before=n_old, verts_after=n_new,
+                 faces=int(len(faces)),
+                 ms=int((time.time() - t_uv) * 1000))
+        except ImportError:
+            log('xatlas not installed, keeping original UVs')
+            _evt('xatlas_skipped', reason='not_installed')
+        except Exception as ux:
+            log(f'xatlas failed: {ux} — keeping original UVs')
+            _evt('xatlas_failed', error=type(ux).__name__, msg=str(ux)[:200])
+
+    # Sanity check: UV topology must match vertex topology.
+    _max_face_idx = int(faces.max()) + 1 if len(faces) else 0
+    _uv_rows = len(uv)
+    _vert_rows = len(vertices)
+    _topology_ok = (_uv_rows == _vert_rows) and (_max_face_idx <= _uv_rows)
+    _evt('uv_topology_check',
+         verts=_vert_rows, uv_rows=_uv_rows,
+         max_face_idx=_max_face_idx, ok=_topology_ok)
+    if not _topology_ok:
+        log(f'WARNING: UV/vertex topology mismatch! '
+            f'verts={_vert_rows} uv_rows={_uv_rows} '
+            f'max_face_idx={_max_face_idx} — atlas will be scrambled.')
+
     # Load SF3D texture as fallback
     sf3d_tex = geom.visual.material.baseColorTexture
     if sf3d_tex is None:
@@ -545,8 +601,34 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     log(f'blended, saving...')
 
     # ---------------------------------------------------------------
-    # Step 5: Write texture back into GLB in-place
+    # Step 5: Write GLB
     # ---------------------------------------------------------------
+    # If xatlas re-unwrapped the UVs, the geometry has changed (more
+    # vertices because of seams) so we cannot write the texture in-place
+    # — we have to rebuild the mesh + export. Otherwise, the cheap
+    # in-place texture swap below preserves everything else SF3D baked
+    # (skinning weights, custom vertex attrs, etc).
+    if _repacked:
+        import trimesh as _trimesh
+        _new_mesh = _trimesh.Trimesh(
+            vertices=vertices, faces=faces,
+            process=False, validate=False,
+        )
+        _vis = _trimesh.visual.texture.TextureVisuals(
+            uv=uv.astype(np.float32),
+            material=_trimesh.visual.material.PBRMaterial(
+                baseColorTexture=result_img,
+                metallicFactor=0.0,
+                roughnessFactor=0.85,
+            ),
+        )
+        _new_mesh.visual = _vis
+        _new_mesh.export(output_path, file_type='glb')
+        sz = os.path.getsize(output_path)
+        log(f'GLB rebuilt with re-packed UVs ({sz} bytes)')
+        _evt('glb_rebuilt', bytes=sz)
+        return True
+
     import shutil
     if os.path.abspath(mesh_path) != os.path.abspath(output_path):
         shutil.copy(mesh_path, output_path)
