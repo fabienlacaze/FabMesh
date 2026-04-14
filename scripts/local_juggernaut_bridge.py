@@ -28,6 +28,25 @@ except Exception as _gt_err:
 
 def generate_images(prompt, output_dir, num_images=4, steps=30):
     from diffusers import StableDiffusionXLPipeline
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from fabmesh_log import Logger
+        _slog = Logger('realvis',
+                       project=os.path.basename(output_dir),
+                       num_images=num_images, steps=steps)
+    except Exception:
+        _slog = None
+    def _evt(event, **f):
+        if _slog:
+            _slog.info(event, **f)
+    def _warn(event, **f):
+        if _slog:
+            _slog.warn(event, **f)
+    _t0 = time.time()
+    _evt('pipeline_started',
+         prompt=prompt[:120],
+         output_dir=output_dir,
+         torch_cuda=torch.cuda.is_available())
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -162,12 +181,17 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
 
         gen_img.save(img_path)
         images.append(img_path)
-        print(f"LOCAL_REALVIS_DONE: {img_path} ({os.path.getsize(img_path)} bytes)")
+        _sz = os.path.getsize(img_path)
+        _evt('image_saved', index=i, path=img_path, bytes=_sz,
+             w=gen_img.size[0], h=gen_img.size[1])
+        print(f"LOCAL_REALVIS_DONE: {img_path} ({_sz} bytes)")
         sys.stdout.flush()
 
     del pipe
     torch.cuda.empty_cache()
 
+    _evt('pipeline_done', images=len(images),
+         total_ms=int((time.time() - _t0) * 1000))
     print(f"LOCAL_REALVIS_SUCCESS: {len(images)} images generated")
     sys.stdout.flush()
     return images

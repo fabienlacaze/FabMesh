@@ -30,6 +30,12 @@ import time
 import numpy as np
 from PIL import Image, ImageDraw
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from fabmesh_log import Logger
+except Exception:
+    Logger = None  # Allow the module to keep working even if the helper is missing
+
 
 def log(msg):
     print(f'[tex_project] {msg}', flush=True)
@@ -37,6 +43,14 @@ def log(msg):
 
 def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                     multiview_dir=None):
+    _slog = Logger('tex_project',
+                   mesh=os.path.basename(mesh_path),
+                   res=tex_res,
+                   multiview=(os.path.basename(multiview_dir) if multiview_dir else None)) \
+            if Logger else None
+    def _evt(event, **f):
+        if _slog:
+            _slog.info(event, **f)
     """Project source photo onto mesh UV atlas and save result.
 
     If multiview_dir is provided, also projects view_0..view_5.png at their
@@ -48,11 +62,14 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     t0 = time.time()
     log(f'mesh={mesh_path} src={source_image_path} out={output_path} res={tex_res}'
         f'{" multiview=" + multiview_dir if multiview_dir else ""}')
+    _evt('pipeline_started', mesh_path=mesh_path, source=source_image_path,
+         out=output_path, res=tex_res, multiview_dir=multiview_dir)
 
     # Load mesh
     scene = trimesh.load(mesh_path)
     geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
     geom = geoms[0]
+    _evt('mesh_loaded', verts=len(geom.vertices), faces=len(geom.faces))
     vertices = np.asarray(geom.vertices, dtype=np.float64)
     faces = np.asarray(geom.faces, dtype=np.int32)
     normals = np.asarray(geom.vertex_normals, dtype=np.float64)
@@ -470,6 +487,8 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         n_drawn += 1
 
     log(f'per-pixel multi-view rasterization: {n_drawn}/{len(faces)} faces, {n_skipped} skipped, {len(view_data)} views')
+    _evt('rasterize_done', drawn=n_drawn, skipped=n_skipped,
+         total_faces=len(faces), views=len(view_data))
 
     # Reconstruct PIL images from numpy arrays
     proj_atlas = Image.fromarray(proj_arr.astype(np.uint8))
@@ -517,6 +536,11 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     result_arr = (proj_arr * w3 + dilated * (1.0 - w3)).astype(np.uint8)
     result_img = Image.fromarray(result_arr)
     log(f'blend: sharp={sharp_mask.sum()} dilated={(~sharp_mask).sum()} total={tex_res*tex_res}')
+    _evt('blend_done',
+         sharp_px=int(sharp_mask.sum()),
+         dilated_px=int((~sharp_mask).sum()),
+         total_px=tex_res * tex_res,
+         sharp_ratio=float(sharp_mask.sum()) / (tex_res * tex_res))
 
     log(f'blended, saving...')
 
@@ -601,6 +625,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     elapsed = time.time() - t0
     log(f'done in {elapsed:.1f}s')
+    _evt('pipeline_done', total_ms=int(elapsed * 1000), output=output_path)
     return True
 
 
