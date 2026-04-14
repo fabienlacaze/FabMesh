@@ -4178,6 +4178,32 @@ ipcMain.handle('pick-export-path', async (event, { defaultName, format }) => {
   return result.filePath;
 });
 
+// Export an image to a user-picked location. Copies the source file as-is
+// (no transcoding) so layers/alpha are preserved. Returns the written path
+// or null if the user cancelled.
+ipcMain.handle('export-image', async (event, { srcPath, defaultName }) => {
+  try {
+    if (!srcPath || !fs.existsSync(srcPath)) {
+      return { ok: false, error: 'Source not found' };
+    }
+    const srcExt = path.extname(srcPath).slice(1).toLowerCase() || 'png';
+    const base = defaultName || path.basename(srcPath, path.extname(srcPath));
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export image as...',
+      defaultPath: base + '.' + srcExt,
+      filters: [
+        { name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+    fs.copyFileSync(srcPath, result.filePath);
+    return { ok: true, path: result.filePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // Get basic file info (size, mtime, dimensions for images, tris for meshes)
 ipcMain.handle('get-file-info', async (event, filePath) => {
   try {

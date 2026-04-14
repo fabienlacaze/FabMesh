@@ -2602,6 +2602,19 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
   });
 });
 
+document.getElementById('ws-export-img-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  try {
+    const base = (p.name || 'image') + '_' + (p.selectedImagePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
+    const r = await API.exportImage({ srcPath: p.selectedImagePath, defaultName: base });
+    if (r?.ok) showToast('Image exported: ' + r.path, 'success');
+    else if (!r?.cancelled) showToast('Export failed: ' + (r?.error || 'unknown'), 'error');
+  } catch (e) {
+    showToast('Export error: ' + e.message, 'error');
+  }
+});
+
 document.getElementById('ws-removebg-btn').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }

@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   readMeshFile: (filePath) => ipcRenderer.invoke('read-mesh-file', filePath),
   getMeshLocalUrl: (filePath) => ipcRenderer.invoke('get-mesh-local-url', filePath),
   exportMesh: (opts) => ipcRenderer.invoke('export-mesh', opts),
+  exportImage: (opts) => ipcRenderer.invoke('export-image', opts),
   pickExportPath: (opts) => ipcRenderer.invoke('pick-export-path', opts),
   getFileInfo: (filePath) => ipcRenderer.invoke('get-file-info', filePath),
   importMesh: () => ipcRenderer.invoke('import-mesh'),
