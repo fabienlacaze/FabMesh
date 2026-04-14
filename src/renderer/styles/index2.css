@@ -2772,3 +2772,15 @@ button.tool-active {
    UTILITIES
    ============================================================ */
 .hidden { display: none !important; }
+
+/* Custom style dropdown (replaces native <select> so we can force black bg) */
+.style-option {
+  padding: 8px 12px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  background: #000;
+}
+.style-option:hover {
+  background: #2a2a2a;
+}

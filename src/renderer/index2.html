@@ -209,17 +209,22 @@
                         <button id="ws-autoinpaint-btn" class="ghost-btn tool-btn">&#129668; Auto Inpaint</button>
                         <button id="ws-removebg-btn" class="ghost-btn tool-btn">&#9986; Remove BG</button>
                         <button id="ws-resolution-btn" class="ghost-btn tool-btn">&#128300; Resolution</button>
-                        <select id="ws-style-btn" class="tool-btn" style="background:#000; border:1px solid var(--border); color:var(--text-0); border-radius:var(--radius-sm); cursor:pointer;">
-                          <option value="" disabled selected style="background:#000; color:#fff;">&#127912; Style...</option>
-                          <option value="anime style, cel shading, vibrant colors" style="background:#000; color:#fff;">Anime</option>
-                          <option value="cartoon style, bold outlines, flat colors" style="background:#000; color:#fff;">Cartoon</option>
-                          <option value="low-poly 3D art, flat shaded, geometric" style="background:#000; color:#fff;">Low-poly</option>
-                          <option value="pixel art, 16-bit retro, limited palette" style="background:#000; color:#fff;">Pixel art</option>
-                          <option value="painterly, brushstrokes, oil painting" style="background:#000; color:#fff;">Painterly</option>
-                          <option value="PBR materials, ultra detailed, 8k textures" style="background:#000; color:#fff;">PBR HD</option>
-                          <option value="voxel art, blocky 3D, cubic geometry" style="background:#000; color:#fff;">Voxel</option>
-                          <option value="realistic style, photorealistic, sharp details" style="background:#000; color:#fff;">Realistic</option>
-                        </select>
+                        <div class="style-dropdown" style="position:relative;">
+                          <button id="ws-style-btn" type="button" class="ghost-btn tool-btn" style="width:100%; text-align:left; display:flex; align-items:center; justify-content:space-between;">
+                            <span id="ws-style-label">&#127912; Style...</span>
+                            <span style="opacity:0.6;">&#9662;</span>
+                          </button>
+                          <div id="ws-style-menu" class="hidden" style="position:absolute; top:100%; left:0; right:0; margin-top:4px; background:#000; border:1px solid var(--border); border-radius:var(--radius-sm); z-index:1000; max-height:320px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.6);">
+                            <div class="style-option" data-value="anime style, cel shading, vibrant colors">Anime</div>
+                            <div class="style-option" data-value="cartoon style, bold outlines, flat colors">Cartoon</div>
+                            <div class="style-option" data-value="low-poly 3D art, flat shaded, geometric">Low-poly</div>
+                            <div class="style-option" data-value="pixel art, 16-bit retro, limited palette">Pixel art</div>
+                            <div class="style-option" data-value="painterly, brushstrokes, oil painting">Painterly</div>
+                            <div class="style-option" data-value="PBR materials, ultra detailed, 8k textures">PBR HD</div>
+                            <div class="style-option" data-value="voxel art, blocky 3D, cubic geometry">Voxel</div>
+                            <div class="style-option" data-value="realistic style, photorealistic, sharp details">Realistic</div>
+                          </div>
+                        </div>
                         <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
                         <button id="ws-symmetrize-auto-btn" class="ghost-btn tool-btn">&#8651; Sym. Auto</button>
                         <button id="ws-multiview-btn" class="ghost-btn tool-btn">&#128065; Multi-Views</button>

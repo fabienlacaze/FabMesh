@@ -3470,24 +3470,39 @@ function _getImageStyle(imgPath) {
   } catch(_) { return null; }
 }
 function _restoreStyleDropdown(imgPath) {
-  const styleEl = document.getElementById('ws-style-btn');
-  if (!styleEl) return;
+  const label = document.getElementById('ws-style-label');
+  if (!label) return;
   const saved = _getImageStyle(imgPath);
-  if (saved) {
-    for (let i = 0; i < styleEl.options.length; i++) {
-      if (styleEl.options[i].value === saved) {
-        styleEl.selectedIndex = i;
-        return;
-      }
-    }
+  const menu = document.getElementById('ws-style-menu');
+  if (saved && menu) {
+    const opt = menu.querySelector(`.style-option[data-value="${saved.replace(/"/g, '\\"')}"]`);
+    if (opt) { label.innerHTML = '&#127912; ' + opt.textContent; return; }
   }
-  // No saved style → reset to placeholder
-  styleEl.selectedIndex = 0;
+  label.innerHTML = '&#127912; Style...';
 }
 
-// Style Transfer: dropdown triggers img2img with the selected style prompt
-document.getElementById('ws-style-btn')?.addEventListener('change', async (e) => {
-  const style = e.target.value;
+// Custom style dropdown: toggle menu on button click
+document.getElementById('ws-style-btn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('ws-style-menu')?.classList.toggle('hidden');
+});
+// Close the menu on outside click
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('ws-style-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  if (!menu.contains(e.target) && e.target.id !== 'ws-style-btn') {
+    menu.classList.add('hidden');
+  }
+});
+// Option click → apply style (same pipeline as the old <select> change)
+document.getElementById('ws-style-menu')?.addEventListener('click', async (e) => {
+  const opt = e.target.closest('.style-option');
+  if (!opt) return;
+  e.stopPropagation();
+  document.getElementById('ws-style-menu').classList.add('hidden');
+  const style = opt.dataset.value;
+  const label = document.getElementById('ws-style-label');
+  if (label) label.innerHTML = '&#127912; ' + opt.textContent;
   if (!style) return;
   // Save last used style so it persists across reloads
   try { localStorage.setItem('fabmesh-last-style', style); } catch(_) {}
