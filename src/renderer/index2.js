@@ -1315,11 +1315,13 @@ const _mvViewMap = {
 
 function _showMultiviewBar(multiviewDir) {
   const bar = document.getElementById('ws-multiview-bar');
+  console.log('[mv-show] bar found?', !!bar, 'current classes:', bar?.className);
   if (!bar) return;
   bar.classList.remove('hidden');
   bar.dataset.dir = multiviewDir;
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
   bar.querySelector('[data-view="front"]')?.classList.add('mv-active');
+  console.log('[mv-show] after show, classes:', bar.className, 'display:', getComputedStyle(bar).display);
 }
 
 function _hideMultiviewBar() {
