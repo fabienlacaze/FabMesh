@@ -1169,33 +1169,36 @@ button.tool-active {
   padding-right: 2px;
 }
 /* Strongly-visible scrollbars on the three edit cards — user asked for
-   the bars to always be in sight, even when content fits the box. */
+   the bars to always be in sight, even when content fits the box.
+   !important is needed because the global ::-webkit-scrollbar rule in
+   main.css has equal specificity and may win the cascade. */
 .step-tools-scroll::-webkit-scrollbar,
 .versions-strip::-webkit-scrollbar,
 #ws-rig-versions::-webkit-scrollbar {
-  width: 12px;
+  width: 12px !important;
+  background: rgba(255,255,255,0.14) !important;
 }
 .step-tools-scroll::-webkit-scrollbar-track,
 .versions-strip::-webkit-scrollbar-track,
 #ws-rig-versions::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.14);
-  border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.14) !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
 }
 .step-tools-scroll::-webkit-scrollbar-thumb,
 .versions-strip::-webkit-scrollbar-thumb,
 #ws-rig-versions::-webkit-scrollbar-thumb {
-  min-height: 40px;
-  background: rgba(255,255,255,0.75);
-  border-radius: 8px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  min-height: 40px !important;
+  background: rgba(255,255,255,0.75) !important;
+  border-radius: 8px !important;
+  border: 2px solid transparent !important;
+  background-clip: padding-box !important;
 }
 .step-tools-scroll::-webkit-scrollbar-thumb:hover,
 .versions-strip::-webkit-scrollbar-thumb:hover,
 #ws-rig-versions::-webkit-scrollbar-thumb:hover {
-  background: #fff;
-  background-clip: padding-box;
+  background: #fff !important;
+  background-clip: padding-box !important;
 }
 .step-tools-group {
   margin-bottom: 10px;
