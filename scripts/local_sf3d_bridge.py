@@ -100,7 +100,9 @@ def generate_3d(
     # ------------------------------------------------------------------
     _multiview_dir = output_path + '.multiview'
     _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'upscale').lower()
-    if _proj_mode_pre in ('upscale', 'none'):
+    # 'augment' is a new mode that needs the multi-view dir
+    _modes_using_mv = ('atlas', 'vc', 'augment')
+    if _proj_mode_pre not in _modes_using_mv:
         print(f"LOCAL_SF3D: multi-view skipped (mode={_proj_mode_pre}, not needed)",
               flush=True)
         _multiview_dir = None
@@ -538,6 +540,9 @@ def generate_3d(
     #   upscale (DEFAULT) — keep SF3D's native baked atlas (correct UV
     #     layout, just blurry) and run RealESRGAN x4 on it. Cleanest
     #     result: no UV mosaic, no vertex-color flou, just sharper.
+    #   augment — KEEP the SF3D atlas (well-textured front), then
+    #     additively rewrite ONLY the back/sides where multi-view
+    #     visibility beats the front. Best of both worlds.
     #   atlas — multi-view UV projection (tends to mosaic on SF3D UVs)
     #   vc    — vertex-color projection (smooth but low-detail)
     #   none  — skip post-processing entirely
@@ -545,6 +550,7 @@ def generate_3d(
     _vc_script = os.path.join(os.path.dirname(__file__), 'texture_project_vc.py')
     _atlas_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
     _upscale_script = os.path.join(os.path.dirname(__file__), 'upscale_atlas.py')
+    _augment_script = os.path.join(os.path.dirname(__file__), 'texture_augment.py')
     try:
         import subprocess as _sp_proj
         _cmd = None
@@ -557,6 +563,16 @@ def generate_3d(
             _cmd = [sys.executable, _upscale_script, output_path,
                     output_path, '--target', str(_target)]
             _label = f'atlas upscale -> {_target}px'
+        elif _proj_mode == 'augment' and os.path.exists(_augment_script):
+            # Keep SF3D's atlas where it's good (front), additively
+            # rewrite back/sides from multi-views where they see better.
+            if _multiview_dir and os.path.isdir(_multiview_dir):
+                _cmd = [sys.executable, _augment_script, output_path,
+                        _preprocessed_path, output_path,
+                        '--multiview', _multiview_dir]
+                _label = 'multi-view augment'
+            else:
+                print('LOCAL_SF3D: augment mode requested but no multi-view dir', flush=True)
         elif _proj_mode == 'vc' and os.path.exists(_vc_script):
             _cmd = ([sys.executable, _vc_script, output_path,
                      _preprocessed_path, output_path]
