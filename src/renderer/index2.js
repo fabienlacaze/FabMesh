@@ -4397,22 +4397,35 @@ async function showStep2Preview(mesh) {
     if (typeof wsMeshControls !== 'undefined' && wsMeshControls) {
       setTimeout(() => wsMeshControls.refreshAll(), 50);
     }
-    // Save a thumbnail of the mesh after the first render so job-details /
-    // rig running-task popup can show the actual 3D model that is being
-    // rigged, not the source image. We wait 2 frames so the renderer
-    // has rendered the new scene at least once.
-    requestAnimationFrame(() => requestAnimationFrame(async () => {
+    // Save a thumbnail of the mesh after a few render passes have
+    // settled. Thumb caused 'white burnout' previously because we were
+    // capturing while toneMappingExposure 1.4 + 4 lights overcooked
+    // bright-base PBR materials. We:
+    //   1) wait 4 frames for camera + materials to stabilise
+    //   2) temporarily lower the exposure to 1.0 for the snapshot
+    //   3) restore the live exposure after capture
+    let _fr = 0;
+    const _capture = async () => {
+      _fr++;
+      if (_fr < 4) { requestAnimationFrame(_capture); return; }
       try {
+        const _origExposure = wsRenderer.toneMappingExposure;
+        wsRenderer.toneMappingExposure = 1.0;
         wsRenderer.render(wsScene, wsCamera);
         const canvas = document.getElementById('ws-mesh-canvas');
         const dataUrl = canvas.toDataURL('image/png');
+        // Restore original exposure + render again so the live viewer
+        // doesn't flicker dim for a frame.
+        wsRenderer.toneMappingExposure = _origExposure;
+        wsRenderer.render(wsScene, wsCamera);
         if (API.saveThumbnail) {
           await API.saveThumbnail({ meshPath: mesh.path, dataUrl });
         }
       } catch (e) {
         console.warn('[thumb] save mesh thumbnail failed:', e && e.message);
       }
-    }));
+    };
+    requestAnimationFrame(_capture);
   }, (err) => { console.error('GLTF parse error', err); });
 }
 
