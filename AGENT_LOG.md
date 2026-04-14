@@ -50,6 +50,69 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-14 — Vertex coloring pipeline (no UV atlas) — IN PROGRESS
+
+**Why**: 3 agents diagnosed the fragmented-mosaic atlas. Agreed strategy
+recommendation: bypass UV atlas entirely. Each vertex carries its own
+RGB, Three.js interpolates linearly across faces — no island borders to
+sample across, no EDT dilation, no xatlas tuning.
+
+**Implementation**: `scripts/texture_project_vc.py` (new, parallel to
+texture_project.py). Same camera math (Zero123++ schema with elevation
+fix), but per-vertex single-winner-takes-all instead of UV rasterization.
+Unseen verts fall back to SF3D baked atlas via UV lookup. Output GLB
+carries COLOR_0 attribute, no baseColorTexture.
+
+**Status**: script written, NOT yet wired into local_sf3d_bridge.py.
+Needs end-to-end test on the orc.
+
+### 2026-04-14 — Zero123++ camera elevation fix — REAL BUG, partial visual win
+
+**Problem (found by 3-agent investigation)**: Zero123++ v1.2 produces 6
+views at ALTERNATING elevations: azimuth=[30,90,150,210,270,330],
+elevation=[20,-10,20,-10,20,-10]. Verified in
+`external/InstantMesh/src/utils/camera_util.py:99-100`.
+
+`texture_project.py` was treating all 6 views as pure Y-axis rotation
+at zero pitch. Every non-front sample fetched from a vertically-shifted
+pixel — back-of-head verts sampled the chest area in view_3, etc.
+
+**Fix** (commit `672c14e`): added `rot_x(elev_deg)` to camera transform,
+re-derived translation since it's no longer azimuth-invariant when
+elevation != 0.
+
+**Result**: math fixed BUT visual still mosaic at render. The other
+half of the problem is SF3D's micro-island UV layout. Multi-agent
+verdict: vertex coloring is the pragmatic next step.
+
+### 2026-04-14 — xatlas UV re-pack — DOES NOT HELP, disabled by default
+
+**Tried**: `xatlas.parametrize` to re-unwrap SF3D micro-islands into
+big contiguous UV charts. Implemented in `texture_project.py`, gated by
+`FABMESH_UV_REPACK` env var.
+
+**Result on orc**: 15273 → 19707 verts (seams duplicated), 19048 faces
+preserved, sharp_ratio 25% → 58%, BUT visual atlas still mosaic. xatlas
+default `ChartOptions` produces per-triangle charts on this dense mesh.
+Final rendering still bad.
+
+**Conclusion**: not a silver bullet for SF3D meshes. Disabled by
+default (`FABMESH_UV_REPACK=0` is now the default — set to 1 to opt
+in). Could be revived with custom `ChartOptions(max_iterations=4,
+normal_deviation_weight=2.0)` but vertex coloring is more promising.
+
+### 2026-04-14 — EDT dilation atlas fill — WIN for coverage, NEUTRAL for visual
+
+**Tried**: `scipy.ndimage.distance_transform_edt` to fill atlas pixels
+with the nearest projected colour instead of falling back to SF3D blur.
+
+**Result**: every atlas pixel now has a colour from our projection
+(no SF3D blur leak), but on SF3D's micro-island layout this produces
+the voronoi-mosaic appearance because EDT spreads each tiny island's
+colour across the whole inter-island padding.
+
+**Status**: still active. Helps when UV layout is good (TripoSG?).
+
 ### 2026-04-14 — Alpha-aware multiview input — SUSPECTED FIX
 
 **Problem**: orc_blue_crown texture came out as a broken voronoi mosaic
@@ -163,5 +226,9 @@ Patched `basicsr/data/degradations.py` (torchvision.transforms.functional_tensor
 - ❌ Retry pure-prompt SDXL multi-view (identity drift)
 - ❌ Retry TRELLIS (never ran)
 - ❌ Ship Hunyuan3D-2 (EU excluded)
-- ❌ Tune per-pixel projection further without first ruling out Three.js
-  lighting as the visual issue
+- ❌ Tune per-pixel UV projection on SF3D meshes — micro-islands make
+  the rendered atlas inevitably mosaic regardless of projection quality
+- ❌ Retry xatlas with default ChartOptions on SF3D output — produces
+  per-triangle charts that don't help the rendering issue
+- ❌ Treat Zero123++ multi-views as pure Y-axis rotations — they have
+  alternating elevations +20°/-10°. Always include `rot_x(elev_deg)`
