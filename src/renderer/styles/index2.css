@@ -1199,8 +1199,9 @@ button.tool-active {
 .step-tools-scroll::-webkit-scrollbar-button,
 .versions-strip::-webkit-scrollbar-button,
 #ws-rig-versions::-webkit-scrollbar-button {
-  display: none;
-  height: 0;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 .step-tools-group {
   margin-bottom: 10px;
