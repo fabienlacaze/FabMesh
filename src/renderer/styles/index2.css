@@ -1168,21 +1168,33 @@ button.tool-active {
   scrollbar-gutter: stable;
   padding-right: 2px;
 }
-/* Visible scrollbar track for the three edit cards — so users always see
-   the bar, even when content fits. */
+/* Strongly-visible scrollbars on the three edit cards — user asked for
+   the bars to always be in sight, even when content fits the box. */
+.step-tools-scroll::-webkit-scrollbar,
+.versions-strip::-webkit-scrollbar,
+#ws-rig-versions::-webkit-scrollbar {
+  width: 12px;
+}
 .step-tools-scroll::-webkit-scrollbar-track,
 .versions-strip::-webkit-scrollbar-track,
 #ws-rig-versions::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.06);
-  border-radius: 6px;
+  background: rgba(255,255,255,0.14);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
 }
 .step-tools-scroll::-webkit-scrollbar-thumb,
 .versions-strip::-webkit-scrollbar-thumb,
 #ws-rig-versions::-webkit-scrollbar-thumb {
-  min-height: 30px;
-  background: rgba(255,255,255,0.55);
-  border-radius: 6px;
+  min-height: 40px;
+  background: rgba(255,255,255,0.75);
+  border-radius: 8px;
   border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.step-tools-scroll::-webkit-scrollbar-thumb:hover,
+.versions-strip::-webkit-scrollbar-thumb:hover,
+#ws-rig-versions::-webkit-scrollbar-thumb:hover {
+  background: #fff;
   background-clip: padding-box;
 }
 .step-tools-group {
