@@ -516,11 +516,11 @@ function createWindow() {
   // grab screenshots, tail logs, trigger generations.
   // ----------------------------------------------------------
   try {
-    const { startTestApi } = require('./test_api');
-    startTestApi(mainWindow);
+    const { startControlApi } = require('./control_api');
+    startControlApi(mainWindow);
   } catch (e) {
-    try { log.error('test_api', 'failed to start: ' + e.message); }
-    catch (_) { console.error('[test_api] failed to start:', e); }
+    try { log.error('control_api', 'failed to start: ' + e.message); }
+    catch (_) { console.error('[control_api] failed to start:', e); }
   }
 }
 

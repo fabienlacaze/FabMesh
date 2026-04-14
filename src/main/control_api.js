@@ -1,13 +1,21 @@
 // ============================================================
-// FabMesh Test/Control HTTP API
+// FabMesh Control API — public, always-on HTTP control plane
 // ============================================================
-// Exposes a local-only HTTP server on 127.0.0.1:7331 that lets
-// an external process (Claude Code, scripts, etc.) pilot the
-// Electron app: click buttons, read state, grab screenshots,
-// tail logs, trigger generations.
+// Local-only HTTP server on 127.0.0.1:7331 that lets any external
+// process (scripts, Claude Code, batch pipelines, CI, other apps)
+// drive the Electron app end-to-end:
+//   * generate images / meshes / rigs
+//   * run every IPC handler exposed by preload.js via POST /ipc
+//   * read and edit log files
+//   * capture full-page and per-thumbnail screenshots, diff versions
+//   * subscribe to state changes and job progress
 //
-// SECURITY: Binds to 127.0.0.1 only. Never expose externally.
-// Enabled when FABMESH_TEST_API=1 or when --dev flag is set.
+// Always-on: enabled by default. Disable with FABMESH_CONTROL_API=0.
+// Back-compat: legacy FABMESH_TEST_API=1 still forces-enables.
+//
+// SECURITY: Binds to 127.0.0.1 only. Every request requires a Bearer
+// token stored in ~/.fabmesh/test_api_token.txt (readable only by the
+// current user). Never expose this port externally.
 // ============================================================
 
 const http = require('http');
@@ -186,11 +194,14 @@ function tailFile(filePath, lines) {
 // ============================================================
 // Start HTTP server
 // ============================================================
-function startTestApi(mainWindow, opts = {}) {
-  const dev = process.argv.includes('--dev');
-  const enabled = process.env.FABMESH_TEST_API === '1' || dev || opts.force === true;
+function startControlApi(mainWindow, opts = {}) {
+  // Always-on by default. Hard-disable with FABMESH_CONTROL_API=0.
+  // Legacy FABMESH_TEST_API=1 still forces enable for scripts that set it.
+  const envDisabled = process.env.FABMESH_CONTROL_API === '0';
+  const legacyForce = process.env.FABMESH_TEST_API === '1';
+  const enabled = (!envDisabled && opts.force !== false) || legacyForce;
   if (!enabled) {
-    console.log('[test_api] disabled (set FABMESH_TEST_API=1 or use --dev)');
+    console.log('[control_api] disabled (FABMESH_CONTROL_API=0)');
     return null;
   }
 
@@ -204,14 +215,16 @@ function startTestApi(mainWindow, opts = {}) {
   const routes = {
     'GET /': async (req, res) => {
       sendOk(res, {
-        name: 'FabMesh Test API',
-        version: 1,
+        name: 'FabMesh Control API',
+        version: 2,
         endpoints: [
           'GET  /',
           'GET  /state',
           'GET  /screenshot',
           'GET  /logs?lines=200',
           'GET  /console',
+          'GET  /ipc/methods                   (list every window.meshyAPI.* method)',
+          'POST /ipc                {method, args?: [...] | arg?: ...}  generic IPC dispatch',
           'POST /click              {selector}',
           'POST /eval               {code}',
           'POST /set                {selector, value}',
@@ -282,6 +295,56 @@ function startTestApi(mainWindow, opts = {}) {
           true
         );
         if (result && result.ok === false) return sendErr(res, result.error);
+        sendOk(res, result && result.data);
+      } catch (e) { sendErr(res, e); }
+    },
+
+    // Generic IPC dispatch — calls any method on window.meshyAPI with
+    // the given args. Covers all 80+ preload handlers without needing a
+    // dedicated endpoint per action.
+    // Body: { method: "generateImages", args: [ {...} ] }  OR
+    //       { method: "generateImages", arg:  {...}      }
+    'POST /ipc': async (req, res) => {
+      const body = await readBody(req);
+      const method = body && body.method;
+      if (!method || typeof method !== 'string') {
+        return sendErr(res, 'missing method (e.g. "generateImages")', 400);
+      }
+      // Never allow reaching into non-exposed properties or prototype.
+      if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(method)) {
+        return sendErr(res, 'invalid method name', 400);
+      }
+      const args = Array.isArray(body.args)
+        ? body.args
+        : (body.arg !== undefined ? [body.arg] : []);
+      try {
+        const script = `(async () => {
+          try {
+            const api = window.meshyAPI;
+            if (!api) return { ok:false, error:'meshyAPI not exposed yet' };
+            const fn = api[${JSON.stringify(method)}];
+            if (typeof fn !== 'function') {
+              return { ok:false, error:'meshyAPI.${method} is not a function' };
+            }
+            const out = await fn(...${JSON.stringify(args)});
+            return { ok:true, data: out };
+          } catch (e) {
+            return { ok:false, error: (e && e.message) || String(e) };
+          }
+        })()`;
+        const result = await mainWindow.webContents.executeJavaScript(script, true);
+        if (result && result.ok === false) return sendErr(res, result.error);
+        sendOk(res, result && result.data);
+      } catch (e) { sendErr(res, e); }
+    },
+
+    // Introspection — list every method exposed on window.meshyAPI.
+    'GET /ipc/methods': async (req, res) => {
+      try {
+        const result = await mainWindow.webContents.executeJavaScript(
+          '(() => ({ ok:true, data: Object.keys(window.meshyAPI || {}).sort() }))()',
+          true
+        );
         sendOk(res, result && result.data);
       } catch (e) { sendErr(res, e); }
     },
@@ -422,7 +485,7 @@ function startTestApi(mainWindow, opts = {}) {
   });
 
   server.listen(PORT, HOST, () => {
-    console.log('[test_api] listening on http://' + HOST + ':' + PORT);
+    console.log('[control_api] listening on http://' + HOST + ':' + PORT);
     try {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.once('did-finish-load', () => {
@@ -435,4 +498,4 @@ function startTestApi(mainWindow, opts = {}) {
   return server;
 }
 
-module.exports = { startTestApi };
+module.exports = { startControlApi, startTestApi: startControlApi };

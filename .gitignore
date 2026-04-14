@@ -28,6 +28,8 @@ wsl_run.sh
 
 # Temp
 *.log
+logs/_*/
+scripts/_*.png
 last_error.log
 test_*.png
 test_*.glb
