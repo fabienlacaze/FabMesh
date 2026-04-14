@@ -573,9 +573,10 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border-top: none;
   padding-top: 0;
   margin-top: 0;
-  padding-right: 8px;
+  padding-right: 2px;
   max-height: 128px;         /* ~2 rows of 56px thumbs + gap */
-  overflow-y: scroll;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   align-content: flex-start;
 }
 .stage .stage-body.stage-edit-rig-body #ws-rig-versions .version-thumb {
@@ -1003,11 +1004,12 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-wrap: wrap;
   margin-top: 10px;
   padding-top: 10px;
-  padding-right: 8px;            /* leave room for the always-on scrollbar */
+  padding-right: 2px;
   border-top: 1px solid var(--border);
   max-height: 160px;             /* ~2 rows of 72px thumbs + gap */
-  overflow-y: scroll;            /* always-on bar, matches tool panels */
-  align-content: flex-start;     /* pack rows at the top instead of stretching */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  align-content: flex-start;
 }
 .versions-strip .version-thumb {
   width: 72px;
@@ -1166,9 +1168,10 @@ button.tool-active {
 }
 
 .step-tools-scroll {
-  height: 380px;             /* fixed height so mesh/rig/image panels match */
-  overflow-y: scroll;        /* always show the track so layout never shifts */
-  padding-right: 8px;
+  max-height: 380px;         /* matching ceiling across image/mesh/rig */
+  overflow-y: auto;          /* only show the bar when content actually overflows */
+  scrollbar-gutter: stable;  /* reserve the gutter so width never shifts */
+  padding-right: 2px;
   /* scrollbar styling inherits from the global rule in main.css */
 }
 .step-tools-group {
