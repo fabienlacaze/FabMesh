@@ -599,7 +599,11 @@ def generate_3d(
         elif _proj_mode == 'none':
             print('LOCAL_SF3D: native SF3D atlas kept (FABMESH_PROJECT_MODE=none)', flush=True)
         if _cmd:
-            _r_proj = _sp_proj.run(_cmd, capture_output=True, text=True, timeout=120)
+            # 600s timeout — texture_refine.py with SDXL img2img on 9 tiles
+            # can take ~90s when the SDXL server isn't running (in-process
+            # fallback loads RealVisXL ~6 GB). The old 120s killed it
+            # mid-refine and we got back the unrefined SF3D atlas.
+            _r_proj = _sp_proj.run(_cmd, capture_output=True, text=True, timeout=600)
             if _r_proj.stdout:
                 for line in _r_proj.stdout.strip().split('\n'):
                     print(f"LOCAL_SF3D: {line}", flush=True)
