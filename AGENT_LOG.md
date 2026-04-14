@@ -50,6 +50,28 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-14 — Atlas 2048 + EDT dilation — WIN (needs user visual check)
+
+**Tried**: two changes to `scripts/texture_project.py`:
+1. Default atlas res stays 1024 but SF3D bridge already passes 2048 in
+   production — confirmed on test mesh.
+2. Replaced SF3D fallback blending with SciPy EDT-based dilation: unseen
+   pixels take color from the nearest projected pixel, not from SF3D's
+   blurry baked texture.
+
+**Metrics on test "man" mesh at 2048**:
+- sharp pixels: 226k @ 1024 → **907k @ 2048** (4× as expected)
+- faces drawn: 8971/9788 (87%) → **9338/9788 (95%)**
+- all 4M atlas pixels now filled (no black gaps)
+
+**Conclusion**: atlas is fully populated by our projected color
+(projected regions + EDT-dilated neighbors). No more SF3D blur leaking
+into the final texture except where scipy unavailable (graceful fallback
+still works).
+
+**Still to verify**: actual FabMesh 3D render — user has not yet run a
+full generation on this new code path.
+
 ### 2026-04-14 — SDXL + IPAdapter multi-view (Option 2) — PARTIAL FAILURE
 
 **Tried**: `scripts/multiview_sdxl_gen.py` — RealVisXL + IPAdapter Plus + per-orientation prompts.

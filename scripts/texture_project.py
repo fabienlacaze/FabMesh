@@ -494,12 +494,29 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # triangle size, not projection quality.
     PIXEL_PRESENT = 0.002
     sharp_mask = weight_arr > PIXEL_PRESENT
-    fallback_mask = ~sharp_mask
-    w_boosted = sharp_mask.astype(np.float64)
-    w3 = w_boosted[:, :, np.newaxis]
-    result_arr = (proj_arr * w3 + sf3d_arr * (1.0 - w3)).astype(np.uint8)
+
+    # Dilate the projected atlas so unseen pixels take their color from the
+    # nearest projected pixel instead of SF3D's blurry baked texture. This
+    # keeps the atlas sharp everywhere, even on surfaces no view saw
+    # directly (under arms, crotch seams, tops of heads). SciPy's EDT
+    # gives us both the mask-nearest lookup and the distance in one pass.
+    try:
+        from scipy.ndimage import distance_transform_edt
+        _, (iy, ix) = distance_transform_edt(~sharp_mask, return_indices=True)
+        dilated = proj_arr[iy, ix]
+        log('dilated projected atlas via EDT')
+    except Exception as _dil_e:
+        # Fall back to SF3D baked texture for unseen pixels if scipy missing.
+        log(f'EDT unavailable ({_dil_e}), using SF3D fallback')
+        dilated = sf3d_arr
+
+    # Hard override: projected color where we have it, dilated (or SF3D)
+    # fallback everywhere else. No soft blending — that was washing out the
+    # sharpness on small triangles like the face/hair.
+    w3 = sharp_mask.astype(np.float64)[:, :, np.newaxis]
+    result_arr = (proj_arr * w3 + dilated * (1.0 - w3)).astype(np.uint8)
     result_img = Image.fromarray(result_arr)
-    log(f'blend: sharp={sharp_mask.sum()} fallback={fallback_mask.sum()} total={tex_res*tex_res}')
+    log(f'blend: sharp={sharp_mask.sum()} dilated={(~sharp_mask).sum()} total={tex_res*tex_res}')
 
     log(f'blended, saving...')
 
