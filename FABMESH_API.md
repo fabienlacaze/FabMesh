@@ -171,6 +171,188 @@ print(f"diff: {d['diffRatio']*100:.2f}% ({d['diffPixels']}/{d['pixelCount']} pix
 
 ---
 
+## UI Button Catalog — every clickable control
+
+These CSS selectors can be sent straight to `POST /click` or
+`fm.click("#selector")`. Clicks go through the full UI handler, so
+popups, job progress, and downstream automation fire exactly as they
+would for a manual click.
+
+### Step 1 — Image
+
+| Button | Selector | Effect |
+|---|---|---|
+| Generate image | `#ws-generate-image` | Kicks off image generation using current form values (prompt, engine, count, steps, style, checkboxes) |
+| Copy prompt | `#ws-copy-prompt` | Copy the current prompt text to clipboard |
+| Enhance prompt | `#ws-enhance-prompt` | AI-augment the prompt with style keywords |
+| Use this image for 3D | `#ws-use-for-3d-btn` | Tag the current preview image as the source for step 2 |
+| Expand image | `#ws-image-expand-btn` | Open the selected image in the full-screen lightbox |
+| Previous / next image | `#ws-img-prev` / `#ws-img-next` | Walk through versions |
+
+Image **AI tools** (each opens a modal or kicks off a background edit):
+
+| Tool | Selector |
+|---|---|
+| Modify (img2img) | `#ws-modify-btn` |
+| Auto Inpaint (CLIPSeg) | `#ws-autoinpaint-btn` |
+| Remove BG | `#ws-removebg-btn` |
+| Resolution (upscale/downscale) | `#ws-resolution-btn` |
+| Style transfer | `#ws-style-btn` (custom dropdown — use `#ws-style-menu .style-option[data-value="..."]`) |
+| Face Fix | `#ws-facefix-btn` |
+| Symmetrize Auto | `#ws-symmetrize-auto-btn` |
+| Generate Multi-Views | `#ws-multiview-btn` |
+
+Image **manual tools** (modals with canvas):
+
+| Tool | Selector |
+|---|---|
+| Clone Stamp | `#ws-clone-btn` |
+| Draw Mask | `#ws-mask-btn` |
+| Crop | `#ws-crop-btn` |
+| Brightness / Contrast | `#ws-brightness-btn` |
+| Color Pick | `#ws-picker-btn` |
+| Blur Brush | `#ws-blur-btn` |
+| Symmetrize (manual axis) | `#ws-symmetrize-btn` |
+| Paint (selection + drawing) | `#ws-paint-btn` |
+
+Image **Export**:
+
+| Button | Selector |
+|---|---|
+| Export image to disk | `#ws-export-img-btn` |
+
+Image **form fields** (set via `POST /set` or `fm.set_value`):
+
+| Field | Selector | Notes |
+|---|---|---|
+| Prompt text | `#ws-prompt` | String |
+| Asset type | `#ws-asset-type` | character / prop / vehicle / building / creature |
+| Asset style | `#ws-asset-style` | realistic / stylized / anime / ... |
+| Engine | `#ws-engine` | `local-realvis`, `pollinations`, ... |
+| Count | `#ws-count` | Integer |
+| Quality (steps) | `#ws-quality` | Integer steps |
+| Auto Multi-Views | `#ws-auto-multiview` | Checkbox |
+| Construction stages | `#ws-img-buildstages` | Checkbox |
+
+### Step 2 — 3D Mesh
+
+| Button | Selector | Effect |
+|---|---|---|
+| Generate 3D mesh | `#ws-generate-mesh` | Runs image → mesh pipeline (disabled until step 1 image is "used for 3D") |
+| Use this mesh for rig | `#ws-use-for-rig-btn` | Mark current mesh as rig source |
+| Expand mesh viewer | `#ws-mesh-expand-btn` | Full-screen 3D viewer |
+
+Mesh **File**:
+
+| Button | Selector |
+|---|---|
+| Export mesh | `#ws-mesh-export-btn` |
+| Open in Blender | `#ws-mesh-blender-btn` |
+| Show in folder | `#ws-mesh-folder-btn` |
+
+Mesh **AI tools**:
+
+| Tool | Selector |
+|---|---|
+| Smooth | `#ws-mesh-smooth-btn` |
+| Decimate | `#ws-mesh-decimate-btn` |
+| Subdivide | `#ws-mesh-subdivide-btn` |
+| Fix normals | `#ws-mesh-fixnormals-btn` |
+| Fill holes | `#ws-mesh-fillholes-btn` |
+| Center | `#ws-mesh-center-btn` |
+| Re-Texture | `#ws-mesh-retexture-btn` |
+
+Mesh **Manual tools** (open 3D edit modal):
+
+| Tool | Selector |
+|---|---|
+| Sculpt | `#ws-mesh-sculpt-btn` |
+| Paint (vertex) | `#ws-mesh-paintvert-btn` |
+| Select (faces) | `#ws-mesh-selectface-btn` |
+
+Mesh **form fields**:
+
+| Field | Selector |
+|---|---|
+| Engine | `#ws-3d-engine` |
+| Quality preset | `#ws-3d-quality` |
+| Target triangles | `#ws-3d-triangles` |
+| Build stages | `#ws-3d-buildstages` |
+
+### Step 3 — Rig
+
+| Button | Selector | Effect |
+|---|---|---|
+| Generate rig (AI) | `#ws-generate-rig-ai` | Runs auto-rig pipeline on current mesh |
+| Landmarks (manual placement) | `#ws-lm-manual` | Opens full-screen landmark placement modal |
+
+Rig **File**:
+
+| Button | Selector |
+|---|---|
+| Export to Unreal | `#ws-rig-unreal-btn` |
+| Edit in Blender | `#ws-rig-blender-btn` |
+| Show in folder | `#ws-rig-folder-btn` |
+
+Rig **AI / Manual**:
+
+| Tool | Selector |
+|---|---|
+| Re-skin only | `#ws-rig-reskin-btn` |
+| Test animation | `#ws-rig-test-btn` |
+| Animation selector | `#ws-rig-anim-select` |
+| Play animation | `#ws-rig-anim-play` |
+| Engine | `#ws-rig-engine` |
+
+### Multi-view selector bars
+
+| Element | Selector | Notes |
+|---|---|---|
+| Small viewer MV bar | `#ws-multiview-bar .mv-btn[data-view="right"]` | `data-view` = `front`, `30`, `90`, `150`, `210`, `270`, `330` |
+| Lightbox MV bar | `#lb-multiview-bar .mv-btn[data-view="..."]` | Same semantics |
+
+### Version strips
+
+| Element | Selector pattern | Notes |
+|---|---|---|
+| Image version | `#ws-image-versions .version-thumb:nth-child(N)` | 1-indexed; most-recent first |
+| Mesh version | `#ws-mesh-versions .version-thumb:nth-child(N)` | |
+| Rig version | `#ws-rig-versions .version-thumb:nth-child(N)` | |
+
+### How to find IDs you don't see here
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"code":"Array.from(document.querySelectorAll(\"[id^=ws-]\")).map(e=>e.id)"}' \
+     http://127.0.0.1:7331/eval | jq
+```
+
+---
+
+## IPC Method Catalog
+
+For actions that don't need the UI (headless automation, background
+batches) use `POST /ipc {method, args}` to invoke any preload method.
+Get the authoritative live list with `GET /ipc/methods` or
+`fm.ipc_methods()`.
+
+Common categories:
+
+| Category | Methods |
+|---|---|
+| Image gen | `generateImages`, `generateFromPrompt`, `generateFromImage`, `generateBuildStages`, `generateMultiview` |
+| Image tools | `removeBackground`, `imageAdjust`, `img2img`, `autoInpaint`, `maskInpaint`, `imageQuickEdit`, `revertImage`, `listImageVersions`, `exportImage` |
+| 3D mesh | `imageTo3D`, `imageToTrellis`, `refineMesh`, `meshTool`, `exportMesh`, `openInBlender`, `listMeshes`, `deleteMesh`, `copyMeshToProject` |
+| Rig | `autoRig`, `autoRigAI`, `listRigTemplates`, `listRigAnimations`, `saveLandmarks`, `loadLandmarks`, `analyzeSkeleton`, `exportToUnreal` |
+| Projects | `listProjects`, `createProjectFromMesh`, `deleteProject`, `importImage`, `importImageFile`, `importMesh` |
+| Files | `getFileInfo`, `pickExportPath`, `showInExplorer`, `deleteFile`, `deleteImageFolder`, `openImagesFolder`, `openMeshesFolder`, `openLogsFolder` |
+| Config | `getConfig`, `setConfig`, `checkGPU`, `checkRAM`, `setRamLimit`, `setGpuLimits`, `toggleUnrestricted`, `getParentalStatus` |
+| Jobs | `cancelJob`, `stopSdxlServer`, `countPython` |
+| NSFW guard | `checkProjectNsfw`, `checkImagesNsfwTags`, `getNsfwKeywords`, `checkImageNsfw`, `batchCheckNsfw` |
+
+---
+
 ## Security
 
 - Bound to `127.0.0.1` — not reachable from other hosts.
