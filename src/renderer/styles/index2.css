@@ -1167,7 +1167,23 @@ button.tool-active {
   overflow-y: scroll;        /* bar always visible, as requested */
   scrollbar-gutter: stable;
   padding-right: 2px;
-  /* scrollbar styling inherits from the global rule in main.css */
+}
+/* Visible scrollbar track for the three edit cards — so users always see
+   the bar, even when content fits. */
+.step-tools-scroll::-webkit-scrollbar-track,
+.versions-strip::-webkit-scrollbar-track,
+#ws-rig-versions::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.06);
+  border-radius: 6px;
+}
+.step-tools-scroll::-webkit-scrollbar-thumb,
+.versions-strip::-webkit-scrollbar-thumb,
+#ws-rig-versions::-webkit-scrollbar-thumb {
+  min-height: 30px;
+  background: rgba(255,255,255,0.55);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 .step-tools-group {
   margin-bottom: 10px;
