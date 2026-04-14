@@ -168,7 +168,9 @@ def generate_multiview(input_image_path, output_dir, size=320):
         with slog.timed('realesrgan_upscale', source_tile=tile_w, target=1024):
             from realesrgan import RealESRGANer
             from basicsr.archs.rrdbnet_arch import RRDBNet
-            import numpy as np
+            # numpy is already imported at module top; re-importing locally
+            # would shadow it for the whole function and break the alpha
+            # check earlier in the function.
 
             model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
             model_path = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
