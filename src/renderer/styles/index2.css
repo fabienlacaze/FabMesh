@@ -535,15 +535,9 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-direction: column;
   gap: 10px;
 }
-/* Edit stage: 2-column layout (preview on left, side panel with versions+tools on right) */
-.stage .stage-body.stage-edit-body {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 18px;
-  align-items: start;
-}
-/* Rig edit stage: viewer takes the left half, side panel (versions + landmarks)
-   takes the right half — both stretch to the same height. */
+/* Edit stage: 2-column layout, identical across image / mesh / rig.
+   Same column ratio, same alignment, same children height via align-items. */
+.stage .stage-body.stage-edit-body,
 .stage .stage-body.stage-edit-rig-body {
   display: grid;
   grid-template-columns: minmax(380px, 1fr) minmax(380px, 1fr);
@@ -555,33 +549,29 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   flex-direction: column;
   gap: 6px;
 }
-.stage .stage-body.stage-edit-rig-body .step-card-preview.large {
-  height: 100%;
-  min-height: 420px;
-}
 .stage .stage-body.stage-edit-rig-body .stage-edit-side {
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: hidden;
 }
-/* Rig version strip: small thumbnails in a 6-col grid at the top */
+/* Rig version strip — same thumb size as image/mesh, same 2-row cap */
 .stage .stage-body.stage-edit-rig-body #ws-rig-versions {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 56px);
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  border-top: none;
-  padding-top: 0;
-  margin-top: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
   padding-right: 2px;
-  max-height: 128px;         /* ~2 rows of 56px thumbs + gap */
-  overflow-y: auto;
+  margin-top: 10px;
+  height: 160px;
+  overflow-y: scroll;
   scrollbar-gutter: stable;
   align-content: flex-start;
 }
 .stage .stage-body.stage-edit-rig-body #ws-rig-versions .version-thumb {
-  width: 56px;
-  height: 56px;
+  width: 72px;
+  height: 72px;
 }
 /* Landmarks list inside the side panel: 2 columns, scrollable */
 .stage .stage-body.stage-edit-rig-body #ws-lm-list {
@@ -867,12 +857,17 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  height: 260px;
+  height: 440px;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   overflow: hidden;
+}
+/* Large variant (used by the rig viewer) keeps the same height so the
+   preview block matches image and mesh one-for-one. */
+.step-card-preview.large {
+  height: 440px;
 }
 /* Navigation arrows on image preview */
 .nav-arrow {
@@ -1006,8 +1001,8 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   padding-top: 10px;
   padding-right: 2px;
   border-top: 1px solid var(--border);
-  max-height: 160px;             /* ~2 rows of 72px thumbs + gap */
-  overflow-y: auto;
+  height: 160px;                 /* exactly 2 rows of 72px thumbs + gap */
+  overflow-y: scroll;            /* bar always visible */
   scrollbar-gutter: stable;
   align-content: flex-start;
 }
@@ -1168,9 +1163,9 @@ button.tool-active {
 }
 
 .step-tools-scroll {
-  max-height: 380px;         /* matching ceiling across image/mesh/rig */
-  overflow-y: auto;          /* only show the bar when content actually overflows */
-  scrollbar-gutter: stable;  /* reserve the gutter so width never shifts */
+  height: 380px;             /* fixed so image/mesh/rig panels are identical */
+  overflow-y: scroll;        /* bar always visible, as requested */
+  scrollbar-gutter: stable;
   padding-right: 2px;
   /* scrollbar styling inherits from the global rule in main.css */
 }
