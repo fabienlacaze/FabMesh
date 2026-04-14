@@ -162,10 +162,22 @@
 
   async function generateImage(payload) {
     const p = payload || {};
-    if (p.prompt != null)  setInputValue('#ws-prompt', p.prompt);
-    if (p.engine != null)  { try { setInputValue('#ws-engine', p.engine); } catch (_) {} }
-    if (p.count  != null)  { try { setInputValue('#ws-count',  p.count);  } catch (_) {} }
-    if (p.steps  != null)  { try { setInputValue('#ws-steps',  p.steps);  } catch (_) {} }
+    if (p.prompt != null)    setInputValue('#ws-prompt', p.prompt);
+    if (p.engine != null)    { try { setInputValue('#ws-engine', p.engine); } catch (_) {} }
+    if (p.count  != null)    { try { setInputValue('#ws-count',  p.count);  } catch (_) {} }
+    if (p.steps  != null)    { try { setInputValue('#ws-steps',  p.steps);  } catch (_) {} }
+    if (p.assetType != null) { try { setInputValue('#ws-asset-type',  p.assetType);  } catch (_) {} }
+    if (p.assetStyle != null){ try { setInputValue('#ws-asset-style', p.assetStyle); } catch (_) {} }
+    // Set checkboxes through their native .checked prop so the click handler
+    // reads the value we asked for (e.g. auto multi-view).
+    if (p.multiView != null) {
+      const cb = document.querySelector('#ws-auto-multiview');
+      if (cb) { cb.checked = !!p.multiView; cb.dispatchEvent(new Event('change', {bubbles:true})); }
+    }
+    if (p.buildStages != null) {
+      const cb = document.querySelector('#ws-img-buildstages');
+      if (cb) { cb.checked = !!p.buildStages; cb.dispatchEvent(new Event('change', {bubbles:true})); }
+    }
     const before = getJobs().length;
     clickSelector('#ws-generate-image');
     // Return the id of the newly-pushed job (if any) so caller can wait on it.
