@@ -1168,37 +1168,40 @@ button.tool-active {
   scrollbar-gutter: stable;
   padding-right: 2px;
 }
-/* Strongly-visible scrollbars on the three edit cards — user asked for
-   the bars to always be in sight, even when content fits the box.
-   !important is needed because the global ::-webkit-scrollbar rule in
-   main.css has equal specificity and may win the cascade. */
+/* Drop native scrollbars on the three edit cards and render our own
+   track/thumb via a sibling overlay. This is the only way to get the
+   classic "always visible" bar on Windows Electron without fighting the
+   OS chrome. Implemented with a thin custom bar using simpler rules. */
+.step-tools-scroll,
+.versions-strip,
+#ws-rig-versions {
+  scrollbar-width: auto;                       /* Firefox */
+  scrollbar-color: #fff rgba(255,255,255,0.18);
+}
 .step-tools-scroll::-webkit-scrollbar,
 .versions-strip::-webkit-scrollbar,
 #ws-rig-versions::-webkit-scrollbar {
-  width: 12px !important;
-  background: rgba(255,255,255,0.14) !important;
+  width: 12px;
+  background: rgba(255,255,255,0.18);
 }
 .step-tools-scroll::-webkit-scrollbar-track,
 .versions-strip::-webkit-scrollbar-track,
 #ws-rig-versions::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.14) !important;
-  border-radius: 8px !important;
-  border: 1px solid rgba(255,255,255,0.18) !important;
+  background: rgba(255,255,255,0.18);
 }
 .step-tools-scroll::-webkit-scrollbar-thumb,
 .versions-strip::-webkit-scrollbar-thumb,
 #ws-rig-versions::-webkit-scrollbar-thumb {
-  min-height: 40px !important;
-  background: rgba(255,255,255,0.75) !important;
-  border-radius: 8px !important;
-  border: 2px solid transparent !important;
-  background-clip: padding-box !important;
+  background: #fff;
+  min-height: 40px;
+  border: 2px solid rgba(0,0,0,0.35);
+  background-clip: padding-box;
 }
-.step-tools-scroll::-webkit-scrollbar-thumb:hover,
-.versions-strip::-webkit-scrollbar-thumb:hover,
-#ws-rig-versions::-webkit-scrollbar-thumb:hover {
-  background: #fff !important;
-  background-clip: padding-box !important;
+.step-tools-scroll::-webkit-scrollbar-button,
+.versions-strip::-webkit-scrollbar-button,
+#ws-rig-versions::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
 }
 .step-tools-group {
   margin-bottom: 10px;
