@@ -140,10 +140,23 @@ def generate_multiview(input_image_path, output_dir, size=320):
         log(f'RealESRGAN upscale skipped ({ue}); using raw 320px tiles')
         upscaled_tiles = view_tiles
 
+    # Remove the Zero123++ gray background so projection doesn't sample it.
+    # Without this, the texture atlas gets dominated by flat gray.
+    try:
+        log('MULTIVIEW_PROGRESS: 88 bg-removal')
+        from rembg import remove as rembg_remove
+        cleaned = []
+        for i, tile in enumerate(upscaled_tiles):
+            cleaned.append(rembg_remove(tile.convert('RGB')))
+            log(f'bg removed view_{i} mode={cleaned[-1].mode}')
+        upscaled_tiles = cleaned
+    except Exception as be:
+        log(f'rembg bg removal skipped ({be})')
+
     for i, tile in enumerate(upscaled_tiles):
         view_path = os.path.join(output_dir, f'{view_names[i]}.png')
         tile.save(view_path)
-        log(f'saved {view_names[i]}.png ({tile.size})')
+        log(f'saved {view_names[i]}.png ({tile.size} mode={tile.mode})')
 
     log('MULTIVIEW_PROGRESS: 90')
 

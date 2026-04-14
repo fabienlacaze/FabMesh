@@ -201,8 +201,9 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         vis *= v_alpha
         vis *= in_bounds.astype(np.float64)
 
-        # Power curve to sharpen visibility falloff
-        vis = vis ** 1.5
+        # Mild power curve — keep wider visibility so oblique faces still
+        # get projected color instead of falling back to blurry SF3D.
+        vis = vis ** 0.8
 
         return v_colors, vis
 
@@ -338,7 +339,12 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     ], axis=1)
     max_edge = edges.max(axis=1)
     min_edge = edges.min(axis=1)
-    aspect_ok = (min_edge > 0.5) & (max_edge / np.clip(min_edge, 0.01, None) < 15)
+    # Loose filters: SF3D atlases pack the face/hair in tiny triangle strips
+    # (top-right "brick" region). Prior thresholds (min_edge>0.5, aspect<15)
+    # rejected ~15% of faces — including the whole head — and those pixels
+    # fell back to SF3D's blurry texture. Keep filters only for true
+    # degenerates (sub-pixel) to preserve detail.
+    aspect_ok = (min_edge > 0.1) & (max_edge / np.clip(min_edge, 0.01, None) < 50)
     edge_size_ok = max_edge < (tex_res * 0.2)
 
     # Per-pixel rasterization: sample source image at projected vertex
@@ -380,7 +386,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         cam_dirs = -v_cs
         cam_dirs_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
         norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
-        vvis = np.clip(np.sum(norms_n * cam_dirs_n, axis=1), 0, 1) ** 1.5
+        vvis = np.clip(np.sum(norms_n * cam_dirs_n, axis=1), 0, 1) ** 0.8
 
         view_data.append({
             'pixels': vsrc_pixels, 'w': vsrc_w, 'h': vsrc_h,
@@ -391,10 +397,9 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     n_drawn = 0
     n_skipped = 0
     for fi in range(len(faces)):
-        vis = avg_vis[fi]
-        if vis < 0.05:
-            continue
-        if uv_areas[fi] < 1.0 or not aspect_ok[fi] or not edge_size_ok[fi]:
+        # Do NOT gate on avg_vis here — low visibility from front view doesn't
+        # mean invisible from multiview. Let the per-view loop below decide.
+        if uv_areas[fi] < 0.1 or not aspect_ok[fi] or not edge_size_ok[fi]:
             n_skipped += 1
             continue
 
@@ -477,14 +482,20 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     sf3d_arr = np.asarray(sf3d_tex, dtype=np.float64)
     weight_arr = np.asarray(weight_atlas, dtype=np.float64) / 255.0
 
-    # Blend: where visibility is high (>0.2), use 100% projected texture (sharp).
-    # Where very low (<0.05), use SF3D fallback.
-    # In between, smooth transition.
-    # This preserves sharpness on visible areas instead of averaging with SF3D blur.
-    sharp_mask = weight_arr > 0.2  # high-confidence projection areas
-    fallback_mask = weight_arr < 0.05  # use SF3D
-    # Boost weight curve: w' = smoothstep(0.05, 0.2, w) then clamp to [0, 1]
-    w_boosted = np.clip((weight_arr - 0.05) / 0.15, 0, 1)
+    # Blend: where the per-pixel weight is non-trivial, use the projected
+    # multi-view color. SF3D's own texture is only a last-resort fallback for
+    # areas no view could see (inside mouth, between limbs). Prior thresholds
+    # (0.2 / 0.05) were too strict and let SF3D dominate 80% of the atlas.
+    # Hard override: if ANY view sampled this atlas pixel (weight > tiny
+    # threshold), use the projected color at 100%. Otherwise fall back to
+    # the SF3D baked texture. Prior smoothstep blend washed out detail on
+    # small triangles (head/hair) because their per-pixel weights are low
+    # relative to the flat broad torso — the weight magnitude varies with
+    # triangle size, not projection quality.
+    PIXEL_PRESENT = 0.002
+    sharp_mask = weight_arr > PIXEL_PRESENT
+    fallback_mask = ~sharp_mask
+    w_boosted = sharp_mask.astype(np.float64)
     w3 = w_boosted[:, :, np.newaxis]
     result_arr = (proj_arr * w3 + sf3d_arr * (1.0 - w3)).astype(np.uint8)
     result_img = Image.fromarray(result_arr)
