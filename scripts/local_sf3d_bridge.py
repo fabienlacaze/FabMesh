@@ -99,7 +99,7 @@ def generate_3d(
     # saves ~35 s of wasted GPU time per generation.
     # ------------------------------------------------------------------
     _multiview_dir = output_path + '.multiview'
-    _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'upscale').lower()
+    _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'refine').lower()
     # 'augment' is a new mode that needs the multi-view dir
     _modes_using_mv = ('atlas', 'vc', 'augment')
     if _proj_mode_pre not in _modes_using_mv:
@@ -546,7 +546,7 @@ def generate_3d(
     #   atlas — multi-view UV projection (tends to mosaic on SF3D UVs)
     #   vc    — vertex-color projection (smooth but low-detail)
     #   none  — skip post-processing entirely
-    _proj_mode = os.environ.get('FABMESH_PROJECT_MODE', 'upscale').lower()
+    _proj_mode = os.environ.get('FABMESH_PROJECT_MODE', 'refine').lower()
     _vc_script = os.path.join(os.path.dirname(__file__), 'texture_project_vc.py')
     _atlas_script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
     _upscale_script = os.path.join(os.path.dirname(__file__), 'upscale_atlas.py')
