@@ -91,7 +91,10 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # FABMESH_UV_REPACK_THRESHOLD faces per island on average — i.e.
     # the existing layout is already fragmented. Disable with
     # FABMESH_UV_REPACK=0 to fall back to the original UVs.
-    _repack_enabled = os.environ.get('FABMESH_UV_REPACK', '1') != '0'
+    # xatlas re-unwrap is OFF by default: on SF3D meshes it produces a
+    # per-triangle chart layout that still renders as mosaic. Keep the
+    # native SF3D UVs unless FABMESH_UV_REPACK=1 is set explicitly.
+    _repack_enabled = os.environ.get('FABMESH_UV_REPACK', '0') == '1'
     _repacked = False
     if _repack_enabled and len(faces) > 100:
         try:
@@ -221,27 +224,31 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     t_w2c_base = np.array([0, 0, -distance], dtype=np.float64)
 
     # -------------------------------------------------------------------
-    # Helper: project vertices from a rotated camera viewpoint
-    # angle_deg: Y-axis rotation angle (0 = front, 90 = right, etc.)
+    # Helper: project vertices from an orbited camera viewpoint.
+    # azim_deg: azimuth around Y axis (0 = front, 90 = right, ...)
+    # elev_deg: elevation above the equator (positive = camera looks DOWN
+    #           at subject, negative = looks UP). Zero123++ v1.2 uses
+    #           +20° / -10° alternating across its 6 views — ignoring
+    #           this pitch was the cause of the mosaic atlas bug.
     # Returns (vertex_colors, visibility) arrays for this view
     # -------------------------------------------------------------------
-    def project_single_view(src_pixels, src_w, src_h, angle_deg):
-        """Project from a camera rotated angle_deg around Y axis.
-
-        Camera orbit math:
-          Base c2w has R_c2w_base and t_c2w_base = [d,0,0].
-          Orbiting by angle_deg around Y applies Ry(angle) to the whole c2w:
-            R_c2w_new = Ry(angle) @ R_c2w_base
-            t_c2w_new = Ry(angle) @ [d,0,0]
-          Inverting to get w2c:
-            R_w2c_new = R_c2w_new^T = R_c2w_base^T @ Ry(-angle) = R_w2c_base @ Ry(-angle)
-            t_w2c_new = -R_w2c_new @ t_c2w_new
-                      = -(R_w2c_base @ Ry(-angle)) @ (Ry(angle) @ [d,0,0])
-                      = -R_w2c_base @ [d,0,0] = t_w2c_base
-          The translation is angle-invariant because orbit rotation cancels out.
+    def project_single_view(src_pixels, src_w, src_h, azim_deg, elev_deg=0.0):
+        """Camera orbit around the subject:
+            c2w = Ry(azim) @ Rx(-elev) @ c2w_base
+        Inverted to w2c:
+            R_w2c = R_w2c_base @ Rx(elev) @ Ry(-azim)
+        For non-zero elevation the translation is no longer azimuth-
+        invariant, so we recompute it explicitly each time.
         """
-        R_w2c = R_w2c_base @ rot_y(-angle_deg)
-        t_w2c = t_w2c_base  # angle-invariant (see derivation above)
+        R_w2c = R_w2c_base @ rot_x(elev_deg) @ rot_y(-azim_deg)
+        # t_w2c = -R_w2c @ t_c2w (camera-to-world translation)
+        # Base c2w sits at +distance on world X axis, then orbited by
+        # Ry(azim) @ Rx(-elev). For elev=0 this collapses to the old
+        # angle-invariant case, but for non-zero elev the camera height
+        # changes and so does the world-space camera centre.
+        cam_pos_w = (rot_y(azim_deg) @ rot_x(-elev_deg) @
+                     np.array([distance, 0.0, 0.0]))
+        t_w2c = -R_w2c @ cam_pos_w
 
         # Transform vertices to this camera's space
         v_cs = (R_w2c @ verts_cam.T).T + t_w2c  # (V, 3)
@@ -283,10 +290,21 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # -------------------------------------------------------------------
     # Build list of views to project
     # -------------------------------------------------------------------
-    # Zero123++ view angles:
-    #   input.png: 0 deg (front)
-    #   view_0.png: 30, view_1: 90, view_2: 150, view_3: 210, view_4: 270, view_5: 330
-    MULTIVIEW_ANGLES = [30.0, 90.0, 150.0, 210.0, 270.0, 330.0]
+    # Zero123++ v1.2 official view schema (verified in
+    # external/InstantMesh/src/utils/camera_util.py:99-100):
+    #   azimuth = [30, 90, 150, 210, 270, 330]
+    #   elevation = [20, -10, 20, -10, 20, -10]   (alternating)
+    # The front input.png stays at (0, 0).
+    MULTIVIEW_VIEWS = [
+        (30.0,   20.0),  # view_0
+        (90.0,  -10.0),  # view_1
+        (150.0,  20.0),  # view_2
+        (210.0, -10.0),  # view_3
+        (270.0,  20.0),  # view_4
+        (330.0, -10.0),  # view_5
+    ]
+    # Back-compat aliases for code below that still reads MULTIVIEW_ANGLES
+    MULTIVIEW_ANGLES = [a for (a, _) in MULTIVIEW_VIEWS]
 
     # Priority weights: front=1.0, front-side=0.7, side=0.5, back-side=0.4, back views get less
     # The priority downweights views so front dominates where multiple views see the same surface
@@ -300,21 +318,22 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         210.0: 0.8,   # back-left — contributes to back coverage
     }
 
-    views = []  # list of (image_path, angle_deg, priority)
+    views = []  # list of (image_path, azim_deg, elev_deg, priority)
 
-    # Always include the front view
-    views.append((source_image_path, 0.0, PRIORITY_WEIGHTS[0.0]))
+    # Always include the front view at (0, 0)
+    views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
 
     if multiview_dir:
-        for i, angle in enumerate(MULTIVIEW_ANGLES):
+        for i, (azim, elev) in enumerate(MULTIVIEW_VIEWS):
             vpath = os.path.join(multiview_dir, f'view_{i}.png')
             if os.path.exists(vpath):
-                views.append((vpath, angle, PRIORITY_WEIGHTS.get(angle, 0.4)))
+                views.append((vpath, azim, elev,
+                              PRIORITY_WEIGHTS.get(azim, 0.4)))
             else:
                 log(f'WARNING: missing {vpath}, skipping')
 
     log(f'projecting {len(views)} view(s): ' +
-        ', '.join(f'{v[1]:.0f}deg(p={v[2]})' for v in views))
+        ', '.join(f'az={v[1]:.0f}/el={v[2]:.0f}(p={v[3]})' for v in views))
 
     # -------------------------------------------------------------------
     # Step 2b: Project all views and accumulate weighted colors per vertex
@@ -323,13 +342,13 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     accum_color = np.zeros((n_verts, 3), dtype=np.float64)
     accum_weight = np.zeros(n_verts, dtype=np.float64)
 
-    for img_path, angle_deg, priority in views:
+    for img_path, azim_deg, elev_deg, priority in views:
         src_img = Image.open(img_path).convert('RGBA')
         sw, sh = src_img.size
         sp = np.asarray(src_img)
-        log(f'  view {angle_deg:.0f}deg: {img_path} ({sw}x{sh})')
+        log(f'  view az={azim_deg:.0f}/el={elev_deg:.0f}: {img_path} ({sw}x{sh})')
 
-        v_colors, vis = project_single_view(sp, sw, sh, angle_deg)
+        v_colors, vis = project_single_view(sp, sw, sh, azim_deg, elev_deg)
 
         # Weight = visibility * priority
         w = vis * priority
@@ -441,13 +460,18 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # makes multi-view projection actually work on surfaces invisible from front
     # (e.g. back of head, sides).
     view_data = []
-    for img_path, angle_deg, priority in views:
+    for img_path, azim_deg, elev_deg, priority in views:
         vsrc_img = Image.open(img_path).convert('RGBA')
         vsrc_w, vsrc_h = vsrc_img.size
         vsrc_pixels = np.asarray(vsrc_img)
 
-        R_w2c_v = R_w2c_base @ rot_y(-angle_deg)
-        t_w2c_v = t_w2c_base
+        # Full orbit: azimuth around Y + elevation around X (Zero123++
+        # alternates +20 / -10 elevation per view — projecting these
+        # as pure azimuth produced the mosaic atlas bug).
+        R_w2c_v = R_w2c_base @ rot_x(elev_deg) @ rot_y(-azim_deg)
+        cam_pos_w = (rot_y(azim_deg) @ rot_x(-elev_deg) @
+                     np.array([distance, 0.0, 0.0]))
+        t_w2c_v = -R_w2c_v @ cam_pos_w
 
         v_cs = (R_w2c_v @ verts_cam.T).T + t_w2c_v
         n_cs = (R_w2c_v @ norms_cam.T).T
@@ -464,7 +488,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         view_data.append({
             'pixels': vsrc_pixels, 'w': vsrc_w, 'h': vsrc_h,
             'p_u': p_u, 'p_v': p_v, 'vis': vvis,
-            'priority': priority, 'angle': angle_deg,
+            'priority': priority, 'azim': azim_deg, 'elev': elev_deg,
         })
 
     n_drawn = 0
