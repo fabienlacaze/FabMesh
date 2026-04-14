@@ -197,8 +197,9 @@ def augment(mesh_path, front_image_path, output_path, multiview_dir=None,
 
     # ---- Rasterize: for each face, write multi-view colour ONLY where
     # a view's score beats the front by >= margin. ----
-    out_arr = sf3d_arr.copy()
+    out_arr = sf3d_arr.copy().astype(np.float64)
     n_overwritten = 0
+    n_partial = 0
     n_skipped = 0
     n_drawn = 0
 
@@ -239,35 +240,72 @@ def augment(mesh_path, front_image_path, output_path, multiview_dir=None,
             continue
         n_drawn += 1
 
-        # Pick the multi-view that beats front by the largest margin
-        best_score = f_front + margin     # threshold to beat
+        # Pick the multi-view with the highest score for this face
+        best_score = -1.0
         best_color = None
         for vd in view_data:
             mv_score_face = vd['score'][v_idx].mean()
             if mv_score_face <= best_score:
                 continue
-            # interpolate sample at every covered pixel
             tri_u = vd['p_u'][v_idx]
             tri_v = vd['p_v'][v_idx]
             su = w0 * tri_u[0] + w1 * tri_u[1] + w2 * tri_u[2]
             sv = w0 * tri_v[0] + w1 * tri_v[1] + w2 * tri_v[2]
             sx = np.clip((su * vd['w']).astype(int), 0, vd['w'] - 1)
             sy = np.clip((sv * vd['h']).astype(int), 0, vd['h'] - 1)
-            sampled = vd['pixels'][sy, sx, :3]  # (h, w, 3)
+            sampled = vd['pixels'][sy, sx, :3].astype(np.float64)
             best_score = mv_score_face
             best_color = sampled
 
-        if best_color is not None:
-            # Apply only inside the triangle mask
-            for c in range(3):
-                out_arr[ys, xs, c] = np.where(mask, best_color[..., c],
-                                              out_arr[ys, xs, c])
+        if best_color is None:
+            continue
+
+        # advantage = how much better the multi-view sees this face
+        # vs the front. Negative means front is better (skip entirely).
+        advantage = best_score - f_front
+        if advantage <= 0:
+            continue
+
+        # Soft blend factor in [0, 1]: 0 when advantage <= margin (no
+        # change), saturates to 1 when advantage is well above margin.
+        # Smoothstep-like ramp avoids the abrupt patchwork seams the
+        # previous version produced.
+        SOFT_RANGE = max(margin, 0.05)
+        t = np.clip((advantage - margin) / SOFT_RANGE, 0.0, 1.0)
+        if t <= 0.0:
+            continue
+
+        # PHOTOMETRIC MATCH: shift the multi-view sample's mean colour
+        # towards the SF3D mean colour for this triangle. Zero123++
+        # views have inconsistent lighting between each other and vs
+        # the SF3D bake, which produced the blotchy yellow/black
+        # patches in the v1 augment. We compute the per-channel mean
+        # offset across the triangle's mask and apply it to the
+        # multi-view sample so its overall tone matches SF3D's, while
+        # keeping the multi-view's local texture variations intact.
+        sf_local = out_arr[ys, xs]              # (H, W, 3) original
+        diff_means = (sf_local[mask].mean(axis=0)
+                      - best_color[mask].mean(axis=0))  # 3-vec
+        matched = best_color + diff_means       # (H, W, 3)
+        matched = np.clip(matched, 0, 255)
+
+        # Apply soft blend only where mask is true
+        write_mask = mask.astype(np.float64)[..., np.newaxis] * t
+        out_arr[ys, xs] = (write_mask * matched + (1.0 - write_mask) * sf_local)
+
+        if t >= 0.99:
             n_overwritten += 1
+        else:
+            n_partial += 1
+
+    out_arr = np.clip(out_arr, 0, 255).astype(np.uint8)
 
     log(f'faces drawn={n_drawn} overwritten={n_overwritten} '
-        f'(SF3D kept on {n_drawn - n_overwritten}) skipped={n_skipped}')
+        f'partial-blend={n_partial} '
+        f'(SF3D kept on {n_drawn - n_overwritten - n_partial}) '
+        f'skipped={n_skipped}')
     _evt('rasterize_done', drawn=n_drawn, overwritten=n_overwritten,
-         skipped=n_skipped, total_faces=int(len(faces)))
+         partial=n_partial, skipped=n_skipped, total_faces=int(len(faces)))
 
     # ---- Write augmented atlas back into the GLB ----
     out_img = Image.fromarray(out_arr)
@@ -354,10 +392,11 @@ if __name__ == '__main__':
     p.add_argument('front_image')
     p.add_argument('output')
     p.add_argument('--multiview', default=None, required=True)
-    p.add_argument('--margin', type=float, default=0.15,
+    p.add_argument('--margin', type=float, default=0.3,
                    help='Min visibility advantage a multi-view needs over '
-                        'the front before its colour overrides SF3D '
-                        '(0=always overwrite, 1=never)')
+                        'the front before its colour starts blending in '
+                        '(0=always overwrite, 1=never). Default 0.3 = '
+                        'only zones meaningfully invisible from front.')
     args = p.parse_args()
     try:
         ok = augment(args.mesh, args.front_image, args.output,
