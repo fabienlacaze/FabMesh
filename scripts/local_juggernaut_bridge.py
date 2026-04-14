@@ -191,6 +191,25 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         _sz = os.path.getsize(img_path)
         _evt('image_saved', index=i, path=img_path, bytes=_sz,
              w=gen_img.size[0], h=gen_img.size[1])
+        # Per-project manifest entry
+        try:
+            from manifest import append_entry as _ma
+            _ma(output_dir,
+                kind='image_gen',
+                path=img_path,
+                engine='local-realvis',
+                model='SG161222/RealVisXL_V4.0',
+                prompt=prompt,
+                full_prompt=optimized_prompt,
+                negative_prompt=negative_prompt,
+                steps=int(steps),
+                guidance_scale=7.0,
+                seed=int(_pipe_kwargs['generator'].initial_seed())
+                     if hasattr(_pipe_kwargs.get('generator'), 'initial_seed') else None,
+                width=1024, height=1024,
+                bytes=_sz)
+        except Exception:
+            pass
         print(f"LOCAL_REALVIS_DONE: {img_path} ({_sz} bytes)")
         sys.stdout.flush()
 
