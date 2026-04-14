@@ -50,6 +50,27 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Multi-view ADDITIVE augment on top of SF3D atlas — REJECTED VISUALLY
+
+**Premise** (user's idea): SF3D textures the front well from the source
+image but invents the back/sides. Augment those by overwriting only
+where a Zero123++ multi-view sees that surface better than the front.
+
+**Implementation**: scripts/texture_augment.py. Per face: front_score
+= front_vis, mv_score = vis * priority for each of 6 views. If max
+mv_score beats front_score by `margin` (default 0.15), overwrite the
+SF3D pixels of that face's UV triangle with the multi-view sample.
+Wired as `FABMESH_PROJECT_MODE=augment`.
+
+**Result on poule_geante**: 8264/16534 faces overwritten (50%). Mesh
+came out with **blotchy patchwork** plumage — black/yellow/white
+patches because each Zero123++ view has its own implicit lighting and
+the seams between SF3D and overwritten zones are abrupt.
+
+**Conclusion**: photometric mismatch between Zero123++ views and SF3D
+makes additive augmentation visually WORSE than plain upscale.
+Keeping the script (it works) but `upscale` stays the default mode.
+
 ### 2026-04-15 — Atlas-only RealESRGAN upscale — NEW DEFAULT
 
 **Insight**: we kept replacing SF3D's native atlas (which has CORRECT
