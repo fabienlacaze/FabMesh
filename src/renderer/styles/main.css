@@ -2023,24 +2023,29 @@ select option {
   color: var(--text-primary);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Scrollbar — global white translucent thumb, visible on any background */
+* {
+  scrollbar-color: rgba(255,255,255,0.55) transparent; /* Firefox */
+  scrollbar-width: thin;
 }
-
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+  background: rgba(255,255,255,0.55);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: rgba(255,255,255,0.85);
+  background-clip: padding-box;
 }
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* Utilities */
 .hidden {
