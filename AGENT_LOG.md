@@ -50,6 +50,36 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Bilateral-symmetry auto-align (commit `2eea5ea`) — drops the ±7° drift
+
+**Root cause of the residual "décalage"**: the chest-bulge heuristic
+was ~7° off optimal on real meshes because asymmetric surface features
+(tilted head, diagonal sash, single pauldron, etc.) bias the mean
+vertex-from-center direction.
+
+**Validation on the pre-rotation test_e2e mesh**:
+- chest-bulge (old): 176.86°
+- bilateral symmetry (new): 169.75°
+- Δ = 7.1° — exactly the order of magnitude the user saw as "pas loin
+  mais il y a encore un décalage".
+
+**New algorithm** (in `local_sf3d_bridge.py`):
+1. Downsample mesh to 4000 vertices.
+2. Coarse Y-rotation scan (2° steps, 0..180°) + fine (0.25° steps,
+   ±3° around coarse best). Score = histogram-overlap between the
+   rotated cloud and its x→-x mirror in a 64×16×64 XYZ grid.
+3. Resolve front/back (180° ambiguity of mirror plane) via chest-z
+   direction after rotation.
+4. Apply only if >0.5° from identity.
+
+Falls through to try/except with full traceback if any edge case hits,
+so silent skip becomes impossible.
+
+**Ready to test**: user to run a fresh generation on test_e2e. Expected:
+face + multi-view back/sides precisely aligned (no ±2-7° residual).
+
+---
+
 ### 2026-04-15 — Rotation-offset propagated to multi-view projection (commit `1965889`)
 
 Follow-up to the auto-align fix: the rotation of the mesh (169.5° for
