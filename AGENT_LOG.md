@@ -85,6 +85,23 @@ to fix fidelity — it was a purely stylistic layer on top.
    that takes the reference image AND the 6 multiviews as conditions,
    so any refine stays aligned with the actual orc.
 
+**FIX 1 applied** (commit `f61ecf0`): added `'refine'` to
+`_modes_using_mv` in `local_sf3d_bridge.py`. Multi-views will now
+generate again in the default refine path.
+
+**FIX 2 applied** (commit `2f63b3f`): even with fix 1, the refine
+branch was *ignoring* the generated multi-views. Refactored the refine
+path into two steps:
+ 1. `texture_project.py --multiview` bakes the 6 Zero123++ views onto
+    the SF3D atlas (same as 'atlas' mode)
+ 2. `texture_refine.py` then SDXL-polishes the *projected* atlas.
+If projection fails, we gracefully keep the vanilla SF3D atlas.
+
+**Test plan** (next run from user): generate a fresh mesh on the orc
+reference → confirm `_multiview_*` folder appears → compare the
+resulting mesh's back/sides with the reference image. Should now show
+real multi-view data instead of SF3D's single-view prior.
+
 **Hyper-SDXL 8-step LoRA work was started** (sdxl_server.py +
 texture_refine.py branches) but **stashed** (`wip_hyper_sdxl_pause`) —
 optimizing refine speed is useless while the base mesh isn't faithful
