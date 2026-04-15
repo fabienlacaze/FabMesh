@@ -92,19 +92,22 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
     def _heartbeat():
         if not sub_phase:
             return
-        # Expected wall-clock for the whole sub-phase in seconds. We use the
-        # PHASE_BUDGET weight × 3 as a rough per-weight seconds estimate so
-        # each heartbeat bump is ~1 overall-percent per 3s of silence.
+        # Bump 1 sub-pct every 2s of silence, cap at 95% of the slice, and
+        # STOP emitting once we hit the cap (otherwise we spam the same
+        # value forever which drowns the diagnostic log without helping
+        # the bar). Real events reset _hb_state when they arrive, so the
+        # cap naturally resets on every real signal.
+        _last_emitted = -1
         while not _hb_stop.wait(2.0):
             elapsed = time.time() - _hb_state['last_sub_time']
             last = _hb_state['last_sub_pct']
-            # Extrapolate 1 sub-pct per 2s of silence, cap at 95% of slice
             bump = min(95, last + int(elapsed / 2.0))
-            if bump > last:
+            if bump > last and bump > _last_emitted:
                 try:
                     overall = _fprog.sub(sub_phase, bump)
                     _emit_progress(sub_phase, overall,
                                    label=f"{sub_phase}:{bump}~hb")
+                    _last_emitted = bump
                 except Exception:
                     pass
 
