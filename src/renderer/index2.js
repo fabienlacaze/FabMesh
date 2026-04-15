@@ -395,7 +395,14 @@ async function refreshProjectsPage() {
       base = base.replace(/_\d{10,}$/, '');
     } while (base !== prev);
     // Remove trailing engine suffix added by main.js: _sf3d / _meshy / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai
-    base = base.replace(/_(sf3d|meshy|hunyuan|local|trellis2|trellis|triposg|ai)$/i, '');
+    // Optionally followed by arbitrary short tags like _apilive, _test, _v2,
+    // each possibly followed by its own timestamp. This handles ad-hoc CLI
+    // names like test_e2e_sf3d_apilive_1776274212 that would otherwise form
+    // their own phantom projects.
+    base = base.replace(
+      /_(sf3d|meshy|hunyuan|local|trellis2|trellis|triposg|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
+      ''
+    );
     // Remove a trailing _<number> if any (legacy index naming)
     base = base.replace(/_\d+$/, '');
     return base || 'untitled';
