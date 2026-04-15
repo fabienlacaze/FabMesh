@@ -50,6 +50,56 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Progress bar: single source of truth (commit `c3acc3e`)
+
+**User pain point**: the 3D generation progress bar jumped from ~20% to
+97% within a few seconds and then froze at 97% for minutes before
+finishing. Felt broken. User asked that the bar reflect TRUE overall
+progress.
+
+**Root cause (two bugs compounding)**:
+1. The bridge's hardcoded markers (5/10/12/25/50/90/97/100) didn't match
+   wall-clock time. On a typical run: SF3D inference is ~45% of real
+   work — not 90%. Multi-view + UV projection + SDXL refine are the
+   other 55%, all happening between the hardcoded 90 and 100.
+2. Sub-scripts (`multiview_gen.py`, `texture_project.py`,
+   `texture_refine.py`) were invoked with `capture_output=True`, so
+   their stdout was buffered until they exited. Intermediate progress
+   lines (per-view upscale, per-tile SDXL) never reached main.js during
+   execution — the bar had nothing to report and the timer saturated.
+
+**Fix**:
+- New `scripts/fabmesh_progress.py` — 50-line module holding
+  `PHASE_BUDGET` with wall-clock weights (`multiview=25`, `sf3d_load=8`,
+  `sf3d_infer=5`, `tex_project=15`, `refine=40`, `finalize=4`, etc.).
+  `start(phase)` / `end(phase)` / `sub(phase, 0..100)` derive
+  overall percentages. Editing one weight rebalances every emitter —
+  single source of truth as requested.
+- Bridge: `_emit_progress(phase)` replaces the hardcoded `LOCAL_SF3D_PROGRESS:`
+  lines. `_stream_subprocess()` replaces `subprocess.run(capture_output=True)`
+  for the four long sub-script calls: forwards stdout line-by-line AND
+  remaps `FABMESH_SUBPCT: <0-100>` markers into the overall slice via
+  `fprog.sub()`, re-emitting them as `LOCAL_SF3D_PROGRESS:`.
+- Sub-scripts emit `FABMESH_SUBPCT:` at meaningful checkpoints:
+  per-view upscale and per-view style-harmonize (multiview_gen), every
+  ~5% of the face-rasterization loop (texture_project), per-tile SDXL
+  refine completion (texture_refine). Existing `MULTIVIEW_PROGRESS:`
+  and `slog.progress(...)` lines kept intact so other consumers
+  (multiview standalone IPC, fabmesh_log) still work.
+- Renderer (`index2.js`): ignores raw `FABMESH_SUBPCT` messages (those
+  are sub-pct, not overall pct — the bridge already remapped them);
+  stops the 5→90% smooth-climb timer as soon as the bridge reports its
+  first real event. The timer's cap at 90% was masking the entire
+  refine phase (60–99%) — that was the user-visible "stall at 97".
+
+**Verification** — dry-run enumeration of a typical pipeline produced:
+1 → 3 → 28 → 36 → 41 → 45 → 59 → 62 → 73 → 86 → 98 → 99 → 100,
+monotonic and roughly proportional to real seconds on an RTX 5080.
+SDXL refine (longest phase) now owns overall 60-99, so per-tile ticks
+(~13s each for 9 tiles) move the bar ~4% each — visible motion.
+
+**Not changed**: pipeline behaviour, timing, quality. Pure plumbing.
+
 ### 2026-04-15 — Project-level multi-view cache (commit `bb87f12`)
 
 **User pain point**: "le multiview doit être dispo à toutes les
