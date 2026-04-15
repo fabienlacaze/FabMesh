@@ -50,6 +50,45 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — ControlNet Tile SDXL atlas refine — FIRST RUN DONE (pending user visual verdict)
+
+**Run 1 (failed at tile 1)**: auto-derived `steps=42` at strength 0.6,
+each tile took ~250s → client timeout 240s. Fixed by pinning
+`steps=25` for CN Tile + bumping HTTP timeout 240→600s (commit
+`39dfd02`).
+
+**Run 2 (success)**: `strength=0.6 cn_scale=0.7 steps=25 target=2048`
+on `test_e2e_sf3d_1776247937665.glb`. Output:
+`test_e2e_sf3d_1776247937665_cntile.glb` (same byte size — in-place
+atlas swap kept GLB structure intact).
+- Tile times: 177+72+65+58+71+57+52+23+17 = **596s total ≈ 10 min**.
+  (1st tile includes 1-time xinsir/controlnet-tile-sdxl-1.0 download
+  + load into VRAM ~2.5 GB. Subsequent tiles ~60s each.)
+- VRAM peak ~15.3/15.9 GB (96%) — at the edge but no OOM.
+
+**Speedup research (agents, 2026-04-15)**:
+- **Hyper-SDXL 8-step CFG-preserved LoRA** (ByteDance, openrail++ with
+  $1M cap): can drop to 8 steps × CFG 6 × strength 0.55 → ~25s/tile
+  (-65%). Micro-detail softens slightly. Yellow-light for ship.
+- **torch.compile**: theoretical +20% but recompile triggered on every
+  pipe unload/reload (our server juggles 3 SDXL pipes on 16 GB), so
+  net gain is negative. **Red-light — skip.**
+- **Atlas 1024 default + RealESRGAN x2** (matches Meshy free tier):
+  1 tile × 60s = **~70s total (-88%)**, better global coherence.
+  **Green-light — biggest win, should be the default mode.**
+- **Preset tuning**: strength=0.42 steps=18 cn_scale=0.75 CFG=5.5
+  DPM++ 2M Karras — ~50s/tile (-30%), more visible micro-detail
+  (lower strength lets CN Tile inject high-freq instead of being
+  overridden). **Green-light — try before going LoRA.**
+
+**Next decision** (pending user visual judgement on the 2048/9-tile
+output): if quality is visibly better than vanilla refine, ship the
+new default as 1024 single-tile + RealESRGAN x2 + preset
+`strength=0.42 steps=18 cn_scale=0.75`. Add a "Max Quality" button
+for 2048/9-tile when needed.
+
+---
+
 ### 2026-04-15 — ControlNet Tile SDXL atlas refine — IN TEST
 
 **Motivation**: user wants Meshy-quality texture; TRELLIS.2 is legally
