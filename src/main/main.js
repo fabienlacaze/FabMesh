@@ -2252,6 +2252,7 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
         // Script may output a different path (e.g. .png instead of .jpeg)
         const outMatch = (stdout || '').match(/OK:\s*(.+)/);
         const actualPath = outMatch ? outMatch[1].trim() : newImagePath;
+        _handleMultiviewInheritance(actualPath).catch(() => {});
         resolve({ success: true, newPath: actualPath });
       }
     });
