@@ -79,41 +79,75 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         except Exception as e:
             print(f"LOCAL_REALVIS: RAM check error: {e}", flush=True)
 
-    print("LOCAL_REALVIS: Loading RealVis XL v4.0 (first run downloads ~7 GB)...")
-    sys.stdout.flush()
-
-    pipe = StableDiffusionXLPipeline.from_pretrained(
-        "SG161222/RealVisXL_V4.0",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        use_safetensors=True,
-    )
-    # Use model_cpu_offload instead of moving everything to CUDA at once.
-    # This prevents VAE decode OOM/freeze on GPUs with limited VRAM (16GB)
-    # and nightly PyTorch builds.
-    pipe.enable_model_cpu_offload()
-    print("LOCAL_REALVIS: Loaded with CPU offload (VAE decodes on CPU if needed)")
-    sys.stdout.flush()
-
-    # Prompt enhancement: choose between T-pose (3D-game-asset) mode and
-    # the default three-quarter view mode based on cues in the user prompt.
-    #
-    # Why two modes:
-    #   - Multi-view generation (Zero123++) works BEST when the input is a
-    #     strict T-pose front-facing character. Dynamic poses cause it to
-    #     duplicate the front across multiple azimuths (observed on
-    #     orc_child: view_0 and view_3 both looked "face").
-    #   - But for hard-surface props (buildings, items) a 3/4 angle gives
-    #     SF3D more side info and bakes a better texture.
-    #
-    # Heuristic: if the user typed "T-pose" or "front view" anywhere, go
-    # full T-pose mode. Otherwise keep the legacy 3/4 bias.
+    # Detect whether the user asked for a T-pose front-facing character.
+    # Drives both (a) the model choice — DreamShaper XL Lightning + ControlNet
+    # OpenPose gives a GUARANTEED T-pose that RealVisXL cannot match, and
+    # (b) the prompt enhancement.
     _p_low = prompt.lower()
     _is_tpose = any(kw in _p_low for kw in (
         't-pose', 't pose', 'tpose',
         'front view', 'frontal view', 'front-facing', 'facing camera',
         'facing the camera', 'straight-on',
     ))
+
+    _ctrl_pipe = None
+    _tpose_skeleton = None
+    if _is_tpose:
+        # T-pose mode: DreamShaper XL Lightning (CreativeML OpenRAIL++-M,
+        # commercial-safe) + xinsir ControlNet OpenPose SDXL (Apache 2.0,
+        # commercial-safe) + a pre-rendered T-pose skeleton as control image.
+        print("LOCAL_REALVIS: T-pose mode — loading DreamShaper XL + ControlNet OpenPose...", flush=True)
+        sys.stdout.flush()
+        from diffusers import (
+            StableDiffusionXLControlNetPipeline,
+            ControlNetModel,
+        )
+        _skel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  'assets', 'tpose_skeleton.png')
+        if not os.path.exists(_skel_path):
+            # Auto-generate if missing
+            try:
+                from assets.tpose_skeleton import build_tpose_skeleton
+                build_tpose_skeleton(1024).save(_skel_path)
+                print(f"LOCAL_REALVIS: auto-generated T-pose skeleton at {_skel_path}", flush=True)
+            except Exception as _se:
+                print(f"LOCAL_REALVIS: could not generate skeleton ({_se}), falling back to plain DreamShaper", flush=True)
+        from PIL import Image as _PImg
+        if os.path.exists(_skel_path):
+            _tpose_skeleton = _PImg.open(_skel_path).convert('RGB').resize((1024, 1024), _PImg.LANCZOS)
+        # xinsir's OpenPose SDXL ControlNet — Apache 2.0
+        _ctrl = ControlNetModel.from_pretrained(
+            "xinsir/controlnet-openpose-sdxl-1.0",
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+        )
+        # DreamShaper XL Lightning — OpenRAIL++-M, commercial-safe. Only
+        # 4-6 steps needed. (We still accept `steps` arg but cap it at 8 for
+        # Lightning since more steps over-burns the output.)
+        pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+            "Lykon/dreamshaper-xl-lightning",
+            controlnet=_ctrl,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+            variant="fp16",
+        )
+        pipe.enable_model_cpu_offload()
+        _ctrl_pipe = pipe
+        steps = min(int(steps), 8)
+        print(f"LOCAL_REALVIS: Loaded DreamShaper XL Lightning + OpenPose (steps clamped to {steps})", flush=True)
+    else:
+        # Default path: RealVis XL V4.0 for photoreal / prop subjects.
+        print("LOCAL_REALVIS: Loading RealVis XL v4.0 (first run downloads ~7 GB)...")
+        sys.stdout.flush()
+        pipe = StableDiffusionXLPipeline.from_pretrained(
+            "SG161222/RealVisXL_V4.0",
+            torch_dtype=torch.float16,
+            variant="fp16",
+            use_safetensors=True,
+        )
+        pipe.enable_model_cpu_offload()
+        print("LOCAL_REALVIS: Loaded with CPU offload (VAE decodes on CPU if needed)")
+        sys.stdout.flush()
     if _is_tpose:
         # T-pose/front mode: reinforce strict symmetry, arms out horizontally,
         # no perspective. Zero123++ will be able to rotate around properly.
@@ -170,6 +204,13 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             width=1024,
             generator=torch.Generator("cuda").manual_seed(int(time.time()) + i),
         )
+        if _is_tpose and _ctrl_pipe is not None and _tpose_skeleton is not None:
+            # ControlNet OpenPose path: feed the T-pose skeleton as control image.
+            # Lower CFG because Lightning prefers 1.5-3.0. ControlNet scale 0.85
+            # is strong enough to lock the pose without killing diversity.
+            _pipe_kwargs['image'] = _tpose_skeleton
+            _pipe_kwargs['controlnet_conditioning_scale'] = 0.85
+            _pipe_kwargs['guidance_scale'] = 2.0
         if _throttle_cb is not None:
             # Diffusers >= 0.25 uses callback_on_step_end; older versions use callback
             try:
