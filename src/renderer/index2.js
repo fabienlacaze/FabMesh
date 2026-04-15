@@ -1060,6 +1060,11 @@ async function renderImageVersions(p) {
       showStep1Preview(img.path);
       // Restore the style that was applied to this specific image
       _restoreStyleDropdown(img.path);
+      // Force re-evaluate multi-view bar even if showStep1Preview's internal
+      // call races with other UI updates (observed on 'garcon' v1 where the
+      // bar stayed hidden even though the _multiview/ folder existed). Fires
+      // after a short delay to let the DOM settle.
+      setTimeout(() => { _checkMultiviewForCurrentImage(); }, 30);
     });
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
