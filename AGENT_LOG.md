@@ -163,9 +163,13 @@ need to inspect the build log on disk.
 (confirmed via direct `from trellis2.pipelines import ...`), so
 this blocks the whole pipeline.
 
-**Next**: capture the actual nvdiffrast build error (probably
-missing CUDA headers or wrong gcc, since flex_gemm/cumesh/o_voxel
-worked from pre-built wheels but nvdiffrast wants to compile).
+**Next**: capture the actual nvdiffrast build error.
+
+→ Build error: `Cannot compile nvdiffrast CUDA extension. Run pip
+install with --no-build-isolation flag`. Trivial fix.
+
+Retrying with `pip install --force-reinstall --no-deps --no-build-isolation
+git+...nvdiffrast.git`. Running in background.
 
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
