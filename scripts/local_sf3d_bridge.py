@@ -259,141 +259,47 @@ def generate_3d(
     image.save(_preprocessed_path)
 
     # ------------------------------------------------------------------
-    # Generate multi-view images (Zero123++) for full-coverage texture
-    # projection. ONLY needed when the post-bake step actually consumes
-    # them. The 'upscale' (default) and 'none' modes don't, so skipping
-    # saves ~35 s of wasted GPU time per generation.
+    # Look for pre-generated multi-views (Zero123++) in the project's image
+    # dir. Convention (since 2026-04-15): the UI's "Generate image" has a
+    # multi-view checkbox that, when enabled, runs multiview_gen at image
+    # creation time and writes the 6 views to `images/<project>/multiview/`.
+    #
+    # The bridge NEVER generates multi-views itself anymore — it just uses
+    # what the user chose to have. If the folder doesn't exist or is
+    # incomplete, we fall through to SF3D-only (no projection phase).
     # ------------------------------------------------------------------
-    _multiview_dir = output_path + '.multiview'
+    _multiview_dir = None
     _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'refine').lower()
-    # 'refine' (default) is the Meshy-style SDXL atlas polish; it ALSO
-    # benefits from having multi-views available because (a) texture_project
-    # can densify coverage before refine runs, and (b) future IPAdapter-
-    # guided refine will consume them as conditions for fidelity. The
-    # previous commit 958b30d switched default to 'refine' WITHOUT adding
-    # it here, which silently disabled multi-views for every user-visible
-    # generation — root cause of the low back/sides fidelity.
-    _modes_using_mv = ('atlas', 'vc', 'augment', 'atlas_refine', 'refine')
-    if _proj_mode_pre not in _modes_using_mv:
-        print(f"LOCAL_SF3D: multi-view skipped (mode={_proj_mode_pre}, not needed)",
+    try:
+        _src_img_dir = os.path.dirname(os.path.abspath(image_path))
+        _img_stem = os.path.splitext(os.path.basename(image_path))[0]
+        _mv_candidate = os.path.join(_src_img_dir, f'{_img_stem}_multiview')
+        _mv_valid = (
+            os.path.isdir(_mv_candidate)
+            and all(os.path.exists(os.path.join(_mv_candidate, f'view_{i}.png'))
+                    for i in range(6))
+        )
+        if _mv_valid:
+            # Copy the 6 views + input.png next to the mesh output so the
+            # rest of the pipeline finds them at the expected location.
+            import shutil as _sh
+            _multiview_dir = output_path + '.multiview'
+            os.makedirs(_multiview_dir, exist_ok=True)
+            for _fn in ('input.png',) + tuple(f'view_{i}.png' for i in range(6)):
+                _src_mv = os.path.join(_mv_candidate, _fn)
+                if os.path.exists(_src_mv):
+                    _sh.copy2(_src_mv, os.path.join(_multiview_dir, _fn))
+            print(f"LOCAL_SF3D: using pre-generated multi-views from {_mv_candidate}",
+                  flush=True)
+        else:
+            print(f"LOCAL_SF3D: no pre-generated multi-views in {_mv_candidate} "
+                  f"— SF3D-only pipeline (no Zero123++ auto-gen)",
+                  flush=True)
+            _multiview_dir = None
+    except Exception as _mv_e:
+        print(f"LOCAL_SF3D: multi-view lookup failed ({_mv_e}) — SF3D-only",
               flush=True)
         _multiview_dir = None
-    else:
-        try:
-            _emit_progress('multiview', label='multiview_gen')
-            import subprocess as _sp_mv
-            _mv_script = os.path.join(os.path.dirname(__file__), 'multiview_gen.py')
-            # Look up the subject prompt from prompts.json next to the
-            # source image (same strategy as refine mode). multiview_gen.py's
-            # optional style-harmonization pass reads it via env so it can
-            # guide SDXL img2img toward the real subject identity.
-            _mv_subject_prompt = None
-            try:
-                import json as _mv_pj
-                _mv_img_dir = os.path.dirname(os.path.abspath(image_path))
-                _mv_pf = os.path.join(_mv_img_dir, 'prompts.json')
-                if os.path.exists(_mv_pf):
-                    with open(_mv_pf, 'r', encoding='utf-8') as _pf:
-                        _mv_entries = _mv_pj.load(_pf)
-                    if isinstance(_mv_entries, list) and _mv_entries:
-                        _mv_subject_prompt = (
-                            _mv_entries[-1].get('prompt')
-                            or _mv_entries[-1].get('fullPrompt'))
-            except Exception:
-                pass
-            _mv_env = dict(os.environ)
-            if _mv_subject_prompt:
-                _mv_env['FABMESH_REFINE_PROMPT'] = _mv_subject_prompt
-
-            # ------------------------------------------------------------
-            # Project-level multi-view CACHE
-            # ------------------------------------------------------------
-            # Small retouches to a reference image (rembg, crop, recolor,
-            # brightness tweak) produce a new file but NOT a new subject
-            # shape. Zero123++ only cares about shape, so its 6 views stay
-            # valid across those variants. Key the cache on a silhouette
-            # hash computed from the preprocessed image:
-            #   1. convert to grayscale alpha (pixel > bg threshold = subject)
-            #   2. downscale to 64×64, binarize, hash the bits
-            # Images with the same silhouette → same hash → reuse the cached
-            # multi-view dir. Saves ~45 s per regeneration when the user is
-            # iterating on image retouches within the same project.
-            _cached = False
-            _cache_root = None
-            try:
-                import hashlib as _hl
-                from PIL import Image as _PImg
-                _pp_img = _PImg.open(_preprocessed_path).convert('RGBA')
-                # Alpha channel is the subject silhouette after preprocess
-                _alpha = _pp_img.split()[-1] if _pp_img.mode == 'RGBA' else _pp_img.convert('L')
-                _sig = _alpha.resize((64, 64), _PImg.BILINEAR)
-                _bits = bytes((1 if p > 64 else 0) for p in _sig.getdata())
-                _sil_hash = _hl.sha1(_bits).hexdigest()[:16]
-                _proj_name = os.path.basename(os.path.dirname(os.path.abspath(image_path)))
-                _cache_root = os.path.join(
-                    os.path.dirname(os.path.abspath(image_path)),
-                    '.multiview_cache', _sil_hash)
-                _cache_valid = (
-                    os.path.isdir(_cache_root)
-                    and all(os.path.exists(os.path.join(_cache_root, f'view_{i}.png'))
-                            for i in range(6))
-                )
-                if _cache_valid:
-                    import shutil as _sh
-                    os.makedirs(_multiview_dir, exist_ok=True)
-                    for _fn in ('input.png',) + tuple(f'view_{i}.png' for i in range(6)):
-                        _src_cf = os.path.join(_cache_root, _fn)
-                        if os.path.exists(_src_cf):
-                            _sh.copy2(_src_cf, os.path.join(_multiview_dir, _fn))
-                    print(f"LOCAL_SF3D: multi-view cache HIT "
-                          f"(project={_proj_name} hash={_sil_hash}) "
-                          f"— reusing 6 cached views",
-                          flush=True)
-                    _cached = True
-                else:
-                    print(f"LOCAL_SF3D: multi-view cache MISS "
-                          f"(project={_proj_name} hash={_sil_hash}) "
-                          f"— running Zero123++",
-                          flush=True)
-                    _mv_env['FABMESH_MV_CACHE_DIR'] = _cache_root
-            except Exception as _ce:
-                print(f"LOCAL_SF3D: multi-view cache check skipped ({_ce})",
-                      flush=True)
-
-            if _cached:
-                pass  # multi-view dir is already populated from cache
-            elif os.path.exists(_mv_script):
-                # Stream stdout live so FABMESH_SUBPCT lines can be remapped
-                # into the overall progress bar (multiview phase) in real time.
-                _r_mv = _stream_subprocess(
-                    [sys.executable, _mv_script, _preprocessed_path, _multiview_dir],
-                    timeout=600, env=_mv_env, sub_phase='multiview',
-                )
-                if _r_mv.returncode == 0:
-                    print(f"LOCAL_SF3D: multi-view generated ({_multiview_dir})", flush=True)
-                    # Populate the project-level cache so the next
-                    # silhouette-matching regen can skip Zero123++.
-                    try:
-                        if _cache_root and not _cached:
-                            import shutil as _sh
-                            os.makedirs(_cache_root, exist_ok=True)
-                            for _fn in ('input.png',) + tuple(f'view_{i}.png' for i in range(6)):
-                                _src_mv = os.path.join(_multiview_dir, _fn)
-                                if os.path.exists(_src_mv):
-                                    _sh.copy2(_src_mv, os.path.join(_cache_root, _fn))
-                            print(f"LOCAL_SF3D: multi-view cache WROTE "
-                                  f"{_cache_root}", flush=True)
-                    except Exception as _cw:
-                        print(f"LOCAL_SF3D: cache write skipped ({_cw})",
-                              flush=True)
-                else:
-                    print(f"LOCAL_SF3D: multi-view failed (code {_r_mv.returncode}), continuing without", flush=True)
-                    _multiview_dir = None
-            else:
-                _multiview_dir = None
-        except Exception as _mv_e:
-            print(f"LOCAL_SF3D: multi-view skipped ({_mv_e})", flush=True)
-            _multiview_dir = None
 
     # ------------------------------------------------------------------
     # Download + load SF3D weights (~3 GB, one-time, gated on HF)

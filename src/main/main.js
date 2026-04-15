@@ -3217,8 +3217,14 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
 // --- Multi-View Generation IPC ---
 ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
-  const timestamp = Date.now();
-  const outDir = path.join(path.dirname(IMAGES_DIR), 'logs', '_multiview_' + timestamp);
+  // Multi-views are tied to the EXACT image version. Output dir derived
+  // from the image file path:
+  //   images/dog/ref_0.png        → images/dog/ref_0_multiview/
+  //   images/dog/ref_0_nobg_X.png → images/dog/ref_0_nobg_X_multiview/
+  // This lets the 3D bridge look up "<image_stem>_multiview/" and use those
+  // views. Editing a multi-view will create a new image version later.
+  const imgBasename = path.basename(imagePath, path.extname(imagePath));
+  const outDir = path.join(path.dirname(imagePath), imgBasename + '_multiview');
   return new Promise((resolve) => {
     const proc = execFile('python', [script, imagePath, outDir], {
       timeout: 600000, maxBuffer: 10 * 1024 * 1024,
