@@ -6220,6 +6220,11 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
   window.meshyAPI.onAI3DProgress((msg) => {
     try {
       if (!msg || typeof msg !== 'string') return;
+      // Ignore sub-phase raw percentages — the bridge already remaps those
+      // into proper LOCAL_SF3D_PROGRESS overall values. Without this guard
+      // a 99% FABMESH_SUBPCT (tile 6/6 of refine) would incorrectly snap
+      // the bar to 99% while the overall slice only covers 60..99.
+      if (msg.indexOf('FABMESH_SUBPCT') !== -1) return;
       const m = PROG_RE.exec(msg);
       if (!m) return;
       const reported = Math.max(0, Math.min(99, parseInt(m[1], 10)));
@@ -6228,6 +6233,12 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
       for (let i = state.jobs.length - 1; i >= 0; i--) {
         const j = state.jobs[i];
         if (j.status === 'running' && (j.kind === 'mesh' || j.kind === 'rig')) {
+          // Mark that we've seen a real bridge progress event. Once the
+          // bridge starts reporting, the local smooth-climb timer should
+          // stop fighting it: its cap at 90 hides the refine phase (60-99)
+          // that now emits real values, so the bar would sit at 90% for
+          // minutes even though the bridge is actively moving.
+          j.bridgeReporting = true;
           if (reported > j.progress) {
             j.progress = reported;
             renderJobs();
@@ -6261,12 +6272,18 @@ function pushJob(name, onCancel, params, expectedMsOverride) {
     tickTimer: null,
     params: params || null,
   };
-  // Smoothly climb from 5 to 90% over expected duration.
-  // IMPORTANT: never DECREASE progress — the bridge Python may report real
-  // progress values (LOCAL_SF3D_PROGRESS: 50) that are ahead of our timer.
-  // Use Math.max to keep the highest value seen so far.
+  // Smoothly climb from 5 to 90% over expected duration UNTIL the bridge
+  // starts emitting real progress events. After that, the bridge is the
+  // single source of truth (it reaches 99% gradually across multi-view,
+  // SF3D, UV projection, and SDXL refine). The old behaviour kept the
+  // timer running to 90% and hid the bridge's more accurate values —
+  // producing the "jumps to 97% then stalls" feel the user complained
+  // about: the bar was the timer, not the pipeline.
+  // IMPORTANT: never DECREASE progress — real values always win.
+  job.bridgeReporting = false;
   job.tickTimer = setInterval(() => {
     if (job.status !== 'running') { clearInterval(job.tickTimer); return; }
+    if (job.bridgeReporting) return; // bridge is driving the bar now
     const elapsed = Date.now() - job.startedAt;
     const estimated = Math.min(90, 5 + (elapsed / expected) * 85);
     job.progress = Math.max(job.progress, estimated);

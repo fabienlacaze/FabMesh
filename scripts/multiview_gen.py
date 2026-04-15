@@ -39,6 +39,13 @@ def log(msg):
     print(f'[multiview] {msg}', flush=True)
 
 
+def _subpct(pct: int, label: str = ''):
+    """Emit a sub-phase percentage (0..100) that the parent bridge remaps
+    into its overall progress-bar slice. Renderer ignores these directly
+    (prefix FABMESH_SUBPCT doesn't match `_PROGRESS:`)."""
+    print(f"FABMESH_SUBPCT: {max(0, min(100, int(pct)))} {label}", flush=True)
+
+
 def generate_multiview(input_image_path, output_dir, size=320):
     """Generate 6 views from a single input image using Zero123++ v1.2."""
     t0 = time.time()
@@ -105,6 +112,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
 
     log('loading Zero123++ v1.2 pipeline...')
     slog.progress(10, 'load_pipeline')
+    _subpct(5, 'load_pipeline')
 
     from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
 
@@ -121,6 +129,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
 
     log(f'pipeline loaded in {time.time()-t0:.1f}s')
     slog.progress(40, 'generate_views')
+    _subpct(25, 'generate_views')
 
     # Generate 6 views
     log('generating 6 views...')
@@ -135,6 +144,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
     log(f'generation done in {time.time()-t0:.1f}s')
     slog.info('grid_produced', w=result.size[0], h=result.size[1])
     slog.progress(80, 'grid_ready')
+    _subpct(65, 'grid_ready')
 
     # Zero123++ v1.2 outputs a 640x960 grid = 2 columns x 3 rows of 320x320 tiles
     # Layout (left to right, top to bottom):
@@ -165,6 +175,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
     try:
         log('MULTIVIEW_PROGRESS: 85 upscaling')
         slog.progress(85, 'upscaling')
+        _subpct(70, 'upscaling')
         with slog.timed('realesrgan_upscale', source_tile=tile_w, target=1024):
             from realesrgan import RealESRGANer
             from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -194,6 +205,8 @@ def generate_multiview(input_image_path, output_dir, size=320):
                           w=up.size[0], h=up.size[1],
                           ms=int((time.time() - t_start) * 1000))
                 log(f'upscaled view_{i} to {up.size}')
+                # Upscale owns sub-phase 70..80 (10 points / 6 views).
+                _subpct(70 + int(((i + 1) / 6) * 10), f'upscale_{i+1}_of_6')
             del upsampler, model
             if torch.cuda.is_available(): torch.cuda.empty_cache()
     except Exception as ue:
@@ -206,6 +219,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
     try:
         log('MULTIVIEW_PROGRESS: 88 bg-removal')
         slog.progress(88, 'bg_removal')
+        _subpct(82, 'bg_removal')
         with slog.timed('rembg_all_views'):
             from rembg import remove as rembg_remove
             cleaned = []
@@ -240,6 +254,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
         if _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
             slog.progress(89, 'style_harmonize')
             log('MULTIVIEW_PROGRESS: 89 style-harmonize')
+            _subpct(88, 'style_harmonize')
             # Prompt keeps subject identity neutral; bridge supplies a
             # subject prompt via env when available (FABMESH_REFINE_PROMPT).
             subject = os.environ.get('FABMESH_REFINE_PROMPT', '').strip()
@@ -310,6 +325,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
         log(f'saved {view_names[i]}.png ({tile.size} mode={tile.mode})')
 
     slog.progress(90, 'cleanup')
+    _subpct(98, 'cleanup')
 
     # Free GPU
     del pipeline

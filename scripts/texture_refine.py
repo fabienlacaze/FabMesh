@@ -63,6 +63,13 @@ def log(msg):
     print(f'[tex_refine] {msg}', flush=True)
 
 
+def _subpct(pct: int, label: str = ''):
+    """Emit a sub-phase percentage (0..100). The bridge remaps it into the
+    refine slice of the overall progress bar. Refine is the longest phase
+    (SDXL per tile) so per-tile ticks are essential to keep the UI alive."""
+    print(f"FABMESH_SUBPCT: {max(0, min(100, int(pct)))} {label}", flush=True)
+
+
 def _server_alive() -> bool:
     try:
         r = requests.get(SDXL_URL + '/ping', timeout=1.5)
@@ -192,6 +199,9 @@ def refine_atlas_image(atlas: Image.Image, prompt: str, strength: float,
 
     idx = 0
     n_tiles = len(xs) * len(ys)
+    # Tiles dominate refine wall-clock (~90% of it). Reserve 5% for setup
+    # and 5% for GLB rewrite at the end. Per-tile ticks land in 5..95.
+    _subpct(5, f'refine_setup_{n_tiles}_tiles')
     for iy, y in enumerate(ys):
         for ix, x in enumerate(xs):
             t0 = time.time()
@@ -219,6 +229,8 @@ def refine_atlas_image(atlas: Image.Image, prompt: str, strength: float,
             weight[y:y + TILE, x:x + TILE] += mask
             log(f'tile {idx+1}/{n_tiles} ({time.time()-t0:.1f}s)')
             idx += 1
+            _subpct(5 + int((idx / n_tiles) * 90),
+                    f'tile_{idx}_of_{n_tiles}')
 
     # Weighted average; where weight==0 (shouldn't happen) keep source
     safe_w = np.where(weight < 1e-6, 1.0, weight)
@@ -379,7 +391,9 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
         new_atlas = ImageEnhance.Color(new_atlas).enhance(1.25)
         new_atlas = ImageEnhance.Contrast(new_atlas).enhance(1.12)
         log('post-refine punch: saturation x1.25, contrast x1.12')
+        _subpct(96, 'glb_rewrite')
         replace_glb_atlas(input_glb, output_glb, new_atlas)
+        _subpct(99, 'refine_done')
     finally:
         # Best-effort cleanup
         try:
