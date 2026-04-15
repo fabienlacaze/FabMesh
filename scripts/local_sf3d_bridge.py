@@ -995,7 +995,7 @@ def generate_3d(
                         [sys.executable, _atlas_script, output_path,
                          _preprocessed_path, output_path, str(tex_res),
                          '--multiview', _multiview_dir,
-                         '--rotation-offset', str(auto_align_rot_deg)],
+                         '--rotation-offset', str(-auto_align_rot_deg)],
                         timeout=300, sub_phase='tex_project',
                     )
                     if _r_mv_proj.returncode == 0:
@@ -1021,7 +1021,7 @@ def generate_3d(
                 _cmd = [sys.executable, _augment_script, output_path,
                         _preprocessed_path, output_path,
                         '--multiview', _multiview_dir,
-                        '--rotation-offset', str(auto_align_rot_deg)]
+                        '--rotation-offset', str(-auto_align_rot_deg)]
                 _label = 'multi-view augment'
                 _cmd_sub_phase = 'tex_project'
             else:
@@ -1030,7 +1030,7 @@ def generate_3d(
             _cmd = ([sys.executable, _vc_script, output_path,
                      _preprocessed_path, output_path]
                     + (['--multiview', _multiview_dir,
-                        '--rotation-offset', str(auto_align_rot_deg)]
+                        '--rotation-offset', str(-auto_align_rot_deg)]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'vertex-color projection'
             _cmd_sub_phase = 'tex_project'
@@ -1038,7 +1038,7 @@ def generate_3d(
             _cmd = ([sys.executable, _atlas_script, output_path,
                      _preprocessed_path, output_path, str(tex_res)]
                     + (['--multiview', _multiview_dir,
-                        '--rotation-offset', str(auto_align_rot_deg)]
+                        '--rotation-offset', str(-auto_align_rot_deg)]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'UV atlas projection'
             _cmd_sub_phase = 'tex_project'
@@ -1052,7 +1052,7 @@ def generate_3d(
                 _cmd = ([sys.executable, _atlas_script, output_path,
                          _preprocessed_path, output_path, str(tex_res),
                          '--multiview', _multiview_dir,
-                         '--rotation-offset', str(auto_align_rot_deg)])
+                         '--rotation-offset', str(-auto_align_rot_deg)])
                 _label = 'atlas+refine pass 1 (projection)'
                 _cmd_sub_phase = 'tex_project'
             else:

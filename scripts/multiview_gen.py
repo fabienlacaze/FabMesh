@@ -235,23 +235,21 @@ def generate_multiview(input_image_path, output_dir, size=320):
         log(f'rembg bg removal skipped ({be})')
 
     # ------------------------------------------------------------------
-    # Style harmonization pass
+    # Style harmonization pass (OPT-IN — disabled by default, 2026-04-15)
     # ------------------------------------------------------------------
-    # Zero123++ v1.2 produces views that look slightly cartoon-rendered
-    # compared to a photorealistic input image — the model was trained on
-    # the Objaverse synthetic renders and imposes that look on everything.
-    # Baking this mix into the atlas gives a texture whose front (from the
-    # source photo) is photorealistic but whose back/sides (from Zero123++)
-    # look like they belong to a different character.
-    #
-    # Fix: after rembg, pass each view through SDXL img2img (RealVisXL)
-    # at strength 0.35 with a "photorealistic, matches reference" prompt,
-    # using the always-on SDXL server (http://127.0.0.1:5555/img2img)
-    # when available. Falls through silently if the server is down —
-    # the pipeline still works, it just skips the harmonization.
+    # Was meant to fix Zero123++'s cartoon look on the back/side views by
+    # passing each through SDXL img2img at strength 0.35 with a
+    # "photorealistic, matches reference photo" prompt. In practice it
+    # DRIFTS COLORS: the user reported horse views turning green because
+    # SDXL doesn't see the reference image (just a prompt) and hallucinates
+    # its own colour scheme. The cost of this breakage is higher than the
+    # gain of slightly better style consistency, so the pass is now opt-in
+    # via the FABMESH_MV_STYLE_HARMONIZE=1 env var.
+    # Commits: 7c9225a introduced it; this guard disables by default.
     try:
         import requests as _rq
-        if _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
+        if os.environ.get('FABMESH_MV_STYLE_HARMONIZE') == '1' and \
+                _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
             slog.progress(89, 'style_harmonize')
             log('MULTIVIEW_PROGRESS: 89 style-harmonize')
             _subpct(88, 'style_harmonize')
