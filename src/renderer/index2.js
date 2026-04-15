@@ -1061,8 +1061,10 @@ async function renderImageVersions(p) {
       strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected'));
       t.classList.add('selected');
       p.previewImagePath = img.path;
-      // Switching version drops any multi-view focus — the multi-view bar
-      // will be re-evaluated for the new image by showStep1Preview.
+      // Drop the active-path cache but KEEP _activeMultiviewKey so when the
+      // new version's mv-bar shows, it restores the same angle (e.g. 90°).
+      // _showMultiviewBar reads _activeMultiviewKey and re-selects the
+      // matching button + swaps preview to the matching view file.
       p._activeMultiview = null;
       showStep1Preview(img.path);
       // Restore the style that was applied to this specific image
@@ -1412,7 +1414,31 @@ function _showMultiviewBar(multiviewDir) {
   bar.classList.remove('hidden');
   bar.dataset.dir = multiviewDir;
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
-  bar.querySelector('[data-view="front"]')?.classList.add('mv-active');
+  // Restore the previously selected angle if the user has one pinned.
+  // Multi-views use the same 6 standardized keys (front/fr/right/br/bl/
+  // left/fl) across every image version, so switching from v0 to v1 while
+  // having 90° (right) selected should keep 90° selected — plus the
+  // preview image should swap to that angle's file in the new version.
+  const p = state.currentProject;
+  const activeKey = (p && p._activeMultiviewKey) || 'front';
+  const activeBtn = bar.querySelector(`[data-view="${activeKey}"]`)
+                 || bar.querySelector('[data-view="front"]');
+  if (activeBtn) activeBtn.classList.add('mv-active');
+  // If the active key is a non-front view, load that view's image into the
+  // preview (we can't trigger a real click synchronously because the preview
+  // was just swapped to the base image; do it via the same swap logic).
+  if (p && activeKey && activeKey !== 'front') {
+    const filename = _mvViewMap[activeKey];
+    if (filename) {
+      const imgPath = multiviewDir + '/' + filename + '.png';
+      p._activeMultiview = imgPath;
+      const preview = document.getElementById('step1-preview');
+      const imgEl = preview?.querySelector('img');
+      if (imgEl) {
+        imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+      }
+    }
+  }
   console.log('[mv-show] after show, classes:', bar.className, 'display:', getComputedStyle(bar).display);
 }
 
@@ -1473,13 +1499,15 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
   let imgPath;
   if (view === 'front') {
     imgPath = p?.previewImagePath || (dir + '/input.png');
-    if (p) p._activeMultiview = null;
+    if (p) { p._activeMultiview = null; p._activeMultiviewKey = 'front'; }
   } else {
     const filename = _mvViewMap[view] || 'input';
     imgPath = dir + '/' + filename + '.png';
     // Remember which multiview the user is currently focused on so tools
     // (Draw Mask, Paint, etc.) operate on that view instead of the front.
-    if (p) p._activeMultiview = imgPath;
+    // Also remember the KEY so switching image version preserves the
+    // same angle (90° stays 90° across v0/v1/v2).
+    if (p) { p._activeMultiview = imgPath; p._activeMultiviewKey = view; }
   }
 
   const preview = document.getElementById('step1-preview');
