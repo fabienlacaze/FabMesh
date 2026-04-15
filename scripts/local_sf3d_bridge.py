@@ -225,6 +225,63 @@ def generate_3d(
 
     print(f"LOCAL_SF3D_PROGRESS: 90 export", flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Auto-align the mesh so the subject faces -Z (glTF forward convention).
+    # SF3D's mesh can end up pointing at any horizontal direction depending
+    # on the input image's implicit 3D pose. The FabMesh Three.js viewer
+    # spawns its camera at (+X,+Y,+Z) looking at origin, so a misaligned
+    # mesh shows up as "from the side" in thumbnails — which is exactly
+    # what the user reported for test_e2e.
+    #
+    # Detection heuristic: the torso surface mostly bulges OUT toward the
+    # face direction. Average the (vertex - center) vector over mid-height
+    # vertices, project onto XZ plane, and use that as the face direction.
+    # Then rotate the whole mesh around Y so that direction becomes -Z.
+    # ------------------------------------------------------------------
+    try:
+        import numpy as _np
+        _v = mesh.vertices
+        _cen = _v.mean(axis=0)
+        _y_top = _np.percentile(_v[:, 1], 95)
+        _y_bot = _np.percentile(_v[:, 1], 5)
+        _y_range = _y_top - _y_bot
+        # Mid-body slab: 30%-80% of height from the bottom
+        _y_lo = _y_bot + 0.30 * _y_range
+        _y_hi = _y_bot + 0.80 * _y_range
+        _chest_mask = (_v[:, 1] > _y_lo) & (_v[:, 1] < _y_hi)
+        if _chest_mask.sum() > 10:
+            _outward = _v[_chest_mask] - _cen
+            _outward[:, 1] = 0.0  # drop Y, we only rotate around Y
+            _avg = _outward.mean(axis=0)
+            _norm = _np.linalg.norm(_avg)
+            if _norm > 1e-4:
+                _face_dir = _avg / _norm
+                # Target direction is (0, 0, -1). Compute Y rotation angle.
+                # face_dir = (sin(θ)*(-1 mapping) ...) — simpler: use atan2.
+                # Current face azimuth (in XZ, measured from -Z axis, CCW around Y):
+                #   angle = atan2(face_dir.x, -face_dir.z)
+                # We want that angle = 0 (face along -Z), so rotate by -angle.
+                _cur_angle = _np.arctan2(_face_dir[0], -_face_dir[2])
+                _rot_angle = -_cur_angle
+                # Only rotate if meaningful (>3°) to avoid tiny numerical drift
+                if abs(_rot_angle) > _np.radians(3):
+                    import trimesh as _tm
+                    _R = _tm.transformations.rotation_matrix(_rot_angle, [0, 1, 0])
+                    mesh.apply_transform(_R)
+                    print(
+                        f"LOCAL_SF3D: auto-aligned mesh by {_np.degrees(_rot_angle):.1f}° "
+                        f"around Y (face was pointing {_face_dir.round(3).tolist()})",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"LOCAL_SF3D: mesh already aligned (face ~{_np.degrees(_cur_angle):.1f}° off -Z)",
+                        flush=True,
+                    )
+    except Exception as _align_e:
+        print(f"LOCAL_SF3D: auto-align skipped ({_align_e})", flush=True)
+
     mesh.export(output_path, include_normals=True)
 
     # ------------------------------------------------------------------
