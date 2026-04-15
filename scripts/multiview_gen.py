@@ -277,18 +277,33 @@ def generate_multiview(input_image_path, output_dir, size=320):
                 torch_dtype=torch.float16,
                 use_safetensors=True,
             )
-            # IPAdapter Plus SDXL (h94/IP-Adapter, MIT license). Feeds the
-            # CLIP-vision embedding of the ref image into the UNet's
-            # cross-attention, so SDXL "sees" the true subject colours.
+            # IPAdapter SDXL — feeds the CLIP-vision embedding of the ref
+            # image into the UNet's cross-attention, so SDXL "sees" the true
+            # subject colours/identity.
+            #
+            # Use the BASE ip-adapter (not "plus"): the "plus" variant needs
+            # a specific CLIP-ViT-H encoder with patch-level projection that
+            # RealVisXL does not bundle; it crashed on every view with
+            # "mat1 and mat2 shapes cannot be multiplied (514x1664 and
+            # 1280x1280)" on orc_woman (2026-04-16). The base variant uses
+            # the bundled OpenCLIP-ViT-bigG encoder that SDXL already has
+            # and works out of the box.
+            from transformers import CLIPVisionModelWithProjection
+            _image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+                'h94/IP-Adapter',
+                subfolder='models/image_encoder',
+                torch_dtype=torch.float16,
+            )
+            _h_pipe.image_encoder = _image_encoder
             _h_pipe.load_ip_adapter(
                 'h94/IP-Adapter',
                 subfolder='sdxl_models',
-                weight_name='ip-adapter-plus_sdxl_vit-h.safetensors',
+                weight_name='ip-adapter_sdxl_vit-h.safetensors',
             )
             # Scale 0.7 = strong guidance but leaves room for refinement.
             _h_pipe.set_ip_adapter_scale(0.7)
             _h_pipe.enable_model_cpu_offload()
-            log('IPAdapter Plus SDXL loaded')
+            log('IPAdapter SDXL (base, vit-h) loaded')
 
             # The ref image the IPAdapter will condition on — the ORIGINAL
             # RGBA input (not the Zero123++ view) since we want SDXL to
@@ -296,6 +311,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
             _ref_ip = input_img_rgba.convert('RGB')
 
             harmonized = []
+            _h_fail_count = 0
             _h_strength = float(os.environ.get('FABMESH_MV_IDENTITY_STRENGTH', '0.3'))
             for i, tile in enumerate(upscaled_tiles):
                 _t_in = tile.convert('RGB')
@@ -323,13 +339,26 @@ def generate_multiview(input_image_path, output_dir, size=320):
                 except Exception as _he2:
                     log(f'identity harmonize view_{i} error ({_he2}), keeping original')
                     harmonized.append(tile)
+                    _h_fail_count += 1
+            # If identity-harmonize failed on ALL views, the pipeline is
+            # effectively broken for this pass. Raise so the outer handler
+            # logs a clear warning (don't silently ship Zero123++'s raw
+            # cartoon output as if it were harmonized).
+            if _h_fail_count == len(upscaled_tiles):
+                raise RuntimeError(
+                    f'identity_harmonize failed on ALL {_h_fail_count} views; '
+                    f'check IPAdapter encoder compatibility'
+                )
+            if _h_fail_count > 0:
+                log(f'identity_harmonize: {_h_fail_count}/{len(upscaled_tiles)} views failed, kept raw for those')
             upscaled_tiles = harmonized
             del _h_pipe
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             slog.info('identity_harmonize_done',
-                      ms=int((time.time() - _h_t0) * 1000))
-            log(f'identity-harmonized 6 views in {time.time() - _h_t0:.1f}s')
+                      ms=int((time.time() - _h_t0) * 1000),
+                      failed_views=_h_fail_count)
+            log(f'identity-harmonized 6 views in {time.time() - _h_t0:.1f}s (failed={_h_fail_count})')
         except Exception as _hi:
             slog.warn('identity_harmonize_skipped', reason=str(_hi)[:200])
             log(f'identity harmonization skipped ({_hi})')
