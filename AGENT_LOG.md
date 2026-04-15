@@ -86,11 +86,53 @@ to avoid going in circles.
 
 **Attempt 1 (2026-04-15 ~10:35)**: downgrade torch in the venv to
 2.6.0+cu124 to match the flex_gemm 1.0.0 pre-built wheels. Command:
-`/root/TRELLIS.2/.venv/bin/pip install torch==2.6.0 torchvision
+`/root/TRELLIS.2/.venv/bin/pip install torch==2.6.0 torchvision==0.21.0
 --index-url https://download.pytorch.org/whl/cu124 --upgrade`.
-Then re-run smoke `import flex_gemm`.
 
-(Result pending.)
+→ torch 2.9.1+cu128 → torch 2.6.0+cu124 OK. Re-tested
+`import flex_gemm` — **STILL** `undefined symbol _ZNK3c1010TensorImpl
+15incref_pyobjectEv`. The locally-installed flex_gemm 1.0.0 isn't
+built for torch 2.6 either. Origin unknown — pip says "from local"
+without source URL. Probably built earlier against an even older
+torch.
+
+**Web research (agent ad0a60f011a9cdcca, 2026-04-15)** — clarifies
+the Windows landscape:
+- ❌ Microsoft TRELLIS.2 has **NO official Windows wheels**. Repo
+  has 0 GitHub releases, no `wheels/`/`dist/`, README explicitly
+  says "tested only on Linux". The earlier agent #3 finding "wheels
+  Windows officielles available" was WRONG.
+- ❌ Native Windows build attempts (issue #4) fail for nvdiffrast,
+  nvdiffrec, cumesh, FlexGEMM, o-voxel — `CUDA_HOME` errors even
+  when set. No Microsoft maintainer has helped on Windows.
+- ✅ **Community wheels Linux cu128** at
+  `siraxe/TRELLIS.2-4B_cuda_12.8.r12.8_wheels` for python 3.12 —
+  usable inside WSL on Blackwell (RTX 5080 / 5090). 3 wheels:
+  `cumesh-0.0.1`, `flex_gemm-0.0.1`, `o_voxel-0.0.1`.
+- ✅ Real working setup: WSL2 Ubuntu + python 3.12 + torch
+  2.6.0+cu128 (or torch from siraxe wheel set) + the 3 community
+  wheels above.
+
+**Packaging consequence for FabMesh commercial release**:
+TRELLIS.2 cannot be shipped as a Windows-native local app. End
+users would need WSL2 installed (~5 GB extra). Three options
+remain:
+- (A) Bundle WSL2 + everything in installer — feasible but heavy
+- (B) Cloud premium endpoint that we host — defeats "100% local"
+- (C) Skip TRELLIS.2 — keep current SF3D + atlas_refine which is
+  100% Windows native
+
+User chose: install attempt continues to validate quality. If
+TRELLIS.2 is visibly much better, decide packaging strategy after.
+
+**Attempt 2 (planned)**: switch venv torch to `2.6.0+cu128` (matches
+siraxe community wheels), install the 3 cu128 wheels via pip from
+HF, re-test `import flex_gemm`, then try `example_texturing.py` on
+the orc image.
+
+**Add to "do not retry"**: don't trust agent claims about "wheels
+Windows officielles" without verifying via direct GitHub release
+listing — Microsoft TRELLIS.2 has none.
 
 ### 2026-04-15 — TRELLIS.2 install attempt — STARTED
 
