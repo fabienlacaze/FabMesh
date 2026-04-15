@@ -575,6 +575,14 @@ def generate_3d(
             # low strength to add micro-detail without changing layout.
             # Talks to the always-on SDXL server (~1 GB VRAM persisted)
             # to avoid loading a 6 GB pipeline per generation.
+            #
+            # 2026-04-15 FIDELITY FIX: if multi-views are available,
+            # first project them onto the atlas (same pass as 'atlas'
+            # mode) to inject real back/sides info from Zero123++,
+            # THEN run SDXL refine on top. This makes the final atlas
+            # actually faithful to the reference image on all angles
+            # instead of relying on SF3D's single-view fallback for
+            # the back.
             _target = max(int(tex_res), 2048)
             # Pull the original user prompt from images/<project>/prompts.json
             # so the refine knows it's an "orc warrior with blue crown" and
@@ -594,6 +602,30 @@ def generate_3d(
                                           or _entries[-1].get('fullPrompt'))
             except Exception as _pe:
                 print(f"LOCAL_SF3D: could not read prompts.json ({_pe})", flush=True)
+
+            # Step 1: multi-view projection pass if views are available.
+            # Same call as the 'atlas' mode but we intentionally don't
+            # bump tex_res (keep it modest, since refine will upscale).
+            if (_multiview_dir and os.path.isdir(_multiview_dir)
+                    and os.path.exists(_atlas_script)):
+                try:
+                    _r_mv_proj = _sp_proj.run(
+                        [sys.executable, _atlas_script, output_path,
+                         _preprocessed_path, output_path, str(tex_res),
+                         '--multiview', _multiview_dir],
+                        capture_output=True, text=True, timeout=300,
+                    )
+                    if _r_mv_proj.stdout:
+                        for line in _r_mv_proj.stdout.strip().split('\n'):
+                            print(f"LOCAL_SF3D: {line}", flush=True)
+                    if _r_mv_proj.returncode == 0:
+                        print("LOCAL_SF3D: multi-view projection applied before refine", flush=True)
+                    else:
+                        print(f"LOCAL_SF3D: multi-view projection failed (code {_r_mv_proj.returncode}), continuing with vanilla SF3D atlas", flush=True)
+                except Exception as _mvp_e:
+                    print(f"LOCAL_SF3D: multi-view projection error ({_mvp_e}), continuing", flush=True)
+
+            # Step 2: SDXL refine on top of the (possibly projected) atlas.
             _cmd = [sys.executable, _refine_script, output_path,
                     output_path, '--strength', '0.25',
                     '--target', str(_target)]
