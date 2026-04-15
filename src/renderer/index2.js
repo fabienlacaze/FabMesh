@@ -6216,7 +6216,19 @@ function inferKind(name) {
 // that value.
 if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshyAPI.onAI3DProgress) {
   window.__fabmesh_ai3d_listener_installed = true;
-  const PROG_RE = /_PROGRESS:\s*(\d{1,3})/;
+  // Match ONLY bridge-level overall emitters (LOCAL_SF3D_PROGRESS,
+  // LOCAL_TRIPOSR_PROGRESS, LOCAL_TRIPOSG_PROGRESS, LOCAL_MESHY_PROGRESS,
+  // LOCAL_IMG_PROGRESS, LOCAL_JUGG_PROGRESS, LOCAL_REALVIS_PROGRESS).
+  // The previous regex `/_PROGRESS:/` also matched MULTIVIEW_PROGRESS and
+  // TEXTURE_*_PROGRESS that sub-scripts emit via slog.progress(). Those
+  // are sub-phase percentages (0-100 *within* multiview, not overall), so
+  // treating them as overall snapped the bar to ~90% as soon as multiview
+  // finished — hiding the full refine phase (the "stuck at 90%" bug).
+  const PROG_RE = /\bLOCAL_[A-Z0-9_]+_PROGRESS:\s*(\d{1,3})/;
+  // Sub-script lines are forwarded by the bridge with a "LOCAL_SF3D: " prefix;
+  // we must NOT scrape their embedded sub-phase percentages. The bridge
+  // already re-emits a remapped LOCAL_SF3D_PROGRESS: line for those.
+  const SUB_PREFIX = 'LOCAL_SF3D: ';
   window.meshyAPI.onAI3DProgress((msg) => {
     try {
       if (!msg || typeof msg !== 'string') return;
@@ -6225,9 +6237,29 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
       // a 99% FABMESH_SUBPCT (tile 6/6 of refine) would incorrectly snap
       // the bar to 99% while the overall slice only covers 60..99.
       if (msg.indexOf('FABMESH_SUBPCT') !== -1) return;
-      const m = PROG_RE.exec(msg);
+      // msg may be a multi-line chunk — parse line by line so sub-script
+      // forwarded lines (prefixed `LOCAL_SF3D: `) don't leak their inner
+      // `MULTIVIEW_PROGRESS` values as fake overall percentages.
+      const lines = msg.split(/\r?\n/);
+      let reported = -1;
+      for (const rawLine of lines) {
+        if (!rawLine) continue;
+        // Forwarded sub-script lines: the bridge prefixes them with
+        // "LOCAL_SF3D: " before printing. Their embedded *_PROGRESS
+        // markers are SUB-PHASE values — skip.
+        if (rawLine.startsWith(SUB_PREFIX)) continue;
+        const mm = PROG_RE.exec(rawLine);
+        if (mm) {
+          const v = parseInt(mm[1], 10);
+          if (v > reported) reported = v;
+        }
+      }
+      if (reported < 0) return;
+      reported = Math.max(0, Math.min(99, reported));
+      // Synthesize a match object so the downstream code path (which used
+      // to read `m`) still compiles. We only need `reported` below.
+      const m = [null, String(reported)];
       if (!m) return;
-      const reported = Math.max(0, Math.min(99, parseInt(m[1], 10)));
       // Apply to the most recent running job whose kind is mesh/rig —
       // bridges that emit these markers are all in the 3D/rig pipeline.
       for (let i = state.jobs.length - 1; i >= 0; i--) {

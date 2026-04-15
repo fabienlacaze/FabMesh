@@ -52,6 +52,16 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
     import subprocess as _sp
     import re as _re
     _sub_re = _re.compile(r'FABMESH_SUBPCT:\s*(\d{1,3})')
+    # Sub-scripts emit `<COMPONENT>_PROGRESS: <pct>` via slog.progress()
+    # (multiview_gen.py -> `MULTIVIEW_PROGRESS:`, texture_* -> `TEXTURE_*_PROGRESS:`).
+    # Those values are SUB-phase percentages, not overall percentages. If we
+    # forward them verbatim the renderer's legacy scraper would snap the bar
+    # to ~90% as soon as multiview hits pct=90 — hiding the whole refine
+    # phase. Neutralize by rewriting the literal token so no downstream
+    # consumer matches `_PROGRESS:` in a forwarded sub-script line.
+    # (LOCAL_*_PROGRESS: lines are only emitted by bridges, never forwarded.)
+    def _neutralize(s: str) -> str:
+        return s.replace('_PROGRESS:', '_SUBPROG:')
 
     class _Result:
         def __init__(self):
@@ -71,8 +81,10 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
                 break
             collected_out.append(line)
             line_stripped = line.rstrip('\n')
-            # Forward verbatim so main.js still sees every sub-script log.
-            print(f"LOCAL_SF3D: {line_stripped}", flush=True)
+            # Forward so main.js still sees every sub-script log, but
+            # neutralize any `*_PROGRESS:` token so the renderer's scraper
+            # doesn't mistake a sub-phase percentage for the overall %.
+            print(f"LOCAL_SF3D: {_neutralize(line_stripped)}", flush=True)
             # Remap sub-phase 0-100 into our overall slice.
             if sub_phase:
                 m = _sub_re.search(line_stripped)

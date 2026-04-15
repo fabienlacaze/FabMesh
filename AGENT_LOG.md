@@ -50,6 +50,55 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Progress bar: completing the earlier fix (commit pending)
+
+**User reported**: after commits `c3acc3e` and `c0d0012`, the bar STILL
+climbs to ~90% in the first few seconds and then sits there for the
+long SDXL refine phase. The `LOCAL_SF3D_PROGRESS: <overall>` single-
+source-of-truth values from the bridge were emitted correctly — but
+something else in the stream kept snapping the bar to 90%.
+
+**Root cause** (two overlapping bugs, both in the previous fix):
+
+1. `scripts/multiview_gen.py` emits progress via TWO channels:
+   - `_subpct(...)` → `FABMESH_SUBPCT: <sub%>` — the bridge remaps
+     these correctly into overall via `fabmesh_progress.sub()`.
+   - `slog.progress(...)` → `MULTIVIEW_PROGRESS: <sub%>` — via
+     `fabmesh_log.Logger.progress()`. These lines were NEVER remapped.
+   The renderer's scraper regex was `/_PROGRESS:\s*(\d{1,3})/`
+   (`src/renderer/index2.js:6219`). That regex matches `MULTIVIEW_PROGRESS:`
+   just as happily as `LOCAL_SF3D_PROGRESS:`. Multiview emits
+   `MULTIVIEW_PROGRESS: 90 cleanup` and `MULTIVIEW_PROGRESS: 100 done`.
+   The renderer interpreted 90 and 100 as OVERALL percentages and
+   slammed the bar to 99%, masking the rest of the pipeline.
+
+2. `_stream_subprocess` in `local_sf3d_bridge.py` forwarded every
+   sub-script stdout line verbatim prefixed with `LOCAL_SF3D: `. Even
+   after tightening the renderer regex, old-renderer builds or third-
+   party log scrapers would still see the raw `MULTIVIEW_PROGRESS:`
+   substring inside those forwarded lines.
+
+**Fix**:
+- `src/renderer/index2.js:6217-6282` — regex tightened to
+  `/\bLOCAL_[A-Z0-9_]+_PROGRESS:\s*(\d{1,3})/` so ONLY bridge-level
+  overall emitters (LOCAL_SF3D_PROGRESS, LOCAL_TRIPOSR_PROGRESS,
+  LOCAL_TRIPOSG_PROGRESS, LOCAL_MESHY_PROGRESS, LOCAL_IMG_PROGRESS,
+  LOCAL_JUGG_PROGRESS, LOCAL_REALVIS_PROGRESS) drive the bar.
+  Also: parse msg line-by-line and SKIP any line starting with the
+  bridge's forward prefix `LOCAL_SF3D: ` — those lines contain
+  sub-phase percentages that look like overall percentages.
+- `scripts/local_sf3d_bridge.py:53-64, 75` — `_neutralize()` helper
+  rewrites `_PROGRESS:` → `_SUBPROG:` in forwarded sub-script lines
+  so legacy scrapers can't mistake a sub-pct for overall.
+
+**Verification** — replay of `logs/fabmesh.log` confirms the renderer
+regex no longer matches `MULTIVIEW_PROGRESS: 90`, `MULTIVIEW_PROGRESS: 100`,
+`TEXTURE_PROGRESS: ...`, only `LOCAL_SF3D_PROGRESS: <overall>` produced
+by `_emit_progress()` or by `_stream_subprocess`'s remap. PHASE_BUDGET
+cumulative: 1 → 3 → 28 → 36 → 41 → 45 → 60 → 99, monotonic.
+
+**Not changed**: pipeline behaviour, mesh/texture quality, timings.
+
 ### 2026-04-15 — Progress bar: single source of truth (commit `c3acc3e`)
 
 **User pain point**: the 3D generation progress bar jumped from ~20% to
