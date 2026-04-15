@@ -188,6 +188,16 @@ Retry with `CUDA_HOME=/usr/local/cuda-12.8`,
 `TORCH_CUDA_ARCH_LIST=12.0` (Blackwell sm_120, RTX 5080 native).
 This is option B without a download (toolkit was already there).
 
+→ First retry FAILED — `wsl -- bash -c "..."` from Windows
+explodes when env vars contain Windows PATH segments with spaces
+(`Program Files`). The shell parser hits `(x86)` and dies.
+
+→ Workaround: package the build commands into a `.sh` script
+(`c:/tmp/_build_nvdiff.sh`), copy into WSL, run there. PATH inside
+the script is set explicitly to Linux-only dirs.
+
+Build now running with clean env. Compile time ~3-5 min for nvdiffrast.
+
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
 - `cumesh OK` ✅
