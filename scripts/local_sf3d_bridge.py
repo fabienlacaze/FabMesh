@@ -70,8 +70,15 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
             self.stderr = ''
 
     res = _Result()
+    # Force Python sub-processes to flush stdout line-by-line so every
+    # `print(..., flush=True)` in multiview_gen/texture_project/texture_refine
+    # actually reaches us immediately — otherwise Windows text-mode pipes
+    # batch up until the child exits, which defeats the whole point of
+    # streaming and freezes the UI progress bar until the sub-script ends.
+    _popen_env = dict(env) if env else dict(os.environ)
+    _popen_env.setdefault('PYTHONUNBUFFERED', '1')
     proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
-                     text=True, env=env, bufsize=1)
+                     text=True, env=_popen_env, bufsize=1)
     collected_out = []
     t_start = time.time()
     try:
