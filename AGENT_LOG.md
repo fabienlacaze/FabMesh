@@ -50,6 +50,41 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Style-harmonize multi-views via SDXL img2img (commit `7c9225a`) — Solution 1
+
+**User observation**: after regenerating the pipeline end-to-end on
+test_e2e, the input image was photorealistic but the 6 Zero123++
+multi-views came out with a cartoon/dessin look — atlas ends up with
+incoherent style (photo front, cartoon back/sides).
+
+**Why**: Zero123++ v1.2 was trained on Objaverse synthetic renders;
+it imposes that style on whatever you feed it. Known limitation.
+
+**3 options considered**:
+ 1. SDXL img2img style-transfer pass after rembg (light, commercial-safe)
+ 2. IPAdapter-guided multi-view gen (heavy refactor, also commercial-safe)
+ 3. Lower Zero123++ guidance_scale (5-min hack, inconsistent results)
+
+**User chose 1 first; 2 as fallback if not enough.**
+
+**Implementation** (`multiview_gen.py`):
+- After the rembg bg-removal pass, each view is sent to the always-on
+  SDXL server at `/img2img` with strength=0.35.
+- Prompt = `<subject>, photorealistic, sharp focus, natural materials,
+  consistent with reference photo, 8k detail`.
+- Subject prompt comes from `prompts.json` via env var
+  `FABMESH_REFINE_PROMPT` set by the bridge before spawning multiview.
+- Alpha channel from rembg is preserved (reapplied after img2img so
+  projection still knows which pixels are subject vs background).
+- Falls through silently if the SDXL server is not up (no hard
+  dependency, pipeline still produces raw Zero123++ views as before).
+
+**Cost**: +30s (~5s × 6 views). Still within the 5 min budget.
+
+**Ready to test**: user regenerates test_e2e end-to-end.
+
+---
+
 ### 2026-04-15 — Bilateral-symmetry auto-align (commit `2eea5ea`) — drops the ±7° drift
 
 **Root cause of the residual "décalage"**: the chest-bulge heuristic
