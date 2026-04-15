@@ -714,7 +714,14 @@ async function openProject(p) {
     if (!scrollTargetId) return;
     setTimeout(() => {
       document.getElementById(scrollTargetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 80);
+      // Re-check multi-view bar now that all stages are open and the preview
+      // image has been rendered. openProject's earlier showStep1Preview call
+      // fires _checkMultiviewForCurrentImage async — but if the disk fallback
+      // (checkMultiviewDir IPC) hadn't resolved yet when the DOM settled,
+      // the bar stayed hidden until the user manually refreshed. Re-calling
+      // here gives the async path a second chance after the stages expanded.
+      _checkMultiviewForCurrentImage();
+    }, 200);
   });
 }
 
