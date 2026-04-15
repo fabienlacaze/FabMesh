@@ -117,10 +117,32 @@ def generate_3d(
             print(f"LOCAL_SF3D_PROGRESS: 12 multiview_gen", flush=True)
             import subprocess as _sp_mv
             _mv_script = os.path.join(os.path.dirname(__file__), 'multiview_gen.py')
+            # Look up the subject prompt from prompts.json next to the
+            # source image (same strategy as refine mode). multiview_gen.py's
+            # optional style-harmonization pass reads it via env so it can
+            # guide SDXL img2img toward the real subject identity.
+            _mv_subject_prompt = None
+            try:
+                import json as _mv_pj
+                _mv_img_dir = os.path.dirname(os.path.abspath(image_path))
+                _mv_pf = os.path.join(_mv_img_dir, 'prompts.json')
+                if os.path.exists(_mv_pf):
+                    with open(_mv_pf, 'r', encoding='utf-8') as _pf:
+                        _mv_entries = _mv_pj.load(_pf)
+                    if isinstance(_mv_entries, list) and _mv_entries:
+                        _mv_subject_prompt = (
+                            _mv_entries[-1].get('prompt')
+                            or _mv_entries[-1].get('fullPrompt'))
+            except Exception:
+                pass
+            _mv_env = dict(os.environ)
+            if _mv_subject_prompt:
+                _mv_env['FABMESH_REFINE_PROMPT'] = _mv_subject_prompt
             if os.path.exists(_mv_script):
                 _r_mv = _sp_mv.run(
                     [sys.executable, _mv_script, _preprocessed_path, _multiview_dir],
-                    capture_output=True, text=True, timeout=600
+                    capture_output=True, text=True, timeout=600,
+                    env=_mv_env,
                 )
                 if _r_mv.stdout:
                     for line in _r_mv.stdout.strip().split('\n'):

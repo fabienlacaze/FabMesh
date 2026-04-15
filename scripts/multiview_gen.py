@@ -220,6 +220,86 @@ def generate_multiview(input_image_path, output_dir, size=320):
         slog.warn('rembg_skipped', reason=str(be)[:200])
         log(f'rembg bg removal skipped ({be})')
 
+    # ------------------------------------------------------------------
+    # Style harmonization pass
+    # ------------------------------------------------------------------
+    # Zero123++ v1.2 produces views that look slightly cartoon-rendered
+    # compared to a photorealistic input image — the model was trained on
+    # the Objaverse synthetic renders and imposes that look on everything.
+    # Baking this mix into the atlas gives a texture whose front (from the
+    # source photo) is photorealistic but whose back/sides (from Zero123++)
+    # look like they belong to a different character.
+    #
+    # Fix: after rembg, pass each view through SDXL img2img (RealVisXL)
+    # at strength 0.35 with a "photorealistic, matches reference" prompt,
+    # using the always-on SDXL server (http://127.0.0.1:5555/img2img)
+    # when available. Falls through silently if the server is down —
+    # the pipeline still works, it just skips the harmonization.
+    try:
+        import requests as _rq
+        if _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
+            slog.progress(89, 'style_harmonize')
+            log('MULTIVIEW_PROGRESS: 89 style-harmonize')
+            # Prompt keeps subject identity neutral; bridge supplies a
+            # subject prompt via env when available (FABMESH_REFINE_PROMPT).
+            subject = os.environ.get('FABMESH_REFINE_PROMPT', '').strip()
+            style_prompt = (
+                (subject + ', ' if subject else '')
+                + 'photorealistic, sharp focus, natural materials, '
+                  'consistent with reference photo, 8k detail'
+            )
+            harmonized = []
+            t_style_start = time.time()
+            for i, tile in enumerate(upscaled_tiles):
+                _tmp_in = os.path.join(output_dir, f'.style_in_{i}.png')
+                _tmp_out = os.path.join(output_dir, f'.style_out_{i}.png')
+                tile.convert('RGBA').save(_tmp_in)
+                try:
+                    r = _rq.post(
+                        'http://127.0.0.1:5555/img2img',
+                        json={'input': _tmp_in, 'output': _tmp_out,
+                              'prompt': style_prompt, 'strength': 0.35},
+                        timeout=180,
+                    )
+                    j = r.json()
+                    if j.get('ok'):
+                        new_rgb = Image.open(_tmp_out).convert('RGB')
+                        if new_rgb.size != tile.size:
+                            new_rgb = new_rgb.resize(tile.size, Image.LANCZOS)
+                        # Preserve the original alpha (rembg'd) so projection
+                        # still knows which pixels are subject vs background.
+                        if tile.mode == 'RGBA':
+                            alpha = tile.split()[-1]
+                            new_rgba = new_rgb.convert('RGBA')
+                            new_rgba.putalpha(alpha)
+                            harmonized.append(new_rgba)
+                        else:
+                            harmonized.append(new_rgb)
+                        slog.info('view_style_harmonized', view=i,
+                                  strength=0.35)
+                    else:
+                        log(f'style harmonize view_{i} failed '
+                            f'({j.get("error")}), keeping original')
+                        harmonized.append(tile)
+                except Exception as _se:
+                    log(f'style harmonize view_{i} error ({_se}), '
+                        f'keeping original')
+                    harmonized.append(tile)
+                finally:
+                    for _p in (_tmp_in, _tmp_out):
+                        try: os.remove(_p)
+                        except Exception: pass
+            upscaled_tiles = harmonized
+            slog.info('style_harmonize_done',
+                      ms=int((time.time() - t_style_start) * 1000))
+            log(f'style-harmonized 6 views in '
+                f'{time.time() - t_style_start:.1f}s')
+        else:
+            log('SDXL server not responding — skipping style harmonization')
+    except Exception as _he:
+        slog.warn('style_harmonize_skipped', reason=str(_he)[:200])
+        log(f'style harmonization skipped ({_he})')
+
     for i, tile in enumerate(upscaled_tiles):
         view_path = os.path.join(output_dir, f'{view_names[i]}.png')
         tile.save(view_path)
