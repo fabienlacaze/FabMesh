@@ -50,6 +50,85 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Trilinear filter + preserve normal map — POLISH
+
+**Problem**: when zooming on a mesh, user saw "carrés" (the actual
+texels of the 2048 atlas in NEAREST filtering). Also asked if we even
+had a normal map.
+
+**Findings**:
+- Normal map IS present in every SF3D-baked GLB (SF3D `system.py:508`
+  exports `normalTexture=bump_tex`).
+- BUT: `upscale_atlas.py` was iterating ALL images in the GLB and
+  upscaling them — including the normal map. RealESRGAN trained on
+  photos was flattening the XY components of the normal, killing the
+  bump.
+- `texture_refine.py` was always replacing `images[0]` — when SF3D
+  ordered the normal map first, refine wrote SDXL's hallucination
+  ON the normal map.
+
+**Fix** (commit `0737124`):
+- Both scripts now resolve baseColorTexture explicitly via
+  `materials[0].pbrMetallicRoughness.baseColorTexture.index` →
+  `textures[i].source` to find which image to touch.
+- `_applyMeshTextureFilter` in renderer: NEAREST → LinearMipMapLinear
+  + 16x anisotropy; covers normalMap/roughnessMap/metalnessMap/aoMap
+  too (was only `mat.map`).
+
+**Status**: visual validation pending. Should give clean trilinear
+zoom + working normal-map relief.
+
+### 2026-04-15 — Subject-aware refine prompt — IN PROGRESS
+
+**Premise**: refine SDXL at strength 0.25 with default generic prompt
+("photorealistic detailed surface texture") was hallucinating an ice
+golem on the orc because the blue crown dominated the signal.
+
+**Fix** (commit `5cc4f6b`):
+- `local_sf3d_bridge.py` reads the latest entry from
+  `images/<project>/prompts.json` and passes it via `--prompt` to
+  `texture_refine.py`.
+- `texture_refine.py` prepends the user prompt to the quality
+  keywords so SDXL is anchored to the right subject.
+
+**Verified manually**: standalone refine with prompt "orc warrior
+with blue crown..." in 60s, atlas correctly refined.
+
+**Bug found**: pipeline run does NOT produce a refined atlas —
+`FABMESH_PROJECT_MODE=upscale` was lingering in the OS env from a
+previous PowerShell `Start-Process`, so the bridge was using upscale
+instead of refine. Restarted clean without the env var.
+
+### 2026-04-15 — SDXL atlas refine (Meshy-style) — DEFAULT
+
+**Approach**: pass SF3D's baked atlas through SDXL img2img (RealVisXL,
+strength 0.25) tile by tile (1024 tiles, 128 px overlap, feather
+blend). Hallucinates micro-detail (skin pores, fabric weave, fur)
+without changing colours or UV.
+
+**Files**: `scripts/texture_refine.py` (new), wired in
+`local_sf3d_bridge.py` as `FABMESH_PROJECT_MODE=refine` (default
+since commit `958b30d`).
+
+**Result on poule_geante**: visibly sharper plumage detail (orange
+striping, defined feathers) vs the upscale baseline. Cost: +60-90 s
+per generation (in-process fallback when SDXL server isn't up).
+
+**Subprocess timeout**: bumped 120 → 600 s (commit `b7905a0`) because
+the in-process fallback loads RealVisXL ~6 GB on first call.
+
+### 2026-04-15 — RealVisXL prompt: 3/4 view bias — DONE
+
+**Fix** (commit `3be97b5`): added "three-quarter view showing one
+side, slight rotation" to the optimized_prompt and "strict frontal
+view, flat profile" to negative_prompt in `local_juggernaut_bridge.py`.
+
+**Why**: SF3D textures only what the front shows and invents the
+back/sides. A 3/4 source image exposes one side directly, so SF3D's
+bake has real data instead of inventions.
+
+**Verified**: prompts produce 3/4 chickens / orcs / camels reliably.
+
 ### 2026-04-15 — Multi-view ADDITIVE augment on top of SF3D atlas — REJECTED VISUALLY
 
 **Premise** (user's idea): SF3D textures the front well from the source
@@ -311,3 +390,14 @@ Patched `basicsr/data/degradations.py` (torchvision.transforms.functional_tensor
   per-triangle charts that don't help the rendering issue
 - ❌ Treat Zero123++ multi-views as pure Y-axis rotations — they have
   alternating elevations +20°/-10°. Always include `rot_x(elev_deg)`
+- ❌ Iterate ALL images in a GLB and run RealESRGAN/SDXL on them —
+  this destroys the normal map. Always resolve baseColorTexture
+  explicitly via `materials[0].pbrMetallicRoughness.baseColorTexture
+  .index → textures[i].source`.
+- ❌ Set FABMESH_PROJECT_MODE in the OS env "just for one test". It
+  persists in the parent shell and overrides the bridge default for
+  every subsequent FabMesh launch. Always set on the Start-Process
+  invocation only, or unset after.
+- ❌ Hardcode NEAREST filtering on Three.js material — kills normal
+  maps, makes texels visible at zoom. Default trilinear + 16x aniso
+  works once UV padding is good.
