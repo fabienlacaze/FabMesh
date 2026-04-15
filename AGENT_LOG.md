@@ -221,6 +221,15 @@ built and installed (15 MB wheel, sm_120 native).
 
 Next: `local_trellis2_bridge.py` on orc image, inspect quality.
 
+**First real test launched** (2026-04-15 ~11:30): `Trellis2TexturingPipeline`
+on:
+- mesh = `meshes/orc_blue_crown_sf3d_1776238700063.glb` (SF3D bake)
+- image = `images/orc_blue_crown/ref_1776197431277_0_nobg_1776200263131.png`
+- output → `c:/tmp/_orc_trellis2_textured.glb`
+
+Uses `microsoft/TRELLIS.2-4B` + `texturing_pipeline.json`.
+First run downloads ~3 GB model weights from HF, then runs. ETA 2-5 min.
+
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
 - `cumesh OK` ✅
