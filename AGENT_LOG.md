@@ -125,10 +125,30 @@ remain:
 User chose: install attempt continues to validate quality. If
 TRELLIS.2 is visibly much better, decide packaging strategy after.
 
-**Attempt 2 (planned)**: switch venv torch to `2.6.0+cu128` (matches
-siraxe community wheels), install the 3 cu128 wheels via pip from
-HF, re-test `import flex_gemm`, then try `example_texturing.py` on
-the orc image.
+**Attempt 2 (2026-04-15 ~10:55)**: switch venv torch to cu128 + install
+community Linux wheels. **PARTIAL FAILURE so far**:
+- `pip install torch==2.6.0 --index-url cu128` → "No matching
+  distribution". The PyTorch index has torch+cu128 only from 2.7.0
+  onwards; 2.6.0 is cu124-only.
+- Without --force-reinstall, the previous 2.6.0+cu124 stayed.
+
+→ Pivot: use **torch 2.7.0+cu128** (lowest cu128 version available)
+and hope the siraxe community wheels (built against cu128 around
+2025-12) are compatible with torch 2.7's ABI. Wheel filenames don't
+encode their torch version, so risk: same `_ZNK3c1010TensorImpl
+15incref_pyobject` symbol mismatch all over again.
+
+**Wheels downloaded** to `/root/trellis2_wheels/`:
+- `flex_gemm-0.0.1-cp312-cp312-linux_x86_64.whl`
+- `cumesh-0.0.1-cp312-cp312-linux_x86_64.whl`
+- `o_voxel-0.0.1-cp312-cp312-linux_x86_64.whl`
+
+**Next**:
+1. `pip install torch==2.7.0 torchvision==0.22.0 --index-url cu128 --force-reinstall`
+2. `pip install /root/trellis2_wheels/*.whl --force-reinstall`
+3. `python -c 'import flex_gemm'` → if error → siraxe wheels are
+   ALSO incompatible with torch 2.7 → next attempt will need torch
+   2.6.0+cu128 from a different source, or build from source.
 
 **Add to "do not retry"**: don't trust agent claims about "wheels
 Windows officielles" without verifying via direct GitHub release
