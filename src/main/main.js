@@ -754,6 +754,132 @@ async function handleListProjects() {
   return { success: true, projects };
 }
 
+// ============================================================
+// Multi-view auto-inheritance on image-version creation
+// ============================================================
+// Rule (user 2026-04-15, option C):
+//   When a new image version is created in the SAME project (auto-paint,
+//   inpaint, rembg, etc.), look at whether any existing image version in
+//   the same folder has `<stem>_multiview/` matching the NEW image's
+//   silhouette. If so, copy that multi-view folder to the new image's
+//   own `<new_stem>_multiview/`. Otherwise, fire off Zero123++ to build
+//   new views. This keeps the "multi-views belong to a version" rule
+//   intact while sparing the user 45 s of regeneration when the change
+//   didn't alter the silhouette (rembg, color tweak, minor retouch).
+//
+// Silhouette hash = sha1 of the 64×64 alpha binarization, first 16 hex.
+
+function _silhouetteHash(imgPath) {
+  // Tiny self-contained Python one-liner via execFileSync — avoids pulling
+  // in canvas/jimp for one hash. Returns 16 hex chars or '' on failure.
+  try {
+    const py = `
+import sys, hashlib
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGBA')
+a = im.split()[-1].resize((64,64))
+bits = bytes(1 if p > 64 else 0 for p in a.getdata())
+print(hashlib.sha1(bits).hexdigest()[:16])
+`.trim();
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python', ['-c', py, imgPath], {
+      timeout: 10000,
+      encoding: 'utf-8',
+      windowsHide: true,
+    });
+    return (out || '').trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+function _copyMultiviewDir(srcDir, dstDir) {
+  try {
+    fs.mkdirSync(dstDir, { recursive: true });
+    for (const fn of ['input.png', 'view_0.png', 'view_1.png', 'view_2.png',
+                      'view_3.png', 'view_4.png', 'view_5.png']) {
+      const src = path.join(srcDir, fn);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(dstDir, fn));
+      }
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Called right after a new image version is written to disk.
+ * Inherits or regenerates the `<stem>_multiview/` for that image.
+ *
+ * @param {string} newImagePath absolute path to the new image version
+ * @returns {Promise<{inherited: boolean, regenerated: boolean, hash: string}>}
+ */
+async function _handleMultiviewInheritance(newImagePath) {
+  try {
+    if (!fs.existsSync(newImagePath)) return { inherited: false, regenerated: false, hash: '' };
+    const imgDir = path.dirname(newImagePath);
+    const newStem = path.basename(newImagePath, path.extname(newImagePath));
+    const newMvDir = path.join(imgDir, `${newStem}_multiview`);
+    if (fs.existsSync(path.join(newMvDir, 'view_5.png'))) {
+      // Already has its own multi-views — nothing to do.
+      return { inherited: false, regenerated: false, hash: '' };
+    }
+    const newHash = _silhouetteHash(newImagePath);
+    if (!newHash) return { inherited: false, regenerated: false, hash: '' };
+
+    // Scan the project's images folder for existing <stem>_multiview/ dirs
+    // whose source image matches the silhouette hash.
+    const entries = fs.readdirSync(imgDir, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !ent.name.endsWith('_multiview')) continue;
+      const candStem = ent.name.slice(0, -'_multiview'.length);
+      if (candStem === newStem) continue;
+      // Find the image file that stem came from (png/jpg)
+      let candImg = null;
+      for (const x of ['.png', '.jpg', '.jpeg', '.webp']) {
+        const p = path.join(imgDir, candStem + x);
+        if (fs.existsSync(p)) { candImg = p; break; }
+      }
+      if (!candImg) continue;
+      const candHash = _silhouetteHash(candImg);
+      if (candHash && candHash === newHash) {
+        // Silhouette match — inherit.
+        const copied = _copyMultiviewDir(path.join(imgDir, ent.name), newMvDir);
+        if (copied) {
+          log.info('mv-inherit', `new=${newStem} reused from=${candStem} hash=${newHash}`);
+          return { inherited: true, regenerated: false, hash: newHash };
+        }
+      }
+    }
+
+    // No silhouette match — trigger Zero123++ asynchronously, don't block
+    // the caller. The user will see the new views appear once done. UI
+    // toast is handled by the existing multiview-progress stream.
+    log.info('mv-inherit', `new=${newStem} no silhouette match — regenerating`);
+    const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
+    const env = { ...process.env, PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' };
+    const proc = execFile('python', [script, newImagePath, newMvDir], {
+      timeout: 600000, maxBuffer: 10 * 1024 * 1024, env,
+    }, (err, stdout, stderr) => {
+      if (err) log.warn('mv-inherit', `regen failed: ${err.message}`);
+      else log.info('mv-inherit', `regen done for ${newStem}`);
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('mv-inherit-done', {
+          imagePath: newImagePath,
+          success: !err,
+        });
+      }
+    });
+    proc.stdout?.on('data', d => safeSend('multiview-progress', d.toString()));
+    return { inherited: false, regenerated: true, hash: newHash };
+  } catch (e) {
+    log.error('mv-inherit', `error: ${e.message}`);
+    return { inherited: false, regenerated: false, hash: '' };
+  }
+}
+
 async function handleRemoveBackground(params) {
   const imagePath = params.imagePath;
   if (!imagePath || !fs.existsSync(imagePath)) return { success: false, error: 'Image not found' };
@@ -775,6 +901,7 @@ print("OK")
       if (error || !fs.existsSync(outPath)) {
         resolve({ success: false, error: error?.message || 'rembg failed' });
       } else {
+        _handleMultiviewInheritance(outPath).catch(() => {});
         resolve({ success: true, newPath: outPath });
       }
     });
@@ -1820,7 +1947,10 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
     const r = await sdxlServerCall('/mask_inpaint', {
       input: imagePath, mask: maskPath, prompt: prompt || '', output: newImagePath
     });
-    if (r.ok) return { success: true, newPath: newImagePath };
+    if (r.ok) {
+      _handleMultiviewInheritance(newImagePath).catch(() => {});
+      return { success: true, newPath: newImagePath };
+    }
     return { success: false, error: r.error || 'SDXL server error' };
   } catch (e) {
     return { success: false, error: e.message };
@@ -1843,7 +1973,10 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
       const r = await sdxlServerCall('/inpaint', {
         input: imagePath, target: targetText, prompt: prompt || '', output: newImagePath, dilate: dilate || 15
       });
-      if (r.ok) return { success: true, newPath: newImagePath };
+      if (r.ok) {
+        _handleMultiviewInheritance(newImagePath).catch(() => {});
+        return { success: true, newPath: newImagePath };
+      }
       console.warn('[inpaint] SDXL server failed, falling back to subprocess:', r.error);
     }
 
@@ -1855,6 +1988,7 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
         if (error) {
           resolve({ success: false, error: error.message, stdout, stderr });
         } else if (fs.existsSync(newImagePath)) {
+          _handleMultiviewInheritance(newImagePath).catch(() => {});
           resolve({ success: true, newPath: newImagePath });
         } else {
           resolve({ success: false, error: 'Output not created', stdout, stderr });
@@ -1900,7 +2034,10 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
       const r = await sdxlServerCall('/img2img', {
         input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
       });
-      if (r.ok) return { success: true, newPath: newImagePath };
+      if (r.ok) {
+        _handleMultiviewInheritance(newImagePath).catch(() => {});
+        return { success: true, newPath: newImagePath };
+      }
       return { success: false, error: r.error || 'img2img failed on SDXL server' };
     }
 
@@ -1952,6 +2089,7 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
         });
         // Cleanup temp
         if (fs.existsSync(tempResized)) fs.unlinkSync(tempResized);
+        _handleMultiviewInheritance(newImagePath).catch(() => {});
         return { success: true, newPath: newImagePath };
       } catch (e) {
         lastError = e;
@@ -2079,6 +2217,7 @@ print("OK")`,
         if (error || !fs.existsSync(outPath)) {
           resolve({ success: false, error: (error?.message || stderr || 'failed').slice(-300) });
         } else {
+          _handleMultiviewInheritance(outPath).catch(() => {});
           resolve({ success: true, newPath: outPath });
         }
       });
