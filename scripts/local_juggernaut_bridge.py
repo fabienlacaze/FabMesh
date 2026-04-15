@@ -95,22 +95,64 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
     print("LOCAL_REALVIS: Loaded with CPU offload (VAE decodes on CPU if needed)")
     sys.stdout.flush()
 
-    # Three-quarter view bias: SF3D textures only what the front shows
-    # and "invents" the back/sides as a duller version of the front. By
-    # asking RealVisXL for a 3/4 angle we expose the side of the subject
-    # in the source image itself, so SF3D bakes a richer, more accurate
-    # texture for the back half of the mesh.
-    optimized_prompt = (
-        f"{prompt}, three-quarter view showing one side, slight rotation, "
-        f"single object centered on plain white background, "
-        f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
-        f"masterpiece, no text, no watermark"
-    )
-    negative_prompt = (
-        "blurry, low quality, text, watermark, signature, deformed, "
-        "extra limbs, bad anatomy, distorted, cropped, worst quality, "
-        "strict frontal view, flat profile"
-    )
+    # Prompt enhancement: choose between T-pose (3D-game-asset) mode and
+    # the default three-quarter view mode based on cues in the user prompt.
+    #
+    # Why two modes:
+    #   - Multi-view generation (Zero123++) works BEST when the input is a
+    #     strict T-pose front-facing character. Dynamic poses cause it to
+    #     duplicate the front across multiple azimuths (observed on
+    #     orc_child: view_0 and view_3 both looked "face").
+    #   - But for hard-surface props (buildings, items) a 3/4 angle gives
+    #     SF3D more side info and bakes a better texture.
+    #
+    # Heuristic: if the user typed "T-pose" or "front view" anywhere, go
+    # full T-pose mode. Otherwise keep the legacy 3/4 bias.
+    _p_low = prompt.lower()
+    _is_tpose = any(kw in _p_low for kw in (
+        't-pose', 't pose', 'tpose',
+        'front view', 'frontal view', 'front-facing', 'facing camera',
+        'facing the camera', 'straight-on',
+    ))
+    if _is_tpose:
+        # T-pose/front mode: reinforce strict symmetry, arms out horizontally,
+        # no perspective. Zero123++ will be able to rotate around properly.
+        optimized_prompt = (
+            f"{prompt}, "
+            f"arms extended straight out horizontally to the sides, "
+            f"legs apart shoulder-width, standing upright, symmetrical pose, "
+            f"perfectly centered, strict front view, orthographic-like flat view, "
+            f"looking directly at the camera, no tilt, no rotation, "
+            f"single character isolated on plain white background, "
+            f"studio lighting, sharp focus, ultra detailed, 8k, "
+            f"no text, no watermark, full body visible, feet on the ground"
+        )
+        negative_prompt = (
+            "dynamic pose, action pose, combat stance, fighting, running, "
+            "jumping, crouching, bent arms, bent legs, tilted head, "
+            "twisted torso, asymmetric, side view, three-quarter view, "
+            "profile view, back view, perspective distortion, foreshortening, "
+            "blurry, low quality, text, watermark, signature, deformed, "
+            "extra limbs, bad anatomy, cropped, worst quality"
+        )
+        print(f"LOCAL_REALVIS: T-pose mode detected (keywords in prompt)", flush=True)
+    else:
+        # Three-quarter view bias for hard-surface / prop subjects: SF3D
+        # textures only what the front shows and "invents" the back/sides
+        # as a duller version of the front. By asking RealVisXL for a 3/4
+        # angle we expose the side of the subject in the source image
+        # itself, so SF3D bakes a richer, more accurate texture.
+        optimized_prompt = (
+            f"{prompt}, three-quarter view showing one side, slight rotation, "
+            f"single object centered on plain white background, "
+            f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
+            f"masterpiece, no text, no watermark"
+        )
+        negative_prompt = (
+            "blurry, low quality, text, watermark, signature, deformed, "
+            "extra limbs, bad anatomy, distorted, cropped, worst quality, "
+            "strict frontal view, flat profile"
+        )
 
     _throttle_cb = make_throttle_callback()  # None if disabled
 
