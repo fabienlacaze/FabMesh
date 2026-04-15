@@ -284,6 +284,44 @@ extractor to work out of the box on current transformers. The
 `DinoV3FeatureExtractor.extract_features` hardcoded `self.model.
 layer` which is now one level deeper.
 
+### 2026-04-15 — TRELLIS.2 — FINAL VERDICT: ❌ ABANDONED FOR FABMESH
+
+After getting the pipeline to actually load (monkey-patch rembg + scene
+concat + DINOv3 layer patch), the next error was `no kernel image is
+available for execution on the device` from flex_gemm — the siraxe
+community wheels were built for sm_89 (Ada), not sm_120 (Blackwell / RTX
+5080). They work for imports but kernels don't launch on our GPU.
+
+Web research (agent a227cd7a80731f3cf, 2026-04-15) found that:
+- ✅ `visualbruno/ComfyUI-Trellis2` ships **Windows sm_120 prebuilt wheels**
+  in `wheels/Windows/Torch270/` — would likely run on RTX 5080 in 10 min.
+- 🚫 **nvdiffrast (hard dep of TRELLIS.2) is NVIDIA Source Code
+  License-NC**: §3.3 "The Work and any derivative works thereof only
+  may be used or intended for use non-commercially." The so-called
+  "1-way commercial" exception covers NVIDIA itself, not us.
+- 🚫 ComfyUI itself is GPL-3.0 — can't be bundled in a closed paid
+  app without source-opening everything.
+
+**Conclusion**: even with infinite engineering time, TRELLIS.2 **cannot
+be shipped** in FabMesh commercial release (Gumroad/itch.io/Fab). The
+non-commercial nvdiffrast clause is a hard legal wall, not a technical
+one. All further TRELLIS.2 install work is **wasted time** for this
+project.
+
+**Add to "do not retry"**: TRELLIS.2 for FabMesh shipping. Full stop.
+Even if the wheels work tomorrow and the output is photorealistic,
+we cannot legally redistribute nvdiffrast binaries in a paid `.zip`.
+Only viable future use: "Bring Your Own ComfyUI" mode where the user
+installs ComfyUI themselves and FabMesh talks to `localhost:8188` —
+but that's a separate feature, not now.
+
+**Path forward (user-chosen 2026-04-15)**: double down on SDXL
+atlas_refine (already commercial-safe, 100% Windows native). Next
+experiments: tighter tile overlap, strength ramp per region,
+ControlNet depth-guided refine to preserve geometry while repainting.
+
+---
+
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
 - `cumesh OK` ✅
