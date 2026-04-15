@@ -493,10 +493,14 @@ def generate_3d(
         # disagree, trust the one with the larger absolute magnitude.
         _chest_vote = -1 if _chest_z_mean < 0 else (1 if _chest_z_mean > 0 else 0)
         _head_vote  = -1 if _head_z_mean  < 0 else (1 if _head_z_mean  > 0 else 0)
-        # Combined: weight each by |value| so a tiny chest signal loses
-        # to a strong head signal.
+        # Combined: weight each by |value|.
+        # Empirical rule (verified by user on 'garcon' mesh 2026-04-16):
+        # on SF3D output rotated by -_sym_theta, the subject FACES +Z when
+        # chest_z+head_z is NEGATIVE (nose/chin/chest bulge sample lands
+        # behind the centroid in z). To face -Z (glTF forward) we need to
+        # flip WHEN the sum is negative.
         _vote_sum = (_chest_z_mean + _head_z_mean)
-        _needs_flip = _vote_sum > 0  # both should want negative
+        _needs_flip = _vote_sum < 0
         if _needs_flip:
             _sym_theta += _np.pi
         print(f"LOCAL_SF3D: facing-check chest_z={_chest_z_mean:+.3f} "
