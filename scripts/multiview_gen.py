@@ -132,13 +132,30 @@ def generate_multiview(input_image_path, output_dir, size=320):
     _subpct(25, 'generate_views')
 
     # Generate 6 views
+    # Quality tuning (2026-04-16):
+    #   - num_inference_steps 100 → 150   reduces noise on flat regions,
+    #     fewer "smudged" textures on clothes and skin
+    #   - guidance_scale 4.0 → 5.5        tighter adherence to the input
+    #     image's colour palette (observed fix: orc_woman legs no longer
+    #     turn beige when they were blue in the ref)
+    #   - seed pinned                     gives reproducible + more
+    #     consistent inter-view coherence (same RNG init for each tile)
+    # Budget cost: +15 s per run on RTX 5080.
     log('generating 6 views...')
-    with slog.timed('inference', steps=100, guidance_scale=4.0):
+    _mv_seed = int(os.environ.get('FABMESH_MV_SEED', '424242'))
+    _mv_steps = int(os.environ.get('FABMESH_MV_STEPS', '150'))
+    _mv_cfg = float(os.environ.get('FABMESH_MV_CFG', '5.5'))
+    with slog.timed('inference', steps=_mv_steps, guidance_scale=_mv_cfg,
+                    seed=_mv_seed):
         with torch.no_grad():
+            _gen = torch.Generator(
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            ).manual_seed(_mv_seed)
             result = pipeline(
                 input_img_resized,
-                num_inference_steps=100,
-                guidance_scale=4.0,
+                num_inference_steps=_mv_steps,
+                guidance_scale=_mv_cfg,
+                generator=_gen,
             ).images[0]
 
     log(f'generation done in {time.time()-t0:.1f}s')
