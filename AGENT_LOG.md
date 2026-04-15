@@ -50,6 +50,41 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Rotation-offset propagated to multi-view projection (commit `1965889`)
+
+Follow-up to the auto-align fix: the rotation of the mesh (169.5° for
+the apilive test) left the 6 Zero123++ views at their original
+pre-rotation azimuths, so they bled onto the wrong parts of the rotated
+mesh — visible as a slightly soft face + head and imperfectly aligned
+side details.
+
+**Fix** — `texture_project.py` now accepts `--rotation-offset DEG`; when
+passed, every MULTIVIEW_VIEWS azimuth is shifted by that angle (modulo
+360) so views land on the same mesh regions they depict. The bridge
+(`local_sf3d_bridge.py`) captures `auto_align_rot_deg` at align time
+and threads it through every `texture_project.py` invocation
+(refine/atlas/atlas_refine/augment/vc paths).
+
+**User verdict on the resulting mesh** (2026-04-15 evening): "on est
+pas loin mais il y a encore un décalage". Face well-positioned overall,
+shoulders/pectorals/pagne all correct, but face texture still slightly
+off + buckle/sash positions drift a couple degrees.
+
+**Root cause**: auto-align uses "average chest-bulge direction" which
+has ±3–5° noise. The rotation offset compensates the alignment applied,
+but if the alignment itself lands 2° off optimal, the multi-views get
+offset by the same 2°. They don't hit the wrong side of the mesh any
+more, but the ±2° residual drift is still visible.
+
+**Next step** (in progress): replace the chest-bulge heuristic with a
+**bilateral-symmetry-maximizing** rotation search. Humanoid subjects
+(orcs, humans, animals) have a clean left/right mirror plane. Finding
+the Y rotation that maximizes mesh-to-mirrored-mesh overlap lands
+within ~0.5° of optimal, eliminating the drift. Scheduled for next
+commit.
+
+---
+
 ### 2026-04-15 — Auto-align WORKS (user visual confirmation)
 
 Generated test_e2e_sf3d_apilive_1776274212.glb via direct CLI bridge call:
