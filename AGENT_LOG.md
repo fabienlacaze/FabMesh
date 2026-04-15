@@ -50,6 +50,37 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Project-level multi-view cache (commit `bb87f12`)
+
+**User pain point**: "le multiview doit être dispo à toutes les
+versions de l'image principale". Every time the user did rembg/crop/
+recolor on the reference image, the mesh generation had to rerun
+Zero123++ (~45s) even though the subject shape was identical.
+
+**Cache key**: silhouette hash. The preprocessed image's alpha channel
+(or grayscale fallback) is downscaled to 64×64, binarized, and sha1'd.
+Retouches that preserve the silhouette → same hash → cache hit.
+
+**Layout**:
+```
+images/<project>/.multiview_cache/<16-hex-hash>/
+    input.png
+    view_0.png .. view_5.png
+```
+
+**Flow** (in `local_sf3d_bridge.py`):
+1. Compute silhouette hash before spawning multiview.
+2. If all 6 views + input exist in cache → copy them into the per-mesh
+   `.multiview` dir and skip Zero123++ entirely (**saves ~45s**).
+3. On miss, run Zero123++ normally and write the result into the cache
+   on success, so the next retouched variant will hit.
+4. Any error falls through silently — pipeline still works.
+
+Transparent, no UI change. Works with the style-harmonize pass too
+(harmonized views get cached, not raw Zero123++ views).
+
+---
+
 ### 2026-04-15 — Style-harmonize multi-views via SDXL img2img (commit `7c9225a`) — Solution 1
 
 **User observation**: after regenerating the pipeline end-to-end on
