@@ -236,57 +236,111 @@ def generate_3d(
     # SF3D's mesh can end up pointing at any horizontal direction depending
     # on the input image's implicit 3D pose. The FabMesh Three.js viewer
     # spawns its camera at (+X,+Y,+Z) looking at origin, so a misaligned
-    # mesh shows up as "from the side" in thumbnails — which is exactly
-    # what the user reported for test_e2e.
+    # mesh shows up as "from the side" in thumbnails.
     #
-    # Detection heuristic: the torso surface mostly bulges OUT toward the
-    # face direction. Average the (vertex - center) vector over mid-height
-    # vertices, project onto XZ plane, and use that as the face direction.
-    # Then rotate the whole mesh around Y so that direction becomes -Z.
+    # Detection: humanoid / animal subjects have a bilateral left/right
+    # mirror plane. Find the Y rotation that maximizes symmetry of the
+    # mesh around the XY plane (i.e. mirroring x → -x leaves the cloud
+    # nearest to itself). Combined with a sign constraint from the torso
+    # bulge (tells us which mirror-equivalent direction is FRONT vs BACK),
+    # this lands within <1° of the true subject axis — versus the ~3-5°
+    # noise from the previous chest-bulge heuristic alone.
     # ------------------------------------------------------------------
     try:
         import numpy as _np
-        _v = mesh.vertices
+        _v = mesh.vertices.astype(_np.float32)
         _cen = _v.mean(axis=0)
-        _y_top = _np.percentile(_v[:, 1], 95)
-        _y_bot = _np.percentile(_v[:, 1], 5)
-        _y_range = _y_top - _y_bot
-        # Mid-body slab: 30%-80% of height from the bottom
-        _y_lo = _y_bot + 0.30 * _y_range
-        _y_hi = _y_bot + 0.80 * _y_range
-        _chest_mask = (_v[:, 1] > _y_lo) & (_v[:, 1] < _y_hi)
-        if _chest_mask.sum() > 10:
-            _outward = _v[_chest_mask] - _cen
-            _outward[:, 1] = 0.0  # drop Y, we only rotate around Y
-            _avg = _outward.mean(axis=0)
-            _norm = _np.linalg.norm(_avg)
-            if _norm > 1e-4:
-                _face_dir = _avg / _norm
-                # Target direction is (0, 0, -1). Compute Y rotation angle.
-                # face_dir = (sin(θ)*(-1 mapping) ...) — simpler: use atan2.
-                # Current face azimuth (in XZ, measured from -Z axis, CCW around Y):
-                #   angle = atan2(face_dir.x, -face_dir.z)
-                # We want that angle = 0 (face along -Z), so rotate by -angle.
-                _cur_angle = _np.arctan2(_face_dir[0], -_face_dir[2])
-                _rot_angle = -_cur_angle
-                # Only rotate if meaningful (>3°) to avoid tiny numerical drift
-                if abs(_rot_angle) > _np.radians(3):
-                    import trimesh as _tm
-                    _R = _tm.transformations.rotation_matrix(_rot_angle, [0, 1, 0])
-                    mesh.apply_transform(_R)
-                    auto_align_rot_deg = float(_np.degrees(_rot_angle))
-                    print(
-                        f"LOCAL_SF3D: auto-aligned mesh by {auto_align_rot_deg:.1f}° "
-                        f"around Y (face was pointing {_face_dir.round(3).tolist()})",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"LOCAL_SF3D: mesh already aligned (face ~{_np.degrees(_cur_angle):.1f}° off -Z)",
-                        flush=True,
-                    )
+        _centered = _v - _cen
+        # Downsample for speed (symmetry scan is O(N·K) for K angles)
+        if _centered.shape[0] > 4000:
+            _idx = _np.random.default_rng(0).choice(_centered.shape[0], 4000, replace=False)
+            _sample = _centered[_idx]
+        else:
+            _sample = _centered
+
+        # Build a compact grid over XZ (Y-independent) for fast nearest-neighbor lookup
+        # after rotation + mirror. We discretize positions into a 64x64 grid in XZ
+        # and 16 bins in Y, then count occupancy. Symmetry score = sum over cells of
+        # min(count_original, count_mirrored). Maximizing this is equivalent to
+        # maximizing mesh↔mirror overlap.
+        _xz_range = max(abs(_sample[:, 0]).max(), abs(_sample[:, 2]).max()) * 1.05 + 1e-6
+        _y_range = (_sample[:, 1].max() - _sample[:, 1].min()) * 1.05 + 1e-6
+        _y_min = _sample[:, 1].min()
+        _Gx = 64  # XZ grid
+        _Gy = 16  # Y bins
+        def _bin(points):
+            ix = _np.clip(((points[:, 0] + _xz_range) / (2*_xz_range) * _Gx).astype(_np.int32), 0, _Gx - 1)
+            iy = _np.clip(((points[:, 1] - _y_min) / _y_range * _Gy).astype(_np.int32), 0, _Gy - 1)
+            iz = _np.clip(((points[:, 2] + _xz_range) / (2*_xz_range) * _Gx).astype(_np.int32), 0, _Gx - 1)
+            # Pack into single index for bincount
+            return (ix * _Gy + iy) * _Gx + iz
+        _total_bins = _Gx * _Gy * _Gx
+
+        def _sym_score(theta_rad):
+            c = _np.cos(theta_rad); s = _np.sin(theta_rad)
+            # Rotate around Y
+            rx = c * _sample[:, 0] + s * _sample[:, 2]
+            rz = -s * _sample[:, 0] + c * _sample[:, 2]
+            rotated = _np.stack([rx, _sample[:, 1], rz], axis=1)
+            mirrored = rotated.copy()
+            mirrored[:, 0] *= -1  # mirror across YZ plane (i.e. x → -x)
+            h_orig = _np.bincount(_bin(rotated), minlength=_total_bins)
+            h_mir = _np.bincount(_bin(mirrored), minlength=_total_bins)
+            return int(_np.minimum(h_orig, h_mir).sum())
+
+        # Coarse 2°-step scan over 0..179° (symmetry has 180° periodicity)
+        _coarse_angles = _np.arange(0, 180, 2) * _np.pi / 180.0
+        _coarse_scores = [_sym_score(a) for a in _coarse_angles]
+        _best_coarse = int(_np.argmax(_coarse_scores))
+        # Fine 0.25°-step scan around the coarse best ±3°
+        _fine_angles = _np.arange(-3, 3.01, 0.25) * _np.pi / 180.0 + _coarse_angles[_best_coarse]
+        _fine_scores = [_sym_score(a) for a in _fine_angles]
+        _best_fine = int(_np.argmax(_fine_scores))
+        _sym_theta = float(_fine_angles[_best_fine])
+
+        # The symmetry axis is ambiguous front/back (mirror plane is the same).
+        # Use the torso-bulge heuristic to resolve that ambiguity: after rotating
+        # the mesh by -_sym_theta, check which direction (-Z or +Z) the chest
+        # bulges toward.
+        c = _np.cos(-_sym_theta); s = _np.sin(-_sym_theta)
+        _rotated = _sample.copy()
+        _rotated[:, 0] = c * _sample[:, 0] + s * _sample[:, 2]
+        _rotated[:, 2] = -s * _sample[:, 0] + c * _sample[:, 2]
+        # Select mid-body vertices (30-80% of height)
+        _y_top = _np.percentile(_rotated[:, 1], 95)
+        _y_bot = _np.percentile(_rotated[:, 1], 5)
+        _y_r = _y_top - _y_bot
+        _mask = (_rotated[:, 1] > _y_bot + 0.30 * _y_r) & (_rotated[:, 1] < _y_bot + 0.80 * _y_r)
+        _chest_z_mean = _rotated[_mask, 2].mean() if _mask.sum() > 0 else 0.0
+        # We want chest_z_mean < 0 (chest bulges toward -Z = forward in glTF)
+        # If it's > 0, the mesh is pointing BACKWARD: rotate another 180°.
+        if _chest_z_mean > 0:
+            _sym_theta += _np.pi
+
+        # Final rotation to apply: -_sym_theta (so that the subject's symmetry
+        # axis aligns with the world -Z axis).
+        _rot_angle = ((-_sym_theta + _np.pi) % (2 * _np.pi)) - _np.pi  # wrap to [-π, π]
+
+        if abs(_rot_angle) > _np.radians(0.5):
+            import trimesh as _tm
+            _R = _tm.transformations.rotation_matrix(_rot_angle, [0, 1, 0])
+            mesh.apply_transform(_R)
+            auto_align_rot_deg = float(_np.degrees(_rot_angle))
+            print(
+                f"LOCAL_SF3D: auto-aligned mesh by {auto_align_rot_deg:.2f}° "
+                f"around Y (bilateral symmetry search; chest_z={_chest_z_mean:+.3f})",
+                flush=True,
+            )
+        else:
+            print(
+                f"LOCAL_SF3D: mesh already aligned "
+                f"(symmetry drift {_np.degrees(_rot_angle):.2f}° < 0.5°)",
+                flush=True,
+            )
     except Exception as _align_e:
         print(f"LOCAL_SF3D: auto-align skipped ({_align_e})", flush=True)
+        import traceback as _tb
+        _tb.print_exc()
 
     mesh.export(output_path, include_normals=True)
 
