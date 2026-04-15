@@ -1352,20 +1352,31 @@ document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.sto
 document.getElementById('ws-multiview-btn')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const imgPath = p.previewImagePath || p.selectedImagePath;
+  // Register a proper job so the "Running task" dialog + progress bar
+  // show up like for image/3D generation. Without this the user only
+  // saw a bottom toast and no way to know multi-view was running.
+  // Multi-view gen typically takes ~70 s (first run can add 4 GB DL).
+  const job = pushJob(`Multi-views: ${p.name}`, null, {
+    Image: (imgPath || '').split(/[\\/]/).pop(),
+  }, 70000);
   showToast('Generating 6 multi-views... (first run downloads ~4GB model)', 'info', 5000);
   try {
-    const imgPath = p.previewImagePath || p.selectedImagePath;
     const result = await API.generateMultiview({ imagePath: imgPath });
     if (result && result.success) {
       showToast('Multi-views generated!', 'success');
       if (!p._multiviews) p._multiviews = {};
       p._multiviews[imgPath] = result.outDir;
       _showMultiviewBar(result.outDir);
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
     } else {
-      showToast('Multi-view failed: ' + ((result && result.error) || 'unknown'), 'error', 5000);
+      const msg = (result && result.error) || 'unknown';
+      showToast('Multi-view failed: ' + msg, 'error', 5000);
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
     }
   } catch (e) {
     showToast('Multi-view error: ' + e.message, 'error', 5000);
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
   }
 });
 
