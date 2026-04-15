@@ -39,6 +39,11 @@ IMG2IMG_MODEL = "SG161222/RealVisXL_V4.0"
 SDXL_TURBO_MODEL = IMG2IMG_MODEL
 SDXL_INPAINT_MODEL = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
 CLIPSEG_MODEL = "CIDAS/clipseg-rd64-refined"
+# ControlNet Tile SDXL — xinsir/controlnet-tile-sdxl-1.0 (Apache 2.0,
+# commercial-safe). Used to boost atlas refine strength without breaking
+# the UV layout: the tile ControlNet constrains SDXL to respect the
+# source image structure while still adding micro-detail.
+CONTROLNET_TILE_MODEL = "xinsir/controlnet-tile-sdxl-1.0"
 
 # Enforce VRAM cap from FabMesh settings (passed via FABMESH_VRAM_FRACTION env var).
 GPU_MEMORY_FRACTION = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
@@ -69,6 +74,7 @@ class ModelState:
     def __init__(self):
         self.img2img_pipe = None
         self.inpaint_pipe = None
+        self.controlnet_tile_pipe = None
         self.clipseg_model = None
         self.clipseg_processor = None
         self.load_lock = threading.RLock()    # Reentrant - same thread can load multiple
@@ -189,8 +195,48 @@ def load_inpaint():
     return state.inpaint_pipe
 
 
+def load_controlnet_tile():
+    """Lazy-load RealVisXL + ControlNet Tile SDXL img2img pipeline."""
+    if state.controlnet_tile_pipe is not None:
+        state.last_use['controlnet_tile'] = time.time()
+        return state.controlnet_tile_pipe
+
+    with state.load_lock:
+        if state.controlnet_tile_pipe is not None:
+            return state.controlnet_tile_pipe
+        log(f"Loading {CONTROLNET_TILE_MODEL} + {IMG2IMG_MODEL}...")
+        _set_memory_fraction()
+        from diffusers import (
+            ControlNetModel,
+            StableDiffusionXLControlNetImg2ImgPipeline,
+        )
+        t0 = time.time()
+        controlnet = ControlNetModel.from_pretrained(
+            CONTROLNET_TILE_MODEL,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+        )
+        pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
+            IMG2IMG_MODEL,
+            controlnet=controlnet,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+        )
+        pipe.to("cuda")
+        pipe.enable_attention_slicing()
+        pipe.enable_vae_tiling()
+        if os.environ.get('FABMESH_UNRESTRICTED') == '1':
+            if hasattr(pipe, 'safety_checker'):
+                pipe.safety_checker = None
+        state.controlnet_tile_pipe = pipe
+        state.last_use['controlnet_tile'] = time.time()
+        log(f"controlnet_tile loaded in {time.time()-t0:.1f}s "
+            f"({vram_used_gb():.1f} GB VRAM)")
+    return state.controlnet_tile_pipe
+
+
 def unload_model(name):
-    """Free a model from VRAM. name in ('img2img', 'inpaint', 'clipseg')."""
+    """Free a model from VRAM. name in ('img2img', 'inpaint', 'controlnet_tile', 'clipseg')."""
     with state.load_lock:
         before = vram_used_gb()
         if name == 'img2img' and state.img2img_pipe is not None:
@@ -199,6 +245,9 @@ def unload_model(name):
         elif name == 'inpaint' and state.inpaint_pipe is not None:
             del state.inpaint_pipe
             state.inpaint_pipe = None
+        elif name == 'controlnet_tile' and state.controlnet_tile_pipe is not None:
+            del state.controlnet_tile_pipe
+            state.controlnet_tile_pipe = None
         elif name == 'clipseg' and state.clipseg_model is not None:
             del state.clipseg_model
             del state.clipseg_processor
@@ -283,6 +332,73 @@ def do_img2img(input_path, prompt, output_path, strength=0.55):
             return {"ok": True, "output": output_path, "time": elapsed, "size": [w, h]}
         except Exception as e:
             log(f"img2img error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
+def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
+                     controlnet_scale=0.7, guidance_scale=6.0, steps=None):
+    """
+    Tile-conditioned img2img: uses the source image as BOTH the init image
+    AND the ControlNet Tile condition. This lets us push strength way higher
+    than plain img2img (0.5-0.8 range) without destroying the UV layout or
+    colour composition of a texture atlas — the ControlNet anchors structure
+    while SDXL adds micro-detail.
+
+    Params:
+      strength          — img2img strength (0.5-0.8 recommended for atlas)
+      controlnet_scale  — how strongly the tile controlnet enforces structure
+                          (0.5 = permissive, 0.9 = rigid). 0.6-0.8 is sweet spot.
+      guidance_scale    — CFG (5-7 typical for RealVisXL)
+      steps             — None = auto from strength (same rule as img2img)
+    """
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+
+    # Single SDXL pipe at a time to stay under 16 GB VRAM.
+    if state.img2img_pipe is not None:
+        unload_model('img2img')
+    if state.inpaint_pipe is not None:
+        unload_model('inpaint')
+
+    pipe = load_controlnet_tile()
+    state.last_use['controlnet_tile'] = time.time()
+
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            img, (w, h) = resize_for_sdxl(img, max_dim=1024)
+
+            enhanced = f"{prompt}, high quality, detailed"
+            s = max(0.1, min(1.0, float(strength)))
+            if steps is None:
+                steps = max(int(round(25 / s)), int(round(1 / s)) + 1)
+                steps = min(steps, 60)
+            cns = max(0.0, min(1.5, float(controlnet_scale)))
+
+            t0 = time.time()
+            with torch.inference_mode():
+                result = pipe(
+                    prompt=enhanced,
+                    image=img,
+                    control_image=img,  # same tile image drives the ControlNet
+                    strength=s,
+                    num_inference_steps=steps,
+                    guidance_scale=guidance_scale,
+                    controlnet_conditioning_scale=cns,
+                ).images[0]
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            result.save(output_path)
+            elapsed = time.time() - t0
+            log(f"img2img_tile done in {elapsed:.1f}s "
+                f"(s={s:.2f}, cns={cns:.2f}, {steps} steps, {w}x{h}) "
+                f"-> {output_path}")
+            return {"ok": True, "output": output_path, "time": elapsed,
+                    "size": [w, h], "strength": s, "controlnet_scale": cns}
+        except Exception as e:
+            log(f"img2img_tile error: {e}", 'err')
             traceback.print_exc()
             free_vram()
             return {"ok": False, "error": str(e)}
@@ -483,6 +599,7 @@ class Handler(BaseHTTPRequestHandler):
                 "models": {
                     "img2img": state.img2img_pipe is not None,
                     "inpaint": state.inpaint_pipe is not None,
+                    "controlnet_tile": state.controlnet_tile_pipe is not None,
                     "clipseg": state.clipseg_model is not None,
                 },
                 "vram_gb": round(vram_used_gb(), 2),
@@ -493,6 +610,7 @@ class Handler(BaseHTTPRequestHandler):
                 "models_loaded": {
                     "img2img": state.img2img_pipe is not None,
                     "inpaint": state.inpaint_pipe is not None,
+                    "controlnet_tile": state.controlnet_tile_pipe is not None,
                     "clipseg": state.clipseg_model is not None,
                 },
                 "last_use": state.last_use,
@@ -525,6 +643,21 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('prompt', ''),
                     data['output'],
                     data.get('strength', 0.55),
+                )
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/img2img_tile':
+                if 'input' not in data or 'output' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output"})
+                    return
+                result = do_img2img_tile(
+                    data['input'],
+                    data.get('prompt', ''),
+                    data['output'],
+                    data.get('strength', 0.55),
+                    data.get('controlnet_scale', 0.7),
+                    data.get('guidance_scale', 6.0),
+                    data.get('steps', None),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

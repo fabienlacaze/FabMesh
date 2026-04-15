@@ -18,13 +18,19 @@ Pipeline:
   3. Blend overlapping tiles via a feathered mask so seams don't show.
   4. Re-pack the new atlas into the GLB (in-place, like upscale_atlas).
 
-Talks to the always-on SDXL server on http://127.0.0.1:7777 to avoid
+Talks to the always-on SDXL server on http://127.0.0.1:5555 to avoid
 loading another 6 GB pipeline. If the server isn't running we fall
 back to a local one-shot diffusers call (slower, more VRAM).
 
 Usage:
     python texture_refine.py <input.glb> <output.glb> [--strength 0.25]
                               [--prompt "..."] [--target 2048]
+                              [--controlnet_tile] [--cn_scale 0.7]
+
+ControlNet Tile mode (`--controlnet_tile`) uses xinsir/controlnet-tile-sdxl-1.0
+(Apache 2.0, commercial-safe) to anchor the refine to the source atlas
+structure, allowing much higher strength (0.5-0.75) without destroying
+UV layout — produces the "Meshy-style" crisp detail.
 """
 from __future__ import annotations
 
@@ -48,7 +54,7 @@ except Exception:
     Logger = None
 
 
-SDXL_URL = 'http://127.0.0.1:7777'
+SDXL_URL = 'http://127.0.0.1:5555'
 TILE = 1024
 OVERLAP = 128
 
@@ -59,24 +65,30 @@ def log(msg):
 
 def _server_alive() -> bool:
     try:
-        r = requests.get(SDXL_URL + '/health', timeout=1.5)
+        r = requests.get(SDXL_URL + '/ping', timeout=1.5)
         return r.status_code == 200
     except Exception:
         return False
 
 
 def _img2img_via_server(tile: Image.Image, prompt: str, strength: float,
-                        scratch_dir: str, idx: int) -> Image.Image:
+                        scratch_dir: str, idx: int,
+                        use_controlnet_tile: bool = False,
+                        controlnet_scale: float = 0.7) -> Image.Image:
     """Save tile to disk, POST, read result back."""
     in_path = os.path.join(scratch_dir, f'tile_{idx}_in.png')
     out_path = os.path.join(scratch_dir, f'tile_{idx}_out.png')
     tile.save(in_path)
-    r = requests.post(SDXL_URL + '/img2img',
-                      json={'input': in_path,
-                            'prompt': prompt,
-                            'output': out_path,
-                            'strength': float(strength)},
-                      timeout=180)
+    endpoint = '/img2img_tile' if use_controlnet_tile else '/img2img'
+    payload = {'input': in_path,
+               'prompt': prompt,
+               'output': out_path,
+               'strength': float(strength)}
+    if use_controlnet_tile:
+        payload['controlnet_scale'] = float(controlnet_scale)
+    r = requests.post(SDXL_URL + endpoint,
+                      json=payload,
+                      timeout=240)
     j = r.json()
     if not j.get('ok'):
         raise RuntimeError(j.get('error') or 'img2img failed')
@@ -131,7 +143,9 @@ def _feather_mask(tile_w: int, tile_h: int, overlap: int,
 
 
 def refine_atlas_image(atlas: Image.Image, prompt: str, strength: float,
-                       use_server: bool, scratch_dir: str) -> Image.Image:
+                       use_server: bool, scratch_dir: str,
+                       use_controlnet_tile: bool = False,
+                       controlnet_scale: float = 0.7) -> Image.Image:
     """Main worker — tile + img2img + feather-blend."""
     W, H = atlas.size
     if (W, H) != (atlas.size[0], atlas.size[1]):
@@ -178,8 +192,12 @@ def refine_atlas_image(atlas: Image.Image, prompt: str, strength: float,
             tile = atlas.crop((x, y, x + TILE, y + TILE))
             try:
                 if use_server:
-                    refined = _img2img_via_server(tile, prompt, strength,
-                                                   scratch_dir, idx)
+                    refined = _img2img_via_server(
+                        tile, prompt, strength,
+                        scratch_dir, idx,
+                        use_controlnet_tile=use_controlnet_tile,
+                        controlnet_scale=controlnet_scale,
+                    )
                 else:
                     refined = _img2img_local_fallback(tile, prompt, strength)
             except Exception as e:
@@ -294,12 +312,16 @@ def replace_glb_atlas(input_glb: str, output_glb: str,
 
 
 def refine(input_glb: str, output_glb: str, strength: float = 0.25,
-           prompt: str | None = None, target: int | None = None) -> bool:
+           prompt: str | None = None, target: int | None = None,
+           use_controlnet_tile: bool = False,
+           controlnet_scale: float = 0.7) -> bool:
     import trimesh
     t0 = time.time()
     slog = Logger('tex_refine', input=os.path.basename(input_glb)) if Logger else None
     if slog: slog.info('pipeline_started', strength=strength,
-                       target=target, prompt=prompt)
+                       target=target, prompt=prompt,
+                       controlnet_tile=use_controlnet_tile,
+                       controlnet_scale=controlnet_scale)
 
     m = trimesh.load(input_glb, process=False)
     geom = list(m.geometry.values())[0] if hasattr(m, 'geometry') else m
@@ -334,9 +356,14 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
     scratch = os.path.join(os.path.dirname(os.path.abspath(output_glb)),
                             '.refine_scratch')
     os.makedirs(scratch, exist_ok=True)
+    if use_controlnet_tile:
+        log(f'ControlNet Tile mode ON (cn_scale={controlnet_scale})')
     try:
-        new_atlas = refine_atlas_image(src, prompt, strength,
-                                        use_server, scratch)
+        new_atlas = refine_atlas_image(
+            src, prompt, strength, use_server, scratch,
+            use_controlnet_tile=use_controlnet_tile,
+            controlnet_scale=controlnet_scale,
+        )
         # Punch up the atlas: SDXL refine + trilinear filter combine to
         # produce visibly washed-out colours (user feedback 2026-04-15
         # "texture délavée"). Boost saturation +25% and contrast +12%
@@ -373,10 +400,16 @@ if __name__ == '__main__':
                    help='Refinement prompt')
     p.add_argument('--target', type=int, default=None,
                    help='Resize atlas to this square size before refinement')
+    p.add_argument('--controlnet_tile', action='store_true',
+                   help='Use ControlNet Tile SDXL for structure-preserving refine')
+    p.add_argument('--cn_scale', type=float, default=0.7,
+                   help='ControlNet conditioning scale (0=off, 1=rigid). Default 0.7')
     args = p.parse_args()
     try:
         ok = refine(args.input, args.output, args.strength,
-                    args.prompt, args.target)
+                    args.prompt, args.target,
+                    use_controlnet_tile=args.controlnet_tile,
+                    controlnet_scale=args.cn_scale)
         sys.exit(0 if ok else 1)
     except Exception as e:
         import traceback
