@@ -50,6 +50,19 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Post-refine saturation/contrast punch — DONE
+
+User feedback on atlas_refine result: "la texture semble toujours
+délavée". The orc identity was preserved (green skin, blue crown
+on head only, brown armor) but colours were too pale.
+
+**Fix**: PIL ImageEnhance.Color x1.25 + ImageEnhance.Contrast x1.12
+applied right after SDXL refine, before atlas write-back. Non-
+destructive on detail (keeps the micro-texture SDXL added) but
+restores the chroma SDXL softens.
+
+Pending visual check.
+
 ### 2026-04-15 — atlas_refine: 2-pass projection + SDXL refine — IN PROGRESS
 
 **Premise** (user request): retry the multi-view UV projection now

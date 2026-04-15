@@ -337,6 +337,15 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
     try:
         new_atlas = refine_atlas_image(src, prompt, strength,
                                         use_server, scratch)
+        # Punch up the atlas: SDXL refine + trilinear filter combine to
+        # produce visibly washed-out colours (user feedback 2026-04-15
+        # "texture délavée"). Boost saturation +25% and contrast +12%
+        # using PIL — non-destructive, keeps the local detail SDXL just
+        # added but restores chroma the diffusion model softens.
+        from PIL import ImageEnhance
+        new_atlas = ImageEnhance.Color(new_atlas).enhance(1.25)
+        new_atlas = ImageEnhance.Contrast(new_atlas).enhance(1.12)
+        log('post-refine punch: saturation x1.25, contrast x1.12')
         replace_glb_atlas(input_glb, output_glb, new_atlas)
     finally:
         # Best-effort cleanup
