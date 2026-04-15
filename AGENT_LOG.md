@@ -143,12 +143,19 @@ encode their torch version, so risk: same `_ZNK3c1010TensorImpl
 - `cumesh-0.0.1-cp312-cp312-linux_x86_64.whl`
 - `o_voxel-0.0.1-cp312-cp312-linux_x86_64.whl`
 
-**Next**:
-1. `pip install torch==2.7.0 torchvision==0.22.0 --index-url cu128 --force-reinstall`
-2. `pip install /root/trellis2_wheels/*.whl --force-reinstall`
-3. `python -c 'import flex_gemm'` → if error → siraxe wheels are
-   ALSO incompatible with torch 2.7 → next attempt will need torch
-   2.6.0+cu128 from a different source, or build from source.
+**Result torch 2.7.0+cu128 + community wheels**:
+- `flex_gemm OK` ✅
+- `cumesh OK` ✅
+- `grid_sample_3d OK` ✅
+- `o_voxel` ❌ — `undefined symbol _ZNK3c107SymBool14guard_or_falseEPKcl`
+  (= `c10::SymBool::guard_or_false(const char*, long)`) — present in
+  torch 2.8+, not in 2.7. So o_voxel was built against torch 2.8.
+
+**Attempt 3 (in progress)**: bump to torch 2.8.0+cu128 + same wheels.
+3 of 4 things now work; o_voxel needs the 2.8 symbol.
+Note: pin between flex_gemm/cumesh ABI (2.7-compatible) and o_voxel
+(2.8-required) is fragile — there might be no torch version where
+ALL 3 wheels are happy at once. Will know in 1 minute.
 
 **Add to "do not retry"**: don't trust agent claims about "wheels
 Windows officielles" without verifying via direct GitHub release
