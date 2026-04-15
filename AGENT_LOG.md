@@ -50,6 +50,40 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Mesh auto-align to -Z (root cause of "texture inverted" on test_e2e)
+
+**User symptom**: newly generated test_e2e mesh appeared as if the
+texture was inverted front/back, and the back looked all black in the
+FabMesh viewer.
+
+**Investigation** (via `_check_orientation2.py` Python renderer, 4
+cardinal views):
+- GLB geometry is intact (same 19567 verts / 24576 faces as earlier
+  working generations).
+- `_proj_debug.png` generated at projection time shows the orc perfectly
+  from the front — so `texture_project.py` IS projecting the correct
+  view onto the correct part of the mesh.
+- BUT the chest bulge (in-plane XZ component of chest-outward average)
+  points at `(-0.606, 0, +0.795)` — face direction ~53° off any axis.
+- FabMesh Three.js viewer spawns camera at `(+X,+Y,+Z)` looking at the
+  origin. With the orc facing 53° in the (-X, +Z) quadrant, the viewer
+  ends up photographing the orc's left side, not its front.
+- Hence the impression of "inverted / back black" — the front IS painted,
+  just not visible from the viewer's default angle.
+
+**Fix** (commit `7f36fc3`): added an auto-align step in
+`local_sf3d_bridge.py` right before `mesh.export`. Slices the
+mid-body (30-80% height), averages chest-outward direction in the XZ
+plane, and rotates the entire mesh around Y so that direction becomes
+-Z (glTF "forward"). Skips if already within 3° to avoid numerical
+drift. Applies to every SF3D generation, so the viewer + projection +
+rig all see a canonically oriented mesh.
+
+**Test plan**: generate a new test_e2e mesh → confirm the thumbnail
+shows the orc from the front (or a 3/4-front), not from the side.
+
+---
+
 ### 2026-04-15 — MAJOR COURSE CORRECTION — going back to fidelity-first
 
 **User restated the #1 goal** (not a new requirement, the *original*
