@@ -3100,7 +3100,16 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
         }
       };
       proc.stdout?.on('data', d => {
-        stdoutBuf += d.toString();
+        const chunk = d.toString();
+        stdoutBuf += chunk;
+        // Diagnostic: log any LOCAL_*_PROGRESS line we see coming from the
+        // bridge, with a timestamp — lets us tell if the bar stays at 5%
+        // because (a) the bridge never emits higher values or (b) main.js
+        // buffers them or (c) the renderer filters them out.
+        const progLines = chunk.split(/\r?\n/).filter(l => /LOCAL_[A-Z0-9_]+_PROGRESS:/.test(l));
+        for (const pl of progLines) {
+          log.info('progress-diag', `t+${Date.now()}: ${pl.trim()}`);
+        }
         const now = Date.now();
         if (now - lastSent > 200) flushStdout();
       });

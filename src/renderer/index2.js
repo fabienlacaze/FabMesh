@@ -6232,6 +6232,14 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
   window.meshyAPI.onAI3DProgress((msg) => {
     try {
       if (!msg || typeof msg !== 'string') return;
+      // DIAGNOSTIC: log every chunk containing a progress marker, with the
+      // matched value — reveals whether the bar stalls because the bridge
+      // sent nothing, or because the renderer rejected a line, or because
+      // main.js batched updates. Filter to progress-relevant chunks so the
+      // console doesn't drown.
+      if (msg.indexOf('_PROGRESS:') !== -1 || msg.indexOf('FABMESH_SUBPCT') !== -1) {
+        console.log('[progress-diag]', Date.now(), JSON.stringify(msg.slice(0, 300)));
+      }
       // Ignore sub-phase raw percentages — the bridge already remaps those
       // into proper LOCAL_SF3D_PROGRESS overall values. Without this guard
       // a 99% FABMESH_SUBPCT (tile 6/6 of refine) would incorrectly snap
@@ -6251,7 +6259,10 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
         const mm = PROG_RE.exec(rawLine);
         if (mm) {
           const v = parseInt(mm[1], 10);
+          console.log('[progress-diag] matched line:', rawLine.trim(), '-> v=', v);
           if (v > reported) reported = v;
+        } else if (rawLine.indexOf('_PROGRESS:') !== -1) {
+          console.log('[progress-diag] NO MATCH but has _PROGRESS:', rawLine.trim());
         }
       }
       if (reported < 0) return;
