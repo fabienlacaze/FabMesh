@@ -570,9 +570,30 @@ def generate_3d(
             # Talks to the always-on SDXL server (~1 GB VRAM persisted)
             # to avoid loading a 6 GB pipeline per generation.
             _target = max(int(tex_res), 2048)
+            # Pull the original user prompt from images/<project>/prompts.json
+            # so the refine knows it's an "orc warrior with blue crown" and
+            # not a generic surface — without this, SDXL hallucinates the
+            # wrong subject (e.g. ice golem instead of orc).
+            _refine_prompt = None
+            try:
+                _img_dir = os.path.dirname(os.path.abspath(image_path))
+                _prompts_json = os.path.join(_img_dir, 'prompts.json')
+                if os.path.exists(_prompts_json):
+                    import json as _pj
+                    with open(_prompts_json, 'r', encoding='utf-8') as _pf:
+                        _entries = _pj.load(_pf)
+                    if isinstance(_entries, list) and _entries:
+                        # Use the most recent prompt
+                        _refine_prompt = (_entries[-1].get('prompt')
+                                          or _entries[-1].get('fullPrompt'))
+            except Exception as _pe:
+                print(f"LOCAL_SF3D: could not read prompts.json ({_pe})", flush=True)
             _cmd = [sys.executable, _refine_script, output_path,
                     output_path, '--strength', '0.25',
                     '--target', str(_target)]
+            if _refine_prompt:
+                _cmd += ['--prompt', _refine_prompt]
+                print(f"LOCAL_SF3D: refine prompt={_refine_prompt[:80]!r}", flush=True)
             _label = f'SDXL atlas refine -> {_target}px'
         elif _proj_mode == 'augment' and os.path.exists(_augment_script):
             # Keep SF3D's atlas where it's good (front), additively

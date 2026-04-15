@@ -304,6 +304,15 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
     if not prompt:
         prompt = ('photorealistic detailed surface texture, '
                   'natural materials, sharp focus, 8k')
+    else:
+        # Subject-aware refine: keep the subject identity from the user's
+        # original prompt, append the texture-quality keywords. SDXL is
+        # then nudged to refine ON THE RIGHT subject (an orc, a chicken)
+        # instead of hallucinating a generic photoreal something.
+        prompt = (prompt
+                  + ', photorealistic detailed surface texture, '
+                    'natural materials, sharp focus, 8k')
+    log(f'prompt: {prompt[:120]}{"..." if len(prompt) > 120 else ""}')
 
     scratch = os.path.join(os.path.dirname(os.path.abspath(output_glb)),
                             '.refine_scratch')
