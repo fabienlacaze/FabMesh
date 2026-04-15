@@ -114,6 +114,24 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
     _hb_thread = _th.Thread(target=_heartbeat, daemon=True)
     if sub_phase:
         _hb_thread.start()
+
+    # CRITICAL — drain stderr continuously in a background thread. Without
+    # this, Python sub-scripts (Zero123++, SF3D, SDXL) write warnings/tqdm
+    # progress/logging to stderr at ~1KB/s; when the Windows stderr pipe
+    # buffer fills (~64KB), the child blocks on its next write → visible
+    # symptom: VRAM allocated but GPU util at 0% for minutes on end, no
+    # progress events. Reading stderr out-of-band keeps the child flowing.
+    _err_buf = []
+
+    def _drain_stderr():
+        assert proc.stderr is not None
+        for eline in iter(proc.stderr.readline, ''):
+            if not eline:
+                break
+            _err_buf.append(eline)
+
+    _err_thread = _th.Thread(target=_drain_stderr, daemon=True)
+    _err_thread.start()
     collected_out = []
     t_start = time.time()
     try:
@@ -152,10 +170,14 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
                   if timeout else None)
         res.returncode = proc.returncode
         res.stdout = ''.join(collected_out)
+        # stderr was drained live by _drain_stderr — join the thread then
+        # collect what it captured. Don't proc.stderr.read() here: the thread
+        # already consumed the pipe.
         try:
-            res.stderr = proc.stderr.read() if proc.stderr else ''
+            _err_thread.join(timeout=2.0)
         except Exception:
-            res.stderr = ''
+            pass
+        res.stderr = ''.join(_err_buf)
     except _sp.TimeoutExpired:
         proc.kill()
         res.returncode = -9
