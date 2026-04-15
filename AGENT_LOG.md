@@ -50,6 +50,45 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — ControlNet Tile SDXL atlas refine — IN TEST
+
+**Motivation**: user wants Meshy-quality texture; TRELLIS.2 is legally
+unshippable (nvdiffrast NC); Hunyuan3D EU-excluded. Only commercial-safe
+lever left is to push the existing SDXL atlas_refine harder.
+
+**Problem with current refine** (`strength=0.25`, plain img2img):
+- Too timid to add visible detail
+- Bump strength above 0.3 → SDXL hallucinates and breaks UV layout
+- No 3D-structure awareness — it repaints tile-blind
+
+**Fix**: plug xinsir/controlnet-tile-sdxl-1.0 (Apache 2.0, commercial-safe)
+into the refine pipeline. Tile ControlNet forces SDXL to respect the
+source image structure while still adding micro-detail. This lets us
+push `strength` to 0.5–0.75 without destroying the atlas layout — same
+technique Meshy/Scenario use.
+
+**Also fixed a stale bug**: `texture_refine.py` was pointing at
+`http://127.0.0.1:7777/health` but the SDXL server binds 5555 and
+exposes `/ping`. So `_server_alive()` always returned False → every
+refine went through the slow in-process fallback. Corrected to 5555
++ /ping.
+
+**New code** (commit `c456ec2`):
+- `sdxl_server.py`: lazy-load `StableDiffusionXLControlNetImg2ImgPipeline`
+  with xinsir/controlnet-tile-sdxl-1.0 + RealVisXL V4.0. Unload-with-others
+  rule preserved to stay under 16 GB. Endpoint `/img2img_tile` accepts
+  `strength`, `controlnet_scale`, `guidance_scale`, `steps`.
+- `texture_refine.py`: flags `--controlnet_tile --cn_scale 0.7`,
+  threaded through the whole call chain. Default strength 0.25 kept
+  for back-compat; ControlNet test will use 0.6.
+
+**Test plan** (pending): run on `test_e2e_sf3d_1776207309698.glb`
+with `--controlnet_tile --strength 0.6 --cn_scale 0.7 --target 2048`
+→ compare side-by-side with previous refine (strength 0.25, no CN).
+User will judge visually.
+
+---
+
 ### 2026-04-15 — TRELLIS.2 already installed in WSL — DIDN'T RUN (CUDA ABI mismatch)
 
 Re-discovery: `local_trellis2_bridge.py` (170 lines) already exists in
