@@ -100,8 +100,8 @@ def generate_3d(
     # ------------------------------------------------------------------
     _multiview_dir = output_path + '.multiview'
     _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'refine').lower()
-    # 'augment' is a new mode that needs the multi-view dir
-    _modes_using_mv = ('atlas', 'vc', 'augment')
+    # 'augment', 'atlas_refine' need the multi-view dir
+    _modes_using_mv = ('atlas', 'vc', 'augment', 'atlas_refine')
     if _proj_mode_pre not in _modes_using_mv:
         print(f"LOCAL_SF3D: multi-view skipped (mode={_proj_mode_pre}, not needed)",
               flush=True)
@@ -617,6 +617,19 @@ def generate_3d(
                     + (['--multiview', _multiview_dir]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'UV atlas projection'
+        elif _proj_mode == 'atlas_refine' and os.path.exists(_atlas_script):
+            # Two-pass: first multi-view UV projection (atlas script)
+            # to cover the back/sides with real Zero123++ data, then
+            # SDXL refine to clean seams + add micro-detail. Cmd
+            # below is just the first pass; the second pass is
+            # triggered after this if-block succeeds.
+            if _multiview_dir and os.path.isdir(_multiview_dir):
+                _cmd = ([sys.executable, _atlas_script, output_path,
+                         _preprocessed_path, output_path, str(tex_res),
+                         '--multiview', _multiview_dir])
+                _label = 'atlas+refine pass 1 (projection)'
+            else:
+                print('LOCAL_SF3D: atlas_refine needs multi-view dir', flush=True)
         elif _proj_mode == 'none':
             print('LOCAL_SF3D: native SF3D atlas kept (FABMESH_PROJECT_MODE=none)', flush=True)
         if _cmd:
@@ -635,6 +648,38 @@ def generate_3d(
                         print(f"LOCAL_SF3D: {line}", flush=True)
             else:
                 print(f"LOCAL_SF3D: {_label} applied", flush=True)
+                # Second pass for atlas_refine: SDXL refine on the
+                # projection result. Subject prompt grabbed from
+                # prompts.json same as plain refine mode.
+                if _proj_mode == 'atlas_refine' and os.path.exists(_refine_script):
+                    _refine_prompt = None
+                    try:
+                        _img_dir = os.path.dirname(os.path.abspath(image_path))
+                        _prompts_json = os.path.join(_img_dir, 'prompts.json')
+                        if os.path.exists(_prompts_json):
+                            import json as _pj
+                            with open(_prompts_json, 'r', encoding='utf-8') as _pf:
+                                _entries = _pj.load(_pf)
+                            if isinstance(_entries, list) and _entries:
+                                _refine_prompt = (_entries[-1].get('prompt')
+                                                  or _entries[-1].get('fullPrompt'))
+                    except Exception:
+                        pass
+                    _refine_cmd = [sys.executable, _refine_script, output_path,
+                                   output_path, '--strength', '0.22',
+                                   '--target', str(max(int(tex_res), 2048))]
+                    if _refine_prompt:
+                        _refine_cmd += ['--prompt', _refine_prompt]
+                    print(f"LOCAL_SF3D: atlas_refine pass 2 (SDXL refine) starting", flush=True)
+                    _r2 = _sp_proj.run(_refine_cmd, capture_output=True,
+                                        text=True, timeout=600)
+                    if _r2.stdout:
+                        for line in _r2.stdout.strip().split('\n'):
+                            print(f"LOCAL_SF3D: {line}", flush=True)
+                    if _r2.returncode != 0:
+                        print(f"LOCAL_SF3D: pass 2 refine failed (code {_r2.returncode})", flush=True)
+                    else:
+                        print(f"LOCAL_SF3D: atlas_refine pass 2 done", flush=True)
     except Exception as _tp_e:
         print(f"LOCAL_SF3D: texture projection skipped ({_tp_e})", flush=True)
     finally:

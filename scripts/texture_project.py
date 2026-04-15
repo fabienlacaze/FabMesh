@@ -678,7 +678,25 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     if json_chunk and bin_chunk_offset:
         images = json_chunk.get('images', [])
         buffer_views = json_chunk.get('bufferViews', [])
-        for img_info in images:
+        # Resolve the baseColorTexture's image index — never overwrite
+        # the normal map. (Bug AGENT_LOG 2026-04-15: SF3D orders normal
+        # before baseColor sometimes; iterating all images destroyed it.)
+        materials_g = json_chunk.get('materials', []) or []
+        textures_g = json_chunk.get('textures', []) or []
+        base_color_image_idx = 0
+        for _mat in materials_g:
+            _pbr = _mat.get('pbrMetallicRoughness') or {}
+            _bct = _pbr.get('baseColorTexture') or {}
+            _ti = _bct.get('index')
+            if _ti is not None and _ti < len(textures_g):
+                _si = textures_g[_ti].get('source')
+                if _si is not None:
+                    base_color_image_idx = _si
+                    break
+        log(f'replacing image[{base_color_image_idx}] only (preserving normal map etc.)')
+        for i_img, img_info in enumerate(images):
+            if i_img != base_color_image_idx:
+                continue
             bv_idx = img_info.get('bufferView')
             if bv_idx is None: continue
             bv = buffer_views[bv_idx]

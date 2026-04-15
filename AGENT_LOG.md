@@ -50,6 +50,25 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — atlas_refine: 2-pass projection + SDXL refine — IN PROGRESS
+
+**Premise** (user request): retry the multi-view UV projection now
+that we have all the latest fixes (alpha-aware multi-views,
+elevation-correct camera, NEAREST→trilinear filter, normal-map
+preservation), then chain SDXL refine on top to clean the seams.
+
+**New mode**: `FABMESH_PROJECT_MODE=atlas_refine` in
+`local_sf3d_bridge.py`. Runs `texture_project.py` (multi-view
+projection, EDT dilation) then chains `texture_refine.py` with the
+subject-aware prompt at strength 0.22.
+
+**Side fix**: `texture_project.py` was iterating ALL images in the
+GLB and overwriting them — same bug as upscale_atlas/texture_refine
+had — destroying the normal map. Now resolves baseColorTexture index
+explicitly before writing.
+
+**Status**: not yet visually validated.
+
 ### 2026-04-15 — Trilinear filter + preserve normal map — POLISH
 
 **Problem**: when zooming on a mesh, user saw "carrés" (the actual
