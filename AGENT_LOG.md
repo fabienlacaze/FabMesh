@@ -50,6 +50,26 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — TRELLIS.2 install attempt — STARTED
+
+**Why retry**: Earlier `AGENT_LOG` entry says "TRELLIS never ran, don't
+retry". That was for **v1** (CUDA / nvdiffrast / kaolin issues on
+Windows). **TRELLIS.2** released by Microsoft in Dec 2025 has
+**official Windows wheels** for nvdiffrast 0.4.0 (cp311-cp311) per
+the agent #3 research today.
+
+**Goal**: install TRELLIS.2 from `microsoft/TRELLIS.2` repo, run
+`example_texturing.py` on the orc image, judge whether it produces
+PBR atlases that beat our current SDXL refine. If yes, bridge it as
+a new mode `FABMESH_PROJECT_MODE=trellis2`.
+
+**Backup**: `git tag before-trellis2-attempt` created so we can
+revert any accidental damage to the working pipeline.
+
+**Constraints**: must be MIT or Apache, EU + commercial OK, must
+fit in 16 GB VRAM (v2 docs say peak 30 GB in rendering — risky on
+RTX 5080, will need the 4B distilled checkpoint).
+
 ### 2026-04-15 — Post-refine saturation/contrast punch — DONE
 
 User feedback on atlas_refine result: "la texture semble toujours
