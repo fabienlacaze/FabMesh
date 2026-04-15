@@ -50,6 +50,52 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — MAJOR COURSE CORRECTION — going back to fidelity-first
+
+**User restated the #1 goal** (not a new requirement, the *original*
+demand): *"je veux un mesh 3D qui soit le plus proche possible de
+l'image initiale (shape et texture) → c'est la demande de base"*.
+
+**Recognition**: I've been chasing SDXL refine quality for hours, but
+every refine (v1 + v2 of CN Tile) was adding/changing pixels that have
+**no relationship to the reference image**. The refine was never going
+to fix fidelity — it was a purely stylistic layer on top.
+
+**Real diagnosis — multi-views are silently not generating**:
+- `logs/_multiview_*` latest folder is from 2026-04-14 23:01 (project
+  orc_blue_crown). No multiview folder exists for today's test_e2e
+  generation (12:12–12:16).
+- `grep multiview logs/fabmesh.log` around 10:12–10:16 returns zero
+  matches. The SF3D bridge's multiview step was skipped.
+- SF3D received only the single reference image → no back/sides info
+  → the atlas can only have front-biased texturing, with back/sides
+  fabricated from SF3D's prior. This is **the real reason** the base
+  mesh texture is weak, and no amount of refine can add back info the
+  mesh never had in the first place.
+
+**Immediate next steps** (pivoting away from CN Tile experiments):
+1. Reproduce a mesh generation and capture EVERY log line to find
+   where multiview is being skipped. `local_sf3d_bridge.py` has a
+   try/except at line ~108 that silently sets `_multiview_dir = None`
+   on failure — likely the culprit.
+2. Once multiview is confirmed running again: verify the 6 views go
+   through RealESRGAN upscale + rembg + feed into SF3D's atlas bake.
+3. Then A/B the mesh with/without multiviews on the same reference.
+4. Only after fidelity is verified: consider IPAdapter-guided refine
+   that takes the reference image AND the 6 multiviews as conditions,
+   so any refine stays aligned with the actual orc.
+
+**Hyper-SDXL 8-step LoRA work was started** (sdxl_server.py +
+texture_refine.py branches) but **stashed** (`wip_hyper_sdxl_pause`) —
+optimizing refine speed is useless while the base mesh isn't faithful
+to the reference.
+
+**Added to memory** (`project_core_requirement.md`): fidelity to
+reference image (shape + texture) is FabMesh's #1 goal, everything
+else is secondary.
+
+---
+
 ### 2026-04-15 — ControlNet Tile SDXL atlas refine — FIRST RUN DONE (pending user visual verdict)
 
 **Run 1 (failed at tile 1)**: auto-derived `steps=42` at strength 0.6,
