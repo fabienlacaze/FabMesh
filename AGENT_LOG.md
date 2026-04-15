@@ -198,6 +198,29 @@ the script is set explicitly to Linux-only dirs.
 
 Build now running with clean env. Compile time ~3-5 min for nvdiffrast.
 
+→ **SUCCESS** 🎉 — `nvdiffrast-0.4.0-cp312-cp312-linux_x86_64.whl`
+built and installed (15 MB wheel, sm_120 native).
+
+**Full stack smoke test** passed:
+- torch 2.8.0+cu128 ✅
+- flex_gemm (siraxe wheel) ✅
+- cumesh (siraxe wheel) ✅
+- o_voxel (siraxe wheel) ✅
+- nvdiffrast 0.4.0 (locally rebuilt for sm_120) ✅
+- `Trellis2TexturingPipeline` import ✅
+
+**Working recipe** (for reproducibility and packaging):
+1. WSL2 Ubuntu with venv python 3.12
+2. CUDA Toolkit 12.8 at `/usr/local/cuda-12.8`
+3. `pip install torch==2.8.0 torchvision==0.23.0 --index-url cu128`
+4. `pip install --no-deps` the 3 siraxe community wheels
+   (flex_gemm, cumesh, o_voxel from HF)
+5. `CUDA_HOME=/usr/local/cuda-12.8 PATH=/usr/local/cuda-12.8/bin:$PATH
+    TORCH_CUDA_ARCH_LIST='12.0' pip install --no-build-isolation
+    --no-deps git+https://github.com/NVlabs/nvdiffrast.git`
+
+Next: `local_trellis2_bridge.py` on orc image, inspect quality.
+
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
 - `cumesh OK` ✅
