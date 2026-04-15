@@ -385,7 +385,8 @@ async function refreshProjectsPage() {
     // another timestamp. Order matters: run until nothing changes.
     // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
     // fix_normals, center, upscale, refine, augment, vc (vertex color).
-    const POST_SUFFIX = /_(cntile|retexture|decimate|smooth|fill_holes|fix_normals|center|upscale|refine|augment|vc)(?:_\d{10,})?$/i;
+    // Optionally followed by a timestamp OR a short tag (_v2, _test, etc.).
+    const POST_SUFFIX = /_(cntile|retexture|decimate|smooth|fill_holes|fix_normals|center|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
     let prev;
     do {
       prev = base;
