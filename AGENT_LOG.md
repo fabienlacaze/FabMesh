@@ -168,8 +168,19 @@ this blocks the whole pipeline.
 → Build error: `Cannot compile nvdiffrast CUDA extension. Run pip
 install with --no-build-isolation flag`. Trivial fix.
 
-Retrying with `pip install --force-reinstall --no-deps --no-build-isolation
-git+...nvdiffrast.git`. Running in background.
+→ Retried with `--no-build-isolation`: **NEW ERROR**
+`nvcc fatal : Unsupported gpu architecture 'compute_120'`. The
+WSL Ubuntu has nvcc 12.0 system-wide, but Blackwell (RTX 5080 =
+sm_120) requires **nvcc 12.8+** to compile.
+
+This is the real blocker. Three options:
+- A. Force build with `TORCH_CUDA_ARCH_LIST=8.9` (sm_89, Ada
+     Lovelace 4090) — Blackwell may run sm_89 binary by fallback.
+- B. Install CUDA Toolkit 12.8 in WSL (~3-4 GB) — clean fix.
+- C. Abandon TRELLIS.2 path entirely.
+
+Trying A first (zero install, 5 min). If kernels don't run on
+Blackwell at runtime, fall back to B.
 
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
