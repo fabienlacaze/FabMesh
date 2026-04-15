@@ -50,6 +50,48 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — TRELLIS.2 already installed in WSL — DIDN'T RUN (CUDA ABI mismatch)
+
+Re-discovery: `local_trellis2_bridge.py` (170 lines) already exists in
+`scripts/`, and `/root/TRELLIS.2` exists in WSL Ubuntu with a `.venv`
+(python 3.12) and the official `example_texturing.py`. Module
+imports cleanly (`from trellis2 ...`).
+
+The bridge's docstring claims "works out of the box with ~14 GB VRAM
+peak on RTX 5080" — so a previous attempt DID succeed once.
+
+**Failure mode this time** (test on orc image, output to /tmp):
+```
+ImportError: ... flex_gemm/kernels/cuda.cpython-312-x86_64-linux-gnu.so:
+undefined symbol: _ZNK3c1010TensorImpl15incref_pyobjectEv
+```
+flex_gemm 1.0.0 was pre-compiled against torch 2.6 (TRELLIS.2 README
+explicitly recommends torch 2.6.0 + CUDA 12.4) but the venv has
+torch 2.9.1+cu128. Pre-built CUDA extensions break across torch
+minor versions.
+
+**Why this happens repeatedly**: TRELLIS.2 ships its own custom CUDA
+ops (flex_gemm, custom_rasterizer). They're tightly coupled to the
+specific torch ABI they were built against. Any pip install/upgrade
+in the venv that touches torch breaks them.
+
+**Two ways forward**:
+- A. `pip install torch==2.6.0 --index-url cu124` inside the venv
+  (5 min, narrow risk — only the trellis2 venv affected)
+- B. Recreate the venv from scratch via TRELLIS.2's official
+  `setup.sh` (~30 min, cleanest)
+
+**User instruction**: install it for real this time, log every step
+to avoid going in circles.
+
+**Attempt 1 (2026-04-15 ~10:35)**: downgrade torch in the venv to
+2.6.0+cu124 to match the flex_gemm 1.0.0 pre-built wheels. Command:
+`/root/TRELLIS.2/.venv/bin/pip install torch==2.6.0 torchvision
+--index-url https://download.pytorch.org/whl/cu124 --upgrade`.
+Then re-run smoke `import flex_gemm`.
+
+(Result pending.)
+
 ### 2026-04-15 — TRELLIS.2 install attempt — STARTED
 
 **Why retry**: Earlier `AGENT_LOG` entry says "TRELLIS never ran, don't
