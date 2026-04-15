@@ -253,6 +253,37 @@ Going with **B** for the test (fastest to validate quality) then
 `briaai/RMBG-2.0` (gated + research license). Must be patched out
 for any commercial usage.
 
+**Attempt B (2026-04-15 ~12:10)**: monkey-patch `BiRefNet.__init__`
+to a no-op before pipeline load (`c:/tmp/_trellis2_monkey.sh`).
+Pipeline load **SUCCEEDED** in 27 s with the 4B weights (415/415
+loaded, flex_gemm + flash_attn backends active). RTX 5080 / cu128
+stack is fully functional.
+
+**Next blocker**: `trimesh.load()` returned a `Scene` because
+SF3D GLB has one geometry inside a node. Fixed by calling
+`trimesh.util.concatenate(list(loaded.geometry.values()))` when
+`isinstance(loaded, trimesh.Scene)`. Mesh became a 15269-vert /
+19048-face `Trimesh`.
+
+**Next blocker after that**: `AttributeError: 'DINOv3ViTModel'
+object has no attribute 'layer'` in
+`trellis2/modules/image_feature_extractor.py:86`. Cause:
+transformers ≥4.41 wraps DINOv3 as `model.model.layer` (i.e. the
+encoder is at `.model`, not flattened). Older transformers the
+TRELLIS.2 code was written against had `.layer` directly. Patched
+the extractor in place:
+```python
+_layers = getattr(self.model, "layer", None) or self.model.model.layer
+for i, layer_module in enumerate(_layers):
+    ...
+```
+Backup saved as `image_feature_extractor.py.bak_preLayerFix`.
+
+**Add to "do not retry"**: don't trust TRELLIS.2's feature
+extractor to work out of the box on current transformers. The
+`DinoV3FeatureExtractor.extract_features` hardcoded `self.model.
+layer` which is now one level deeper.
+
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
 - `cumesh OK` ✅
