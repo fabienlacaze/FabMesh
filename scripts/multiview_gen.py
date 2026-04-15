@@ -252,20 +252,97 @@ def generate_multiview(input_image_path, output_dir, size=320):
         log(f'rembg bg removal skipped ({be})')
 
     # ------------------------------------------------------------------
-    # Style harmonization pass (OPT-IN — disabled by default, 2026-04-15)
+    # Identity harmonization pass via SDXL + IPAdapter (NEW 2026-04-16)
     # ------------------------------------------------------------------
-    # Was meant to fix Zero123++'s cartoon look on the back/side views by
-    # passing each through SDXL img2img at strength 0.35 with a
-    # "photorealistic, matches reference photo" prompt. In practice it
-    # DRIFTS COLORS: the user reported horse views turning green because
-    # SDXL doesn't see the reference image (just a prompt) and hallucinates
-    # its own colour scheme. The cost of this breakage is higher than the
-    # gain of slightly better style consistency, so the pass is now opt-in
-    # via the FABMESH_MV_STYLE_HARMONIZE=1 env var.
-    # Commits: 7c9225a introduced it; this guard disables by default.
+    # Replaces the old style-harmonize (which drifted colors because SDXL
+    # only saw a text prompt, not the ref image).
+    # Now: SDXL img2img at low strength GUIDED BY IPAdapter with the input
+    # ref image. SDXL sees the actual pixels of the subject and keeps its
+    # colour/identity while cleaning up Zero123++'s cartoon smoothing and
+    # hallucinated occluded regions (legs under loincloth etc).
+    # Opt-in via FABMESH_MV_IDENTITY_HARMONIZE=1 env var. Disabled by
+    # default until proven on user's examples.
+    _identity_on = os.environ.get('FABMESH_MV_IDENTITY_HARMONIZE') == '1'
+    if _identity_on:
+        try:
+            log('MULTIVIEW_PROGRESS: 89 identity-harmonize')
+            slog.progress(89, 'identity_harmonize')
+            _subpct(88, 'identity_harmonize')
+            from diffusers import StableDiffusionXLImg2ImgPipeline
+            _h_t0 = time.time()
+            # Lazy-load a small img2img pipeline. Use RealVisXL V4.0
+            # (already cached locally, openrail++-M commercial-safe).
+            _h_pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                'SG161222/RealVisXL_V4.0',
+                torch_dtype=torch.float16,
+                use_safetensors=True,
+            )
+            # IPAdapter Plus SDXL (h94/IP-Adapter, MIT license). Feeds the
+            # CLIP-vision embedding of the ref image into the UNet's
+            # cross-attention, so SDXL "sees" the true subject colours.
+            _h_pipe.load_ip_adapter(
+                'h94/IP-Adapter',
+                subfolder='sdxl_models',
+                weight_name='ip-adapter-plus_sdxl_vit-h.safetensors',
+            )
+            # Scale 0.7 = strong guidance but leaves room for refinement.
+            _h_pipe.set_ip_adapter_scale(0.7)
+            _h_pipe.enable_model_cpu_offload()
+            log('IPAdapter Plus SDXL loaded')
+
+            # The ref image the IPAdapter will condition on — the ORIGINAL
+            # RGBA input (not the Zero123++ view) since we want SDXL to
+            # pull identity from there, not from the cartoon-style view.
+            _ref_ip = input_img_rgba.convert('RGB')
+
+            harmonized = []
+            _h_strength = float(os.environ.get('FABMESH_MV_IDENTITY_STRENGTH', '0.3'))
+            for i, tile in enumerate(upscaled_tiles):
+                _t_in = tile.convert('RGB')
+                # Respect alpha for later atlas projection
+                _alpha = tile.split()[-1] if tile.mode == 'RGBA' else None
+                try:
+                    with torch.no_grad():
+                        _out = _h_pipe(
+                            prompt='photorealistic, clean texture, consistent with reference',
+                            negative_prompt='cartoon, smudged, blurry, distorted',
+                            image=_t_in,
+                            ip_adapter_image=_ref_ip,
+                            strength=_h_strength,
+                            num_inference_steps=20,
+                            guidance_scale=5.0,
+                        ).images[0]
+                    if _out.size != tile.size:
+                        _out = _out.resize(tile.size, Image.LANCZOS)
+                    if _alpha is not None:
+                        _out = _out.convert('RGBA')
+                        _out.putalpha(_alpha)
+                    harmonized.append(_out)
+                    slog.info('view_identity_harmonized', view=i,
+                              strength=_h_strength)
+                except Exception as _he2:
+                    log(f'identity harmonize view_{i} error ({_he2}), keeping original')
+                    harmonized.append(tile)
+            upscaled_tiles = harmonized
+            del _h_pipe
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            slog.info('identity_harmonize_done',
+                      ms=int((time.time() - _h_t0) * 1000))
+            log(f'identity-harmonized 6 views in {time.time() - _h_t0:.1f}s')
+        except Exception as _hi:
+            slog.warn('identity_harmonize_skipped', reason=str(_hi)[:200])
+            log(f'identity harmonization skipped ({_hi})')
+
+    # ------------------------------------------------------------------
+    # Legacy style harmonization pass (OPT-IN — disabled by default)
+    # Kept for backwards compat. Disabled because SDXL-with-text-only
+    # drifted colors (horse→green). Use FABMESH_MV_STYLE_HARMONIZE=1 to
+    # force the legacy behavior. Prefer the IPAdapter-based pass above.
+    # ------------------------------------------------------------------
     try:
         import requests as _rq
-        if os.environ.get('FABMESH_MV_STYLE_HARMONIZE') == '1' and \
+        if (not _identity_on) and os.environ.get('FABMESH_MV_STYLE_HARMONIZE') == '1' and \
                 _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
             slog.progress(89, 'style_harmonize')
             log('MULTIVIEW_PROGRESS: 89 style-harmonize')

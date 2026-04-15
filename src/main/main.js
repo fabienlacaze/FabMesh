@@ -3365,9 +3365,20 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   const imgBasename = path.basename(imagePath, path.extname(imagePath));
   const outDir = path.join(path.dirname(imagePath), imgBasename + '_multiview');
   return new Promise((resolve) => {
+    // Enable IPAdapter-guided identity harmonize by default (2026-04-16).
+    // SDXL img2img at strength 0.3 guided by the ref image's CLIP embed
+    // cleans up Zero123++ hallucinations (occluded limbs, wrong skin
+    // colour) while keeping the subject's identity intact. Cost ~+30s.
+    // User can opt out via FABMESH_MV_IDENTITY_HARMONIZE=0.
+    const mvEnv = {
+      ...process.env,
+      PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True',
+      FABMESH_MV_IDENTITY_HARMONIZE:
+        process.env.FABMESH_MV_IDENTITY_HARMONIZE ?? '1',
+    };
     const proc = execFile('python', [script, imagePath, outDir], {
-      timeout: 600000, maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' }
+      timeout: 900000, maxBuffer: 10 * 1024 * 1024,
+      env: mvEnv
     }, (error, stdout, stderr) => {
       if (stdout) {
         log.info('multiview', stdout.trim());
