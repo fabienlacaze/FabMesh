@@ -153,8 +153,19 @@ encode their torch version, so risk: same `_ZNK3c1010TensorImpl
 
 Trying: rebuild nvdiffrast from source against torch 2.8
 (`pip install --force-reinstall --no-deps git+https://github.com/
-NVlabs/nvdiffrast.git`). Builds CUDA extension lazily on first use,
-should pick up torch 2.8 ABI automatically.
+NVlabs/nvdiffrast.git`).
+
+→ **Build wheel FAILED** (exit code 1, output truncated to 5 lines).
+Verbose retry with `-v` also failed. Output too noisy to triage,
+need to inspect the build log on disk.
+
+`Trellis2TexturingPipeline` requires nvdiffrast at import time
+(confirmed via direct `from trellis2.pipelines import ...`), so
+this blocks the whole pipeline.
+
+**Next**: capture the actual nvdiffrast build error (probably
+missing CUDA headers or wrong gcc, since flex_gemm/cumesh/o_voxel
+worked from pre-built wheels but nvdiffrast wants to compile).
 
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
