@@ -50,6 +50,30 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-15 — Auto-align WORKS (user visual confirmation)
+
+Generated test_e2e_sf3d_apilive_1776274212.glb via direct CLI bridge call:
+```
+LOCAL_SF3D: auto-aligned mesh by 169.5° around Y (face was pointing [-0.182, 0.0, 0.983])
+```
+The orc's face was pointing ~dead-Z (away from glTF viewer). Rotation
+brings it to -Z as expected. User confirmed visually: "l'orc est
+parfaitement de face" in the FabMesh viewer — sash, buckle, armor on
+thigh all visible in the right position.
+
+Side note: CLI bridge runs bypass FabMesh's `mcp-job-start` event, so
+no "Running task" dialog appears when bridged directly. Functionally
+fine, just UX-different.
+
+**Still to polish** (user mentioned): the face/head texture looks a
+bit soft compared to the reference. Candidate next step: run the
+ControlNet Tile refine with IPAdapter fed from the reference image +
+multi-views, so SDXL has the actual orc identity to match when
+injecting detail. Distinct task from fidelity (shape) which is now
+solved.
+
+---
+
 ### 2026-04-15 — Mesh auto-align to -Z (root cause of "texture inverted" on test_e2e)
 
 **User symptom**: newly generated test_e2e mesh appeared as if the
