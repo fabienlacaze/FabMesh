@@ -380,8 +380,19 @@ async function refreshProjectsPage() {
     let base = filename.replace(/\.[^.]+$/, '');
     // Remove "_rigged_<anything>" suffix
     base = base.replace(/_rigged_.+$/i, '');
-    // Remove trailing timestamp (_<10+ digits>)
-    base = base.replace(/_\d{10,}$/, '');
+    // Iteratively peel post-processing suffixes produced by the refine /
+    // decimate / retexture / smooth / etc. scripts, possibly followed by
+    // another timestamp. Order matters: run until nothing changes.
+    // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
+    // fix_normals, center, upscale, refine, augment, vc (vertex color).
+    const POST_SUFFIX = /_(cntile|retexture|decimate|smooth|fill_holes|fix_normals|center|upscale|refine|augment|vc)(?:_\d{10,})?$/i;
+    let prev;
+    do {
+      prev = base;
+      base = base.replace(POST_SUFFIX, '');
+      // Remove trailing timestamp (_<10+ digits>)
+      base = base.replace(/_\d{10,}$/, '');
+    } while (base !== prev);
     // Remove trailing engine suffix added by main.js: _sf3d / _meshy / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai
     base = base.replace(/_(sf3d|meshy|hunyuan|local|trellis2|trellis|triposg|ai)$/i, '');
     // Remove a trailing _<number> if any (legacy index naming)
