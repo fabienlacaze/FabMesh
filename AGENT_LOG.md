@@ -222,13 +222,36 @@ built and installed (15 MB wheel, sm_120 native).
 Next: `local_trellis2_bridge.py` on orc image, inspect quality.
 
 **First real test launched** (2026-04-15 ~11:30): `Trellis2TexturingPipeline`
-on:
-- mesh = `meshes/orc_blue_crown_sf3d_1776238700063.glb` (SF3D bake)
-- image = `images/orc_blue_crown/ref_1776197431277_0_nobg_1776200263131.png`
-- output → `c:/tmp/_orc_trellis2_textured.glb`
+on orc mesh + no-bg image.
 
-Uses `microsoft/TRELLIS.2-4B` + `texturing_pipeline.json`.
-First run downloads ~3 GB model weights from HF, then runs. ETA 2-5 min.
+→ **FAILED** at pipeline load (before inference!):
+```
+OSError: You are trying to access a gated repo.
+Cannot access gated repo briaai/RMBG-2.0
+403 Client Error.
+```
+
+The texturing pipeline instantiates a `BiRefNet` rembg module on
+from_pretrained (trellis2/pipelines/rembg/BiRefNet.py:10), which
+tries to download `briaai/RMBG-2.0` weights — a **gated** HF repo.
+
+**Licence caveat**: `briaai/RMBG-2.0` is under a research license
+(not commercial-free). Even if we got access, shipping FabMesh with
+RMBG-2.0 would violate our "commercial + EU-safe" constraint. Same
+as IP-Adapter-FaceID (research-only, we excluded it earlier).
+
+**Options**:
+A. Patch `trellis2_texturing.py` to skip rembg_model when the input
+   image has alpha (our no-bg inputs already do).
+B. Monkey-patch to inject a no-op rembg.
+C. Replace BiRefNet with our existing `rembg` (u2net, Apache-2.0).
+
+Going with **B** for the test (fastest to validate quality) then
+**C** for commercial viability if quality is worth it.
+
+**Add to "do not retry"**: TRELLIS.2 texturing depends on
+`briaai/RMBG-2.0` (gated + research license). Must be patched out
+for any commercial usage.
 
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
