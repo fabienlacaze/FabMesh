@@ -226,6 +226,11 @@ def generate_3d(
     print(f"LOCAL_SF3D_PROGRESS: 90 export", flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
+    # Track the auto-align rotation so downstream projection can compensate
+    # multi-view azimuths (Zero123++ views were generated from the PRE-align
+    # mesh, so they land on wrong parts of the rotated mesh otherwise).
+    auto_align_rot_deg = 0.0
+
     # ------------------------------------------------------------------
     # Auto-align the mesh so the subject faces -Z (glTF forward convention).
     # SF3D's mesh can end up pointing at any horizontal direction depending
@@ -269,8 +274,9 @@ def generate_3d(
                     import trimesh as _tm
                     _R = _tm.transformations.rotation_matrix(_rot_angle, [0, 1, 0])
                     mesh.apply_transform(_R)
+                    auto_align_rot_deg = float(_np.degrees(_rot_angle))
                     print(
-                        f"LOCAL_SF3D: auto-aligned mesh by {_np.degrees(_rot_angle):.1f}° "
+                        f"LOCAL_SF3D: auto-aligned mesh by {auto_align_rot_deg:.1f}° "
                         f"around Y (face was pointing {_face_dir.round(3).tolist()})",
                         flush=True,
                     )
@@ -669,7 +675,8 @@ def generate_3d(
                     _r_mv_proj = _sp_proj.run(
                         [sys.executable, _atlas_script, output_path,
                          _preprocessed_path, output_path, str(tex_res),
-                         '--multiview', _multiview_dir],
+                         '--multiview', _multiview_dir,
+                         '--rotation-offset', str(auto_align_rot_deg)],
                         capture_output=True, text=True, timeout=300,
                     )
                     if _r_mv_proj.stdout:
@@ -696,20 +703,23 @@ def generate_3d(
             if _multiview_dir and os.path.isdir(_multiview_dir):
                 _cmd = [sys.executable, _augment_script, output_path,
                         _preprocessed_path, output_path,
-                        '--multiview', _multiview_dir]
+                        '--multiview', _multiview_dir,
+                        '--rotation-offset', str(auto_align_rot_deg)]
                 _label = 'multi-view augment'
             else:
                 print('LOCAL_SF3D: augment mode requested but no multi-view dir', flush=True)
         elif _proj_mode == 'vc' and os.path.exists(_vc_script):
             _cmd = ([sys.executable, _vc_script, output_path,
                      _preprocessed_path, output_path]
-                    + (['--multiview', _multiview_dir]
+                    + (['--multiview', _multiview_dir,
+                        '--rotation-offset', str(auto_align_rot_deg)]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'vertex-color projection'
         elif _proj_mode == 'atlas' and os.path.exists(_atlas_script):
             _cmd = ([sys.executable, _atlas_script, output_path,
                      _preprocessed_path, output_path, str(tex_res)]
-                    + (['--multiview', _multiview_dir]
+                    + (['--multiview', _multiview_dir,
+                        '--rotation-offset', str(auto_align_rot_deg)]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'UV atlas projection'
         elif _proj_mode == 'atlas_refine' and os.path.exists(_atlas_script):
@@ -721,7 +731,8 @@ def generate_3d(
             if _multiview_dir and os.path.isdir(_multiview_dir):
                 _cmd = ([sys.executable, _atlas_script, output_path,
                          _preprocessed_path, output_path, str(tex_res),
-                         '--multiview', _multiview_dir])
+                         '--multiview', _multiview_dir,
+                         '--rotation-offset', str(auto_align_rot_deg)])
                 _label = 'atlas+refine pass 1 (projection)'
             else:
                 print('LOCAL_SF3D: atlas_refine needs multi-view dir', flush=True)

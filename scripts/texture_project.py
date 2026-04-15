@@ -42,7 +42,7 @@ def log(msg):
 
 
 def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
-                    multiview_dir=None):
+                    multiview_dir=None, rotation_offset_deg=0.0):
     _slog = Logger('tex_project',
                    mesh=os.path.basename(mesh_path),
                    res=tex_res,
@@ -323,14 +323,27 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # Always include the front view at (0, 0)
     views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
 
+    # If the bridge applied an auto-align rotation around Y between SF3D
+    # inference and this projection, we must shift every multi-view azimuth
+    # by the SAME angle — Zero123++ views were generated from the pre-rotation
+    # mesh, so their "az=30°" view actually lands on the mesh at (30° + offset)
+    # in the new coordinate frame. Without this compensation, multi-views bleed
+    # onto the wrong part of the mesh and wash out detail (user-visible: soft
+    # face, blurry head on test_e2e). The source image stays at az=0 because
+    # it was projected AFTER rotation from the viewer-front direction.
     if multiview_dir:
         for i, (azim, elev) in enumerate(MULTIVIEW_VIEWS):
             vpath = os.path.join(multiview_dir, f'view_{i}.png')
             if os.path.exists(vpath):
-                views.append((vpath, azim, elev,
+                shifted_azim = (azim + rotation_offset_deg) % 360
+                # Priority lookup uses the ORIGINAL azimuth (that's the angle
+                # at which Zero123++ actually photographed the subject).
+                views.append((vpath, shifted_azim, elev,
                               PRIORITY_WEIGHTS.get(azim, 0.4)))
             else:
                 log(f'WARNING: missing {vpath}, skipping')
+        if abs(rotation_offset_deg) > 0.5:
+            log(f'applied rotation_offset_deg={rotation_offset_deg:.1f}° to multiview azimuths')
 
     log(f'projecting {len(views)} view(s): ' +
         ', '.join(f'az={v[1]:.0f}/el={v[2]:.0f}(p={v[3]})' for v in views))
@@ -763,10 +776,18 @@ if __name__ == '__main__':
                         help='Texture resolution (default: 1024)')
     parser.add_argument('--multiview', metavar='DIR', default=None,
                         help='Directory with Zero123++ views (view_0.png..view_5.png)')
+    parser.add_argument('--rotation-offset', type=float, default=0.0,
+                        metavar='DEG',
+                        help='Azimuth shift (deg) applied to multi-view angles. '
+                             'Use when the bridge auto-aligned the mesh around Y '
+                             'after Zero123++ generated the views — pass the same '
+                             'angle here so multi-views still land on the right '
+                             'parts of the rotated mesh.')
     args = parser.parse_args()
     try:
         ok = project_texture(args.mesh, args.source_image, args.output,
-                             args.resolution, multiview_dir=args.multiview)
+                             args.resolution, multiview_dir=args.multiview,
+                             rotation_offset_deg=args.rotation_offset)
         sys.exit(0 if ok else 1)
     except Exception as e:
         log(f'ERROR: {type(e).__name__}: {e}')
