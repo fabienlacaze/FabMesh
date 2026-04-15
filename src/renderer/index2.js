@@ -2462,13 +2462,21 @@ if (qualityEl && qualityLabel) {
 
 // Build a final prompt by wrapping the user input with type/style suffixes.
 // Asset type controls framing, pose, isolation. Style controls the visual look.
+//
+// T-pose reminder (2026-04-16): templates for SUBJECTS THAT WILL BE 3D-MESHED
+// must use "T-pose, front view, facing camera" WITHOUT conflicting
+// view keywords like "isometric three-quarter view". The juggernaut bridge
+// auto-detects T-pose keywords and swaps to DreamShaper XL + ControlNet
+// OpenPose which guarantees the T-pose — but that only works if the prompt
+// doesn't also scream "3/4 view" at the model. Inanimate assets (buildings,
+// vehicles, props) keep the 3/4 view since they don't need rigging.
 const ASSET_TYPE_PROMPTS = {
-  character: 'single isolated 3D character, full body, T-pose neutral stance, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, isometric three-quarter view, clean silhouette, no text, no UI',
+  character: 'single isolated 3D character, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
   building: 'single isolated 3D building, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric three-quarter view, clean silhouette, no text, no UI',
   vehicle: 'single isolated 3D vehicle, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, three-quarter view, clean silhouette, no text, no UI',
   weapon: 'single isolated 3D weapon, full weapon, plain white background, even studio lighting, no shadows, centered, side view, clean silhouette, no text, no UI',
   prop: 'single isolated 3D prop, full item, plain white background, even studio lighting, no shadows, no characters, centered, three-quarter view, clean silhouette, no text, no UI',
-  creature: 'single isolated 3D creature, full body, neutral stance, plain white background, even studio lighting, no shadows, no other creatures, centered, isometric three-quarter view, clean silhouette, no text, no UI',
+  creature: 'single isolated 3D creature, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI',
   environment: 'single isolated 3D environment piece, full structure, plain white background, even studio lighting, no shadows, no characters, centered, three-quarter view, clean silhouette, no text, no UI',
   custom: '',
 };
