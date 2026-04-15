@@ -143,7 +143,20 @@ encode their torch version, so risk: same `_ZNK3c1010TensorImpl
 - `cumesh-0.0.1-cp312-cp312-linux_x86_64.whl`
 - `o_voxel-0.0.1-cp312-cp312-linux_x86_64.whl`
 
-**Result torch 2.7.0+cu128 + community wheels**:
+**Result torch 2.8.0+cu128**:
+- flex_gemm OK ✅
+- cumesh OK ✅
+- o_voxel OK ✅ (the SymBool symbol is in torch 2.8)
+- ❌ **nvdiffrast** now breaks: `undefined symbol _ZN3c104cuda29
+  c10_cuda_check_implementationEiPKcS2_jb`. nvdiffrast was built for
+  another torch ABI.
+
+Trying: rebuild nvdiffrast from source against torch 2.8
+(`pip install --force-reinstall --no-deps git+https://github.com/
+NVlabs/nvdiffrast.git`). Builds CUDA extension lazily on first use,
+should pick up torch 2.8 ABI automatically.
+
+**Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
 - `cumesh OK` ✅
 - `grid_sample_3d OK` ✅
