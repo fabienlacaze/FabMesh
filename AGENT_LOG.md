@@ -179,8 +179,14 @@ This is the real blocker. Three options:
 - B. Install CUDA Toolkit 12.8 in WSL (~3-4 GB) — clean fix.
 - C. Abandon TRELLIS.2 path entirely.
 
-Trying A first (zero install, 5 min). If kernels don't run on
-Blackwell at runtime, fall back to B.
+**Discovery**: CUDA Toolkit 12.8 is **already installed** at
+`/usr/local/cuda-12.8/`. The `nvcc` symlink at `/usr/bin/nvcc`
+just points to the older 12.0. Use the explicit path.
+
+Retry with `CUDA_HOME=/usr/local/cuda-12.8`,
+`PATH=/usr/local/cuda-12.8/bin:$PATH`, and
+`TORCH_CUDA_ARCH_LIST=12.0` (Blackwell sm_120, RTX 5080 native).
+This is option B without a download (toolkit was already there).
 
 **Result torch 2.7.0+cu128 + community wheels** (previous attempt):
 - `flex_gemm OK` ✅
