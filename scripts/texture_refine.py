@@ -86,9 +86,15 @@ def _img2img_via_server(tile: Image.Image, prompt: str, strength: float,
                'strength': float(strength)}
     if use_controlnet_tile:
         payload['controlnet_scale'] = float(controlnet_scale)
+        # Cap steps to 25 — plenty for a refine pass, and keeps each
+        # tile under ~2 min on RTX 5080 (auto would pick 42 at
+        # strength 0.6 which times out the HTTP call).
+        payload['steps'] = 25
+    # 600s per tile is generous: CN Tile on a 1024² tile at 25 steps
+    # runs ~60-120s on 5080; bigger meshes with slower VAE can still fit.
     r = requests.post(SDXL_URL + endpoint,
                       json=payload,
-                      timeout=240)
+                      timeout=600)
     j = r.json()
     if not j.get('ok'):
         raise RuntimeError(j.get('error') or 'img2img failed')
