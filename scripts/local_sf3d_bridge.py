@@ -79,6 +79,38 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
     _popen_env.setdefault('PYTHONUNBUFFERED', '1')
     proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
                      text=True, env=_popen_env, bufsize=1)
+
+    # Heartbeat thread: even when the sub-script is silent for a long time
+    # (Zero123++ spends ~45s in a single pipeline() call with no intermediate
+    # prints, likewise SDXL per-tile), the UI bar would otherwise freeze at
+    # the last known sub-pct. Every 2s we interpolate toward the end of the
+    # current sub-phase slice based on elapsed/expected time.
+    import threading as _th
+    _hb_stop = _th.Event()
+    _hb_state = {'last_sub_pct': 0, 'last_sub_time': time.time()}
+
+    def _heartbeat():
+        if not sub_phase:
+            return
+        # Expected wall-clock for the whole sub-phase in seconds. We use the
+        # PHASE_BUDGET weight × 3 as a rough per-weight seconds estimate so
+        # each heartbeat bump is ~1 overall-percent per 3s of silence.
+        while not _hb_stop.wait(2.0):
+            elapsed = time.time() - _hb_state['last_sub_time']
+            last = _hb_state['last_sub_pct']
+            # Extrapolate 1 sub-pct per 2s of silence, cap at 95% of slice
+            bump = min(95, last + int(elapsed / 2.0))
+            if bump > last:
+                try:
+                    overall = _fprog.sub(sub_phase, bump)
+                    _emit_progress(sub_phase, overall,
+                                   label=f"{sub_phase}:{bump}~hb")
+                except Exception:
+                    pass
+
+    _hb_thread = _th.Thread(target=_heartbeat, daemon=True)
+    if sub_phase:
+        _hb_thread.start()
     collected_out = []
     t_start = time.time()
     try:
@@ -101,12 +133,17 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
                         overall = _fprog.sub(sub_phase, sub_pct)
                         _emit_progress(sub_phase, overall,
                                        label=f"{sub_phase}:{sub_pct}")
+                        # Reset heartbeat anchor: from now on the heartbeat
+                        # extrapolates from THIS sub-pct, not the phase start.
+                        _hb_state['last_sub_pct'] = sub_pct
+                        _hb_state['last_sub_time'] = time.time()
                     except Exception:
                         pass
             if timeout and (time.time() - t_start) > timeout:
                 proc.kill()
                 res.returncode = -9
                 res.stderr = f'timeout after {timeout}s'
+                _hb_stop.set()
                 return res
         proc.wait(timeout=max(1.0, timeout - (time.time() - t_start))
                   if timeout else None)
@@ -123,6 +160,8 @@ def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None)
     except Exception as e:
         res.returncode = -1
         res.stderr = str(e)
+    finally:
+        _hb_stop.set()
     return res
 
 
