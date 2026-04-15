@@ -478,10 +478,30 @@ def generate_3d(
         _y_r = _y_top - _y_bot
         _mask = (_rotated[:, 1] > _y_bot + 0.30 * _y_r) & (_rotated[:, 1] < _y_bot + 0.80 * _y_r)
         _chest_z_mean = _rotated[_mask, 2].mean() if _mask.sum() > 0 else 0.0
-        # We want chest_z_mean < 0 (chest bulges toward -Z = forward in glTF)
-        # If it's > 0, the mesh is pointing BACKWARD: rotate another 180°.
-        if _chest_z_mean > 0:
+
+        # Chest-z alone is unreliable when |chest_z_mean| is small
+        # (observed on 'garcon' mesh: +0.005, triggered a spurious +180°
+        # flip that put the face behind the head). Add a second vote
+        # using the HEAD region — human heads have much more mass in
+        # front of the symmetry axis than behind (nose, chin, forehead
+        # vs flat nape). The face-forward z should be NEGATIVE.
+        _head_mask = _rotated[:, 1] > _y_bot + 0.85 * _y_r
+        _head_z_mean = (_rotated[_head_mask, 2].mean()
+                        if _head_mask.sum() > 10 else 0.0)
+
+        # Vote: 2 signals, both should say the same thing. If they
+        # disagree, trust the one with the larger absolute magnitude.
+        _chest_vote = -1 if _chest_z_mean < 0 else (1 if _chest_z_mean > 0 else 0)
+        _head_vote  = -1 if _head_z_mean  < 0 else (1 if _head_z_mean  > 0 else 0)
+        # Combined: weight each by |value| so a tiny chest signal loses
+        # to a strong head signal.
+        _vote_sum = (_chest_z_mean + _head_z_mean)
+        _needs_flip = _vote_sum > 0  # both should want negative
+        if _needs_flip:
             _sym_theta += _np.pi
+        print(f"LOCAL_SF3D: facing-check chest_z={_chest_z_mean:+.3f} "
+              f"head_z={_head_z_mean:+.3f} sum={_vote_sum:+.3f} "
+              f"flip={_needs_flip}", flush=True)
 
         # Final rotation to apply: -_sym_theta (so that the subject's symmetry
         # axis aligns with the world -Z axis).
