@@ -1411,19 +1411,34 @@ function _hideMultiviewBar() {
 
 function _normPath(p) { return (p || '').replace(/\\/g, '/'); }
 
-function _checkMultiviewForCurrentImage() {
+async function _checkMultiviewForCurrentImage() {
   const p = state.currentProject;
   console.log('[mv-check] previewImagePath:', p?.previewImagePath, 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none');
   if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
-  if (!p._multiviews) { _hideMultiviewBar(); return; }
   const key = _normPath(p.previewImagePath);
-  const found = Object.keys(p._multiviews).find(k => _normPath(k) === key);
-  console.log('[mv-check] key:', key, 'found:', found);
-  if (found) {
-    _showMultiviewBar(p._multiviews[found]);
-  } else {
-    _hideMultiviewBar();
+  // First try the in-memory cache (populated when user clicks
+  // Multi-Views during the same session).
+  if (p._multiviews) {
+    const found = Object.keys(p._multiviews).find(k => _normPath(k) === key);
+    if (found) {
+      _showMultiviewBar(p._multiviews[found]);
+      return;
+    }
   }
+  // Fall back to disk: reloadCurrentProject() clears _multiviews,
+  // so after a 3D gen / refresh the bar would vanish even though the
+  // <image_stem>_multiview/ folder still exists next to the image.
+  // Ask main.js whether it's there and re-populate the cache.
+  try {
+    const info = await window.meshyAPI.checkMultiviewDir(p.previewImagePath);
+    if (info && info.exists && info.dir) {
+      if (!p._multiviews) p._multiviews = {};
+      p._multiviews[p.previewImagePath] = info.dir;
+      _showMultiviewBar(info.dir);
+      return;
+    }
+  } catch (e) { /* ignore, bar stays hidden */ }
+  _hideMultiviewBar();
 }
 
 document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {

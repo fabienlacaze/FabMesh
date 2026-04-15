@@ -3354,6 +3354,24 @@ ipcMain.handle('generate-from-image', async (event, { imagePath, outputName }) =
 });
 
 // --- Multi-View Generation IPC ---
+// Check whether a given image already has `<stem>_multiview/` on disk
+// with all 6 views + input. Used by the renderer to re-hydrate the
+// multi-view bar after reloadCurrentProject() clears its in-memory cache.
+ipcMain.handle('check-multiview-dir', async (_event, imagePath) => {
+  try {
+    if (!imagePath || !fs.existsSync(imagePath)) return { exists: false };
+    const stem = path.basename(imagePath, path.extname(imagePath));
+    const mvDir = path.join(path.dirname(imagePath), stem + '_multiview');
+    if (!fs.existsSync(mvDir)) return { exists: false };
+    for (let i = 0; i < 6; i++) {
+      if (!fs.existsSync(path.join(mvDir, `view_${i}.png`))) return { exists: false };
+    }
+    return { exists: true, dir: mvDir };
+  } catch (e) {
+    return { exists: false };
+  }
+});
+
 ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
   // Multi-views are tied to the EXACT image version. Output dir derived
