@@ -1281,6 +1281,30 @@ function showStep1Preview(imgPath) {
       btn.textContent = isSelected ? '\u2713 Used for 3D generation \u2192' : 'Use this image for 3D \u2192';
     }
   }
+  // Image actions bar — Copy prompt button.
+  const actionsBar = document.getElementById('ws-image-actions');
+  const copyBtn = document.getElementById('ws-copy-prompt-btn');
+  if (actionsBar && copyBtn) {
+    const p = state.currentProject;
+    const promptText = (p && (p.prompt || p.initialPrompt)) || '';
+    if (promptText) {
+      actionsBar.classList.remove('hidden');
+      copyBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(promptText);
+          const orig = copyBtn.textContent;
+          copyBtn.textContent = '\u2713 Copied';
+          copyBtn.disabled = true;
+          setTimeout(() => { copyBtn.textContent = orig; copyBtn.disabled = false; }, 1500);
+        } catch (err) {
+          if (typeof showToast === 'function') showToast('Copy failed: ' + err.message, 'error');
+        }
+      };
+    } else {
+      actionsBar.classList.add('hidden');
+    }
+  }
 }
 
 // Image navigation arrows
