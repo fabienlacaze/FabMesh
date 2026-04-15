@@ -4438,17 +4438,29 @@ async function showStep2Preview(mesh) {
 // same reason.
 function _applyMeshTextureFilter(root) {
   if (!root || typeof root.traverse !== 'function') return;
+  // Use trilinear (linear + mipmaps) + anisotropic filtering on every
+  // PBR map. Earlier we forced NEAREST to hide the SF3D micro-island
+  // bleed; that worked but pixels were visible on close zoom and broke
+  // normal maps. The refine pipeline now bakes proper UV padding so we
+  // can go back to clean trilinear without the moire artefacts.
+  let renderer = null;
+  try {
+    if (typeof wsRenderer !== 'undefined') renderer = wsRenderer;
+  } catch (_) {}
+  const maxAniso = renderer ? renderer.capabilities.getMaxAnisotropy() : 8;
   root.traverse((child) => {
     if (!child.isMesh || !child.material) return;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const mat of mats) {
       if (!mat) continue;
-      const tex = mat.map || mat.baseColorTexture || null;
-      if (tex) {
-        tex.magFilter = THREE.NearestFilter;
-        tex.minFilter = THREE.LinearFilter;   // mipless linear is fine for minify
-        tex.generateMipmaps = false;
-        tex.anisotropy = 1;
+      const slots = [mat.map, mat.normalMap, mat.roughnessMap,
+                     mat.metalnessMap, mat.aoMap, mat.emissiveMap];
+      for (const tex of slots) {
+        if (!tex) continue;
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipMapLinearFilter;  // trilinear minify
+        tex.generateMipmaps = true;
+        tex.anisotropy = Math.min(16, maxAniso);
         tex.needsUpdate = true;
       }
     }

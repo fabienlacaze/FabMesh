@@ -112,11 +112,34 @@ def upscale_atlas_in_glb(input_path: str, output_path: str,
     log(f'GLB has {len(images)} embedded image(s); '
         f'BIN chunk = {bin_chunk_len} bytes')
 
+    # Find which image index is the baseColorTexture — we ONLY upscale
+    # that one. Normal maps must stay untouched (RealESRGAN trained on
+    # photos would smooth out the directional XY components, killing
+    # the bump effect). roughness/metallic are scalars in our pipeline,
+    # not textures.
+    materials = (json_chunk or {}).get('materials', []) or []
+    textures = (json_chunk or {}).get('textures', []) or []
+    base_color_image_idx = None
+    for mat in materials:
+        pbr = mat.get('pbrMetallicRoughness') or {}
+        bct = pbr.get('baseColorTexture') or {}
+        tex_idx = bct.get('index')
+        if tex_idx is not None and tex_idx < len(textures):
+            src_idx = textures[tex_idx].get('source')
+            if src_idx is not None:
+                base_color_image_idx = src_idx
+                break
+    log(f'baseColorTexture is image[{base_color_image_idx}] '
+        f'(out of {len(images)} images in GLB)')
+
     # We rebuild the binary buffer from scratch: copy every buffer view
     # except those that point to images we replace, then append the
     # upscaled images at the end with new (offset, length).
     img_view_idx_to_new_bytes = {}
     for i_img, img_info in enumerate(images):
+        if base_color_image_idx is not None and i_img != base_color_image_idx:
+            log(f'image {i_img}: NOT baseColor, keeping as-is')
+            continue
         bv_idx = img_info.get('bufferView')
         if bv_idx is None:
             log(f'image {i_img}: no bufferView, skipping')

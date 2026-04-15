@@ -237,8 +237,25 @@ def replace_glb_atlas(input_glb: str, output_glb: str,
     if not images or not bin_chunk_offset:
         raise RuntimeError('no images / no BIN')
 
+    # Resolve baseColorTexture explicitly via materials → don't
+    # accidentally overwrite the normal map (image[0] vs image[1]
+    # depending on how SF3D ordered them).
+    materials = (json_chunk or {}).get('materials', []) or []
+    textures = (json_chunk or {}).get('textures', []) or []
+    base_color_image_idx = 0
+    for mat in materials:
+        pbr = mat.get('pbrMetallicRoughness') or {}
+        bct = pbr.get('baseColorTexture') or {}
+        tex_idx = bct.get('index')
+        if tex_idx is not None and tex_idx < len(textures):
+            src_idx = textures[tex_idx].get('source')
+            if src_idx is not None:
+                base_color_image_idx = src_idx
+                break
+    log(f'replacing image[{base_color_image_idx}] (baseColorTexture)')
+
     # Encode new atlas
-    img_info = images[0]
+    img_info = images[base_color_image_idx]
     bv = buffer_views[img_info['bufferView']]
     img_offset = bin_chunk_offset + bv.get('byteOffset', 0)
     img_length = bv['byteLength']
