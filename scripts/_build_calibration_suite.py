@@ -178,39 +178,53 @@ def _rebuild_cube_uvs(mesh: trimesh.Trimesh, s: float):
     """
     verts = mesh.vertices
     uvs = np.zeros((len(verts), 2), dtype=np.float32)
-    # For each vertex, pick the dominant cube-face axis (largest |coord|)
-    ax = np.abs(verts).argmax(axis=1)  # 0=x,1=y,2=z
+    # For each vertex, pick the dominant cube-face axis (largest |coord|).
+    # Tiny bias on Z > X > Y so ties (edge/corner vertices that sit
+    # equally on two faces after subdivision) resolve to a specific
+    # face instead of flickering between them — this kills the
+    # rainbow-edge noise on rendered views.
+    _bias = np.array([1.0, 0.9, 1.1])  # prefer Z, then X, then Y
+    ax = (np.abs(verts) * _bias).argmax(axis=1)
     for i, v in enumerate(verts):
         x, y, z = v
         which = ax[i]
         # Local 2D coords on the face (u,v ∈ [-s, +s]) then normalize to [0,1]
+        # When looking at a face from OUTSIDE the cube (along -normal),
+        # "right on screen" corresponds to a specific sign of the
+        # perpendicular axis. We pick fu/fv so that the letter on the
+        # atlas (drawn in natural left-to-right orientation) reads
+        # correctly on the cube.
+        # fv convention: fv=0 maps to the TOP of the atlas cell (since
+        # glTF final `v = 1 - (row + fv)/2` and atlas row 0 occupies the
+        # top half of the image). So pick fv so that the "up" direction
+        # on the painted face corresponds to fv=0.
         if which == 2:
-            if z < 0:  # front face, -Z, cell (0,0)
+            if z < 0:  # front face, -Z → camera at +Z. Screen-right=+X, up=+Y
                 col, row = 0, 0
                 fu = (x + s) / (2 * s)
-                fv = (y + s) / (2 * s)
-            else:  # back face, +Z, cell (2,0)
+                fv = (s - y) / (2 * s)
+            else:  # back face, +Z → camera at -Z. Screen-right=-X, up=+Y
                 col, row = 2, 0
-                fu = (-x + s) / (2 * s)
-                fv = (y + s) / (2 * s)
+                fu = (s - x) / (2 * s)
+                fv = (s - y) / (2 * s)
         elif which == 0:
-            if x > 0:  # right face, +X, cell (1,0)
+            if x > 0:  # right face, +X → camera at -X. Screen-right=+Z, up=+Y
                 col, row = 1, 0
-                fu = (-z + s) / (2 * s)
-                fv = (y + s) / (2 * s)
-            else:  # left face, -X, cell (0,1)
-                col, row = 0, 1
                 fu = (z + s) / (2 * s)
-                fv = (y + s) / (2 * s)
+                fv = (s - y) / (2 * s)
+            else:  # left face, -X → camera at +X. Screen-right=-Z, up=+Y
+                col, row = 0, 1
+                fu = (-z + s) / (2 * s)
+                fv = (s - y) / (2 * s)
         else:  # which == 1
-            if y > 0:  # top face, +Y, cell (1,1)
+            if y > 0:  # top face, +Y → camera at -Y. Screen-right=-X, up=+Z
                 col, row = 1, 1
-                fu = (x + s) / (2 * s)
-                fv = (-z + s) / (2 * s)
-            else:  # bottom face, -Y, cell (2,1)
+                fu = (-x + s) / (2 * s)
+                fv = (s - z) / (2 * s)
+            else:  # bottom face, -Y → camera at +Y. Screen-right=+X, up=+Z
                 col, row = 2, 1
                 fu = (x + s) / (2 * s)
-                fv = (z + s) / (2 * s)
+                fv = (s - z) / (2 * s)
         # Map to atlas UV: u = (col + fu) / 3 ; v_top = (row + fv) / 2
         # But glTF V is flipped, so v_final = 1 - (row + fv) / 2
         u = (col + fu) / 3.0
