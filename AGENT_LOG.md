@@ -50,6 +50,69 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-16 evening — Calibration suite (color-coded cube) + convention sweep
+
+Built a deterministic 3D calibration target so pipeline bugs become
+immediately diagnosable visually. User wanted non-AI known-good input
+so hallucinations don't hide orientation/projection bugs.
+
+**Asset** (`scripts/_build_calibration_suite.py` → `images/_calibration/`
++ `meshes/_calibration_groundtruth.glb`):
+ - 1x1x1 cube, each face: distinct solid colour + huge centered letter
+   + faint pattern + corner labels ({F,B,R,L,T,D}-{TL,TR,BL,BR}).
+   front=red F, back=cyan B, right=blue R, left=green L, top=yellow T,
+   bottom=magenta D.
+ - First draft used 12 face triangles → texture_project.py rejected
+   100% of them (edge_size > 20% of atlas). Subdivided 4 levels →
+   3072 faces; `_rebuild_cube_uvs()` re-projects every sub-vertex onto
+   its owner cube face and emits an atlas UV pointing at the right cell.
+ - Renders now orthographic (was perspective; was leaking 5 faces at
+   once in the front view). Atlas face textures pre-flipped H so the
+   letter reads the right way on the cube seen from outside.
+
+**Analyzer** (`C:/tmp/_analyze_calib.py`): renders the output mesh
+from each of the 6 cardinal axis directions orthographically, samples
+the central 40% average colour, classifies as F/B/R/L/T/D and reports
+a pass/fail per axis.
+
+**Observed today on real FabMesh calibration runs**:
+ - `_calibration_sf3d_1776359098043.glb`:
+     Front = F red OK. Back = F-red (BAD, should be B cyan).
+     Right = F-red spillover. Left = L green OK.
+     Top = L green (should be T yellow). Bot = R blue (should be D magenta).
+   Pattern: front projection floods multiple axes; back/top/bottom
+   are getting mismatched views.
+
+**Convention sweep tool** (`C:/tmp/_sweep_texproj.py`): loads the
+ground-truth cube pre-rotated into SF3D's frame (Rx(-90)·Ry(+90)·invert),
+runs `texture_project.py --multiview` with 8 different sign
+combinations of azim/elev/campos_azim env flags, and measures axis
+correctness. Result: all 8 variants score ≤ 1/6 — not because the
+sweep is wrong, but because the synthetic multi-views I render in
+the calibration script don't match Zero123++'s actual per-view
+camera convention. So this sweep can't pick a convention on its own;
+must be driven from REAL Zero123++ output for the answer to be real.
+
+**Env flags added to texture_project.py** (non-default, used only
+when set):
+ - `FABMESH_TEXPROJ_FLIP_AZIM`
+ - `FABMESH_TEXPROJ_FLIP_ELEV`
+ - `FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM`
+
+**Next step**: drive a fresh FabMesh generation through the calibration
+project (Zero123++ → SF3D → projection → refine) via the MCP bridge so
+the user sees the progress popup. Run `_analyze_calib.py` on the result
+to see which of the 6 axes still carry wrong colours, then iterate on
+rotation_offset and projection conventions with ground truth in hand
+instead of guessing from orc textures.
+
+Commits today:
+  - `ce1e12b` log update
+  - `0cce0ef` view select shows current view name
+  - `776e3bb` subdivided cube + env sign flags in texture_project
+
+---
+
 ### 2026-04-16 — Day-long pipeline overhaul (19 commits)
 
 Focused day: making multi-views actually serve fidelity to the reference
