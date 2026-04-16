@@ -140,6 +140,12 @@ def build_cube_atlas(face_size: int = 512) -> Image.Image:
 
       row 0: FRONT | RIGHT | BACK
       row 1: LEFT  | TOP   | BOTTOM
+
+    Each face texture is horizontally flipped BEFORE paste so that when
+    it's mapped onto the cube and viewed from outside, the letter reads
+    the correct way (not mirrored). UV convention has u increasing
+    along the camera's right when viewed head-on, but we render textures
+    in screen-space-normal orientation, so a pre-flip compensates.
     """
     W = 3 * face_size
     H = 2 * face_size
@@ -150,6 +156,7 @@ def build_cube_atlas(face_size: int = 512) -> Image.Image:
     ]
     for name, cx, cy in layout:
         tex = _face_texture(FACE_SPECS[name], face_size)
+        tex = tex.transpose(Image.FLIP_LEFT_RIGHT)
         atlas.paste(tex, (cx * face_size, cy * face_size))
     return atlas
 
@@ -319,17 +326,23 @@ def render_view(mesh: trimesh.Trimesh, atlas: Image.Image,
 
 def render_textured_view(mesh: trimesh.Trimesh, atlas: Image.Image,
                          azim_deg: float, elev_deg: float = 0.0,
-                         size: int = 768, bg=(255, 255, 255)) -> Image.Image:
+                         size: int = 768, bg=(255, 255, 255),
+                         orthographic: bool = True) -> Image.Image:
     """
     Better renderer that preserves the texture pattern (letters readable).
     For each pixel inside a projected triangle, barycentric-interpolate
     the UVs and sample the atlas.
+
+    orthographic=True (default for calibration): camera at infinite
+    distance, no perspective — a cube shows exactly ONE face per axis
+    view with no adjacent-face leak. Matches Zero123++'s training data
+    (Objaverse ortho renders).
     """
     c_a, s_a = math.cos(math.radians(azim_deg)), math.sin(math.radians(azim_deg))
     c_e, s_e = math.cos(math.radians(elev_deg)), math.sin(math.radians(elev_deg))
     dist = max(mesh.bounds[1] - mesh.bounds[0]) * 2.2
     cam_pos = np.array([
-        dist * s_a * c_e, dist * s_e, dist * c_a * c_e,
+        -dist * s_a * c_e, dist * s_e, dist * c_a * c_e,
     ])
     forward = -cam_pos / np.linalg.norm(cam_pos)
     up0 = np.array([0, 1, 0], dtype=float)
@@ -340,12 +353,18 @@ def render_textured_view(mesh: trimesh.Trimesh, atlas: Image.Image,
     v_cam = (R @ mesh.vertices.T).T + t
 
     W = H = size
-    fov_deg = 40
-    f = 0.5 / math.tan(math.radians(fov_deg) / 2)
     z = v_cam[:, 2]
-    safe_z = np.where(np.abs(z) < 1e-6, -1e-6, z)
-    px = f * v_cam[:, 0] / (-safe_z) * W * 0.5 + W * 0.5
-    py = H * 0.5 - f * v_cam[:, 1] / (-safe_z) * H * 0.5
+    if orthographic:
+        extent = max(mesh.bounds[1] - mesh.bounds[0]) * 0.6
+        scale = W * 0.5 / extent
+        px = v_cam[:, 0] * scale + W * 0.5
+        py = H * 0.5 - v_cam[:, 1] * scale
+    else:
+        fov_deg = 40
+        f = 0.5 / math.tan(math.radians(fov_deg) / 2)
+        safe_z = np.where(np.abs(z) < 1e-6, -1e-6, z)
+        px = f * v_cam[:, 0] / (-safe_z) * W * 0.5 + W * 0.5
+        py = H * 0.5 - f * v_cam[:, 1] / (-safe_z) * H * 0.5
 
     faces = mesh.faces
     uvs = mesh.visual.uv
