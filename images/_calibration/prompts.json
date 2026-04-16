@@ -1,6 +1,6 @@
 [
   {
-    "prompt": "calibration mannequin, 3D humanoid in T-pose, red front torso, cyan back torso, yellow head, blue right arm, green left arm, strict front view, plain white background, symmetric, clean silhouette",
+    "prompt": "calibration cube 6-face test pattern, solid colors with letters F B R L T D, symmetric, strict front view, plain white background, clean silhouette",
     "timestamp": 0
   }
 ]
