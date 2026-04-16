@@ -487,8 +487,19 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         # Full orbit: azimuth around Y + elevation around X (Zero123++
         # alternates +20 / -10 elevation per view — projecting these
         # as pure azimuth produced the mosaic atlas bug).
-        R_w2c_v = R_w2c_base @ rot_x(elev_deg) @ rot_y(-azim_deg)
-        cam_pos_w = (rot_y(azim_deg) @ rot_x(-elev_deg) @
+        # Sign conventions tunable via env for the calibration sweep:
+        #   FABMESH_TEXPROJ_FLIP_AZIM=True  -> rot_y(+azim) instead of rot_y(-azim)
+        #   FABMESH_TEXPROJ_FLIP_ELEV=True  -> rot_x(-elev) instead of rot_x(+elev)
+        #   FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM=True -> rot_y(-azim) instead of rot_y(+azim)
+        _fa = os.environ.get('FABMESH_TEXPROJ_FLIP_AZIM', 'False') == 'True'
+        _fe = os.environ.get('FABMESH_TEXPROJ_FLIP_ELEV', 'False') == 'True'
+        _fc = os.environ.get('FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM', 'False') == 'True'
+        _az_w2c = azim_deg if _fa else -azim_deg
+        _el_w2c = -elev_deg if _fe else elev_deg
+        _az_cam = -azim_deg if _fc else azim_deg
+        _el_cam = elev_deg if _fe else -elev_deg  # keep inverse of _el_w2c
+        R_w2c_v = R_w2c_base @ rot_x(_el_w2c) @ rot_y(_az_w2c)
+        cam_pos_w = (rot_y(_az_cam) @ rot_x(_el_cam) @
                      np.array([distance, 0.0, 0.0]))
         t_w2c_v = -R_w2c_v @ cam_pos_w
 

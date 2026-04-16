@@ -165,6 +165,60 @@ def build_cube_atlas(face_size: int = 512) -> Image.Image:
 # Cube mesh with UVs that sample the atlas correctly
 # ---------------------------------------------------------------------
 
+def _rebuild_cube_uvs(mesh: trimesh.Trimesh, s: float):
+    """
+    After subdivision, re-compute per-vertex UVs by projecting each vertex
+    onto the cube face whose normal best matches its local outward direction.
+    This gives clean UVs that sample the correct atlas cell for every
+    sub-triangle.
+
+    Atlas layout (3×2 cells, 0..1 UV range):
+      row 0 (v>=0.5): front(col0) | right(col1) | back(col2)
+      row 1 (v<0.5):  left(col0)  | top(col1)   | bottom(col2)
+    """
+    verts = mesh.vertices
+    uvs = np.zeros((len(verts), 2), dtype=np.float32)
+    # For each vertex, pick the dominant cube-face axis (largest |coord|)
+    ax = np.abs(verts).argmax(axis=1)  # 0=x,1=y,2=z
+    for i, v in enumerate(verts):
+        x, y, z = v
+        which = ax[i]
+        # Local 2D coords on the face (u,v ∈ [-s, +s]) then normalize to [0,1]
+        if which == 2:
+            if z < 0:  # front face, -Z, cell (0,0)
+                col, row = 0, 0
+                fu = (x + s) / (2 * s)
+                fv = (y + s) / (2 * s)
+            else:  # back face, +Z, cell (2,0)
+                col, row = 2, 0
+                fu = (-x + s) / (2 * s)
+                fv = (y + s) / (2 * s)
+        elif which == 0:
+            if x > 0:  # right face, +X, cell (1,0)
+                col, row = 1, 0
+                fu = (-z + s) / (2 * s)
+                fv = (y + s) / (2 * s)
+            else:  # left face, -X, cell (0,1)
+                col, row = 0, 1
+                fu = (z + s) / (2 * s)
+                fv = (y + s) / (2 * s)
+        else:  # which == 1
+            if y > 0:  # top face, +Y, cell (1,1)
+                col, row = 1, 1
+                fu = (x + s) / (2 * s)
+                fv = (-z + s) / (2 * s)
+            else:  # bottom face, -Y, cell (2,1)
+                col, row = 2, 1
+                fu = (x + s) / (2 * s)
+                fv = (z + s) / (2 * s)
+        # Map to atlas UV: u = (col + fu) / 3 ; v_top = (row + fv) / 2
+        # But glTF V is flipped, so v_final = 1 - (row + fv) / 2
+        u = (col + fu) / 3.0
+        v = 1.0 - (row + fv) / 2.0
+        uvs[i] = (u, v)
+    return uvs
+
+
 def build_cube_mesh(side: float = 0.8) -> trimesh.Trimesh:
     """
     A 1×1×1-ish cube centered on origin with per-face UVs pointing at
@@ -230,6 +284,25 @@ def build_cube_mesh(side: float = 0.8) -> trimesh.Trimesh:
     faces_tri = np.array(faces_tri, dtype=np.int64)
 
     mesh = trimesh.Trimesh(vertices=verts, faces=faces_tri, process=False)
+
+    # Subdivide so each face becomes many small triangles. This matters for
+    # texture_project.py which rejects faces whose UV edge > 20% of the
+    # atlas (a sanity filter against broken SF3D meshes). A 6-face cube
+    # fails 100% of that filter. After 4 levels of subdivision we get
+    # 12 * 4^4 = 3072 small triangles, each with UV edges < 10%.
+    try:
+        from trimesh.remesh import subdivide as _subdiv
+        _sub_v, _sub_f = verts, faces_tri
+        for _ in range(4):
+            _sub_v, _sub_f = _subdiv(_sub_v, _sub_f)
+        mesh = trimesh.Trimesh(vertices=_sub_v, faces=_sub_f, process=False)
+        # Regenerate UVs via cube-face projection so every sub-vertex
+        # samples the right atlas cell.
+        new_uvs = _rebuild_cube_uvs(mesh, s=side / 2)
+        uvs = new_uvs
+    except Exception as _e:
+        print(f'[calib] subdivide skipped ({_e}); keeping 12-face cube')
+
     # Use trimesh's TextureVisuals with a PBR material carrying the atlas.
     atlas = build_cube_atlas(512)
     material = trimesh.visual.material.PBRMaterial(
