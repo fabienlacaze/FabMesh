@@ -423,7 +423,9 @@ def main():
     print(f'[calib] wrote ground-truth GLB: {gt_path}')
 
     atlas = build_cube_atlas(512)
-    atlas_path = os.path.join(img_dir, 'atlas.png')
+    # Write atlas OUTSIDE the images dir so FabMesh's project scanner
+    # doesn't treat it as another image version of _calibration.
+    atlas_path = os.path.join(mesh_dir, '_calibration_atlas.png')
     atlas.convert('RGB').save(atlas_path)
     print(f'[calib] wrote atlas: {atlas_path}')
 
