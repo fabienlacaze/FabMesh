@@ -50,6 +50,70 @@ Commits of interest:
 
 ## Log entries
 
+### 2026-04-16 — Day-long pipeline overhaul (19 commits)
+
+Focused day: making multi-views actually serve fidelity to the reference
+image + fixing the constant "the mesh face is 180° wrong" bug + UX around
+multi-view bar.
+
+**Storage architecture — per image version** (was previously shared per project):
+- `35634a4` multi-views live in `images/<project>/<image_stem>_multiview/`.
+  3D bridge only LOOKS UP, never generates. Falls back to pure SF3D if missing.
+- `4404fed` + `c1f4bc8` auto-inherit on new image version: silhouette hash
+  matches → copy; no match → async Zero123++. Wired on all 6 handlers that
+  produce new versions (including the second `remove-background` I'd missed).
+- `80202ad` re-hydrate mv-bar from disk when `reloadCurrentProject` clears
+  the in-memory cache. New `check-multiview-dir` IPC.
+- `09f94c7` mv button now registers a proper pushJob (Running task dialog).
+- `4ea78f7` openProject re-checks mv-bar after stages settle.
+- `34baeba` version-thumb click re-checks mv-bar.
+- `732667c` selected ANGLE (front/fr/right/br/bl/left/fl) persists across
+  version switches: if user has 90° pinned on v0, switching to v1 keeps 90°
+  and swaps preview to v1's view_1.png.
+
+**Copy prompt button** (`0d72183`): under image preview, reads
+state.currentProject.prompt, copies to clipboard.
+
+**T-pose enforcement** (addresses Zero123++ failure on dynamic poses):
+- `200e389` text-prompt tuning. **Insufficient.**
+- `c2cbfd8` real fix: T-pose keyword → DreamShaper XL Lightning
+  (OpenRAIL++-M) + xinsir ControlNet OpenPose SDXL (Apache 2.0) + pre-
+  rendered skeleton PNG (`scripts/assets/tpose_skeleton.py`). Geometric
+  guarantee.
+- `e989d68` fixed template conflict: `character` said both "T-pose" AND
+  "isometric 3/4 view" — removed 3/4 keyword, added strict symmetry.
+
+**Zero123++ quality** (`6c316e3`): steps 100→150, cfg 4.0→5.5, seed pinned.
++15 s, fewer smudges, tighter color adherence.
+
+**Identity harmonize via IPAdapter**:
+- `1837551` opt-in pass (on by default): each view → SDXL img2img
+  strength 0.3 + IPAdapter conditioned on ref image. First attempt with
+  plus variant crashed "mat1 x mat2 (514×1664 and 1280×1280)".
+- `bd33c6e` switched to `ip-adapter_sdxl_vit-h` BASE variant, explicit
+  CLIPVisionModelWithProjection from h94/IP-Adapter/models/image_encoder.
+  Raises if ALL views fail instead of silently shipping unharmonized
+  cartoon output. **Do-not-retry: ip-adapter-PLUS on RealVisXL+diffusers
+  current stack crashes on 0-element reshape in attention processor even
+  with correct encoder.**
+
+**Auto-align facing detection** (series of fixes for "mesh backwards"):
+- `d581779` bug: chest_z near zero (+0.005) caused spurious 180° flip
+  decisions. Added head_z vote as tie-breaker; weighted sum of chest+head.
+- `8f6e264` sign of comparison was inverted (empirical verification on
+  'garcon' mesh: chest_z=-0.004 head_z=-0.017 was showing BACKWARDS, so
+  flip should trigger on NEGATIVE sum, not positive).
+
+**Observed user pain points still open** (not resolved today):
+- Zero123++ still hallucinates back/sides of stylized characters
+  (orc_child dup face, orc_woman beige legs, garcon bras repliés vers
+  tête instead of horizontal on multi-views). Limit is fundamental to
+  Zero123++ v1.2 training data — Objaverse lacks T-pose chars.
+- MV-Adapter (Apache 2.0, commercial-safe) identified as real
+  replacement candidate but not yet integrated (~1h30 dev deferred).
+
+---
+
 ### 2026-04-15 — Progress bar: completing the earlier fix (commit pending)
 
 **User reported**: after commits `c3acc3e` and `c0d0012`, the bar STILL
