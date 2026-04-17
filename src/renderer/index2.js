@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { Viewer3D } from './lib/Viewer3D.js';
 
 const API = window.meshyAPI;
 
@@ -4647,43 +4648,30 @@ let wsRenderer, wsScene, wsCamera, wsControls, wsModel, wsRafId;
 function initWsThree() {
   if (wsRenderer) return;
   const canvas = document.getElementById('ws-mesh-canvas');
-  const w = canvas.clientWidth || 320, h = canvas.clientHeight || 260;
+  // Unified Viewer3D (see src/renderer/lib/Viewer3D.js).
   // preserveDrawingBuffer is required so canvas.toDataURL() can capture
-  // the rendered scene for thumbnail saving (used by job-details overlay).
-  wsRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
-  wsRenderer.setSize(w, h, false);
-  wsRenderer.setPixelRatio(window.devicePixelRatio);
-  wsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  wsRenderer.toneMappingExposure = 1.0;
-  wsScene = new THREE.Scene();
-  wsScene.background = new THREE.Color(0x1d1d2c);
-  wsCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
-  wsCamera.position.set(2, 2, 3);
-  wsControls = new OrbitControls(wsCamera, canvas);
-  wsControls.enableDamping = true;
-  // Balanced PBR lighting — avoid over-exposing textures
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0);
-  wsScene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-  dir.position.set(5, 8, 5);
-  wsScene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
-  fill.position.set(-5, 3, -5);
-  wsScene.add(fill);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.3);
-  wsScene.add(ambient);
-  function tick() {
-    // Pause rendering when the canvas is offscreen / hidden — saves ~5% CPU
-    // and ~10W on the GPU when the user is on the projects page or has the
-    // workspace collapsed.
-    const visible = canvas.offsetParent !== null && document.visibilityState !== 'hidden';
-    if (visible) {
-      wsControls.update();
-      wsRenderer.render(wsScene, wsCamera);
-    }
-    wsRafId = requestAnimationFrame(tick);
-  }
-  tick();
+  // the rendered scene for thumbnail saving.
+  const _wsV = new Viewer3D({
+    canvas, fov: 45, bgColor: 0x1d1d2c, cameraPos: [2, 2, 3],
+    lighting: true,
+  });
+  // Renderer needs preserveDrawingBuffer → patch after construction.
+  // (Viewer3D's renderer was created without it; recreate using the
+  // same canvas with the flag on.)
+  _wsV.renderer.dispose();
+  _wsV.renderer = new THREE.WebGLRenderer({
+    canvas, antialias: true, alpha: true, preserveDrawingBuffer: true,
+  });
+  _wsV.renderer.setSize(canvas.clientWidth || 320, canvas.clientHeight || 260, false);
+  _wsV.renderer.setPixelRatio(window.devicePixelRatio);
+  _wsV.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  _wsV.renderer.toneMappingExposure = 1.0;
+  wsRenderer = _wsV.renderer;
+  wsScene = _wsV.scene;
+  wsCamera = _wsV.camera;
+  wsControls = _wsV.controls;
+  _wsV.startTickLoop();
+  wsRafId = -1;  // (Viewer3D owns the RAF; kept for legacy shutdown code)
 }
 
 async function showStep2Preview(mesh) {
