@@ -1654,3 +1654,29 @@ Patched `basicsr/data/degradations.py` (torchvision.transforms.functional_tensor
 - ❌ Hardcode NEAREST filtering on Three.js material — kills normal
   maps, makes texels visible at zoom. Default trilinear + 16x aniso
   works once UV padding is good.
+
+### 2026-04-17 — SDXL+IPAdapter multiview tested on mannequin
+
+Ran multiview_sdxl_gen.py on mannequin_ref.png then full pipeline.
+Compare to Z123 result on same input:
+
+Z123 BACK: hallucinated green/yellow/white patterns (random).
+SDXL BACK: violet/yellow/red mix — consistent with front identity
+  but doesn't invent the orange/black back-specific pattern.
+
+Pipeline end-to-end (6-axis render of mesh):
+  FRONT: impeccable (yellow/black checker, red/blue arms, green/purple legs)
+  BACK: patterns propagated from front — not fully wrong, but not
+    the asset's designated orange/black back either. SDXL can't
+    invent info it doesn't have.
+  Sides: thin profile (SF3D limitation with 3/4 input).
+
+**Practical conclusion for users**: SDXL multiview is STRICTLY BETTER
+than Z123 for stylized / synthetic inputs (no random hallucination).
+For real photoreal subjects (dog, horse, orc) Z123 works well because
+Objaverse covers them. Suggest offering both in UI as toggle based on
+subject type.
+
+**Not fixable without user input**: if the back should look specifically
+different from front (e.g. character with logo on back), the ref image
+must SHOW the back, or the user must upload a second back photo.
