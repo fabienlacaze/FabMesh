@@ -2134,6 +2134,22 @@ help" — that was with Z123 input + small atlas. With CRM +
 **Users re-generating meshes now will see properly textured atlases**
 by default. FABMESH_UV_REPACK=0 to revert.
 
+### Orientation validée sur "woman" (2026-04-18 00:20)
+
+Fresh generation post-commit 87900b3 (mesh normalize post-export +
+camera +Z standard). Result on woman_sf3d_1776464211167.glb:
+  - head z centroid: +0.215 (face toward +Z ✓)
+  - posZ render (Three.js cam at +Z): shows the FRONT (top rose,
+    skin on arms/legs — matches ref image)
+  - negZ render: shows the BACK (hair, shoulders)
+  - User confirmed orientation correct.
+
+**Orientation fix definitively validated.**
+
+Residual: atlas still fragmented (SF3D micro-island UV packing).
+xatlas repack default-on helps but doesn't fully eliminate the
+leopard-skin pattern on bodies. Known limitation documented above.
+
 ### Orientation saga finale (2026-04-18 00:00)
 
 Problème: zombi mesh géométrique face à -Z (native SF3D), camera
