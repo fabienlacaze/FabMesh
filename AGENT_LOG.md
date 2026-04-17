@@ -100,6 +100,52 @@ User question: "can we improve the multi-view?" Agent investigated
 stays safety net. Flip default once mannequin back shows orange/black
 instead of Z123's green hallucination.
 
+## 2026-04-17 — 6-view model with TOP+BOTTOM — AGENT REPORT
+
+User question: which AI model generates 6 CANONICAL views including
+TOP and BOTTOM (elev ±90°) — not just horizon views like Z123/MV-Adapter?
+
+### Ranked candidates
+
+| # | Model | License | Top+Bot? | VRAM | Disk | Notes |
+|---|-------|---------|----------|------|------|-------|
+| 1 | **CRM (thu-ml)** | **MIT** ✓ | **YES native 6 ortho incl. up/down** | 8-10 GB | 3 GB | Best direct answer |
+| 2 | **TRELLIS.2** | MIT ✓ | N/A (full mesh) | 12-14 GB | 10-12 GB | SOTA 2025, PBR |
+| 3 | **SPAR3D** | Community (<1M$) ✓ | N/A (full mesh) | 8 GB | 4 GB | 0.7s/obj |
+| 4 | **Stable Zero123C** | Community ✓ | YES arbitrary (az,el) | 8 GB | 2 GB | Per-view, less consistent |
+| 5 | **Unique3D** | MIT ✓ | **NO** (only 4 horizon views) | 8 GB | 4 GB | Excluded |
+| 6 | **Era3D** | AGPL-3.0 ✗ | No | - | - | Copyleft excluded |
+| 7 | **SV3D / Wonder3D / One2345++** | Non-commercial ✗ | - | - | - | Excluded |
+
+### TOP recommendation: **CRM**
+  - Repo: github.com/thu-ml/CRM (MIT)
+  - Weights: huggingface.co/Zhengyi/CRM
+  - Paper: arxiv.org/abs/2403.05034
+  - Literally designed around "six orthographic views including up and
+    down" — the exact feature we need
+  - Commercial + EU-safe (MIT)
+  - Fits RTX 5080 VRAM budget
+
+### Alternative: hybrid MV-Adapter + Stable Zero123C
+  - Keep MV-Adapter for F/B/L/R (already planned)
+  - Call Stable Zero123C twice for (elev=+90) and (elev=-90)
+  - SZ123C accepts arbitrary (az, el) unlike Z123++
+
+### RECOMMENDED production path (long-term):
+  **Mesh-first render-and-refine**:
+    1. Generate mesh via SF3D/TripoSG/CRM
+    2. Render 6 canonical views from raw geometry (trimesh/pyrender)
+       at exact F/B/L/R/T/B
+    3. img2img refine each view with SDXL + depth/normal ControlNet
+       + IPAdapter (identity from ref)
+  This fixes the chicken-and-egg: proxy views have correct silhouette
+  + normals, diffusion only repaints texture. SDXL reliable at that.
+  This is what Meshy/Rodin do internally.
+
+### NEXT STEP (user decides)
+  - Short-term: integrate CRM as new multi-view backend (1 week)
+  - Long-term: mesh-first render-and-refine as v2 texture path
+
 ## 2026-04-17 — Stage 4 root cause found, NOT yet fixed
 
 **Agent investigation report**: Stage 4 fails (1/6) on the GT cube

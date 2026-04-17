@@ -231,10 +231,27 @@ def generate_multiview(input_image_path, output_dir, size=320):
     # look like they belong to a different character.
     #
     # Fix: after rembg, pass each view through SDXL img2img (RealVisXL)
-    # at strength 0.35 with a "photorealistic, matches reference" prompt,
-    # using the always-on SDXL server (http://127.0.0.1:5555/img2img)
-    # when available. Falls through silently if the server is down —
-    # the pipeline still works, it just skips the harmonization.
+    # with a "photorealistic, matches reference" prompt, using the
+    # always-on SDXL server (http://127.0.0.1:5555/img2img) when
+    # available. Falls through silently if the server is down — the
+    # pipeline still works, it just skips the harmonization.
+    #
+    # Per-view strength schedule (2026-04-17 tuning):
+    #   front-quarters (views 0,5 → az 30/330): 0.40 — preserve identity
+    #   sides (views 1,4 → az 90/270):         0.55 — medium overwrite
+    #   back (views 2,3 → az 150/210):         0.65 — high overwrite
+    #                                                 of Z123 hallucinations
+    # Override globally with FABMESH_MV_HARMONIZE_STRENGTH.
+    _strength_override = os.environ.get('FABMESH_MV_HARMONIZE_STRENGTH')
+    if _strength_override:
+        try:
+            _fixed_s = float(_strength_override)
+            STRENGTH_SCHEDULE = [_fixed_s] * 6
+        except Exception:
+            STRENGTH_SCHEDULE = [0.40, 0.55, 0.65, 0.65, 0.55, 0.40]
+    else:
+        STRENGTH_SCHEDULE = [0.40, 0.55, 0.65, 0.65, 0.55, 0.40]
+
     try:
         import requests as _rq
         if _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
@@ -254,11 +271,12 @@ def generate_multiview(input_image_path, output_dir, size=320):
                 _tmp_in = os.path.join(output_dir, f'.style_in_{i}.png')
                 _tmp_out = os.path.join(output_dir, f'.style_out_{i}.png')
                 tile.convert('RGBA').save(_tmp_in)
+                _s = STRENGTH_SCHEDULE[i]
                 try:
                     r = _rq.post(
                         'http://127.0.0.1:5555/img2img',
                         json={'input': _tmp_in, 'output': _tmp_out,
-                              'prompt': style_prompt, 'strength': 0.35},
+                              'prompt': style_prompt, 'strength': _s},
                         timeout=180,
                     )
                     j = r.json()
@@ -276,7 +294,7 @@ def generate_multiview(input_image_path, output_dir, size=320):
                         else:
                             harmonized.append(new_rgb)
                         slog.info('view_style_harmonized', view=i,
-                                  strength=0.35)
+                                  strength=_s)
                     else:
                         log(f'style harmonize view_{i} failed '
                             f'({j.get("error")}), keeping original')
