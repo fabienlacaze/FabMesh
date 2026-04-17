@@ -1434,6 +1434,23 @@ ipcMain.handle('calib-open-report', (event, { html } = {}) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+let _calibDiagnoseProc = null;
+
+ipcMain.handle('calib-cancel', () => {
+  if (_calibDiagnoseProc && !_calibDiagnoseProc.killed) {
+    try {
+      // Kill the python process AND its children (SF3D subprocess etc.)
+      if (process.platform === 'win32') {
+        require('child_process').execSync(`taskkill /pid ${_calibDiagnoseProc.pid} /T /F`, { stdio: 'ignore' });
+      } else {
+        _calibDiagnoseProc.kill('SIGTERM');
+      }
+      return { success: true };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+  return { success: false, error: 'no active calibration' };
+});
+
 ipcMain.handle('calib-diagnose', async () => {
   const script = path.join(__dirname, '..', '..', 'scripts', '_calib_diagnose.py');
   return new Promise((resolve) => {
@@ -1442,8 +1459,15 @@ ipcMain.handle('calib-diagnose', async () => {
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
       cwd: path.join(__dirname, '..', '..'),
     }, (error, stdout, stderr) => {
+      _calibDiagnoseProc = null;
       if (error) {
-        resolve({ success: false, error: error.message, stderr: (stderr || '').slice(-500) });
+        const cancelled = (error.killed || (error.code === null && error.signal));
+        resolve({
+          success: false,
+          cancelled,
+          error: cancelled ? 'cancelled by user' : error.message,
+          stderr: (stderr || '').slice(-500)
+        });
         return;
       }
       // The Python script prints a DIAGNOSE_JSON: {...} line at the end
@@ -1467,6 +1491,7 @@ ipcMain.handle('calib-diagnose', async () => {
         });
       } catch (e) { resolve({ success: false, error: e.message }); }
     });
+    _calibDiagnoseProc = proc;
     proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
     proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
   });

@@ -7409,10 +7409,22 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
       </div>`;
   }
 
+  const btnCancel = document.getElementById('calib-diagnose-cancel');
+  btnCancel?.addEventListener('click', async () => {
+    btnCancel.disabled = true;
+    btnCancel.textContent = 'Cancelling...';
+    try { await API.calibCancel(); } catch (e) {}
+  });
+
   btnDiagnose?.addEventListener('click', async () => {
     diagModal.classList.remove('hidden');
     diagBody.innerHTML = '<p style="color:#aaa">Running pipeline stages — this takes ~4-5 min the first time (SF3D + Zero123++ + projection)...</p>';
     btnDiagnose.disabled = true;
+    if (btnCancel) {
+      btnCancel.style.display = '';
+      btnCancel.disabled = false;
+      btnCancel.innerHTML = '&#9209;&#65039; Cancel';
+    }
     const t0 = Date.now();
     const fmt = (ms) => { const s = Math.floor(ms/1000); const m = Math.floor(s/60); return m>0 ? `${m}m${String(s%60).padStart(2,'0')}s` : `${s}s`; };
     const progressEl = document.createElement('p');
@@ -7427,11 +7439,16 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     try {
       const res = await API.calibDiagnose();
       clearInterval(timer);
-      renderDiagnose(res);
+      if (res && res.cancelled) {
+        diagBody.innerHTML = `<p style="color:#f88">Cancelled after ${fmt(Date.now()-t0)}.</p>`;
+      } else {
+        renderDiagnose(res);
+      }
     } catch (e) {
       clearInterval(timer);
       diagBody.innerHTML = `<p style="color:#f66">Error: ${e.message}</p>`;
     }
+    if (btnCancel) btnCancel.style.display = 'none';
     btnDiagnose.disabled = false;
   });
 
