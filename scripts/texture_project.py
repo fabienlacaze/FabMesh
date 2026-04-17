@@ -316,28 +316,56 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     #   azimuth = [30, 90, 150, 210, 270, 330]
     #   elevation = [20, -10, 20, -10, 20, -10]   (alternating)
     # The front input.png stays at (0, 0).
-    MULTIVIEW_VIEWS = [
-        (30.0,   20.0),  # view_0
-        (90.0,  -10.0),  # view_1
-        (150.0,  20.0),  # view_2
-        (210.0, -10.0),  # view_3
-        (270.0,  20.0),  # view_4
-        (330.0, -10.0),  # view_5
-    ]
+    #
+    # If the multiview directory contains views.json (written by
+    # multiview_crm_gen.py or any engine that uses non-Zero123 angles)
+    # use that schema instead. CRM schema is:
+    #   [(0,0), (90,0), (180,0), (270,0), (0,+90), (0,-90)]
+    # This adds TOP and BOTTOM coverage which Zero123 cannot produce.
+    MULTIVIEW_VIEWS = None
+    if multiview_dir:
+        _schema_path = os.path.join(multiview_dir, 'views.json')
+        if os.path.exists(_schema_path):
+            try:
+                with open(_schema_path, 'r', encoding='utf-8') as _sf:
+                    _schema = json.load(_sf)
+                MULTIVIEW_VIEWS = [(float(v['azim']), float(v['elev']))
+                                   for v in _schema.get('views', [])]
+                log(f'using views.json schema (engine={_schema.get("engine","?")}): {MULTIVIEW_VIEWS}')
+            except Exception as _e:
+                log(f'views.json read failed: {_e}, falling back to Z123 schema')
+    if MULTIVIEW_VIEWS is None:
+        MULTIVIEW_VIEWS = [
+            (30.0,   20.0),  # view_0
+            (90.0,  -10.0),  # view_1
+            (150.0,  20.0),  # view_2
+            (210.0, -10.0),  # view_3
+            (270.0,  20.0),  # view_4
+            (330.0, -10.0),  # view_5
+        ]
     # Back-compat aliases for code below that still reads MULTIVIEW_ANGLES
     MULTIVIEW_ANGLES = [a for (a, _) in MULTIVIEW_VIEWS]
 
     # Priority weights: front=1.0, front-side=0.7, side=0.5, back-side=0.4, back views get less
-    # The priority downweights views so front dominates where multiple views see the same surface
-    PRIORITY_WEIGHTS = {
-        0.0:   1.0,   # front (input.png) — HD source image
-        30.0:  0.6,   # front-right
-        330.0: 0.6,   # front-left
-        90.0:  0.9,   # right — main side view
-        270.0: 0.9,   # left — main side view
-        150.0: 0.8,   # back-right — contributes to back coverage
-        210.0: 0.8,   # back-left — contributes to back coverage
+    # The priority downweights views so front dominates where multiple views see the same surface.
+    # Keys are (azim, elev) tuples so CRM's top/bottom (elev=+/-90) are handled.
+    PRIORITY_WEIGHTS_TUP = {
+        (0.0,   0.0):   1.0,   # front (input.png) — HD source image
+        (30.0,  20.0):  0.6,   # Z123 front-right
+        (330.0, -10.0): 0.6,   # Z123 front-left
+        (90.0,  -10.0): 0.9,   # Z123 right
+        (270.0, 20.0):  0.9,   # Z123 left
+        (150.0, 20.0):  0.8,   # Z123 back-right
+        (210.0, -10.0): 0.8,   # Z123 back-left
+        # CRM orthographic schema
+        (90.0,  0.0):   0.9,   # CRM right
+        (180.0, 0.0):   0.8,   # CRM back
+        (270.0, 0.0):   0.9,   # CRM left
+        (0.0,   90.0):  0.7,   # CRM TOP — unique coverage, never seen elsewhere
+        (0.0,  -90.0):  0.7,   # CRM BOTTOM — unique coverage
     }
+    # Legacy dict keyed on azim alone (for code paths that only have azim)
+    PRIORITY_WEIGHTS = {a: p for (a, _), p in PRIORITY_WEIGHTS_TUP.items()}
 
     views = []  # list of (image_path, azim_deg, elev_deg, priority)
 
@@ -357,10 +385,12 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             vpath = os.path.join(multiview_dir, f'view_{i}.png')
             if os.path.exists(vpath):
                 shifted_azim = (azim + rotation_offset_deg) % 360
-                # Priority lookup uses the ORIGINAL azimuth (that's the angle
-                # at which Zero123++ actually photographed the subject).
-                views.append((vpath, shifted_azim, elev,
-                              PRIORITY_WEIGHTS.get(azim, 0.4)))
+                # Priority lookup uses the ORIGINAL (azim, elev) tuple.
+                # Falls back to azim-only dict for back-compat, then 0.4.
+                prio = PRIORITY_WEIGHTS_TUP.get(
+                    (azim, elev),
+                    PRIORITY_WEIGHTS.get(azim, 0.4))
+                views.append((vpath, shifted_azim, elev, prio))
             else:
                 log(f'WARNING: missing {vpath}, skipping')
         if abs(rotation_offset_deg) > 0.5:

@@ -1439,16 +1439,22 @@ document.getElementById('ws-multiview-btn')?.addEventListener('click', async () 
 });
 
 // Multi-view face selector
-// Maps Zero123++ view indices to face names
-// Zero123++ outputs: view_0=30°, view_1=90°, view_2=150°, view_3=210°, view_4=270°, view_5=330°
+// CRM engine (default now) produces:
+//   view_0=front(0°), view_1=right(90°), view_2=back(180°),
+//   view_3=left(270°), view_4=TOP(elev +90°), view_5=BOTTOM(elev -90°)
+// Legacy Z123 aliases kept for backward compat with older projects.
 const _mvViewMap = {
-  front: 'input',    // original image (0°)
-  'fr': 'view_0',    // 30° front-right
-  right: 'view_1',   // 90° right
-  'br': 'view_2',    // 150° back-right
-  'bl': 'view_3',    // 210° back-left
-  left: 'view_4',    // 270° left
-  'fl': 'view_5',    // 330° front-left
+  front:  'input',    // original image (0°, el=0)
+  right:  'view_1',   // 90°
+  back:   'view_2',   // 180°
+  left:   'view_3',   // 270°
+  top:    'view_4',   // elev +90°
+  bottom: 'view_5',   // elev -90°
+  // Legacy Z123 keys (30/150/210/330) map to the closest CRM slot:
+  'fr':   'view_1',   // 30° -> right
+  'br':   'view_2',   // 150° -> back
+  'bl':   'view_3',   // 210° -> left
+  'fl':   'view_1',   // 330° -> right (closest front-right equiv)
 };
 
 function _showMultiviewBar(multiviewDir) {
