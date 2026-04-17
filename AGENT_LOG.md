@@ -89,6 +89,40 @@ the black holes we saw before.
 - Later: offer per-slot repair UI in the multi-view review dialog
   ("regenerate this view with repair").
 
+### Zebre test — 4 slots repaired (0, 3, 4, 5)
+
+|slot|before w|after w|before palette|after palette|visual|
+|---|---|---|---|---|---|
+|0 front  |0.76|0.56|0.023|0.678|GOOD — real zebra face+body|
+|3 left   |0.80|0.78|0.011|0.061|GOOD visually — striped side-profile zebra|
+|4 top    |0.77|0.24|0.013|0.265|MEDIUM — coherent downward view|
+|5 bottom |0.77|0.74|0.019|0.083|MARGINAL — incoherent bottom|
+
+49s total for 4 slots.
+
+### Finding: detector false-positives on naturally-striped subjects
+
+Zebre ref shows front-view stripes. Detector's `ref_stats` only
+captures ~1% dark pixels because alpha-masked ref doesn't pick up
+stripes as "dark". Side/left views of a striped subject then have
+much higher dark_ratio (30%) than ref's baseline — detector
+flags them even though they're correctly rendered.
+
+### Mitigation options (future)
+1. Use LAB color space instead of luminance for "dark" detection —
+   stripes show as neutral-chroma, not dark.
+2. Compute ref_stats from the already-known-good front view
+   (view_0 if it passes detector) instead of input.png.
+3. Per-slot weirdness threshold: tighter for TOP/BOTTOM
+   (high-prior-failure), looser for sides.
+
+### Verdict
+Repair pass ships as-is. For "clean subjects with hallucinated
+TOP/BOTTOM" (child, zombi) it's a clear win. For "naturally
+patterned subjects" (zebra, dalmatian) it still improves palette
+but the detector may need per-subject tuning. Document expected
+behavior in `FABMESH_API.md`.
+
 ---
 
 ## 2026-04-17 — Child project analysis: multi-views insufficient, mesh degraded
