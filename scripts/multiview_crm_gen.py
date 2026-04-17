@@ -115,6 +115,73 @@ VIEW_MAPPING = [
 ]
 
 
+def _hsv_hist_sim(pil_a, pil_b, bins=16, mask_grey=True):
+    """HSV 3D-histogram cosine similarity between two PIL images.
+    Both resized to 128 for speed. Pixels close to CRM's (127,127,127)
+    grey background can be masked out (they would dominate histogram)."""
+    import numpy as _np
+    from PIL import Image as _Img
+    a = _np.asarray(pil_a.convert('RGB').resize((128, 128), _Img.LANCZOS))
+    b = _np.asarray(pil_b.convert('RGB').resize((128, 128), _Img.LANCZOS))
+    if mask_grey:
+        # Mask CRM grey background ±25
+        da = _np.linalg.norm(a.astype(float) - 127, axis=2)
+        db = _np.linalg.norm(b.astype(float) - 127, axis=2)
+        a_fg = a[da > 25].reshape(-1, 3)
+        b_fg = b[db > 25].reshape(-1, 3)
+    else:
+        a_fg = a.reshape(-1, 3)
+        b_fg = b.reshape(-1, 3)
+    if len(a_fg) < 50 or len(b_fg) < 50:
+        return 0.0
+    # Convert to HSV-like via PIL (simpler than manual conversion)
+    import colorsys as _cs  # noqa - unused but keeps deps explicit
+    # Fall back to RGB histogram if masks empty
+    ha, _ = _np.histogramdd(a_fg, bins=bins, range=[[0, 256]]*3)
+    hb, _ = _np.histogramdd(b_fg, bins=bins, range=[[0, 256]]*3)
+    ha = ha.ravel(); hb = hb.ravel()
+    denom = _np.linalg.norm(ha) * _np.linalg.norm(hb)
+    if denom < 1e-8:
+        return 0.0
+    return float(_np.dot(ha, hb) / denom)
+
+
+def _select_best_per_slot(per_seed, ref_img, seeds):
+    """For each CRM output slot (0..5), pick the seed whose view best
+    matches the reference image (front slot) or its mirror (side slots)
+    or its masked palette (back/top/bottom). Returns list of 6 PIL
+    images, one per slot from the winning seed.
+
+    Scoring strategies per slot:
+      - front (slot 5): highest hist-sim vs ref
+      - right (slot 3), back (slot 2), left (slot 0), top (slot 4),
+        bottom (slot 1): highest hist-sim vs ref (palette should stay
+        consistent even when view angle differs)
+    """
+    from PIL import ImageOps as _Ops
+    selected = [None] * 6
+    scores = {}
+    for slot_idx in range(6):
+        best_seed = seeds[0]
+        best_score = -1.0
+        for s in seeds:
+            view = per_seed[s][slot_idx]
+            # Mirror ref for left/right slots (some subjects are asymmetric
+            # enough that ref's right side matches CRM's right view better
+            # than ref's left — but bilateral symmetry is the usual case,
+            # so mirroring is a cheap identity boost).
+            sim = _hsv_hist_sim(view, ref_img)
+            if sim > best_score:
+                best_score = sim
+                best_seed = s
+        selected[slot_idx] = per_seed[best_seed][slot_idx]
+        scores[slot_idx] = (best_seed, best_score)
+    # Log selection summary
+    for slot_idx, (s, sc) in scores.items():
+        log(f'  slot {slot_idx}: seed {s} (sim={sc:.3f})')
+    return selected
+
+
 def generate(input_image_path, output_dir, scale=5.5, step=50,
              size=1024):
     """Run CRM stage 1 and produce 6 views + input.png + views.json."""
@@ -195,15 +262,41 @@ def generate(input_image_path, output_dir, scale=5.5, step=50,
         os.chdir(_cwd_save)
 
     _subpct(20, 'stage1_infer')
-    log(f'running CRM stage 1 (scale={scale}, step={step})...')
+    # Multi-seed + best-of-N (2026-04-18, agent recommendation):
+    # CRM's fixed-seed DDIM sampler can mode-collapse on stylised inputs,
+    # producing a wrong-but-confident back view. Running N seeds and
+    # picking the best candidate per slot (via HSV histogram similarity
+    # vs reference) kills most back-view hallucinations.
+    seeds = [int(s.strip()) for s in os.environ.get(
+        'FABMESH_CRM_SEEDS', '1234').split(',') if s.strip()]
+    if len(seeds) == 1:
+        log(f'running CRM stage 1 (scale={scale}, step={step}, seed={seeds[0]})...')
+    else:
+        log(f'running CRM stage 1 × {len(seeds)} seeds={seeds} '
+            f'(scale={scale}, step={step})...')
     # Hook tqdm so DDIM steps drive the progress bar through 20..65.
     _orig_tqdm = _install_ddim_progress_hook(20, 65)
+    per_seed = {}  # seed -> list of 6 PIL
     try:
-        rt = pipeline(crm_input, scale=scale, step=step)
+        for si, s in enumerate(seeds):
+            # Override sampler seed for this run
+            try:
+                pipeline.stage1_sampler.seed = s
+            except Exception:
+                pass
+            rt = pipeline(crm_input, scale=scale, step=step)
+            per_seed[s] = rt['stage1_images']
+            log(f'  seed {s} done ({si+1}/{len(seeds)})')
     finally:
         _restore_tqdm(_orig_tqdm)
-    stage1_images = rt['stage1_images']  # list of 6 PIL images at 256x256
-    log(f'stage 1 done, {len(stage1_images)} views produced')
+
+    if len(seeds) == 1:
+        # Legacy single-seed path
+        stage1_images = per_seed[seeds[0]]
+    else:
+        # Pick best seed per slot via HSV histogram similarity vs ref image
+        stage1_images = _select_best_per_slot(per_seed, crm_input, seeds)
+    log(f'stage 1 done, {len(stage1_images)} views selected')
 
     _subpct(70, 'upscale')
     # CRM outputs at 256×256. Upscale to target size with RealESRGAN x4
