@@ -1919,10 +1919,30 @@ log said "disabled by default because didn't help with old mosaic
 layout" — but that was with Z123 + low-res atlas. CRM + 2048 atlas
 makes xatlas genuinely helpful now.
 
-### Test B: FABMESH_PROJECT_MODE=vc (vertex coloring) — IN PROGRESS
-Running in background. User rejected in April for low effective
-resolution (15k verts = ~128x128 equivalent). With CRM + 243k verts
-it may be viable now.
+### Test B: FABMESH_PROJECT_MODE=vc — NOT A REAL VC TEST
+`texture_project_vc.py` rejected the `--rotation-offset` flag that
+local_sf3d_bridge unconditionally passes. Bridge silently fell back
+to the standard atlas path. But the produced atlas is VERY CLEAN:
+several whole views of the chat laid out as organized charts, face
+recognizable. This is the NORMAL atlas path run fresh (10k verts
+instead of 243k).
+
+### REAL conclusion from A vs B comparison
+The voronoi-noise issue on the original chat_vert mesh was caused
+by the mesh being **over-subdivided** (243k verts, extent Z=0.25,
+flat). When we re-run fresh (10k verts, extent Z=0.41, real 3D):
+  - B (no repack): atlas = **multiple coherent chat views** ← WINNER
+  - A (with repack): atlas still voronoi-ish (xatlas recharted but
+    fills are still noisy when over-subdivided source)
+
+**So the real fix** is NOT UV repack — it's not re-using the stale
+243k-vertex mesh. Why was the original bloated? Either the
+"construction stages" path or a subdivide post-step was applied.
+Need to find and disable.
+
+The current pipeline on a fresh run (like our test B) already
+produces an OK atlas. Defaults stay Z123-schema + no repack.
+**FABMESH_UV_REPACK=0 confirmed optimal.**
 
 ### Viewer unification — START (backups done)
 Backup: `before-viewer-unify-20260417` tag + file copies in backups/.
