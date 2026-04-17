@@ -147,6 +147,39 @@ This gives a proper calibration asset that is:
   (a) In-distribution (humanoid shape SF3D has seen 1000s of times)
   (b) Traceable (each zone's projection can be visually verified)
 
+### 2026-04-17 — Mannequin full-pipeline test — CRITICAL FINDING
+
+Ran local_sf3d_bridge on mannequin_ref.png (3/4 view of a humanoid
+with yellow/black F checker front + orange/black B checker back).
+
+Result: 7112 verts / 11844 faces.
+Visual 4-axis render:
+  - FRONT: silhouette + palette CORRECT. Yellow/black checker visible
+    on torso, red/blue stripes on arms, green/purple dots on legs,
+    orange head. F letter illegible due to noise but color zones right.
+  - BACK: texture WRONG. Atlas shows yellow/green/white checker pattern
+    instead of orange/black. SF3D hallucinated the back because
+    Zero123++ couldn't correctly imagine the back of a stylized figure.
+  - RIGHT/LEFT: mesh is nearly flat (0 depth on sides) because input
+    was 3/4 not profile — SF3D reconstructed a flat silhouette.
+
+**Root-cause verdict**: The texturing problem the user has been seeing
+for weeks is NOT primarily in texture_project.py. It has 3 layers:
+  1. Zero123++ hallucinates back/sides on stylized or unusual inputs
+  2. SF3D reconstructs flat sides when input is 3/4 instead of profile
+  3. texture_project then has nothing real to project from on back/sides
+     → falls back to SF3D's blurry baked atlas → noise artefacts
+
+Fixing texture_project alone cannot solve this. Upstream improvements
+needed:
+  - Better multiview generator (TRELLIS, Unique3D, MV-Adapter)
+  - OR force user to provide back image separately (UI workflow change)
+  - OR accept that texture fidelity on non-front regions is capped
+
+For calibration: the mannequin asset is NOW valuable for detecting
+pipeline regressions visually (F on back / R on left arm / etc.)
+even though it won't reach 6/6 score with current pipeline.
+
 **What works**:
   - UI calibration button functional in ~7s
   - Per-stage visual comparison HTML (expected vs got)
