@@ -1877,3 +1877,66 @@ subject type.
 **Not fixable without user input**: if the back should look specifically
 different from front (e.g. character with logo on back), the ref image
 must SHOW the back, or the user must upload a second back photo.
+
+## 2026-04-17 (late) — CRM integration complete + mesh quality analysis
+
+### CRM shipped + routed through UI
+- Dependencies thrashed: xformers broke torch 2.11, forcibly downgraded
+  back to torch 2.7.1+cu128 then uninstalled xformers entirely (CRM uses
+  torch SDPA fallback instead). diffusers pinned 0.34, transformers 4.46
+  (5.5 dropped FLAX_WEIGHTS_NAME). Stage 2 skipped by default
+  (FABMESH_CRM_USE_STAGE2=1 to opt in) — saves ~6 GB VRAM and brings
+  inference from 5 min → 25s.
+- `_mvScriptForEngine()` helper in main.js routes FABMESH_MV_ENGINE
+  correctly at BOTH call sites (generate-multiview IPC + mv-inherit).
+- UI multi-view bar updated for CRM schema: 0° / 90° / 180° / 270° / TOP / BOT.
+- texture_project.py reads views.json to discover (azim, elev) per view.
+- PRIORITY_WEIGHTS_TUP uses (azim, elev) tuples to handle top/bot.
+- Realtime progress via tqdm monkey-patch (DDIM steps mapped 20..65%).
+- RealESRGAN x4 upscale 256→1024 on CRM output (was LANCZOS, too blurry).
+
+### Mesh quality finding (chat_vert test, 2026-04-17 18:26)
+Full pipeline on chat_vert (CRM → SF3D → texture_project → refine):
+  - Multi-views CRM: EXCELLENT (front/back/TOP/BOT all cohérents avec input)
+  - Mesh: 243k verts / 162k faces BUT extent Z=0.25 vs X/Y=0.9 →
+    **mesh is nearly flat 2D** (SF3D failed depth on this input)
+  - Atlas: VORONOI MOSAIC (known bug from 2026-04-14) — SF3D's
+    micro-island UVs + EDT dilation = random green/black polygons
+    instead of coherent chat silhouette
+
+### Test A: FABMESH_UV_REPACK=1 — MAJOR IMPROVEMENT
+Re-ran on same input with `FABMESH_UV_REPACK=1`:
+  - verts: 243k → 10889 (cleaner, no over-subdivision)
+  - extent Z: 0.25 → 0.41 (real 3D, not flat!)
+  - Atlas: **chart-based layout with recognizable chat pieces**
+    (head, paws, body visible) instead of voronoi noise
+  - xatlas re-parametrization collapses SF3D's micro-islands into
+    usable charts, which the projection can actually fill with
+    coherent pixels from the 7 views.
+
+**Action**: default FABMESH_UV_REPACK=1 for CRM pipeline. 2026-04-14
+log said "disabled by default because didn't help with old mosaic
+layout" — but that was with Z123 + low-res atlas. CRM + 2048 atlas
+makes xatlas genuinely helpful now.
+
+### Test B: FABMESH_PROJECT_MODE=vc (vertex coloring) — IN PROGRESS
+Running in background. User rejected in April for low effective
+resolution (15k verts = ~128x128 equivalent). With CRM + 243k verts
+it may be viable now.
+
+### Viewer unification — START (backups done)
+Backup: `before-viewer-unify-20260417` tag + file copies in backups/.
+Goal: single 3D viewer class + single 2D canvas class so nav commands
+(zoom=wheel, pan=right-click, rotate=left-click on 3D) are identical
+across all 7+ viewers and modals.
+
+Current state:
+  - 3D viewers (7x): all use Three.js OrbitControls with only
+    enableDamping=true — ALREADY consistent behavior-wise.
+  - 2D canvases (mask/clone/paint): use CanvasManager in canvas-utils.js
+    with pan on middle-click / alt+click / optional right-click.
+  - No unified 2D zoom convention (wheel is not bound in canvas-utils
+    for some tool paths).
+
+Next: factor a single BaseViewer3D + BaseCanvas2D class so any future
+change applies everywhere at once.
