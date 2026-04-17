@@ -108,6 +108,45 @@ the pipeline inputs it expects don't exist for this asset. Use
 Stage 4 as a REGRESSION detector (did score drop vs last run?) not
 as a correctness oracle.
 
+### 2026-04-17 end-of-day — Full pipeline test on T-pose person — PARTIAL
+
+Generated a photoreal T-pose person via RealVisXL, ran full
+local_sf3d_bridge on it. Result: 6553 verts / 10088 faces.
+
+Visual 6-axis render:
+  - FRONT: silhouette OK, t-shirt + jeans visible but VERY pixelated
+    ("tile-like" noise artefacts everywhere, not smooth color)
+  - BACK: back visible, same granular noise
+  - RIGHT/LEFT: side profiles correct, same noise
+  - Shape: correct T-pose, arms extended, head + limbs recognisable
+
+**Conclusion**: The REAL bug the user has been seeing all along is
+NOT in UV projection (Stage 4), it's in the atlas resolution /
+SDXL refine tile quality. The pipeline gets the geometry + azimuth
+mapping right on in-distribution humanoids, but the final texture
+quality is low-fidelity. Likely causes:
+  - SF3D base atlas is ~512-1024px for the whole mesh
+  - SDXL refine tiles sometimes hallucinate noise patterns
+  - Vertex density too low to support fine details
+
+### 2026-04-17 NEXT STEP — Crash-test mannequin asset (IN PROGRESS)
+
+User request: build a humanoid mannequin (in-distribution for SF3D)
+with each body zone labeled by a unique color + pattern + letter.
+If the texture projection puts "F" on the back or "L" on the right
+arm, the mismatch is instantly visible. Zones:
+  - Torso FRONT = yellow/black checker + "F"
+  - Torso BACK  = orange/black checker + "B"
+  - Left arm    = red stripes + "L"
+  - Right arm   = blue stripes + "R"
+  - Left leg    = green dots + "LL"
+  - Right leg   = purple dots + "RL"
+  - Head top    = plain orange + "H"
+
+This gives a proper calibration asset that is:
+  (a) In-distribution (humanoid shape SF3D has seen 1000s of times)
+  (b) Traceable (each zone's projection can be visually verified)
+
 **What works**:
   - UI calibration button functional in ~7s
   - Per-stage visual comparison HTML (expected vs got)
