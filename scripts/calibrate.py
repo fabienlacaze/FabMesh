@@ -115,26 +115,97 @@ def render_axis(mesh, cam_dir, up_dir, size=384):
     return img
 
 
-def classify_face(img):
-    """Return the letter of the painted face most likely present."""
-    c0, c1 = int(img.shape[0] * 0.25), int(img.shape[0] * 0.75)
-    sample = img[c0:c1, c0:c1].reshape(-1, 3).astype(float)
-    # Filter out white bg pixels
-    mask = sample.sum(1) < 700
+_TEMPLATE_CACHE = {}
+
+def _load_templates(size):
+    """Load the 6 ground-truth axis renders as reference templates."""
+    if size in _TEMPLATE_CACHE:
+        return _TEMPLATE_CACHE[size]
+    templates = {}
+    letter_map = {'front': 'F', 'back': 'B', 'right': 'R',
+                  'left': 'L', 'top': 'T', 'bottom': 'D'}
+    for name, letter in letter_map.items():
+        p = os.path.join(GT_AXES_DIR, f'{name}.png')
+        if os.path.exists(p):
+            img = Image.open(p).convert('RGB').resize((size, size), Image.LANCZOS)
+            templates[letter] = np.asarray(img).astype(float)
+    _TEMPLATE_CACHE[size] = templates
+    return templates
+
+
+def _template_classify(img):
+    """Classify by template matching against the 6 ground-truth renders."""
+    size = img.shape[0]
+    templates = _load_templates(size)
+    if not templates:
+        return '?', 1.0, {}
+    m0, m1 = int(size * 0.18), int(size * 0.82)
+    got = img[m0:m1, m0:m1].astype(float)
+    scores = {}
+    for letter, tpl in templates.items():
+        ref = tpl[m0:m1, m0:m1]
+        scores[letter] = float(np.linalg.norm(got - ref, axis=2).mean())
+    ranked = sorted(scores.items(), key=lambda kv: kv[1])
+    best_letter, best_d = ranked[0]
+    second_d = ranked[1][1] if len(ranked) > 1 else best_d + 1
+    conf = float(min(1.0, (second_d - best_d) / max(1.0, best_d)))
+    return best_letter, conf, scores
+
+
+def _palette_classify(img):
+    """Classify by counting pixels that match each face's signature
+    palette. Independent from template matching — uses each face's
+    unique dominant + secondary colors."""
+    # Each face has a signature color set (dominant + accent).
+    # We count pixels matching each palette and pick the highest hit.
+    PALETTES = {
+        'F': [(200, 40, 40), (240, 240, 240)],        # red + white
+        'B': [(40, 70, 200), (200, 40, 40), (240, 240, 240)],  # blue + red + white
+        'R': [(240, 210, 140), (80, 210, 90), (30, 30, 30)],   # beige + green + black
+        'L': [(230, 60, 210), (80, 210, 90), (240, 240, 240)], # magenta + green + white
+        'T': [(240, 235, 210), (80, 210, 90), (200, 40, 40)],  # cream + green + red
+        'D': [(200, 40, 40), (40, 70, 200), (80, 210, 90)],    # red + blue + green (BOT)
+    }
+    size = img.shape[0]
+    m0, m1 = int(size * 0.2), int(size * 0.8)
+    sample = img[m0:m1, m0:m1].reshape(-1, 3).astype(float)
+    # Drop bg (pure white)
+    mask = sample.sum(1) < 720
     if not mask.any():
-        return '?', (255, 255, 255), 0.0
+        return '?', 0.0, {}
     sample = sample[mask]
-    avg = tuple(int(x) for x in sample.mean(0))
-    best = '?'; best_d = 1e18
-    for letter, ref in FACE_COLOR.items():
-        d = sum((a - b) ** 2 for a, b in zip(avg, ref))
-        if d < best_d:
-            best_d = d; best = letter
-    # Confidence: how many pixels match the best color within threshold
-    ref = np.array(FACE_COLOR[best], float)
-    close = np.linalg.norm(sample - ref, axis=1) < 80
-    conf = float(close.sum()) / max(1, len(sample))
-    return best, avg, conf
+    scores = {}
+    for letter, palette in PALETTES.items():
+        # For each pixel, distance to closest palette color
+        refs = np.array(palette, float)
+        dists = np.linalg.norm(sample[:, None, :] - refs[None, :, :], axis=2)
+        min_d = dists.min(axis=1)
+        # Count pixels within tight threshold
+        scores[letter] = float((min_d < 60).sum()) / len(sample)
+    ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+    best_letter, best_s = ranked[0]
+    second_s = ranked[1][1] if len(ranked) > 1 else 0
+    conf = float(max(0, best_s - second_s))
+    return best_letter, conf, scores
+
+
+def classify_face(img):
+    """Cross-validate using two independent classifiers:
+      1. Template matching (pixel-vs-pixel distance to ground truth)
+      2. Palette histogram (counts of signature colors per face)
+
+    If both agree → high confidence.
+    If they disagree → '?' flagged so the UI shows it's ambiguous.
+    """
+    tpl_letter, tpl_conf, _ = _template_classify(img)
+    pal_letter, pal_conf, _ = _palette_classify(img)
+    agree = tpl_letter == pal_letter
+    # Combined confidence: product scaled down if they disagree
+    conf = (tpl_conf + pal_conf) / 2 if agree else 0.0
+    letter = tpl_letter if agree else f'?{tpl_letter}/{pal_letter}'
+    avg = tuple(int(x) for x in img[int(img.shape[0]*0.3):int(img.shape[0]*0.7),
+                                    int(img.shape[0]*0.3):int(img.shape[0]*0.7)].reshape(-1,3).mean(0))
+    return letter, avg, conf
 
 
 def pixel_similarity(got, expected_path, size=384):
