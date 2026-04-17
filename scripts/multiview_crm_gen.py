@@ -205,17 +205,50 @@ def generate(input_image_path, output_dir, scale=5.5, step=50,
     stage1_images = rt['stage1_images']  # list of 6 PIL images at 256x256
     log(f'stage 1 done, {len(stage1_images)} views produced')
 
-    _subpct(70, 'save_views')
+    _subpct(70, 'upscale')
+    # CRM outputs at 256×256. Upscale to target size with RealESRGAN x4
+    # for sharpness (BSD-3, commercial-safe, already downloaded by Z123 path).
+    # Fallback to LANCZOS if RealESRGAN not available.
+    upscaled = {}
+    try:
+        from realesrgan import RealESRGANer
+        from basicsr.archs.rrdbnet_arch import RRDBNet
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                        num_block=23, num_grow_ch=32, scale=4)
+        model_path = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
+        upsampler = RealESRGANer(
+            scale=4, model_path=model_path, model=model,
+            tile=0, tile_pad=10, pre_pad=0, half=True,
+            device='cuda' if torch.cuda.is_available() else 'cpu')
+        outscale = size / 256
+        for src_idx in range(6):
+            v = stage1_images[src_idx].convert('RGB')
+            arr = np.asarray(v)
+            out, _ = upsampler.enhance(arr, outscale=outscale)
+            up = Image.fromarray(out)
+            if up.size != (size, size):
+                up = up.resize((size, size), Image.LANCZOS)
+            upscaled[src_idx] = up
+        del upsampler, model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        log(f'RealESRGAN x4 upscale 256 -> {size} done')
+    except Exception as ue:
+        log(f'RealESRGAN skipped ({ue}); falling back to LANCZOS')
+        for src_idx in range(6):
+            v = stage1_images[src_idx]
+            upscaled[src_idx] = v.resize((size, size), Image.LANCZOS) \
+                if v.size[0] != size else v
+
+    _subpct(85, 'save_views')
     views_meta = []
     for slot_idx, (src_idx, az, el) in enumerate(VIEW_MAPPING):
-        v = stage1_images[src_idx]
-        # CRM outputs PIL at 256 on grey bg. Upscale to target size.
-        v_up = v.resize((size, size), Image.LANCZOS) if v.size[0] != size else v
+        v_up = upscaled[src_idx]
         # Remove grey background via threshold (grey is #7F7F7F).
-        # Simple approach: pixels close to (127,127,127) within 20 → alpha=0.
+        # Pixels close to (127,127,127) within 25 → alpha=0.
         arr = np.array(v_up.convert('RGB'))
         dist = np.linalg.norm(arr.astype(float) - np.array([127, 127, 127]), axis=2)
-        alpha = (dist > 20).astype(np.uint8) * 255
+        alpha = (dist > 25).astype(np.uint8) * 255
         rgba = np.dstack([arr, alpha])
         Image.fromarray(rgba, 'RGBA').save(
             os.path.join(output_dir, f'view_{slot_idx}.png'))
