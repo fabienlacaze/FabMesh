@@ -338,8 +338,8 @@
   function _syncMaskToolButtons() {
     var brushBtn = document.getElementById('mask-brush-mode');
     var eraserBtn = document.getElementById('mask-eraser-mode');
-    if (brushBtn) brushBtn.classList.toggle('mv-active', !maskEraserMode);
-    if (eraserBtn) eraserBtn.classList.toggle('mv-active', maskEraserMode);
+    if (brushBtn) brushBtn.classList.toggle('tool-active', !maskEraserMode);
+    if (eraserBtn) eraserBtn.classList.toggle('tool-active', maskEraserMode);
   }
   (function _wireMaskToolToggle() {
     var brushBtn = document.getElementById('mask-brush-mode');

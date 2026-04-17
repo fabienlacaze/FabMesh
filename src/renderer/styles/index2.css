@@ -932,6 +932,15 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   background: rgba(245,158,11,0.3);
   color: #f59e0b;
 }
+/* Tool-button active state (brush/eraser/flip toggles etc.) —
+   strong highlight so the user sees which mode is currently on. */
+.tool-btn.tool-active,
+.secondary-btn.tool-active {
+  background: var(--accent, #d946ef) !important;
+  color: white !important;
+  border-color: var(--accent, #d946ef) !important;
+  box-shadow: 0 0 0 1px var(--accent, #d946ef), 0 0 6px rgba(217,70,239,0.4);
+}
 .mv-btn svg { flex-shrink: 0; }
 
 .step-card-preview img {
