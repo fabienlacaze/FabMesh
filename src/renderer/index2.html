@@ -880,6 +880,35 @@
         <button id="set-open-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:8px;">&#128193; Open logs folder</button>
         <button id="set-live-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:6px;">&#128269; Live logs viewer</button>
 
+        <!-- ═══ CALIBRATION ═══ -->
+        <div class="settings-section-header">Calibration</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Pipeline test</div>
+          <div class="settings-box-desc">Generates a textured mesh from the calibration cube and scores how many of the 6 painted faces end up on the correct axis.</div>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:8px;">
+            <button id="set-calib-run" class="primary-btn" style="flex:1; padding:6px 12px;">&#127919; Run calibration</button>
+            <button id="set-calib-open" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128444;&#65039; Open last report</button>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
+            <button id="set-calib-gallery" class="ghost-btn" style="flex:1; padding:6px 12px;">&#127912; Gallery (all runs)</button>
+            <button id="set-calib-viewer" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128269; Open viewer</button>
+          </div>
+          <div id="set-calib-status" style="margin-top:10px; font-size:12px; color:var(--text-2);">
+            No run yet.
+          </div>
+          <div id="set-calib-score-row" style="display:none; margin-top:10px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+              <span id="set-calib-score" style="font-size:1.8em; font-weight:bold; padding:4px 14px; border-radius:6px;">0/6</span>
+              <span id="set-calib-similarity" style="font-size:11px; color:var(--text-2);"></span>
+              <span id="set-calib-timestamp" style="font-size:10px; color:var(--text-3); margin-left:auto;"></span>
+            </div>
+            <div id="set-calib-axes" style="display:grid; grid-template-columns:repeat(6,1fr); gap:4px;"></div>
+          </div>
+          <div class="settings-box-footer" style="margin-top:8px;">
+            Ground truth: 6 painted cube faces &middot; <a href="#" id="set-calib-docs">docs</a>
+          </div>
+        </div>
+
       </div>
     </div>
 

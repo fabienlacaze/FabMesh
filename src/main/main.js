@@ -1360,6 +1360,92 @@ ipcMain.handle('open-logs-folder', () => {
   }
 });
 
+// IPC: calibration pipeline
+ipcMain.handle('calib-run', async (event, { skipSf3d = false, env = {}, tag = '' } = {}) => {
+  const calibScript = path.join(__dirname, '..', '..', 'scripts', 'calibrate.py');
+  const args = [calibScript];
+  if (skipSf3d) args.push('--skip-sf3d');
+  if (tag) { args.push('--tag', String(tag)); }
+  for (const [k, v] of Object.entries(env || {})) {
+    args.push('--env', `${k}=${v}`);
+  }
+  return new Promise((resolve) => {
+    const proc = execFile('python', args, {
+      timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      cwd: path.join(__dirname, '..', '..'),
+    }, (error, stdout, stderr) => {
+      if (error) {
+        resolve({ success: false, error: error.message, stderr: (stderr || '').slice(-500) });
+        return;
+      }
+      // Find the latest report
+      try {
+        const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+        const entries = fs.readdirSync(reportsDir)
+          .filter(n => !n.startsWith('sweep_'))
+          .map(n => ({ n, t: fs.statSync(path.join(reportsDir, n)).mtimeMs }))
+          .sort((a, b) => b.t - a.t);
+        if (!entries.length) { resolve({ success: true, score: null }); return; }
+        const reportPath = path.join(reportsDir, entries[0].n);
+        const scorePath = path.join(reportPath, 'score.json');
+        const score = JSON.parse(fs.readFileSync(scorePath, 'utf-8'));
+        resolve({ success: true, score, reportDir: reportPath, reportHtml: path.join(reportPath, 'index.html') });
+      } catch (e) {
+        resolve({ success: false, error: e.message });
+      }
+    });
+    proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
+    proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
+  });
+});
+
+ipcMain.handle('calib-last-report', () => {
+  try {
+    const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+    if (!fs.existsSync(reportsDir)) return { success: false, error: 'no reports dir' };
+    const entries = fs.readdirSync(reportsDir)
+      .filter(n => !n.startsWith('sweep_'))
+      .map(n => ({ n, t: fs.statSync(path.join(reportsDir, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    if (!entries.length) return { success: false, error: 'no reports' };
+    const reportPath = path.join(reportsDir, entries[0].n);
+    const scorePath = path.join(reportPath, 'score.json');
+    const score = JSON.parse(fs.readFileSync(scorePath, 'utf-8'));
+    return { success: true, score, reportDir: reportPath, reportHtml: path.join(reportPath, 'index.html') };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('calib-open-report', (event, { html } = {}) => {
+  try {
+    if (html && fs.existsSync(html)) { shell.openPath(html); return { success: true }; }
+    // default: latest
+    const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+    const entries = fs.readdirSync(reportsDir)
+      .filter(n => !n.startsWith('sweep_'))
+      .map(n => ({ n, t: fs.statSync(path.join(reportsDir, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    if (!entries.length) return { success: false, error: 'no reports' };
+    const p = path.join(reportsDir, entries[0].n, 'index.html');
+    shell.openPath(p);
+    return { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('calib-open-gallery', () => {
+  try {
+    const gal = path.join(__dirname, '..', '..', 'images', '_calibration', 'gallery.html');
+    // Regenerate the gallery first so it includes any new runs
+    const galScript = path.join(__dirname, '..', '..', 'scripts', '_calib_gallery.py');
+    execFile('python', [galScript], { cwd: path.join(__dirname, '..', '..') }, () => {
+      shell.openPath(gal);
+    });
+    return { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 // IPC: read the last N lines of the log file (for an in-app log viewer later)
 // Renderer -> file log passthrough for debug instrumentation
 ipcMain.handle('renderer-log', (event, { tag, msg } = {}) => {

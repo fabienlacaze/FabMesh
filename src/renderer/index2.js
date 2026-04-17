@@ -7288,6 +7288,95 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 });
 
 // ============================================================
+// CALIBRATION panel wiring
+// ============================================================
+(() => {
+  const btnRun = document.getElementById('set-calib-run');
+  const btnOpen = document.getElementById('set-calib-open');
+  const btnGallery = document.getElementById('set-calib-gallery');
+  const btnViewer = document.getElementById('set-calib-viewer');
+  const statusEl = document.getElementById('set-calib-status');
+  const scoreRow = document.getElementById('set-calib-score-row');
+  const scoreEl = document.getElementById('set-calib-score');
+  const simEl = document.getElementById('set-calib-similarity');
+  const tsEl = document.getElementById('set-calib-timestamp');
+  const axesEl = document.getElementById('set-calib-axes');
+  if (!btnRun) return;
+
+  function renderScore(score, reportDir) {
+    if (!score) { scoreRow.style.display = 'none'; return; }
+    scoreRow.style.display = 'block';
+    const s = score.score, total = score.total;
+    scoreEl.textContent = `${s}/${total}`;
+    const ratio = s / total;
+    scoreEl.style.background = ratio >= 0.83 ? '#1a5c1a' : ratio >= 0.5 ? '#8a6a1a' : '#8a1a1a';
+    simEl.textContent = `similarity ${(score.avg_similarity || 0).toFixed(2)}`;
+    tsEl.textContent = score.timestamp || '';
+    axesEl.innerHTML = '';
+    for (const r of (score.results || [])) {
+      const cell = document.createElement('div');
+      cell.style.cssText = 'position:relative; border-radius:4px; overflow:hidden; outline:2px solid ' +
+        (r.correct ? '#3a3' : '#c33') + ';';
+      const img = document.createElement('img');
+      if (reportDir) {
+        const sep = reportDir.includes('\\') ? '\\' : '/';
+        img.src = 'file:///' + (reportDir + sep + r.got_img).replace(/\\/g, '/');
+      }
+      img.style.cssText = 'width:100%; display:block; background:#fff;';
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.75); ' +
+        'padding:2px 3px; font-size:9px; text-align:center; color:#fff; line-height:1.1;';
+      lbl.innerHTML = `${r.axis}<br><b>${r.expected}&rarr;${r.got}</b>`;
+      cell.appendChild(img); cell.appendChild(lbl);
+      axesEl.appendChild(cell);
+    }
+  }
+
+  async function loadLast() {
+    try {
+      const res = await API.calibLastReport();
+      if (res && res.success && res.score) {
+        renderScore(res.score, res.reportDir);
+        statusEl.textContent = 'Last run loaded.';
+      } else {
+        statusEl.textContent = 'No run yet.';
+      }
+    } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
+  }
+
+  btnRun?.addEventListener('click', async () => {
+    btnRun.disabled = true;
+    btnRun.textContent = '... running (~2 min)';
+    statusEl.textContent = 'Running SF3D + projection...';
+    let lastLine = '';
+    const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
+      lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 80);
+      statusEl.textContent = lastLine;
+    }) : null;
+    try {
+      const res = await API.calibRun({ skipSf3d: false, tag: 'ui' });
+      if (res && res.success && res.score) {
+        renderScore(res.score, res.reportDir);
+        statusEl.textContent = `Done: ${res.score.score}/${res.score.total}`;
+      } else {
+        statusEl.textContent = 'Failed: ' + (res && res.error || 'unknown');
+      }
+    } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
+    btnRun.disabled = false;
+    btnRun.innerHTML = '&#127919; Run calibration';
+  });
+
+  btnOpen?.addEventListener('click', () => API.calibOpenReport && API.calibOpenReport());
+  btnGallery?.addEventListener('click', () => API.calibOpenGallery && API.calibOpenGallery());
+  btnViewer?.addEventListener('click', () => API.calibOpenGallery && API.calibOpenGallery());
+
+  // Auto-load last result when Settings opens
+  document.getElementById('btn-settings')?.addEventListener('click', () => {
+    setTimeout(loadLast, 50);
+  });
+})();
+
+// ============================================================
 // LIVE LOGS VIEWER — streams logs/fabmesh.log (or any registered file)
 // via the Control API SSE endpoint. Reuses the same token the control
 // API wrote to .fabmesh/test_api_token.txt at startup.
