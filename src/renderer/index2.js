@@ -7294,7 +7294,6 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   const btnRun = document.getElementById('set-calib-run');
   const btnOpen = document.getElementById('set-calib-open');
   const btnGallery = document.getElementById('set-calib-gallery');
-  const btnViewer = document.getElementById('set-calib-viewer');
   const statusEl = document.getElementById('set-calib-status');
   const scoreRow = document.getElementById('set-calib-score-row');
   const scoreEl = document.getElementById('set-calib-score');
@@ -7368,7 +7367,6 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 
   btnOpen?.addEventListener('click', () => API.calibOpenReport && API.calibOpenReport());
   btnGallery?.addEventListener('click', () => API.calibOpenGallery && API.calibOpenGallery());
-  btnViewer?.addEventListener('click', () => API.calibOpenGallery && API.calibOpenGallery());
 
   // Auto-load last result when Settings opens
   document.getElementById('btn-settings')?.addEventListener('click', () => {
