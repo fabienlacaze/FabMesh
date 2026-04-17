@@ -325,12 +325,11 @@ let sdxlProc = null;
 let sdxlReady = false;
 const SDXL_PORT = 5555;
 // Auto-shutdown: kill the SDXL server after this many ms of inactivity to
-// free ~13 GB VRAM. Bumped from 60s → 300s because the first /mask_inpaint
-// call lazy-loads the SDXL inpainting pipeline (~6 GB, ~90-120s on a cold
-// HF cache), and we don't want the idle timer to fire DURING that load.
-// The server is also protected by `sdxlInflightRequests > 0`, so this is a
-// safety net, not the primary mechanism.
-const SDXL_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+// free ~13 GB VRAM. 90s is a compromise: long enough to chain 2-3 tool
+// actions without reload, short enough to release VRAM when the user
+// switches tasks. The server is protected by `sdxlInflightRequests > 0`
+// so a long model load never gets killed mid-inference.
+const SDXL_IDLE_TIMEOUT_MS = 90 * 1000;
 let sdxlLastUsedAt = 0;
 let sdxlIdleTimer = null;
 // Number of in-flight HTTP requests to the SDXL server. The idle shutdown
@@ -342,7 +341,7 @@ let sdxlInflightRequests = 0;
 function markSdxlUsed() {
   sdxlLastUsedAt = Date.now();
   if (sdxlIdleTimer) clearInterval(sdxlIdleTimer);
-  // Check every 15s whether the server is idle and should be killed
+  // Check every 10s whether the server is idle and should be killed
   sdxlIdleTimer = setInterval(() => {
     if (!sdxlProc || !sdxlReady) return;
     // Never kill while a request is in flight (could be a first-time
@@ -355,7 +354,7 @@ function markSdxlUsed() {
       clearInterval(sdxlIdleTimer);
       sdxlIdleTimer = null;
     }
-  }, 15000);
+  }, 10000);
 }
 
 function startSdxlServer() {
