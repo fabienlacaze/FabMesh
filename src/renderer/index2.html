@@ -120,9 +120,9 @@
                 <div class="form-row">
                   <label>Count</label>
                   <select id="ws-count">
-                    <option value="1">1</option>
+                    <option value="1" selected>1</option>
                     <option value="2">2</option>
-                    <option value="4" selected>4</option>
+                    <option value="4">4</option>
                     <option value="6">6</option>
                   </select>
                 </div>
@@ -131,7 +131,7 @@
                   <input type="range" id="ws-quality" min="10" max="60" step="2" value="30" style="flex:1; accent-color: var(--accent);" />
                   <span id="ws-quality-val" style="min-width: 90px; font-size: 11px; color: var(--text-2); text-align: right;">30 steps</span>
                 </div>
-                <div class="form-row check-row">
+                <div class="form-row check-row" id="ws-img-buildstages-row">
                   <label class="inline-check">
                     <input type="checkbox" id="ws-img-buildstages" />
                     Construction stages (3 progressive versions)
@@ -551,6 +551,36 @@
         <p class="modal-subtitle">Give your project a name and describe what you want to create.</p>
         <label>Project name</label>
         <input type="text" id="np-name" placeholder="orc_warrior" />
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label>Asset type</label>
+            <select id="np-asset-type" style="width:100%;">
+              <option value="character" selected>Character / Unit (RTS, RPG)</option>
+              <option value="building">Building / Structure</option>
+              <option value="vehicle">Vehicle</option>
+              <option value="weapon">Weapon</option>
+              <option value="prop">Prop / Item</option>
+              <option value="creature">Creature / Beast</option>
+              <option value="environment">Environment piece</option>
+              <option value="custom">Custom (no preset)</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label>Style</label>
+            <select id="np-asset-style" style="width:100%;">
+              <option value="realistic" selected>Realistic</option>
+              <option value="stylized">Stylized (mid-poly)</option>
+              <option value="lowpoly">Low-poly</option>
+              <option value="cartoon">Cartoon</option>
+              <option value="anime">Anime</option>
+              <option value="pixelart">Pixel art</option>
+              <option value="painterly">Painterly</option>
+              <option value="pbr">PBR (high detail)</option>
+              <option value="voxel">Voxel</option>
+              <option value="custom">Custom (no preset)</option>
+            </select>
+          </div>
+        </div>
         <label>Description (prompt)</label>
         <textarea id="np-prompt" rows="3" placeholder="An orc warrior with leather armor, full-body pose..."></textarea>
         <div class="modal-actions">

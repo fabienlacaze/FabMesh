@@ -659,6 +659,8 @@ document.getElementById('np-cancel').addEventListener('click', closeNewProjectMo
 document.getElementById('np-create').addEventListener('click', async () => {
   const name = document.getElementById('np-name').value.trim() || 'project';
   const prompt = document.getElementById('np-prompt').value.trim();
+  const assetType = document.getElementById('np-asset-type')?.value || 'character';
+  const assetStyle = document.getElementById('np-asset-style')?.value || 'realistic';
 
   // Parental control: check name + prompt for blocked content
   let restricted = true;
@@ -687,6 +689,8 @@ document.getElementById('np-create').addEventListener('click', async () => {
     rigs: [],
     thumb: null,
     initialPrompt: prompt,
+    assetType,
+    assetStyle,
   };
   state.currentProject = proj;
   showPage('workspace');
@@ -694,7 +698,35 @@ document.getElementById('np-create').addEventListener('click', async () => {
   if (prompt) {
     document.getElementById('ws-prompt').value = prompt;
   }
+  // Pre-fill the "Create new image" form with the project's choices
+  const atSel = document.getElementById('ws-asset-type');
+  if (atSel) { atSel.value = assetType; atSel.dispatchEvent(new Event('change')); }
+  const asSel = document.getElementById('ws-asset-style');
+  if (asSel) asSel.value = assetStyle;
 });
+
+// Show/hide "Construction stages" checkbox based on asset type —
+// only makes sense for characters (progressive build: silhouette →
+// base mesh → final). Creatures, buildings, props skip this.
+(function _wireBuildStagesVisibility() {
+  const applyVisibility = () => {
+    const at = document.getElementById('ws-asset-type')?.value || 'character';
+    const row = document.getElementById('ws-img-buildstages-row');
+    if (!row) return;
+    const show = (at === 'character');
+    row.style.display = show ? '' : 'none';
+    if (!show) {
+      const cb = document.getElementById('ws-img-buildstages');
+      if (cb) cb.checked = false;
+    }
+  };
+  const sel = document.getElementById('ws-asset-type');
+  if (sel) {
+    sel.addEventListener('change', applyVisibility);
+    // Run once on load so default view is correct
+    applyVisibility();
+  }
+})();
 
 // Import Image → create project with imported image
 document.getElementById('btn-import-image')?.addEventListener('click', async () => {
