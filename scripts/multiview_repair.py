@@ -152,18 +152,29 @@ def _build_repair_mask(view_rgba: Image.Image, score: dict,
     alpha = arr[..., 3]
     fg = alpha > 32
 
-    if force_full_fg or score['weirdness'] >= 0.70:
+    # Full-FG is destructive: SDXL regenerates the whole subject and can
+    # produce a shape different from the original silhouette, leaving
+    # "ghost" alpha outline. Only trigger it when the view is truly
+    # garbage (pitch-black mass AND palette completely drifted) or the
+    # user explicitly forces it via --full-fg.
+    very_bad = (score['weirdness'] >= 0.85 and score['palette_sim'] < 0.05)
+    if force_full_fg or very_bad:
+        # Strictly inside alpha — NO dilation, minimal blur. Dilation
+        # gives SDXL pixels outside the subject silhouette to paint,
+        # which creates "shadow clone" ghosts when IPAdapter pulls
+        # the composition toward a different pose.
         mask = fg.astype(np.uint8) * 255
+        m_img = Image.fromarray(mask, mode='L')
+        m_img = m_img.filter(ImageFilter.GaussianBlur(1.5))
     else:
         lum = rgb.mean(axis=2)
         dark = (lum < 40) & fg
         r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
         hot = (r > 180) & (r - g > 50) & (r - b > 50) & fg
         mask = (dark | hot).astype(np.uint8) * 255
-
-    m_img = Image.fromarray(mask, mode='L')
-    m_img = m_img.filter(ImageFilter.MaxFilter(9))
-    m_img = m_img.filter(ImageFilter.GaussianBlur(4))
+        m_img = Image.fromarray(mask, mode='L')
+        m_img = m_img.filter(ImageFilter.MaxFilter(9))
+        m_img = m_img.filter(ImageFilter.GaussianBlur(4))
     return m_img
 
 
@@ -212,9 +223,21 @@ def repair(mv_dir, threshold=0.55, force_slots=None, steps=35,
         targets = set(force_slots)
         log(f'FORCE mode: repairing slots={sorted(targets)}')
     else:
-        targets = {i for i, r in enumerate(scored)
-                   if r is not None and r[1]['weirdness'] > threshold}
-        log(f'AUTO mode (threshold={threshold}): repairing slots={sorted(targets)}')
+        # Require BOTH high weirdness AND a real defect signal
+        # (dark/sat excess). Pure palette drift alone is likely noise
+        # (different generator fingerprint, not hallucination) —
+        # repairing those views tends to replace good content with
+        # same-or-worse content.
+        targets = set()
+        for i, r in enumerate(scored):
+            if r is None:
+                continue
+            s = r[1]
+            hard_defect = s['dark'] > 0.15 or s['sat'] > 0.05
+            if s['weirdness'] > threshold and hard_defect:
+                targets.add(i)
+        log(f'AUTO mode (threshold={threshold}, '
+            f'needs dark>15% or sat>5%): repairing slots={sorted(targets)}')
 
     if not targets:
         log('nothing to repair')
@@ -313,10 +336,17 @@ def repair(mv_dir, threshold=0.55, force_slots=None, steps=35,
             generator=torch.Generator('cuda').manual_seed(seed + slot),
         ).images[0]
 
-        # Re-apply original alpha (SDXL Inpaint outputs RGB only)
+        # Re-apply original alpha (SDXL Inpaint outputs RGB only).
+        # ALSO zero-out the RGB outside the alpha silhouette to suppress
+        # "shadow clone" ghosts that SDXL paints in the mask's blurred
+        # halo. Without this the view shows a phantom copy of the
+        # subject outside its real silhouette.
         orig_rgba = np.asarray(v_img.resize((w8, h8), Image.LANCZOS).convert('RGBA'))
-        new_rgb = np.asarray(result)
-        out = np.dstack([new_rgb, orig_rgba[..., 3]])
+        new_rgb = np.asarray(result).copy()
+        alpha = orig_rgba[..., 3]
+        outside = alpha <= 32
+        new_rgb[outside] = 0  # black-out-of-silhouette
+        out = np.dstack([new_rgb, alpha])
         out_img = Image.fromarray(out, 'RGBA')
         if out_img.size != v_img.size:
             out_img = out_img.resize(v_img.size, Image.LANCZOS)

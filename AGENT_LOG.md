@@ -123,6 +123,35 @@ patterned subjects" (zebra, dalmatian) it still improves palette
 but the detector may need per-subject tuning. Document expected
 behavior in `FABMESH_API.md`.
 
+### 2026-04-18 — Zebre re-test revealed destructive repair bug
+
+User screenshot showed view_3 with "double silhouette" — repaired
+zebra inside a ghost alpha outline of the original. Root cause:
+- Detector false-flagged left/right/bottom zebre views (palette_sim
+  is pathologically low on striped subjects — different stripe
+  arrangement between CRM output and ref gives near-zero hist
+  cosine even when both are correct zebras).
+- --full-fg mask + strength 0.98 made SDXL regenerate the subject
+  with a DIFFERENT silhouette than the original alpha, leaving the
+  original alpha outline visible around the new (smaller) zebra.
+
+### Fixes applied
+1. Auto mode now requires `dark_excess > 0.15 OR sat_excess > 0.05`
+   in addition to weirdness > threshold. Pure palette-drift alone
+   no longer triggers repair (it's likely generator-noise, not
+   hallucination).
+2. `full-FG` auto-activation only for `weirdness >= 0.85 AND
+   palette_sim < 0.05` — child-bottom still qualifies, zebre
+   side-profiles no longer do.
+3. Mask has no dilation in full-FG mode, blur radius 1.5 instead
+   of 4 — reduces "shadow clone" artifacts outside silhouette.
+4. Post-inpaint, RGB pixels outside the original alpha are
+   zeroed explicitly — hardens against any residual ghost.
+
+### Next: user wants a better multi-view pipeline
+Agent dispatched to research "how to get 6 clean consistent views
+of the same mesh" — MV-Adapter, SV3D, Era3D, etc.
+
 ---
 
 ## 2026-04-17 — Child project analysis: multi-views insufficient, mesh degraded
