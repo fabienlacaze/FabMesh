@@ -2133,3 +2133,23 @@ help" — that was with Z123 input + small atlas. With CRM +
 
 **Users re-generating meshes now will see properly textured atlases**
 by default. FABMESH_UV_REPACK=0 to revert.
+
+### Orientation saga finale (2026-04-18 00:00)
+
+Problème: zombi mesh géométrique face à -Z (native SF3D), camera
+Three.js workspace à +Z → voit le dos. Précédemment avec chat_vert
+l'auto-align rotait le mesh donc face à +Z, mais avec auto-align
+désactivé (d9a02eb) la face reste à -Z.
+
+**Fix définitif (commit 87900b3)** :
+  - scripts/local_sf3d_bridge.py: normalize orientation post-export
+    via rotation 180° autour Y → face toujours à +Z.
+    Guard: FABMESH_SF3D_NORMALIZE_ORIENT=1 (défaut).
+  - src/renderer/index2.js: revert du flip camera Z (b1eddee).
+    Camera revient à +Z standard Three.js.
+  - auto_align_rot_deg=180 propagé à texture_project pour compenser
+    les azimuths multi-view CRM.
+
+Logique: meshes auto-normalisés à face=+Z peu importe auto-align.
+Camera Three.js standard +Z voit la face. Cohérent pour tous les
+futurs meshes.
