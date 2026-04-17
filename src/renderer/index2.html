@@ -943,6 +943,20 @@
       </div>
     </div>
 
+    <style>
+      .tier-spinner {
+        display: inline-block;
+        width: 22px;
+        height: 22px;
+        border: 3px solid #f59e0b;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: tier-spin 0.9s linear infinite;
+        vertical-align: middle;
+      }
+      @keyframes tier-spin { to { transform: rotate(360deg); } }
+    </style>
+
     <!-- ============================================================
          CALIBRATION LOG MODAL
          ============================================================ -->

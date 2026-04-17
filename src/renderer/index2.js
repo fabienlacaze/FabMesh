@@ -7680,15 +7680,38 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 
   // ---- NEW: Tiered calibration (test -> analyze -> auto-tune) ---------
   function tierRow(num, name, state = 'pending') {
-    const icons = { pending: '⏳', running: '⚙️', pass: '✅', fail: '❌', skipped: '⊘' };
+    const icons = { pending: '⏳', pass: '✅', fail: '❌', skipped: '⊘' };
     const colors = { pending: '#555', running: '#f59e0b', pass: '#3a3', fail: '#c33', skipped: '#666' };
-    return `<div class="tier-row" id="tier-row-${num}" style="display:flex; align-items:center; gap:12px; padding:12px; background:#161616; border-left:4px solid ${colors[state]}; border-radius:4px; margin-bottom:8px;">
-      <div style="font-size:1.6em;" id="tier-icon-${num}">${icons[state]}</div>
+    return `<div class="tier-row" id="tier-row-${num}" data-state="${state}" style="display:flex; align-items:center; gap:12px; padding:12px; background:#161616; border-left:4px solid ${colors[state]}; border-radius:4px; margin-bottom:8px;">
+      <div style="font-size:1.6em; width:32px; text-align:center;" id="tier-icon-${num}">${state === 'running' ? '<span class="tier-spinner"></span>' : icons[state]}</div>
       <div style="flex:1;">
         <div style="font-weight:bold; color:#9cf;">Tier ${num}. ${name}</div>
         <div id="tier-msg-${num}" style="font-size:12px; color:#aaa; font-family:monospace; margin-top:4px;">waiting...</div>
       </div>
+      <div id="tier-timer-${num}" style="font-size:12px; color:#888; font-family:monospace; min-width:50px; text-align:right;"></div>
     </div>`;
+  }
+
+  // Timer state: when a tier becomes 'running' we store its start time
+  // and update the displayed elapsed every 500ms. When it leaves running
+  // state we freeze the value.
+  const _tierStart = { 1: null, 2: null, 3: null };
+  const _tierFrozen = { 1: null, 2: null, 3: null };
+  let _tierTimerId = null;
+  function _fmtSec(ms) {
+    const s = Math.floor(ms / 1000); const m = Math.floor(s / 60);
+    return m > 0 ? `${m}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+  }
+  function _updateTierTimers() {
+    for (const num of [1, 2, 3]) {
+      const el = document.getElementById(`tier-timer-${num}`);
+      if (!el) continue;
+      if (_tierFrozen[num] !== null) {
+        el.textContent = _tierFrozen[num];
+      } else if (_tierStart[num] !== null) {
+        el.textContent = _fmtSec(Date.now() - _tierStart[num]);
+      }
+    }
   }
 
   function setTierState(num, state, message) {
@@ -7696,15 +7719,31 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     const icon = document.getElementById(`tier-icon-${num}`);
     const msg = document.getElementById(`tier-msg-${num}`);
     if (!row) return;
-    const icons = { pending: '⏳', running: '⚙️', pass: '✅', fail: '❌', skipped: '⊘' };
+    const icons = { pending: '⏳', pass: '✅', fail: '❌', skipped: '⊘' };
     const colors = { pending: '#555', running: '#f59e0b', pass: '#3a3', fail: '#c33', skipped: '#666' };
     row.style.borderLeftColor = colors[state] || '#555';
-    icon.textContent = icons[state] || '⏳';
+    row.dataset.state = state;
+    // Spinner while running, static icon otherwise
+    icon.innerHTML = state === 'running' ? '<span class="tier-spinner"></span>' : (icons[state] || '⏳');
     if (message !== undefined) msg.textContent = message;
+    // Timer transitions
+    if (state === 'running' && _tierStart[num] === null) {
+      _tierStart[num] = Date.now();
+      _tierFrozen[num] = null;
+    } else if ((state === 'pass' || state === 'fail' || state === 'skipped') && _tierStart[num] !== null && _tierFrozen[num] === null) {
+      _tierFrozen[num] = _fmtSec(Date.now() - _tierStart[num]);
+    } else if (state === 'skipped') {
+      _tierFrozen[num] = '—';
+    }
+    _updateTierTimers();
   }
 
   async function runTieredCalibration() {
     diagModal.classList.remove('hidden');
+    // Reset timer state
+    for (const k of [1, 2, 3]) { _tierStart[k] = null; _tierFrozen[k] = null; }
+    if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
+    _tierTimerId = setInterval(_updateTierTimers, 500);
     diagBody.innerHTML = `
       <p style="color:#aaa; margin-top:0;">Test → Analyze → Correct automatically, one tier at a time. Each tier must pass before the next runs.</p>
       ${tierRow(1, 'Reference image sanity (~5s)')}
@@ -7782,6 +7821,7 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     if (btnCancel) btnCancel.style.display = 'none';
     btnDiagnose.disabled = false;
     if (btnCompare) btnCompare.disabled = false;
+    if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
   }
 
   function renderTieredResult(r) {
