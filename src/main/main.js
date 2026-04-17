@@ -1453,6 +1453,44 @@ ipcMain.handle('calib-cancel', () => {
   return { success: false, error: 'no active calibration' };
 });
 
+ipcMain.handle('calib-v3', async (event, opts = {}) => {
+  // Calibration v3: per-stage independent checks.
+  // Stage 4 runs unconditionally (deterministic, ~7s, no SF3D/Zero123++).
+  // Other stages run only if --ref / --mesh / --mv-dir are passed.
+  const script = path.join(__dirname, '..', '..', 'scripts', 'run_calibration_v3.py');
+  const args = [script];
+  if (opts.ref) args.push('--ref', opts.ref);
+  if (opts.mvDir) args.push('--mv-dir', opts.mvDir);
+  if (opts.mesh) args.push('--mesh', opts.mesh);
+  if (opts.skipStage4) args.push('--skip-stage4');
+  return new Promise((resolve) => {
+    _calibCancelFlag = false;
+    const proc = execFile('python', args, {
+      timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      cwd: path.join(__dirname, '..', '..'),
+    }, (error, stdout, stderr) => {
+      _calibDiagnoseProc = null;
+      if (error) {
+        const cancelled = _calibCancelFlag || error.killed;
+        _calibCancelFlag = false;
+        resolve({ success: false, cancelled,
+                  error: cancelled ? 'cancelled by user' : error.message,
+                  stderr: (stderr || '').slice(-800) });
+        return;
+      }
+      const m = (stdout || '').match(/CALIB_RESULT:\s*(\{[\s\S]+?\})\s*$/m);
+      if (!m) return resolve({ success: false, error: 'no CALIB_RESULT line',
+                               stdout: (stdout || '').slice(-1200) });
+      try { resolve({ success: true, result: JSON.parse(m[1]) }); }
+      catch (e) { resolve({ success: false, error: e.message }); }
+    });
+    _calibDiagnoseProc = proc;
+    proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
+    proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
+  });
+});
+
 ipcMain.handle('calib-tiered', async () => {
   const script = path.join(__dirname, '..', '..', 'scripts', '_calib_tiered.py');
   return new Promise((resolve) => {

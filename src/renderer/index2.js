@@ -7801,7 +7801,11 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     }) : null;
 
     try {
-      const res = await API.calibTiered();
+      // Calibration v3: per-stage independent checks.
+      // Stage 4 is deterministic and runs in ~7s — it catches UV/camera
+      // bugs that v1/v2 could not isolate because they ran SF3D+Zero123++
+      // in the loop. We call v3 by default now.
+      const res = await API.calibV3({});
       if (res && res.cancelled) {
         document.getElementById('tiered-footer').innerHTML = `<span style="color:#f88">Cancelled.</span>`;
       } else if (!res || !res.success) {
@@ -7812,7 +7816,7 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
             `<pre style="margin-top:8px; font-size:11px; color:#faa; max-height:200px; overflow:auto;">${String(res.stderr).replace(/</g, '&lt;')}</pre>`;
         }
       } else {
-        renderTieredResult(res.result);
+        renderCalibV3Result(res.result);
       }
     } catch (e) {
       document.getElementById('tiered-footer').innerHTML =
@@ -7822,6 +7826,41 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     btnDiagnose.disabled = false;
     if (btnCompare) btnCompare.disabled = false;
     if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
+  }
+
+  function renderCalibV3Result(r) {
+    if (!r || !r.summary) return;
+    const footer = document.getElementById('tiered-footer');
+    if (!footer) return;
+    const s = r.summary;
+    const stageLabel = {1:'Ref image', 2:'Multi-views', 3:'Mesh silhouette',
+                       4:'UV projection', 5:'Final render'};
+    const rows = (s.per_stage || []).map(st => {
+      const col = st.ok ? '#3a3' : '#c33';
+      const bg  = st.ok ? '#1a3c1a' : '#3c1a1a';
+      const regBadge = st.regression
+        ? ' <span style="background:#c33;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;">REGRESSION</span>'
+        : '';
+      const name = stageLabel[st.stage] || st.name;
+      return `<div style="padding:6px 10px; background:${bg}; border-left:3px solid ${col}; margin-bottom:4px;">
+        <b>Stage ${st.stage} — ${name}</b>
+        <span style="float:right; color:${col};">${st.ok ? 'PASS' : 'FAIL'} · score ${st.score.toFixed(2)}</span>${regBadge}
+      </div>`;
+    }).join('');
+    const overallCol = s.all_ok ? '#3a3' : '#c33';
+    const verdict = s.all_ok
+      ? '<b>All stages passed.</b> Baselines updated.'
+      : (s.per_stage.find(x => !x.ok)
+          ? `<b>First failing stage: ${s.per_stage.find(x => !x.ok).stage}</b> — this is where pipeline bugs are localized.`
+          : 'Nothing ran.');
+    footer.innerHTML = `
+      <div style="padding:10px; background:#1a1a1a; border:1px solid #333; border-radius:4px;">
+        <div style="margin-bottom:8px; color:${overallCol}; font-size:14px;">
+          Calibration v3 · ${s.stages_run} stages · ${s.elapsed_s}s${s.any_regression ? ' · <b style="color:#f60">REGRESSION</b>' : ''}
+        </div>
+        ${rows}
+        <div style="margin-top:10px; padding:8px; background:#222; border-radius:3px; font-size:12px;">${verdict}</div>
+      </div>`;
   }
 
   function renderTieredResult(r) {
