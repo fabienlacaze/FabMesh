@@ -2858,7 +2858,78 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
 //   3. Otherwise the image tagged "used for 3D" (first-load fallback)
 function editTarget(p) {
   if (!p) return null;
-  return p._activeMultiview || p.previewImagePath || p.selectedImagePath;
+  // Track that the user is about to edit a multi-view so that after
+  // the tool finishes we can ask whether to regenerate the others.
+  const path_ = p._activeMultiview || p.previewImagePath || p.selectedImagePath;
+  if (p._activeMultiview && p._activeMultiviewKey && p._activeMultiviewKey !== 'front') {
+    _pendingMvEdit = {
+      projectName: p.name,
+      viewKey: p._activeMultiviewKey,
+      viewPath: p._activeMultiview,
+    };
+  } else {
+    _pendingMvEdit = null;
+  }
+  return path_;
+}
+
+// After a tool finishes, if the target was a multi-view, ask the
+// user whether to regenerate the other views for consistency or
+// keep the single-view edit localised.
+let _pendingMvEdit = null;
+function _offerMultiviewRegenerate() {
+  const info = _pendingMvEdit;
+  _pendingMvEdit = null;
+  if (!info) return;
+  const p = state.currentProject;
+  if (!p || p.name !== info.projectName) return;
+  // Build a minimal inline confirm modal (no extra HTML needed).
+  const existing = document.getElementById('mv-regen-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'mv-regen-modal';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:10000; display:flex; align-items:center; justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:#1a1a2a; border:1px solid #3a3a4d; border-radius:8px; padding:20px; max-width:480px;">
+      <h3 style="margin:0 0 8px; color:#fff;">Regenerate multi-views?</h3>
+      <p style="color:#aaa; margin:0 0 16px; font-size:13px;">
+        You edited the <b>${info.viewKey.toUpperCase()}</b> view.
+        The other 5 angles still reflect the pre-edit state and may look
+        inconsistent with it during 3D texturing.
+      </p>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="mv-regen-keep" class="ghost-btn">Keep single-view edit</button>
+        <button id="mv-regen-do" class="primary-btn">Regenerate all 6 from front</button>
+      </div>
+      <p style="color:#777; font-size:11px; margin:10px 0 0;">
+        Regenerating replaces all 6 multi-views (CRM/Z123 runs on the current front image).
+        Your local edit on ${info.viewKey} will be lost.
+      </p>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('mv-regen-keep').onclick = () => modal.remove();
+  document.getElementById('mv-regen-do').onclick = async () => {
+    modal.remove();
+    // Relaunch multi-view on the current front image. Target = the
+    // image referenced by the current project preview (post-edit).
+    const frontImg = p.previewImagePath || p.selectedImagePath;
+    if (!frontImg) {
+      showToast('No front image to regenerate from.', 'error');
+      return;
+    }
+    showToast('Regenerating multi-views...', 'info', 3000);
+    try {
+      const r = await API.generateMultiview({ imagePath: frontImg });
+      if (r?.success) {
+        showToast('Multi-views regenerated.', 'success');
+        await reloadCurrentProject();
+      } else {
+        showToast('Regeneration failed: ' + (r?.error || 'unknown'), 'error');
+      }
+    } catch (e) {
+      showToast('Regeneration error: ' + e.message, 'error');
+    }
+  };
 }
 
 // Modify image: opens a popup (consistent with Clone Stamp / Draw Mask)
@@ -6435,6 +6506,9 @@ async function reloadCurrentProject() {
 
     _checkMultiviewForCurrentImage();
   }
+  // If the user just edited a multi-view, offer to regenerate the others.
+  // Deferred so the reload UI settles first.
+  setTimeout(_offerMultiviewRegenerate, 250);
 }
 
 // ============================================================
