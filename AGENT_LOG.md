@@ -10,7 +10,97 @@ what happened, conclusion.
 
 ---
 
-## 2026-04-17 (latest) — Stage 4 root cause found, NOT yet fixed
+## 2026-04-17 — Multi-view improvement options — benchmarked by agent
+
+User question: "can we improve the multi-view?" Agent investigated
+5 options and ranked them by quality-gain / effort / EU-license safety.
+
+### Ranking (best first)
+
+**#1 — MV-Adapter i2mv SDXL (Apache 2.0)** — RECOMMENDED
+  - Plug-and-play SDXL adapter, 6 view-consistent 768px images from
+    1 ref. Reuses our RealVisXL V4.0 base, +3.6 GB adapter only.
+  - VRAM: ~14 GB (fits 5080). Effort: ~6-8 h dev.
+  - Expected on mannequin back: HIGH quality.
+  - Benchmark paper: beats Z123++ and Era3D on GSO.
+  - URL: github.com/huanngzh/MV-Adapter
+  - **This is the "real multiview-native model" option user asked for.**
+
+**#2 — Hybrid Z123 → SDXL+IPAdapter cleanup at strength=0.55**
+  - Keep Z123 geometric skeleton, re-paint each view with higher
+    IPAdapter strength (current 0.35 is too shy, 0.55-0.65 would
+    overwrite hallucinations while preserving identity).
+  - VRAM: 0 new. Effort: 1-2 h (1 line change + per-view schedule).
+  - Expected on mannequin back: MEDIUM-HIGH.
+  - Easiest quick win before shipping #1.
+
+**#3 — xinsir ControlNet-OpenPose per view (Apache 2.0)**
+  - Only helps humanoid T-pose subjects. Generate skeleton PNG per
+    azimuth (front/right/back/left) + SDXL + OpenPose + IPAdapter.
+  - VRAM: ~12 GB. Effort: ~1 day.
+  - Expected: HIGH for humans, USELESS for props.
+  - Gate by existing _is_tpose detector in local_juggernaut_bridge.
+
+**#4 — Dual-reference UI workflow (front + optional back image)**
+  - UI adds 2nd dropzone, `multiview_gen.py --back-image` skips Z123
+    for view_3 when provided.
+  - Effort: ~3-4 h. No model changes.
+  - Expected: PERFECT when user has back photo, zero help otherwise.
+
+**#5 — Z123 param re-tune (cheapest, probably dead-end)**
+  - Current cfg=5.5, steps=150. Z123 v1.2 tuned for cfg=4.0, 28-75 steps.
+  - AGENT_LOG already states Objaverse training-data lack is fundamental.
+  - Effort: 30 min. Worth A/B-testing as baseline but won't fix mannequin.
+
+### Avoid
+  - Wonder3D (AGPL-3.0 — incompatible with commercial closed-source)
+  - Hunyuan3D-2 (Tencent Community — EU excluded)
+  - IP-Adapter FaceID (research only)
+  - Unique3D (MIT OK but produces mesh, not a drop-in multiview)
+
+### Recommended sequencing
+  1. TONIGHT: option #2 — bump identity-harmonize strength 0.35→0.55
+  2. THIS WEEK: option #1 — bridge MV-Adapter as new default
+  3. LATER: option #3 gated on humanoid detection
+  4. UI polish: option #4 as "power user" feature
+
+## 2026-04-17 — MV-Adapter i2mv SDXL — implementation plan (agent #2)
+
+**Fact sheet**:
+  - Repo: github.com/huanngzh/MV-Adapter (Apache 2.0)
+  - HF weights: `huanngzh/mv-adapter` / `mvadapter_i2mv_sdxl.safetensors` (~740 MB)
+  - Image encoder: `facebook/dinov2-large` (~1.2 GB, Apache 2.0)
+  - Pipeline class: `MVAdapterI2MVSDXLPipeline`
+  - Base: reuses our existing SG161222/RealVisXL_V4.0 (no duplicate)
+  - Total new disk: ~1.95 GB
+  - VRAM peak: ~11-12 GB fp16 (fits RTX 5080 16 GB)
+  - Deps: diffusers>=0.30, transformers>=4.40, peft>=0.11
+  - Azimuths: custom kwarg → pass Z123 schema [30,90,150,210,270,330]
+    with elev [20,-10,20,-10,20,-10] for drop-in compat
+
+**9-step roadmap (~9h total)**:
+  1. git submodule add MV-Adapter to external/
+  2. new scripts/multiview_mvadapter_gen.py (same CLI as Z123)
+  3. Wire RealVisXL base + offload if VRAM<14GB
+  4. Load adapter + DINOv2 encoder
+  5. Pass Z123-matching azimuths to pipeline call
+  6. Save view_0..5.png + input.png (same layout)
+  7. Bridge dispatch: FABMESH_MV_ENGINE=z123|mvadapter|sdxl
+  8. Silhouette-hash cache keyed with engine name
+  9. UI dropdown "Multi-view engine" in Settings→Advanced
+  10. Calibration gallery extension (side-by-side)
+  11. AGENT_LOG + README update
+
+**Risks**:
+  - VRAM blowout (medium) → enable_model_cpu_offload() guard
+  - diffusers version drift (medium) → pin 0.30.3
+  - Azimuth convention mismatch (medium) → validate on mannequin
+
+**GO/NO-GO**: GO. Default-off via env flag during validation, Z123
+stays safety net. Flip default once mannequin back shows orange/black
+instead of Z123's green hallucination.
+
+## 2026-04-17 — Stage 4 root cause found, NOT yet fixed
 
 **Agent investigation report**: Stage 4 fails (1/6) on the GT cube
 because the cube is authored in natural glTF frame (front=-Z, up=+Y),
