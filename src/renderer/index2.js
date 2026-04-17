@@ -7291,7 +7291,6 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 // CALIBRATION panel wiring
 // ============================================================
 (() => {
-  const btnRun = document.getElementById('set-calib-run');
   const btnOpen = document.getElementById('set-calib-open');
   const btnGallery = document.getElementById('set-calib-gallery');
   const statusEl = document.getElementById('set-calib-status');
@@ -7300,7 +7299,7 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   const simEl = document.getElementById('set-calib-similarity');
   const tsEl = document.getElementById('set-calib-timestamp');
   const axesEl = document.getElementById('set-calib-axes');
-  if (!btnRun) return;
+  if (!statusEl) return;
 
   function renderScore(score, reportDir) {
     if (!score) { scoreRow.style.display = 'none'; return; }
@@ -7342,48 +7341,6 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
       }
     } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
   }
-
-  btnRun?.addEventListener('click', async () => {
-    btnRun.disabled = true;
-    const t0 = Date.now();
-    let lastLine = 'Running SF3D + projection...';
-    function fmt(ms) {
-      const s = Math.floor(ms / 1000);
-      const m = Math.floor(s / 60);
-      return m > 0 ? `${m}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
-    }
-    function renderStatus() {
-      const t = fmt(Date.now() - t0);
-      btnRun.innerHTML = `&#8987; Running... ${t}`;
-      statusEl.innerHTML = `<span style="color:#9cf; font-family:monospace;">[${t}]</span> ${lastLine}`;
-    }
-    renderStatus();
-    const timer = setInterval(renderStatus, 1000);
-    const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
-      lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 80);
-      renderStatus();
-    }) : null;
-    try {
-      const res = await API.calibRun({ skipSf3d: false, tag: 'ui' });
-      clearInterval(timer);
-      const total = fmt(Date.now() - t0);
-      if (res && res.success && res.score) {
-        renderScore(res.score, res.reportDir);
-        statusEl.innerHTML = `<span style="color:#6f6">Done in ${total}:</span> ${res.score.score}/${res.score.total}`;
-      } else {
-        const full = String((res && res.error) || 'unknown');
-        const m = full.match(/RuntimeError:\s*([^\n]+)/);
-        const msg = m ? m[1].trim() : full.split('\n').pop().slice(0, 160);
-        statusEl.innerHTML = `<span style="color:#f88">Failed after ${total}:</span> ${msg}`;
-      }
-    } catch (e) {
-      clearInterval(timer);
-      statusEl.textContent = 'Error: ' + e.message;
-    }
-    clearInterval(timer);
-    btnRun.disabled = false;
-    btnRun.innerHTML = '&#127919; Run calibration';
-  });
 
   btnOpen?.addEventListener('click', () => openReportModal());
   btnGallery?.addEventListener('click', () => openGalleryModal());
