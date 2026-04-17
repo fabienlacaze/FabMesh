@@ -3700,11 +3700,31 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
         resolve({ success: true, views, inputCopy, outDir });
       }
     });
-    // Forward progress
+    // Forward progress — multiview is the last 10% of the parent job
+    // (image gen 0..90, multiview 90..99, finalise 100). Map the
+    // sub-script's 0..100 into the 90..99 slice and re-emit as
+    // LOCAL_IMG_PROGRESS so the renderer's existing
+    // LOCAL_*_PROGRESS scraper (index2.js:6375 PROG_RE) picks it up
+    // and actually moves the progress bar instead of sitting at 90.
     proc.stdout?.on('data', d => {
       const txt = d.toString();
-      const m = txt.match(/MULTIVIEW_PROGRESS:\s*(\d+)/);
-      if (m) safeSend('multiview-progress', { progress: parseInt(m[1]) });
+      const matches = txt.matchAll(/MULTIVIEW_PROGRESS:\s*(\d+)/g);
+      let lastSub = -1;
+      for (const m of matches) {
+        const v = parseInt(m[1]);
+        if (v > lastSub) lastSub = v;
+      }
+      if (lastSub >= 0) {
+        safeSend('multiview-progress', { progress: lastSub });
+        // Remap lastSub (0..100) into overall 90..99
+        const overall = Math.min(99, 90 + Math.round(lastSub * 9 / 100));
+        // Emit on stdout to the renderer scraper (which filters on
+        // LOCAL_*_PROGRESS lines in the mcp-job-progress channel)
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('mcp-job-progress',
+            `LOCAL_IMG_PROGRESS: ${overall}\n`);
+        }
+      }
     });
   });
 });

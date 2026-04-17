@@ -60,7 +60,48 @@ def log(msg):
 
 
 def _subpct(pct, label=''):
-    print(f'FABMESH_SUBPCT: {int(pct)} {label}', flush=True)
+    # Emit BOTH formats so any consumer (main.js legacy scraper,
+    # run-task dialog, progress-bar "single source of truth") catches it.
+    pct = int(pct)
+    print(f'FABMESH_SUBPCT: {pct} {label}', flush=True)
+    print(f'MULTIVIEW_PROGRESS: {pct} {label}', flush=True)
+
+
+def _install_ddim_progress_hook(min_pct, max_pct):
+    """Monkey-patch tqdm inside CRM's DDIM sampler so each denoising
+    step emits a progress update mapped into [min_pct..max_pct].
+    Returns the original tqdm ref for restoration."""
+    try:
+        import tqdm as _tqdm_mod
+        _orig_tqdm = _tqdm_mod.tqdm
+
+        class _ProgTqdm(_orig_tqdm):
+            def update(self, n=1):
+                super().update(n)
+                try:
+                    total = self.total or 0
+                    cur = self.n or 0
+                    if total > 0:
+                        frac = min(1.0, cur / total)
+                        pct = min_pct + int(frac * (max_pct - min_pct))
+                        _subpct(pct, f'ddim_{cur}/{total}')
+                except Exception:
+                    pass
+
+        _tqdm_mod.tqdm = _ProgTqdm
+        return _orig_tqdm
+    except Exception:
+        return None
+
+
+def _restore_tqdm(orig):
+    if orig is None:
+        return
+    try:
+        import tqdm as _tqdm_mod
+        _tqdm_mod.tqdm = orig
+    except Exception:
+        pass
 
 
 # Our target slot order -> (stage1 index in CRM output, azim, elev)
@@ -148,7 +189,12 @@ def generate(input_image_path, output_dir, scale=5.5, step=50,
 
     _subpct(20, 'stage1_infer')
     log(f'running CRM stage 1 (scale={scale}, step={step})...')
-    rt = pipeline(crm_input, scale=scale, step=step)
+    # Hook tqdm so DDIM steps drive the progress bar through 20..65.
+    _orig_tqdm = _install_ddim_progress_hook(20, 65)
+    try:
+        rt = pipeline(crm_input, scale=scale, step=step)
+    finally:
+        _restore_tqdm(_orig_tqdm)
     stage1_images = rt['stage1_images']  # list of 6 PIL images at 256x256
     log(f'stage 1 done, {len(stage1_images)} views produced')
 
