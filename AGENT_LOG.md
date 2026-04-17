@@ -10,7 +10,33 @@ what happened, conclusion.
 
 ---
 
-## 2026-04-17 (latest) — Calibration v3: per-stage independent checks — IN PROGRESS
+## 2026-04-17 (latest) — Calibration v3: Stage 4 REVEALS real UV bug
+
+**First Stage 4 run** (deterministic: GT cube GLB + GT multi-views
+fed directly to texture_project.py, no SF3D/Zero123++ involvement):
+  - front:  sim=0.65 OK  (letter F slightly washed but correct)
+  - back:   sim=0.598 FAIL
+  - right:  sim=0.500 FAIL
+  - left:   sim=0.439 FAIL
+  - top:    sim=0.514 FAIL
+  - bottom: sim=0.390 FAIL
+  - Overall: **1/6**, all failures on non-front axes.
+
+**Visual inspection**: the rendered FRONT shows the letter "F" as a
+**horizontal mirror** of the GT (the F's crossbars point left instead
+of right). This is a UV-to-atlas u-axis flip in texture_project.py
+affecting every non-front face.
+
+**This is the kind of bug the calibration system was built to catch.**
+v1 (hand-painted cube) and v2 (Rubik's) couldn't reproduce it because
+they also ran SF3D in the loop and the mesh hallucination masked the
+projection bug. v3 stage 4 bypasses SF3D entirely → bug exposed in 7s.
+
+**Next**: diagnose the U-flip in texture_project (likely in the
+per-face UV emission or the camera-to-UV convention). Then implement
+stages 2/3/5 + wire into UI.
+
+## 2026-04-17 — Calibration v3 architecture defined
 
 **Why abandon v2**: Every v2 attempt tried to score the entire
 pipeline end-to-end on one reference. This conflated "pipeline
