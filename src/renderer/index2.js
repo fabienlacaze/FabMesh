@@ -7389,6 +7389,43 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   btnOpen?.addEventListener('click', () => openReportModal());
   btnGallery?.addEventListener('click', () => openGalleryModal());
 
+  // ---- Detailed log modal ---------------------------------------------
+  const btnLog = document.getElementById('set-calib-log');
+  const logModal = document.getElementById('modal-calib-log');
+  const logBody = document.getElementById('calib-log-body');
+  const logLinesInput = document.getElementById('calib-log-lines');
+  document.getElementById('calib-log-close')?.addEventListener('click',
+    () => logModal.classList.add('hidden'));
+  logModal?.addEventListener('click', (e) => {
+    if (e.target === logModal) logModal.classList.add('hidden');
+  });
+  async function loadCalibLog() {
+    const lines = parseInt(logLinesInput?.value || '500', 10);
+    logBody.textContent = 'Loading...';
+    const res = await API.calibReadLog({ lines });
+    if (res && res.success) {
+      logBody.textContent = res.log || '(empty)';
+      logBody.scrollTop = logBody.scrollHeight;
+    } else {
+      logBody.textContent = 'Error: ' + (res && res.error || 'unknown');
+    }
+  }
+  document.getElementById('calib-log-refresh')?.addEventListener('click', loadCalibLog);
+  document.getElementById('calib-log-clear')?.addEventListener('click', async () => {
+    const ok = await fabConfirm({
+      title: 'Clear calibration log?',
+      message: 'This will empty logs/calibration.log. Previous run transcripts will be lost.',
+      okLabel: 'Clear', cancelLabel: 'Keep',
+    });
+    if (!ok) return;
+    await API.calibClearLog();
+    loadCalibLog();
+  });
+  btnLog?.addEventListener('click', () => {
+    logModal.classList.remove('hidden');
+    loadCalibLog();
+  });
+
   // ---- Auto-diagnose button -------------------------------------------
   const btnDiagnose = document.getElementById('set-calib-diagnose');
   const diagModal = document.getElementById('modal-calib-diagnose');

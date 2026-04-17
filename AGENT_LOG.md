@@ -10,6 +10,56 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-17 (late) — Calibration v2: Rubik's target + API + detailed logs
+
+**Context**: After the painted-cube experiment scored 1/6 at best, the
+diagnosis pointed at SF3D being out-of-distribution for stylized flat-color
+inputs. User requested a switch to a canonical in-distribution object.
+
+**Built**:
+
+1. **Rubik's Cube calibration asset** (`scripts/_calib_build_rubiks.py`)
+   - 6 canonical Western Rubik's colors (red/orange/blue/green/white/yellow)
+   - 3×3 sticker grid with black borders + center-sticker letter per face
+   - Produces `ref_rubiks.png` (ortho front), `ref_rubiks_multiview_perfect/`
+     (6 GT views at z123 angles), `ref_rubiks_axes_perfect/` (6 axis GT),
+     `meshes/_calibration/rubiks_groundtruth.glb`.
+   - Auto-picked by default via env var `FABMESH_CALIB_TARGET=rubiks`
+     (set to anything else to fall back to the painted cube).
+
+2. **Control API endpoints** (in `src/main/control_api.js`), all local-only
+   on 127.0.0.1:7331, auth-token gated:
+   - `POST /calib/run` — full auto-diagnose pipeline (~4-5 min), returns
+     summary + stages + verdict + log path
+   - `GET /calib/list-reports` — all past runs with scores
+   - `GET /calib/last-report` — most recent run's full data
+   - `GET /calib/report?name=...` — specific run
+   - `GET /calib/log?lines=500` — tail the detailed log
+   - `POST /calib/log/clear` — empty the log
+   - `POST /calib/build-rubiks` — regenerate the Rubik's reference asset
+   - All scriptable from Claude Code / batch scripts / CI without the UI.
+
+3. **Detailed calibration log** (`logs/calibration.log`)
+   - `CalibLogger` class in `_calib_diagnose.py` with timestamped events,
+     per-stage durations, GPU info, image dimensions, subprocess return
+     codes, stderr tails on failure, per-face expected/got/sim.
+   - Viewable in-app via `Settings → Calibration → View detailed log`
+     (scrollable modal, line count adjustable, clear button).
+
+**User constraints reaffirmed**:
+- 100% local ✓
+- Free + commercially licensable ✓
+- Backup every significant state via git tags ✓
+  (`calib-before-api-logging-20260417` added this session)
+- Full API controllability ✓
+
+**Backup tags so far for this calibration work**:
+  - `calib-ui-backup-20260417` (before revert to 7c9225a)
+  - `before-revert-to-7c9225a-20260417`
+  - `calib-before-api-logging-20260417` (this entry's snapshot)
+
+---
+
 ## 2026-04-17 — Calibration system + honest scoring + revert to standard flow
 
 **Built**: full calibration infrastructure in FabMesh.

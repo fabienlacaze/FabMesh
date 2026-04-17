@@ -21,11 +21,107 @@ Writes:
 Usage:  python scripts/_calib_diagnose.py
 """
 from __future__ import annotations
-import os, sys, json, subprocess, datetime, shutil
+import os, sys, json, subprocess, datetime, shutil, time, platform
 import numpy as np
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOGS_DIR = os.path.join(ROOT, 'logs')
+os.makedirs(LOGS_DIR, exist_ok=True)
+CALIB_LOG = os.path.join(LOGS_DIR, 'calibration.log')
+
+
+class CalibLogger:
+    """Detailed calibration logger. Writes to logs/calibration.log AND
+    echoes to stdout so the UI/API can stream progress. Includes:
+      - timestamped events
+      - per-stage durations
+      - GPU memory snapshots
+      - image/file sizes
+      - subprocess stderr captured on failure
+    """
+    def __init__(self, run_id):
+        self.run_id = run_id
+        self.t0 = time.time()
+        self.stage_t = None
+        self.stage_name = None
+        self.fh = open(CALIB_LOG, 'a', encoding='utf-8', buffering=1)
+        self._banner()
+
+    def _banner(self):
+        self._raw(f'\n{"=" * 72}')
+        self._raw(f'RUN {self.run_id}  started {datetime.datetime.now().isoformat(timespec="seconds")}')
+        self._raw(f'Python {sys.version.split()[0]} · {platform.platform()}')
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gm = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                self._raw(f'GPU: {torch.cuda.get_device_name(0)} ({gm:.1f} GB)')
+        except Exception: pass
+        self._raw('=' * 72)
+
+    def _raw(self, s):
+        line = s if not s or s.startswith('=') or s.startswith('\n') else f'[{time.time()-self.t0:6.1f}s] {s}'
+        print(line, flush=True)
+        try: self.fh.write(line + '\n')
+        except Exception: pass
+
+    def info(self, msg, **kv):
+        extra = ''
+        if kv:
+            extra = ' ' + ' '.join(f'{k}={v}' for k, v in kv.items())
+        self._raw(f'  {msg}{extra}')
+
+    def stage_start(self, name):
+        self.stage_name = name
+        self.stage_t = time.time()
+        self._raw(f'\n--- STAGE: {name} ---')
+
+    def stage_end(self, result=None, ok=True):
+        if self.stage_t is None: return
+        dt = time.time() - self.stage_t
+        tag = 'OK' if ok else 'FAIL'
+        extra = ''
+        if result:
+            extra = ' ' + ' '.join(f'{k}={v}' for k, v in result.items())
+        self._raw(f'--- {self.stage_name} {tag} in {dt:.1f}s{extra} ---')
+        self.stage_t = None
+        self.stage_name = None
+
+    def subprocess_result(self, r, label):
+        self.info(f'{label} returncode={r.returncode}')
+        if r.returncode != 0:
+            tail = (r.stderr or '')[-800:]
+            self._raw('  stderr tail:')
+            for line in tail.splitlines()[-20:]:
+                self._raw(f'    | {line}')
+
+    def file_stat(self, path, label=''):
+        if not os.path.exists(path):
+            self.info(f'{label or path}: MISSING')
+            return
+        try:
+            sz = os.path.getsize(path)
+            if path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                try:
+                    im = Image.open(path)
+                    self.info(f'{label or os.path.basename(path)} size={sz}B dim={im.size} mode={im.mode}')
+                    return
+                except Exception: pass
+            self.info(f'{label or os.path.basename(path)} size={sz}B')
+        except Exception as e:
+            self.info(f'{label or path}: stat failed ({e})')
+
+    def close(self, summary=None):
+        total = time.time() - self.t0
+        self._raw(f'\nRUN {self.run_id} done in {total:.1f}s')
+        if summary:
+            self._raw('SUMMARY: ' + json.dumps(summary))
+        try: self.fh.close()
+        except Exception: pass
+
+
+
 CALIB_DIR = os.path.join(ROOT, 'images', '_calibration')
 # Which calibration target? Prefer the Rubik's Cube (in-distribution
 # for SF3D) over the hand-painted cube (which is out-of-distribution).
@@ -52,84 +148,110 @@ def _sim(a_path, b_path, size=384):
     return float(1.0 - diff.mean() / 441.0)
 
 
-def stage1_sf3d(work_dir, env):
-    """Generate SF3D mesh from ref_0.png, score it via calibrate.py."""
-    print('[diagnose] Stage 1: SF3D raw mesh...')
+def stage1_sf3d(work_dir, env, logger):
+    logger.stage_start('SF3D mesh reconstruction')
+    logger.file_stat(REF_IMG, 'input image')
     sf3d_path = os.path.join(work_dir, 'sf3d_raw.glb')
     if not os.path.exists(sf3d_path):
         sf3d_script = os.path.join(ROOT, 'scripts', 'local_sf3d_bridge.py')
+        logger.info(f'invoking local_sf3d_bridge.py -> {sf3d_path}')
         r = subprocess.run(
             [sys.executable, sf3d_script, REF_IMG, sf3d_path, '1024', '-1', 'none', '0'],
             env=env, capture_output=True, text=True, timeout=1800)
+        logger.subprocess_result(r, 'SF3D')
         if r.returncode != 0 or not os.path.exists(sf3d_path):
+            logger.stage_end(ok=False)
             return {'ok': False, 'error': r.stderr[-400:]}
-    # Score via calibrate.py --mesh
+    else:
+        logger.info('sf3d_raw.glb already exists, skipping reconstruction')
+    logger.file_stat(sf3d_path, 'SF3D output mesh')
     tag = 'diag_stage1'
+    logger.info(f'scoring with calibrate.py --tag {tag}')
     r = subprocess.run(
         [sys.executable, os.path.join(ROOT, 'scripts', 'calibrate.py'),
          '--mesh', sf3d_path, '--tag', tag],
         env=env, capture_output=True, text=True, timeout=300)
-    # Find the latest report for this tag
+    logger.subprocess_result(r, 'calibrate.py')
     dirs = sorted([d for d in os.listdir(REPORTS_DIR) if d.endswith('_' + tag)])
     if not dirs:
+        logger.stage_end(ok=False)
         return {'ok': False, 'error': 'no report produced', 'stdout': r.stdout[-500:]}
     rd = os.path.join(REPORTS_DIR, dirs[-1])
     with open(os.path.join(rd, 'score.json'), 'r', encoding='utf-8') as f:
         score = json.load(f)
+    for face in score.get('results', []):
+        logger.info(f"  face {face['axis']:6s} expected={face['expected']} got={face['got']} "
+                    f"ok={face['correct']} sim={face.get('similarity',0):.2f}")
+    logger.stage_end(result={'score': f"{score['score']}/{score['total']}",
+                             'avg_sim': f"{score.get('avg_similarity',0):.2f}"})
     return {'ok': True, 'mesh': sf3d_path, 'report': rd, 'score': score}
 
 
-def stage2_multiview(env):
-    """Generate Zero123++ multi-views from ref_0.png. Compare each view to
-    its ground-truth counterpart."""
-    print('[diagnose] Stage 2: Zero123++ multi-views...')
+def stage2_multiview(env, logger):
+    logger.stage_start('Zero123++ multi-views')
+    logger.info(f'active dir: {MV_DIR_ACTIVE}')
     if not os.path.exists(os.path.join(MV_DIR_ACTIVE, 'view_0.png')):
         os.makedirs(MV_DIR_ACTIVE, exist_ok=True)
         mv_script = os.path.join(ROOT, 'scripts', 'multiview_gen.py')
+        logger.info(f'invoking multiview_gen.py {REF_IMG} -> {MV_DIR_ACTIVE}')
         r = subprocess.run(
             [sys.executable, mv_script, REF_IMG, MV_DIR_ACTIVE],
             env=env, capture_output=True, text=True, timeout=600)
+        logger.subprocess_result(r, 'multiview_gen')
         if r.returncode != 0:
+            logger.stage_end(ok=False)
             return {'ok': False, 'error': r.stderr[-400:]}
-    # Compare each view_N.png to the ground-truth equivalent
+    else:
+        logger.info('multi-views already generated, skipping')
     views = []
     for i in range(6):
         got = os.path.join(MV_DIR_ACTIVE, f'view_{i}.png')
         gt = os.path.join(GT_MV_DIR, f'view_{i}.png')
         if not (os.path.exists(got) and os.path.exists(gt)):
+            logger.info(f'  view_{i}: MISSING (got={os.path.exists(got)} gt={os.path.exists(gt)})')
             views.append({'i': i, 'similarity': 0.0, 'ok': False})
             continue
         sim = _sim(got, gt)
+        logger.info(f'  view_{i} similarity {sim:.3f} {"ok" if sim > 0.7 else "low"}')
         views.append({'i': i, 'similarity': sim, 'ok': sim > 0.7})
     avg = sum(v['similarity'] for v in views) / max(1, len(views))
+    good = sum(1 for v in views if v['ok'])
+    logger.stage_end(result={'good_views': f"{good}/{len(views)}", 'avg_sim': f"{avg:.3f}"})
     return {'ok': True, 'views': views, 'avg_similarity': avg,
-            'good_views': sum(1 for v in views if v['ok']),
-            'total': len(views)}
+            'good_views': good, 'total': len(views)}
 
 
-def stage3_projected(sf3d_path, work_dir, env):
-    """Run texture_project with the (already generated) multi-views."""
-    print('[diagnose] Stage 3: texture_project...')
+def stage3_projected(sf3d_path, work_dir, env, logger):
+    logger.stage_start('texture_project')
     out_path = os.path.join(work_dir, 'projected.glb')
     proj_script = os.path.join(ROOT, 'scripts', 'texture_project.py')
+    logger.info(f'projecting mv -> {out_path}')
     r = subprocess.run(
         [sys.executable, proj_script, sf3d_path, REF_IMG, out_path, '1024',
          '--multiview', MV_DIR_ACTIVE],
         env=env, capture_output=True, text=True, timeout=300)
+    logger.subprocess_result(r, 'texture_project')
     if r.returncode != 0 or not os.path.exists(out_path):
+        logger.stage_end(ok=False)
         return {'ok': False, 'error': r.stderr[-400:]}
-    # Score
+    logger.file_stat(out_path, 'projected mesh')
     tag = 'diag_stage3'
     r = subprocess.run(
         [sys.executable, os.path.join(ROOT, 'scripts', 'calibrate.py'),
          '--mesh', out_path, '--tag', tag],
         env=env, capture_output=True, text=True, timeout=300)
+    logger.subprocess_result(r, 'calibrate.py')
     dirs = sorted([d for d in os.listdir(REPORTS_DIR) if d.endswith('_' + tag)])
     if not dirs:
+        logger.stage_end(ok=False)
         return {'ok': False, 'error': 'no report produced'}
     rd = os.path.join(REPORTS_DIR, dirs[-1])
     with open(os.path.join(rd, 'score.json'), 'r', encoding='utf-8') as f:
         score = json.load(f)
+    for face in score.get('results', []):
+        logger.info(f"  face {face['axis']:6s} expected={face['expected']} got={face['got']} "
+                    f"ok={face['correct']} sim={face.get('similarity',0):.2f}")
+    logger.stage_end(result={'score': f"{score['score']}/{score['total']}"})
     return {'ok': True, 'mesh': out_path, 'report': rd, 'score': score}
 
 
@@ -284,10 +406,16 @@ def main():
     env = dict(os.environ)
     env['PYTHONUNBUFFERED'] = '1'
 
-    s1 = stage1_sf3d(work_dir, env)
-    s2 = stage2_multiview(env)
+    logger = CalibLogger(stamp)
+    logger.info(f'calibration target: {"rubiks" if _USE_RUBIKS else "painted cube"}')
+    logger.info(f'ref image: {REF_IMG}')
+    logger.info(f'work dir:  {work_dir}')
+    logger.info(f'report dir: {report_dir}')
+
+    s1 = stage1_sf3d(work_dir, env, logger)
+    s2 = stage2_multiview(env, logger)
     sf3d_path = s1.get('mesh') if s1.get('ok') else None
-    s3 = stage3_projected(sf3d_path, work_dir, env) if sf3d_path else {'ok': False, 'error': 'skipped: SF3D failed'}
+    s3 = stage3_projected(sf3d_path, work_dir, env, logger) if sf3d_path else {'ok': False, 'error': 'skipped: SF3D failed'}
 
     verdict = build_verdict(s1, s2, s3)
     html = write_report(report_dir, s1, s2, s3, verdict)
@@ -299,7 +427,7 @@ def main():
     print(f'\nPRIMARY CAUSE: {verdict["primary_cause"]}')
     print(f'RECOMMENDATION: {verdict["recommendation"]}')
     print(f'\nReport: {html}')
-    # Also emit a machine-parseable line for the UI
+    # Also emit a machine-parseable line for the UI/API
     summary = {
         'primary_cause': verdict['primary_cause'],
         'stage1': verdict.get('stage1_sf3d_score'),
@@ -308,7 +436,9 @@ def main():
         'report_html': html,
         'report_dir': report_dir,
         'recommendation': verdict['recommendation'],
+        'log_file': CALIB_LOG,
     }
+    logger.close(summary)
     print('DIAGNOSE_JSON:', json.dumps(summary))
 
 

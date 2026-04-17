@@ -264,7 +264,14 @@ function startControlApi(mainWindow, opts = {}) {
           'GET  /popups',
           'POST /dismiss-popup     {id?}',
           'GET  /last-error',
-          'GET  /devtools-open'
+          'GET  /devtools-open',
+          'POST /calib/run                  run full auto-diagnose (SF3D + z123 + projection)',
+          'GET  /calib/list-reports',
+          'GET  /calib/last-report',
+          'GET  /calib/report?name=...',
+          'GET  /calib/log?lines=500',
+          'POST /calib/log/clear',
+          'POST /calib/build-rubiks        rebuild the Rubik\'s calibration reference'
         ]
       });
     },
@@ -677,6 +684,146 @@ function startControlApi(mainWindow, opts = {}) {
       const r = await rendererCall(mainWindow, 'auto-rig', body, 60000);
       if (!r.ok) return sendErr(res, r.error);
       sendOk(res, r.data);
+    },
+
+    // ============================================================
+    // CALIBRATION endpoints — full pipeline + per-stage scoring.
+    // Lets scripts (Claude Code, CI, batch sweeps) run calibration
+    // without the UI. Uses the same Python script as the Settings UI.
+    // ============================================================
+    'POST /calib/run': async (req, res) => {
+      // Run the full auto-diagnose pipeline (~4-5 min).
+      const { ipcMain } = require('electron');
+      const { execFile } = require('child_process');
+      const rootDir = path.join(__dirname, '..', '..');
+      const script = path.join(rootDir, 'scripts', '_calib_diagnose.py');
+      const logPath = path.join(rootDir, 'logs', 'calibration.log');
+
+      const stream = fs.createWriteStream(logPath, { flags: 'a' });
+      stream.write(`\n=== ${new Date().toISOString()} /calib/run START ===\n`);
+
+      return new Promise((resolve) => {
+        const proc = execFile('python', [script], {
+          timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
+          env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          cwd: rootDir,
+        }, (error, stdout, stderr) => {
+          stream.write(stdout || ''); stream.write(stderr || '');
+          stream.write(`=== END (code=${error ? error.code : 0}) ===\n`);
+          stream.end();
+          if (error) return sendErr(res, error.message, 500) || resolve();
+          const m = (stdout || '').match(/DIAGNOSE_JSON:\s*(\{[^\n]+\})/);
+          if (!m) return sendErr(res, 'no DIAGNOSE_JSON line', 500) || resolve();
+          try {
+            const summary = JSON.parse(m[1]);
+            const reportDir = summary.report_dir;
+            const readOpt = (fn) => {
+              try { return JSON.parse(fs.readFileSync(path.join(reportDir, fn), 'utf-8')); }
+              catch (e) { return null; }
+            };
+            sendOk(res, {
+              summary,
+              stage1: readOpt('stage1_sf3d.json'),
+              stage2: readOpt('stage2_mv.json'),
+              stage3: readOpt('stage3_projected.json'),
+              verdict: readOpt('verdict.json'),
+              log_file: logPath,
+            });
+            resolve();
+          } catch (e) { sendErr(res, e.message, 500); resolve(); }
+        });
+        proc.stdout?.on('data', d => { try { stream.write(d); } catch (_) {} });
+        proc.stderr?.on('data', d => { try { stream.write(d); } catch (_) {} });
+      });
+    },
+
+    'GET /calib/list-reports': async (req, res) => {
+      try {
+        const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+        if (!fs.existsSync(reportsDir)) return sendOk(res, { reports: [] });
+        const out = [];
+        for (const name of fs.readdirSync(reportsDir)) {
+          if (name.startsWith('sweep_')) continue;
+          const dir = path.join(reportsDir, name);
+          const sp = path.join(dir, 'score.json');
+          if (!fs.existsSync(sp)) continue;
+          try {
+            const s = JSON.parse(fs.readFileSync(sp, 'utf-8'));
+            out.push({
+              name, dir, mtime: fs.statSync(dir).mtimeMs,
+              score: s.score, total: s.total,
+              similarity: s.avg_similarity, timestamp: s.timestamp,
+              mesh: s.mesh, results: s.results,
+            });
+          } catch (_) {}
+        }
+        out.sort((a, b) => b.mtime - a.mtime);
+        sendOk(res, { reports: out });
+      } catch (e) { sendErr(res, e.message, 500); }
+    },
+
+    'GET /calib/last-report': async (req, res) => {
+      try {
+        const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+        if (!fs.existsSync(reportsDir)) return sendErr(res, 'no reports dir', 404);
+        const entries = fs.readdirSync(reportsDir)
+          .filter(n => !n.startsWith('sweep_'))
+          .map(n => ({ n, t: fs.statSync(path.join(reportsDir, n)).mtimeMs }))
+          .sort((a, b) => b.t - a.t);
+        if (!entries.length) return sendErr(res, 'no reports', 404);
+        const dir = path.join(reportsDir, entries[0].n);
+        const score = JSON.parse(fs.readFileSync(path.join(dir, 'score.json'), 'utf-8'));
+        sendOk(res, {
+          name: entries[0].n, dir, score,
+          html: path.join(dir, 'index.html'),
+        });
+      } catch (e) { sendErr(res, e.message, 500); }
+    },
+
+    'GET /calib/report': async (req, res, url) => {
+      const name = url.searchParams.get('name');
+      if (!name) return sendErr(res, 'missing name', 400);
+      try {
+        const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+        const dir = path.join(reportsDir, name);
+        if (!fs.existsSync(dir)) return sendErr(res, 'not found', 404);
+        const result = { name, dir };
+        for (const fn of ['score.json', 'stage1_sf3d.json', 'stage2_mv.json',
+                          'stage3_projected.json', 'verdict.json']) {
+          const p = path.join(dir, fn);
+          if (fs.existsSync(p)) {
+            try { result[fn.replace('.json', '')] = JSON.parse(fs.readFileSync(p, 'utf-8')); }
+            catch (_) {}
+          }
+        }
+        sendOk(res, result);
+      } catch (e) { sendErr(res, e.message, 500); }
+    },
+
+    'GET /calib/log': async (req, res, url) => {
+      const lines = parseInt(url.searchParams.get('lines') || '500', 10);
+      const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
+      if (!fs.existsSync(logPath)) return sendOk(res, { log: '', path: logPath });
+      const content = fs.readFileSync(logPath, 'utf-8');
+      const tail = content.split(/\r?\n/).slice(-lines).join('\n');
+      sendOk(res, { log: tail, path: logPath, total_bytes: content.length });
+    },
+
+    'POST /calib/log/clear': async (req, res) => {
+      const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
+      try { fs.writeFileSync(logPath, ''); sendOk(res, { cleared: true }); }
+      catch (e) { sendErr(res, e.message, 500); }
+    },
+
+    'POST /calib/build-rubiks': async (req, res) => {
+      // Rebuilds the Rubik's calibration reference (idempotent, ~2 sec)
+      const { execFile } = require('child_process');
+      const script = path.join(__dirname, '..', '..', 'scripts', '_calib_build_rubiks.py');
+      execFile('python', [script], { cwd: path.join(__dirname, '..', '..') },
+        (error, stdout, stderr) => {
+          if (error) return sendErr(res, error.message, 500);
+          sendOk(res, { stdout: (stdout || '').slice(-1000) });
+        });
     },
 
     'GET /jobs': async (req, res) => {

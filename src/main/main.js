@@ -1503,6 +1503,24 @@ ipcMain.handle('calib-diagnose', async () => {
   });
 });
 
+ipcMain.handle('calib-read-log', (event, { lines = 500 } = {}) => {
+  try {
+    const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
+    if (!fs.existsSync(logPath)) return { success: true, log: '(no log yet)' };
+    const content = fs.readFileSync(logPath, 'utf-8');
+    const tail = content.split(/\r?\n/).slice(-lines).join('\n');
+    return { success: true, log: tail, total_bytes: content.length, path: logPath };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('calib-clear-log', () => {
+  try {
+    const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
+    fs.writeFileSync(logPath, '');
+    return { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 // List every report dir with score.json — fed into the in-app gallery.
 ipcMain.handle('calib-list-reports', () => {
   try {

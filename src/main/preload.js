@@ -87,6 +87,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   calibListReports: () => ipcRenderer.invoke('calib-list-reports'),
   calibDiagnose: () => ipcRenderer.invoke('calib-diagnose'),
   calibCancel: () => ipcRenderer.invoke('calib-cancel'),
+  calibReadLog: (opts) => ipcRenderer.invoke('calib-read-log', opts || {}),
+  calibClearLog: () => ipcRenderer.invoke('calib-clear-log'),
   onCalibProgress: (cb) => ipcRenderer.on('calib-progress', (e, data) => cb(data)),
   countPython: () => ipcRenderer.invoke('count-python'),
   readLogTail: (opts) => ipcRenderer.invoke('read-log-tail', opts),
