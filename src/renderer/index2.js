@@ -7345,26 +7345,42 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 
   btnRun?.addEventListener('click', async () => {
     btnRun.disabled = true;
-    btnRun.textContent = '... running (~2 min)';
-    statusEl.textContent = 'Running SF3D + projection...';
-    let lastLine = '';
+    const t0 = Date.now();
+    let lastLine = 'Running SF3D + projection...';
+    function fmt(ms) {
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      return m > 0 ? `${m}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+    }
+    function renderStatus() {
+      const t = fmt(Date.now() - t0);
+      btnRun.innerHTML = `&#8987; Running... ${t}`;
+      statusEl.innerHTML = `<span style="color:#9cf; font-family:monospace;">[${t}]</span> ${lastLine}`;
+    }
+    renderStatus();
+    const timer = setInterval(renderStatus, 1000);
     const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
       lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 80);
-      statusEl.textContent = lastLine;
+      renderStatus();
     }) : null;
     try {
       const res = await API.calibRun({ skipSf3d: false, tag: 'ui' });
+      clearInterval(timer);
+      const total = fmt(Date.now() - t0);
       if (res && res.success && res.score) {
         renderScore(res.score, res.reportDir);
-        statusEl.textContent = `Done: ${res.score.score}/${res.score.total}`;
+        statusEl.innerHTML = `<span style="color:#6f6">Done in ${total}:</span> ${res.score.score}/${res.score.total}`;
       } else {
-        // Extract just the RuntimeError message for a readable error
         const full = String((res && res.error) || 'unknown');
         const m = full.match(/RuntimeError:\s*([^\n]+)/);
         const msg = m ? m[1].trim() : full.split('\n').pop().slice(0, 160);
-        statusEl.innerHTML = '<span style="color:#f88">Failed:</span> ' + msg;
+        statusEl.innerHTML = `<span style="color:#f88">Failed after ${total}:</span> ${msg}`;
       }
-    } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
+    } catch (e) {
+      clearInterval(timer);
+      statusEl.textContent = 'Error: ' + e.message;
+    }
+    clearInterval(timer);
     btnRun.disabled = false;
     btnRun.innerHTML = '&#127919; Run calibration';
   });
