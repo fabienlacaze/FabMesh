@@ -168,10 +168,17 @@ def generate(input_image_path, output_dir, scale=5.5, step=50,
             f'Missing CRM weight: {pixel_pth}. Run '
             f'`python scripts/download_crm_weights.py --mv`')
     stage1_cfg.models.resume = pixel_pth
-    # Stage 2 skipped — FabMesh patch in external/CRM/pipelines.py recognizes
-    # 'SKIP' as "don't load stage2, we only need stage1 multi-views".
+    # Stage 2 skipped by default — saves ~6 GB VRAM. We only need stage1
+    # for multi-view images; stage2 (CCM) + stage3 (3D recon) are for
+    # CRM's own mesh reconstruction which SF3D does instead.
+    # Set FABMESH_CRM_USE_STAGE2=1 to experiment with full pipeline.
     ccm_pth = os.path.join(CRM_WEIGHTS_DIR, 'ccm-diffusion.pth')
-    stage2_cfg.models.resume = ccm_pth if os.path.exists(ccm_pth) else 'SKIP'
+    if os.environ.get('FABMESH_CRM_USE_STAGE2') == '1' and os.path.exists(ccm_pth):
+        stage2_cfg.models.resume = ccm_pth
+        log('stage2 ENABLED (FABMESH_CRM_USE_STAGE2=1, extra ~6 GB VRAM)')
+    else:
+        stage2_cfg.models.resume = 'SKIP'
+        log('stage2 skipped (saves ~6 GB VRAM); set FABMESH_CRM_USE_STAGE2=1 to enable')
 
     # CRM loads sub-configs via relative paths — chdir into its root.
     _cwd_save = os.getcwd()
