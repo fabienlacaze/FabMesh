@@ -26,10 +26,17 @@ import trimesh
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CALIB_DIR = os.path.join(ROOT, 'images', '_calibration')
-GT_AXES_DIR = os.path.join(CALIB_DIR, 'ref_0_perfect_axes')
-REF_IMG = os.path.join(CALIB_DIR, 'ref_0.png')
-MV_DIR_PERFECT = os.path.join(CALIB_DIR, 'ref_0_multiview_perfect')
-MV_DIR_ACTIVE = os.path.join(CALIB_DIR, 'ref_0_multiview')
+_USE_RUBIKS = os.environ.get('FABMESH_CALIB_TARGET', 'rubiks') == 'rubiks'
+if _USE_RUBIKS and os.path.exists(os.path.join(CALIB_DIR, 'ref_rubiks.png')):
+    GT_AXES_DIR = os.path.join(CALIB_DIR, 'ref_rubiks_axes_perfect')
+    REF_IMG = os.path.join(CALIB_DIR, 'ref_rubiks.png')
+    MV_DIR_PERFECT = os.path.join(CALIB_DIR, 'ref_rubiks_multiview_perfect')
+    MV_DIR_ACTIVE = os.path.join(CALIB_DIR, 'ref_rubiks_multiview')
+else:
+    GT_AXES_DIR = os.path.join(CALIB_DIR, 'ref_0_perfect_axes')
+    REF_IMG = os.path.join(CALIB_DIR, 'ref_0.png')
+    MV_DIR_PERFECT = os.path.join(CALIB_DIR, 'ref_0_multiview_perfect')
+    MV_DIR_ACTIVE = os.path.join(CALIB_DIR, 'ref_0_multiview')
 REPORTS_DIR = os.path.join(CALIB_DIR, 'reports')
 
 AXES = [
@@ -156,16 +163,25 @@ def _palette_classify(img):
     """Classify by counting pixels that match each face's signature
     palette. Independent from template matching — uses each face's
     unique dominant + secondary colors."""
-    # Each face has a signature color set (dominant + accent).
-    # We count pixels matching each palette and pick the highest hit.
-    PALETTES = {
-        'F': [(200, 40, 40), (240, 240, 240)],        # red + white
-        'B': [(40, 70, 200), (200, 40, 40), (240, 240, 240)],  # blue + red + white
-        'R': [(240, 210, 140), (80, 210, 90), (30, 30, 30)],   # beige + green + black
-        'L': [(230, 60, 210), (80, 210, 90), (240, 240, 240)], # magenta + green + white
-        'T': [(240, 235, 210), (80, 210, 90), (200, 40, 40)],  # cream + green + red
-        'D': [(200, 40, 40), (40, 70, 200), (80, 210, 90)],    # red + blue + green (BOT)
-    }
+    if _USE_RUBIKS:
+        # Rubik's Cube standard (Western): unique dominant color per face
+        PALETTES = {
+            'F': [(200, 35, 35)],    # red
+            'B': [(230, 120, 40)],   # orange
+            'R': [(40, 70, 200)],    # blue
+            'L': [(50, 180, 90)],    # green
+            'T': [(245, 245, 245)],  # white
+            'D': [(245, 215, 60)],   # yellow
+        }
+    else:
+        PALETTES = {
+            'F': [(200, 40, 40), (240, 240, 240)],
+            'B': [(40, 70, 200), (200, 40, 40), (240, 240, 240)],
+            'R': [(240, 210, 140), (80, 210, 90), (30, 30, 30)],
+            'L': [(230, 60, 210), (80, 210, 90), (240, 240, 240)],
+            'T': [(240, 235, 210), (80, 210, 90), (200, 40, 40)],
+            'D': [(200, 40, 40), (40, 70, 200), (80, 210, 90)],
+        }
     size = img.shape[0]
     m0, m1 = int(size * 0.2), int(size * 0.8)
     sample = img[m0:m1, m0:m1].reshape(-1, 3).astype(float)

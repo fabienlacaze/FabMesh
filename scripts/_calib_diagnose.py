@@ -27,10 +27,19 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CALIB_DIR = os.path.join(ROOT, 'images', '_calibration')
-GT_AXES_DIR = os.path.join(CALIB_DIR, 'ref_0_perfect_axes')
-GT_MV_DIR = os.path.join(CALIB_DIR, 'ref_0_multiview_perfect')
-MV_DIR_ACTIVE = os.path.join(CALIB_DIR, 'ref_0_multiview')
-REF_IMG = os.path.join(CALIB_DIR, 'ref_0.png')
+# Which calibration target? Prefer the Rubik's Cube (in-distribution
+# for SF3D) over the hand-painted cube (which is out-of-distribution).
+_USE_RUBIKS = os.environ.get('FABMESH_CALIB_TARGET', 'rubiks') == 'rubiks'
+if _USE_RUBIKS and os.path.exists(os.path.join(CALIB_DIR, 'ref_rubiks.png')):
+    REF_IMG = os.path.join(CALIB_DIR, 'ref_rubiks.png')
+    GT_AXES_DIR = os.path.join(CALIB_DIR, 'ref_rubiks_axes_perfect')
+    GT_MV_DIR = os.path.join(CALIB_DIR, 'ref_rubiks_multiview_perfect')
+    MV_DIR_ACTIVE = os.path.join(CALIB_DIR, 'ref_rubiks_multiview')
+else:
+    REF_IMG = os.path.join(CALIB_DIR, 'ref_0.png')
+    GT_AXES_DIR = os.path.join(CALIB_DIR, 'ref_0_perfect_axes')
+    GT_MV_DIR = os.path.join(CALIB_DIR, 'ref_0_multiview_perfect')
+    MV_DIR_ACTIVE = os.path.join(CALIB_DIR, 'ref_0_multiview')
 REPORTS_DIR = os.path.join(CALIB_DIR, 'reports')
 
 
