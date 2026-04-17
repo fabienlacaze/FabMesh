@@ -6903,12 +6903,15 @@ document.getElementById('jobs-close-2').addEventListener('click', () => {
 // ============================================================
 document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
-  if (!p || !p.previewImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
   document.getElementById('ai-target').value = '';
   document.getElementById('ai-replace').value = '';
-  // Show the source image inside the modal
+  // Show the source image inside the modal — use the ACTIVE view
+  // (multiview angle if selected, else front) so the preview matches
+  // what the user is looking at in the workspace.
   const srcImg = document.getElementById('ai-source-img');
-  if (srcImg) srcImg.src = 'file:///' + p.previewImagePath.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
   document.getElementById('modal-auto-inpaint').classList.remove('hidden');
 });
 const aiDilate = document.getElementById('ai-dilate');
@@ -6920,7 +6923,8 @@ document.getElementById('ai-cancel')?.addEventListener('click', () => {
 });
 document.getElementById('ai-go')?.addEventListener('click', async () => {
   const p = state.currentProject;
-  if (!p || !p.previewImagePath) return;
+  const imagePath = editTarget(p);
+  if (!imagePath) return;
   const target = document.getElementById('ai-target').value.trim();
   if (!target) {
     showToast('Type what to find first (e.g. "hat", "background")', 'error');
@@ -6938,7 +6942,7 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
       Padding: dilate + 'px',
     }, 180000);
     try {
-      const r = await API.autoInpaint({ imagePath: p.previewImagePath, targetText: target, prompt: replace, dilate, jobId: job.id });
+      const r = await API.autoInpaint({ imagePath, targetText: target, prompt: replace, dilate, jobId: job.id });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();

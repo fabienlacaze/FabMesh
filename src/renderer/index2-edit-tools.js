@@ -329,9 +329,41 @@
   var maskOverlayCanvas = document.getElementById('mask-overlay-canvas');
   var maskOverlayCtx = maskOverlayCanvas ? maskOverlayCanvas.getContext('2d', { willReadFrequently: true }) : null;
   var _maskMgr = null;
-  var maskIsErasing = false;
+  var maskIsErasing = false;  // current-stroke erase flag (set per mouse-down)
+  var maskEraserMode = false; // sticky toggle: eraser tool active
 
   var maskBrushSize = 50;
+
+  // Wire the brush/eraser toggle buttons
+  function _syncMaskToolButtons() {
+    var brushBtn = document.getElementById('mask-brush-mode');
+    var eraserBtn = document.getElementById('mask-eraser-mode');
+    if (brushBtn) brushBtn.classList.toggle('mv-active', !maskEraserMode);
+    if (eraserBtn) eraserBtn.classList.toggle('mv-active', maskEraserMode);
+  }
+  (function _wireMaskToolToggle() {
+    var brushBtn = document.getElementById('mask-brush-mode');
+    var eraserBtn = document.getElementById('mask-eraser-mode');
+    if (brushBtn) brushBtn.addEventListener('click', function () {
+      maskEraserMode = false; _syncMaskToolButtons();
+    });
+    if (eraserBtn) eraserBtn.addEventListener('click', function () {
+      maskEraserMode = true; _syncMaskToolButtons();
+    });
+    // Keyboard shortcuts: B = brush, E = eraser (active only while modal open)
+    document.addEventListener('keydown', function (e) {
+      var modal = document.getElementById('mask-modal');
+      if (!modal || modal.classList.contains('hidden')) return;
+      // Skip if typing in a text field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'b' || e.key === 'B') {
+        maskEraserMode = false; _syncMaskToolButtons();
+      } else if (e.key === 'e' || e.key === 'E') {
+        maskEraserMode = true; _syncMaskToolButtons();
+      }
+    });
+    _syncMaskToolButtons();
+  })();
 
   function maskPaintDab(ctx, x, y, erase) {
     ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
@@ -382,20 +414,22 @@
       loupeBtn: document.getElementById('mask-loupe-toggle'),
       brushCursor: document.getElementById('mask-brush-cursor'),
       brushSizeGetter: function () { return maskBrushSize; },
-      // Right-click = erase, not pan; use middle-click / Alt+click for pan (default)
+      // Right-click = erase (legacy shortcut, still works).
+      // Alternatively toggle the eraser button (or press E) to use
+      // left-click as eraser — same radius as the brush slider.
       onMouseDown: function (ctx, x, y, e, mgr) {
         if (e.button === 2) {
-          // Right-click: erase mode — we handle it manually
+          // Right-click: always erase
           e.preventDefault();
           maskIsErasing = true;
           mgr.pushUndo();
           mgr.painting = true;
           mgr.lastPaintPoint = { x: x, y: y };
           maskPaintDab(ctx, Math.round(x), Math.round(y), true);
-          return false; // skip default paint
+          return false;
         }
-        maskIsErasing = false;
-        // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
+        // Left click uses the sticky eraser toggle as default mode
+        maskIsErasing = maskEraserMode;
         return undefined;
       },
       onPaint: function (ctx, x, y, lastPt, mgr) {

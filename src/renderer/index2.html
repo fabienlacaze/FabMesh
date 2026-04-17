@@ -1243,8 +1243,10 @@
           <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
         </div>
         <div style="font-size: 11px; color: var(--text-muted);">
-          <strong>Click & drag</strong> to paint red mask &nbsp;|&nbsp;
-          <strong>Right-click drag</strong> to erase &nbsp;|&nbsp;
+          <strong>Click & drag</strong> to paint &nbsp;|&nbsp;
+          <strong>E</strong> / eraser button to erase &nbsp;|&nbsp;
+          <strong>B</strong> for brush &nbsp;|&nbsp;
+          <strong>Right-click drag</strong> also erases &nbsp;|&nbsp;
           <strong>Z</strong> to undo
         </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -1255,9 +1257,11 @@
           </label>
           <div style="display:flex; gap:4px; flex-shrink:0;">
             <button id="mask-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
-            <button id="mask-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+            <button id="mask-brush-mode" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Paint mode (B)">&#128396;&#65039;</button>
+            <button id="mask-eraser-mode" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Eraser mode (E) — radius follows brush size">&#129529;</button>
+            <button id="mask-undo" class="secondary-btn tool-btn" disabled title="Undo (Z)">&#8630;</button>
             <button id="mask-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
-            <button id="mask-clear" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+            <button id="mask-clear" class="secondary-btn tool-btn" title="Clear whole mask">&#8634;</button>
           </div>
         </div>
         <div id="mask-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
@@ -1306,9 +1310,9 @@
           <div style="display:flex; gap:4px; flex-shrink:0;">
             <button id="clone-flip-toggle" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px;" title="Flip mode">Flip: Off</button>
             <button id="clone-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
-            <button id="clone-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+            <button id="clone-undo" class="secondary-btn tool-btn" disabled title="Undo (Z)">&#8630;</button>
             <button id="clone-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
-            <button id="clone-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+            <button id="clone-reset" class="secondary-btn tool-btn" title="Clear all paint">&#129529; Clear</button>
           </div>
         </div>
         <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
