@@ -178,6 +178,35 @@ Backup tag: before-crm-integration-20260417.
 ### NEXT: test full pipeline (CRM multi-views → SF3D → texture_project)
 to see end-to-end quality on a real character.
 
+## 2026-04-17 — CRM routing bug + fix (user "vache" test)
+
+**Symptom**: user ran Generate on "vache" project, expected TOP/BOT
+views, none produced. Only view_0..view_5 in classic Z123 layout.
+
+**Root cause**: `main.js` hardcoded `multiview_gen.py` at two call
+sites (line 861 mv-inherit, line 3642 generate-multiview IPC).
+Setting FABMESH_MV_ENGINE=crm in the launcher env had NO effect
+because the script path was never read from env.
+
+**Fix**: added `_mvScriptForEngine()` helper that maps engine name
+to script path. Both call sites now use it. Z123 remains the
+default when FABMESH_MV_ENGINE is unset.
+
+**Verification**: killed electron + restarted with env=crm,
+deleted `images/vache/ref_0_multiview/` cache so the bridge
+regenerates from scratch. User must retry "Generate".
+
+**Dependency chain unresolved in the same session**:
+  - xformers 0.0.35 (tied to torch 2.11) broke SDXL imports;
+    uninstalled
+  - diffusers 0.37 broke on torch 2.7 (GroupName import);
+    pinned 0.34
+  - transformers 5.5 dropped FLAX_WEIGHTS_NAME; pinned 4.46
+  - CRM itself needed EMAModel stub + SDPA fallback + stage2 SKIP
+
+All committed. All patches documented above in the CRM Integration
+section. Tests on mannequin worked; real user test pending.
+
 ## 2026-04-17 — Stage 4 root cause found, NOT yet fixed
 
 **Agent investigation report**: Stage 4 fails (1/6) on the GT cube
