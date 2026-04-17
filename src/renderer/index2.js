@@ -1232,31 +1232,21 @@ function initRigSrcViewer() {
   const canvas = document.getElementById('ws-rig-source-canvas');
   if (!canvas) return;
   const w = canvas.clientWidth || 240, h = canvas.clientHeight || 240;
-  rigSrcRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  rigSrcRenderer.setSize(w, h, false);
-  rigSrcRenderer.setPixelRatio(window.devicePixelRatio);
-  rigSrcRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  rigSrcRenderer.toneMappingExposure = 1.0;
-  rigSrcScene = new THREE.Scene();
-  rigSrcScene.background = new THREE.Color(0x0b0b14);
-  rigSrcCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
-  rigSrcCamera.position.set(2, 2, 3);
-  rigSrcControls = new OrbitControls(rigSrcCamera, canvas);
-  rigSrcControls.enableDamping = true;
+  const _rsV = new Viewer3D({
+    canvas, fov: 45, bgColor: 0x0b0b14, cameraPos: [2, 2, 3],
+    lighting: false,  // custom lights below (no fill light here)
+  });
+  rigSrcRenderer = _rsV.renderer;
+  rigSrcScene = _rsV.scene;
+  rigSrcCamera = _rsV.camera;
+  rigSrcControls = _rsV.controls;
   rigSrcScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
   const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   rigSrcScene.add(dir);
   rigSrcScene.add(new THREE.AmbientLight(0xffffff, 0.3));
-  function tick() {
-    const visible = canvas.offsetParent !== null && document.visibilityState !== 'hidden';
-    if (visible) {
-      rigSrcControls.update();
-      rigSrcRenderer.render(rigSrcScene, rigSrcCamera);
-    }
-    rigSrcRafId = requestAnimationFrame(tick);
-  }
-  tick();
+  _rsV.startTickLoop();
+  rigSrcRafId = -1;
 }
 
 async function showRigSourceMesh(meshPath) {
@@ -2152,25 +2142,16 @@ let lb3dLandmarkClones = []; // clones of lmMarkers mirrored into lb3dScene
 function init3DLightbox() {
   if (lb3dRenderer) return;
   const canvas = document.getElementById('lightbox-3d-canvas');
-  lb3dRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  lb3dRenderer.setPixelRatio(window.devicePixelRatio);
-  lb3dRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  lb3dRenderer.toneMappingExposure = 1.0;
-  lb3dScene = new THREE.Scene();
-  lb3dScene.background = new THREE.Color(0x0b0b14);
-  lb3dCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 5000);
-  lb3dCamera.position.set(2, 2, 3);
-  lb3dControls = new OrbitControls(lb3dCamera, canvas);
-  lb3dControls.enableDamping = true;
-  // Bright base lighting
-  lb3dScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-  dir.position.set(5, 8, 5);
-  lb3dScene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
-  fill.position.set(-5, 3, -5);
-  lb3dScene.add(fill);
-  lb3dScene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  const _lbV = new Viewer3D({
+    canvas, fov: 45, bgColor: 0x0b0b14, far: 5000, cameraPos: [2, 2, 3],
+    lighting: true, autoResize: false,
+  });
+  lb3dRenderer = _lbV.renderer;
+  lb3dScene = _lbV.scene;
+  lb3dCamera = _lbV.camera;
+  lb3dControls = _lbV.controls;
+  // NOTE: lightbox uses its own manual start/stop loop (startLb3dLoop)
+  // rather than Viewer3D's auto tick — we leave it to the existing code.
 }
 function resize3DLightbox() {
   if (!lb3dRenderer) return;
@@ -5818,41 +5799,23 @@ function initRigViewer() {
   if (rigVwRenderer) return;
   const canvas = document.getElementById('ws-rig-canvas');
   if (!canvas) return;
-  const w = canvas.clientWidth || 320, h = canvas.clientHeight || 260;
-  rigVwRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  rigVwRenderer.setSize(w, h, false);
-  rigVwRenderer.setPixelRatio(window.devicePixelRatio);
-  rigVwRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  rigVwRenderer.toneMappingExposure = 1.0;
-  rigVwScene = new THREE.Scene();
-  rigVwScene.background = new THREE.Color(0x1d1d2c);
-  rigVwCamera = new THREE.PerspectiveCamera(45, w / h, 0.01, 5000);
-  rigVwCamera.position.set(2, 2, 3);
-  rigVwControls = new OrbitControls(rigVwCamera, canvas);
-  rigVwControls.enableDamping = true;
-  rigVwScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-  dir.position.set(5, 8, 5);
-  rigVwScene.add(dir);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
-  fill.position.set(-5, 3, -5);
-  rigVwScene.add(fill);
-  rigVwScene.add(new THREE.AmbientLight(0xffffff, 0.3));
-  function tick() {
-    const visible = canvas.offsetParent !== null && document.visibilityState !== 'hidden';
-    if (visible) {
+  // The rig viewer has an animation mixer that must update each frame,
+  // so we use Viewer3D with an onBeforeRender hook.
+  const _rvV = new Viewer3D({
+    canvas, fov: 45, bgColor: 0x1d1d2c, far: 5000, cameraPos: [2, 2, 3],
+    lighting: true,
+    onBeforeRender: () => {
       const now = performance.now() / 1000;
       const dt = Math.min(0.1, now - (rigVwLastTime || now));
       rigVwLastTime = now;
       if (rigVwMixer) rigVwMixer.update(dt);
-      rigVwControls.update();
-      rigVwRenderer.render(rigVwScene, rigVwCamera);
-    } else {
-      rigVwLastTime = performance.now() / 1000; // avoid huge dt jump on resume
-    }
-    requestAnimationFrame(tick);
-  }
-  tick();
+    },
+  });
+  rigVwRenderer = _rvV.renderer;
+  rigVwScene = _rvV.scene;
+  rigVwCamera = _rvV.camera;
+  rigVwControls = _rvV.controls;
+  _rvV.startTickLoop();
 }
 
 async function showStep3Preview(rig) {
