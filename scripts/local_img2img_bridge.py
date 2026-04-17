@@ -31,6 +31,16 @@ def img2img(input_path, prompt, output_path, strength=0.55):
         use_safetensors=True,
     )
     pipe.to("cuda")
+    # Force every sub-module to fp16 to avoid "mat1 and mat2 must have the
+    # same dtype" errors with torch 2.7.1+cu128 / diffusers 0.34 — some
+    # internal buffers stay fp32 after from_pretrained on this stack.
+    try:
+        pipe.unet.to(torch.float16)
+        pipe.vae.to(torch.float16)
+        pipe.text_encoder.to(torch.float16)
+        pipe.text_encoder_2.to(torch.float16)
+    except Exception as _e:
+        print(f"IMG2IMG: dtype force-cast skipped ({_e})", flush=True)
     # Memory optim
     pipe.enable_attention_slicing()
     pipe.enable_vae_tiling()
