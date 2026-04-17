@@ -2092,6 +2092,25 @@ Delete all `view_*_nobg_*`, `view_*_facefix_*`, `view_*_symmetrize_*`
 from `images/chat_vert/ref_0_multiview/` then re-run generation at
 HEAD. If clean, confirmed input contamination (not code regression).
 
+### RESULT after cleanup + re-gen (2026-04-17 21:40)
+
+Deleted 4 contaminated files + their sub-multiview dirs. Re-ran
+pipeline. Output at `c:/tmp/chat_clean/mesh.glb`:
+  - 10889 verts / 11944 faces
+  - extent [0.91, 0.91, 0.41] (real 3D)
+  - Front render: FACE visible (eyes, muzzle, ears) — orientation fix ✅
+  - Back render: BACK + tail visible, no more face duplication ✅
+  - Atlas: multiple cat views recognizable (was voronoi before)
+
+**Orientation regression cured** (face-on-back was the contamination +
+U-flip combo, now both resolved).
+
+**Residual issue**: atlas still shows leopard-skin / craquelure pattern
+on body even with clean views. That's the remaining SF3D micro-island
+atlas packing problem. Next step: FABMESH_UV_REPACK=1 (default in HEAD
+per commit 33306ad) should help further. User will test next mesh
+generation which will use ALL current fixes.
+
 ### ROOT CAUSE — UV_REPACK default ON (commit 33306ad)
 Investigated chat_vert mesh 1776450499355 (7K verts, correct Z
 depth, views.json present, proper CRM schema). Still voronoi
