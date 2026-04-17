@@ -269,8 +269,7 @@ function startControlApi(mainWindow, opts = {}) {
           'GET  /calib/list-reports',
           'GET  /calib/last-report',
           'GET  /calib/report?name=...',
-          'GET  /calib/log?lines=500',
-          'POST /calib/log/clear',
+          'GET  /calib/log?lines=500        tail logs/fabmesh.log filtered by [calib]',
           'POST /calib/build-rubiks        rebuild the Rubik\'s calibration reference'
         ]
       });
@@ -692,15 +691,12 @@ function startControlApi(mainWindow, opts = {}) {
     // without the UI. Uses the same Python script as the Settings UI.
     // ============================================================
     'POST /calib/run': async (req, res) => {
-      // Run the full auto-diagnose pipeline (~4-5 min).
-      const { ipcMain } = require('electron');
+      // Run the full auto-diagnose pipeline (~4-5 min). Progress and
+      // details are already written to logs/fabmesh.log by the Python
+      // CalibLogger (source='calib'), so we don't duplicate here.
       const { execFile } = require('child_process');
       const rootDir = path.join(__dirname, '..', '..');
       const script = path.join(rootDir, 'scripts', '_calib_diagnose.py');
-      const logPath = path.join(rootDir, 'logs', 'calibration.log');
-
-      const stream = fs.createWriteStream(logPath, { flags: 'a' });
-      stream.write(`\n=== ${new Date().toISOString()} /calib/run START ===\n`);
 
       return new Promise((resolve) => {
         const proc = execFile('python', [script], {
@@ -708,9 +704,6 @@ function startControlApi(mainWindow, opts = {}) {
           env: { ...process.env, PYTHONUNBUFFERED: '1' },
           cwd: rootDir,
         }, (error, stdout, stderr) => {
-          stream.write(stdout || ''); stream.write(stderr || '');
-          stream.write(`=== END (code=${error ? error.code : 0}) ===\n`);
-          stream.end();
           if (error) return sendErr(res, error.message, 500) || resolve();
           const m = (stdout || '').match(/DIAGNOSE_JSON:\s*(\{[^\n]+\})/);
           if (!m) return sendErr(res, 'no DIAGNOSE_JSON line', 500) || resolve();
@@ -727,13 +720,11 @@ function startControlApi(mainWindow, opts = {}) {
               stage2: readOpt('stage2_mv.json'),
               stage3: readOpt('stage3_projected.json'),
               verdict: readOpt('verdict.json'),
-              log_file: logPath,
+              log_file: LOG_FILE,
             });
             resolve();
           } catch (e) { sendErr(res, e.message, 500); resolve(); }
         });
-        proc.stdout?.on('data', d => { try { stream.write(d); } catch (_) {} });
-        proc.stderr?.on('data', d => { try { stream.write(d); } catch (_) {} });
       });
     },
 
@@ -802,17 +793,12 @@ function startControlApi(mainWindow, opts = {}) {
 
     'GET /calib/log': async (req, res, url) => {
       const lines = parseInt(url.searchParams.get('lines') || '500', 10);
-      const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
-      if (!fs.existsSync(logPath)) return sendOk(res, { log: '', path: logPath });
-      const content = fs.readFileSync(logPath, 'utf-8');
-      const tail = content.split(/\r?\n/).slice(-lines).join('\n');
-      sendOk(res, { log: tail, path: logPath, total_bytes: content.length });
-    },
-
-    'POST /calib/log/clear': async (req, res) => {
-      const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
-      try { fs.writeFileSync(logPath, ''); sendOk(res, { cleared: true }); }
-      catch (e) { sendErr(res, e.message, 500); }
+      // Filter the main fabmesh.log by [calib] source.
+      if (!fs.existsSync(LOG_FILE)) return sendOk(res, { log: '', path: LOG_FILE });
+      const content = fs.readFileSync(LOG_FILE, 'utf-8');
+      const calibLines = content.split(/\r?\n/).filter(l => l.includes('[calib]'));
+      const tail = calibLines.slice(-lines).join('\n');
+      sendOk(res, { log: tail, path: LOG_FILE, total_bytes: content.length });
     },
 
     'POST /calib/build-rubiks': async (req, res) => {

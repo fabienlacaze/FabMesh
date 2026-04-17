@@ -1505,20 +1505,19 @@ ipcMain.handle('calib-diagnose', async () => {
 
 ipcMain.handle('calib-read-log', (event, { lines = 500 } = {}) => {
   try {
-    const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
-    if (!fs.existsSync(logPath)) return { success: true, log: '(no log yet)' };
-    const content = fs.readFileSync(logPath, 'utf-8');
-    const tail = content.split(/\r?\n/).slice(-lines).join('\n');
-    return { success: true, log: tail, total_bytes: content.length, path: logPath };
+    // Read from the main fabmesh.log, filter lines with the [calib] source.
+    if (!fs.existsSync(LOG_FILE)) return { success: true, log: '(no log yet)' };
+    const content = fs.readFileSync(LOG_FILE, 'utf-8');
+    const calibLines = content.split(/\r?\n/).filter(l => l.includes('[calib]'));
+    const tail = calibLines.slice(-lines).join('\n');
+    return { success: true, log: tail, total_bytes: content.length, path: LOG_FILE };
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+// No separate calib log to clear — fabmesh.log rotation handles size.
+// The 'clear' button in the UI now just refreshes the filtered view.
 ipcMain.handle('calib-clear-log', () => {
-  try {
-    const logPath = path.join(__dirname, '..', '..', 'logs', 'calibration.log');
-    fs.writeFileSync(logPath, '');
-    return { success: true };
-  } catch (e) { return { success: false, error: e.message }; }
+  return { success: false, error: 'calibration entries are part of logs/fabmesh.log; use log rotation instead' };
 });
 
 // List every report dir with score.json — fed into the in-app gallery.

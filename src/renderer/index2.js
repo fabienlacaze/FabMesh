@@ -7411,16 +7411,6 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     }
   }
   document.getElementById('calib-log-refresh')?.addEventListener('click', loadCalibLog);
-  document.getElementById('calib-log-clear')?.addEventListener('click', async () => {
-    const ok = await fabConfirm({
-      title: 'Clear calibration log?',
-      message: 'This will empty logs/calibration.log. Previous run transcripts will be lost.',
-      okLabel: 'Clear', cancelLabel: 'Keep',
-    });
-    if (!ok) return;
-    await API.calibClearLog();
-    loadCalibLog();
-  });
   btnLog?.addEventListener('click', () => {
     logModal.classList.remove('hidden');
     loadCalibLog();

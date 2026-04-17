@@ -28,54 +28,52 @@ from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGS_DIR = os.path.join(ROOT, 'logs')
 os.makedirs(LOGS_DIR, exist_ok=True)
-CALIB_LOG = os.path.join(LOGS_DIR, 'calibration.log')
+# Route into the main FabMesh log instead of a separate file — same
+# format as main.js logToFile() so tools that tail fabmesh.log see
+# everything in one place.
+FABMESH_LOG = os.path.join(LOGS_DIR, 'fabmesh.log')
 
 
 class CalibLogger:
-    """Detailed calibration logger. Writes to logs/calibration.log AND
-    echoes to stdout so the UI/API can stream progress. Includes:
-      - timestamped events
-      - per-stage durations
-      - GPU memory snapshots
-      - image/file sizes
-      - subprocess stderr captured on failure
+    """Detailed calibration logger. Writes to logs/fabmesh.log with
+    source='calib' AND echoes to stdout so the UI/API streams progress.
+    Line format matches main.js logToFile():
+        ISO-ts [LEVEL] [calib] message\\n
     """
     def __init__(self, run_id):
         self.run_id = run_id
         self.t0 = time.time()
         self.stage_t = None
         self.stage_name = None
-        self.fh = open(CALIB_LOG, 'a', encoding='utf-8', buffering=1)
-        self._banner()
-
-    def _banner(self):
-        self._raw(f'\n{"=" * 72}')
-        self._raw(f'RUN {self.run_id}  started {datetime.datetime.now().isoformat(timespec="seconds")}')
-        self._raw(f'Python {sys.version.split()[0]} · {platform.platform()}')
+        self.fh = open(FABMESH_LOG, 'a', encoding='utf-8', buffering=1)
+        self._write('INFO', '=' * 60)
+        self._write('INFO', f'RUN {run_id} started')
         try:
             import torch
             if torch.cuda.is_available():
                 gm = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                self._raw(f'GPU: {torch.cuda.get_device_name(0)} ({gm:.1f} GB)')
-        except Exception: pass
-        self._raw('=' * 72)
+                self._write('INFO', f'GPU: {torch.cuda.get_device_name(0)} ({gm:.1f} GB)')
+        except Exception:
+            pass
+        self._write('INFO', f'Python {sys.version.split()[0]} {platform.platform()}')
 
-    def _raw(self, s):
-        line = s if not s or s.startswith('=') or s.startswith('\n') else f'[{time.time()-self.t0:6.1f}s] {s}'
-        print(line, flush=True)
-        try: self.fh.write(line + '\n')
+    def _write(self, level, msg):
+        ts = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.') + f'{datetime.datetime.utcnow().microsecond // 1000:03d}Z'
+        line = f'{ts} [{level}] [calib] {msg}\n'
+        print(f'[{time.time()-self.t0:6.1f}s] {msg}', flush=True)
+        try: self.fh.write(line)
         except Exception: pass
 
     def info(self, msg, **kv):
         extra = ''
         if kv:
             extra = ' ' + ' '.join(f'{k}={v}' for k, v in kv.items())
-        self._raw(f'  {msg}{extra}')
+        self._write('INFO', f'  {msg}{extra}')
 
     def stage_start(self, name):
         self.stage_name = name
         self.stage_t = time.time()
-        self._raw(f'\n--- STAGE: {name} ---')
+        self._write('INFO', f'--- STAGE: {name} ---')
 
     def stage_end(self, result=None, ok=True):
         if self.stage_t is None: return
@@ -84,39 +82,41 @@ class CalibLogger:
         extra = ''
         if result:
             extra = ' ' + ' '.join(f'{k}={v}' for k, v in result.items())
-        self._raw(f'--- {self.stage_name} {tag} in {dt:.1f}s{extra} ---')
+        lvl = 'INFO' if ok else 'ERROR'
+        self._write(lvl, f'--- {self.stage_name} {tag} in {dt:.1f}s{extra} ---')
         self.stage_t = None
         self.stage_name = None
 
     def subprocess_result(self, r, label):
-        self.info(f'{label} returncode={r.returncode}')
+        lvl = 'INFO' if r.returncode == 0 else 'ERROR'
+        self._write(lvl, f'  {label} returncode={r.returncode}')
         if r.returncode != 0:
             tail = (r.stderr or '')[-800:]
-            self._raw('  stderr tail:')
             for line in tail.splitlines()[-20:]:
-                self._raw(f'    | {line}')
+                self._write('ERROR', f'    | {line}')
 
     def file_stat(self, path, label=''):
         if not os.path.exists(path):
-            self.info(f'{label or path}: MISSING')
+            self._write('WARN', f'  {label or path}: MISSING')
             return
         try:
             sz = os.path.getsize(path)
             if path.lower().endswith(('.png', '.jpg', '.jpeg')):
                 try:
                     im = Image.open(path)
-                    self.info(f'{label or os.path.basename(path)} size={sz}B dim={im.size} mode={im.mode}')
+                    self._write('INFO', f'  {label or os.path.basename(path)} size={sz}B dim={im.size} mode={im.mode}')
                     return
                 except Exception: pass
-            self.info(f'{label or os.path.basename(path)} size={sz}B')
+            self._write('INFO', f'  {label or os.path.basename(path)} size={sz}B')
         except Exception as e:
-            self.info(f'{label or path}: stat failed ({e})')
+            self._write('WARN', f'  {label or path}: stat failed ({e})')
 
     def close(self, summary=None):
         total = time.time() - self.t0
-        self._raw(f'\nRUN {self.run_id} done in {total:.1f}s')
+        self._write('INFO', f'RUN {self.run_id} done in {total:.1f}s')
         if summary:
-            self._raw('SUMMARY: ' + json.dumps(summary))
+            self._write('INFO', 'SUMMARY: ' + json.dumps(summary))
+        self._write('INFO', '=' * 60)
         try: self.fh.close()
         except Exception: pass
 
@@ -436,7 +436,7 @@ def main():
         'report_html': html,
         'report_dir': report_dir,
         'recommendation': verdict['recommendation'],
-        'log_file': CALIB_LOG,
+        'log_file': FABMESH_LOG,
     }
     logger.close(summary)
     print('DIAGNOSE_JSON:', json.dumps(summary))
