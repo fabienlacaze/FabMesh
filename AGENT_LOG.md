@@ -2053,6 +2053,45 @@ Fixed + heal-pass propagated views.json to 10 existing derived
 dirs. BUT the chat_vert test still showed voronoi after this fix
 — views.json was a real bug but NOT the root cause of the atlas.
 
+## 2026-04-17 (late evening) — Regression analysis: oiseau (good) vs chat_vert (bad)
+
+User question: why did oiseau_sf3d_1776440580579.glb (15:43) produce
+a cleanly textured humanoid mesh, while chat_vert_sf3d_1776453637124.glb
+(19:20) came out with voronoi texture + face painted on the back?
+
+### Agent comparison (fact table)
+
+| Axis | Oiseau (good) | Chat_vert (bad) |
+|---|---|---|
+| Multi-view engine | CRM 6-view ortho | CRM (SAME) |
+| UV_REPACK default | 0 (OFF) | 0 (OFF — commit 33306ad landed after) |
+| U-flip default | ON (legacy) | ON (SAME) |
+| SF3D subdivide | not triggered | not triggered |
+| Auto-align applied | no | no |
+| CRM views for subject | clean, in-distribution T-pose | CRM views for stylised cat — borderline |
+| Manual per-view edits | NONE | view_1_nobg_*, view_2_facefix_*, view_2_symmetrize_* |
+
+### Most likely culprit: INPUT contamination, not code regression
+
+Code paths were IDENTICAL between the two runs — commits 33306ad
+(UV_REPACK=1) and c6bc61e (UFLIP=off) both landed AFTER chat_vert
+was generated. What DIFFERS:
+
+1. CRM trains mostly on Objaverse props. Stylised cat (rotation-
+   quasi-invariant fur pattern) is borderline — CRM can swap
+   front/back without the model "noticing".
+2. chat_vert's ref_0_multiview/ contains manual per-view edits
+   (nobg, facefix, symmetrize) that were mixed with the CRM output
+   during re-generation, making the 6-view set spatially inconsistent.
+3. The U-flip (active in both) operates on views where one angle
+   was corrupted by those manual edits → face lands on the back.
+
+### Recommended action (to validate)
+
+Delete all `view_*_nobg_*`, `view_*_facefix_*`, `view_*_symmetrize_*`
+from `images/chat_vert/ref_0_multiview/` then re-run generation at
+HEAD. If clean, confirmed input contamination (not code regression).
+
 ### ROOT CAUSE — UV_REPACK default ON (commit 33306ad)
 Investigated chat_vert mesh 1776450499355 (7K verts, correct Z
 depth, views.json present, proper CRM schema). Still voronoi

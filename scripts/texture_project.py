@@ -679,19 +679,33 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     PIXEL_PRESENT = 0.002
     sharp_mask = weight_arr > PIXEL_PRESENT
 
-    # Dilate the projected atlas so unseen pixels take their color from the
-    # nearest projected pixel instead of SF3D's blurry baked texture. This
-    # keeps the atlas sharp everywhere, even on surfaces no view saw
-    # directly (under arms, crotch seams, tops of heads). SciPy's EDT
-    # gives us both the mask-nearest lookup and the distance in one pass.
+    # Fill unseen pixels with SF3D's baked texture — not EDT-dilated
+    # projected pixels, which would stretch arbitrary colors across
+    # UV regions that are not geometrically adjacent on the mesh
+    # (tested 2026-04-17: EDT dilation on CRM-projected atlases
+    # produced fragmented "leopard skin" patterns on chat_vert).
+    # SF3D's baked atlas is blurry but COHERENT per UV region.
+    # Blend softly near the boundary so the transition is invisible.
     try:
-        from scipy.ndimage import distance_transform_edt
+        from scipy.ndimage import distance_transform_edt, gaussian_filter
+        # Distance from each pixel to the nearest sharp (projected) pixel
+        dist_to_sharp = distance_transform_edt(~sharp_mask)
+        # Within a narrow band (< 4 px) of sharp pixels, blend projection→SF3D.
+        # Beyond that, use SF3D. Also lightly blur the SF3D fallback so it
+        # doesn't add its own aliasing.
+        band = 4.0
+        blend_w = np.clip(1.0 - dist_to_sharp / band, 0, 1)[:, :, np.newaxis]
+        sf3d_smooth = gaussian_filter(sf3d_arr, sigma=(0.8, 0.8, 0)) \
+            if sf3d_arr.ndim == 3 else sf3d_arr
+        # Near-sharp band takes nearest-projected color to avoid a ring of
+        # SF3D blur around every projected pixel cluster; beyond the band
+        # fall back to SF3D.
         _, (iy, ix) = distance_transform_edt(~sharp_mask, return_indices=True)
-        dilated = proj_arr[iy, ix]
-        log('dilated projected atlas via EDT')
+        nearest_proj = proj_arr[iy, ix]
+        dilated = (nearest_proj * blend_w + sf3d_smooth * (1.0 - blend_w)).astype(np.float64)
+        log('filled unseen pixels with SF3D baked + narrow projection dilation band')
     except Exception as _dil_e:
-        # Fall back to SF3D baked texture for unseen pixels if scipy missing.
-        log(f'EDT unavailable ({_dil_e}), using SF3D fallback')
+        log(f'EDT unavailable ({_dil_e}), using SF3D fallback directly')
         dilated = sf3d_arr
 
     # Hard override: projected color where we have it, dilated (or SF3D)
