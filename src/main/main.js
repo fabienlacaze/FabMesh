@@ -1471,19 +1471,25 @@ ipcMain.handle('calib-v3', async (event, opts = {}) => {
       cwd: path.join(__dirname, '..', '..'),
     }, (error, stdout, stderr) => {
       _calibDiagnoseProc = null;
-      if (error) {
-        const cancelled = _calibCancelFlag || error.killed;
-        _calibCancelFlag = false;
-        resolve({ success: false, cancelled,
-                  error: cancelled ? 'cancelled by user' : error.message,
-                  stderr: (stderr || '').slice(-800) });
-        return;
+      // Exit 1 is not a fatal error for v3 — it means "at least one stage
+      // failed". The CALIB_RESULT line in stdout still has the data we need.
+      // Only treat as fatal if the process was cancelled or stdout is empty.
+      const cancelled = _calibCancelFlag && error;
+      _calibCancelFlag = false;
+      if (cancelled) {
+        return resolve({ success: false, cancelled: true,
+                         error: 'cancelled by user' });
       }
       const m = (stdout || '').match(/CALIB_RESULT:\s*(\{[\s\S]+?\})\s*$/m);
-      if (!m) return resolve({ success: false, error: 'no CALIB_RESULT line',
-                               stdout: (stdout || '').slice(-1200) });
-      try { resolve({ success: true, result: JSON.parse(m[1]) }); }
-      catch (e) { resolve({ success: false, error: e.message }); }
+      if (m) {
+        try { return resolve({ success: true, result: JSON.parse(m[1]) }); }
+        catch (e) { return resolve({ success: false, error: e.message }); }
+      }
+      // No CALIB_RESULT line — real failure
+      resolve({ success: false,
+                error: error ? error.message : 'no CALIB_RESULT line',
+                stderr: (stderr || '').slice(-800),
+                stdout: (stdout || '').slice(-1200) });
     });
     _calibDiagnoseProc = proc;
     proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
