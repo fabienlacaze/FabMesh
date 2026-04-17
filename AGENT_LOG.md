@@ -10,7 +10,45 @@ what happened, conclusion.
 
 ---
 
-## 2026-04-17 (latest) — Calibration v3: Stage 4 REVEALS real UV bug
+## 2026-04-17 (latest) — Stage 4 root cause found, NOT yet fixed
+
+**Agent investigation report**: Stage 4 fails (1/6) on the GT cube
+because the cube is authored in natural glTF frame (front=-Z, up=+Y),
+while `texture_project.py` expects SF3D post-transform frame. SF3D
+bakes Rx(-90) @ Ry(+90) into its GLB output; `texture_project` has
+R_undo = Rx(+90) @ Ry(-90) to reverse it. Applied to the natural-frame
+cube, R_undo scrambles the axes → TOP face receives RIGHT view, etc.
+
+**Why real meshes work**: SF3D output → auto-align adds rotation_offset
+→ texture_project R_undo → multi-view azimuths shifted. The full chain
+is self-consistent only when every step is taken. GT cube skips the
+bridge + auto-align, so the chain breaks.
+
+**What was tried (all failed to reach 6/6)**:
+  1. Pre-rotate GT cube into SF3D frame before export — 0/6
+  2. Post-rotate output mesh back to natural before render_axis — 0/6
+  3. FABMESH_TEXPROJ_SKIP_UNDO=1 — 0/6
+  4. Basis sweep (24 signed-axis permutations of R_w2c_base) — best 3/6 (p18)
+  5. 8 rotation-offset × U-flip combinations — best 1/6 unchanged
+  6. rotation-offset -90 — worse (0/6, scores 0.33-0.50)
+
+**What works**:
+  - UI calibration button functional in ~7s
+  - Per-stage visual comparison HTML (expected vs got)
+  - Bug precisely localized and visualized
+
+**Open question for next session**: the full chain has THREE coupled
+conventions (SF3D post-transform, R_undo in texture_project, Zero123++
+camera basis). Fixing any single one breaks the others. Next approach
+should either:
+  (a) parameterize ALL three simultaneously and sweep the joint space
+  (b) bypass R_undo + use a cube authored in SF3D output frame + render
+      with SF3D-frame cameras — fully self-consistent isolated test
+  (c) accept stage 4 at 3/6 as "detect regression" floor and move on
+
+**Backup**: `calib-before-redesign-20260417` (pre-v3 state).
+
+## 2026-04-17 — Calibration v3: Stage 4 REVEALS real UV bug
 
 **First Stage 4 run** (deterministic: GT cube GLB + GT multi-views
 fed directly to texture_project.py, no SF3D/Zero123++ involvement):

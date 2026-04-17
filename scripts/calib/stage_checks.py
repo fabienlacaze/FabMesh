@@ -272,7 +272,10 @@ def check_stage4_projection(work_dir, env=None):
 
     out_glb = os.path.join(work_dir, 'stage4_projected.glb')
     script = os.path.join(ROOT, 'scripts', 'texture_project.py')
-    e = {**os.environ, 'PYTHONUNBUFFERED': '1', **(env or {})}
+    # FABMESH_TEXPROJ_SKIP_UNDO=1: GT cube is in natural frame, so
+    # texture_project must NOT apply its R_undo (which assumes SF3D input).
+    e = {**os.environ, 'PYTHONUNBUFFERED': '1',
+         'FABMESH_TEXPROJ_SKIP_UNDO': '1', **(env or {})}
     r = subprocess.run(
         [sys.executable, script, GT_CUBE_GLB, gt_input, out_glb, '1024',
          '--multiview', GT_MV_DIR, '--rotation-offset', '0'],
@@ -283,7 +286,7 @@ def check_stage4_projection(work_dir, env=None):
     res['artifacts'].append(out_glb)
 
     # Render 6 axes and compare pixel-wise to the GT axes renders
-    import trimesh
+    import trimesh, numpy as np
     sys.path.insert(0, os.path.join(ROOT, 'scripts'))
     from calibrate import render_axis, AXES
     g = trimesh.load(out_glb, force='mesh', process=False)

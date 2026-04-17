@@ -223,11 +223,18 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     # Base world-to-camera transform (front view, 0 degrees)
     # R_w2c = R_c2w^T where R_c2w = [[0,0,1],[1,0,0],[0,1,0]]
-    R_w2c_base = np.array([
-        [0, 1, 0],
-        [0, 0, 1],
-        [1, 0, 0]
-    ], dtype=np.float64)
+    _basis_override_path = os.environ.get('FABMESH_TEXPROJ_BASIS_OVERRIDE')
+    if _basis_override_path and os.path.exists(_basis_override_path):
+        import json as _json
+        with open(_basis_override_path, 'r', encoding='utf-8') as _f:
+            R_w2c_base = np.array(_json.load(_f), dtype=np.float64)
+        log(f'R_w2c_base overridden from {_basis_override_path}')
+    else:
+        R_w2c_base = np.array([
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 0]
+        ], dtype=np.float64)
     t_w2c_base = np.array([0, 0, -distance], dtype=np.float64)
 
     # -------------------------------------------------------------------
