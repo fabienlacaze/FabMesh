@@ -925,6 +925,25 @@
     </div>
 
     <!-- ============================================================
+         GENERIC CONFIRM MODAL (replaces window.confirm)
+         ============================================================ -->
+    <div id="modal-confirm" class="modal-overlay hidden" style="z-index:10000;">
+      <div class="modal-card" style="width:440px; max-width:92vw; padding:0;">
+        <div style="padding:14px 18px; border-bottom:1px solid var(--border); background:var(--bg-1); display:flex; align-items:center; gap:10px;">
+          <span id="confirm-icon" style="font-size:18px;">&#9888;&#65039;</span>
+          <h3 id="confirm-title" style="margin:0; font-size:14px; flex:1;">Confirm</h3>
+        </div>
+        <div style="padding:16px 18px;">
+          <p id="confirm-message" style="margin:0; line-height:1.5; color:var(--text-1);"></p>
+        </div>
+        <div style="padding:12px 18px; border-top:1px solid var(--border); background:var(--bg-1); display:flex; gap:8px; justify-content:flex-end;">
+          <button id="confirm-cancel" class="ghost-btn" style="padding:6px 16px;">Cancel</button>
+          <button id="confirm-ok" class="primary-btn danger" style="padding:6px 16px;">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
          CALIBRATION DIAGNOSE MODAL (pipeline stages + verdict)
          ============================================================ -->
     <div id="modal-calib-diagnose" class="modal-overlay hidden">

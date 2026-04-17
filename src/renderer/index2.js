@@ -14,6 +14,50 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 const API = window.meshyAPI;
 
+// FabMesh-styled confirm dialog (replaces the OS-native window.confirm
+// popup, which looks out of place against the dark UI).
+function fabConfirm({ title = 'Confirm', message = '', okLabel = 'Confirm',
+                     cancelLabel = 'Cancel', icon = '\u26A0\uFE0F',
+                     danger = true } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-confirm');
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = document.getElementById('confirm-message');
+    const iconEl = document.getElementById('confirm-icon');
+    const okBtn = document.getElementById('confirm-ok');
+    const cancelBtn = document.getElementById('confirm-cancel');
+    if (!modal || !okBtn) { resolve(window.confirm(message)); return; }
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    iconEl.textContent = icon;
+    okBtn.textContent = okLabel;
+    cancelBtn.textContent = cancelLabel;
+    okBtn.classList.toggle('danger', !!danger);
+    function cleanup(v) {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      resolve(v);
+    }
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') cleanup(false);
+      else if (e.key === 'Enter') cleanup(true);
+    };
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+    modal.classList.remove('hidden');
+    setTimeout(() => okBtn.focus(), 50);
+  });
+}
+window.fabConfirm = fabConfirm;
+
 // Forward all console.log/warn/error to main process log file for debugging.
 // test_api_client.js already wrapped console.* — we wrap their wrapped versions.
 // Helper for action logging — called from button handlers
@@ -7414,11 +7458,12 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 
   const btnCancel = document.getElementById('calib-diagnose-cancel');
   btnCancel?.addEventListener('click', async () => {
-    const ok = window.confirm(
-      'Cancel the calibration run?\n\n' +
-      'This will stop the pipeline immediately (SF3D, Zero123++, projection). ' +
-      'Any partial output for this run will be discarded.'
-    );
+    const ok = await fabConfirm({
+      title: 'Cancel calibration?',
+      message: 'This will stop the pipeline immediately (SF3D, Zero123++, projection). Any partial output for this run will be discarded.',
+      okLabel: 'Cancel run',
+      cancelLabel: 'Keep running',
+    });
     if (!ok) return;
     btnCancel.disabled = true;
     btnCancel.textContent = 'Cancelling...';
