@@ -2134,6 +2134,38 @@ help" — that was with Z123 input + small atlas. With CRM +
 **Users re-generating meshes now will see properly textured atlases**
 by default. FABMESH_UV_REPACK=0 to revert.
 
+### Agent diagnostic: texture leopard-skin root cause (2026-04-18 00:50)
+
+**Root cause found**: binary `sharp_mask = weight > 0.002` at
+texture_project.py:680 creates a hard cliff between:
+  - sharp islands (5-16% of atlas) = correctly projected pixels
+  - gaussian-blurred SF3D fallback (remaining 84-95%)
+
+On SF3D's micro-island atlas, each triangle is 1-3 px wide.
+Per-triangle rasterization writes thousands of tiny colored tiles
+surrounded by blurry SF3D fallback with razor-thin borders.
+The visual result IS the leopard-skin.
+
+Evidence: `logs/fabmesh.log:1830` sharp_ratio=0.054 on chat_vert,
+`logs/fabmesh.log.1:1729` sharp_ratio=0.159 on orc_blue_crown.
+5-16% projected is way too low to look continuous.
+
+**Why past fixes didn't work**:
+  - xatlas repack: new chart boundaries = new mosaic boundaries, not fewer
+  - 4px narrow band: too narrow, majority of atlas falls back to blurred SF3D
+  - SDXL tile refine: preserves and slightly amplifies existing seams
+  - hard PIXEL_PRESENT=0.002: the binary threshold IS what creates visible polygonal seams
+
+**Fix tonight (<2h)**: replace hard sharp_mask cliff with push-pull
+Gaussian pyramid fill. Instead of "sharp projected OR blurry SF3D",
+fill ALL unseen pixels with locally-averaged projected color from
+the multi-view accumulation. SF3D fallback discarded entirely.
+
+Ranked alternatives for later:
+  1. Per-triangle best-view baking (MRF-free) — 1.5 days
+  2. Push-pull Gaussian pyramid replacing EDT — 2 days (tonight's fix)
+  3. Vertex color path (texture_project_vc.py already exists) — 0.5 day
+
 ### Agent recommendations: multi-view quality improvements (2026-04-18 00:40)
 
 Ranked top-3:

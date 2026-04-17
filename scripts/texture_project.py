@@ -679,40 +679,85 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     PIXEL_PRESENT = 0.002
     sharp_mask = weight_arr > PIXEL_PRESENT
 
-    # Fill unseen pixels with SF3D's baked texture — not EDT-dilated
-    # projected pixels, which would stretch arbitrary colors across
-    # UV regions that are not geometrically adjacent on the mesh
-    # (tested 2026-04-17: EDT dilation on CRM-projected atlases
-    # produced fragmented "leopard skin" patterns on chat_vert).
-    # SF3D's baked atlas is blurry but COHERENT per UV region.
-    # Blend softly near the boundary so the transition is invisible.
+    # 2026-04-18 — push-pull Gaussian pyramid fill (replaces EDT-band + SF3D
+    # fallback). Diagnosis: hard binary `sharp_mask` + blurred-SF3D fallback
+    # on SF3D's micro-island atlas (sharp_ratio typically 5-16%) produced
+    # leopard-skin pattern — thousands of 1-3px projected tiles surrounded
+    # by blurry SF3D with razor-thin borders. Push-pull pyramid instead
+    # fills EVERY unseen pixel with locally-averaged projected color from
+    # the multi-view accumulation. SF3D fallback discarded — its blur was
+    # the background contrast that made seams visible.
     try:
-        from scipy.ndimage import distance_transform_edt, gaussian_filter
-        # Distance from each pixel to the nearest sharp (projected) pixel
-        dist_to_sharp = distance_transform_edt(~sharp_mask)
-        # Within a narrow band (< 4 px) of sharp pixels, blend projection→SF3D.
-        # Beyond that, use SF3D. Also lightly blur the SF3D fallback so it
-        # doesn't add its own aliasing.
-        band = 4.0
-        blend_w = np.clip(1.0 - dist_to_sharp / band, 0, 1)[:, :, np.newaxis]
-        sf3d_smooth = gaussian_filter(sf3d_arr, sigma=(0.8, 0.8, 0)) \
-            if sf3d_arr.ndim == 3 else sf3d_arr
-        # Near-sharp band takes nearest-projected color to avoid a ring of
-        # SF3D blur around every projected pixel cluster; beyond the band
-        # fall back to SF3D.
-        _, (iy, ix) = distance_transform_edt(~sharp_mask, return_indices=True)
-        nearest_proj = proj_arr[iy, ix]
-        dilated = (nearest_proj * blend_w + sf3d_smooth * (1.0 - blend_w)).astype(np.float64)
-        log('filled unseen pixels with SF3D baked + narrow projection dilation band')
-    except Exception as _dil_e:
-        log(f'EDT unavailable ({_dil_e}), using SF3D fallback directly')
-        dilated = sf3d_arr
+        from scipy.ndimage import gaussian_filter
 
-    # Hard override: projected color where we have it, dilated (or SF3D)
-    # fallback everywhere else. No soft blending — that was washing out the
-    # sharpness on small triangles like the face/hair.
-    w3 = sharp_mask.astype(np.float64)[:, :, np.newaxis]
-    result_arr = (proj_arr * w3 + dilated * (1.0 - w3)).astype(np.uint8)
+        def _push_pull_fill(rgb_f, w_f, levels=6):
+            """Push-pull / pyramid fill. Unseen pixels take on the weighted
+            average of the nearest projected pixels at ascending scales."""
+            # Premultiply: at base level, pixel = rgb * w (zero where unseen).
+            pyr_rgb = [rgb_f * w_f[:, :, np.newaxis]]
+            pyr_w = [w_f]
+            for _ in range(levels):
+                # Downsample 2x: sum-pool weights, sum-pool rgb*w.
+                rgb_cur = pyr_rgb[-1]
+                w_cur = pyr_w[-1]
+                h, w = w_cur.shape
+                # Pad odd dims before pooling
+                if h % 2 or w % 2:
+                    pad_h = h % 2; pad_w = w % 2
+                    rgb_cur = np.pad(rgb_cur, ((0, pad_h), (0, pad_w), (0, 0)))
+                    w_cur = np.pad(w_cur, ((0, pad_h), (0, pad_w)))
+                rgb_down = (rgb_cur[0::2, 0::2] + rgb_cur[1::2, 0::2]
+                            + rgb_cur[0::2, 1::2] + rgb_cur[1::2, 1::2]) * 0.25
+                w_down = (w_cur[0::2, 0::2] + w_cur[1::2, 0::2]
+                          + w_cur[0::2, 1::2] + w_cur[1::2, 1::2]) * 0.25
+                pyr_rgb.append(rgb_down)
+                pyr_w.append(w_down)
+            # Walk back up. At each coarser level: normalize rgb=rgb/w where w>0.
+            # Upsample and composite back under any pixel whose mask is < threshold.
+            out_rgb = None
+            out_w = None
+            EPS = 1e-6
+            for lvl in range(levels, -1, -1):
+                rgb_l = pyr_rgb[lvl]
+                w_l = pyr_w[lvl]
+                # Normalize where we have weight
+                safe = w_l > EPS
+                rgb_norm = np.zeros_like(rgb_l)
+                rgb_norm[safe] = rgb_l[safe] / w_l[safe, np.newaxis]
+                if out_rgb is None:
+                    out_rgb = rgb_norm
+                    out_w = safe.astype(np.float64)
+                else:
+                    # Upsample (nearest) to next level size
+                    target_h, target_w = rgb_norm.shape[:2]
+                    from scipy.ndimage import zoom as _zoom
+                    up_rgb = np.repeat(np.repeat(out_rgb, 2, axis=0), 2, axis=1)
+                    up_w = np.repeat(np.repeat(out_w, 2, axis=0), 2, axis=1)
+                    up_rgb = up_rgb[:target_h, :target_w]
+                    up_w = up_w[:target_h, :target_w]
+                    # Where current level has weight, use it; else use upsampled coarser.
+                    cur_w = safe.astype(np.float64)
+                    blend = cur_w[:, :, np.newaxis]
+                    out_rgb = rgb_norm * blend + up_rgb * (1 - blend)
+                    out_w = np.maximum(cur_w, up_w * 0.95)  # coarser has less weight
+            return out_rgb
+
+        filled = _push_pull_fill(proj_arr.astype(np.float64),
+                                 weight_arr.astype(np.float64))
+        # Final composite: where we have a real projected pixel use it crisply;
+        # elsewhere use the push-pull fill. Sharp_mask now a narrow cliff to
+        # keep small-triangle detail, but the "unseen" region is smoothly
+        # filled rather than blurry-SF3D.
+        w3 = sharp_mask.astype(np.float64)[:, :, np.newaxis]
+        result_arr = np.clip(
+            proj_arr * w3 + filled * (1.0 - w3), 0, 255
+        ).astype(np.uint8)
+        log('fill: push-pull Gaussian pyramid (no SF3D blur leak)')
+    except Exception as _dil_e:
+        log(f'push-pull unavailable ({_dil_e}), falling back to SF3D baked')
+        w3 = sharp_mask.astype(np.float64)[:, :, np.newaxis]
+        result_arr = (proj_arr * w3 + sf3d_arr * (1.0 - w3)).astype(np.uint8)
+
     result_img = Image.fromarray(result_arr)
     log(f'blend: sharp={sharp_mask.sum()} dilated={(~sharp_mask).sum()} total={tex_res*tex_res}')
     _evt('blend_done',
