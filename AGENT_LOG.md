@@ -2134,6 +2134,25 @@ help" — that was with Z123 input + small atlas. With CRM +
 **Users re-generating meshes now will see properly textured atlases**
 by default. FABMESH_UV_REPACK=0 to revert.
 
+### Agent recommendations: multi-view quality improvements (2026-04-18 00:40)
+
+Ranked top-3:
+1. **Multi-seed + best-of-N on CRM stage 1** (~4h, MIT) — run 3-4 seeds,
+   pick best per slot via CLIP+HSV hist ranking. Kills back hallucinations
+   on stylised subjects. Raise step 50→75.
+2. **Re-enable CRM stage 2 (CCM)** + use XYZ maps to re-project stage-1
+   views (~6h, MIT) — CCM was designed for this, weights already on disk.
+3. **SDXL img2img + ControlNet-depth + IPAdapter(reference)** (~8h,
+   Apache 2.0) — shifts budget from "fighting the view" to "enforcing
+   identity". Drop harmonize strength 0.65→0.35.
+
+1-week stack: multi-seed (day 1-2) + IPAdapter-Plus on :5555 (day 3-4) +
+CCM enable (day 5) + back-photo upload slot (day 6) + joint-bilateral
+post-atlas filter (day 7).
+
+Don't retry: TRELLIS.2, Hunyuan, Wonder3D, Zero123++, CRM scale>6.5.
+TOP/BOTTOM won't become photoreal (mask weakly in texture_project).
+
 ### Orientation validée sur "woman" (2026-04-18 00:20)
 
 Fresh generation post-commit 87900b3 (mesh normalize post-export +
