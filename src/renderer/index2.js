@@ -7365,8 +7365,136 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     btnRun.innerHTML = '&#127919; Run calibration';
   });
 
-  btnOpen?.addEventListener('click', () => API.calibOpenReport && API.calibOpenReport());
-  btnGallery?.addEventListener('click', () => API.calibOpenGallery && API.calibOpenGallery());
+  btnOpen?.addEventListener('click', () => openReportModal());
+  btnGallery?.addEventListener('click', () => openGalleryModal());
+
+  // ---- In-app Report modal --------------------------------------------
+  const reportModal = document.getElementById('modal-calib-report');
+  const reportBody = document.getElementById('calib-report-body');
+  document.getElementById('calib-report-close')?.addEventListener('click',
+    () => reportModal.classList.add('hidden'));
+  reportModal?.addEventListener('click', (e) => {
+    if (e.target === reportModal) reportModal.classList.add('hidden');
+  });
+
+  function buildReportHtml(score, reportDir) {
+    if (!score) return '<p>No report available.</p>';
+    const sep = reportDir.includes('\\') ? '\\' : '/';
+    const s = score.score, total = score.total;
+    const ratio = s / total;
+    const bg = ratio >= 0.83 ? '#1a5c1a' : ratio >= 0.5 ? '#8a6a1a' : '#8a1a1a';
+    const rows = score.results.map(r => {
+      const got = 'file:///' + (reportDir + sep + r.got_img).replace(/\\/g, '/');
+      const gt = 'file:///' + reportDir.replace(/\\/g, '/').replace(/\/reports\/[^/]+$/, '/ref_0_perfect_axes/') + r.axis + '.png';
+      const cls = r.correct ? '#1a3c1a' : '#3c1a1a';
+      const mark = r.correct ? '<span style="color:#6f6">OK</span>' : '<span style="color:#f66">XX</span>';
+      return `<tr style="background:${cls};">
+        <td style="padding:8px; min-width:100px;"><b>${r.axis}</b><br><small style="color:#aaa">${r.desc||''}</small></td>
+        <td style="padding:8px;"><img src="${gt}" width="140" style="display:block; border:1px solid #333;"></td>
+        <td style="padding:8px;"><img src="${got}" width="140" style="display:block; border:1px solid #333;"></td>
+        <td style="padding:8px; font-family:monospace; font-size:13px;">${r.expected} &rarr; ${r.got} ${mark}<br>
+          <small style="color:#aaa">sim ${(r.similarity||0).toFixed(2)}<br>conf ${(r.confidence||0).toFixed(2)}</small></td>
+      </tr>`;
+    }).join('');
+    return `
+      <p style="color:#aaa; margin:0 0 12px;"><code>${score.mesh||''}</code><br>
+         <small>${score.timestamp||''}</small></p>
+      <div style="margin-bottom:16px;">
+        <span style="font-size:2em; font-weight:bold; padding:6px 18px; border-radius:8px; background:${bg}; color:#fff;">${s}/${total}</span>
+        <span style="margin-left:12px; color:#aaa;">avg similarity ${(score.avg_similarity||0).toFixed(2)}</span>
+      </div>
+      <table style="border-collapse:collapse; width:100%;">
+        <tr style="background:var(--bg-1);">
+          <th style="padding:8px; text-align:left;">Axis</th>
+          <th style="padding:8px; text-align:left;">Expected (ground truth)</th>
+          <th style="padding:8px; text-align:left;">Got (generated)</th>
+          <th style="padding:8px; text-align:left;">Result</th>
+        </tr>
+        ${rows}
+      </table>`;
+  }
+
+  async function openReportModal() {
+    const res = await API.calibLastReport();
+    if (res && res.success && res.score) {
+      reportBody.innerHTML = buildReportHtml(res.score, res.reportDir);
+    } else {
+      reportBody.innerHTML = '<p>No calibration run yet. Click "Run calibration" first.</p>';
+    }
+    reportModal.classList.remove('hidden');
+  }
+
+  // ---- In-app Gallery modal -------------------------------------------
+  const galleryModal = document.getElementById('modal-calib-gallery');
+  const galleryBody = document.getElementById('calib-gallery-body');
+  const galleryCount = document.getElementById('calib-gallery-count');
+  document.getElementById('calib-gallery-close')?.addEventListener('click',
+    () => galleryModal.classList.add('hidden'));
+  document.getElementById('calib-gallery-refresh')?.addEventListener('click',
+    () => renderGallery());
+  galleryModal?.addEventListener('click', (e) => {
+    if (e.target === galleryModal) galleryModal.classList.add('hidden');
+  });
+
+  function buildGalleryCard(rep) {
+    const sep = rep.dir.includes('\\') ? '\\' : '/';
+    const ratio = rep.score / rep.total;
+    const bg = ratio >= 0.83 ? '#1a5c1a' : ratio >= 0.5 ? '#8a6a1a' : '#8a1a1a';
+    const meshFile = (rep.mesh || '').replace(/.*[\\/]/, '');
+    const axes = (rep.results || []).map(r => {
+      const img = 'file:///' + (rep.dir + sep + r.got_img).replace(/\\/g, '/');
+      const border = r.correct ? '#3a3' : '#c33';
+      return `<div style="position:relative; border-radius:4px; overflow:hidden; outline:2px solid ${border};">
+          <img src="${img}" style="width:100%; display:block; background:#fff;">
+          <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.75); padding:2px 3px; font-size:9px; text-align:center; color:#fff;">
+            ${r.axis}<br><b>${r.expected}&rarr;${r.got}</b>
+          </div>
+        </div>`;
+    }).join('');
+    return `<div class="calib-card" data-name="${rep.name}"
+        style="background:#161616; border:1px solid #333; border-radius:8px; padding:12px; cursor:pointer;">
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+        <div style="font-size:0.85em; color:#9cf; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-family:monospace;">${meshFile || rep.name}</div>
+        <span style="padding:3px 10px; border-radius:4px; background:${bg}; color:#fff; font-weight:bold;">${rep.score}/${rep.total}</span>
+      </div>
+      <div style="font-size:10px; color:#888; margin:4px 0 8px;">${rep.timestamp||''} · sim ${(rep.similarity||0).toFixed(2)}</div>
+      <div style="display:grid; grid-template-columns:repeat(6,1fr); gap:3px;">${axes}</div>
+    </div>`;
+  }
+
+  async function renderGallery() {
+    galleryBody.innerHTML = '<p style="color:#aaa">Loading...</p>';
+    const res = await API.calibListReports();
+    if (!res || !res.success) {
+      galleryBody.innerHTML = `<p style="color:#f66">Error: ${res && res.error || 'unknown'}</p>`;
+      return;
+    }
+    const reports = res.reports || [];
+    galleryCount.textContent = `${reports.length} runs`;
+    if (!reports.length) {
+      galleryBody.innerHTML = '<p>No runs yet. Click "Run calibration" first.</p>';
+      return;
+    }
+    galleryBody.innerHTML = '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(380px,1fr)); gap:12px;">' +
+      reports.map(buildGalleryCard).join('') + '</div>';
+    // Click a card to open its report
+    galleryBody.querySelectorAll('.calib-card').forEach((el, i) => {
+      el.addEventListener('click', () => {
+        const rep = reports[i];
+        reportBody.innerHTML = buildReportHtml({
+          mesh: rep.mesh, score: rep.score, total: rep.total,
+          avg_similarity: rep.similarity, timestamp: rep.timestamp,
+          results: rep.results,
+        }, rep.dir);
+        reportModal.classList.remove('hidden');
+      });
+    });
+  }
+
+  function openGalleryModal() {
+    galleryModal.classList.remove('hidden');
+    renderGallery();
+  }
 
   // Auto-load last result when Settings opens
   document.getElementById('btn-settings')?.addEventListener('click', () => {

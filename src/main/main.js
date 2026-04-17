@@ -1434,15 +1434,34 @@ ipcMain.handle('calib-open-report', (event, { html } = {}) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
-ipcMain.handle('calib-open-gallery', () => {
+// List every report dir with score.json — fed into the in-app gallery.
+ipcMain.handle('calib-list-reports', () => {
   try {
-    const gal = path.join(__dirname, '..', '..', 'images', '_calibration', 'gallery.html');
-    // Regenerate the gallery first so it includes any new runs
-    const galScript = path.join(__dirname, '..', '..', 'scripts', '_calib_gallery.py');
-    execFile('python', [galScript], { cwd: path.join(__dirname, '..', '..') }, () => {
-      shell.openPath(gal);
-    });
-    return { success: true };
+    const reportsDir = path.join(__dirname, '..', '..', 'images', '_calibration', 'reports');
+    if (!fs.existsSync(reportsDir)) return { success: true, reports: [] };
+    const out = [];
+    for (const name of fs.readdirSync(reportsDir)) {
+      if (name.startsWith('sweep_')) continue;
+      const dir = path.join(reportsDir, name);
+      const scorePath = path.join(dir, 'score.json');
+      if (!fs.existsSync(scorePath)) continue;
+      try {
+        const s = JSON.parse(fs.readFileSync(scorePath, 'utf-8'));
+        out.push({
+          name,
+          dir,
+          mtime: fs.statSync(dir).mtimeMs,
+          score: s.score,
+          total: s.total,
+          similarity: s.avg_similarity,
+          timestamp: s.timestamp,
+          mesh: s.mesh,
+          results: s.results,
+        });
+      } catch (e) {}
+    }
+    out.sort((a, b) => b.mtime - a.mtime);
+    return { success: true, reports: out };
   } catch (e) { return { success: false, error: e.message }; }
 });
 

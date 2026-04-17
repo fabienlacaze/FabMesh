@@ -885,11 +885,11 @@
         <div class="settings-box">
           <div class="settings-box-title">Pipeline test</div>
           <div class="settings-box-desc">Generates a textured mesh from the calibration cube and scores how many of the 6 painted faces end up on the correct axis.</div>
-          <div style="display:flex; gap:6px; align-items:center; margin-top:8px;">
-            <button id="set-calib-run" class="primary-btn" style="flex:1; padding:6px 12px;">&#127919; Run calibration</button>
-            <button id="set-calib-open" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128444;&#65039; Open last report</button>
+          <div style="margin-top:8px;">
+            <button id="set-calib-run" class="primary-btn" style="width:100%; padding:6px 12px;">&#127919; Run calibration</button>
           </div>
           <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
+            <button id="set-calib-open" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128444;&#65039; Open last report</button>
             <button id="set-calib-gallery" class="ghost-btn" style="flex:1; padding:6px 12px;">&#127912; Gallery (all runs)</button>
           </div>
           <div id="set-calib-status" style="margin-top:10px; font-size:12px; color:var(--text-2);">
@@ -908,6 +908,36 @@
           </div>
         </div>
 
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CALIBRATION REPORT MODAL (in-app, replaces browser-opened HTML)
+         ============================================================ -->
+    <div id="modal-calib-report" class="modal-overlay hidden">
+      <div class="modal-card" style="width:92vw; max-width:1100px; max-height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#127919; Calibration report</h2>
+          <button class="settings-close-x" id="calib-report-close" title="Close">&#10005;</button>
+        </div>
+        <div id="calib-report-body" style="padding:16px; overflow:auto; flex:1;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CALIBRATION GALLERY MODAL (in-app grid of all runs)
+         ============================================================ -->
+    <div id="modal-calib-gallery" class="modal-overlay hidden">
+      <div class="modal-card" style="width:95vw; height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#127912; Calibration gallery</h2>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span id="calib-gallery-count" style="font-size:11px; color:var(--text-2);"></span>
+            <button id="calib-gallery-refresh" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#8635; Refresh</button>
+            <button class="settings-close-x" id="calib-gallery-close" title="Close">&#10005;</button>
+          </div>
+        </div>
+        <div id="calib-gallery-body" style="padding:14px; overflow:auto; flex:1;"></div>
       </div>
     </div>
 
