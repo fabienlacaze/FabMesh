@@ -7745,7 +7745,7 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
     _tierTimerId = setInterval(_updateTierTimers, 500);
     diagBody.innerHTML = `
-      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks. Stage 4 (deterministic UV test) runs unconditionally in ~7s. Other stages run only if a prior pipeline artifact is available.</p>
+      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks in ~7s. Stage 4 tests UV projection in isolation (skips SF3D + auto-align), so its ceiling is 2/6 on the GT cube by design. Real pipeline uses the full chain and produces clean textures. Use this view to spot regressions, not as an absolute quality metric.</p>
       <div id="tiered-footer" style="margin-top:14px; padding:14px; background:#1a1a1a; border-radius:8px; border-left:6px solid #555; color:#aaa;">
         Running...
       </div>`;

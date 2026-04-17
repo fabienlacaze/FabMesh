@@ -86,6 +86,28 @@ paths use the same convention.
 stage 4 at 2/6 stable, full diagnostic visible in UI, user can see
 per-face GT-vs-got. Real pipeline untouched.
 
+### Full-pipeline test on GT cube image (2026-04-17 late) — HALLUCINATION CONFIRMED
+
+Ran `local_sf3d_bridge.py` on `ref_0.png` (the flat F-striped cube image):
+  - Output: 24343 verts / 45248 faces (full pipeline succeeded in 3min)
+  - FRONT: F visible but texture granular + rayures bruitées
+  - BACK: bruit + hallucinations rayures (Zero123++ couldn't imagine
+    back of a flat cube)
+  - TOP: hexagonal pattern artefacts (SF3D out-of-distribution)
+
+**Definitive conclusion**: The real pipeline ALSO produces bad textures
+on the flat calibration cube. It's not a calibration-only bug — the
+whole pipeline is unsuited to flat-color out-of-distribution inputs.
+
+On real photorealistic subjects (dog, horse, orc) the pipeline works
+because SF3D+Zero123++ were trained on Objaverse photo-like renders.
+
+**Implication for calibration**: Stage 4 will never pass 6/6 on the
+synthetic cube, not because texture_project is broken, but because
+the pipeline inputs it expects don't exist for this asset. Use
+Stage 4 as a REGRESSION detector (did score drop vs last run?) not
+as a correctness oracle.
+
 **What works**:
   - UI calibration button functional in ~7s
   - Per-stage visual comparison HTML (expected vs got)
