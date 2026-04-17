@@ -5002,6 +5002,25 @@ function updateMeshHint() {
 document.getElementById('ws-3d-quality')?.addEventListener('change', updateMeshHint);
 document.getElementById('ws-3d-triangles')?.addEventListener('change', updateMeshHint);
 
+// High triangle count warning: above ~50K, SF3D's per-triangle UV
+// packing + 2048 atlas produces incoherent voronoi texture. Warn
+// the user before they commit to the long generation.
+(function _wireHighPolyWarning() {
+  const HIGH_POLY_VALUES = new Set([
+    '1', '75k', '100k', '150k', '2', '250k', '300k', '500k',
+    '3', '1m', '4',
+  ]);
+  const triSel = document.getElementById('ws-3d-triangles');
+  const warn = document.getElementById('ws-3d-highcount-warn');
+  if (!triSel || !warn) return;
+  const sync = () => {
+    const isHigh = HIGH_POLY_VALUES.has(triSel.value);
+    warn.classList.toggle('hidden', !isHigh);
+  };
+  triSel.addEventListener('change', sync);
+  sync();
+})();
+
 document.getElementById('ws-generate-mesh').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }

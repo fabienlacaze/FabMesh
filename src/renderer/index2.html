@@ -313,6 +313,7 @@
                   </div>
                   <div id="ws-3d-quality-hint" class="form-hint">~200K triangles · 1024 px texture</div>
                   <div class="form-hint" style="margin-top:2px;">Texture is baked by SF3D (GPU). Triangles are added via subdivision (CPU, no extra VRAM).</div>
+                  <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (SF3D micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
                   <div class="form-row check-row">
                     <label class="inline-check">
                       <input type="checkbox" id="ws-3d-buildstages" />
