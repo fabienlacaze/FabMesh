@@ -2040,3 +2040,38 @@ blocking other tools. Reduced `SDXL_IDLE_TIMEOUT_MS` 300s → 90s
 and polling interval 15s → 10s. Chain of 2-3 tool calls still
 skips reload (< 90s between calls), but switching to a different
 task releases VRAM within ~100s.
+
+### views.json propagation on mv-inherit (commit 28802e0)
+`_copyMultiviewDir` copied the 7 PNGs but NOT `views.json`.
+Derived image versions (after remove-bg / inpaint / refine)
+inherited multi-views without their schema file, so
+texture_project fell back to Z123 angles (30/90/150/210/270/330)
+on CRM-generated views (0/90/180/270/TOP/BOT) — top/bottom
+projected as side views → voronoi atlas.
+
+Fixed + heal-pass propagated views.json to 10 existing derived
+dirs. BUT the chat_vert test still showed voronoi after this fix
+— views.json was a real bug but NOT the root cause of the atlas.
+
+### ROOT CAUSE — UV_REPACK default ON (commit 33306ad)
+Investigated chat_vert mesh 1776450499355 (7K verts, correct Z
+depth, views.json present, proper CRM schema). Still voronoi
+atlas. The `_proj_debug.png` showed **correct** projection
+(silhouette + debug dots lined up on the chat), but the `_tex.png`
+atlas was voronoi.
+
+Conclusion: texture_project rasterises correctly, but SF3D's
+per-triangle micro-island UV layout + EDT dilation produces the
+voronoi pattern independently of input quality.
+
+Re-tested `FABMESH_UV_REPACK=1`:
+  - chat_vert without repack: voronoi noise
+  - chat_vert with repack:    **recognisable chat** (body, head,
+    paws visible as coherent texture regions)
+
+Decision: flipped default ON. 2026-04-14 had marked it "doesn't
+help" — that was with Z123 input + small atlas. With CRM +
+2048 atlas + correct UV projection, xatlas re-chart is a clear win.
+
+**Users re-generating meshes now will see properly textured atlases**
+by default. FABMESH_UV_REPACK=0 to revert.
