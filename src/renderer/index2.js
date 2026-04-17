@@ -2458,7 +2458,24 @@ async function openLightbox(imgPath) {
       lbMvBar.classList.remove('hidden');
       lbMvBar.dataset.dir = p._multiviews[imgPath];
       lbMvBar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
-      lbMvBar.querySelector('[data-view="front"]')?.classList.add('mv-active');
+      // Respect whichever angle the user had selected in the small
+      // preview so small and big viewer stay in sync.
+      const currentKey = (p && p._activeMultiviewKey) || 'front';
+      const activeBtn = lbMvBar.querySelector(`[data-view="${currentKey}"]`)
+                     || lbMvBar.querySelector('[data-view="front"]');
+      if (activeBtn) activeBtn.classList.add('mv-active');
+      // If active key is non-front, swap the lightbox image to that view
+      if (currentKey && currentKey !== 'front') {
+        const filename = _mvViewMap[currentKey];
+        if (filename) {
+          const viewPath = p._multiviews[imgPath] + '/' + filename + '.png';
+          // Defer so the img element is in the DOM when we set src
+          setTimeout(() => {
+            const lbImg = document.getElementById('lightbox-2-img');
+            if (lbImg) lbImg.src = 'file:///' + viewPath.replace(/\\/g, '/') + '?t=' + Date.now();
+          }, 0);
+        }
+      }
     } else {
       lbMvBar.classList.add('hidden');
     }
@@ -2479,13 +2496,30 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
   let imgPath;
   if (view === 'front') {
     imgPath = _lightboxImages[_lightboxIndex] || (dir + '/input.png');
-    if (p) p._activeMultiview = null;
+    if (p) { p._activeMultiview = null; p._activeMultiviewKey = 'front'; }
   } else {
     const filename = _mvViewMap[view] || 'input';
     imgPath = dir + '/' + filename + '.png';
-    if (p) p._activeMultiview = imgPath;
+    // Persist BOTH the path (for tools) AND the key (so small and big
+    // viewers stay in sync when the user flips between them).
+    if (p) { p._activeMultiview = imgPath; p._activeMultiviewKey = view; }
   }
   document.getElementById('lightbox-2-img').src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  // Also sync the SMALL preview so when the lightbox closes the
+  // user sees the same view they were looking at.
+  try {
+    const smallPreview = document.getElementById('step1-preview');
+    const smallImg = smallPreview?.querySelector('img');
+    if (smallImg) {
+      smallImg.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+    // Mirror active button state in the small bar too.
+    const smallBar = document.getElementById('ws-multiview-bar');
+    if (smallBar) {
+      smallBar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+      smallBar.querySelector(`[data-view="${view}"]`)?.classList.add('mv-active');
+    }
+  } catch (_) {}
 });
 
 function closeLightbox() {
