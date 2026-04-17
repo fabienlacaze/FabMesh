@@ -1,0 +1,90 @@
+[
+  {
+    "tag": "a0e1c0",
+    "fa": false,
+    "fe": true,
+    "fc": false,
+    "score": 3,
+    "similarity": 0.5234783015659158,
+    "letters": "FBDDTL",
+    "report": "20260417_092423_sweep_a0e1c0",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092423_sweep_a0e1c0"
+  },
+  {
+    "tag": "a0e0c0",
+    "fa": false,
+    "fe": false,
+    "fc": false,
+    "score": 3,
+    "similarity": 0.5227978660879008,
+    "letters": "FBFDTL",
+    "report": "20260417_092355_sweep_a0e0c0",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092355_sweep_a0e0c0"
+  },
+  {
+    "tag": "a1e1c1",
+    "fa": true,
+    "fe": true,
+    "fc": true,
+    "score": 2,
+    "similarity": 0.49694369583950104,
+    "letters": "FBFDLT",
+    "report": "20260417_092534_sweep_a1e1c1",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092534_sweep_a1e1c1"
+  },
+  {
+    "tag": "a1e0c0",
+    "fa": true,
+    "fe": false,
+    "fc": false,
+    "score": 2,
+    "similarity": 0.49660658208203823,
+    "letters": "FRDDTL",
+    "report": "20260417_092451_sweep_a1e0c0",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092451_sweep_a1e0c0"
+  },
+  {
+    "tag": "a1e0c1",
+    "fa": true,
+    "fe": false,
+    "fc": true,
+    "score": 2,
+    "similarity": 0.4955338466356114,
+    "letters": "FBDDLT",
+    "report": "20260417_092505_sweep_a1e0c1",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092505_sweep_a1e0c1"
+  },
+  {
+    "tag": "a1e1c0",
+    "fa": true,
+    "fe": true,
+    "fc": false,
+    "score": 2,
+    "similarity": 0.490552146723481,
+    "letters": "FRFDTL",
+    "report": "20260417_092520_sweep_a1e1c0",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092520_sweep_a1e1c0"
+  },
+  {
+    "tag": "a0e0c1",
+    "fa": false,
+    "fe": false,
+    "fc": true,
+    "score": 1,
+    "similarity": 0.47715832695907806,
+    "letters": "FTFDLT",
+    "report": "20260417_092409_sweep_a0e0c1",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092409_sweep_a0e0c1"
+  },
+  {
+    "tag": "a0e1c1",
+    "fa": false,
+    "fe": true,
+    "fc": true,
+    "score": 1,
+    "similarity": 0.47335497026115836,
+    "letters": "FTDDLT",
+    "report": "20260417_092437_sweep_a0e1c1",
+    "report_path": "C:\\Users\\Utilisateur\\Desktop\\FabWare\\MeshyMyself\\images\\_calibration\\reports\\20260417_092437_sweep_a0e1c1"
+  }
+]

@@ -1,0 +1,105 @@
+{
+  "mesh": "C:/Users/UTILIS~1/AppData/Local/Temp/offset90.glb",
+  "score": 1,
+  "total": 6,
+  "avg_similarity": 0.4980156320413435,
+  "timestamp": "2026-04-17T09:27:29",
+  "results": [
+    {
+      "axis": "front",
+      "expected": "F",
+      "got": "F",
+      "correct": true,
+      "confidence": 0.9192200557103064,
+      "similarity": 0.6338960471715722,
+      "avg_color": [
+        214,
+        44,
+        44
+      ],
+      "desc": "FRONT red/white stripes",
+      "got_img": "got_front.png",
+      "gt_img": "../../ref_0_perfect_axes/front.png"
+    },
+    {
+      "axis": "back",
+      "expected": "B",
+      "got": "T",
+      "correct": false,
+      "confidence": 0.040257180704985296,
+      "similarity": 0.34261186326144344,
+      "avg_color": [
+        158,
+        206,
+        96
+      ],
+      "desc": "BACK blue/red B",
+      "got_img": "got_back.png",
+      "gt_img": "../../ref_0_perfect_axes/back.png"
+    },
+    {
+      "axis": "right",
+      "expected": "R",
+      "got": "D",
+      "correct": false,
+      "confidence": 0.7073314012688964,
+      "similarity": 0.5430216245310506,
+      "avg_color": [
+        214,
+        74,
+        60
+      ],
+      "desc": "RIGHT beige/green R",
+      "got_img": "got_right.png",
+      "gt_img": "../../ref_0_perfect_axes/right.png"
+    },
+    {
+      "axis": "left",
+      "expected": "L",
+      "got": "D",
+      "correct": false,
+      "confidence": 0.3677928885111206,
+      "similarity": 0.47710936901836665,
+      "avg_color": [
+        206,
+        125,
+        85
+      ],
+      "desc": "LEFT magenta/green L",
+      "got_img": "got_left.png",
+      "gt_img": "../../ref_0_perfect_axes/left.png"
+    },
+    {
+      "axis": "top",
+      "expected": "T",
+      "got": "F",
+      "correct": false,
+      "confidence": 0.8508309153257716,
+      "similarity": 0.5389312065684846,
+      "avg_color": [
+        208,
+        49,
+        49
+      ],
+      "desc": "TOP cream/red T",
+      "got_img": "got_top.png",
+      "gt_img": "../../ref_0_perfect_axes/top.png"
+    },
+    {
+      "axis": "bottom",
+      "expected": "D",
+      "got": "B",
+      "correct": false,
+      "confidence": 0.3703143447461629,
+      "similarity": 0.4525236816971433,
+      "avg_color": [
+        65,
+        29,
+        195
+      ],
+      "desc": "BOT red/blue B",
+      "got_img": "got_bottom.png",
+      "gt_img": "../../ref_0_perfect_axes/bottom.png"
+    }
+  ]
+}

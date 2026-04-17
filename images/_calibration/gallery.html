@@ -1,0 +1,605 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>FabMesh Calibration Gallery</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer@3/dist/model-viewer.min.js"></script>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; padding: 16px;
+       background: #0a0a0a; color: #eee; }
+h1 { margin: 0 0 16px; }
+.intro { max-width: 900px; color: #aaa; margin-bottom: 24px; }
+.intro code { background: #222; padding: 2px 6px; border-radius: 3px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+.card { background: #161616; border: 1px solid #333; border-radius: 8px;
+        padding: 12px; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.card-head h3 { margin: 0; font-size: 0.9em; font-family: monospace; color: #9cf;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.score { padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 1.1em; }
+.score.high { background: #1a5c1a; }
+.score.mid { background: #8a6a1a; }
+.score.low { background: #8a1a1a; }
+.score.no-score { background: #333; color: #888; font-weight: normal; }
+.sim { color: #888; margin-left: 8px; font-size: 0.85em; }
+model-viewer { border-radius: 6px; margin: 8px 0; }
+.axes-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;
+            margin-top: 8px; }
+.axcell { position: relative; border-radius: 4px; overflow: hidden; }
+.axcell img { width: 100%; display: block; background: #fff; }
+.axcell.ok { outline: 2px solid #3a3; }
+.axcell.bad { outline: 2px solid #c33; }
+.ax-label { position: absolute; bottom: 0; left: 0; right: 0;
+             background: rgba(0,0,0,0.75); padding: 2px 4px; font-size: 0.7em;
+             text-align: center; line-height: 1.1; }
+.letters { font-family: monospace; font-weight: bold; }
+.report-link { display: inline-block; margin-top: 8px; color: #6af;
+                font-size: 0.85em; }
+</style>
+</head><body>
+<h1>FabMesh Calibration Gallery</h1>
+<p class="intro">
+All meshes in <code>meshes/_calibration/</code> with their scoring reports.
+Drag the 3D previews to rotate. The 6 small images under each mesh are the
+rendered axis views (expected &rarr; got per face). Green border = face
+correctly identified, red = misaligned.
+</p>
+<div class="grid">
+  
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092423_sweep_a0e1c0.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092423_sweep_a0e1c0.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092423_sweep_a0e1c0/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092423_sweep_a0e1c0/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092423_sweep_a0e1c0/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092423_sweep_a0e1c0/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092423_sweep_a0e1c0/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092423_sweep_a0e1c0/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092423_sweep_a0e1c0/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092355_sweep_a0e0c0.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092355_sweep_a0e0c0.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092355_sweep_a0e0c0/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092355_sweep_a0e0c0/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092355_sweep_a0e0c0/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092355_sweep_a0e0c0/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092355_sweep_a0e0c0/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092355_sweep_a0e0c0/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092355_sweep_a0e0c0/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092631_offset0.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092631_offset0.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092631_offset0/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092631_offset0/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092631_offset0/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092631_offset0/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092631_offset0/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092631_offset0/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092631_offset0/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092700_offset90.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092700_offset90.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092700_offset90/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092700_offset90/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092700_offset90/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092700_offset90/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092700_offset90/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092700_offset90/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092700_offset90/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092729_offset180.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092729_offset180.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092729_offset180/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092729_offset180/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092729_offset180/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092729_offset180/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092729_offset180/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092729_offset180/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092729_offset180/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092759_offset270.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092759_offset270.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092759_offset270/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092759_offset270/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092759_offset270/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092759_offset270/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092759_offset270/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092759_offset270/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092759_offset270/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>sf3d_projected.glb</h3>
+        <span class="score mid">3/6</span><span class="sim">sim 0.52</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/sf3d_projected.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092148_baseline/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092148_baseline/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092148_baseline/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092148_baseline/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092148_baseline/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092148_baseline/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092148_baseline/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092534_sweep_a1e1c1.glb</h3>
+        <span class="score low">2/6</span><span class="sim">sim 0.50</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092534_sweep_a1e1c1.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092534_sweep_a1e1c1/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092534_sweep_a1e1c1/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092534_sweep_a1e1c1/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092534_sweep_a1e1c1/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092534_sweep_a1e1c1/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;L</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092534_sweep_a1e1c1/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;T</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092534_sweep_a1e1c1/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092451_sweep_a1e0c0.glb</h3>
+        <span class="score low">2/6</span><span class="sim">sim 0.50</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092451_sweep_a1e0c0.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092451_sweep_a1e0c0/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092451_sweep_a1e0c0/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;R</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092451_sweep_a1e0c0/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092451_sweep_a1e0c0/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092451_sweep_a1e0c0/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092451_sweep_a1e0c0/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092451_sweep_a1e0c0/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092505_sweep_a1e0c1.glb</h3>
+        <span class="score low">2/6</span><span class="sim">sim 0.50</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092505_sweep_a1e0c1.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092505_sweep_a1e0c1/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092505_sweep_a1e0c1/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;B</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092505_sweep_a1e0c1/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092505_sweep_a1e0c1/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092505_sweep_a1e0c1/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;L</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092505_sweep_a1e0c1/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;T</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092505_sweep_a1e0c1/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092520_sweep_a1e1c0.glb</h3>
+        <span class="score low">2/6</span><span class="sim">sim 0.49</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092520_sweep_a1e1c0.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092520_sweep_a1e1c0/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092520_sweep_a1e1c0/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;R</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092520_sweep_a1e1c0/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092520_sweep_a1e1c0/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell ok">
+                <img src="reports/20260417_092520_sweep_a1e1c0/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092520_sweep_a1e1c0/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;L</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092520_sweep_a1e1c0/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092409_sweep_a0e0c1.glb</h3>
+        <span class="score low">1/6</span><span class="sim">sim 0.48</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092409_sweep_a0e0c1.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092409_sweep_a0e0c1/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092409_sweep_a0e0c1/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092409_sweep_a0e0c1/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092409_sweep_a0e0c1/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092409_sweep_a0e0c1/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;L</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092409_sweep_a0e0c1/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;T</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092409_sweep_a0e0c1/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>projected_20260417_092437_sweep_a0e1c1.glb</h3>
+        <span class="score low">1/6</span><span class="sim">sim 0.47</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/projected_20260417_092437_sweep_a0e1c1.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      <div class="axes-row">
+              <div class="axcell ok">
+                <img src="reports/20260417_092437_sweep_a0e1c1/got_front.png" loading="lazy">
+                <div class="ax-label">front<br>
+                  <span class="letters">F&rarr;F</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092437_sweep_a0e1c1/got_back.png" loading="lazy">
+                <div class="ax-label">back<br>
+                  <span class="letters">B&rarr;T</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092437_sweep_a0e1c1/got_right.png" loading="lazy">
+                <div class="ax-label">right<br>
+                  <span class="letters">R&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092437_sweep_a0e1c1/got_left.png" loading="lazy">
+                <div class="ax-label">left<br>
+                  <span class="letters">L&rarr;D</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092437_sweep_a0e1c1/got_top.png" loading="lazy">
+                <div class="ax-label">top<br>
+                  <span class="letters">T&rarr;L</span></div>
+              </div>
+              <div class="axcell bad">
+                <img src="reports/20260417_092437_sweep_a0e1c1/got_bottom.png" loading="lazy">
+                <div class="ax-label">bottom<br>
+                  <span class="letters">D&rarr;T</span></div>
+              </div></div><a class="report-link" href="reports/20260417_092437_sweep_a0e1c1/index.html" target="_blank">Full report</a>
+    </div>
+    
+    <div class="card">
+      <div class="card-head">
+        <h3>sf3d_output.glb</h3>
+        <span class="score no-score">no report</span>
+      </div>
+      <model-viewer src="../../meshes/_calibration/sf3d_output.glb" camera-controls auto-rotate
+        style="width: 100%; height: 320px; background: #222"
+        exposure="1" shadow-intensity="1"
+        camera-orbit="30deg 70deg auto"></model-viewer>
+      
+    </div>
+    
+</div>
+</body></html>

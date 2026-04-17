@@ -1,0 +1,98 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>FabMesh Calibration Report</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 20px; background: #111; color: #eee; }
+h1 { margin-top: 0; }
+.score { font-size: 2em; font-weight: bold; padding: 10px 20px; border-radius: 8px;
+          display: inline-block; background: #222; }
+.score.high { background: #1a5c1a; }
+.score.mid { background: #8a6a1a; }
+.score.low { background: #8a1a1a; }
+table { border-collapse: collapse; margin-top: 20px; width: 100%; }
+th, td { padding: 10px; border: 1px solid #333; text-align: left; vertical-align: middle; }
+th { background: #222; }
+tr.ok { background: #1a2c1a; }
+tr.bad { background: #2c1a1a; }
+.status { font-family: monospace; font-size: 1.1em; }
+.swatch { width: 40px; height: 40px; border: 1px solid #555; display: inline-block; }
+img { display: block; border: 1px solid #333; }
+pre { background: #222; padding: 8px; border-radius: 4px; }
+</style>
+</head><body>
+<h1>FabMesh Calibration Report</h1>
+<p>Mesh: <code>C:\Users\Utilisateur\Desktop\FabWare\MeshyMyself\meshes\_calibration\projected_20260417_092437_sweep_a0e1c1.glb</code><br>
+Timestamp: 2026-04-17T09:24:51</p>
+<p>
+  <span class="score low">
+    Score: 1 / 6
+  </span>
+  &nbsp; avg similarity: 0.47
+</p>
+<h3>Env overrides:</h3><pre>FABMESH_TEXPROJ_FLIP_AZIM=False
+FABMESH_TEXPROJ_FLIP_ELEV=True
+FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM=True</pre>
+<table>
+  <tr><th>Axis</th><th>Expected (ground truth)</th><th>Got (generated)</th><th>Classification</th><th>Metrics</th></tr>
+  
+        <tr class="ok">
+          <td><b>front</b><br><small>FRONT red/white stripes</small></td>
+          <td><img src="../../ref_0_perfect_axes/front.png" width=160></td>
+          <td><img src="got_front.png" width=160></td>
+          <td class="status">F &rarr; F OK</td>
+          <td>
+            <div class="swatch" style="background:rgb(214,44,44)"></div>
+            <small>sim 0.63<br>conf 0.92</small>
+          </td>
+        </tr>
+        <tr class="bad">
+          <td><b>back</b><br><small>BACK blue/red B</small></td>
+          <td><img src="../../ref_0_perfect_axes/back.png" width=160></td>
+          <td><img src="got_back.png" width=160></td>
+          <td class="status">B &rarr; T XX</td>
+          <td>
+            <div class="swatch" style="background:rgb(129,133,81)"></div>
+            <small>sim 0.36<br>conf 0.06</small>
+          </td>
+        </tr>
+        <tr class="bad">
+          <td><b>right</b><br><small>RIGHT beige/green R</small></td>
+          <td><img src="../../ref_0_perfect_axes/right.png" width=160></td>
+          <td><img src="got_right.png" width=160></td>
+          <td class="status">R &rarr; D XX</td>
+          <td>
+            <div class="swatch" style="background:rgb(222,52,62)"></div>
+            <small>sim 0.53<br>conf 0.79</small>
+          </td>
+        </tr>
+        <tr class="bad">
+          <td><b>left</b><br><small>LEFT magenta/green L</small></td>
+          <td><img src="../../ref_0_perfect_axes/left.png" width=160></td>
+          <td><img src="got_left.png" width=160></td>
+          <td class="status">L &rarr; D XX</td>
+          <td>
+            <div class="swatch" style="background:rgb(203,87,71)"></div>
+            <small>sim 0.49<br>conf 0.54</small>
+          </td>
+        </tr>
+        <tr class="bad">
+          <td><b>top</b><br><small>TOP cream/red T</small></td>
+          <td><img src="../../ref_0_perfect_axes/top.png" width=160></td>
+          <td><img src="got_top.png" width=160></td>
+          <td class="status">T &rarr; L XX</td>
+          <td>
+            <div class="swatch" style="background:rgb(222,34,200)"></div>
+            <small>sim 0.49<br>conf 0.86</small>
+          </td>
+        </tr>
+        <tr class="bad">
+          <td><b>bottom</b><br><small>BOT red/blue B</small></td>
+          <td><img src="../../ref_0_perfect_axes/bottom.png" width=160></td>
+          <td><img src="got_bottom.png" width=160></td>
+          <td class="status">D &rarr; T XX</td>
+          <td>
+            <div class="swatch" style="background:rgb(153,206,94)"></div>
+            <small>sim 0.34<br>conf 0.04</small>
+          </td>
+        </tr>
+</table>
+</body></html>

@@ -1,0 +1,90 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>FabMesh Convention Sweep</title>
+<style>
+body { font-family: system-ui; margin: 20px; background: #111; color: #eee; }
+h1 { margin-top: 0; }
+table { border-collapse: collapse; margin-top: 20px; }
+th, td { padding: 10px; border: 1px solid #333; text-align: left; vertical-align: middle; }
+th { background: #222; }
+tr.best { background: #1a3c1a; font-weight: bold; }
+.score { font-size: 1.5em; font-family: monospace; }
+.letters { font-family: monospace; font-size: 1.3em; letter-spacing: 4px; }
+.expected { color: #888; }
+.ok { color: #6f6; }
+.bad { color: #f66; }
+a { color: #6af; }
+</style>
+</head><body>
+<h1>FabMesh Convention Sweep</h1>
+<p>Tested all 8 combinations of FABMESH_TEXPROJ_{FLIP_AZIM, FLIP_ELEV, FLIP_CAMPOS_AZIM}.<br>
+Timestamp: 20260417_092354<br>
+Ranked by score, then similarity.</p>
+<table>
+  <tr><th>Variant</th><th>Flags</th><th>Score</th><th>Similarity</th><th>Letters (F/B/R/L/T/D)</th><th></th></tr>
+  
+        <tr class="best">
+          <td><b>a0e1c0</b></td>
+          <td>azim=False<br>elev=True<br>cam=False</td>
+          <td><span class="score">3/6</span></td>
+          <td>0.52</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="ok">B</span><span class="bad">D</span><span class="bad">D</span><span class="ok">T</span><span class="bad">L</span></td>
+          <td><a href="../20260417_092423_sweep_a0e1c0/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a0e0c0</b></td>
+          <td>azim=False<br>elev=False<br>cam=False</td>
+          <td><span class="score">3/6</span></td>
+          <td>0.52</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="ok">B</span><span class="bad">F</span><span class="bad">D</span><span class="ok">T</span><span class="bad">L</span></td>
+          <td><a href="../20260417_092355_sweep_a0e0c0/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a1e1c1</b></td>
+          <td>azim=True<br>elev=True<br>cam=True</td>
+          <td><span class="score">2/6</span></td>
+          <td>0.50</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="ok">B</span><span class="bad">F</span><span class="bad">D</span><span class="bad">L</span><span class="bad">T</span></td>
+          <td><a href="../20260417_092534_sweep_a1e1c1/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a1e0c0</b></td>
+          <td>azim=True<br>elev=False<br>cam=False</td>
+          <td><span class="score">2/6</span></td>
+          <td>0.50</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="bad">R</span><span class="bad">D</span><span class="bad">D</span><span class="ok">T</span><span class="bad">L</span></td>
+          <td><a href="../20260417_092451_sweep_a1e0c0/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a1e0c1</b></td>
+          <td>azim=True<br>elev=False<br>cam=True</td>
+          <td><span class="score">2/6</span></td>
+          <td>0.50</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="ok">B</span><span class="bad">D</span><span class="bad">D</span><span class="bad">L</span><span class="bad">T</span></td>
+          <td><a href="../20260417_092505_sweep_a1e0c1/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a1e1c0</b></td>
+          <td>azim=True<br>elev=True<br>cam=False</td>
+          <td><span class="score">2/6</span></td>
+          <td>0.49</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="bad">R</span><span class="bad">F</span><span class="bad">D</span><span class="ok">T</span><span class="bad">L</span></td>
+          <td><a href="../20260417_092520_sweep_a1e1c0/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a0e0c1</b></td>
+          <td>azim=False<br>elev=False<br>cam=True</td>
+          <td><span class="score">1/6</span></td>
+          <td>0.48</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="bad">T</span><span class="bad">F</span><span class="bad">D</span><span class="bad">L</span><span class="bad">T</span></td>
+          <td><a href="../20260417_092409_sweep_a0e0c1/index.html">report</a></td>
+        </tr>
+        <tr class="">
+          <td><b>a0e1c1</b></td>
+          <td>azim=False<br>elev=True<br>cam=True</td>
+          <td><span class="score">1/6</span></td>
+          <td>0.47</td>
+          <td class="letters">expected: <span class="expected">FBRLTD</span><br>got: <span class="ok">F</span><span class="bad">T</span><span class="bad">D</span><span class="bad">D</span><span class="bad">L</span><span class="bad">T</span></td>
+          <td><a href="../20260417_092437_sweep_a0e1c1/index.html">report</a></td>
+        </tr>
+</table>
+</body></html>
