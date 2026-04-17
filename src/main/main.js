@@ -858,7 +858,7 @@ async function _handleMultiviewInheritance(newImagePath) {
     // the caller. The user will see the new views appear once done. UI
     // toast is handled by the existing multiview-progress stream.
     log.info('mv-inherit', `new=${newStem} no silhouette match — regenerating`);
-    const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
+    const script = _mvScriptForEngine();
     const env = { ...process.env, PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' };
     const proc = execFile('python', [script, newImagePath, newMvDir], {
       timeout: 600000, maxBuffer: 10 * 1024 * 1024, env,
@@ -3639,8 +3639,25 @@ ipcMain.handle('check-multiview-dir', async (_event, imagePath) => {
   }
 });
 
+// Multi-view engine dispatch (shared with mv-inherit).
+// Selects the Python script based on FABMESH_MV_ENGINE:
+//   z123 (default) — Zero123++ (horizon ±20°)
+//   sdxl           — SDXL + IPAdapter
+//   crm            — CRM (6 ortho views incl. TOP/BOTTOM)
+function _mvScriptForEngine() {
+  const engine = (process.env.FABMESH_MV_ENGINE || 'z123').toLowerCase();
+  const map = {
+    z123: 'multiview_gen.py',
+    sdxl: 'multiview_sdxl_gen.py',
+    crm:  'multiview_crm_gen.py',
+  };
+  const name = map[engine] || 'multiview_gen.py';
+  log.info('multiview', `engine=${engine} script=${name}`);
+  return path.join(__dirname, '..', '..', 'scripts', name);
+}
+
 ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', 'multiview_gen.py');
+  const script = _mvScriptForEngine();
   // Multi-views are tied to the EXACT image version. Output dir derived
   // from the image file path:
   //   images/dog/ref_0.png        → images/dog/ref_0_multiview/
