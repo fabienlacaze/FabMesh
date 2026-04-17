@@ -154,6 +154,54 @@ of the same mesh" — MV-Adapter, SV3D, Era3D, etc.
 
 ---
 
+## 2026-04-18 — MV-Adapter integration — IN PROGRESS
+
+**Goal**: ship MV-Adapter i2mv-sdxl as new `FABMESH_MV_ENGINE=mvadapter`
+option. Apache 2.0, local, 768px, 6 views with arbitrary (az, el).
+
+### Files added/changed
+- `external/MV-Adapter/` — git submodule (huanngzh/MV-Adapter)
+- `external/MV-Adapter/mvadapter/utils/mesh_utils/__init__.py` — patched
+  to lazy-load nvdiffrast-dependent modules (FabMesh only needs
+  camera helpers; mesh/render paths need nvdiffrast which we don't
+  want to compile).
+- `external/MV-Adapter/mvadapter/utils/mesh_utils/utils.py` — also
+  patched for optional `dr` import.
+- `scripts/multiview_mvadapter_gen.py` — new generator following same
+  CLI contract as `multiview_crm_gen.py`. Env vars:
+    - `FABMESH_MVA_BASE` (default `stabilityai/stable-diffusion-xl-base-1.0`)
+    - `FABMESH_MVA_CPU_OFFLOAD` (default off — hooks break attention cache)
+    - `FABMESH_MVA_PROMPT` / `FABMESH_MVA_SUBJECT_PROMPT`
+- `src/main/main.js` — dispatch mapping adds `mvadapter`
+- `scripts/local_sf3d_bridge.py` — same dispatch update
+
+### Issues hit
+1. **nvdiffrast missing** — MV-Adapter pulls it transitively via
+   `mesh_utils/__init__.py`. Patched `__init__.py` + `utils.py` to
+   skip the heavy-rendering modules when nvdiffrast is absent.
+2. **KeyError on first run** with RealVisXL V4.0:
+   `down_blocks.1.attentions.0.transformer_blocks.0.attn1.processor`
+   not in `ref_hidden_states`. MV-Adapter's DecoupledMVRowSelfAttnProcessor
+   caches hidden states per attn layer name during the first UNet
+   forward; on the inference forward it looks them back up. The cache
+   was incomplete. Likely cause: either RealVisXL layer-name drift,
+   or diffusers 0.34 `accelerate` CPU-offload hooks dropping
+   `cross_attention_kwargs` before it reaches the down-blocks.
+3. Fix attempt: switch base to `stabilityai/stable-diffusion-xl-base-1.0`
+   + disable CPU offload by default. Second run failed before even
+   hitting the issue — my own bug (`base_model` referenced before
+   assignment). Patched.
+
+### Status
+Not working yet. Next run pending. If KeyError persists on vanilla
+SDXL without offload, the root cause is diffusers version mismatch
+(MV-Adapter validated against ~0.30; we have 0.34). Options:
+- pin diffusers~=0.30 in a FabMesh venv scoped to this script
+- patch MV-Adapter's attn processor to use `.get(name, fallback)`
+  instead of `[name]`
+
+---
+
 ## 2026-04-17 — Child project analysis: multi-views insufficient, mesh degraded
 
 User: "analyse le dernier projet que jai créé le resultat (multi vues et mesh) ne sont pas suffiant"

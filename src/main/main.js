@@ -3647,12 +3647,14 @@ ipcMain.handle('check-multiview-dir', async (_event, imagePath) => {
 //   z123 (default) — Zero123++ (horizon ±20°)
 //   sdxl           — SDXL + IPAdapter
 //   crm            — CRM (6 ortho views incl. TOP/BOTTOM)
+//   mvadapter      — MV-Adapter i2mv-sdxl (6 ortho views, 768px, Apache 2.0)
 function _mvScriptForEngine() {
   const engine = (process.env.FABMESH_MV_ENGINE || 'z123').toLowerCase();
   const map = {
-    z123: 'multiview_gen.py',
-    sdxl: 'multiview_sdxl_gen.py',
-    crm:  'multiview_crm_gen.py',
+    z123:      'multiview_gen.py',
+    sdxl:      'multiview_sdxl_gen.py',
+    crm:       'multiview_crm_gen.py',
+    mvadapter: 'multiview_mvadapter_gen.py',
   };
   const name = map[engine] || 'multiview_gen.py';
   log.info('multiview', `engine=${engine} script=${name}`);

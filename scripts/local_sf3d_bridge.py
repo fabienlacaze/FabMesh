@@ -118,12 +118,14 @@ def generate_3d(
             import subprocess as _sp_mv
             # Multi-view engine dispatch via FABMESH_MV_ENGINE env var.
             # Supported: z123 (default, 6 views horizon ±20°), sdxl (SDXL+IPA),
-            # crm (6 ortho views incl. TOP/BOTTOM, native MIT model).
+            # crm (6 ortho views incl. TOP/BOTTOM, native MIT model),
+            # mvadapter (MV-Adapter i2mv-sdxl, 6 ortho views 768px, Apache 2.0).
             _mv_engine = os.environ.get('FABMESH_MV_ENGINE', 'z123').lower()
             _mv_script_map = {
-                'z123':     'multiview_gen.py',
-                'sdxl':     'multiview_sdxl_gen.py',
-                'crm':      'multiview_crm_gen.py',
+                'z123':      'multiview_gen.py',
+                'sdxl':      'multiview_sdxl_gen.py',
+                'crm':       'multiview_crm_gen.py',
+                'mvadapter': 'multiview_mvadapter_gen.py',
             }
             _mv_script_name = _mv_script_map.get(_mv_engine, 'multiview_gen.py')
             _mv_script = os.path.join(os.path.dirname(__file__), _mv_script_name)

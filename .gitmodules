@@ -1,3 +1,6 @@
 [submodule "external/CRM"]
 	path = external/CRM
 	url = https://github.com/thu-ml/CRM
+[submodule "external/MV-Adapter"]
+	path = external/MV-Adapter
+	url = https://github.com/huanngzh/MV-Adapter
