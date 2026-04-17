@@ -389,6 +389,22 @@ def generate_3d(
         import traceback as _tb
         _tb.print_exc()
 
+    # Normalize orientation: SF3D meshes come out with the subject's face
+    # at -Z (SF3D native convention). Three.js default camera is at +Z
+    # looking toward -Z, which would show the subject's BACK. Rotate 180°
+    # around Y so face ends up at +Z (camera-facing), matching Three.js
+    # standard. Skip if auto-align is on (legacy path already handles this).
+    if os.environ.get('FABMESH_SF3D_NORMALIZE_ORIENT', '1') == '1' \
+            and os.environ.get('FABMESH_SF3D_AUTOALIGN') != '1':
+        try:
+            import numpy as _np2, trimesh as _tm2
+            _R180 = _tm2.transformations.rotation_matrix(_np2.pi, [0, 1, 0])
+            mesh.apply_transform(_R180)
+            auto_align_rot_deg = 180.0  # propagate to texture_project
+            print("LOCAL_SF3D: normalized orientation (rotated 180° around Y, face -> +Z)", flush=True)
+        except Exception as _no_e:
+            print(f"LOCAL_SF3D: orientation normalize failed ({_no_e})", flush=True)
+
     mesh.export(output_path, include_normals=True)
 
     # ------------------------------------------------------------------
