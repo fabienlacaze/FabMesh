@@ -7371,7 +7371,10 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 
   function renderDiagnose(res) {
     if (!res || !res.success) {
-      diagBody.innerHTML = `<p style="color:#f66">Error: ${res && res.error || 'unknown'}</p>`;
+      const err = (res && res.error) || 'unknown';
+      const stderr = (res && res.stderr) || '';
+      diagBody.innerHTML = `<p style="color:#f66">Error: ${err}</p>` +
+        (stderr ? `<pre style="background:#111; padding:10px; border-radius:4px; font-size:11px; color:#faa; max-height:300px; overflow:auto;">${stderr.replace(/</g, '&lt;')}</pre>` : '');
       return;
     }
     const s1 = res.stage1, s2 = res.stage2, s3 = res.stage3, v = res.verdict;
@@ -7411,6 +7414,12 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
 
   const btnCancel = document.getElementById('calib-diagnose-cancel');
   btnCancel?.addEventListener('click', async () => {
+    const ok = window.confirm(
+      'Cancel the calibration run?\n\n' +
+      'This will stop the pipeline immediately (SF3D, Zero123++, projection). ' +
+      'Any partial output for this run will be discarded.'
+    );
+    if (!ok) return;
     btnCancel.disabled = true;
     btnCancel.textContent = 'Cancelling...';
     try { await API.calibCancel(); } catch (e) {}

@@ -1435,10 +1435,12 @@ ipcMain.handle('calib-open-report', (event, { html } = {}) => {
 });
 
 let _calibDiagnoseProc = null;
+let _calibCancelFlag = false;
 
 ipcMain.handle('calib-cancel', () => {
   if (_calibDiagnoseProc && !_calibDiagnoseProc.killed) {
     try {
+      _calibCancelFlag = true;
       // Kill the python process AND its children (SF3D subprocess etc.)
       if (process.platform === 'win32') {
         require('child_process').execSync(`taskkill /pid ${_calibDiagnoseProc.pid} /T /F`, { stdio: 'ignore' });
@@ -1454,6 +1456,7 @@ ipcMain.handle('calib-cancel', () => {
 ipcMain.handle('calib-diagnose', async () => {
   const script = path.join(__dirname, '..', '..', 'scripts', '_calib_diagnose.py');
   return new Promise((resolve) => {
+    _calibCancelFlag = false;
     const proc = execFile('python', [script], {
       timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
@@ -1461,7 +1464,10 @@ ipcMain.handle('calib-diagnose', async () => {
     }, (error, stdout, stderr) => {
       _calibDiagnoseProc = null;
       if (error) {
-        const cancelled = (error.killed || (error.code === null && error.signal));
+        const cancelled = _calibCancelFlag || error.killed ||
+                          (error.code === null && error.signal) ||
+                          /taskkill|STATUS_CONTROL_C_EXIT|terminated/i.test(error.message || '');
+        _calibCancelFlag = false;
         resolve({
           success: false,
           cancelled,
