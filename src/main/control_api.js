@@ -698,8 +698,11 @@ function startControlApi(mainWindow, opts = {}) {
       const rootDir = path.join(__dirname, '..', '..');
       const script = path.join(rootDir, 'scripts', '_calib_diagnose.py');
 
+      const body = await readBody(req);
+      const engine = (body && body.engine === 'triposg') ? 'triposg' : 'sf3d';
+
       return new Promise((resolve) => {
-        const proc = execFile('python', [script], {
+        const proc = execFile('python', [script, '--engine', engine], {
           timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
           env: { ...process.env, PYTHONUNBUFFERED: '1' },
           cwd: rootDir,

@@ -148,24 +148,29 @@ def _sim(a_path, b_path, size=384):
     return float(1.0 - diff.mean() / 441.0)
 
 
-def stage1_sf3d(work_dir, env, logger):
-    logger.stage_start('SF3D mesh reconstruction')
+def stage1_mesh(work_dir, env, logger, engine='sf3d'):
+    """Reconstruct 3D mesh. engine='sf3d' or 'triposg'."""
+    logger.stage_start(f'{engine.upper()} mesh reconstruction')
     logger.file_stat(REF_IMG, 'input image')
-    sf3d_path = os.path.join(work_dir, 'sf3d_raw.glb')
+    out_filename = f'{engine}_raw.glb'
+    sf3d_path = os.path.join(work_dir, out_filename)
     if not os.path.exists(sf3d_path):
-        sf3d_script = os.path.join(ROOT, 'scripts', 'local_sf3d_bridge.py')
-        logger.info(f'invoking local_sf3d_bridge.py -> {sf3d_path}')
-        r = subprocess.run(
-            [sys.executable, sf3d_script, REF_IMG, sf3d_path, '1024', '-1', 'none', '0'],
-            env=env, capture_output=True, text=True, timeout=1800)
-        logger.subprocess_result(r, 'SF3D')
+        if engine == 'triposg':
+            script = os.path.join(ROOT, 'scripts', 'local_triposg_bridge.py')
+            cmd = [sys.executable, script, REF_IMG, sf3d_path, '30', '7.0']
+        else:  # sf3d
+            script = os.path.join(ROOT, 'scripts', 'local_sf3d_bridge.py')
+            cmd = [sys.executable, script, REF_IMG, sf3d_path, '1024', '-1', 'none', '0']
+        logger.info(f'invoking {os.path.basename(script)} -> {sf3d_path}')
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1800)
+        logger.subprocess_result(r, engine.upper())
         if r.returncode != 0 or not os.path.exists(sf3d_path):
             logger.stage_end(ok=False)
             return {'ok': False, 'error': r.stderr[-400:]}
     else:
-        logger.info('sf3d_raw.glb already exists, skipping reconstruction')
-    logger.file_stat(sf3d_path, 'SF3D output mesh')
-    tag = 'diag_stage1'
+        logger.info(f'{out_filename} already exists, skipping reconstruction')
+    logger.file_stat(sf3d_path, f'{engine.upper()} output mesh')
+    tag = f'diag_stage1_{engine}'
     logger.info(f'scoring with calibrate.py --tag {tag}')
     r = subprocess.run(
         [sys.executable, os.path.join(ROOT, 'scripts', 'calibrate.py'),
@@ -398,24 +403,32 @@ a {{ color: #6af; }}
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--engine', choices=['sf3d', 'triposg'], default='sf3d',
+                        help='Which 3D reconstruction engine to test')
+    args = parser.parse_args()
+    engine = args.engine
+
     stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    work_dir = os.path.join(ROOT, 'meshes', '_calibration', f'diagnose_{stamp}')
+    work_dir = os.path.join(ROOT, 'meshes', '_calibration', f'diagnose_{engine}_{stamp}')
     os.makedirs(work_dir, exist_ok=True)
-    report_dir = os.path.join(REPORTS_DIR, f'diagnose_{stamp}')
+    report_dir = os.path.join(REPORTS_DIR, f'diagnose_{engine}_{stamp}')
 
     env = dict(os.environ)
     env['PYTHONUNBUFFERED'] = '1'
 
-    logger = CalibLogger(stamp)
+    logger = CalibLogger(f'{engine}_{stamp}')
+    logger.info(f'engine: {engine}')
     logger.info(f'calibration target: {"rubiks" if _USE_RUBIKS else "painted cube"}')
     logger.info(f'ref image: {REF_IMG}')
     logger.info(f'work dir:  {work_dir}')
     logger.info(f'report dir: {report_dir}')
 
-    s1 = stage1_sf3d(work_dir, env, logger)
+    s1 = stage1_mesh(work_dir, env, logger, engine=engine)
     s2 = stage2_multiview(env, logger)
     sf3d_path = s1.get('mesh') if s1.get('ok') else None
-    s3 = stage3_projected(sf3d_path, work_dir, env, logger) if sf3d_path else {'ok': False, 'error': 'skipped: SF3D failed'}
+    s3 = stage3_projected(sf3d_path, work_dir, env, logger) if sf3d_path else {'ok': False, 'error': f'skipped: {engine} failed'}
 
     verdict = build_verdict(s1, s2, s3)
     html = write_report(report_dir, s1, s2, s3, verdict)
@@ -429,6 +442,7 @@ def main():
     print(f'\nReport: {html}')
     # Also emit a machine-parseable line for the UI/API
     summary = {
+        'engine': engine,
         'primary_cause': verdict['primary_cause'],
         'stage1': verdict.get('stage1_sf3d_score'),
         'stage2': verdict.get('stage2_mv_similarity'),

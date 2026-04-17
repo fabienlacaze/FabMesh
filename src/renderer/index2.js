@@ -7452,22 +7452,81 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     const causeColors = { sf3d: '#cc3', zero123: '#c60', projection: '#c36',
                           none_clear: '#888', projection_or_sf3d: '#888', unknown: '#555' };
     const causeColor = causeColors[v?.primary_cause] || '#555';
+    // Helper: mini-thumbnails for a stage's per-axis results.
+    function stageThumbs(stageData, kind) {
+      if (!stageData || !stageData.ok) return '';
+      if (kind === 'axes') {
+        const reportDir = stageData.report;
+        const results = stageData.score?.results || [];
+        if (!reportDir || !results.length) return '';
+        const sep = reportDir.includes('\\') ? '\\' : '/';
+        const cells = results.map(r => {
+          const img = 'file:///' + (reportDir + sep + r.got_img).replace(/\\/g, '/');
+          const border = r.correct ? '#3a3' : '#c33';
+          return `<div style="position:relative; outline:2px solid ${border}; border-radius:3px; overflow:hidden;">
+            <img src="${img}" style="width:100%; display:block; background:#fff;">
+            <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.8); font-size:9px; padding:1px 2px; text-align:center; color:#fff; line-height:1.1;">
+              ${r.axis}<br><b>${r.expected}&rarr;${r.got}</b>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div style="display:grid; grid-template-columns:repeat(6,1fr); gap:2px; margin-top:10px;">${cells}</div>`;
+      }
+      if (kind === 'views') {
+        // Show view_0..5 from the active multiview dir
+        const views = stageData.views || [];
+        const mvBase = 'file:///' + encodeURI(
+          'c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/images/_calibration/ref_rubiks_multiview/'
+            .replace(/\\/g, '/')
+        );
+        const cells = views.map(v => {
+          const border = v.ok ? '#3a3' : '#c33';
+          return `<div style="position:relative; outline:2px solid ${border}; border-radius:3px; overflow:hidden;">
+            <img src="${mvBase}view_${v.i}.png" style="width:100%; display:block; background:#fff;">
+            <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.8); font-size:9px; padding:1px 2px; text-align:center; color:#fff; line-height:1.1;">
+              v${v.i}<br>sim ${(v.similarity||0).toFixed(2)}
+            </div>
+          </div>`;
+        }).join('');
+        return `<div style="display:grid; grid-template-columns:repeat(6,1fr); gap:2px; margin-top:10px;">${cells}</div>`;
+      }
+      return '';
+    }
+
+    function stageCardWithThumbs(title, data, extract, kind) {
+      if (!data || !data.ok) {
+        const err = (data && data.error) ? data.error.slice(0, 160) : 'not run';
+        return `<div style="background:#1a0e0e; border:2px solid #633; border-radius:8px; padding:14px; text-align:center;">
+          <h3 style="margin:0 0 8px; color:#f88; font-size:14px;">${title}</h3>
+          <p style="color:#f66; font-size:12px;">Failed: ${err}</p></div>`;
+      }
+      const { score, sub, bg } = extract(data);
+      return `<div style="background:#161616; border:2px solid #333; border-radius:8px; padding:14px;">
+        <h3 style="margin:0 0 8px; color:#9cf; font-size:14px; text-align:center;">${title}</h3>
+        <div style="text-align:center;">
+          <div style="display:inline-block; padding:10px 22px; background:${bg}; border-radius:8px; font-size:2em; font-weight:bold; color:#fff;">${score}</div>
+          <p style="margin:6px 0 0; font-size:12px; color:#aaa;">${sub}</p>
+        </div>
+        ${stageThumbs(data, kind)}
+      </div>`;
+    }
+
     const cards = [
-      stageCard('1. SF3D raw mesh', s1, (d) => {
+      stageCardWithThumbs('1. SF3D raw mesh', s1, (d) => {
         const s = d.score?.score || 0, t = d.score?.total || 6;
         const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
         return { score: `${s}/${t}`, sub: `sim ${(d.score?.avg_similarity || 0).toFixed(2)}`, bg };
-      }),
-      stageCard('2. Zero123++ views', s2, (d) => {
+      }, 'axes'),
+      stageCardWithThumbs('2. Zero123++ views', s2, (d) => {
         const s = d.good_views || 0, t = d.total || 6;
         const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
         return { score: `${s}/${t}`, sub: `avg sim ${(d.avg_similarity || 0).toFixed(2)}`, bg };
-      }),
-      stageCard('3. Final projection', s3, (d) => {
+      }, 'views'),
+      stageCardWithThumbs('3. Final projection', s3, (d) => {
         const s = d.score?.score || 0, t = d.score?.total || 6;
         const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
         return { score: `${s}/${t}`, sub: `sim ${(d.score?.avg_similarity || 0).toFixed(2)}`, bg };
-      }),
+      }, 'axes'),
     ];
     const detailsList = (v?.details || []).map(d => `<li>${d}</li>`).join('');
     diagBody.innerHTML = `
@@ -7497,10 +7556,11 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     try { await API.calibCancel(); } catch (e) {}
   });
 
-  btnDiagnose?.addEventListener('click', async () => {
+  async function runDiagnose(engine) {
     diagModal.classList.remove('hidden');
-    diagBody.innerHTML = '<p style="color:#aaa">Running pipeline stages — this takes ~4-5 min the first time (SF3D + Zero123++ + projection)...</p>';
+    diagBody.innerHTML = `<p style="color:#aaa">Running ${engine.toUpperCase()} pipeline — ~4-5 min (${engine} + Zero123++ + projection)...</p>`;
     btnDiagnose.disabled = true;
+    if (btnCompare) btnCompare.disabled = true;
     if (btnCancel) {
       btnCancel.style.display = '';
       btnCancel.disabled = false;
@@ -7511,14 +7571,14 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     const progressEl = document.createElement('p');
     progressEl.style.cssText = 'color:#9cf; font-family:monospace; font-size:12px;';
     diagBody.appendChild(progressEl);
-    const timer = setInterval(() => { progressEl.textContent = `[${fmt(Date.now()-t0)}] running...`; }, 1000);
+    const timer = setInterval(() => { progressEl.textContent = `[${fmt(Date.now()-t0)}] running ${engine}...`; }, 1000);
     let lastLine = '';
     const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
       lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 120);
       progressEl.textContent = `[${fmt(Date.now()-t0)}] ${lastLine}`;
     }) : null;
     try {
-      const res = await API.calibDiagnose();
+      const res = await API.calibDiagnose({ engine });
       clearInterval(timer);
       if (res && res.cancelled) {
         diagBody.innerHTML = `<p style="color:#f88">Cancelled after ${fmt(Date.now()-t0)}.</p>`;
@@ -7531,7 +7591,94 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     }
     if (btnCancel) btnCancel.style.display = 'none';
     btnDiagnose.disabled = false;
-  });
+    if (btnCompare) btnCompare.disabled = false;
+  }
+
+  // Side-by-side comparison: run SF3D then TripoSG, show both verdicts.
+  async function runCompare() {
+    diagModal.classList.remove('hidden');
+    diagBody.innerHTML = '<p style="color:#aaa">Running both engines sequentially — ~8-10 min total...</p>';
+    btnDiagnose.disabled = true;
+    if (btnCompare) btnCompare.disabled = true;
+    if (btnCancel) {
+      btnCancel.style.display = ''; btnCancel.disabled = false;
+      btnCancel.innerHTML = '&#9209;&#65039; Cancel';
+    }
+    const t0 = Date.now();
+    const fmt = (ms) => { const s = Math.floor(ms/1000); const m = Math.floor(s/60); return m>0 ? `${m}m${String(s%60).padStart(2,'0')}s` : `${s}s`; };
+    const progressEl = document.createElement('p');
+    progressEl.style.cssText = 'color:#9cf; font-family:monospace; font-size:12px;';
+    diagBody.appendChild(progressEl);
+    let phase = 'SF3D';
+    const timer = setInterval(() => { progressEl.textContent = `[${fmt(Date.now()-t0)}] ${phase} ${lastLine||'...'}`; }, 1000);
+    let lastLine = '';
+    const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
+      lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 120);
+    }) : null;
+    try {
+      const resSf3d = await API.calibDiagnose({ engine: 'sf3d' });
+      phase = 'TripoSG';
+      const resTriposg = await API.calibDiagnose({ engine: 'triposg' });
+      clearInterval(timer);
+      diagBody.innerHTML = renderComparison(resSf3d, resTriposg);
+    } catch (e) {
+      clearInterval(timer);
+      diagBody.innerHTML = `<p style="color:#f66">Error: ${e.message}</p>`;
+    }
+    if (btnCancel) btnCancel.style.display = 'none';
+    btnDiagnose.disabled = false;
+    if (btnCompare) btnCompare.disabled = false;
+  }
+
+  function renderComparison(resA, resB) {
+    function miniCard(label, res) {
+      if (!res || !res.success) {
+        return `<div style="flex:1; background:#1a0e0e; border:2px solid #633; border-radius:8px; padding:14px;">
+          <h3 style="margin:0 0 8px; color:#f88;">${label}</h3>
+          <p style="color:#f66; font-size:12px;">Failed: ${(res && res.error) || 'unknown'}</p></div>`;
+      }
+      const v = res.verdict || {};
+      const s1 = v.stage1_sf3d_score || '?';
+      const s2 = v.stage2_mv_similarity || '?';
+      const s3 = v.stage3_final_score || '?';
+      return `<div style="flex:1; background:#161616; border:2px solid #333; border-radius:8px; padding:14px;">
+        <h3 style="margin:0 0 10px; color:#9cf;">${label}</h3>
+        <table style="width:100%; font-family:monospace; font-size:13px;">
+          <tr><td>Mesh (stage 1)</td><td style="text-align:right;"><b>${s1}</b></td></tr>
+          <tr><td>Multi-views (stage 2)</td><td style="text-align:right;"><b>${s2}</b></td></tr>
+          <tr><td>Final projected (stage 3)</td><td style="text-align:right;"><b>${s3}</b></td></tr>
+        </table>
+        <p style="font-size:11px; color:#aaa; margin-top:10px;">Primary cause: <b>${v.primary_cause || 'unknown'}</b></p>
+      </div>`;
+    }
+    // Winner: highest stage3 score
+    function parseScore(res) {
+      const s = res?.verdict?.stage3_final_score;
+      if (!s) return -1;
+      const m = String(s).match(/^(\d+)/);
+      return m ? parseInt(m[1], 10) : -1;
+    }
+    const sfScore = parseScore(resA);
+    const tpScore = parseScore(resB);
+    let winner = '';
+    if (sfScore > tpScore) winner = '<div style="padding:14px; margin-top:14px; background:#1a5c1a; border-radius:8px;"><b>WINNER: SF3D</b> (' + sfScore + ' vs ' + tpScore + ')</div>';
+    else if (tpScore > sfScore) winner = '<div style="padding:14px; margin-top:14px; background:#1a5c1a; border-radius:8px;"><b>WINNER: TripoSG</b> (' + tpScore + ' vs ' + sfScore + ')</div>';
+    else winner = '<div style="padding:14px; margin-top:14px; background:#555; border-radius:8px;"><b>TIE</b> (' + sfScore + '/6 each)</div>';
+    return `
+      <h3 style="margin-top:0;">Engine comparison on the same calibration input</h3>
+      <p style="color:#aaa;">Both engines ran the full pipeline (mesh → multi-views → projection → scoring).</p>
+      <div style="display:flex; gap:14px;">
+        ${miniCard('SF3D', resA)}
+        ${miniCard('TripoSG', resB)}
+      </div>
+      ${winner}
+    `;
+  }
+
+  const btnCompare = document.getElementById('set-calib-compare');
+  btnCompare?.addEventListener('click', runCompare);
+
+  btnDiagnose?.addEventListener('click', () => runDiagnose('sf3d'));
 
   // ---- In-app Report modal --------------------------------------------
   const reportModal = document.getElementById('modal-calib-report');

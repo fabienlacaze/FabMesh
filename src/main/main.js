@@ -1453,11 +1453,11 @@ ipcMain.handle('calib-cancel', () => {
   return { success: false, error: 'no active calibration' };
 });
 
-ipcMain.handle('calib-diagnose', async () => {
+ipcMain.handle('calib-diagnose', async (event, { engine = 'sf3d' } = {}) => {
   const script = path.join(__dirname, '..', '..', 'scripts', '_calib_diagnose.py');
   return new Promise((resolve) => {
     _calibCancelFlag = false;
-    const proc = execFile('python', [script], {
+    const proc = execFile('python', [script, '--engine', String(engine)], {
       timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
       cwd: path.join(__dirname, '..', '..'),
