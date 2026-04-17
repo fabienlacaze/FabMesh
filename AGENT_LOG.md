@@ -10,6 +10,46 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-17 (latest) — Calibration v3: per-stage independent checks — IN PROGRESS
+
+**Why abandon v2**: Every v2 attempt tried to score the entire
+pipeline end-to-end on one reference. This conflated "pipeline
+correctness" with "generative quality" — a scoring death spiral:
+  - Hand-painted cube (flat colors, letters): out-of-distribution for
+    SF3D. Max 1/6 forever.
+  - Synthetic Rubik's: same OOD problem.
+  - RealVisXL Rubik's photo: in-distribution for Zero123++ but
+    per-face color positions are random — no deterministic GT possible.
+  - RealVisXL apple: in-distribution, GT not possible (no face labels).
+
+**v3 architecture** (planned via Plan-agent this session):
+
+Five **independent** per-stage checks, each with inputs/outputs that
+do NOT depend on upstream stages. The key trick — the colored-cube
+GLB is NOT a pipeline input; it is a stage-4-only asset whose 6 GT
+views in `ref_0_multiview_perfect/` are **inputs to texture_project**,
+making stage 4 fully deterministic.
+
+| Stage | Test | Pass |
+|---|---|---|
+| 1 — Ref image | dims, stddev, background clean | bool |
+| 2 — Multi-views | silhouette centroids differ + color hist consistent | both |
+| 3 — Mesh SF3D | orthographic front silhouette IoU vs input alpha | >= 0.70 |
+| 4 — Projection | run texture_project on GT cube + GT views, render 6 axes, classify | 6/6 |
+| 5 — Final GLB | render from input camera, perceptual similarity vs input | >= baseline - 0.05 |
+
+**Backup tag**: `calib-before-redesign-20260417`.
+
+**Roadmap commits**:
+  1. module scripts/calib/stage_checks.py with 5 pure functions
+  2. Stage 4 implementation (ROI max — catches 90% of UV/camera bugs)
+  3. Stage 3 (silhouette IoU)
+  4. Stages 2, 1, 5
+  5. Orchestrator run_calibration.py + UI
+  6. Per-stage baselines .fabmesh/calib_baselines.json for regression detection
+
+---
+
 ## 2026-04-17 (late) — Calibration v2: Rubik's target + API + detailed logs
 
 **Context**: After the painted-cube experiment scored 1/6 at best, the
