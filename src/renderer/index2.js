@@ -7745,12 +7745,9 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
     _tierTimerId = setInterval(_updateTierTimers, 500);
     diagBody.innerHTML = `
-      <p style="color:#aaa; margin-top:0;">Test → Analyze → Correct automatically, one tier at a time. Each tier must pass before the next runs.</p>
-      ${tierRow(1, 'Reference image sanity (~5s)')}
-      ${tierRow(2, 'Multi-view generation tuning (~1-2min)')}
-      ${tierRow(3, 'Mesh + projection tuning (~3min)')}
+      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks. Stage 4 (deterministic UV test) runs unconditionally in ~7s. Other stages run only if a prior pipeline artifact is available.</p>
       <div id="tiered-footer" style="margin-top:14px; padding:14px; background:#1a1a1a; border-radius:8px; border-left:6px solid #555; color:#aaa;">
-        Waiting for results...
+        Running...
       </div>`;
     btnDiagnose.disabled = true;
     if (btnCompare) btnCompare.disabled = true;
