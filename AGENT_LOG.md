@@ -1960,3 +1960,83 @@ Current state:
 
 Next: factor a single BaseViewer3D + BaseCanvas2D class so any future
 change applies everywhere at once.
+
+## 2026-04-17 (latest) — UX session recap
+
+### Viewer refactor 4/7 done (commits 6cfafbd, cf23fe1)
+New `src/renderer/lib/Viewer3D.js` — unified class wrapping
+renderer + scene + camera + OrbitControls + tick loop + lighting.
+Migrated: wsThree, rigSrc, lightbox3D, rigViewer. Remaining 3
+(mesh-edit, lmFs A+B) still use direct OrbitControls but with
+identical `enableDamping=true` — behaviorally harmonised.
+Backup: tag `before-viewer-refactor-20260417-v2` + `backups/viewer-refactor-v2/`.
+
+Navigation is now guaranteed identical across all viewers:
+  - Left-click drag = rotate (3D) / paint (2D)
+  - Right-click drag = pan (3D) / erase (2D Draw Mask)
+  - Middle-click drag = pan (both)
+  - Wheel = zoom (both)
+
+### Multi-view UX (commits ffd0f5a, 4964f7b, b9010b4)
+  - Small viewer ↔ lightbox synced: clicking an angle in one
+    updates the other (image + active-button class).
+  - Lightbox has a right-side tool column (Modify, Auto Inpaint,
+    Remove BG, Resolution, Face Fix, Sym. Auto, Draw Mask, Clone
+    Stamp, Paint, Crop). Each routes to the workspace handler so
+    tools operate on the currently-selected angle.
+  - Popup after editing a multi-view: asks whether to keep the
+    single-view edit or regenerate all 6 from the current front
+    image (via FABMESH_MV_ENGINE dispatch).
+
+### Draw Mask eraser (commit c1971fd + b7b0e91)
+Toggle brush/eraser modes with dedicated buttons + B/E keyboard
+shortcuts. Eraser uses the same radius as the paint brush (slider
+drives both). Right-click drag still erases (legacy preserved).
+Active tool button now has a strong pink accent background via
+new `.tool-active` CSS class.
+
+### New-project popup + UI defaults (commits 96c5e2a, 9695c77)
+  - Asset Type + Style dropdowns added to the "New project" modal.
+    Values propagate to the "Create new image" form so the user
+    doesn't re-enter them.
+  - Count default 4 → 1 (users rarely want 4 variants).
+  - "Construction stages" checkbox hidden for character & creature
+    (3-stage progressive build doesn't apply to living subjects);
+    visible for building/vehicle/weapon/prop/environment/custom.
+
+### Mesh quality regression (commit 122b180)
+Discovered: the chat_vert voronoi-atlas bug was NOT UV projection
+but the user having selected ~200K triangles in the dropdown.
+Fresh run with default (~23K) produces a clean atlas with
+recognizable chat pieces. Added an orange warning under the
+"Target triangles" dropdown that appears for any selection >= 50K,
+explaining that SF3D's per-triangle UV packing breaks the texture
+above that threshold.
+
+### SDXL pipeline fixes (commits fd4d8ea, c7ca6ed, 045db5a)
+After the torch/diffusers/xformers thrashing for CRM, several
+SDXL pipelines hit "mat1 and mat2 must have the same dtype: float
+!= struct c10::Half" at inference. Root cause: diffusers 0.34 on
+torch 2.7.1+cu128 leaves some buffers fp32 after
+`from_pretrained(torch_dtype=float16)`.
+
+Fix applied to all affected scripts:
+  - scripts/local_img2img_bridge.py
+  - scripts/sdxl_server.py: load_img2img, load_inpaint, load_controlnet_tile
+
+Pattern: after `pipe.to("cuda")`, force every sub-module:
+    pipe.unet.to(torch.float16)
+    pipe.vae.to(torch.float16)
+    pipe.text_encoder.to(torch.float16)
+    pipe.text_encoder_2.to(torch.float16)
+    # + pipe.controlnet for ControlNet variants
+
+Validated end-to-end: CLI + HTTP server both produce clean results
+on chat_vert ("make eyes glow red" → red-eyed chat in 7s).
+
+### SDXL idle-unload tightened (commit 045db5a)
+SDXL server was holding ~9 GB VRAM for 5 min after a Modify,
+blocking other tools. Reduced `SDXL_IDLE_TIMEOUT_MS` 300s → 90s
+and polling interval 15s → 10s. Chain of 2-3 tool calls still
+skips reload (< 90s between calls), but switching to a different
+task releases VRAM within ~100s.
