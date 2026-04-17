@@ -706,16 +706,18 @@ document.getElementById('np-create').addEventListener('click', async () => {
 });
 
 // Show/hide "Construction stages" checkbox based on asset type —
-// only makes sense for characters (progressive build: silhouette →
-// base mesh → final). Creatures, buildings, props skip this.
+// hidden for living subjects (character, creature) where 3-stage
+// progressive build doesn't make sense. Visible for buildings,
+// vehicles, weapons, props, environment, custom — assets that have
+// a natural "blueprint → rough → finished" progression.
 (function _wireBuildStagesVisibility() {
   const applyVisibility = () => {
     const at = document.getElementById('ws-asset-type')?.value || 'character';
     const row = document.getElementById('ws-img-buildstages-row');
     if (!row) return;
-    const show = (at === 'character');
-    row.style.display = show ? '' : 'none';
-    if (!show) {
+    const hide = (at === 'character' || at === 'creature');
+    row.style.display = hide ? 'none' : '';
+    if (hide) {
       const cb = document.getElementById('ws-img-buildstages');
       if (cb) cb.checked = false;
     }
