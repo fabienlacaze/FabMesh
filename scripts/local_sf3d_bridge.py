@@ -116,7 +116,18 @@ def generate_3d(
         try:
             print(f"LOCAL_SF3D_PROGRESS: 12 multiview_gen", flush=True)
             import subprocess as _sp_mv
-            _mv_script = os.path.join(os.path.dirname(__file__), 'multiview_gen.py')
+            # Multi-view engine dispatch via FABMESH_MV_ENGINE env var.
+            # Supported: z123 (default, 6 views horizon ±20°), sdxl (SDXL+IPA),
+            # crm (6 ortho views incl. TOP/BOTTOM, native MIT model).
+            _mv_engine = os.environ.get('FABMESH_MV_ENGINE', 'z123').lower()
+            _mv_script_map = {
+                'z123':     'multiview_gen.py',
+                'sdxl':     'multiview_sdxl_gen.py',
+                'crm':      'multiview_crm_gen.py',
+            }
+            _mv_script_name = _mv_script_map.get(_mv_engine, 'multiview_gen.py')
+            _mv_script = os.path.join(os.path.dirname(__file__), _mv_script_name)
+            print(f"LOCAL_SF3D: multi-view engine = {_mv_engine} ({_mv_script_name})", flush=True)
             # Look up the subject prompt from prompts.json next to the
             # source image (same strategy as refine mode). multiview_gen.py's
             # optional style-harmonization pass reads it via env so it can

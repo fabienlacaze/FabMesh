@@ -146,6 +146,38 @@ TOP and BOTTOM (elev ±90°) — not just horizon views like Z123/MV-Adapter?
   - Short-term: integrate CRM as new multi-view backend (1 week)
   - Long-term: mesh-first render-and-refine as v2 texture path
 
+## 2026-04-17 (end of day) — CRM INTEGRATED, WORKING ON MANNEQUIN
+
+Delivered:
+  - `external/CRM` submodule (MIT license)
+  - `scripts/download_crm_weights.py` — fetches CRM.pth + pixel-diffusion.pth
+    + ccm-diffusion.pth (~12 GB total from HF Zhengyi/CRM)
+  - `scripts/multiview_crm_gen.py` — CLI-compatible with multiview_gen.py
+  - `scripts/local_sf3d_bridge.py` — FABMESH_MV_ENGINE=z123|sdxl|crm dispatch
+  - Patches in external/CRM/:
+    - libs/base_utils.py: stub EMAModel (torch 2.7 incompat)
+    - imagedream/ldm/modules/attention.py: SDPA fallback when xformers absent
+    - pipelines.py: SKIP stage2 when resume='SKIP' or missing
+
+Test on mannequin_ref.png (FABMESH_MV_ENGINE=crm):
+  - 5.5 min wall-clock (vs Z123 45s), scale=5.5, step=30
+  - 6 views produced, TOP+BOTTOM native
+  - view_0 front: mannequin reconstructed with F+H+stripes+dots ✓
+  - view_2 back: damier + identity preserved (not orange/black but
+    consistent with front, NO hallucination)
+  - view_4 TOP: head from above + arms extended + limb colors ✓
+  - view_5 BOTTOM: legs+arms from below ✓
+
+CRM output at 256×256, upscaled to 1024. Grey-bg threshold removed
+for alpha. Much better than Z123 for top/bot (which Z123 can't do
+at all). Back quality similar to SDXL+IPAdapter but with TOP/BOT
+bonus.
+
+Backup tag: before-crm-integration-20260417.
+
+### NEXT: test full pipeline (CRM multi-views → SF3D → texture_project)
+to see end-to-end quality on a real character.
+
 ## 2026-04-17 — Stage 4 root cause found, NOT yet fixed
 
 **Agent investigation report**: Stage 4 fails (1/6) on the GT cube
