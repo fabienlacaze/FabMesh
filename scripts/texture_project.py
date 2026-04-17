@@ -173,7 +173,14 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         ])
 
     # Inverse of: Rx(-90) then Ry(+90) = undo Ry(+90) then undo Rx(-90)
-    R_undo = rot_x(90) @ rot_y(-90)
+    # The GT calibration cube is NOT passed through SF3D, so the undo
+    # transform would rotate it into the wrong frame. Skip when the env
+    # signals a pre-aligned input mesh (set by stage_checks.py stage 4).
+    if os.environ.get('FABMESH_TEXPROJ_SKIP_UNDO') == '1':
+        R_undo = np.eye(3)
+        log('FABMESH_TEXPROJ_SKIP_UNDO=1: skipping SF3D undo transform')
+    else:
+        R_undo = rot_x(90) @ rot_y(-90)
     verts_cam = (R_undo @ vertices.T).T  # (V, 3) in SF3D's internal coords
     norms_cam = (R_undo @ normals.T).T
     # The invert() call flips normals; undo that
