@@ -31,6 +31,26 @@ bridge + auto-align, so the chain breaks.
   4. Basis sweep (24 signed-axis permutations of R_w2c_base) — best 3/6 (p18)
   5. 8 rotation-offset × U-flip combinations — best 1/6 unchanged
   6. rotation-offset -90 — worse (0/6, scores 0.33-0.50)
+  7. Fine rotation-offset sweep (13 angles):
+     - rot=0 → 0/6
+     - rot=30 → 0/6
+     - rot=45 → 0/6
+     - rot=60 → 1/6
+     - **rot=90 → 2/6 (best: front+right PASS)** ← visual still wrong
+     - rot=120 → 1/6
+     - rot=150..330 → 0/6
+
+**Process differences (origin vs calibration stage 4)**:
+| | Real pipeline (works) | Stage 4 GT cube (fails) |
+|---|---|---|
+| Input mesh | SF3D output (has Rx(-90)@Ry(+90) baked) | Natural glTF frame (no bake) |
+| Auto-align | Yes (Y rotation) | No |
+| rotation_offset | Inherited from auto-align | 0 by default |
+| R_undo in texture_project | Correctly unbakes SF3D xform | Scrambles natural cube |
+| Multi-views | Zero123++ output on real subj | Pre-rendered from GT cube (natural frame) |
+| Net effect | Self-consistent chain | 3 conventions mismatched |
+
+**Best score so far**: 2/6 at rotation-offset=90°. FRONT sim=0.638 (R letter appears but in wrong orientation), RIGHT sim=0.665 (spurious pass — red dominant matches). So "2/6" is misleading: front + right "pass" the 0.60 threshold by luck of palette similarity, NOT by correct projection. Visual inspection confirms texture is still scrambled.
 
 **What works**:
   - UI calibration button functional in ~7s

@@ -278,7 +278,7 @@ def check_stage4_projection(work_dir, env=None):
          'FABMESH_TEXPROJ_SKIP_UNDO': '1', **(env or {})}
     r = subprocess.run(
         [sys.executable, script, GT_CUBE_GLB, gt_input, out_glb, '1024',
-         '--multiview', GT_MV_DIR, '--rotation-offset', '0'],
+         '--multiview', GT_MV_DIR, '--rotation-offset', '330'],
         env=e, capture_output=True, text=True, timeout=300)
     if r.returncode != 0 or not os.path.exists(out_glb):
         res['details']['error'] = (r.stderr or '')[-400:]
