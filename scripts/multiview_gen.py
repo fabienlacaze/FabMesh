@@ -39,13 +39,6 @@ def log(msg):
     print(f'[multiview] {msg}', flush=True)
 
 
-def _subpct(pct: int, label: str = ''):
-    """Emit a sub-phase percentage (0..100) that the parent bridge remaps
-    into its overall progress-bar slice. Renderer ignores these directly
-    (prefix FABMESH_SUBPCT doesn't match `_PROGRESS:`)."""
-    print(f"FABMESH_SUBPCT: {max(0, min(100, int(pct)))} {label}", flush=True)
-
-
 def generate_multiview(input_image_path, output_dir, size=320):
     """Generate 6 views from a single input image using Zero123++ v1.2."""
     t0 = time.time()
@@ -112,7 +105,6 @@ def generate_multiview(input_image_path, output_dir, size=320):
 
     log('loading Zero123++ v1.2 pipeline...')
     slog.progress(10, 'load_pipeline')
-    _subpct(5, 'load_pipeline')
 
     from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
 
@@ -129,39 +121,20 @@ def generate_multiview(input_image_path, output_dir, size=320):
 
     log(f'pipeline loaded in {time.time()-t0:.1f}s')
     slog.progress(40, 'generate_views')
-    _subpct(25, 'generate_views')
 
     # Generate 6 views
-    # Quality tuning (2026-04-16):
-    #   - num_inference_steps 100 → 150   reduces noise on flat regions,
-    #     fewer "smudged" textures on clothes and skin
-    #   - guidance_scale 4.0 → 5.5        tighter adherence to the input
-    #     image's colour palette (observed fix: orc_woman legs no longer
-    #     turn beige when they were blue in the ref)
-    #   - seed pinned                     gives reproducible + more
-    #     consistent inter-view coherence (same RNG init for each tile)
-    # Budget cost: +15 s per run on RTX 5080.
     log('generating 6 views...')
-    _mv_seed = int(os.environ.get('FABMESH_MV_SEED', '424242'))
-    _mv_steps = int(os.environ.get('FABMESH_MV_STEPS', '150'))
-    _mv_cfg = float(os.environ.get('FABMESH_MV_CFG', '5.5'))
-    with slog.timed('inference', steps=_mv_steps, guidance_scale=_mv_cfg,
-                    seed=_mv_seed):
+    with slog.timed('inference', steps=100, guidance_scale=4.0):
         with torch.no_grad():
-            _gen = torch.Generator(
-                device='cuda' if torch.cuda.is_available() else 'cpu'
-            ).manual_seed(_mv_seed)
             result = pipeline(
                 input_img_resized,
-                num_inference_steps=_mv_steps,
-                guidance_scale=_mv_cfg,
-                generator=_gen,
+                num_inference_steps=100,
+                guidance_scale=4.0,
             ).images[0]
 
     log(f'generation done in {time.time()-t0:.1f}s')
     slog.info('grid_produced', w=result.size[0], h=result.size[1])
     slog.progress(80, 'grid_ready')
-    _subpct(65, 'grid_ready')
 
     # Zero123++ v1.2 outputs a 640x960 grid = 2 columns x 3 rows of 320x320 tiles
     # Layout (left to right, top to bottom):
@@ -192,7 +165,6 @@ def generate_multiview(input_image_path, output_dir, size=320):
     try:
         log('MULTIVIEW_PROGRESS: 85 upscaling')
         slog.progress(85, 'upscaling')
-        _subpct(70, 'upscaling')
         with slog.timed('realesrgan_upscale', source_tile=tile_w, target=1024):
             from realesrgan import RealESRGANer
             from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -222,8 +194,6 @@ def generate_multiview(input_image_path, output_dir, size=320):
                           w=up.size[0], h=up.size[1],
                           ms=int((time.time() - t_start) * 1000))
                 log(f'upscaled view_{i} to {up.size}')
-                # Upscale owns sub-phase 70..80 (10 points / 6 views).
-                _subpct(70 + int(((i + 1) / 6) * 10), f'upscale_{i+1}_of_6')
             del upsampler, model
             if torch.cuda.is_available(): torch.cuda.empty_cache()
     except Exception as ue:
@@ -236,7 +206,6 @@ def generate_multiview(input_image_path, output_dir, size=320):
     try:
         log('MULTIVIEW_PROGRESS: 88 bg-removal')
         slog.progress(88, 'bg_removal')
-        _subpct(82, 'bg_removal')
         with slog.timed('rembg_all_views'):
             from rembg import remove as rembg_remove
             cleaned = []
@@ -252,130 +221,25 @@ def generate_multiview(input_image_path, output_dir, size=320):
         log(f'rembg bg removal skipped ({be})')
 
     # ------------------------------------------------------------------
-    # Identity harmonization pass via SDXL + IPAdapter (NEW 2026-04-16)
+    # Style harmonization pass
     # ------------------------------------------------------------------
-    # Replaces the old style-harmonize (which drifted colors because SDXL
-    # only saw a text prompt, not the ref image).
-    # Now: SDXL img2img at low strength GUIDED BY IPAdapter with the input
-    # ref image. SDXL sees the actual pixels of the subject and keeps its
-    # colour/identity while cleaning up Zero123++'s cartoon smoothing and
-    # hallucinated occluded regions (legs under loincloth etc).
-    # Opt-in via FABMESH_MV_IDENTITY_HARMONIZE=1 env var. Disabled by
-    # default until proven on user's examples.
-    _identity_on = os.environ.get('FABMESH_MV_IDENTITY_HARMONIZE') == '1'
-    if _identity_on:
-        try:
-            log('MULTIVIEW_PROGRESS: 89 identity-harmonize')
-            slog.progress(89, 'identity_harmonize')
-            _subpct(88, 'identity_harmonize')
-            from diffusers import StableDiffusionXLImg2ImgPipeline
-            _h_t0 = time.time()
-            # Lazy-load a small img2img pipeline. Use RealVisXL V4.0
-            # (already cached locally, openrail++-M commercial-safe).
-            _h_pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
-                'SG161222/RealVisXL_V4.0',
-                torch_dtype=torch.float16,
-                use_safetensors=True,
-            )
-            # IPAdapter SDXL — feeds the CLIP-vision embedding of the ref
-            # image into the UNet's cross-attention, so SDXL "sees" the true
-            # subject colours/identity.
-            #
-            # Use the BASE ip-adapter (not "plus"): the "plus" variant needs
-            # a specific CLIP-ViT-H encoder with patch-level projection that
-            # RealVisXL does not bundle; it crashed on every view with
-            # "mat1 and mat2 shapes cannot be multiplied (514x1664 and
-            # 1280x1280)" on orc_woman (2026-04-16). The base variant uses
-            # the bundled OpenCLIP-ViT-bigG encoder that SDXL already has
-            # and works out of the box.
-            from transformers import CLIPVisionModelWithProjection
-            _image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-                'h94/IP-Adapter',
-                subfolder='models/image_encoder',
-                torch_dtype=torch.float16,
-            )
-            _h_pipe.image_encoder = _image_encoder
-            _h_pipe.load_ip_adapter(
-                'h94/IP-Adapter',
-                subfolder='sdxl_models',
-                weight_name='ip-adapter_sdxl_vit-h.safetensors',
-            )
-            # Scale 0.7 = strong guidance but leaves room for refinement.
-            _h_pipe.set_ip_adapter_scale(0.7)
-            _h_pipe.enable_model_cpu_offload()
-            log('IPAdapter SDXL (base, vit-h) loaded')
-
-            # The ref image the IPAdapter will condition on — the ORIGINAL
-            # RGBA input (not the Zero123++ view) since we want SDXL to
-            # pull identity from there, not from the cartoon-style view.
-            _ref_ip = input_img_rgba.convert('RGB')
-
-            harmonized = []
-            _h_fail_count = 0
-            _h_strength = float(os.environ.get('FABMESH_MV_IDENTITY_STRENGTH', '0.3'))
-            for i, tile in enumerate(upscaled_tiles):
-                _t_in = tile.convert('RGB')
-                # Respect alpha for later atlas projection
-                _alpha = tile.split()[-1] if tile.mode == 'RGBA' else None
-                try:
-                    with torch.no_grad():
-                        _out = _h_pipe(
-                            prompt='photorealistic, clean texture, consistent with reference',
-                            negative_prompt='cartoon, smudged, blurry, distorted',
-                            image=_t_in,
-                            ip_adapter_image=_ref_ip,
-                            strength=_h_strength,
-                            num_inference_steps=20,
-                            guidance_scale=5.0,
-                        ).images[0]
-                    if _out.size != tile.size:
-                        _out = _out.resize(tile.size, Image.LANCZOS)
-                    if _alpha is not None:
-                        _out = _out.convert('RGBA')
-                        _out.putalpha(_alpha)
-                    harmonized.append(_out)
-                    slog.info('view_identity_harmonized', view=i,
-                              strength=_h_strength)
-                except Exception as _he2:
-                    log(f'identity harmonize view_{i} error ({_he2}), keeping original')
-                    harmonized.append(tile)
-                    _h_fail_count += 1
-            # If identity-harmonize failed on ALL views, the pipeline is
-            # effectively broken for this pass. Raise so the outer handler
-            # logs a clear warning (don't silently ship Zero123++'s raw
-            # cartoon output as if it were harmonized).
-            if _h_fail_count == len(upscaled_tiles):
-                raise RuntimeError(
-                    f'identity_harmonize failed on ALL {_h_fail_count} views; '
-                    f'check IPAdapter encoder compatibility'
-                )
-            if _h_fail_count > 0:
-                log(f'identity_harmonize: {_h_fail_count}/{len(upscaled_tiles)} views failed, kept raw for those')
-            upscaled_tiles = harmonized
-            del _h_pipe
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            slog.info('identity_harmonize_done',
-                      ms=int((time.time() - _h_t0) * 1000),
-                      failed_views=_h_fail_count)
-            log(f'identity-harmonized 6 views in {time.time() - _h_t0:.1f}s (failed={_h_fail_count})')
-        except Exception as _hi:
-            slog.warn('identity_harmonize_skipped', reason=str(_hi)[:200])
-            log(f'identity harmonization skipped ({_hi})')
-
-    # ------------------------------------------------------------------
-    # Legacy style harmonization pass (OPT-IN — disabled by default)
-    # Kept for backwards compat. Disabled because SDXL-with-text-only
-    # drifted colors (horse→green). Use FABMESH_MV_STYLE_HARMONIZE=1 to
-    # force the legacy behavior. Prefer the IPAdapter-based pass above.
-    # ------------------------------------------------------------------
+    # Zero123++ v1.2 produces views that look slightly cartoon-rendered
+    # compared to a photorealistic input image — the model was trained on
+    # the Objaverse synthetic renders and imposes that look on everything.
+    # Baking this mix into the atlas gives a texture whose front (from the
+    # source photo) is photorealistic but whose back/sides (from Zero123++)
+    # look like they belong to a different character.
+    #
+    # Fix: after rembg, pass each view through SDXL img2img (RealVisXL)
+    # at strength 0.35 with a "photorealistic, matches reference" prompt,
+    # using the always-on SDXL server (http://127.0.0.1:5555/img2img)
+    # when available. Falls through silently if the server is down —
+    # the pipeline still works, it just skips the harmonization.
     try:
         import requests as _rq
-        if (not _identity_on) and os.environ.get('FABMESH_MV_STYLE_HARMONIZE') == '1' and \
-                _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
+        if _rq.get('http://127.0.0.1:5555/ping', timeout=1.5).status_code == 200:
             slog.progress(89, 'style_harmonize')
             log('MULTIVIEW_PROGRESS: 89 style-harmonize')
-            _subpct(88, 'style_harmonize')
             # Prompt keeps subject identity neutral; bridge supplies a
             # subject prompt via env when available (FABMESH_REFINE_PROMPT).
             subject = os.environ.get('FABMESH_REFINE_PROMPT', '').strip()
@@ -446,7 +310,6 @@ def generate_multiview(input_image_path, output_dir, size=320):
         log(f'saved {view_names[i]}.png ({tile.size} mode={tile.mode})')
 
     slog.progress(90, 'cleanup')
-    _subpct(98, 'cleanup')
 
     # Free GPU
     del pipeline

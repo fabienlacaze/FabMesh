@@ -41,12 +41,6 @@ def log(msg):
     print(f'[tex_project] {msg}', flush=True)
 
 
-def _subpct(pct: int, label: str = ''):
-    """Emit a sub-phase percentage (0..100). The bridge remaps it into the
-    tex_project slice of the overall progress bar."""
-    print(f"FABMESH_SUBPCT: {max(0, min(100, int(pct)))} {label}", flush=True)
-
-
 def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                     multiview_dir=None, rotation_offset_deg=0.0):
     _slog = Logger('tex_project',
@@ -487,19 +481,8 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         # Full orbit: azimuth around Y + elevation around X (Zero123++
         # alternates +20 / -10 elevation per view — projecting these
         # as pure azimuth produced the mosaic atlas bug).
-        # Sign conventions tunable via env for the calibration sweep:
-        #   FABMESH_TEXPROJ_FLIP_AZIM=True  -> rot_y(+azim) instead of rot_y(-azim)
-        #   FABMESH_TEXPROJ_FLIP_ELEV=True  -> rot_x(-elev) instead of rot_x(+elev)
-        #   FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM=True -> rot_y(-azim) instead of rot_y(+azim)
-        _fa = os.environ.get('FABMESH_TEXPROJ_FLIP_AZIM', 'False') == 'True'
-        _fe = os.environ.get('FABMESH_TEXPROJ_FLIP_ELEV', 'False') == 'True'
-        _fc = os.environ.get('FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM', 'False') == 'True'
-        _az_w2c = azim_deg if _fa else -azim_deg
-        _el_w2c = -elev_deg if _fe else elev_deg
-        _az_cam = -azim_deg if _fc else azim_deg
-        _el_cam = elev_deg if _fe else -elev_deg  # keep inverse of _el_w2c
-        R_w2c_v = R_w2c_base @ rot_x(_el_w2c) @ rot_y(_az_w2c)
-        cam_pos_w = (rot_y(_az_cam) @ rot_x(_el_cam) @
+        R_w2c_v = R_w2c_base @ rot_x(elev_deg) @ rot_y(-azim_deg)
+        cam_pos_w = (rot_y(azim_deg) @ rot_x(-elev_deg) @
                      np.array([distance, 0.0, 0.0]))
         t_w2c_v = -R_w2c_v @ cam_pos_w
 
@@ -523,17 +506,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     n_drawn = 0
     n_skipped = 0
-    _n_faces_total = len(faces)
-    # Rasterization owns most of tex_project wall-clock — emit ~20
-    # progress ticks distributed across the loop so the UI bar moves
-    # steadily inside the tex_project slice (overall 45-60%).
-    _tick_every = max(1, _n_faces_total // 20)
-    _subpct(10, 'rasterize_start')
     for fi in range(len(faces)):
-        if fi and (fi % _tick_every == 0):
-            # Loop eats ~80% of the tex_project phase; map the face index
-            # into sub-pct 10..90 so final steps (EDT, GLB write) can use 90..100.
-            _subpct(10 + int((fi / _n_faces_total) * 80), f'rasterize_{fi}')
         # Do NOT gate on avg_vis here — low visibility from front view doesn't
         # mean invisible from multiview. Let the per-view loop below decide.
         if uv_areas[fi] < 0.1 or not aspect_ok[fi] or not edge_size_ok[fi]:
@@ -606,7 +579,6 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
         n_drawn += 1
 
-    _subpct(92, 'rasterize_done')
     log(f'per-pixel multi-view rasterization: {n_drawn}/{len(faces)} faces, {n_skipped} skipped, {len(view_data)} views')
     _evt('rasterize_done', drawn=n_drawn, skipped=n_skipped,
          total_faces=len(faces), views=len(view_data))

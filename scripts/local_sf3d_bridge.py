@@ -23,172 +23,6 @@ import time
 import traceback
 from contextlib import nullcontext
 
-# Shared progress helper — single source of truth for the overall-percent
-# phase budget. Edit scripts/fabmesh_progress.py:PHASE_BUDGET to rebalance.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fabmesh_progress as _fprog
-
-
-def _emit_progress(phase_name: str, pct: int | None = None, label: str | None = None):
-    """Emit a `LOCAL_SF3D_PROGRESS: <overall%> <label>` line. When pct is None,
-    use the phase's start percentage. Renderer picks this up via its
-    `_PROGRESS:\\s*(\\d+)` regex and never decreases the bar."""
-    if pct is None:
-        pct = _fprog.start(phase_name)
-    lbl = label or phase_name
-    print(f"LOCAL_SF3D_PROGRESS: {pct} {lbl}", flush=True)
-
-
-def _stream_subprocess(cmd, timeout=600, env=None, sub_phase: str | None = None):
-    """Replacement for `subprocess.run(capture_output=True)` that streams
-    stdout line-by-line. Any line matching `FABMESH_SUBPCT: <0-100> ...` is
-    remapped into the given `sub_phase`'s overall-percent slice and re-emitted
-    as a `LOCAL_SF3D_PROGRESS:` line so the UI progress bar moves steadily
-    during long sub-scripts (multi-view generation, SDXL refine, projection).
-
-    Returns an object with .returncode, .stdout (captured), .stderr (captured)
-    to keep the call sites close to what subprocess.run returned before.
-    """
-    import subprocess as _sp
-    import re as _re
-    _sub_re = _re.compile(r'FABMESH_SUBPCT:\s*(\d{1,3})')
-    # Sub-scripts emit `<COMPONENT>_PROGRESS: <pct>` via slog.progress()
-    # (multiview_gen.py -> `MULTIVIEW_PROGRESS:`, texture_* -> `TEXTURE_*_PROGRESS:`).
-    # Those values are SUB-phase percentages, not overall percentages. If we
-    # forward them verbatim the renderer's legacy scraper would snap the bar
-    # to ~90% as soon as multiview hits pct=90 — hiding the whole refine
-    # phase. Neutralize by rewriting the literal token so no downstream
-    # consumer matches `_PROGRESS:` in a forwarded sub-script line.
-    # (LOCAL_*_PROGRESS: lines are only emitted by bridges, never forwarded.)
-    def _neutralize(s: str) -> str:
-        return s.replace('_PROGRESS:', '_SUBPROG:')
-
-    class _Result:
-        def __init__(self):
-            self.returncode = -1
-            self.stdout = ''
-            self.stderr = ''
-
-    res = _Result()
-    # Force Python sub-processes to flush stdout line-by-line so every
-    # `print(..., flush=True)` in multiview_gen/texture_project/texture_refine
-    # actually reaches us immediately — otherwise Windows text-mode pipes
-    # batch up until the child exits, which defeats the whole point of
-    # streaming and freezes the UI progress bar until the sub-script ends.
-    _popen_env = dict(env) if env else dict(os.environ)
-    _popen_env.setdefault('PYTHONUNBUFFERED', '1')
-    proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
-                     text=True, env=_popen_env, bufsize=1)
-
-    # Heartbeat thread: even when the sub-script is silent for a long time
-    # (Zero123++ spends ~45s in a single pipeline() call with no intermediate
-    # prints, likewise SDXL per-tile), the UI bar would otherwise freeze at
-    # the last known sub-pct. Every 2s we interpolate toward the end of the
-    # current sub-phase slice based on elapsed/expected time.
-    import threading as _th
-    _hb_stop = _th.Event()
-    _hb_state = {'last_sub_pct': 0, 'last_sub_time': time.time()}
-
-    def _heartbeat():
-        if not sub_phase:
-            return
-        # Bump 1 sub-pct every 2s of silence, cap at 95% of the slice, and
-        # STOP emitting once we hit the cap (otherwise we spam the same
-        # value forever which drowns the diagnostic log without helping
-        # the bar). Real events reset _hb_state when they arrive, so the
-        # cap naturally resets on every real signal.
-        _last_emitted = -1
-        while not _hb_stop.wait(2.0):
-            elapsed = time.time() - _hb_state['last_sub_time']
-            last = _hb_state['last_sub_pct']
-            bump = min(95, last + int(elapsed / 2.0))
-            if bump > last and bump > _last_emitted:
-                try:
-                    overall = _fprog.sub(sub_phase, bump)
-                    _emit_progress(sub_phase, overall,
-                                   label=f"{sub_phase}:{bump}~hb")
-                    _last_emitted = bump
-                except Exception:
-                    pass
-
-    _hb_thread = _th.Thread(target=_heartbeat, daemon=True)
-    if sub_phase:
-        _hb_thread.start()
-
-    # CRITICAL — drain stderr continuously in a background thread. Without
-    # this, Python sub-scripts (Zero123++, SF3D, SDXL) write warnings/tqdm
-    # progress/logging to stderr at ~1KB/s; when the Windows stderr pipe
-    # buffer fills (~64KB), the child blocks on its next write → visible
-    # symptom: VRAM allocated but GPU util at 0% for minutes on end, no
-    # progress events. Reading stderr out-of-band keeps the child flowing.
-    _err_buf = []
-
-    def _drain_stderr():
-        assert proc.stderr is not None
-        for eline in iter(proc.stderr.readline, ''):
-            if not eline:
-                break
-            _err_buf.append(eline)
-
-    _err_thread = _th.Thread(target=_drain_stderr, daemon=True)
-    _err_thread.start()
-    collected_out = []
-    t_start = time.time()
-    try:
-        assert proc.stdout is not None
-        for line in iter(proc.stdout.readline, ''):
-            if not line:
-                break
-            collected_out.append(line)
-            line_stripped = line.rstrip('\n')
-            # Forward so main.js still sees every sub-script log, but
-            # neutralize any `*_PROGRESS:` token so the renderer's scraper
-            # doesn't mistake a sub-phase percentage for the overall %.
-            print(f"LOCAL_SF3D: {_neutralize(line_stripped)}", flush=True)
-            # Remap sub-phase 0-100 into our overall slice.
-            if sub_phase:
-                m = _sub_re.search(line_stripped)
-                if m:
-                    try:
-                        sub_pct = int(m.group(1))
-                        overall = _fprog.sub(sub_phase, sub_pct)
-                        _emit_progress(sub_phase, overall,
-                                       label=f"{sub_phase}:{sub_pct}")
-                        # Reset heartbeat anchor: from now on the heartbeat
-                        # extrapolates from THIS sub-pct, not the phase start.
-                        _hb_state['last_sub_pct'] = sub_pct
-                        _hb_state['last_sub_time'] = time.time()
-                    except Exception:
-                        pass
-            if timeout and (time.time() - t_start) > timeout:
-                proc.kill()
-                res.returncode = -9
-                res.stderr = f'timeout after {timeout}s'
-                _hb_stop.set()
-                return res
-        proc.wait(timeout=max(1.0, timeout - (time.time() - t_start))
-                  if timeout else None)
-        res.returncode = proc.returncode
-        res.stdout = ''.join(collected_out)
-        # stderr was drained live by _drain_stderr — join the thread then
-        # collect what it captured. Don't proc.stderr.read() here: the thread
-        # already consumed the pipe.
-        try:
-            _err_thread.join(timeout=2.0)
-        except Exception:
-            pass
-        res.stderr = ''.join(_err_buf)
-    except _sp.TimeoutExpired:
-        proc.kill()
-        res.returncode = -9
-        res.stderr = 'timeout'
-    except Exception as e:
-        res.returncode = -1
-        res.stderr = str(e)
-    finally:
-        _hb_stop.set()
-    return res
-
 
 def generate_3d(
     image_path,
@@ -208,7 +42,7 @@ def generate_3d(
     print(f"LOCAL_SF3D: image={image_path}", flush=True)
     print(f"LOCAL_SF3D: output={output_path}", flush=True)
     print(f"LOCAL_SF3D: texture_res={texture_resolution} verts={target_vertex_count} remesh={remesh_option} subdivide={subdivide_levels}", flush=True)
-    _emit_progress('import', label='import_start')
+    print(f"LOCAL_SF3D_PROGRESS: 5 import_start", flush=True)
 
     # Path to the cloned SF3D repo (bundled in external/)
     SF3D_DIR = os.path.abspath(os.path.join(
@@ -226,7 +60,7 @@ def generate_3d(
     from sf3d.system import SF3D
     from sf3d.utils import get_device, remove_background, resize_foreground
 
-    _emit_progress('preprocess', label='preprocess_start')
+    print(f"LOCAL_SF3D_PROGRESS: 10 preprocess_start", flush=True)
 
     # Enforce VRAM cap passed by FabMesh main.js (optional)
     if torch.cuda.is_available():
@@ -259,52 +93,75 @@ def generate_3d(
     image.save(_preprocessed_path)
 
     # ------------------------------------------------------------------
-    # Look for pre-generated multi-views (Zero123++) in the project's image
-    # dir. Convention (since 2026-04-15): the UI's "Generate image" has a
-    # multi-view checkbox that, when enabled, runs multiview_gen at image
-    # creation time and writes the 6 views to `images/<project>/multiview/`.
-    #
-    # The bridge NEVER generates multi-views itself anymore — it just uses
-    # what the user chose to have. If the folder doesn't exist or is
-    # incomplete, we fall through to SF3D-only (no projection phase).
+    # Generate multi-view images (Zero123++) for full-coverage texture
+    # projection. ONLY needed when the post-bake step actually consumes
+    # them. The 'upscale' (default) and 'none' modes don't, so skipping
+    # saves ~35 s of wasted GPU time per generation.
     # ------------------------------------------------------------------
-    _multiview_dir = None
+    _multiview_dir = output_path + '.multiview'
     _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'refine').lower()
-    try:
-        _src_img_dir = os.path.dirname(os.path.abspath(image_path))
-        _img_stem = os.path.splitext(os.path.basename(image_path))[0]
-        _mv_candidate = os.path.join(_src_img_dir, f'{_img_stem}_multiview')
-        _mv_valid = (
-            os.path.isdir(_mv_candidate)
-            and all(os.path.exists(os.path.join(_mv_candidate, f'view_{i}.png'))
-                    for i in range(6))
-        )
-        if _mv_valid:
-            # Copy the 6 views + input.png next to the mesh output so the
-            # rest of the pipeline finds them at the expected location.
-            import shutil as _sh
-            _multiview_dir = output_path + '.multiview'
-            os.makedirs(_multiview_dir, exist_ok=True)
-            for _fn in ('input.png',) + tuple(f'view_{i}.png' for i in range(6)):
-                _src_mv = os.path.join(_mv_candidate, _fn)
-                if os.path.exists(_src_mv):
-                    _sh.copy2(_src_mv, os.path.join(_multiview_dir, _fn))
-            print(f"LOCAL_SF3D: using pre-generated multi-views from {_mv_candidate}",
-                  flush=True)
-        else:
-            print(f"LOCAL_SF3D: no pre-generated multi-views in {_mv_candidate} "
-                  f"— SF3D-only pipeline (no Zero123++ auto-gen)",
-                  flush=True)
-            _multiview_dir = None
-    except Exception as _mv_e:
-        print(f"LOCAL_SF3D: multi-view lookup failed ({_mv_e}) — SF3D-only",
+    # 'refine' (default) is the Meshy-style SDXL atlas polish; it ALSO
+    # benefits from having multi-views available because (a) texture_project
+    # can densify coverage before refine runs, and (b) future IPAdapter-
+    # guided refine will consume them as conditions for fidelity. The
+    # previous commit 958b30d switched default to 'refine' WITHOUT adding
+    # it here, which silently disabled multi-views for every user-visible
+    # generation — root cause of the low back/sides fidelity.
+    _modes_using_mv = ('atlas', 'vc', 'augment', 'atlas_refine', 'refine')
+    if _proj_mode_pre not in _modes_using_mv:
+        print(f"LOCAL_SF3D: multi-view skipped (mode={_proj_mode_pre}, not needed)",
               flush=True)
         _multiview_dir = None
+    else:
+        try:
+            print(f"LOCAL_SF3D_PROGRESS: 12 multiview_gen", flush=True)
+            import subprocess as _sp_mv
+            _mv_script = os.path.join(os.path.dirname(__file__), 'multiview_gen.py')
+            # Look up the subject prompt from prompts.json next to the
+            # source image (same strategy as refine mode). multiview_gen.py's
+            # optional style-harmonization pass reads it via env so it can
+            # guide SDXL img2img toward the real subject identity.
+            _mv_subject_prompt = None
+            try:
+                import json as _mv_pj
+                _mv_img_dir = os.path.dirname(os.path.abspath(image_path))
+                _mv_pf = os.path.join(_mv_img_dir, 'prompts.json')
+                if os.path.exists(_mv_pf):
+                    with open(_mv_pf, 'r', encoding='utf-8') as _pf:
+                        _mv_entries = _mv_pj.load(_pf)
+                    if isinstance(_mv_entries, list) and _mv_entries:
+                        _mv_subject_prompt = (
+                            _mv_entries[-1].get('prompt')
+                            or _mv_entries[-1].get('fullPrompt'))
+            except Exception:
+                pass
+            _mv_env = dict(os.environ)
+            if _mv_subject_prompt:
+                _mv_env['FABMESH_REFINE_PROMPT'] = _mv_subject_prompt
+            if os.path.exists(_mv_script):
+                _r_mv = _sp_mv.run(
+                    [sys.executable, _mv_script, _preprocessed_path, _multiview_dir],
+                    capture_output=True, text=True, timeout=600,
+                    env=_mv_env,
+                )
+                if _r_mv.stdout:
+                    for line in _r_mv.stdout.strip().split('\n'):
+                        print(f"LOCAL_SF3D: {line}", flush=True)
+                if _r_mv.returncode == 0:
+                    print(f"LOCAL_SF3D: multi-view generated ({_multiview_dir})", flush=True)
+                else:
+                    print(f"LOCAL_SF3D: multi-view failed (code {_r_mv.returncode}), continuing without", flush=True)
+                    _multiview_dir = None
+            else:
+                _multiview_dir = None
+        except Exception as _mv_e:
+            print(f"LOCAL_SF3D: multi-view skipped ({_mv_e})", flush=True)
+            _multiview_dir = None
 
     # ------------------------------------------------------------------
     # Download + load SF3D weights (~3 GB, one-time, gated on HF)
     # ------------------------------------------------------------------
-    _emit_progress('sf3d_load', label='load_pipeline')
+    print(f"LOCAL_SF3D_PROGRESS: 25 load_pipeline", flush=True)
     t0 = time.time()
     model = SF3D.from_pretrained(
         "stabilityai/stable-fast-3d",
@@ -358,7 +215,7 @@ def generate_3d(
     # ------------------------------------------------------------------
     # Run inference
     # ------------------------------------------------------------------
-    _emit_progress('sf3d_infer', label='inference_start')
+    print(f"LOCAL_SF3D_PROGRESS: 50 inference_start", flush=True)
     t0 = time.time()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
@@ -388,8 +245,7 @@ def generate_3d(
             return False
         mesh = mesh[0]
 
-    # End of SF3D inference — enter the finalize phase (decimate / subdivide).
-    _emit_progress('finalize', label='export')
+    print(f"LOCAL_SF3D_PROGRESS: 90 export", flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     # Track the auto-align rotation so downstream projection can compensate
@@ -478,34 +334,10 @@ def generate_3d(
         _y_r = _y_top - _y_bot
         _mask = (_rotated[:, 1] > _y_bot + 0.30 * _y_r) & (_rotated[:, 1] < _y_bot + 0.80 * _y_r)
         _chest_z_mean = _rotated[_mask, 2].mean() if _mask.sum() > 0 else 0.0
-
-        # Chest-z alone is unreliable when |chest_z_mean| is small
-        # (observed on 'garcon' mesh: +0.005, triggered a spurious +180°
-        # flip that put the face behind the head). Add a second vote
-        # using the HEAD region — human heads have much more mass in
-        # front of the symmetry axis than behind (nose, chin, forehead
-        # vs flat nape). The face-forward z should be NEGATIVE.
-        _head_mask = _rotated[:, 1] > _y_bot + 0.85 * _y_r
-        _head_z_mean = (_rotated[_head_mask, 2].mean()
-                        if _head_mask.sum() > 10 else 0.0)
-
-        # Vote: 2 signals, both should say the same thing. If they
-        # disagree, trust the one with the larger absolute magnitude.
-        _chest_vote = -1 if _chest_z_mean < 0 else (1 if _chest_z_mean > 0 else 0)
-        _head_vote  = -1 if _head_z_mean  < 0 else (1 if _head_z_mean  > 0 else 0)
-        # Combined: weight each by |value|.
-        # Empirical rule (verified by user on 'garcon' mesh 2026-04-16):
-        # on SF3D output rotated by -_sym_theta, the subject FACES +Z when
-        # chest_z+head_z is NEGATIVE (nose/chin/chest bulge sample lands
-        # behind the centroid in z). To face -Z (glTF forward) we need to
-        # flip WHEN the sum is negative.
-        _vote_sum = (_chest_z_mean + _head_z_mean)
-        _needs_flip = _vote_sum < 0
-        if _needs_flip:
+        # We want chest_z_mean < 0 (chest bulges toward -Z = forward in glTF)
+        # If it's > 0, the mesh is pointing BACKWARD: rotate another 180°.
+        if _chest_z_mean > 0:
             _sym_theta += _np.pi
-        print(f"LOCAL_SF3D: facing-check chest_z={_chest_z_mean:+.3f} "
-              f"head_z={_head_z_mean:+.3f} sum={_vote_sum:+.3f} "
-              f"flip={_needs_flip}", flush=True)
 
         # Final rotation to apply: -_sym_theta (so that the subject's symmetry
         # axis aligns with the world -Z axis).
@@ -744,7 +576,7 @@ def generate_3d(
     if subdiv_val < 0:
         # --- DECIMATE to low-poly ---
         target_faces = abs(subdiv_val)
-        _emit_progress('finalize', label='decimate_start')
+        print(f"LOCAL_SF3D_PROGRESS: 92 decimate_start", flush=True)
         print(f"LOCAL_SF3D: decimating to ~{target_faces} faces...", flush=True)
         try:
             import subprocess as _sp
@@ -769,7 +601,7 @@ def generate_3d(
         # --- TARGET face count (e.g. 20000, 75000, 150000) ---
         # Subdivide to the next power-of-4 level above target, then decimate to exact
         target_faces = subdiv_val
-        _emit_progress('finalize', label='target_faces_start')
+        print(f"LOCAL_SF3D_PROGRESS: 92 target_faces_start", flush=True)
         print(f"LOCAL_SF3D: targeting ~{target_faces} faces (subdivide + decimate)...", flush=True)
         import subprocess as _sp
         _raw = output_path + '.presub.glb'
@@ -818,7 +650,7 @@ def generate_3d(
 
     elif subdiv_val > 0:
         # --- SUBDIVISION levels (1-4) ---
-        _emit_progress('finalize', label='subdivide_start')
+        print(f"LOCAL_SF3D_PROGRESS: 92 subdivide_start", flush=True)
         print(f"LOCAL_SF3D: subdividing x{subdivide_levels} via trimesh...", flush=True)
         import subprocess
         subdivide_script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
@@ -848,7 +680,7 @@ def generate_3d(
     # Texture projection: LAST step — after subdivision/decimation.
     # Re-project source photo onto the final mesh for sharp textures.
     # ------------------------------------------------------------------
-    _emit_progress('tex_project', label='texture_project')
+    print(f"LOCAL_SF3D_PROGRESS: 97 texture_project", flush=True)
     # Modes:
     #   upscale (DEFAULT) — keep SF3D's native baked atlas (correct UV
     #     layout, just blurry) and run RealESRGAN x4 on it. Cleanest
@@ -869,7 +701,6 @@ def generate_3d(
         import subprocess as _sp_proj
         _cmd = None
         _label = None
-        _cmd_sub_phase = None  # which phase's slice the streamed sub-pct maps to
         if _proj_mode == 'upscale' and os.path.exists(_upscale_script):
             # Atlas-only sharpener: keep SF3D's UV mapping and texture
             # data, just run RealESRGAN x4 on the baked image. This
@@ -878,7 +709,6 @@ def generate_3d(
             _cmd = [sys.executable, _upscale_script, output_path,
                     output_path, '--target', str(_target)]
             _label = f'atlas upscale -> {_target}px'
-            _cmd_sub_phase = 'refine'  # upscale occupies the refine time slot
         elif _proj_mode == 'refine' and os.path.exists(_refine_script):
             # Meshy-style: pass the SF3D atlas through SDXL img2img at
             # low strength to add micro-detail without changing layout.
@@ -918,16 +748,16 @@ def generate_3d(
             if (_multiview_dir and os.path.isdir(_multiview_dir)
                     and os.path.exists(_atlas_script)):
                 try:
-                    # Streamed so the UV-projection rasterization loop can
-                    # emit FABMESH_SUBPCT: lines that move the UI bar inside
-                    # the tex_project slice.
-                    _r_mv_proj = _stream_subprocess(
+                    _r_mv_proj = _sp_proj.run(
                         [sys.executable, _atlas_script, output_path,
                          _preprocessed_path, output_path, str(tex_res),
                          '--multiview', _multiview_dir,
-                         '--rotation-offset', str(-auto_align_rot_deg)],
-                        timeout=300, sub_phase='tex_project',
+                         '--rotation-offset', str(auto_align_rot_deg)],
+                        capture_output=True, text=True, timeout=300,
                     )
+                    if _r_mv_proj.stdout:
+                        for line in _r_mv_proj.stdout.strip().split('\n'):
+                            print(f"LOCAL_SF3D: {line}", flush=True)
                     if _r_mv_proj.returncode == 0:
                         print("LOCAL_SF3D: multi-view projection applied before refine", flush=True)
                     else:
@@ -943,7 +773,6 @@ def generate_3d(
                 _cmd += ['--prompt', _refine_prompt]
                 print(f"LOCAL_SF3D: refine prompt={_refine_prompt[:80]!r}", flush=True)
             _label = f'SDXL atlas refine -> {_target}px'
-            _cmd_sub_phase = 'refine'
         elif _proj_mode == 'augment' and os.path.exists(_augment_script):
             # Keep SF3D's atlas where it's good (front), additively
             # rewrite back/sides from multi-views where they see better.
@@ -951,27 +780,24 @@ def generate_3d(
                 _cmd = [sys.executable, _augment_script, output_path,
                         _preprocessed_path, output_path,
                         '--multiview', _multiview_dir,
-                        '--rotation-offset', str(-auto_align_rot_deg)]
+                        '--rotation-offset', str(auto_align_rot_deg)]
                 _label = 'multi-view augment'
-                _cmd_sub_phase = 'tex_project'
             else:
                 print('LOCAL_SF3D: augment mode requested but no multi-view dir', flush=True)
         elif _proj_mode == 'vc' and os.path.exists(_vc_script):
             _cmd = ([sys.executable, _vc_script, output_path,
                      _preprocessed_path, output_path]
                     + (['--multiview', _multiview_dir,
-                        '--rotation-offset', str(-auto_align_rot_deg)]
+                        '--rotation-offset', str(auto_align_rot_deg)]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'vertex-color projection'
-            _cmd_sub_phase = 'tex_project'
         elif _proj_mode == 'atlas' and os.path.exists(_atlas_script):
             _cmd = ([sys.executable, _atlas_script, output_path,
                      _preprocessed_path, output_path, str(tex_res)]
                     + (['--multiview', _multiview_dir,
-                        '--rotation-offset', str(-auto_align_rot_deg)]
+                        '--rotation-offset', str(auto_align_rot_deg)]
                        if _multiview_dir and os.path.isdir(_multiview_dir) else []))
             _label = 'UV atlas projection'
-            _cmd_sub_phase = 'tex_project'
         elif _proj_mode == 'atlas_refine' and os.path.exists(_atlas_script):
             # Two-pass: first multi-view UV projection (atlas script)
             # to cover the back/sides with real Zero123++ data, then
@@ -982,9 +808,8 @@ def generate_3d(
                 _cmd = ([sys.executable, _atlas_script, output_path,
                          _preprocessed_path, output_path, str(tex_res),
                          '--multiview', _multiview_dir,
-                         '--rotation-offset', str(-auto_align_rot_deg)])
+                         '--rotation-offset', str(auto_align_rot_deg)])
                 _label = 'atlas+refine pass 1 (projection)'
-                _cmd_sub_phase = 'tex_project'
             else:
                 print('LOCAL_SF3D: atlas_refine needs multi-view dir', flush=True)
         elif _proj_mode == 'none':
@@ -994,11 +819,10 @@ def generate_3d(
             # can take ~90s when the SDXL server isn't running (in-process
             # fallback loads RealVisXL ~6 GB). The old 120s killed it
             # mid-refine and we got back the unrefined SF3D atlas.
-            # Streamed so FABMESH_SUBPCT lines emitted by the sub-script
-            # (e.g. texture_refine.py per-tile, texture_project.py per-face-batch)
-            # are remapped live into the overall progress bar.
-            _r_proj = _stream_subprocess(_cmd, timeout=600,
-                                         sub_phase=_cmd_sub_phase)
+            _r_proj = _sp_proj.run(_cmd, capture_output=True, text=True, timeout=600)
+            if _r_proj.stdout:
+                for line in _r_proj.stdout.strip().split('\n'):
+                    print(f"LOCAL_SF3D: {line}", flush=True)
             if _r_proj.returncode != 0:
                 print(f"LOCAL_SF3D: {_label} failed (code {_r_proj.returncode})", flush=True)
                 if _r_proj.stderr:
@@ -1029,8 +853,11 @@ def generate_3d(
                     if _refine_prompt:
                         _refine_cmd += ['--prompt', _refine_prompt]
                     print(f"LOCAL_SF3D: atlas_refine pass 2 (SDXL refine) starting", flush=True)
-                    _r2 = _stream_subprocess(_refine_cmd, timeout=600,
-                                             sub_phase='refine')
+                    _r2 = _sp_proj.run(_refine_cmd, capture_output=True,
+                                        text=True, timeout=600)
+                    if _r2.stdout:
+                        for line in _r2.stdout.strip().split('\n'):
+                            print(f"LOCAL_SF3D: {line}", flush=True)
                     if _r2.returncode != 0:
                         print(f"LOCAL_SF3D: pass 2 refine failed (code {_r2.returncode})", flush=True)
                     else:
@@ -1049,7 +876,7 @@ def generate_3d(
     # Re-read final file size
     size = os.path.getsize(output_path)
     print(f"LOCAL_SF3D_SUCCESS: {output_path} ({size} bytes)", flush=True)
-    print(f"LOCAL_SF3D_PROGRESS: 100 done", flush=True)  # final — keep literal 100
+    print(f"LOCAL_SF3D_PROGRESS: 100 done", flush=True)
 
     # Free GPU
     del model
