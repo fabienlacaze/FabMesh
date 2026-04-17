@@ -272,13 +272,14 @@ def check_stage4_projection(work_dir, env=None):
 
     out_glb = os.path.join(work_dir, 'stage4_projected.glb')
     script = os.path.join(ROOT, 'scripts', 'texture_project.py')
-    # FABMESH_TEXPROJ_SKIP_UNDO=1: GT cube is in natural frame, so
-    # texture_project must NOT apply its R_undo (which assumes SF3D input).
+    # GT cube is in natural glTF frame (front=-Z, up=+Y). SKIP_UNDO=1
+    # stops R_undo from rotating the cube into SF3D frame (which would
+    # scramble the axes).
     e = {**os.environ, 'PYTHONUNBUFFERED': '1',
          'FABMESH_TEXPROJ_SKIP_UNDO': '1', **(env or {})}
     r = subprocess.run(
         [sys.executable, script, GT_CUBE_GLB, gt_input, out_glb, '1024',
-         '--multiview', GT_MV_DIR, '--rotation-offset', '330'],
+         '--multiview', GT_MV_DIR, '--rotation-offset', '120'],
         env=e, capture_output=True, text=True, timeout=300)
     if r.returncode != 0 or not os.path.exists(out_glb):
         res['details']['error'] = (r.stderr or '')[-400:]

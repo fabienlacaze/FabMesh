@@ -50,7 +50,41 @@ bridge + auto-align, so the chain breaks.
 | Multi-views | Zero123++ output on real subj | Pre-rendered from GT cube (natural frame) |
 | Net effect | Self-consistent chain | 3 conventions mismatched |
 
-**Best score so far**: 2/6 at rotation-offset=90°. FRONT sim=0.638 (R letter appears but in wrong orientation), RIGHT sim=0.665 (spurious pass — red dominant matches). So "2/6" is misleading: front + right "pass" the 0.60 threshold by luck of palette similarity, NOT by correct projection. Visual inspection confirms texture is still scrambled.
+**Best score**: 2/6 at SKIP_UNDO=1 + rotation-offset=90. FRONT 0.638,
+RIGHT 0.665. Front+right pass by palette coincidence mostly.
+
+**Arithmetic trace of R_undo on face normals** (proves why fix is hard):
+
+R_undo = Rx(+90) @ Ry(-90) = [[0,0,-1],[-1,0,0],[0,1,0]]
+
+| Face (natural normal) | Post-R_undo normal | Matching (az,el) |
+|---|---|---|
+| FRONT (0,0,-1) | (+1,0,0) | az=0, el∈{0,20,-10} ✓ |
+| BACK (0,0,+1) | (-1,0,0) | az=180 ✓ |
+| TOP (0,+1,0) | (0,0,+1) | az=270 (!) ✓ |
+| BOTTOM (0,-1,0) | (0,0,-1) | az=90 (!) ✓ |
+| RIGHT (+1,0,0) | (0,-1,0) | **NO MATCH** in Z123 angles |
+| LEFT (-1,0,0) | (0,+1,0) | **NO MATCH** |
+
+So R_undo maps TOP/BOTTOM → horizontal azimuths, and RIGHT/LEFT → to
+the ±Y axis which Zero123++ never images directly (elev is only ±20).
+**The vertical Y axis of the subject becomes uncoverable.**
+
+That's why 2/6 is the ceiling with rotation tweaks alone: we can get
+FRONT + BACK or FRONT + one side to align, never more.
+
+**Full fix requires TWO coordinated changes**:
+  (1) change R_w2c_base so natural +Y = camera up
+  (2) keep R_undo = identity for the GT cube
+These two break the real pipeline (which relies on the current basis +
+R_undo). Making the fix backward-compat needs either a flag on the
+bridge that signals "input is already canonical" and selects a
+different code path, or a cube asset rebuilt in SF3D frame so both
+paths use the same convention.
+
+**Not done tonight**: the backward-compat refactor. Session ends with
+stage 4 at 2/6 stable, full diagnostic visible in UI, user can see
+per-face GT-vs-got. Real pipeline untouched.
 
 **What works**:
   - UI calibration button functional in ~7s
