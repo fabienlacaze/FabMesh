@@ -2553,11 +2553,65 @@ button.tool-active {
 }
 #lightbox-2.hidden { display: none; }
 #lightbox-2 img {
-  max-width: 92vw;
+  /* Leave ~220 px on the right for the tool column */
+  max-width: calc(92vw - 220px);
   max-height: 92vh;
   object-fit: contain;
   box-shadow: 0 20px 60px rgba(0,0,0,0.8);
   border-radius: 8px;
+  margin-right: 220px;
+}
+
+/* Tool column on the right side of the big viewer */
+.lb-toolbox {
+  position: absolute;
+  right: 20px;
+  top: 72px;
+  bottom: 72px;
+  width: 200px;
+  background: rgba(26, 26, 40, 0.85);
+  border: 1px solid #2a2a3a;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  backdrop-filter: blur(8px);
+  z-index: 9510;
+}
+.lb-toolbox-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2, #8a8a9a);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 4px 2px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 2px;
+}
+.lb-toolbox-group-label:first-child { padding-top: 0; }
+.lb-tool-btn {
+  background: #1d1d2c;
+  color: #e5e5ef;
+  border: 1px solid #3a3a4d;
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.15s ease;
+}
+.lb-tool-btn:hover {
+  background: #2a2a42;
+  border-color: var(--accent, #d946ef);
+  color: white;
+}
+.lb-tool-btn:active {
+  transform: scale(0.97);
 }
 #lightbox-2-close {
   position: absolute;

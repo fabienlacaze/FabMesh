@@ -2522,6 +2522,45 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
   } catch (_) {}
 });
 
+// Lightbox tool column: each button routes to the workspace handler
+// (clicking the workspace button). Tools read editTarget(p) which
+// follows _activeMultiview — already in sync with the lightbox.
+(function _wireLightboxToolbox() {
+  const TOOL_MAP = {
+    modify:      'ws-modify-btn',
+    autoinpaint: 'ws-autoinpaint-btn',
+    removebg:    'ws-removebg-btn',
+    resolution:  'ws-resolution-btn',
+    facefix:     'ws-facefix-btn',
+    symmetry:    'ws-symmetrize-auto-btn',
+    mask:        'ws-mask-btn',
+    clone:       'ws-clone-btn',
+    paint:       'ws-paint-btn',
+    crop:        'ws-crop-btn',
+  };
+  const box = document.getElementById('lb-toolbox');
+  if (!box) return;
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lb-tool]');
+    if (!btn) return;
+    const toolKey = btn.getAttribute('data-lb-tool');
+    const wsBtnId = TOOL_MAP[toolKey];
+    if (!wsBtnId) return;
+    const wsBtn = document.getElementById(wsBtnId);
+    if (!wsBtn) { console.warn('lb-tool: missing ws button', wsBtnId); return; }
+    // Some tools (Modify, Draw Mask, Clone, Paint, Auto Inpaint)
+    // open their own modal. The lightbox stays open in the background;
+    // close it so the modal gets focus and isn't layered under.
+    const OPENS_MODAL = ['modify', 'autoinpaint', 'mask', 'clone',
+                         'paint', 'crop', 'resolution'];
+    if (OPENS_MODAL.includes(toolKey)) {
+      closeLightbox();
+    }
+    // Defer so the close animation doesn't fight the modal open
+    setTimeout(() => wsBtn.click(), 30);
+  });
+})();
+
 function closeLightbox() {
   document.getElementById('lightbox-2').classList.add('hidden');
   const infoEl = document.getElementById('lightbox-2-info');
