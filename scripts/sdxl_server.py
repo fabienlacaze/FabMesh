@@ -138,6 +138,16 @@ def load_img2img():
             use_safetensors=True,
         )
         pipe.to("cuda")
+        # Force every sub-module to fp16 — diffusers 0.34 on torch
+        # 2.7.1+cu128 leaves some buffers fp32 after from_pretrained,
+        # causing "mat1/mat2 dtype mismatch" errors at inference.
+        try:
+            pipe.unet.to(torch.float16)
+            pipe.vae.to(torch.float16)
+            pipe.text_encoder.to(torch.float16)
+            pipe.text_encoder_2.to(torch.float16)
+        except Exception as _e:
+            log(f"img2img fp16 cast skipped: {_e}")
         pipe.enable_attention_slicing()
         pipe.enable_vae_tiling()
         # Safety checker: enabled by default (parental control).
@@ -184,6 +194,14 @@ def load_inpaint():
                 variant="fp16",
             )
             pipe.to("cuda")
+            # Same fp16 force-cast as img2img (diffusers 0.34 / torch 2.7.1)
+            try:
+                pipe.unet.to(torch.float16)
+                pipe.vae.to(torch.float16)
+                pipe.text_encoder.to(torch.float16)
+                pipe.text_encoder_2.to(torch.float16)
+            except Exception as _e:
+                log(f"inpaint fp16 cast skipped: {_e}")
             pipe.enable_attention_slicing()
             pipe.enable_vae_tiling()
             if os.environ.get('FABMESH_UNRESTRICTED') == '1':
@@ -223,6 +241,16 @@ def load_controlnet_tile():
             use_safetensors=True,
         )
         pipe.to("cuda")
+        # Same fp16 force-cast (diffusers 0.34 / torch 2.7.1)
+        try:
+            pipe.unet.to(torch.float16)
+            pipe.vae.to(torch.float16)
+            pipe.text_encoder.to(torch.float16)
+            pipe.text_encoder_2.to(torch.float16)
+            if hasattr(pipe, 'controlnet'):
+                pipe.controlnet.to(torch.float16)
+        except Exception as _e:
+            log(f"controlnet_tile fp16 cast skipped: {_e}")
         pipe.enable_attention_slicing()
         pipe.enable_vae_tiling()
         if os.environ.get('FABMESH_UNRESTRICTED') == '1':
