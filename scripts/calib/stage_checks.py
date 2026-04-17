@@ -155,6 +155,32 @@ def check_stage2_multiview(mv_dir, input_img):
     res['score'] = min(max_pair_dist / 0.30, 1.0) * 0.5 + min(hist_mean / 0.80, 1.0) * 0.5
     res['details']['checks'] = {'views_differ': views_differ,
                                 'colors_consistent': colors_consistent}
+    # Visual comparison: input image + 6 multi-views with per-view sim.
+    try:
+        html_dir = os.path.dirname(os.path.abspath(mv_dir))
+        html_path = os.path.join(html_dir, 'stage2_compare.html')
+        input_rel = os.path.relpath(input_img, html_dir).replace('\\', '/')
+        tiles = []
+        for i in range(6):
+            v_rel = os.path.relpath(views[i], html_dir).replace('\\', '/')
+            sim = hist_sims[i]
+            col = '#3a3' if sim > 0.40 else '#c33'
+            tiles.append(f'<div style="text-align:center;">'
+                         f'<img src="{v_rel}" width="180" style="border:1px solid #333;"><br>'
+                         f'<span style="font-family:monospace; color:{col};">view_{i} · hist {sim:.2f}</span></div>')
+        html = f'''<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:Segoe UI,sans-serif; background:#111; color:#ddd; padding:18px;">
+  <h2>Stage 2 — Multi-view generation</h2>
+  <div style="margin-bottom:12px;"><b>Input reference:</b><br>
+    <img src="{input_rel}" width="260" style="border:1px solid #333;"></div>
+  <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">{''.join(tiles)}</div>
+</body></html>'''
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        res['details']['compare_html'] = html_path
+        res['artifacts'].append(html_path)
+    except Exception:
+        pass
     return res
 
 
@@ -286,6 +312,48 @@ def check_stage4_projection(work_dir, env=None):
     res['details'] = {'correct': correct, 'total': 6, 'per_axis': per_axis}
     res['score'] = correct / 6.0
     res['ok'] = correct >= 6
+
+    # Write a side-by-side HTML comparison so the user can judge visually.
+    html_path = os.path.join(work_dir, 'stage4_compare.html')
+    rows = []
+    for name, cam, up, letter, desc in AXES:
+        got_rel = f'stage4_{name}.png'
+        gt_abs = os.path.join(GT_AXES_DIR, f'{name}.png')
+        gt_rel = os.path.relpath(gt_abs, work_dir).replace('\\', '/')
+        info = per_axis.get(name, {})
+        sim = info.get('sim', 0.0)
+        ok = info.get('ok', False)
+        col = '#3a3' if ok else '#c33'
+        rows.append(f'''
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">{name.upper()} ({letter})</td>
+          <td style="padding:4px;"><img src="{gt_rel}" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="{got_rel}" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:{col}; font-family:monospace;">sim {sim:.3f}<br>{'PASS' if ok else 'FAIL'}</td>
+        </tr>''')
+    html = f'''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Stage 4 — Expected vs Got</title></head>
+<body style="font-family:Segoe UI,sans-serif; background:#111; color:#ddd; padding:18px;">
+  <h2>Stage 4 — UV Projection Calibration</h2>
+  <div style="margin-bottom:14px; padding:10px; background:#1a1a1a; border-radius:4px;">
+    <b>Result:</b> {correct}/6 axes correct &nbsp;·&nbsp; pass threshold sim &ge; 0.60
+  </div>
+  <table style="border-collapse:collapse; width:100%;">
+    <thead>
+      <tr style="background:#222; color:#aaa; text-align:left;">
+        <th style="padding:8px;">Axis</th>
+        <th style="padding:8px;">Expected (GT)</th>
+        <th style="padding:8px;">Got (pipeline)</th>
+        <th style="padding:8px;">Similarity</th>
+      </tr>
+    </thead>
+    <tbody>{''.join(rows)}</tbody>
+  </table>
+</body></html>'''
+    with open(html_path, 'w', encoding='utf-8') as f:
+        f.write(html)
+    res['artifacts'].append(html_path)
+    res['details']['compare_html'] = html_path
     return res
 
 

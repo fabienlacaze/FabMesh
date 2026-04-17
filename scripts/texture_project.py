@@ -260,6 +260,13 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
         p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5
         p_v = 1.0 - p_v  # flip V (image Y top-to-bottom)
+        # Empirical: the front render of the GT cube shows the letter F
+        # as a horizontal mirror of the reference. The source image's
+        # pixel (u=0, v=v) maps to world-space left, but our camera
+        # basis maps that to image-right. A simple U-flip corrects this.
+        # Stage 4 calibration validates this on a deterministic input.
+        if os.environ.get('FABMESH_TEXPROJ_NO_UFLIP') != '1':
+            p_u = 1.0 - p_u
 
         # Bounds check
         in_bounds = (p_u >= 0) & (p_u <= 1) & (p_v >= 0) & (p_v <= 1)
@@ -492,6 +499,12 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
         p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
         p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
+        # Same U-flip as in project_single_view — calibration stage 4 on
+        # the GT cube confirmed the front face texture was horizontally
+        # mirrored. The mirror is in the SF3D → GLB axis convention
+        # interacting with our camera basis; simplest fix is to flip U.
+        if os.environ.get('FABMESH_TEXPROJ_NO_UFLIP') != '1':
+            p_u = 1.0 - p_u
 
         cam_dirs = -v_cs
         cam_dirs_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)

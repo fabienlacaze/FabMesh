@@ -7832,16 +7832,25 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     const s = r.summary;
     const stageLabel = {1:'Ref image', 2:'Multi-views', 3:'Mesh silhouette',
                        4:'UV projection', 5:'Final render'};
-    const rows = (s.per_stage || []).map(st => {
+    const rows = (s.per_stage || []).map((st, idx) => {
       const col = st.ok ? '#3a3' : '#c33';
       const bg  = st.ok ? '#1a3c1a' : '#3c1a1a';
       const regBadge = st.regression
         ? ' <span style="background:#c33;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;">REGRESSION</span>'
         : '';
       const name = stageLabel[st.stage] || st.name;
+      // Find matching full stage object (has details incl. compare_html)
+      const full = (r.stages || [])[idx] || {};
+      const compareHtml = full.details && full.details.compare_html;
+      const viewBtn = compareHtml
+        ? ` <button class="v3-view-btn" data-path="${compareHtml.replace(/\\/g, '/')}"
+             style="margin-left:8px; padding:2px 8px; font-size:11px;
+                    background:#4d7eff; color:#fff; border:none; border-radius:3px; cursor:pointer;">
+             View expected vs got</button>`
+        : '';
       return `<div style="padding:6px 10px; background:${bg}; border-left:3px solid ${col}; margin-bottom:4px;">
         <b>Stage ${st.stage} — ${name}</b>
-        <span style="float:right; color:${col};">${st.ok ? 'PASS' : 'FAIL'} · score ${st.score.toFixed(2)}</span>${regBadge}
+        <span style="float:right; color:${col};">${st.ok ? 'PASS' : 'FAIL'} · score ${st.score.toFixed(2)}</span>${regBadge}${viewBtn}
       </div>`;
     }).join('');
     const overallCol = s.all_ok ? '#3a3' : '#c33';
@@ -7858,6 +7867,30 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
         ${rows}
         <div style="margin-top:10px; padding:8px; background:#222; border-radius:3px; font-size:12px;">${verdict}</div>
       </div>`;
+    // Wire up "View expected vs got" buttons to open the HTML compare page
+    footer.querySelectorAll('.v3-view-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const p = btn.getAttribute('data-path');
+        if (!p) return;
+        // Open the comparison HTML in a fresh modal iframe
+        let modal = document.getElementById('v3-compare-modal');
+        if (!modal) {
+          modal = document.createElement('div');
+          modal.id = 'v3-compare-modal';
+          modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:10000; display:flex; flex-direction:column;';
+          modal.innerHTML = `
+            <div style="padding:10px; background:#1a1a1a; display:flex; justify-content:space-between; align-items:center;">
+              <b style="color:#ddd;">Stage comparison — expected vs got</b>
+              <button id="v3-compare-close" style="padding:4px 12px; background:#c33; color:#fff; border:none; border-radius:3px; cursor:pointer;">Close</button>
+            </div>
+            <iframe id="v3-compare-frame" style="flex:1; border:0; width:100%; height:100%; background:#111;"></iframe>`;
+          document.body.appendChild(modal);
+          modal.querySelector('#v3-compare-close').addEventListener('click', () => modal.remove());
+        }
+        const frame = modal.querySelector('#v3-compare-frame');
+        frame.src = 'file:///' + p;
+      });
+    });
   }
 
   function renderTieredResult(r) {
