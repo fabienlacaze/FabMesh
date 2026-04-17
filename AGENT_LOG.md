@@ -10,6 +10,146 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-18 — Multi-view repair pass (option B): detector + SDXL-Inpaint
+
+Follow-up to child analysis. Option B from the 3-way split:
+"Inpaint-repair hallucinated multi-view regions using ref as IPAdapter
+conditioning." Ships as a standalone script — can run after any
+engine (CRM / Z123 / SDXL / MV-Adapter later).
+
+### New file: `scripts/multiview_repair.py`
+
+**Detector** (no-GPU, runs first):
+- Scores each view on weirdness = dark_excess + sat_excess + (1-palette_sim)
+- `excess` = view ratio minus ref's own ratio + 5% slack. This is
+  critical for naturally dark subjects (zebra, panda) — otherwise
+  their own stripes would false-flag.
+- Hard-trigger at dark_excess > 8% or sat_excess > 5% → weirdness += 0.4
+- Threshold default 0.55.
+
+**Repair** (GPU):
+- SDXL-Inpaint 1.0 + IP-Adapter Plus SDXL + RealVisXL-class base.
+- ip_scale per slot: front 0.75, sides 0.55, back 0.60, top/bottom 0.55.
+- Slot-aware prompts: "top down view, looking down from above", etc.
+- Strength 0.95, 35 steps, guidance 7.5.
+- Backs up originals in `<mv_dir>/.repair_backup/` before overwrite.
+
+### Detector validation
+
+Tested on 2 subjects:
+- **child** (clean ref, dark=0.010): flags slot 5 only (w=0.89). ✓
+  Matches human assessment (only bottom view is hallucinated).
+- **zebre** (zebra from front, dark=0.011): flags slots 0,3,4,5. ✓
+  Matches earlier human assessment of weak zebre multi-views.
+
+After ref-anchoring (5% slack), no false positives on the clean slots.
+
+### CLI
+```
+python scripts/multiview_repair.py <mv_dir>               # auto-detect
+python scripts/multiview_repair.py <mv_dir> --force-slots 4,5
+python scripts/multiview_repair.py <mv_dir> --threshold 0.5
+```
+
+### Live test on child slot 5 — RESULT
+
+- First attempt (dark-pixels-only mask, 6.4% coverage, strength 0.95):
+  no visible improvement. Surrounding hallucinated context dragged
+  SDXL back to the same black-mass answer.
+- Second attempt (script auto-selected defect-only mask because
+  already-repaired palette_sim passed threshold): re-repaired the
+  remnant 3% — still no gain.
+- **Third attempt, `--full-fg --strength 0.98`**: strong improvement.
+  Slot 5 weirdness 0.886 → 0.075. palette_sim 0.011 → 0.760.
+  dark_ratio 0.533 → 0.068. 17s on RTX 5080.
+
+### Result interpretation
+
+The SDXL-Inpaint output is NOT a true bottom-up orthographic view
+(SDXL doesn't know that perspective). It produces a low-angle/frontal
+rendering with the child's denim jacket + arms spread. BUT: it's
+plausible, coherent, and shares palette with ref — so SF3D projecting
+it onto the bottom of the mesh will yield coherent color instead of
+the black holes we saw before.
+
+### Takeaways
+
+1. **ALWAYS use `--full-fg`** when weirdness > 0.7. The defect-only
+   mask strategy fails when the surroundings are also hallucinated.
+2. Default `repair` decision threshold 0.55 stands. Detector catches
+   the right slots (child: only 5; zebre: 0,3,4,5).
+3. **This is a partial fix** — for a true top/bottom view, MV-Adapter
+   or Era3D is still the right long-term solution. But the repair
+   pass is a cheap (≤30s/view) guardrail that prevents black-hole
+   artifacts on the mesh.
+
+### Next integrations
+- Hook repair into `main.js` multi-view pipeline as optional post-step
+  (env `FABMESH_MV_REPAIR=1`).
+- Later: offer per-slot repair UI in the multi-view review dialog
+  ("regenerate this view with repair").
+
+---
+
+## 2026-04-17 — Child project analysis: multi-views insufficient, mesh degraded
+
+User: "analyse le dernier projet que jai créé le resultat (multi vues et mesh) ne sont pas suffiant"
+
+Project: `images/child/` (ref = photoreal child T-pose, denim jacket,
+white T, khaki cargo shorts, sneakers — clean black background).
+
+### Multi-views (CRM, 6 views)
+- **view_0 / front (0°)**: acceptable, jacket slightly shinier/synthetic
+  vs ref, face softened.
+- **view_2 / back (180°)**: reasonable, hair crown coherent, jacket
+  back plausible.
+- **view_4 / TOP (+90° elev)**: weak — body stretched, proportions wrong.
+- **view_5 / BOTTOM (-90° elev)**: hallucinated — black mass, shoes
+  barely recognizable, feet geometry incoherent.
+- **view_1 / right, view_3 / left**: profile lost detail on jacket seams.
+
+### Mesh (`child_sf3d_1776467095964.glb`, 3/4 thumbnail)
+- Silhouette: arms-out T-pose preserved. Face badly simplified — eyes,
+  nose, mouth smudged into a single dark band.
+- Torso OK, denim jacket color transferred.
+- **Hands: mangled into red/orange blobs** (not flesh-toned) — this is
+  the same signature we see when projection falls back on an unseen
+  region and the nearest projected source is a reddish area.
+- Legs + shorts: color fine, shape cylindrical/stiff.
+- Feet: deformed, sneakers barely a shape.
+
+### Root cause
+1. CRM is Objaverse-trained; children + T-pose extremities (hands,
+   feet) are under-represented → hallucinated TOP/BOTTOM + weak profiles.
+2. SF3D rebuilds geometry from the 6 views. Hallucinated TOP/BOTTOM
+   propagate to the mesh (mangled hands/feet).
+3. Texture projection (push-pull) is working — atlas is uniform — but
+   it can only project what the multi-views contain. Garbage in,
+   garbage out.
+
+### Pattern confirmed
+Same failure mode as: zebre (quadruped), zombi, chat_vert. The
+weakness is CONSISTENTLY at TOP + BOTTOM + distant extremities. Only
+the oiseau (bird, compact silhouette, round body) worked well because
+TOP/BOTTOM of a bird is plausible to CRM priors.
+
+### Conclusion
+The bottleneck is NOT texture projection (already fixed), NOT SF3D
+per se — it's **multi-view quality on non-compact subjects**. The
+queue is:
+1. Disable TOP/BOTTOM generation OR downweight them in SF3D pass
+   (cheap, few hours).
+2. MV-Adapter i2mv SDXL (agent recommendation #1, best quality).
+3. Per-slot multi-seed was implemented but disabled — 16 GB VRAM
+   can't hold CRM + SF3D + 3 seeds concurrently.
+
+### Next experiment to try
+Run SF3D with only 4 views (front/right/back/left, skip TOP/BOTTOM)
+and see if hands/feet improve. If yes → make this the default for
+characters with a clean ground plane.
+
+---
+
 ## 2026-04-17 — Multi-view improvement options — benchmarked by agent
 
 User question: "can we improve the multi-view?" Agent investigated
