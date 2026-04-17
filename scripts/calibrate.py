@@ -244,12 +244,14 @@ def run_pipeline(mesh_out, env_overrides=None, skip_sf3d=False):
         if r.returncode != 0 or not os.path.exists(sf3d_path):
             raise RuntimeError(f'SF3D failed: {r.stderr[-500:]}')
 
-    # Ensure active multi-view dir is populated
+    # Use whatever multi-views are in the standard pipeline location.
+    # If none exist, the user should run multi-view gen via the UI (normal
+    # Zero123++ flow). We no longer auto-copy the "perfect" synthetic
+    # views, because they bypass the real pipeline under test.
     if not os.path.exists(os.path.join(MV_DIR_ACTIVE, 'view_0.png')):
-        print('[calib] copying perfect multi-views to active dir...')
-        os.makedirs(MV_DIR_ACTIVE, exist_ok=True)
-        for fn in os.listdir(MV_DIR_PERFECT):
-            shutil.copy(os.path.join(MV_DIR_PERFECT, fn), os.path.join(MV_DIR_ACTIVE, fn))
+        raise RuntimeError(
+            'No multi-views in ' + MV_DIR_ACTIVE + '. '
+            'Generate them via the normal multi-view button in FabMesh first.')
 
     print('[calib] running texture_project...')
     proj_script = os.path.join(ROOT, 'scripts', 'texture_project.py')

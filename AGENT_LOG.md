@@ -10,6 +10,59 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-17 — Calibration system + honest scoring + revert to standard flow
+
+**Built**: full calibration infrastructure in FabMesh.
+
+1. **Ground truth** (`images/_calibration/ref_0_perfect_axes/`): 6 synthetic
+   orthographic axis renders of a textured cube using the 6 user-painted
+   face PNGs. Each letter F/B/R/L/T/D reads correctly.
+2. **`scripts/calibrate.py`**: runs SF3D + `texture_project.py` on the
+   calibration cube image, renders 6 axis views of the result, classifies
+   each against ground truth, writes an HTML report + score.json.
+3. **Cross-validated classifier**: initial color-mean classifier gave
+   false OKs (reported 3/6 when visual inspection said 1/6). Replaced
+   with **two independent methods** that must agree:
+   - Template matching (pixel-Euclidean distance vs the 6 GT renders)
+   - Palette histogram (counts pixels matching each face's signature palette)
+   If they disagree, the face is marked `?F/T` in the report — no false OK.
+4. **FabMesh UI** — `Settings → Calibration`:
+   - Run calibration button (full-width, row 1)
+   - Open last report + Gallery (side-by-side, row 2)
+   - Both now render **in-app modals** (not shell-opened HTML).
+   - 6 axis thumbnails with green/red outline per face.
+5. **Sweep script** (`_calib_sweep.py`): tests all 8
+   `FABMESH_TEXPROJ_FLIP_{AZIM,ELEV,CAMPOS_AZIM}` combinations plus
+   rotation-offset 0/90/180/270. **Max score achieved: 3/6 with the
+   naive classifier, 1/6 with the honest one**.
+6. **Visual diagnosis**: the raw SF3D output (without multi-view
+   projection) ALSO scores 1/6 — the faces show "F" backwards on -Z,
+   right side gets the front stripes, etc. So the core issue is
+   upstream of the projection script.
+
+**Conclusion**: fighting convention flags in `texture_project.py` is the
+wrong battle. The symptom is visible in the raw SF3D mesh already.
+Two hypotheses to test separately later:
+  (a) the calibration cube itself is pathological input for SF3D (Objaverse-
+      trained, expects photorealistic multi-view; a stylized cube with
+      flat colors produces unreliable meshing/UV).
+  (b) an unknown axis-flip between SF3D's output frame and the
+      projection script's camera frame is compounding.
+
+**Revert decision (user 2026-04-17)**: "temporairement on revient au flux
+de base, avec juste les outils dans leur configuration normale". Actions:
+  - Emptied `images/_calibration/ref_0_multiview/` (no more auto-copy
+    of synthetic perfect views into the pipeline).
+  - `calibrate.py` now errors out if the active multi-view dir is empty
+    instead of silently copying the synthetic views.
+  - UI Calibration panel kept (diagnostic tool).
+  - Backup tag: `calib-ui-backup-20260417`.
+
+Standard flow is restored: normal image → normal Zero123++ multi-view →
+normal SF3D → normal `texture_project.py`. No forced perfect views.
+
+---
+
 ## Constraints (never forget)
 
 - **Commercial target**: Gumroad / itch.io / Fab.com (NOT Steam)
