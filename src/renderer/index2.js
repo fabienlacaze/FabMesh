@@ -7358,7 +7358,11 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
         renderScore(res.score, res.reportDir);
         statusEl.textContent = `Done: ${res.score.score}/${res.score.total}`;
       } else {
-        statusEl.textContent = 'Failed: ' + (res && res.error || 'unknown');
+        // Extract just the RuntimeError message for a readable error
+        const full = String((res && res.error) || 'unknown');
+        const m = full.match(/RuntimeError:\s*([^\n]+)/);
+        const msg = m ? m[1].trim() : full.split('\n').pop().slice(0, 160);
+        statusEl.innerHTML = '<span style="color:#f88">Failed:</span> ' + msg;
       }
     } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
     btnRun.disabled = false;

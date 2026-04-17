@@ -244,20 +244,23 @@ def run_pipeline(mesh_out, env_overrides=None, skip_sf3d=False):
         if r.returncode != 0 or not os.path.exists(sf3d_path):
             raise RuntimeError(f'SF3D failed: {r.stderr[-500:]}')
 
-    # Use whatever multi-views are in the standard pipeline location.
-    # If none exist, the user should run multi-view gen via the UI (normal
-    # Zero123++ flow). We no longer auto-copy the "perfect" synthetic
-    # views, because they bypass the real pipeline under test.
+    # Generate multi-views via the normal Zero123++ pipeline if they
+    # don't already exist — this is the real "out of the factory" flow.
     if not os.path.exists(os.path.join(MV_DIR_ACTIVE, 'view_0.png')):
-        raise RuntimeError(
-            'No multi-views in ' + MV_DIR_ACTIVE + '. '
-            'Generate them via the normal multi-view button in FabMesh first.')
+        print('[calib] running Zero123++ multi-view gen...')
+        os.makedirs(MV_DIR_ACTIVE, exist_ok=True)
+        mv_script = os.path.join(ROOT, 'scripts', 'multiview_gen.py')
+        r = subprocess.run(
+            [sys.executable, mv_script, REF_IMG, MV_DIR_ACTIVE],
+            env=env, capture_output=True, text=True, timeout=600)
+        if r.returncode != 0 or not os.path.exists(os.path.join(MV_DIR_ACTIVE, 'view_0.png')):
+            raise RuntimeError(f'multiview_gen failed: {r.stderr[-500:]}')
 
     print('[calib] running texture_project...')
     proj_script = os.path.join(ROOT, 'scripts', 'texture_project.py')
     r = subprocess.run(
         [sys.executable, proj_script, sf3d_path, REF_IMG, projected_path, '1024',
-         '--multiview', MV_DIR_ACTIVE, '--rotation-offset', '0'],
+         '--multiview', MV_DIR_ACTIVE],
         env=env, capture_output=True, text=True, timeout=300)
     if r.returncode != 0 or not os.path.exists(projected_path):
         raise RuntimeError(f'texture_project failed: {r.stderr[-500:]}')
