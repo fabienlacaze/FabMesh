@@ -691,16 +691,34 @@ function startControlApi(mainWindow, opts = {}) {
     // without the UI. Uses the same Python script as the Settings UI.
     // ============================================================
     'POST /calib/run': async (req, res) => {
-      // Run the full auto-diagnose pipeline (~4-5 min). Progress and
-      // details are already written to logs/fabmesh.log by the Python
-      // CalibLogger (source='calib'), so we don't duplicate here.
+      // Tiered calibration: image sanity -> multi-view tuning ->
+      // mesh/projection tuning. Each tier is locked before the next;
+      // an upstream failure short-circuits downstream tiers.
+      const { execFile } = require('child_process');
+      const rootDir = path.join(__dirname, '..', '..');
+      const script = path.join(rootDir, 'scripts', '_calib_tiered.py');
+      return new Promise((resolve) => {
+        const proc = execFile('python', [script], {
+          timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
+          env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          cwd: rootDir,
+        }, (error, stdout, stderr) => {
+          if (error) return sendErr(res, error.message, 500) || resolve();
+          const m = (stdout || '').match(/TIERED_RESULT:\s*(\{[^\n]+\})/);
+          if (!m) return sendErr(res, 'no TIERED_RESULT line', 500) || resolve();
+          try { sendOk(res, JSON.parse(m[1])); resolve(); }
+          catch (e) { sendErr(res, e.message, 500); resolve(); }
+        });
+      });
+    },
+
+    'POST /calib/run-legacy': async (req, res) => {
+      // Old single-pass diagnose (no tiering, no tuning loop).
       const { execFile } = require('child_process');
       const rootDir = path.join(__dirname, '..', '..');
       const script = path.join(rootDir, 'scripts', '_calib_diagnose.py');
-
       const body = await readBody(req);
       const engine = (body && body.engine === 'triposg') ? 'triposg' : 'sf3d';
-
       return new Promise((resolve) => {
         const proc = execFile('python', [script, '--engine', engine], {
           timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
@@ -710,23 +728,8 @@ function startControlApi(mainWindow, opts = {}) {
           if (error) return sendErr(res, error.message, 500) || resolve();
           const m = (stdout || '').match(/DIAGNOSE_JSON:\s*(\{[^\n]+\})/);
           if (!m) return sendErr(res, 'no DIAGNOSE_JSON line', 500) || resolve();
-          try {
-            const summary = JSON.parse(m[1]);
-            const reportDir = summary.report_dir;
-            const readOpt = (fn) => {
-              try { return JSON.parse(fs.readFileSync(path.join(reportDir, fn), 'utf-8')); }
-              catch (e) { return null; }
-            };
-            sendOk(res, {
-              summary,
-              stage1: readOpt('stage1_sf3d.json'),
-              stage2: readOpt('stage2_mv.json'),
-              stage3: readOpt('stage3_projected.json'),
-              verdict: readOpt('verdict.json'),
-              log_file: LOG_FILE,
-            });
-            resolve();
-          } catch (e) { sendErr(res, e.message, 500); resolve(); }
+          try { sendOk(res, JSON.parse(m[1])); resolve(); }
+          catch (e) { sendErr(res, e.message, 500); resolve(); }
         });
       });
     },

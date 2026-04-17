@@ -1453,6 +1453,37 @@ ipcMain.handle('calib-cancel', () => {
   return { success: false, error: 'no active calibration' };
 });
 
+ipcMain.handle('calib-tiered', async () => {
+  const script = path.join(__dirname, '..', '..', 'scripts', '_calib_tiered.py');
+  return new Promise((resolve) => {
+    _calibCancelFlag = false;
+    const proc = execFile('python', [script], {
+      timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      cwd: path.join(__dirname, '..', '..'),
+    }, (error, stdout, stderr) => {
+      _calibDiagnoseProc = null;
+      if (error) {
+        const cancelled = _calibCancelFlag || error.killed ||
+          (error.code === null && error.signal) ||
+          /taskkill|STATUS_CONTROL_C_EXIT|terminated/i.test(error.message || '');
+        _calibCancelFlag = false;
+        resolve({ success: false, cancelled,
+                  error: cancelled ? 'cancelled by user' : error.message,
+                  stderr: (stderr || '').slice(-800) });
+        return;
+      }
+      const m = (stdout || '').match(/TIERED_RESULT:\s*(\{[^\n]+\})/);
+      if (!m) return resolve({ success: false, error: 'no TIERED_RESULT line' });
+      try { resolve({ success: true, result: JSON.parse(m[1]) }); }
+      catch (e) { resolve({ success: false, error: e.message }); }
+    });
+    _calibDiagnoseProc = proc;
+    proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
+    proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
+  });
+});
+
 ipcMain.handle('calib-diagnose', async (event, { engine = 'sf3d' } = {}) => {
   const script = path.join(__dirname, '..', '..', 'scripts', '_calib_diagnose.py');
   return new Promise((resolve) => {

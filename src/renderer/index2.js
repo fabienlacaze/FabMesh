@@ -7678,7 +7678,137 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   const btnCompare = document.getElementById('set-calib-compare');
   btnCompare?.addEventListener('click', runCompare);
 
-  btnDiagnose?.addEventListener('click', () => runDiagnose('sf3d'));
+  // ---- NEW: Tiered calibration (test -> analyze -> auto-tune) ---------
+  function tierRow(num, name, state = 'pending') {
+    const icons = { pending: '⏳', running: '⚙️', pass: '✅', fail: '❌', skipped: '⊘' };
+    const colors = { pending: '#555', running: '#f59e0b', pass: '#3a3', fail: '#c33', skipped: '#666' };
+    return `<div class="tier-row" id="tier-row-${num}" style="display:flex; align-items:center; gap:12px; padding:12px; background:#161616; border-left:4px solid ${colors[state]}; border-radius:4px; margin-bottom:8px;">
+      <div style="font-size:1.6em;" id="tier-icon-${num}">${icons[state]}</div>
+      <div style="flex:1;">
+        <div style="font-weight:bold; color:#9cf;">Tier ${num}. ${name}</div>
+        <div id="tier-msg-${num}" style="font-size:12px; color:#aaa; font-family:monospace; margin-top:4px;">waiting...</div>
+      </div>
+    </div>`;
+  }
+
+  function setTierState(num, state, message) {
+    const row = document.getElementById(`tier-row-${num}`);
+    const icon = document.getElementById(`tier-icon-${num}`);
+    const msg = document.getElementById(`tier-msg-${num}`);
+    if (!row) return;
+    const icons = { pending: '⏳', running: '⚙️', pass: '✅', fail: '❌', skipped: '⊘' };
+    const colors = { pending: '#555', running: '#f59e0b', pass: '#3a3', fail: '#c33', skipped: '#666' };
+    row.style.borderLeftColor = colors[state] || '#555';
+    icon.textContent = icons[state] || '⏳';
+    if (message !== undefined) msg.textContent = message;
+  }
+
+  async function runTieredCalibration() {
+    diagModal.classList.remove('hidden');
+    diagBody.innerHTML = `
+      <p style="color:#aaa; margin-top:0;">Test → Analyze → Correct automatically, one tier at a time. Each tier must pass before the next runs.</p>
+      ${tierRow(1, 'Reference image sanity (~5s)')}
+      ${tierRow(2, 'Multi-view generation tuning (~1-2min)')}
+      ${tierRow(3, 'Mesh + projection tuning (~3min)')}
+      <div id="tiered-footer" style="margin-top:14px; padding:14px; background:#1a1a1a; border-radius:8px; border-left:6px solid #555; color:#aaa;">
+        Waiting for results...
+      </div>`;
+    btnDiagnose.disabled = true;
+    if (btnCompare) btnCompare.disabled = true;
+    if (btnCancel) {
+      btnCancel.style.display = '';
+      btnCancel.disabled = false;
+      btnCancel.innerHTML = '&#9209;&#65039; Cancel';
+    }
+
+    // Parse TIER_JSON lines streamed from Python
+    let currentTier = 0;
+    const unsub = API.onCalibProgress ? API.onCalibProgress((data) => {
+      String(data).split('\n').forEach(line => {
+        const m = line.match(/TIER_JSON:\s*(\{.+\})/);
+        if (!m) return;
+        try {
+          const ev = JSON.parse(m[1]);
+          const t = ev.tier; currentTier = t;
+          if (ev.phase === 'start') {
+            setTierState(t, 'running', `Starting: ${ev.name || ''}`);
+          } else if (ev.phase === 'pass') {
+            setTierState(t, 'pass', `OK · contrast=${ev.contrast_spread?.toFixed?.(0) || '?'}, size=${(ev.size || []).join('x')}`);
+          } else if (ev.phase === 'fail') {
+            setTierState(t, 'fail', `Failed: ${ev.reason || '?'}`);
+          } else if (ev.phase === 'skipped') {
+            setTierState(t, 'skipped', `Skipped: ${ev.reason || '?'}`);
+          } else if (ev.phase === 'tune') {
+            setTierState(t, 'running', `Tuning iter ${ev.iter}/${ev.total}: ${ev.variant || ''}`);
+          } else if (ev.phase === 'iter_done') {
+            if (t === 2) {
+              setTierState(t, 'running', `${ev.variant}: avg_sim=${ev.avg_sim}`);
+            } else {
+              setTierState(t, 'running', `${ev.variant}: ${ev.score} (sim ${ev.sim})`);
+            }
+          } else if (ev.phase === 'iter_fail') {
+            setTierState(t, 'running', `iter ${ev.variant} failed: ${(ev.error || '').slice(0, 60)}`);
+          } else if (ev.phase === 'sf3d') {
+            setTierState(t, 'running', ev.message || 'SF3D...');
+          } else if (ev.phase === 'done') {
+            const ok = ev.passed;
+            const detail = t === 2
+              ? `best ${ev.winning_variant} · sim ${ev.score} (threshold ${ev.threshold})`
+              : `best ${ev.best_variant} · ${ev.best_score}`;
+            setTierState(t, ok ? 'pass' : 'fail', detail);
+          }
+        } catch (e) {}
+      });
+    }) : null;
+
+    try {
+      const res = await API.calibTiered();
+      if (res && res.cancelled) {
+        document.getElementById('tiered-footer').innerHTML = `<span style="color:#f88">Cancelled.</span>`;
+      } else if (!res || !res.success) {
+        document.getElementById('tiered-footer').innerHTML =
+          `<span style="color:#f66">Failed: ${(res && res.error) || 'unknown'}</span>`;
+        if (res && res.stderr) {
+          document.getElementById('tiered-footer').innerHTML +=
+            `<pre style="margin-top:8px; font-size:11px; color:#faa; max-height:200px; overflow:auto;">${String(res.stderr).replace(/</g, '&lt;')}</pre>`;
+        }
+      } else {
+        renderTieredResult(res.result);
+      }
+    } catch (e) {
+      document.getElementById('tiered-footer').innerHTML =
+        `<span style="color:#f66">Error: ${e.message}</span>`;
+    }
+    if (btnCancel) btnCancel.style.display = 'none';
+    btnDiagnose.disabled = false;
+    if (btnCompare) btnCompare.disabled = false;
+  }
+
+  function renderTieredResult(r) {
+    if (!r) return;
+    const t3 = r.tier3 || {};
+    const finalScore = r.final_score || '?';
+    const ok = t3.ok;
+    const color = ok ? '#3a3' : (t3.skipped ? '#666' : '#c33');
+    const bg = ok ? '#1a3c1a' : (t3.skipped ? '#222' : '#3c1a1a');
+    let verdict = '';
+    if (t3.skipped) {
+      verdict = `<b>Blocked upstream</b> — ${t3.reason || 'an earlier tier failed'}. Fix the upstream issue first.`;
+    } else if (ok) {
+      verdict = `<b>Perfect score reached.</b> The winning projection config has been persisted and will be used automatically for future runs.`;
+    } else {
+      verdict = `<b>Plateau at ${t3.best_score}/${t3.target}.</b> No projection config reached a perfect score — the remaining loss is upstream (SF3D mesh quality or Zero123++ hallucinations), not a projection flag issue.`;
+    }
+    const cfg = t3.best_combo ? `<pre style="margin-top:10px; background:#0a0a0a; padding:10px; border-radius:4px; font-size:11px;">${JSON.stringify(t3.best_combo, null, 2)}</pre>` : '';
+    document.getElementById('tiered-footer').outerHTML = `
+      <div style="margin-top:14px; padding:16px; background:${bg}; border-left:6px solid ${color}; border-radius:8px;">
+        <div style="font-size:1.3em; margin-bottom:8px;">Final score: <b>${finalScore}</b> · elapsed ${r.elapsed_s}s</div>
+        <div>${verdict}</div>
+        ${cfg}
+      </div>`;
+  }
+
+  btnDiagnose?.addEventListener('click', runTieredCalibration);
 
   // ---- In-app Report modal --------------------------------------------
   const reportModal = document.getElementById('modal-calib-report');
