@@ -1285,7 +1285,7 @@ async function showRigSourceMesh(meshPath) {
     rigSrcCamera.near = Math.max(0.01, size * 0.001);
     rigSrcCamera.far = Math.max(2000, size * 100);
     rigSrcCamera.updateProjectionMatrix();
-    rigSrcCamera.position.set(size * 1.3, size * 0.9 + lookY, size * 1.3);
+    rigSrcCamera.position.set(size * 1.3, size * 0.9 + lookY, -size * 1.3);
     rigSrcCamera.lookAt(0, lookY, 0);
     rigSrcControls.target.set(0, lookY, 0);
     rigSrcControls.update();
@@ -1957,7 +1957,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     const size = sizeVec.length();
     // The model is already positioned so its bottom sits on y=0; aim at mid-height
     const lookY = sizeVec.y * 0.5;
-    viewer.camera.position.set(size * 1.2, size * 0.8 + lookY, size * 1.2);
+    viewer.camera.position.set(size * 1.2, size * 0.8 + lookY, -size * 1.2);
     viewer.camera.lookAt(0, lookY, 0);
     viewer.controls.target.set(0, lookY, 0);
     viewer.controls.update();
@@ -2255,7 +2255,7 @@ async function _lb3dLoadAt(meshPath) {
     lb3dCamera.near = Math.max(0.01, size * 0.001);
     lb3dCamera.far = Math.max(2000, size * 100);
     lb3dCamera.updateProjectionMatrix();
-    lb3dCamera.position.set(size * 1.3, size * 0.9 + lookY, size * 1.3);
+    lb3dCamera.position.set(size * 1.3, size * 0.9 + lookY, -size * 1.3);
     lb3dCamera.lookAt(0, lookY, 0);
     lb3dControls.target.set(0, lookY, 0);
     lb3dControls.update();
@@ -4793,7 +4793,11 @@ function fitWsCamera(obj) {
   // Look at the model's vertical mid-height instead of (0,0,0)
   const sizeVec = box.getSize(new THREE.Vector3());
   const lookY = sizeVec.y * 0.5;
-  wsCamera.position.set(size * 1.2, size * 0.8 + lookY, size * 1.2);
+  // SF3D outputs meshes with the subject's face pointing toward -Z
+  // (head verts cluster in -Z, confirmed on chat_vert 1776453637124).
+  // Place the initial camera in -Z so the user sees the face first,
+  // not the back. User can still orbit freely.
+  wsCamera.position.set(size * 1.2, size * 0.8 + lookY, -size * 1.2);
   wsCamera.lookAt(0, lookY, 0);
   wsControls.target.set(0, lookY, 0);
   wsControls.update();
@@ -6146,7 +6150,7 @@ function fitRigVwCamera(obj) {
   // Far plane high enough for FBX rigs in cm scale
   rigVwCamera.far = Math.max(rigVwCamera.far, size * 100);
   rigVwCamera.updateProjectionMatrix();
-  rigVwCamera.position.set(size * 1.2, size * 0.8 + lookY, size * 1.2);
+  rigVwCamera.position.set(size * 1.2, size * 0.8 + lookY, -size * 1.2);
   rigVwCamera.lookAt(0, lookY, 0);
   rigVwControls.target.set(0, lookY, 0);
   rigVwControls.update();
