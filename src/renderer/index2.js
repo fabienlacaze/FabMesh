@@ -7388,6 +7388,96 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   btnOpen?.addEventListener('click', () => openReportModal());
   btnGallery?.addEventListener('click', () => openGalleryModal());
 
+  // ---- Auto-diagnose button -------------------------------------------
+  const btnDiagnose = document.getElementById('set-calib-diagnose');
+  const diagModal = document.getElementById('modal-calib-diagnose');
+  const diagBody = document.getElementById('calib-diagnose-body');
+  document.getElementById('calib-diagnose-close')?.addEventListener('click',
+    () => diagModal.classList.add('hidden'));
+  diagModal?.addEventListener('click', (e) => {
+    if (e.target === diagModal) diagModal.classList.add('hidden');
+  });
+
+  function stageCard(title, data, extract) {
+    if (!data || !data.ok) {
+      const err = (data && data.error) ? data.error.slice(0, 160) : 'not run';
+      return `<div style="background:#1a0e0e; border:2px solid #633; border-radius:8px; padding:14px; text-align:center;">
+        <h3 style="margin:0 0 8px; color:#f88; font-size:14px;">${title}</h3>
+        <p style="color:#f66; font-size:12px;">Failed: ${err}</p></div>`;
+    }
+    const { score, sub, bg } = extract(data);
+    return `<div style="background:#161616; border:2px solid #333; border-radius:8px; padding:14px; text-align:center;">
+      <h3 style="margin:0 0 8px; color:#9cf; font-size:14px;">${title}</h3>
+      <div style="display:inline-block; padding:10px 22px; background:${bg}; border-radius:8px; font-size:2em; font-weight:bold; color:#fff;">${score}</div>
+      <p style="margin:6px 0 0; font-size:12px; color:#aaa;">${sub}</p></div>`;
+  }
+
+  function renderDiagnose(res) {
+    if (!res || !res.success) {
+      diagBody.innerHTML = `<p style="color:#f66">Error: ${res && res.error || 'unknown'}</p>`;
+      return;
+    }
+    const s1 = res.stage1, s2 = res.stage2, s3 = res.stage3, v = res.verdict;
+    const causeColors = { sf3d: '#cc3', zero123: '#c60', projection: '#c36',
+                          none_clear: '#888', projection_or_sf3d: '#888', unknown: '#555' };
+    const causeColor = causeColors[v?.primary_cause] || '#555';
+    const cards = [
+      stageCard('1. SF3D raw mesh', s1, (d) => {
+        const s = d.score?.score || 0, t = d.score?.total || 6;
+        const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
+        return { score: `${s}/${t}`, sub: `sim ${(d.score?.avg_similarity || 0).toFixed(2)}`, bg };
+      }),
+      stageCard('2. Zero123++ views', s2, (d) => {
+        const s = d.good_views || 0, t = d.total || 6;
+        const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
+        return { score: `${s}/${t}`, sub: `avg sim ${(d.avg_similarity || 0).toFixed(2)}`, bg };
+      }),
+      stageCard('3. Final projection', s3, (d) => {
+        const s = d.score?.score || 0, t = d.score?.total || 6;
+        const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
+        return { score: `${s}/${t}`, sub: `sim ${(d.score?.avg_similarity || 0).toFixed(2)}`, bg };
+      }),
+    ];
+    const detailsList = (v?.details || []).map(d => `<li>${d}</li>`).join('');
+    diagBody.innerHTML = `
+      <p style="color:#aaa; margin-top:0;">Ran each pipeline stage independently, scored each one.</p>
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin:14px 0;">${cards.join('')}</div>
+      <div style="border-left:6px solid ${causeColor}; padding:14px 18px; background:#1a1a1a; border-radius:0 8px 8px 0;">
+        <h3 style="margin:0 0 10px;">Verdict
+          <span style="display:inline-block; background:${causeColor}; color:#000; padding:2px 10px; border-radius:3px; font-size:0.8em; text-transform:uppercase; margin-left:8px;">${v?.primary_cause || 'unknown'}</span>
+        </h3>
+        <ul style="margin:0 0 12px; line-height:1.6; padding-left:22px;">${detailsList}</ul>
+        <p style="margin:0;"><b>Recommendation:</b></p>
+        <p style="margin:6px 0 0; color:#ddd;">${v?.recommendation || ''}</p>
+      </div>`;
+  }
+
+  btnDiagnose?.addEventListener('click', async () => {
+    diagModal.classList.remove('hidden');
+    diagBody.innerHTML = '<p style="color:#aaa">Running pipeline stages — this takes ~4-5 min the first time (SF3D + Zero123++ + projection)...</p>';
+    btnDiagnose.disabled = true;
+    const t0 = Date.now();
+    const fmt = (ms) => { const s = Math.floor(ms/1000); const m = Math.floor(s/60); return m>0 ? `${m}m${String(s%60).padStart(2,'0')}s` : `${s}s`; };
+    const progressEl = document.createElement('p');
+    progressEl.style.cssText = 'color:#9cf; font-family:monospace; font-size:12px;';
+    diagBody.appendChild(progressEl);
+    const timer = setInterval(() => { progressEl.textContent = `[${fmt(Date.now()-t0)}] running...`; }, 1000);
+    let lastLine = '';
+    const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
+      lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 120);
+      progressEl.textContent = `[${fmt(Date.now()-t0)}] ${lastLine}`;
+    }) : null;
+    try {
+      const res = await API.calibDiagnose();
+      clearInterval(timer);
+      renderDiagnose(res);
+    } catch (e) {
+      clearInterval(timer);
+      diagBody.innerHTML = `<p style="color:#f66">Error: ${e.message}</p>`;
+    }
+    btnDiagnose.disabled = false;
+  });
+
   // ---- In-app Report modal --------------------------------------------
   const reportModal = document.getElementById('modal-calib-report');
   const reportBody = document.getElementById('calib-report-body');

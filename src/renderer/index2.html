@@ -888,6 +888,9 @@
           <div style="margin-top:8px;">
             <button id="set-calib-run" class="primary-btn" style="width:100%; padding:6px 12px;">&#127919; Run calibration</button>
           </div>
+          <div style="margin-top:6px;">
+            <button id="set-calib-diagnose" class="primary-btn" style="width:100%; padding:6px 12px; background:linear-gradient(135deg,#d97706,#f59e0b);">&#129302; Auto-diagnose pipeline</button>
+          </div>
           <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
             <button id="set-calib-open" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128444;&#65039; Open last report</button>
             <button id="set-calib-gallery" class="ghost-btn" style="flex:1; padding:6px 12px;">&#127912; Gallery (all runs)</button>
@@ -921,6 +924,19 @@
           <button class="settings-close-x" id="calib-report-close" title="Close">&#10005;</button>
         </div>
         <div id="calib-report-body" style="padding:16px; overflow:auto; flex:1;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CALIBRATION DIAGNOSE MODAL (pipeline stages + verdict)
+         ============================================================ -->
+    <div id="modal-calib-diagnose" class="modal-overlay hidden">
+      <div class="modal-card" style="width:92vw; max-width:1000px; max-height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#129302; Pipeline auto-diagnosis</h2>
+          <button class="settings-close-x" id="calib-diagnose-close" title="Close">&#10005;</button>
+        </div>
+        <div id="calib-diagnose-body" style="padding:16px; overflow:auto; flex:1;"></div>
       </div>
     </div>
 

@@ -1434,6 +1434,44 @@ ipcMain.handle('calib-open-report', (event, { html } = {}) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+ipcMain.handle('calib-diagnose', async () => {
+  const script = path.join(__dirname, '..', '..', 'scripts', '_calib_diagnose.py');
+  return new Promise((resolve) => {
+    const proc = execFile('python', [script], {
+      timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      cwd: path.join(__dirname, '..', '..'),
+    }, (error, stdout, stderr) => {
+      if (error) {
+        resolve({ success: false, error: error.message, stderr: (stderr || '').slice(-500) });
+        return;
+      }
+      // The Python script prints a DIAGNOSE_JSON: {...} line at the end
+      const m = (stdout || '').match(/DIAGNOSE_JSON:\s*(\{[^\n]+\})/);
+      if (!m) { resolve({ success: false, error: 'no DIAGNOSE_JSON line' }); return; }
+      try {
+        const summary = JSON.parse(m[1]);
+        // Also load each stage's details for in-app rendering
+        const reportDir = summary.report_dir;
+        const readOpt = (fn) => {
+          try { return JSON.parse(fs.readFileSync(path.join(reportDir, fn), 'utf-8')); }
+          catch (e) { return null; }
+        };
+        resolve({
+          success: true,
+          summary,
+          stage1: readOpt('stage1_sf3d.json'),
+          stage2: readOpt('stage2_mv.json'),
+          stage3: readOpt('stage3_projected.json'),
+          verdict: readOpt('verdict.json'),
+        });
+      } catch (e) { resolve({ success: false, error: e.message }); }
+    });
+    proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
+    proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
+  });
+});
+
 // List every report dir with score.json — fed into the in-app gallery.
 ipcMain.handle('calib-list-reports', () => {
   try {
