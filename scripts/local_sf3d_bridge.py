@@ -264,6 +264,9 @@ def generate_3d(
     # mesh, so they land on wrong parts of the rotated mesh otherwise).
     auto_align_rot_deg = 0.0
 
+    class _SkipAutoAlign(Exception):
+        pass
+
     # ------------------------------------------------------------------
     # Auto-align the mesh so the subject faces -Z (glTF forward convention).
     # SF3D's mesh can end up pointing at any horizontal direction depending
@@ -279,7 +282,18 @@ def generate_3d(
     # this lands within <1° of the true subject axis — versus the ~3-5°
     # noise from the previous chest-bulge heuristic alone.
     # ------------------------------------------------------------------
+    # Auto-align was written to fix a Z123-era issue where SF3D meshes
+    # came out facing random azimuths. With CRM the mesh orientation
+    # tracks the input view reliably, and auto-align rotating the mesh
+    # while the multi-views keep their original azimuths causes the
+    # texture face to land on the geometric back (user report 2026-04-17).
+    # Disable by default; set FABMESH_SF3D_AUTOALIGN=1 to opt in.
+    _do_autoalign = os.environ.get('FABMESH_SF3D_AUTOALIGN') == '1'
+    if not _do_autoalign:
+        print("LOCAL_SF3D: auto-align disabled (default for CRM pipeline)", flush=True)
     try:
+        if not _do_autoalign:
+            raise _SkipAutoAlign()
         import numpy as _np
         _v = mesh.vertices.astype(_np.float32)
         _cen = _v.mean(axis=0)
