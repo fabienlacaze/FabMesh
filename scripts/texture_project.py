@@ -93,8 +93,13 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # FABMESH_UV_REPACK=0 to fall back to the original UVs.
     # xatlas re-unwrap is OFF by default: on SF3D meshes it produces a
     # per-triangle chart layout that still renders as mosaic. Keep the
-    # native SF3D UVs unless FABMESH_UV_REPACK=1 is set explicitly.
-    _repack_enabled = os.environ.get('FABMESH_UV_REPACK', '0') == '1'
+    # 2026-04-17 re-evaluation with CRM multi-views (6 ortho incl. TOP/BOT):
+    # xatlas re-chart is now a clear WIN — SF3D's micro-island packing
+    # produces voronoi-mosaic atlases (chat_vert, orc_m1 reproduced this)
+    # which xatlas collapses into chart-based layout where projection
+    # data actually spans contiguous UV regions. Default flipped to ON.
+    # Set FABMESH_UV_REPACK=0 to disable.
+    _repack_enabled = os.environ.get('FABMESH_UV_REPACK', '1') == '1'
     _repacked = False
     if _repack_enabled and len(faces) > 100:
         try:
