@@ -766,6 +766,56 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Is the CUDA 12.8 install a repeat of a failed attempt? NO.
+
+User asked (rightly): "on a pas déjà échoué à faire ça ?"
+
+Verified via grep: CUDA 12.8 coexist install has been **PLANNED**
+multiple times in AGENT_LOG (agent plan sections around lines
+1010-1045) but **NEVER EXECUTED**. Each time the agent produced
+step-by-step instructions, the session pivoted to trying an
+alternative (kaolin wheel swap, torch 2.8 upgrade, pytorch3d build,
+monkey-patch bypass) before getting to the actual install.
+
+So THIS is the first real attempt. If it works, it unblocks
+pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
+we know the environment is fundamentally incompatible and we
+accept D as the shipping baseline.
+
+### CUDA 12.8 Toolkit install — USER ACTION NEEDED (2026-04-18)
+
+User picked CUDA 12.8 coexist install. This is admin/installer,
+so user does it manually. My part afterwards: use CUDA 12.8 for
+the build.
+
+Instructions for user:
+
+**1. Download** `https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_571.96_windows.exe` (~3.1 GB, NVIDIA signed installer — SAC should accept it).
+
+**2. Run as Administrator**. At install type, pick **Custom (Advanced)**, NOT Express.
+
+**3. In the component tree, UNCHECK EVERYTHING**, then re-check ONLY:
+- ☑ CUDA > Development > Compiler (nvcc_12.8)
+- ☑ CUDA > Development > Libraries (cudart, cublas, cufft, curand, cusolver, cusparse, nvrtc dev)
+- ☑ CUDA > Runtime > Libraries (cudart_12.8)
+
+**Explicitly UNCHECK**:
+- ☒ Driver Components > Display Driver (keep your current driver)
+- ☒ Other Components > Nsight *
+- ☒ CUDA > Visual Studio Integration
+- ☒ CUDA > Demo Suite / Documentation / Samples
+
+**4. Install folder**: keep default `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\`. Click Install. Takes 5-10 min.
+
+**5. Verify**: open a fresh cmd:
+```
+dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin\nvcc.exe"
+dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\nvcc.exe"
+```
+Both must exist. Don't reboot.
+
+**6. Tell me when done** — I'll continue with env setup + build.
+
 ### pytorch3d build — bypass fails too (CCCL preprocessor error)
 
 User picked "bypass the CUDA check". Implemented:
