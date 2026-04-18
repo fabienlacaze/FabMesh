@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Paint3D v16 — FRONT VIEW ONLY</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd; font-family:system-ui, sans-serif; }
+  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; }
+  h2 { padding:10px 16px 4px; margin:0; font-size:12px; color:#4ade80; }
+  .desc { padding:4px 16px; color:#aaa; font-size:11px; line-height:1.5; }
+  .card { background:#181818; padding:6px; }
+  .card img { max-width:100%; max-height:500px; object-fit:contain; border:1px solid #333; }
+  .card model-viewer { width:100%; height:500px; background:#1b1b1b; }
+  .row { display:grid; grid-template-columns: 1fr 1fr; gap:2px; background:#000; padding:2px; }
+  .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:2px; background:#000; padding:2px; }
+  .row4 { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:2px; background:#000; padding:2px; }
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>v16 — FABMESH_MV_SLOTS=0 (front view only, views_init=[0])</h1>
+<p class="desc">Test: donner UNIQUEMENT la photo front à Paint3D pour voir ce que la back-projection + UV-inpaint font seuls, sans interférence de la back view. Si v16 front est propre là où front est visible, ça prouve que c'est la fusion 2-views qui pollue v15c.</p>
+
+<h2>Atlas progression: v14 stage1 / v15c stage1+2 / v16 stage1 / v16 stage1+2</h2>
+<div class="row4">
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v14 stage1 (2 views, no inpaint)</p>
+    <img src="mesh_paint3d_v14.glb.paint3d_work/stage1/res-0/albedo.png" />
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v15c stage2 UV-inpaint (2 views)</p>
+    <img src="mesh_paint3d_v15c.glb.paint3d_work/stage2/UV_inpaint_res_0.png" />
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v16 stage1 (FRONT ONLY)</p>
+    <img src="mesh_paint3d_v16.glb.paint3d_work/stage1/res-0/albedo.png" />
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v16 stage2 UV-inpaint (FRONT ONLY)</p>
+    <img src="mesh_paint3d_v16.glb.paint3d_work/stage2/UV_inpaint_res_0.png" />
+  </div>
+</div>
+
+<h2>init-img-0 v16 (devrait être UNE seule photo front, pas un grid)</h2>
+<div class="card"><img src="mesh_paint3d_v16.glb.paint3d_work/stage1/init-img-0.png" /></div>
+
+<h2>3D compare: Mesh D vs v14 (2v stage1) vs v15c (2v stage1+2) vs v16 (FRONT ONLY stage1+2)</h2>
+<div class="row4">
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">Mesh D baseline</p>
+    <model-viewer src="mesh_NORMALIZE_1.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v14 Paint3D (2 views, stage1 only)</p>
+    <model-viewer src="mesh_paint3d_v14.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v15c Paint3D (2 views, stage1+2)</p>
+    <model-viewer src="mesh_paint3d_v15c.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v16 Paint3D (FRONT ONLY, stage1+2)</p>
+    <model-viewer src="mesh_paint3d_v16.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+</div>
+
+<h2>Render GIF v16 (Paint3D stage 2 visualisation interne 360°)</h2>
+<div class="card"><img src="mesh_paint3d_v16.glb.paint3d_work/stage2/render_rgb.gif" /></div>
+
+</body>
+</html>
