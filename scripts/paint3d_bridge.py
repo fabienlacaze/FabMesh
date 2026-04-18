@@ -69,12 +69,16 @@ def _glb_to_obj(glb_path: str, obj_path: str) -> None:
             visual=trimesh.visual.TextureVisuals(uv=uv),
             process=False,
         )
-    # Pre-rotate Rx(180°). SF3D mesh has "up" in a different convention
-    # than Paint3D expects. Without this, init views render upside-down.
+    # Pre-rotate combined Rx(180°) + Ry(180°) = Rz(180°).
+    # - Rx(180°) alone (v14/v15c/v16): mesh upright BUT face pointing away
+    #   from Paint3D's front camera → init view shows mesh FROM BEHIND.
+    # - Ry(180°) alone (v18): face toward cam BUT mesh UPSIDE-DOWN.
+    # - Rx+Ry = Rz(180°) (v19): face toward cam + upright.
     if os.environ.get('FABMESH_PAINT3D_SKIP_ROTATE') != '1':
-        Rx180 = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
-        scene.apply_transform(Rx180)
-        log('pre-rotated mesh Rx(180°) for Paint3D orientation')
+        Rz180 = trimesh.transformations.rotation_matrix(np.pi, [0, 0, 1])
+        scene.apply_transform(Rz180)
+        log('pre-rotated mesh Rz(180°) = Rx(180°)+Ry(180°) for Paint3D front cam')
+
     scene.export(obj_path)
     log(f'converted glb -> obj: {obj_path}')
 
@@ -193,12 +197,11 @@ def _pack_obj_to_glb(obj_dir: str, out_glb: str) -> None:
     mesh = trimesh.load(obj_path, process=False)
     if isinstance(mesh, trimesh.Scene):
         mesh = list(mesh.geometry.values())[0]
-    # UN-rotate Rx(-180°) = Rx(180°) (180° rotation is self-inverse)
-    # to undo the pre-rotate done in _glb_to_obj.
+    # Undo Rz(180°) pre-rotate (self-inverse).
     if os.environ.get('FABMESH_PAINT3D_SKIP_ROTATE') != '1':
-        Rx180 = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
-        mesh.apply_transform(Rx180)
-        log('post-rotated mesh Rx(180°) to undo pre-rotate')
+        Rz180 = trimesh.transformations.rotation_matrix(np.pi, [0, 0, 1])
+        mesh.apply_transform(Rz180)
+        log('post-rotated mesh Rz(180°) to undo pre-rotate')
     # trimesh auto-loads the albedo.png via the .mtl file.
     mesh.export(out_glb)
     log(f'packed glb: {out_glb}')

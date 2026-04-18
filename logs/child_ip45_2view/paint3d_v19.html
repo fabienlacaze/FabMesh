@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Paint3D v19 — BREAKTHROUGH: Rz(180°) fix</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd; font-family:system-ui, sans-serif; }
+  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; }
+  h2 { padding:10px 16px 4px; margin:0; font-size:12px; color:#4ade80; }
+  .desc { padding:4px 16px; color:#aaa; font-size:11px; line-height:1.5; max-width:1000px; }
+  .card { background:#181818; padding:6px; }
+  .card img { max-width:100%; max-height:500px; object-fit:contain; border:1px solid #333; }
+  .card model-viewer { width:100%; height:500px; background:#1b1b1b; }
+  .row { display:grid; grid-template-columns: 1fr 1fr; gap:2px; background:#000; padding:2px; }
+  .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:2px; background:#000; padding:2px; }
+  .row4 { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:2px; background:#000; padding:2px; }
+  .ok { color:#4ade80; }
+  .bad { color:#f87171; }
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>v19 — BREAKTHROUGH: Rz(180°) = Rx+Ry combined</h1>
+<p class="desc">
+v14-v17 bug cascade: Rx(180°) seul mettait le mesh tête en haut mais <b>FACE VERS L'ARRIÈRE</b> de la cam Paint3D → photos front projetées sur le DOS.
+<br>v18 (Ry seul) : face vers cam mais mesh <b>TÊTE EN BAS</b>.
+<br><b class="ok">v19 (Rz=Rx+Ry) : face vers cam ET mesh debout = PREMIER DEPTH RENDER CORRECT !</b>
+</p>
+
+<h2>Depth render progression (ce qui prouve le fix)</h2>
+<div class="row3">
+  <div class="card">
+    <p style="font-size:11px;color:#f87171;">v16 (Rx seul) — mesh vu DE DOS</p>
+    <img src="mesh_paint3d_v16.glb.paint3d_work/stage1/init_depth_render.png" />
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#f87171;">v18 (Ry seul) — mesh TÊTE EN BAS</p>
+    <img src="mesh_paint3d_v18.glb.paint3d_work/stage1/init_depth_render.png" />
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v19 (Rz=Rx+Ry) — VISAGE DEVANT, DEBOUT ✓</p>
+    <img src="mesh_paint3d_v19.glb.paint3d_work/stage1/init_depth_render.png" />
+  </div>
+</div>
+
+<h2>Stage 1 albedo (back-projection photo front → UV atlas)</h2>
+<p class="desc">En bas à gauche de l'atlas v19 on voit clairement 3 mini-enfants en veste jean + short beige = la photo front se projette ENFIN correctement sur la tête et le torse. Zones magenta = faces non vues par la cam front (dos, côtés, arrière bras).</p>
+<div class="row3">
+  <div class="card">
+    <p style="font-size:11px;color:#f87171;">v15c (Rx bug, 2-view)</p>
+    <img src="mesh_paint3d_v15c.glb.paint3d_work/stage1/res-0/albedo.png" />
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#f87171;">v16 (Rx bug, 1-view)</p>
+    <img src="mesh_paint3d_v16.glb.paint3d_work/stage1/res-0/albedo.png" />
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v19 (Rz fix, 1-view front only)</p>
+    <img src="mesh_paint3d_v19.glb.paint3d_work/stage1/res-0/albedo.png" />
+  </div>
+</div>
+
+<h2>Stage 2 UV-inpaint (IP-Adapter remplit les gaps)</h2>
+<div class="row3">
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v15c (mauvais stage 1)</p>
+    <img src="mesh_paint3d_v15c.glb.paint3d_work/stage2/UV_inpaint_res_0.png" />
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v16 (mauvais stage 1)</p>
+    <img src="mesh_paint3d_v16.glb.paint3d_work/stage2/UV_inpaint_res_0.png" />
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v19 (bon stage 1)</p>
+    <img src="mesh_paint3d_v19.glb.paint3d_work/stage2/UV_inpaint_res_0.png" />
+  </div>
+</div>
+
+<h2>3D comparison</h2>
+<div class="row4">
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">Mesh D baseline</p>
+    <model-viewer src="mesh_NORMALIZE_1.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v15c (2v + bug Rx)</p>
+    <model-viewer src="mesh_paint3d_v15c.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card">
+    <p style="font-size:11px;color:#aaa;">v16 (1v + bug Rx)</p>
+    <model-viewer src="mesh_paint3d_v16.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card" style="border:2px solid #4ade80;">
+    <p style="font-size:11px;color:#4ade80;">v19 (1v + Rz FIX)</p>
+    <model-viewer src="mesh_paint3d_v19.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+</div>
+
+<h2>Render 360° v19 (stage 2 visualisation interne)</h2>
+<div class="card"><img src="mesh_paint3d_v19.glb.paint3d_work/stage2/render_rgb.gif" /></div>
+
+</body>
+</html>

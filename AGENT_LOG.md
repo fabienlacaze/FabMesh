@@ -5145,3 +5145,40 @@ désactivé (d9a02eb) la face reste à -Z.
 Logique: meshes auto-normalisés à face=+Z peu importe auto-align.
 Camera Three.js standard +Z voit la face. Cohérent pour tous les
 futurs meshes.
+
+---
+
+## Paint3D v16-v17 saga (2026-04-18 21:30-21:55)
+
+### v15c — stage 1 + stage 2 UV-inpaint (2-view front+back)
+Fix critical path bug: `_run_paint3d_stage2` was packing the
+stale `stage1/albedo.png` instead of `stage2/UV_inpaint_res_0.png`.
+After fix, v15c atlas shows beige filled regions instead of magenta
+gaps. Visual verdict: **"c'est mieux mais pas suffisant"** — UV
+texture sali par inpaint qui invente du gris. Face OK, tout le
+corps et les membres = beige/noir moche.
+
+### v16 — FRONT VIEW ONLY (isolate fusion bug?)
+Hypothesis: is 2-view fusion polluting v15c's texture? Test with
+FABMESH_MV_SLOTS=0 (1 view, views_init=[0]). Added env var
+override in `external/Paint3D/pipeline_paint3d_stage1.py`.
+Result: **v16 pire que v15c**. Deux bugs révélés:
+  1. **Bug #1 vertical**: face back-projetée au niveau TORSE
+     au lieu de HEAD. Visible sur side-view: la vraie tête reste
+     en tissu blanc de capuche tandis que le visage est smeared
+     au niveau du cou/poitrine.
+  2. **Bug #2 front→back leak**: la photo front se retrouve
+     aussi peinte sur l'ARRIÈRE du mesh (cause probable:
+     FABMESH_PAINT3D_LOOSE_MASK=85° auto-enabled masque les
+     faces rear-facing comme visibles).
+
+### v17 — diagnose + fix les 2 bugs (en cours)
+Agent lancé pour:
+  1. Mesurer bbox mesh + head position vs `look_at_height=0.25`
+  2. Fix vertical: translation mesh pour aligner centroid
+     avec look_at_height (ou override look_at_height via env var)
+  3. Fix mask leak: désactiver auto LOOSE_MASK quand len(mv_paths)==1
+Status in-flight: agent a auto-override `look_at_height: 0.25 -> 0.7107`
+(centroid mesh était à 0.7107 en Y), stage1 done 51.8s. En attente
+stage2 + viewer.
+
