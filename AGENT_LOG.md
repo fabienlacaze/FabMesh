@@ -352,6 +352,115 @@ So:
 D remains the best-quality stable config for shipping. Future face
 definition work should stay within NORMALIZE=0 frame.
 
+### Run L result — STILL NEEDS VISUAL EVAL
+
+Run completed (mesh_RUN_L.glb 2.9 MB, atlas now 2048×2048). User
+hasn't compared yet — pivoted to a more important observation below.
+
+### KEY USER INSIGHT (2026-04-18) — REAL_D has BETTER textures but inverted
+
+User looked at REAL_D (NORMALIZE=1, no SHIFT_SOURCE) and reported:
+"Real D a des super textures mais elles sont inversées".
+
+Visible: denim is much sharper, seams clearly defined, white t-shirt
+visible, cargo shorts crisp, baskets defined. BUT:
+- The mesh shows the BACK at the locked frontal viewer angle.
+- Face features (eyes, hair patches) are projected onto the back of
+  the head from the wrong angle.
+
+So REAL_D is the OPPOSITE of D:
+- D = correct orientation but lower texture quality (bottlenecked by
+  mv/view_0 dup at 1024px since input.png HD lands "behind" the
+  rotated mesh).
+- REAL_D = HIGH texture quality (HD source actually paints the dense
+  side of the bake) but mirror-swapped (back where front should be).
+
+### Re-evaluation of REAL_D after closer look (2026-04-18)
+
+User looked at REAL_D from a different angle and reported TWO bugs:
+1. "avant arriere inversée" — side-swap (Y rotation issue)
+2. "orientation de la vrai avant inversée (tete vers les pieds)" —
+   the front face image is projected UPSIDE DOWN onto the mesh
+
+So REAL_D's textures aren't just "swapped left/right" — the source
+input.png is also vertically flipped. Visible in the 2nd screenshot:
+the back of the mesh shows a "head zone" in the BOTTOM (where the
+feet should be) and shorts in the upper area where the chest is.
+This is a head-toward-feet inversion.
+
+Conclusion: REAL_D combines TWO transformations:
+- side-swap (180° Y) caused by bridge rotating mesh but not source
+- vertical flip (180° X or p_v inversion) caused by R_undo's Rx(90)
+  no longer matching the rotated mesh orientation
+
+A simple post-export Y rotation won't fix this — it would only fix
+the side-swap, not the vertical flip. We'd need to also apply X
+rotation OR fix the V flip in texture_project's projection chain.
+
+ABANDONING the Run O plan (post-rotate Y -180°). It would only
+half-fix the problem.
+
+### Pivot: investigate the 2 specific bugs in REAL_D math
+
+To fix REAL_D properly, we need either:
+- **Option A**: post-rotate the mesh by Rx(180) @ Ry(180) on export
+  AFTER the bridge does its work. Both rotations together net out
+  to a Z-axis flip — equivalent to 180° around Z.
+- **Option B**: in texture_project.py, when rotation_offset_deg!=0,
+  also flip p_v (`p_v = 1 - p_v`) for the source view to compensate
+  for the vertical inversion that the rotated mesh introduces vs the
+  R_undo's standard Rx(90) chain.
+- **Option C**: revert to D (NORMALIZE=0) which is geometrically
+  correct, and accept the texture quality bottleneck. Best definition
+  improvement path within D = bake the SDXL refine more aggressively
+  (raise strength), or use a higher-res input.png.
+
+### Run L was completed but ignored (mesh_RUN_L.glb 2.9 MB exists)
+
+User skipped past Run L's verdict. Run L = D + atlas tex_res 2048
+should be fine to evaluate later if the REAL_D direction is dropped.
+
+### Decision needed from user
+
+(awaiting input on Option A / B / C)
+
+### NEW PLAN — Run O: REAL_D + post-rotate mesh -180° Y on export
+
+Hypothesis: REAL_D's textures are sharp because NORMALIZE=1 makes
+the bridge rotate the mesh +180° BEFORE projection, and texture_project
+projects with rotation_offset_deg=180 — so the **HD source input.png
+lands on the densely-sampled side of the mesh**. The only problem is
+that the exported GLB is then "facing backward" relative to
+model-viewer's default camera.
+
+Fix: after the bridge produces mesh_REAL_D-style GLB (with great
+textures), apply an additional Ry(-180°) to the mesh geometry on
+export. Textures stay the same (UV-mapped to vertices), vertices
+rotate so the face ends up at +Z.
+
+Implementation: easiest is to add a post-export Y rotation in
+local_sf3d_bridge.py if NORMALIZE_ORIENT was applied. But to keep
+the standard pipeline untouched, add an env flag
+FABMESH_POST_ROTATE_Y=180 that rotates the final exported mesh by
+that amount. Then call with NORMALIZE_ORIENT=1 + POST_ROTATE_Y=180
+to get HD textures + correct viewer orientation.
+
+LOGGING NOW BEFORE WRITING CODE.
+
+### Run L — D + tex_res 2048 (atlas resolution doubled) — STARTING NOW
+
+Config: D config exactly + bridge invoked with tex_res=2048 (third
+positional arg of local_sf3d_bridge.py). The mv source images stay
+at 1024 (unchanged), only the destination atlas baked by SF3D and
+projected by texture_project becomes 2048×2048.
+
+Hypothesis: per-texel detail will be sharper because the atlas has
+4× more pixels for the same UV layout. NO change to NORMALIZE, NO
+shift, NO mv content change → no flip risk per the latest verdict.
+
+Output: mesh_RUN_L.glb. Will compare to D (mesh_NORMALIZE_1.glb,
+which despite its name is the canonical D run = NORMALIZE=0).
+
 ### Plan after the double-erratum (2026-04-18)
 
 User asked to keep improving D's definition. Resetting all hypotheses
