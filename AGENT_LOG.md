@@ -782,6 +782,10 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### CUDA 12.8 download started (2026-04-18)
+
+Download kicked off in background to `c:\tmp\cuda_installer\cuda_12.8.0_571.96_windows.exe`. Expected 3.1 GB, 5-15 min depending on bandwidth.
+
 ### CUDA 12.8 Toolkit install — USER ACTION NEEDED (2026-04-18)
 
 User picked CUDA 12.8 coexist install. This is admin/installer,
