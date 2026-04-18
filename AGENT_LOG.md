@@ -782,6 +782,31 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Quick Win pack result — NO visible improvement (2026-04-18)
+
+All 3 quick win patches applied:
+- ip_adapter_scale 1.0 -> 1.5 (via FABMESH_IPA_SCALE env, default 1.5)
+- denoising_strength 1.0 -> 0.7 in depth_based_inpaint_template.yaml
+- views_init [0, 23] -> [0, 3, 6, 9, 12, 15, 18, 21] (2 -> 8 views)
+- Also cleaned up the hardcoded monkey-head prompt from the YAML
+- Made grid nrow + split_grid_image size dynamic
+
+Run completed in 58s. Albedo: SAME pattern as before — same magenta
+gaps, same gray figures in bottom-center, maybe 1-2 more silhouettes.
+
+### Root cause understanding
+The real bottleneck isn't the SD params — it's the **output resolution**.
+The YAML has `width: 1024, height: 512` fixed. With 8 views on a
+single row, each view is 1024/8 = **128 px wide**. SD1.5 + ControlNet
+at 128px wide produces noise, not usable texture.
+
+To actually fix:
+- EITHER change YAML width to 2048+ (VRAM-heavy for SD1.5, 8 views
+  at 256px each is still marginal)
+- OR switch to a 2x4 grid (each view 512x256) via nrow=4 in make_grid
+- OR split the 8 views into 4 separate SD1.5 calls of 2 views each
+  (keeps 512px per view, but 4x slower total)
+
 ### Quick Win pack — STARTING NOW (2026-04-18)
 
 User picked: combine 3 changes in one test run:

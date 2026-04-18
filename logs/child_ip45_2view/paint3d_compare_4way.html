@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Paint3D variants vs mesh D</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
+               font-family:system-ui, sans-serif; }
+  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; border-bottom:1px solid #333; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+          gap:1px; background:#000; height:calc(100vh - 40px); padding:4px; }
+  .card { background:#181818; padding:8px; position:relative; }
+  .card model-viewer { width:100%; height:100%; background:#1b1b1b; }
+  .label { position:absolute; top:8px; left:16px;
+           background:rgba(0,0,0,0.75); padding:5px 10px; font-size:11px;
+           color:#eee; border-radius:4px; z-index:5; max-width:90%; }
+  .verdict { position:absolute; bottom:8px; left:16px; right:16px;
+             background:rgba(0,0,0,0.7); padding:5px 10px; font-size:10px;
+             border-radius:4px; z-index:5; color:#bbb; }
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>Paint3D variants vs mesh D — 4-way compare (drag to rotate)</h1>
+<div class="grid">
+  <div class="card">
+    <div class="label">1. Mesh D (texture_project bricolage)</div>
+    <model-viewer src="mesh_NORMALIZE_1.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+    <div class="verdict">WINNER — baseline fidèle à la photo</div>
+  </div>
+  <div class="card">
+    <div class="label">2. Paint3D stage 1, 1 ref (front only)</div>
+    <model-viewer src="mesh_paint3d.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+    <div class="verdict">magenta + gray harness, no identity</div>
+  </div>
+  <div class="card">
+    <div class="label">3. Paint3D stage 1+2, 2 refs IPA (front+back)</div>
+    <model-viewer src="mesh_paint3d_multi.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+    <div class="verdict">pire : plus de magenta, ninja figures</div>
+  </div>
+  <div class="card">
+    <div class="label">4. Option A : photos en init views directes</div>
+    <model-viewer src="mesh_paint3d_optionA.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+    <div class="verdict">identique à multi-ref — Paint3D ignore nos photos</div>
+  </div>
+</div>
+</body>
+</html>
