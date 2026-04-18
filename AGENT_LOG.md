@@ -766,6 +766,21 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### pytorch3d shim install — IN PROGRESS (2026-04-18)
+
+User gave GO. Starting Option 1.
+
+Step 1 — `pip install fvcore iopath` — DONE
+(fvcore 0.1.5, iopath 0.1.10 installed + tiny transitive deps).
+
+Step 2 — check cl.exe in PATH — NOT in PATH, but vcvars64.bat
+exists at `C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat`.
+Need to source it before `pip install pytorch3d` or JIT compile
+will fail.
+
+Step 3 — next: `pip install pytorch3d from source` with vcvars64
+sourced. Build time 10-20 min.
+
 ### Paint3D kaolin forensic (2026-04-18) — pytorch3d shim is the answer
 
 Agent dissected Paint3D. Key findings:
