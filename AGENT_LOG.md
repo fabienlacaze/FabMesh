@@ -782,6 +782,32 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Agent survey for no-compile, non-eliminated texturing AI (2026-04-18)
+
+User constraint: local + free + commercial + NOT already eliminated.
+
+Agent checked:
+- MV-Adapter direct: needs nvdiffrast compile — blocked
+- ComfyUI-3D-Pack: has "prebuilt wheels" but falls back to source
+  compile if arch missing. Worth ONE attempt to see if the prebuilt
+  cache happens to include sm_120.
+- Wonder3D / Unique3D / LGM / InstantMesh: all generate geometry,
+  NOT retexture — out of scope
+- TRELLIS: full CUDA toolkit required
+
+**Two paths remain**:
+
+1. **ComfyUI-3D-Pack** (MIT, MV-Adapter node for texturing). Test
+   `install.py` — if prebuilt wheels cover sm_120, turnkey solution.
+
+2. **Upgrade `scripts/texture_project.py`** with:
+   - ControlNet-depth-SDXL (diffusers, no compile)
+   - IP-Adapter for ref-image conditioning (pure diffusers)
+   - trimesh + pyrender for CPU/OpenGL projection (no CUDA ext)
+   - LaMa seam inpainting (pure torch)
+   No new install, no compile, pure diffusers + existing FabMesh
+   bricolage architecture.
+
 ### User question (important): "l'utilisateur final devra-t-il installer CUDA 12.8 aussi ?"
 
 **No**. CUDA 12.8 toolkit is a DEV-ONLY dependency needed to
