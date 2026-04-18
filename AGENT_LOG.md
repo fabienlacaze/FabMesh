@@ -5325,3 +5325,75 @@ User feedback final sur config restaurée: "cest mieux" — visage net,
 veste denim avec boutons détaillés, short cargo. Configuration finale
 gardée comme baseline `a-utiliser-v2`.
 
+
+---
+
+## 2026-04-18 — texture_project front/back inversion FIXED (commit 5124f8c)
+
+### Diagnostic
+The "Solution 5" hypothesis (R_undo conditional on NORMALIZE_ORIENT)
+turned out to be RIGHT about the symptom (front photo on back of mesh)
+but WRONG about the root cause. The real culprit is the
+`norms_cam = -norms_cam` line at texture_project.py:192.
+
+That negation was added (long ago) on the assumption that after SF3D's
+`tmesh.invert()` post-transform, the loaded vertex_normals point
+INWARD into the mesh. Empirical verification on the current pipeline
+(SF3D + weld_uv + trimesh.load) shows the opposite:
+
+```
+mean dot(normal, outward_dir) = +0.42
+% positive (outward) = 81.0%
+```
+
+So the negation was FLIPPING normals from outward to inward, which
+inverted every visibility test. Per-head-vertex check:
+
+| code path                    | front-head (-Z) visible | back-head (+Z) visible |
+|------------------------------|-------------------------|------------------------|
+| no negation (FIX)            | 218/337                 | 0/149                  |
+| with negation (CURRENT BUG)  | 72/337                  | 149/149 ALL            |
+
+With negation, ALL 149 back-of-head verts pass the visibility test
+from the az=0 camera, while only 72 face verts do. So the front photo
+gets sprayed on the back of the head (and vice-versa for the back
+photo at az=180).
+
+### Fix
+`scripts/texture_project.py:184-208` — gate the negation behind
+`FABMESH_TEXPROJ_FRAME_FIX=1` (default ON). Setting to 0 reverts to
+the legacy path for A/B regression testing.
+
+### Validation
+Test mesh: existing `logs/child_ip45_2view/mesh.glb` (welded, NORMALIZE_ORIENT=0,
+face at GLB -Z confirmed by head Z extent: -0.11 to +0.05).
+
+`scripts/_render_simple.py` shows 4 views around Y. With z-buffer
+keeping max-Z, az=0 view shows the +Z side of the mesh = BACK side.
+Therefore for a correctly-textured mesh: face must appear at az=180
+(-Z side) and hair/back at az=0 (+Z side).
+
+LEGACY (FRAME_FIX=0): face visible at az=0 → BUG
+FIXED (FRAME_FIX=1): face visible at az=180, hair at az=0 → CORRECT
+
+Visible artefacts:
+- `_render_BEFORE_FIX.png` (legacy texture_project on existing mesh)
+- `_render_AFTER_FIX.png` (FRAME_FIX=1 on same mesh + mv/)
+- `_render_FULL_PIPELINE.png` (full bridge w/ NORMALIZE_ORIENT=0 +
+  FRAME_FIX=1 + Z123 schema)
+- `_render_FIXED_2VIEW.png` (FRAME_FIX=1 + ip45_2view mv/ schema)
+- `_atlas_FIXED_final.png` (atlas extracted from fixed mesh)
+
+### Commit
+`5124f8c` texture_project: fix front/back texture inversion bug
+
+### Notes for downstream
+- This fix should also resolve the historical "mini-children mosaic"
+  bug. Atlas xatlas re-pack still produces fragmented islands but each
+  island now contains the CORRECT photo region.
+- For meshes generated WITHOUT the SF3D+weld pipeline (e.g. GT
+  calibration cube, or any mesh whose normals genuinely point
+  inward), set FABMESH_TEXPROJ_FRAME_FIX=0.
+- The bridge's `auto_align_rot_deg` propagation still works
+  identically — this fix is orthogonal to the rotation_offset story.
+
