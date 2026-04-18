@@ -766,6 +766,31 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Paint3D install BLOCKED — kaolin doesn't support RTX 5080 (sm_120)
+
+Tried to install Paint3D. Deps all fine (albumentations, lightning,
+kornia, loguru) except kaolin:
+- kaolin 0.18 wheel for torch 2.7 + cu126 installs cleanly
+- At runtime, kaolin rasterize_cuda fails with "no kernel image
+  available for execution on the device"
+- RTX 5080 = sm_120 (Blackwell). Kaolin wheels were compiled without
+  sm_120 support (max sm_90 in the torch 2.7 build).
+
+Tried wheel for torch 2.8 + cu129 — installs but crashes with
+"DLL load failed while importing _C: procedure not found" because
+the wheel links against torch 2.8 ABI and we have torch 2.7.
+
+Reverted to torch 2.7 wheel (safe broken state).
+
+### Options forward
+- Upgrade torch 2.7 → 2.8 (risks breaking SF3D, diffusers).
+- Compile kaolin from source with TORCH_CUDA_ARCH_LIST=12.0 (long
+  on Windows, requires MSVC, may still fail on sm_120 if the code
+  itself uses unsupported features).
+- **Abandon Paint3D**, try TEXTure (MIT, SD1.5 based) — check if
+  it uses kaolin or an alternative like nvdiffrast.
+- Look for a different texturing AI without kaolin dependency.
+
 ### Paint3D capabilities — multi-view confirmed
 
 Cloned github.com/OpenTexture/Paint3D into external/Paint3D.
