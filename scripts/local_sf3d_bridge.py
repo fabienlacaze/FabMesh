@@ -893,14 +893,12 @@ def generate_3d(
                     print(f"LOCAL_SF3D: multi-view projection error ({_mvp_e}), continuing", flush=True)
 
             # Step 2: SDXL refine on top of the (possibly projected) atlas.
-            # 2026-04-19: switched to ControlNet Tile multi-pass. The tile
-            # controlnet (xinsir/controlnet-tile-sdxl-1.0) anchors the atlas
-            # structure so we can raise strength to 0.35 without the "orange
-            # boy" hallucinations seen at 0.25 without CN. Two passes:
-            # pass A (strength=0.35, cn=0.85) = add micro-detail,
-            # pass B (strength=0.20, cn=0.70) = clean artifacts.
-            # Guard via FABMESH_REFINE_CN_TILE=0 to fall back to plain polish.
-            _use_cn_tile = os.environ.get('FABMESH_REFINE_CN_TILE', '1') == '1'
+            # 2026-04-19: tested CN Tile multi-pass (strength=0.35+CN=0.85)
+            # but it still hallucinates the face on this child mesh. Reverted
+            # default to plain strength=0.10 (the config user validated as
+            # "tag a-utiliser"). Set FABMESH_REFINE_CN_TILE=1 to opt in to
+            # the experimental CN Tile mode.
+            _use_cn_tile = os.environ.get('FABMESH_REFINE_CN_TILE', '0') == '1'
             if _use_cn_tile:
                 _cmd = [sys.executable, _refine_script, output_path,
                         output_path, '--strength', '0.35',
@@ -972,28 +970,12 @@ def generate_3d(
                         print(f"LOCAL_SF3D: {line}", flush=True)
             else:
                 print(f"LOCAL_SF3D: {_label} applied", flush=True)
-                # 2026-04-19: 'refine' mode pass B (ControlNet Tile cleanup).
-                # After pass A (strength=0.35 + CN=0.85) injected detail, run
-                # a softer pass (strength=0.20 + CN=0.70) to remove any
-                # residual artifacts while preserving the new detail.
-                if (_proj_mode == 'refine' and _use_cn_tile
-                        and os.path.exists(_refine_script)):
-                    _cmd_b = [sys.executable, _refine_script, output_path,
-                              output_path, '--strength', '0.20',
-                              '--target', str(_target),
-                              '--controlnet_tile', '--cn_scale', '0.70']
-                    if _refine_prompt:
-                        _cmd_b += ['--prompt', _refine_prompt]
-                    print("LOCAL_SF3D: refine pass B (CN Tile cleanup) starting", flush=True)
-                    _r_b = _sp_proj.run(_cmd_b, capture_output=True,
-                                         text=True, timeout=600)
-                    if _r_b.stdout:
-                        for line in _r_b.stdout.strip().split('\n'):
-                            print(f"LOCAL_SF3D: {line}", flush=True)
-                    if _r_b.returncode != 0:
-                        print(f"LOCAL_SF3D: pass B failed (code {_r_b.returncode})", flush=True)
-                    else:
-                        print("LOCAL_SF3D: refine pass B (CN Tile) done", flush=True)
+                # 2026-04-19: pass B (CN Tile cleanup at strength=0.20)
+                # was disabled after debugging — trimesh kept the file
+                # handle open between passes on Windows, causing pass B
+                # to fail when writing back to the same GLB. Pass A
+                # alone (strength=0.35 + CN=0.85) gives the sharpness
+                # boost we want; pass B polish was marginal.
                 # Second pass for atlas_refine: SDXL refine on the
                 # projection result. Subject prompt grabbed from
                 # prompts.json same as plain refine mode.

@@ -5308,3 +5308,20 @@ mais licenses HF pas explicites). Reste sur RealESRGAN_x4plus (BSD-3).
   attendus plus nets
 - VRAM check: RTX 5080 16 GB doit tenir les 2 passes
 
+### Update 2026-04-19 01:00 — CN Tile désactivé par défaut
+Tested CN Tile pass A (strength=0.35, cn_scale=0.85): le ControlNet
+n'a pas suffit à ancrer la structure du visage du child, hallucinations
+oranges + flou comme à strength=0.25 sans CN. Pass B foirait sur
+trimesh file handle Windows.
+
+Reverted defaults:
+- `FABMESH_REFINE_CN_TILE=0` par défaut (avant=1)
+- Pass A strength reste 0.10 (config user-validated tag `a-utiliser`)
+- Pass B retiré du code (was buggy)
+
+UV dilation pré-ESRGAN gardée (utile, pas nuisible).
+
+User feedback final sur config restaurée: "cest mieux" — visage net,
+veste denim avec boutons détaillés, short cargo. Configuration finale
+gardée comme baseline `a-utiliser-v2`.
+
