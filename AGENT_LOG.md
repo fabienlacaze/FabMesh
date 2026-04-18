@@ -766,6 +766,61 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Paint3D kaolin forensic (2026-04-18) — pytorch3d shim is the answer
+
+Agent dissected Paint3D. Key findings:
+
+- kaolin is used in EXACTLY 3 files: paint3d/models/mesh.py,
+  render.py, textured_mesh.py. The pipeline scripts themselves
+  don't import kaolin.
+- 12 kaolin call categories found. 11 of them are trivially
+  replaceable (trimesh for IO, pure torch for gather/normals/
+  camera utils, `F.grid_sample` for texture_mapping).
+- **Only 1 hard dep**: `kal.render.mesh.rasterize` (5 call sites,
+  all in render.py). Needs a GPU rasterizer returning
+  `(face_features_interpolated, face_idx)` per pixel.
+
+### Environment ground truth (verified by agent)
+
+- `cl.exe` NOT in PATH but VS 2022 Professional IS installed at
+  `C:\Program Files\Microsoft Visual Studio\2022\Professional\`
+  with MSVC 14.44.35207. `vcvars64.bat` opens the right shell.
+- nvcc is ONLY CUDA 13.2 (no 12.8 coexist yet).
+- torch 2.7.1+cu128, RTX 5080 sm_120 confirmed.
+
+### Ranked options (agent's table)
+
+1. **pytorch3d shim** (HIGH prob) — install pytorch3d (has rasterize
+   with similar contract), write `_kal_shim.py` that exposes
+   kaolin's signature but uses pytorch3d internally, replace
+   `import kaolin` in the 3 Paint3D files. No CUDA 12.8 needed.
+2. Compile kaolin from source with CUDA 12.8 (MEDIUM prob) —
+   previous plan. Needs CUDA 12.8 install first.
+3. Compile nvdiffrast + shim (MEDIUM prob) — same CUDA issue.
+4. Kaolin OpenGL backend (ZERO) — doesn't exist.
+5. pyrender fallback (LOW) — no differentiable raster, painful
+   on Windows.
+
+### Chosen: Option 1 — pytorch3d shim
+
+Concrete steps (from agent):
+1. Open MSVC shell: `vcvars64.bat`.
+2. `pip install fvcore iopath`
+3. `pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/pytorch3d.git@stable"` — JIT builds with torch's cu128 + MSVC, auto-picks sm_120.
+4. Smoke test pytorch3d rasterize on a triangle.
+5. Write `external/Paint3D/paint3d/models/_kal_shim.py` exposing:
+   `rotate_translate_points`, `generate_transformation_matrix`,
+   `PinholeIntrinsics`, `OrthographicIntrinsics`,
+   `index_vertices_by_faces`, `face_normals`, `rasterize`,
+   `texture_mapping`, `io.obj.import_mesh`, `io.off.import_mesh`.
+6. Replace `import kaolin as kal` with
+   `from paint3d.models import _kal_shim as kal` in the 3 files.
+7. Run Paint3D stage 1 on Suzanne demo.
+
+Fallback if pytorch3d install fails: try pre-built wheel from
+https://anaconda.org/pytorch3d/pytorch3d/files (py311_cu128_pyt271)
+or drop to Option 2 (compile kaolin with CUDA 12.8).
+
 ### Kaolin from source build — STARTING NOW (2026-04-18)
 
 User refocused: we're installing Paint3D specifically, not chasing
