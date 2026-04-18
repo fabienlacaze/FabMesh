@@ -782,6 +782,34 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### User question (important): "l'utilisateur final devra-t-il installer CUDA 12.8 aussi ?"
+
+**No**. CUDA 12.8 toolkit is a DEV-ONLY dependency needed to
+COMPILE pytorch3d/kaolin from source. Once compiled, the wheels
+contain pre-built .pyd/.dll files. End users get the wheel via
+`pip install <wheel>`, no toolkit / nvcc / MSVC needed. They just
+need the NVIDIA driver (already present on any GPU system).
+
+Same pattern as torch: user installed `torch==2.7.1+cu128` via pip
+without compiling CUDA — someone else compiled it for them.
+
+**Multi-arch concern for distribution**: ship wheels built with
+`TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;12.0"` so sm_75..sm_120
+users all work. ~3x bigger wheel but covers the full RTX 20xx/
+30xx/40xx/50xx range.
+
+### Less-invasive dev alternatives user proposed
+
+1. **WSL2 + Docker container** with CUDA 12.8 preinstalled. Build
+   in container, export wheel, discard container. No Win11 host
+   pollution.
+
+2. **Github Actions Linux runner** with CUDA 12.8. Automated build
+   pipeline, zero local install.
+
+3. **Local CUDA 12.8 coexist install** (current plan). Smallest
+   iteration cycle but pollutes host.
+
 ### Safety analysis of CUDA 12.8 installer (user asked)
 
 **Not dangerous IF installed correctly**:
