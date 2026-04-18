@@ -555,6 +555,39 @@ Perte de détail minime et typique de la chaîne SF3D + texture_project.
 
 After 18 runs (A..R), D wins.
 
+### CRITICAL UPDATE — D has 2 distinct face/back bugs (2026-04-18)
+
+User rotated the mesh in the viewer and reported:
+- "la texture de face est dans le bon sens mais DÉCALÉE"
+  (front texture is correctly oriented but spatially offset)
+- "la texture de l'arrière est INVERSÉE (tête en bas)"
+  (back texture is vertically flipped)
+
+So my "D wins" verdict above was based only on the front view. The
+back view of the same mesh has the head-toward-feet inversion that
+I'd previously diagnosed in REAL_D and dismissed.
+
+This is consistent with what I should have realized earlier:
+texture_project handles front (input.png at azim=0) and back (mv/2
+at azim=180) with different rotation chains. For the front, p_v is
+flipped via `p_v = 1.0 - p_v` (l 555). For the back, the same
+formula applies BUT the back image needs an additional vertical flip
+because its source camera convention is opposite — back-view photos
+have "up" at the top of the image just like front, but when projected
+from azim=180 onto a mesh in SF3D-native frame, the V coord lands
+inverted.
+
+### Plan to fix
+
+For the back view (and only the back), apply an extra V flip:
+`p_v = 1.0 - p_v` becomes `p_v = p_v` for views at azim=180.
+
+OR equivalently: pre-flip the back image vertically before passing
+it to texture_project. Simpler: in build_mv_dir, vertically flip
+view_2 (and view_3, the back-side dups).
+
+Will try the latter first (less code change, no env flag).
+
 ### Fix needed
 
 Don't use trimesh for the post-rotation. Need a method that
