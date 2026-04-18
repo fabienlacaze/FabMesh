@@ -802,6 +802,7 @@ def generate_3d(
                          '--multiview', _multiview_dir,
                          '--rotation-offset', str(auto_align_rot_deg)],
                         capture_output=True, text=True, timeout=300,
+                        env=dict(os.environ),
                     )
                     if _r_mv_proj.stdout:
                         for line in _r_mv_proj.stdout.strip().split('\n'):

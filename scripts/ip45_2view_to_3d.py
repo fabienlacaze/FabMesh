@@ -69,13 +69,18 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
     env['FABMESH_MV_REUSE'] = mv_dir
     # Keep the refine mode so texture projection consumes the multi-views.
     env.setdefault('FABMESH_PROJECT_MODE', 'refine')
-    # Disable the bridge's +180° Y rotation. That rotation exists to make
-    # the face point to +Z (three.js default camera), but it also injects a
-    # 180° offset into every MV projection while leaving the source image
-    # at azim=0 — which puts the BACK image on the FRONT of the mesh (and
-    # the face on the back). Our views.json already uses the canonical
-    # SF3D frame (face at -Z), so we turn the normalizer off entirely.
-    env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
+    # Keep the bridge's +180° Y normalization (face -> +Z, the three.js
+    # convention) ON — disabling it caused texture_project's vertex
+    # visibility math to disagree with its built-in V/U flips, which made
+    # ~40% of the atlas texels uncovered and pushed-pulled into a flat
+    # blur (visually: cireux face, lost denim crease detail).
+    # Instead, tell texture_project to shift the source image's azimuth
+    # by the same +180° as the MV views via FABMESH_TEXPROJ_SHIFT_SOURCE.
+    env['FABMESH_TEXPROJ_SHIFT_SOURCE'] = '1'
+    # Forward diag flag explicitly — some shells don't propagate env into
+    # the grandchild subprocess reliably on Windows.
+    if os.environ.get('FABMESH_TEXPROJ_DIAG') == '1':
+        env['FABMESH_TEXPROJ_DIAG'] = '1'
     cmd = [sys.executable, bridge, source_image, glb_out]
     log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir})')
     r = subprocess.run(cmd, env=env, check=False)

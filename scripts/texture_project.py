@@ -379,8 +379,17 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     views = []  # list of (image_path, azim_deg, elev_deg, priority)
 
-    # Always include the front view at (0, 0)
-    views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
+    # Always include the front view. Its azimuth in the *post-rotation*
+    # frame equals the offset that was applied to the mesh — for the
+    # Z123/CRM pipeline that's 0 (the source is generated/preprocessed
+    # from the post-rotation viewer-front direction), but for any
+    # caller that supplies a raw photo BEFORE the bridge applied its
+    # +180° normalization (e.g. ip45_2view_to_3d.py with FABMESH_MV_REUSE),
+    # the source must be shifted by `rotation_offset_deg` too — otherwise
+    # it lands on the BACK of the rotated mesh.
+    _src_azim = (0.0 + rotation_offset_deg) % 360 \
+        if os.environ.get('FABMESH_TEXPROJ_SHIFT_SOURCE') == '1' else 0.0
+    views.append((source_image_path, _src_azim, 0.0, PRIORITY_WEIGHTS[0.0]))
 
     # If the bridge applied an auto-align rotation around Y between SF3D
     # inference and this projection, we must shift every multi-view azimuth
@@ -580,6 +589,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # Only allocated when FABMESH_TEXPROJ_DIAG=1 to keep the default
     # memory footprint unchanged for production runs.
     _diag_on = os.environ.get('FABMESH_TEXPROJ_DIAG') == '1'
+    log(f'diag flag: FABMESH_TEXPROJ_DIAG={os.environ.get("FABMESH_TEXPROJ_DIAG")!r} -> _diag_on={_diag_on}')
     if _diag_on:
         source_view_arr = np.full((tex_res, tex_res), 255, dtype=np.uint8)
         coverage_arr = np.zeros((tex_res, tex_res), dtype=np.uint16)
@@ -699,7 +709,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             src_rgb[m] = _palette[vi]
         # Emptry texels left black.
         src_img = Image.fromarray(src_rgb)
-        src_path = out_mesh_path + '.diag_sourceview.png'
+        src_path = output_path + '.diag_sourceview.png'
         src_img.save(src_path)
         log(f'diag source-view map saved: {src_path}')
 
@@ -717,7 +727,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         ], dtype=np.uint8)
         cov_rgb = cov_palette[cov_clamped]
         cov_img = Image.fromarray(cov_rgb)
-        cov_path = out_mesh_path + '.diag_coverage.png'
+        cov_path = output_path + '.diag_coverage.png'
         cov_img.save(cov_path)
         log(f'diag coverage map saved: {cov_path}  '
             f'(holes={int((coverage_arr == 0).sum())}, '
