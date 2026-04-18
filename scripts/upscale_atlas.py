@@ -39,7 +39,14 @@ def log(msg):
 
 
 def upscale_image(img: Image.Image, target_size: int | None = None) -> Image.Image:
-    """Upscale via RealESRGAN x4plus, optionally resize to target."""
+    """Upscale via RealESRGAN x4plus (BSD-3-Clause, commercial-safe).
+
+    NOTE 2026-04-19: 4x-UltraSharp / Remacri alternatives were considered
+    for better texture quality, but their distribution on HuggingFace/Civitai
+    does not include an explicit commercial license. Sticking with x4plus
+    which has clean BSD-3 licensing. Improvement: tile_pad raised 10->32
+    to reduce seam artefacts at UV chart edges.
+    """
     from realesrgan import RealESRGANer
     from basicsr.archs.rrdbnet_arch import RRDBNet
 
@@ -49,10 +56,37 @@ def upscale_image(img: Image.Image, target_size: int | None = None) -> Image.Ima
                   'download/v0.1.0/RealESRGAN_x4plus.pth')
     upsampler = RealESRGANer(
         scale=4, model_path=model_path, model=model,
-        tile=512, tile_pad=10, pre_pad=0, half=True,
+        tile=512, tile_pad=32, pre_pad=0, half=True,
         device='cuda' if torch.cuda.is_available() else 'cpu',
     )
     arr = np.asarray(img.convert('RGB'))
+    # UV chart dilation: SF3D atlases have ~300 UV charts with gaps between
+    # them. ESRGAN bleeds across chart borders because it sees the gaps as
+    # edges. Dilate the filled pixels into the gap by ~4px so the ESRGAN
+    # "sees" continuous content. Detect gap = uniform magenta / near-black /
+    # exact SF3D padding colour (it's the constant dilate_fill border).
+    try:
+        from scipy import ndimage as _ndi
+        # Background mask heuristic: pixels that are exactly the same across
+        # R/G/B AND close to 0 or 255 are typically padding. Safer mask = flat
+        # pixels matching the mode colour at image corners.
+        _corners = arr[[0, 0, -1, -1], [0, -1, 0, -1]]
+        _corner_mode = np.mean(_corners, axis=0).astype(np.int32)
+        _diff = np.abs(arr.astype(np.int32) - _corner_mode).sum(axis=-1)
+        _bg_mask = _diff < 8  # near-identical to padding colour
+        if _bg_mask.mean() > 0.05 and _bg_mask.mean() < 0.90:
+            # Dilate the foreground into the background by ~4px
+            _fg = ~_bg_mask
+            # EDT of the BG: for each bg pixel, find nearest fg pixel coords
+            _, (_yi, _xi) = _ndi.distance_transform_edt(
+                _bg_mask, return_indices=True,
+            )
+            _mask_close = _bg_mask & (_ndi.distance_transform_edt(_bg_mask) < 6)
+            arr = arr.copy()
+            arr[_mask_close] = arr[_yi[_mask_close], _xi[_mask_close]]
+            log(f'UV dilation applied to {_bg_mask.mean()*100:.1f}% padding')
+    except Exception as _de:
+        log(f'UV dilation skipped ({_de})')
     out_arr, _ = upsampler.enhance(arr, outscale=4)
     out = Image.fromarray(out_arr)
     del upsampler, model

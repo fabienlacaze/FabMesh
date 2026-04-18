@@ -5270,3 +5270,41 @@ vs Paint3D v22 stage1-only sur le même mesh.
 - `scripts/blender_smart_uv.py` (nouveau)
 - `scripts/local_sf3d_bridge.py` (patch weld_uv)
 
+---
+
+## Quality upgrades via ControlNet Tile + UV dilation (2026-04-19 00:45)
+
+### Contexte
+Config validée `a-utiliser` (refine + SKIP_MV + SDXL strength=0.10) donne
+texture propre, orientation correcte, mais résolution "un peu faible"
+(feedback user). Deep-dive agent a identifié 3 pistes à haut ROI, toutes
+basées sur du code déjà présent mais non activé.
+
+### Changements commités
+1. **`local_sf3d_bridge.py`** — Remplace le single refine strength=0.10 par
+   un multi-pass ControlNet Tile dans PROJECT_MODE=refine:
+   - Pass A: `--strength 0.35 --controlnet_tile --cn_scale 0.85` (détails)
+   - Pass B: `--strength 0.20 --controlnet_tile --cn_scale 0.70` (cleanup)
+   - ControlNet Tile (xinsir/controlnet-tile-sdxl-1.0, Apache 2.0) ancre la
+     structure de l'atlas source → strength plus élevée = détails sans
+     hallucination ("orange boy" fix).
+   - Guard: `FABMESH_REFINE_CN_TILE=0` pour fallback plain strength=0.10.
+
+2. **`upscale_atlas.py`** — UV chart dilation avant ESRGAN:
+   - scipy EDT dilate les pixels "foreground" de 4-6 px dans les gaps UV
+     détectés (bg = près couleur des 4 coins de l'atlas)
+   - Élimine bleeding ESRGAN aux bords de charts UV (seam artefacts en
+     rendu 3D)
+   - Trigger conditionnel: 5-90% padding detected, sinon skip
+
+3. **`upscale_atlas.py`** — tile_pad 10→32: pad plus large pour seams cleans.
+
+### Licensing
+Rejeté 4x-UltraSharp et 4x_foolhardy_Remacri (meilleure qualité textures
+mais licenses HF pas explicites). Reste sur RealESRGAN_x4plus (BSD-3).
+
+### Restes à tester
+- Run complet avec pass A+B CN tile: visage + cheveux + couture jean
+  attendus plus nets
+- VRAM check: RTX 5080 16 GB doit tenir les 2 passes
+

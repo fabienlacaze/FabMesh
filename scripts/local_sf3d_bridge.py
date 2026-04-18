@@ -893,15 +893,28 @@ def generate_3d(
                     print(f"LOCAL_SF3D: multi-view projection error ({_mvp_e}), continuing", flush=True)
 
             # Step 2: SDXL refine on top of the (possibly projected) atlas.
-            # strength=0.10 chosen 2026-04-19: user reported 0.25 hallucinates
-            # orange-skinned boy with broken face. 0.10 = light polish only.
-            _cmd = [sys.executable, _refine_script, output_path,
-                    output_path, '--strength', '0.10',
-                    '--target', str(_target)]
+            # 2026-04-19: switched to ControlNet Tile multi-pass. The tile
+            # controlnet (xinsir/controlnet-tile-sdxl-1.0) anchors the atlas
+            # structure so we can raise strength to 0.35 without the "orange
+            # boy" hallucinations seen at 0.25 without CN. Two passes:
+            # pass A (strength=0.35, cn=0.85) = add micro-detail,
+            # pass B (strength=0.20, cn=0.70) = clean artifacts.
+            # Guard via FABMESH_REFINE_CN_TILE=0 to fall back to plain polish.
+            _use_cn_tile = os.environ.get('FABMESH_REFINE_CN_TILE', '1') == '1'
+            if _use_cn_tile:
+                _cmd = [sys.executable, _refine_script, output_path,
+                        output_path, '--strength', '0.35',
+                        '--target', str(_target),
+                        '--controlnet_tile', '--cn_scale', '0.85']
+                _label = 'SDXL+CN-Tile pass A (strength=0.35)'
+            else:
+                _cmd = [sys.executable, _refine_script, output_path,
+                        output_path, '--strength', '0.10',
+                        '--target', str(_target)]
+                _label = f'SDXL atlas refine -> {_target}px'
             if _refine_prompt:
                 _cmd += ['--prompt', _refine_prompt]
                 print(f"LOCAL_SF3D: refine prompt={_refine_prompt[:80]!r}", flush=True)
-            _label = f'SDXL atlas refine -> {_target}px'
         elif _proj_mode == 'augment' and os.path.exists(_augment_script):
             # Keep SF3D's atlas where it's good (front), additively
             # rewrite back/sides from multi-views where they see better.
@@ -959,6 +972,28 @@ def generate_3d(
                         print(f"LOCAL_SF3D: {line}", flush=True)
             else:
                 print(f"LOCAL_SF3D: {_label} applied", flush=True)
+                # 2026-04-19: 'refine' mode pass B (ControlNet Tile cleanup).
+                # After pass A (strength=0.35 + CN=0.85) injected detail, run
+                # a softer pass (strength=0.20 + CN=0.70) to remove any
+                # residual artifacts while preserving the new detail.
+                if (_proj_mode == 'refine' and _use_cn_tile
+                        and os.path.exists(_refine_script)):
+                    _cmd_b = [sys.executable, _refine_script, output_path,
+                              output_path, '--strength', '0.20',
+                              '--target', str(_target),
+                              '--controlnet_tile', '--cn_scale', '0.70']
+                    if _refine_prompt:
+                        _cmd_b += ['--prompt', _refine_prompt]
+                    print("LOCAL_SF3D: refine pass B (CN Tile cleanup) starting", flush=True)
+                    _r_b = _sp_proj.run(_cmd_b, capture_output=True,
+                                         text=True, timeout=600)
+                    if _r_b.stdout:
+                        for line in _r_b.stdout.strip().split('\n'):
+                            print(f"LOCAL_SF3D: {line}", flush=True)
+                    if _r_b.returncode != 0:
+                        print(f"LOCAL_SF3D: pass B failed (code {_r_b.returncode})", flush=True)
+                    else:
+                        print("LOCAL_SF3D: refine pass B (CN Tile) done", flush=True)
                 # Second pass for atlas_refine: SDXL refine on the
                 # projection result. Subject prompt grabbed from
                 # prompts.json same as plain refine mode.
