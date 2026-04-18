@@ -677,6 +677,46 @@ the mesh's natural axis system. So to project back correctly we
 may need to PRE-FLIP the back PNG horizontally in build_mv_dir
 (not U-flip in projection math).
 
+### Run Y result — NO improvement (same as W and X)
+
+User: "meme constat". So none of the corrective attempts
+(W=skip-V, X=skip-V+U-flip, Y=skip-V+pre-FLIP-LEFT-RIGHT) changed
+the visible side-swap relative to W's base.
+
+Hash check confirms W/X/Y are all DIFFERENT meshes, so the code
+changes applied. But the visible side-swap persists unchanged in
+the viewer.
+
+### Interpretation — the "side-swap" may not be what I thought
+
+All 3 of W, X, Y have `p_v` skipped for azim=180, which fixed the
+head-toward-feet inversion. Then:
+- X added p_u = 1 - p_u in the projection math: no visible change.
+- Y pre-flipped the PNG horizontally: no visible change.
+
+If U-flip in the projection and horizontal flip of the source both
+have no visible effect after skipping V-flip on back, that strongly
+suggests the "side-swap" the user sees isn't actually a U-axis
+issue at all. It's probably:
+- **model-viewer's default camera** showing the wrong side by
+  default, independent of texture content.
+- After W's V-flip fix, the back texture is correctly placed on
+  the back side of the mesh. But model-viewer's default camera
+  points at the back (because SF3D mesh has face at -Z, camera
+  at +Z). So user sees the back-painted-back (correct) as the
+  "default view", which looks similar to the W pre-fix state.
+
+To test this: lock model-viewer camera to AZIM=180 (face side) and
+see if the face image is there. If yes, Y is already correct; the
+"side-swap" was just model-viewer's default camera angle.
+
+### Plan Run Z — lock camera at azim=180 in the compare viewer
+
+No code change to the pipeline. Just update compare.html so the
+Y panel has `camera-orbit="180deg 90deg"` — force looking at the
+mesh's face side. If W/X/Y all then show the face correctly, the
+side-swap was a camera-angle illusion, not a real bug.
+
 ### Run X — NO improvement
 
 ### Run Y — PRE-FLIP back.png horizontally in build_mv_dir

@@ -159,11 +159,19 @@
   <div class="verdict">no improvement vs W</div>
 </div>
 
-<div class="col" style="border-right:3px solid #4ade80;">
-  <div class="col-title">Y: W + pre-flip back.png horizontally (NEW)</div>
+<div class="col">
+  <div class="col-title">Y: W + pre-flip back.png horizontally</div>
   <model-viewer src="mesh_RUN_Y.glb" auto-rotate camera-controls
                 shadow-intensity="1" environment-image="neutral"></model-viewer>
-  <div class="verdict">target: fix side-swap via image pre-flip, not projection math</div>
+  <div class="verdict">no improvement vs W/X</div>
+</div>
+
+<div class="col" style="border-right:3px solid #4ade80;">
+  <div class="col-title">Y LOCKED at face side (azim=180)</div>
+  <model-viewer src="mesh_RUN_Y.glb" camera-controls
+                camera-orbit="180deg 90deg 1.2m" field-of-view="25deg"
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">test: force viewer to look at SF3D-front side (face at -Z)</div>
 </div>
 
 </div>
