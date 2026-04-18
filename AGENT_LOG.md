@@ -525,6 +525,36 @@ Restoring ip45_2view_to_3d.py: keep the pygltflib post-rotate code
 as opt-in (FABMESH_IP45_POST_ROTATE=1) but default OFF, so D config
 runs cleanly without the extra step.
 
+### Final D run analysis (2026-04-18) — objective comparison
+
+After restoring D config and re-running, examined
+mesh_proj_debug.png (the front-camera render with vertex debug
+overlay) vs the source ip45_front.png:
+
+PRESERVED (good):
+- Pose (T-pose, bras tendus, jambes parallèles)
+- Identité de l'enfant (visage reconnaissable, mêmes traits)
+- Coiffure (cheveux bruns, coupe identique)
+- Veste denim (couleur, coutures, 2 poches frontales, boutons)
+- T-shirt blanc cassé sous la veste
+- Shorts cargo beige avec poche latérale
+- Baskets bleu marine avec semelle blanche
+- Visage net avec yeux/nez/bouche bien placés
+- Aucune déformation géométrique visible
+
+DEGRADED (acceptable):
+- Petits points colorés (vertex debug overlay only, not real texture
+  artefacts — they're added by texture_project for diagnostic)
+- Fond noir vs gris studio source (rembg clean)
+- Léger blur sur détails fins (boutons, coutures cargo) — typical
+  of 1024 atlas on 8k-vert mesh
+
+VERDICT: D is a convincing and shippable result. Identité préservée,
+vêtements correctement mappés, pose intacte, pas de bug géométrique.
+Perte de détail minime et typique de la chaîne SF3D + texture_project.
+
+After 18 runs (A..R), D wins.
+
 ### Fix needed
 
 Don't use trimesh for the post-rotation. Need a method that

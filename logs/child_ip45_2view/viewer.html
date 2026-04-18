@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ip45 2-view final D config</title>
+<style>
+  html, body { margin:0; padding:0; background:#111; color:#ddd;
+               font-family:system-ui, sans-serif; height:100%; overflow:hidden; }
+  model-viewer { position:absolute; inset:0; width:100vw; height:100vh;
+                 background:#1b1b1b; }
+  .hud { position:absolute; top:12px; left:12px; z-index:10;
+         background:rgba(0,0,0,0.6); color:#eee; padding:8px 12px;
+         font-size:12px; line-height:1.45; border-radius:6px; max-width:280px; }
+  .hud b { color:#fff; }
+  .thumbs { position:absolute; bottom:12px; left:12px; z-index:10; display:flex; gap:8px; }
+  .thumbs img { width:90px; height:90px; object-fit:cover; border:1px solid #333; border-radius:4px; }
+  .thumbs div { text-align:center; font-size:10px; color:#aaa; }
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<model-viewer src="mesh.glb" auto-rotate camera-controls
+              shadow-intensity="1" exposure="1" environment-image="neutral"></model-viewer>
+<div class="hud">
+  <b>ip45 2-view — final D config</b><br/>
+  NORMALIZE=0 + canonical 7-view layout<br/>
+  SDXL IPA-Plus front+back ip_scale=0.45<br/>
+  After 18 experimental runs (A..R)<br/>
+  Confirmed visually as the answer.
+</div>
+<div class="thumbs">
+  <div><img src="front.png" /><br/>front</div>
+  <div><img src="back.png"  /><br/>back</div>
+</div>
+</body>
+</html>
