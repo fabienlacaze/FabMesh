@@ -111,6 +111,140 @@ visible front of the mesh in the viewer's frame. The "face is in
 front" requirement is enforced not just by mesh geometry but by
 matching the texture_project frame to model-viewer's default camera.
 
+### Why A/C/F are sharper than D/E — analysis
+
+User correctly pushed back: rather than asking how to improve D/E,
+ask **why A/C/F have better definition**. Tabling the relevant flags:
+
+| Run | NORMALIZE | SHIFT_SRC | R_undo+Ry180 | rot_offset | input azim final | mv azims final | Sharpness |
+|-----|-----------|-----------|--------------|------------|------------------|----------------|-----------|
+| A   | 0         | 0         | no           | 0          | 0                | 0/90/180/270/0/0 | sharp |
+| C   | 0         | 0         | yes          | 0          | 0                | 0/90/180/270/0/0 | sharp |
+| F   | 1         | 1         | no           | 180        | 180              | 0/0/0/0/0/0       | sharp |
+| D   | 1         | 0         | no           | 180        | 0                | 180/270/0/90/180/180 | medium |
+| E   | 1         | 1         | no           | 180        | 180              | 180/270/0/90/180/180 | flou |
+
+What A, C, F share that D, E lack:
+- All MV final azimuths are **clean orthos** (multiples of 90°,
+  ideally 0/90/180/270 or all-zero) **after** the rotation_offset
+  is folded in.
+- input.png lands on the same side of the mesh as ip45_front shows
+  — i.e. the actual front of the rendered mesh.
+
+What goes wrong in D, E:
+- Geometrically the projection math is correct (rot_y(-180) on a
+  mesh that was rotated +180 nets to identity).
+- But the HD source signal (input.png 1151px) ends up at az=180
+  (in E) AND mv/view_0 (1024px front dup) ends up also at az=180
+  -> two views compete on the exact same face area with sub-pixel
+  sample-coord differences -> moiré.
+- In D, input.png stays at az=0 -> wasted on the BACK of the
+  rotated mesh. The face is painted only by mv/view_0 (1024px).
+  No moiré, but no HD bonus either -> "medium" sharpness.
+
+So:
+- A's sharpness comes from mv azimuths being raw orthos (no shift)
+  AND input.png at az=0 hitting the actual face (raw mesh frame).
+- C's sharpness same as A. The face deformation in C is from the
+  R_undo Ry(180) patch over-correcting mesh sample coords.
+- F's sharpness comes from collapsing all MV slots to one azimuth
+  (no fractional offsets). But mesh ends up rotated 180° at the
+  viewer's frontal angle.
+- D = OK because no two views fight for the front (input.png on
+  back, mv/0 alone on front).
+- E = bad because input.png + mv/0 fight on the front.
+
+### Hypothesis to try next — Run G
+
+Take E and **remove only mv/view_0** (the slot that doubles input.png
+on the face), keep mv/view_1..5 for right/back/left/top/bottom
+coverage. Should:
+- Eliminate the moiré on the face (no doubled-front signal).
+- Keep the HD bonus from input.png on the face.
+- Keep the back/sides coverage from the other mv slots.
+- Keep the correct placement (NORMALIZE=1 + SHIFT_SOURCE).
+
+Implementation: ip45_2view_to_3d.py — write only 5 mv slots
+(view_1..view_5), let texture_project skip view_0 because the file
+won't exist. Or write all 6 but mark view_0 with priority 0.0 in
+views.json (but views.json doesn't carry priority, only azim/elev).
+
+Cleaner path: skip writing view_0 entirely. texture_project.py
+already logs `WARNING: missing {vpath}, skipping` for missing slots.
+
+### Run H result — also flipped 180°
+
+Run H (NORMALIZE=1 + SHIFT_SOURCE + view_0 = back image, all other
+slots unchanged) was meant to keep the 7-view ortho layout intact
+while removing only the doubled-front signal. Result: **also flipped
+180° at the locked angle** (mesh shows back, denim back side, nuque).
+
+So even swapping a single mv slot's image content is enough to flip
+the mesh in the viewer. The flip isn't about layout structure
+(7 vs 6 vs 5 slots) — it's about the **identity of pixels at each
+azimuth**. As soon as the front area of the mesh has insufficient
+front-pixel signal at the expected azimuths, model-viewer / xatlas
+re-uvs in a way that swaps the visible side.
+
+### Definitive learning — modifying mv/ contents is a dead end
+
+After runs A..H, conclusion: **any change to the contents or layout
+of mv/ flips the mesh** in the viewer's frontal camera frame.
+- A: NORMALIZE=0 (sharp, well-placed)
+- C: + R_undo Ry180 patch -> flipped
+- D: NORMALIZE=1 standard (medium sharp, well-placed)
+- E: + SHIFT_SOURCE -> floue (moiré HD vs 1024)
+- F: + back-only mv -> flipped
+- G: + skip view_0 -> flipped
+- H: + view_0 = back image -> flipped
+
+The ONLY stable, well-placed configurations are A, D, E. All paths
+to improve their definition by editing mv/ images or views.json
+flip the result.
+
+To improve D/E without flipping, the next attack surface is the
+**texture_project.py code itself**, NOT the mv/ inputs:
+- Lower the hardcoded priority of `(0.0, 0.0)` for mv slots when
+  the source image is also a mv slot (currently both get prio 1.0).
+- Disable `FABMESH_TEXPROJ_REFINE` (the SDXL atlas refine pass
+  may be amplifying the moiré rather than smoothing it).
+- Disable `FABMESH_UV_REPACK` (xatlas re-pack may be the cause of
+  the flip — it re-charts UVs based on which faces are visible from
+  which views, and the viewer's frontal angle could be tracking
+  the dominant chart island).
+- Increase tex_res from 1024 to 2048 to reduce sub-pixel
+  disagreement between input.png 1151px and view_0 1024px samples.
+
+All four changes are safer because they don't touch mv/ contents.
+
+### Run G result — also flipped 180° at locked angle
+
+Run G (NORMALIZE=1 + SHIFT_SOURCE + skip view_0 only) was supposed to
+preserve E's correct placement while killing the HD-vs-1024 moiré.
+Result: G **also shows the back at the locked frontal angle**, just
+like C and F.
+
+Lesson: ANY change to the standard 7-view layout (input + view_0..5
+at azims 0/90/180/270/0/0 in raw frame, becoming 180/270/0/90/180/180
+post-shift) flips the visible front of the mesh in the viewer's
+frame. C, F, G all flipped. Only D and E preserve the rendered "face
+in front" pose. The placement constraint is **fragile**: it only
+holds for the exact 7-view ortho cardinal layout that
+texture_project / model-viewer expect.
+
+So the path "drop view_0 to kill the moiré" is dead. Other angles to
+try if we still want to fix E's face moiré:
+
+- **Lower mv/view_0 priority** (e.g. 0.4 instead of 1.0) so input.png
+  HD wins on the face but view_0 keeps voting on borders. Edits
+  PRIORITY_WEIGHTS_TUP in texture_project.py.
+- **Replace view_0 with a downscaled copy of input.png** so they
+  agree pixel-for-pixel after resize, no sub-pixel disagreement.
+- **Pre-shrink input.png to 1024px** so it matches mv/view_0 exactly
+  -> still HD-resampled but no resolution mismatch.
+- **Disable atlas refine** entirely and re-evaluate — the SDXL
+  refine pass might be amplifying the moiré rather than smoothing it.
+
 ### D vs E — pending side-by-side face zoom
 
 Both D and E look sharp at wide frame. E was reported earlier as
