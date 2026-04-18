@@ -766,6 +766,50 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### pytorch3d build — bypass fails too (CCCL preprocessor error)
+
+User picked "bypass the CUDA check". Implemented:
+- Monkey-patched torch/utils/cpp_extension.py line 478:
+  `if cuda_ver.major != torch_cuda_version.major` now honors
+  env flag `FABMESH_BYPASS_CUDA_MAJOR_CHECK=1` (emit warning
+  instead of raising).
+- Retried `pip install pytorch3d` with:
+  - `vcvars64.bat` sourced
+  - `FABMESH_BYPASS_CUDA_MAJOR_CHECK=1`
+  - `TORCH_CUDA_ARCH_LIST=12.0`
+  - `CL=/Zc:preprocessor`
+  - `CFLAGS=/Zc:preprocessor`
+  - `CXXFLAGS=/Zc:preprocessor`
+  - `NVCC_FLAGS=-Xcompiler "/Zc:preprocessor" -DCCCL_IGNORE_MSVC_TRADITIONAL_PREPROCESSOR_WARNING`
+
+Result: bypass check passed ✓, but nvcc/cl fails compiling:
+> CUDA/v13.2/include/cccl/cuda/std/__cccl/preprocessor.h:
+> fatal error C1189: MSVC/cl.exe with traditional preprocessor.
+> Switch to standard conforming preprocessor by passing
+> /Zc:preprocessor to cl.exe.
+
+Despite setting /Zc:preprocessor via all available env vars, nvcc
+doesn't propagate it to the cl sub-invocation. The CUDA 13.2
+headers (CCCL library) are stricter than 12.x headers.
+
+### Full backup taken (commit d18046c)
+
+User asked for a full backup before more attempts. `git add -A` +
+commit captured all untracked logs/ + scripts. Submodules (CRM,
+MV-Adapter, Paint3D, StableFast3D, UniRig) untouched.
+
+### Proposal after this failure
+
+Two paths remain to unblock pytorch3d/kaolin/nvdiffrast source
+build on this machine:
+
+1. **Install CUDA Toolkit 12.8 alongside 13.2** (the agent's
+   original plan). Switch CUDA_HOME to v12.8 for the build.
+   Headers from 12.8 don't require /Zc:preprocessor. ~3 GB
+   download + 15 min install.
+
+2. **Stop chasing Paint3D entirely** and use D's mesh as-is.
+
 ### pytorch3d build BLOCKED too (2026-04-18) — same CUDA 13.2/cu128 mismatch
 
 Attempted `pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/pytorch3d.git@stable"` with MSVC env sourced (`vcvars64.bat`). Failed with the SAME error that blocked nvdiffrast:
