@@ -782,6 +782,29 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Paint3D FabMesh integration — STARTING NOW (2026-04-18)
+
+User confirmed Paint3D Suzanne test passed. Moving to FabMesh
+integration. Plan:
+
+1. `scripts/paint3d_bridge.py` — new script with CLI:
+   `python paint3d_bridge.py <mesh.glb or .obj> <ref_image> <out.glb>
+   [--prompt "..."]`
+   - Takes existing mesh + reference image (e.g. ip45_front.png)
+   - Calls Paint3D stage 1 pipeline internally (runs in-process)
+   - Packs the resulting baked texture into a new .glb
+2. Test on our reference case: `logs/child_ip45_2view/mesh_NORMALIZE_1.glb`
+   (mesh D) + `images/child/_scale_sweep/ip45_front.png`.
+3. If result is clean, add a FabMesh wrapper that glues SF3D + Paint3D.
+4. Document in AGENT_LOG + commit.
+
+Paint3D constraints observed from the Suzanne test:
+- Takes .obj input (not .glb directly — may need trimesh conversion)
+- Output is .obj + mesh.mtl + albedo.png (separate files, not packed GLB)
+- Uses 2 init views (fixed at theta 60/120 or so — defined in
+  `views_init: [0, 23]` out of `n_views=24`).
+- Needs at least 12 GB VRAM to load SD1.5 + ControlNet + IPA.
+
 ### BREAKTHROUGH (2026-04-18) — Prebuilt wheels for sm_120 found!
 
 ComfyUI-3D-Pack README links to **MiroPsota/torch_packages_builder**
