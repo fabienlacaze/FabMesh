@@ -766,6 +766,40 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### nvdiffrast install — ALSO BLOCKED (CUDA version mismatch)
+
+Tried `pip install nvdiffrast` (not on PyPI) then
+`pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast.git`.
+
+Fails at the CUDA version check in torch.utils.cpp_extension:
+> RuntimeError: The detected CUDA version (13.2) mismatches the
+> version that was used to compile PyTorch (12.8).
+
+System nvcc = 13.2, torch was compiled with cu128. nvdiffrast
+refuses to build with this mismatch.
+
+Options to resolve:
+- Install CUDA Toolkit 12.8 alongside 13.2, point nvcc to 12.8.
+- `TORCH_DONT_CHECK_COMPILER_ABI=1` env to force-bypass the check,
+  risking subtle ABI breakage at runtime.
+- Download a pre-built nvdiffrast wheel from an unofficial source
+  (security risk with SAC on).
+
+### Honest status after 3 failed install attempts
+
+Environment constraints on this RTX 5080 / Win11 machine:
+- Smart App Control ON -> can't load unsigned DLLs (torch 2.8 fails)
+- CUDA 13.2 installed, torch cu128 -> build from source fails
+- Torch 2.7 wheel -> kaolin sm_120 unsupported
+
+Any local-compile-required texturing AI (kaolin OR nvdiffrast-based)
+hits one of these 3 walls. Non-compile-required options remain:
+- Cloud API (Meshy.ai — paid, not local, user ruled out)
+- Pure diffusers SDXL + ControlNet-depth (what texture_project is
+  essentially doing)
+- Handroll a texturing pipeline in PyTorch using only built-in
+  ops (no C++ extensions, slower but works).
+
 ### TEXTure integration — BLOCKED (also uses kaolin)
 
 After cloning TEXTure, discovered that it ALSO uses kaolin (not
