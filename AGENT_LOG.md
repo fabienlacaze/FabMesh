@@ -766,6 +766,48 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### TEXTure integration — BLOCKED (also uses kaolin)
+
+After cloning TEXTure, discovered that it ALSO uses kaolin (not
+nvdiffrast as I assumed). src/models/render.py line 1:
+`import kaolin as kal`. Requirements README explicitly says
+`pip install kaolin==0.11.0`.
+
+So TEXTure hits the exact same sm_120 wall as Paint3D. My earlier
+recommendation was wrong.
+
+### Real list of texturing AIs that DON'T use kaolin
+
+Need a non-kaolin 3D texturing AI. Candidates:
+- **MVEdit**: uses nvdiffrast (needs to verify). 24 GB VRAM still
+  a concern.
+- **Stable-Dreamfusion or similar**: uses nvdiffrast for some
+  backends.
+- **Meshy cloud**: no local dep at all (but paid cloud).
+- **SDXL + ControlNet-depth handrolled**: no framework dep, use
+  diffusers directly. Essentially what texture_project.py is
+  trying to do but better.
+
+Need to survey again specifically for NON-KAOLIN options.
+
+### TEXTure integration — STARTING NOW (2026-04-18)
+
+User picked TEXTure after torch 2.8 blocked by SAC. TEXTure uses
+nvdiffrast for 3D rasterization instead of kaolin. nvdiffrast
+compiles its CUDA kernels JIT at first use via torch's extension
+builder — it should pick up sm_120 automatically if
+TORCH_CUDA_ARCH_LIST is set or left at default.
+
+Plan:
+1. Clone github.com/TEXTurePaper/TEXTurePaper into external/TEXTure.
+2. Check its deps (environment.yaml / requirements.txt).
+3. Install nvdiffrast (pip, JIT-compiled at first use).
+4. Run a tiny nvdiffrast test on GPU to confirm sm_120 works.
+5. Run TEXTure's demo on its sample mesh.
+6. Create scripts/texture_bridge.py adapting TEXTure to FabMesh
+   inputs (SF3D mesh + ip45 front/back photos).
+7. Test on logs/child_ip45_2view/mesh_NORMALIZE_1.glb.
+
 ### Torch 2.8 upgrade BLOCKED by Windows Smart App Control (2026-04-18)
 
 User picked "Upgrade torch 2.7 -> 2.8". Installed torch 2.8.0+cu129
