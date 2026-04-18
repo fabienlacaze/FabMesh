@@ -782,6 +782,25 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Paint3D stage 2 integration — STARTING NOW (2026-04-18)
+
+User chose: add stage 2 UV-position ControlNet inpaint to fill the
+magenta gaps in stage 1 output.
+
+Plan:
+1. Check Paint3D's `pipeline_paint3d_stage2.py` args — it needs:
+   - `--sd_config controlnet/config/UV_based_inpaint_template.yaml`
+   - `--render_config paint3d/config/train_config_paint3d.py`
+   - `--mesh_path <mesh.obj>` (from stage 1)
+   - `--texture_path <stage1 albedo.png>`
+   - `--outdir <out2>`
+2. Check stage 2 depends on weights from
+   `GeorgeQi/Paint3d_UVPos_Control` (HuggingFace). Auto-download on
+   first run.
+3. Update `scripts/paint3d_bridge.py` to chain:
+   stage 1 -> stage 2 -> pack GLB.
+4. Test on mesh D again.
+
 ### Paint3D FabMesh integration RESULT — worse than mesh D (2026-04-18)
 
 User screenshot of side-by-side comparison in
