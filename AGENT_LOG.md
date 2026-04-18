@@ -782,6 +782,56 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Paint3D v9/v10/v11/v12/v13 — mv_dir mode progression (2026-04-18)
+
+Chronological results of the "FabMesh mv/ dir as Paint3D init views"
+pipeline:
+
+**v9** — First working run. Bypass fix for gen_init_view double-
+execution. `_fm_init_views = 'handled'` short-circuits the fallback
+branches. init-img-0 now shows the mv/ photos (no SD1.5).
+
+**v10** — `FABMESH_PAINT3D_SKIP_ROTATE=1` to test if removing the
+pre-rotate helps. Verdict: init-img shows photos right-side-up,
+but depth map shows mesh UPSIDE-DOWN (Paint3D renders the SF3D-
+native mesh without the Rx(180) correction). Depth and photos
+don't match → shattered albedo.
+
+**v11** — Re-enabled pre-rotate Rx(180). Depth map now matches
+photo orientation. Albedo still patchy (3-4 figure silhouettes +
+magenta), BUT the top-half of the atlas gets texture now.
+
+**v12** — Added post-rotate Rx(-180) after Paint3D finishes, to
+undo the pre-rotate and restore the original mesh orientation in
+the exported .glb. Expected: head goes back up in the viewer.
+User verdict: "la bouche du garçon est sur son ventre" — mesh still
+flipped head-down in viewer, post-rotate didn't fix it (or was
+overridden by Paint3D's own coord convention during export).
+
+**v13** — User observation: "6 vues = 2 uniques dupliquées, donne
+lui juste 2". Modified pipeline to load only `view_0.png` (front)
++ `view_2.png` (back), `render_cfg.render.views_init = [0, 12]`
+(n_views=24 → index 0=phi 0°, index 12=phi 180° = back).
+
+init-img-0 now shows ONLY 2 clean views of the child. But the
+albedo is STILL shattered — same pattern as v11/v12 (fragments of
+child silhouettes scattered across magenta UV).
+
+### Diagnosis — bottleneck is the back-projection, not the inputs
+
+v13 has PERFECT inputs (2 unique real photos, mesh orientation
+matches, pre+post-rotate correct). But the UV atlas comes out
+fragmented. Root cause: the SF3D mesh has micro-UV islands and
+Paint3D's `forward_texturing_render` doesn't project cleanly onto
+them — most face rasterizations land in sub-pixel UV regions that
+get discarded.
+
+To fix this, we'd need either:
+- UV repack before Paint3D (xatlas re-unwrap, like texture_project
+  does — but that changes vertex count and might break Paint3D).
+- OR run Paint3D stage 2 (UV-inpaint ControlNet) which is designed
+  to fill these gaps. We skipped it so far with --skip-stage2.
+
 ### NEW PIPELINE DESIGN v2 (2026-04-18): FabMesh mv dir → Paint3D
 
 User clarified: replace texture_project.py with Paint3D in the
