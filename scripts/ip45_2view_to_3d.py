@@ -35,27 +35,14 @@ def log(msg):
 def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     from PIL import Image
     os.makedirs(mv_dir, exist_ok=True)
-    # mv slots stay at 1024 — Run K proved that 2048 flips the mesh
-    # (see AGENT_LOG). Even raising mv resolution above input.png's
-    # native ~1151px makes mv/view_0 dominant -> flip. The 1024
-    # bottleneck is structural for D placement.
     front = Image.open(front_png).convert('RGB').resize((1024, 1024))
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
-    # Run S (2026-04-18): pre-flip back image vertically so that when
-    # texture_project applies its standard p_v = 1 - p_v formula
-    # (which is correct for the front), the back image arrives with
-    # its head at the top of the mesh head instead of at the feet.
-    # The face was already in the right orientation; only the back
-    # needs this compensation.
-    back = back.transpose(Image.FLIP_TOP_BOTTOM)
 
     front.save(os.path.join(mv_dir, 'input.png'))
-    # CANONICAL E LAYOUT — confirmed unchangeable.
-    # Runs C/F/G/H/I all proved that ANY change to mv/ contents
-    # (back-only, skip view_0, swap view_0=back, view_0=transparent)
-    # FLIPS the rendered mesh 180° in the viewer. The fix for E's
-    # face moiré must come from texture_project.py priority logic,
-    # NOT from mv/ content changes.
+    # CRM slot convention (see scripts/multiview_crm_gen.py docstring):
+    #   view_0 front, view_1 right, view_2 back, view_3 left,
+    #   view_4 top, view_5 bottom.
+    # We dup front -> right+top, back -> left+bottom.
     slots = {0: front, 1: front, 2: back, 3: back, 4: front, 5: back}
     for slot, img in slots.items():
         img.save(os.path.join(mv_dir, f'view_{slot}.png'))
@@ -80,42 +67,20 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
     bridge = os.path.join(SCRIPTS, 'local_sf3d_bridge.py')
     env = dict(os.environ)
     env['FABMESH_MV_REUSE'] = mv_dir
+    # Keep the refine mode so texture projection consumes the multi-views.
     env.setdefault('FABMESH_PROJECT_MODE', 'refine')
-    # Final shipping config (after runs A..R 2026-04-18):
-    # NORMALIZE=0 (mesh in SF3D native frame, face -Z), no SHIFT,
-    # no post-rotate. This is "Run D" config and was confirmed by
-    # the user as having both correct orientation AND sharp texture.
-    # Runs P/Q/R explored post-rotation to fix REAL_D's apparent
-    # side-swap, but it turned out D was already the answer.
+    # Disable the bridge's +180° Y rotation. That rotation exists to make
+    # the face point to +Z (three.js default camera), but it also injects a
+    # 180° offset into every MV projection while leaving the source image
+    # at azim=0 — which puts the BACK image on the FRONT of the mesh (and
+    # the face on the back). Our views.json already uses the canonical
+    # SF3D frame (face at -Z), so we turn the normalizer off entirely.
     env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
     cmd = [sys.executable, bridge, source_image, glb_out]
-    log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir}, NORMALIZE=0)')
+    log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir})')
     r = subprocess.run(cmd, env=env, check=False)
     if r.returncode != 0:
         raise RuntimeError(f'sf3d bridge failed: rc={r.returncode}')
-
-    # Optional post-rotation kept opt-in for future experiments.
-    # Default OFF — D config doesn't need it.
-    if os.environ.get('FABMESH_IP45_POST_ROTATE') == '1':
-        _post_rotate_glb_xy180(glb_out)
-
-
-def _post_rotate_glb_xy180(glb_path: str) -> None:
-    """Apply Ry(180) to the mesh in `glb_path` in-place using
-    glb_post_rotate.py (binary-preserving — does NOT round-trip
-    through trimesh, so the SDXL-refined embedded baseColorTexture
-    is preserved).
-
-    Runs P+Q showed that trimesh load+apply_transform+export drops
-    ~50% of the GLB file (likely the high-res texture binary).
-    pygltflib-based positions-only rotation keeps everything else.
-    """
-    rotator = os.path.join(SCRIPTS, 'glb_post_rotate.py')
-    log(f'post-rotating mesh Ry(180) via pygltflib -> {glb_path}')
-    r = subprocess.run([sys.executable, rotator, glb_path, 'y', '180'],
-                       check=False)
-    if r.returncode != 0:
-        raise RuntimeError(f'glb_post_rotate failed: rc={r.returncode}')
 
 
 def main():

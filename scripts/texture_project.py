@@ -186,18 +186,6 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         log('FABMESH_TEXPROJ_SKIP_UNDO=1: skipping SF3D undo transform')
     else:
         R_undo = rot_x(90) @ rot_y(-90)
-        # If the bridge skipped its post-inference +180° Y normalization
-        # (FABMESH_SF3D_NORMALIZE_ORIENT=0), the mesh is still in SF3D's
-        # raw export frame (face -> -Z) instead of the post-normalize
-        # frame the standard R_undo assumes (face -> +Z). Add a Ry(180°)
-        # to the undo so that v_cs / p_u / p_v all land back in the
-        # camera frame consistently with the photo. Without this, every
-        # texel samples the source PNG slightly offset into the gray
-        # background -> washed-out / cireux atlas.
-        if os.environ.get('FABMESH_SF3D_NORMALIZE_ORIENT') == '0':
-            R_undo = R_undo @ rot_y(180)
-            log('FABMESH_SF3D_NORMALIZE_ORIENT=0 detected: adding Ry(180) '
-                'to R_undo so sampling matches raw SF3D frame')
     verts_cam = (R_undo @ vertices.T).T  # (V, 3) in SF3D's internal coords
     norms_cam = (R_undo @ normals.T).T
     # The invert() call flips normals; undo that
@@ -391,16 +379,8 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     views = []  # list of (image_path, azim_deg, elev_deg, priority)
 
-    # Always include the front view. Standard pipeline (Z123/CRM) places
-    # it at azim=0 because the source is preprocessed in the post-rotation
-    # frame. Callers that supply a raw photo BEFORE the bridge applied
-    # its +180° normalization (e.g. ip45_2view_to_3d.py with
-    # FABMESH_MV_REUSE) need the source shifted by rotation_offset_deg
-    # too — otherwise the HD source lands on the BACK of the rotated
-    # mesh and the front is texturized only by the lower-res mv duplicates.
-    _src_azim = (0.0 + rotation_offset_deg) % 360 \
-        if os.environ.get('FABMESH_TEXPROJ_SHIFT_SOURCE') == '1' else 0.0
-    views.append((source_image_path, _src_azim, 0.0, PRIORITY_WEIGHTS[0.0]))
+    # Always include the front view at (0, 0)
+    views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
 
     # If the bridge applied an auto-align rotation around Y between SF3D
     # inference and this projection, we must shift every multi-view azimuth
@@ -420,19 +400,6 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                 prio = PRIORITY_WEIGHTS_TUP.get(
                     (azim, elev),
                     PRIORITY_WEIGHTS.get(azim, 0.4))
-                # If SHIFT_SOURCE is on AND this mv slot collides with the
-                # source image's azimuth at the same priority, demote it.
-                # Otherwise the per-texel winner-take-all (l ~676) oscillates
-                # between input.png HD (1151px) and the mv resize (1024px),
-                # producing moiré ghost-doubles on the face. Demoting the mv
-                # slot lets input.png win cleanly on the shared azimuth.
-                if (os.environ.get('FABMESH_TEXPROJ_SHIFT_SOURCE') == '1'
-                        and abs(((shifted_azim - _src_azim + 180) % 360) - 180) < 1.0
-                        and abs(elev) < 1.0
-                        and prio >= PRIORITY_WEIGHTS[0.0] - 1e-6):
-                    log(f'view_{i}: demoting prio {prio} -> 0.5 '
-                        f'(collision with source at az={_src_azim})')
-                    prio = 0.5
                 views.append((vpath, shifted_azim, elev, prio))
             else:
                 log(f'WARNING: missing {vpath}, skipping')

@@ -577,6 +577,28 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
+### Deep analysis request (2026-04-18, post-18-runs)
+
+User confirmed D (mesh_NORMALIZE_1.glb, 02:59) and E
+(mesh_NORMALIZE_1_SHIFT.glb, 03:09) are the best-positioned meshes
+of the whole session. Requests a complete analysis to understand
+how to reliably reproduce this positioning.
+
+Key observations:
+- D/E generated at commit 16489cf code.
+- Re-running EXACT 16489cf code now produces mesh with different
+  md5 hash (62e18a vs 0abaf8). External state has drifted between
+  03:00 and now.
+- Pipeline is deterministic: two consecutive runs now give same hash.
+
+Candidates for external drift:
+- SF3D weights (HF hub updated?)
+- texture_refine.py (fp16 bug patched around 04:00)
+- Other dependencies
+- GPU / CUDA cache
+
+Launching 3 parallel agents for forensic + prescriptive analysis.
+
 ### Run S result — orientation FIXED, but spatial offset on back
 
 User confirmed: "l'orientation est ok par contre le positionnement
@@ -603,18 +625,42 @@ When we feed back.png at raw 1024×1024 (subject at full 5%..98%
 of the image), the projection sample coords land 13% off
 vertically.
 
-### Run T — apply same resize_foreground to back.png — STARTING NOW
+### Run T result — BACK PERFECT, FRONT degraded (visage doublé)
 
-Will pre-process back.png the same way the bridge pre-processes
-input.png:
-1. rembg background removal
-2. resize_foreground at 0.85
-Then save into mv/view_2 + 3 + 5. The flipped back will then
-match the mesh's vertical proportions.
+User screenshots after pre-processing back.png with rembg +
+resize_foreground 0.85 + V flip:
 
-Implementation: in build_mv_dir, replace
-`Image.open(back_png).convert('RGB').resize((1024,1024))`
-with a call to the bridge's preprocessing chain (or a copy).
+**BACK view: EXCELLENT.** Hair correctly at top, denim with seams
+on the torso, cargo shorts on legs, dark baskets at the feet.
+Spatially perfectly aligned. The vertical-offset bug from Run S is
+SOLVED.
+
+**FRONT view: DEGRADED.** Face shows DOUBLED features (a face on
+top + a ghost face below), arms whitish/pasty. The denim/shorts
+are still well-placed but the face quality dropped vs Run S.
+
+Diagnosis: in build_mv_dir, `back` is now preprocessed (rembg +
+resize 0.85 + V flip) and used in slots 2 (back), 3 (left dup
+back), 5 (bottom dup back). Slot 3 in particular projects to az=270
+which post-rotation_offset shift becomes az=90 — a side that's
+visible from the front camera. So the preprocessed back image
+(with its preserved rembg-cropped shape and 0.85 framing) bleeds
+onto the side of the face from the left/right azimuths, creating
+ghosting on the face.
+
+The face was OK in S because back.png at full 1024 raw with no
+preprocessing was visually different enough from front.png that
+its contribution at side azimuths was downweighted by the visibility
+math. Now that preprocessed back has clean alpha and matching
+proportions, it competes more aggressively on the face area.
+
+### Run U plan
+
+Use the preprocessed back ONLY in slot 2 (the actual back azimuth).
+For the left dup (slot 3) and bottom dup (slot 5), use the OLD raw
+back.png (no preprocess). That way the back azimuth gets the clean
+proportional alignment, but the side dups stay weak enough not to
+ghost the face.
 
 User asked to apply to the back what already works for the front
 ("tu as réussi à mettre la texture de face dans le bon sens, il faut
