@@ -766,7 +766,44 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
-### pytorch3d shim install — IN PROGRESS (2026-04-18)
+### pytorch3d build BLOCKED too (2026-04-18) — same CUDA 13.2/cu128 mismatch
+
+Attempted `pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/pytorch3d.git@stable"` with MSVC env sourced (`vcvars64.bat`). Failed with the SAME error that blocked nvdiffrast:
+
+> RuntimeError: The detected CUDA version (13.2) mismatches the
+> version that was used to compile PyTorch (12.8).
+
+It's in torch cpp_extension.py line 478 (`_check_cuda_version`).
+Agent's optimistic claim ("pytorch3d wheel exists for cu128") was
+wrong — no public wheel matches Python 3.11 + torch 2.7 cu128 +
+Windows; only Linux + Python 3.8-3.9 + CUDA 11.8/12.1 wheels
+available on anaconda.org/pytorch3d.
+
+So pytorch3d **also** needs CUDA Toolkit 12.8 coexist, same as
+nvdiffrast. The "pytorch3d shim avoids CUDA 12.8 install" claim
+doesn't hold.
+
+### Consolidated reality
+
+Both pytorch3d and nvdiffrast (and by extension kaolin) need CUDA
+Toolkit 12.8 installed to compile from source on this machine.
+There's no shortcut via wheels for ANY of them.
+
+So the path forward IS the CUDA 12.8 coexist plan that the agent
+produced earlier. The choice of shim (kaolin source / pytorch3d /
+nvdiffrast) doesn't matter until we have CUDA 12.8.
+
+### Options NOW
+
+1. Install CUDA Toolkit 12.8 alongside 13.2 (3 GB download, admin,
+   15 min) — enables ALL of (kaolin from source, pytorch3d,
+   nvdiffrast) at once. This is the right investment.
+2. Bypass the version check by monkey-patching torch's
+   `_check_cuda_version` and hope nvcc 13.2 produces CUDA
+   12.8-compatible kernels. Risky, untested.
+3. Back to "accept D as baseline" and stop chasing Paint3D.
+
+### pytorch3d shim install — ATTEMPTED (2026-04-18)
 
 User gave GO. Starting Option 1.
 
