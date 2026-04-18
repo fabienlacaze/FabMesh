@@ -109,11 +109,23 @@ def _run_paint3d_stage2(obj_path: str, stage1_albedo: str,
     log(f'stage 2 done in {time.time()-t0:.1f}s (rc={r.returncode})')
     if r.returncode != 0:
         raise RuntimeError(f'Paint3D stage 2 failed: rc={r.returncode}')
-    albedo = os.path.join(outdir, 'res-0', 'albedo.png')
-    if not os.path.exists(albedo):
-        raise RuntimeError(f'Paint3D stage 2 produced no albedo at {albedo}')
-    log(f'stage 2 albedo baked: {albedo}')
-    return albedo
+    # Stage 2's FINAL output is UV_inpaint_res_0.png (the UV-inpainted
+    # atlas that fills the magenta gaps), NOT albedo.png (which is
+    # just a copy of the stage 1 input albedo). See pipeline_paint3d_stage2.py:173.
+    inpaint_albedo = os.path.join(outdir, 'UV_inpaint_res_0.png')
+    if os.path.exists(inpaint_albedo):
+        log(f'stage 2 UV-inpainted albedo: {inpaint_albedo}')
+        return inpaint_albedo
+    # Fallback: legacy albedo.png
+    albedo = os.path.join(outdir, 'albedo.png')
+    if os.path.exists(albedo):
+        log(f'stage 2 albedo (fallback): {albedo}')
+        return albedo
+    albedo2 = os.path.join(outdir, 'res-0', 'albedo.png')
+    if os.path.exists(albedo2):
+        log(f'stage 2 albedo (res-0 fallback): {albedo2}')
+        return albedo2
+    raise RuntimeError(f'Paint3D stage 2 produced no albedo in {outdir}')
 
 
 def _run_paint3d_stage1(obj_path: str, ref_image: str,
@@ -258,8 +270,17 @@ def main():
         final_res_dir = os.path.join(outdir1, 'res-0')
     else:
         outdir2 = os.path.abspath(os.path.join(work, 'stage2'))
-        _run_paint3d_stage2(stage1_obj, albedo1, ref_abs, args.prompt, outdir2)
-        final_res_dir = os.path.join(outdir2, 'res-0')
+        stage2_albedo = _run_paint3d_stage2(stage1_obj, albedo1, ref_abs,
+                                             args.prompt, outdir2)
+        # Stage 2 writes albedo in outdir2/ (not outdir2/res-0/). Build a
+        # pack dir with stage1's mesh.obj/mesh.mtl + stage2's new albedo.
+        import shutil as _sh
+        final_res_dir = os.path.join(outdir2, '_pack')
+        os.makedirs(final_res_dir, exist_ok=True)
+        _sh.copy(stage1_obj, os.path.join(final_res_dir, 'mesh.obj'))
+        _sh.copy(os.path.join(outdir1, 'res-0', 'mesh.mtl'),
+                 os.path.join(final_res_dir, 'mesh.mtl'))
+        _sh.copy(stage2_albedo, os.path.join(final_res_dir, 'albedo.png'))
 
     # Step 4: pack final textured OBJ back to GLB
     _pack_obj_to_glb(final_res_dir, os.path.abspath(args.out_glb))
