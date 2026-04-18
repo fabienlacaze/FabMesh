@@ -782,6 +782,37 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Paint3D FabMesh integration RESULT — worse than mesh D (2026-04-18)
+
+User screenshot of side-by-side comparison in
+`paint3d_fabmesh.html`:
+
+**Mesh D (left, texture_project bricolage)**:
+- Face, denim jacket, cargo shorts, baskets all well-placed
+- Texture fidelity matches the photo reference
+
+**Paint3D (right, stage 1 only)**:
+- Head: LARGE magenta zones (UVs never covered by any view in
+  Paint3D's 2 init views `views_init: [0, 23]`)
+- Torso: weird gray "backpack/harness"-like texture, no denim
+- Arms: magenta
+- Legs: partial gray cargo shorts, magenta patches
+- Identity is NOT preserved — Paint3D's SD1.5 + ControlNet output
+  has the "armored monkey" look from the default negative prompt
+  rather than respecting the ip45_front IP-Adapter reference
+
+**Verdict**: mesh D's bricolage beats Paint3D stage 1 for this case.
+
+### Root causes
+1. Paint3D stage 1 only uses 2 init views + inpainting. The magenta
+   zones correspond to UVs never rasterized by those 2 views.
+2. Paint3D stage 2 (pipeline_paint3d_stage2.py) specifically inpaints
+   these gaps using a UV-position ControlNet — didn't run it.
+3. IP-Adapter weight in Paint3D may be too weak for ip45-style
+   character; SD1.5 + generic prompt = generic look.
+4. Paint3D was designed for "sci-fi digital painting" / stylized
+   texturing, not photoreal IP-Adapter-constrained identity.
+
 ### Paint3D FabMesh integration — STARTING NOW (2026-04-18)
 
 User confirmed Paint3D Suzanne test passed. Moving to FabMesh
