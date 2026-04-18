@@ -145,11 +145,25 @@
   <div class="verdict">front OK, back still vertical-inverted (same as D)</div>
 </div>
 
-<div class="col" style="border-right:3px solid #4ade80;">
-  <div class="col-title">W: V config + SKIP_BACK_VFLIP (NEW)</div>
+<div class="col">
+  <div class="col-title">W: V config + SKIP_BACK_VFLIP</div>
   <model-viewer src="mesh_RUN_W.glb" auto-rotate camera-controls
                 shadow-intensity="1" environment-image="neutral"></model-viewer>
-  <div class="verdict">target: front OK AND back not inverted</div>
+  <div class="verdict">vertical fixed but side-swapped</div>
+</div>
+
+<div class="col">
+  <div class="col-title">X: W + U-flip for back</div>
+  <model-viewer src="mesh_RUN_X.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">no improvement vs W</div>
+</div>
+
+<div class="col" style="border-right:3px solid #4ade80;">
+  <div class="col-title">Y: W + pre-flip back.png horizontally (NEW)</div>
+  <model-viewer src="mesh_RUN_Y.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">target: fix side-swap via image pre-flip, not projection math</div>
 </div>
 
 </div>

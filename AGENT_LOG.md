@@ -636,6 +636,61 @@ Or more cleanly: when we skip the V flip for back, also apply U
 flip to counter the mirror. Add this to the same conditional block
 in texture_project.py.
 
+### Run X result — NO improvement (same visible bug as W)
+
+User said "même problème". Screenshot shows the back of the subject
+(denim of dos, nuque, brown hair patch) at the default auto-rotate
+pose — i.e. at the same angle W was showing, with the same texture
+distribution.
+
+Hash verification: W and X have DIFFERENT md5 (64a8cc... vs 39b0a1)
+so the code did change something. But the visible result isn't
+any better to the user.
+
+Interpretation: skip_back_vflip + U-flip might not compose the way
+I expected. Skipping V-flip moved things vertically, adding U-flip
+for the same view moved them horizontally — together they may act
+like a 180° in-image rotation, which is equivalent to doing
+neither (since images aren't naturally rotated).
+
+### Rethinking the bug
+
+The back image `ip45_back.png` is the "view from behind" of a
+subject. Its pixel at (U=0, V=0) = top-left of the image. The
+subject's head is at top, the subject's RIGHT ARM is on the LEFT
+side of the image (mirror view).
+
+When we project this onto the mesh at azim=180, the camera looks
+at the +Z side of the mesh. For the projection to correctly place:
+- head pixel (V=0) -> mesh top (correct)
+- subject-right-arm (U=0) -> mesh right arm = world +X
+- subject-left-arm (U=1) -> mesh left arm = world -X
+
+Standard p_v flip (`p_v = 1 - p_v`) reverses head/feet — we need
+to SKIP it for back (Run W fix). Good.
+Standard projection gives `p_u = focal * v_cs[0] / -z + 0.5`, so
+mesh point at world +X appears at... depends on cam basis.
+
+The lateral mirror might be inherent to projecting any "back view"
+onto a mesh: a back photo of a subject has the arms mirrored vs
+the mesh's natural axis system. So to project back correctly we
+may need to PRE-FLIP the back PNG horizontally in build_mv_dir
+(not U-flip in projection math).
+
+### Run X — NO improvement
+
+### Run Y — PRE-FLIP back.png horizontally in build_mv_dir
+
+Change plan:
+- Revert Run X's U-flip in texture_project.
+- Keep Run W's conditional V-flip skip.
+- In build_mv_dir, apply `.transpose(Image.FLIP_LEFT_RIGHT)` to
+  back.png before saving into mv slots 2/3/5.
+
+This is cleaner because it's a property of the input images (back
+photo is naturally mirrored for a subject facing away), not of
+the projection math.
+
 ### Run W — conditional p_v flip in texture_project — STARTING NOW
 
 Plan logged BEFORE patching, per protocol.

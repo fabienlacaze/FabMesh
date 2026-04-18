@@ -284,9 +284,11 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         # that same formula flips the image vertically on the mesh
         # (head ends up at feet). Skip the flip conditionally when
         # FABMESH_TEXPROJ_SKIP_BACK_VFLIP=1 and azim is near 180.
-        if (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
-                and abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0):
-            pass  # leave p_v as is (no flip)
+        _is_back_azim = abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0
+        _skip_back_vflip = (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
+                            and _is_back_azim)
+        if _skip_back_vflip:
+            pass  # p_v left as is (no V flip). U-flip removed in Run Y.
         else:
             p_v = 1.0 - p_v  # flip V (image Y top-to-bottom)
         # Empirical: the front render of the GT cube shows the letter F
@@ -563,9 +565,12 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
         p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
         # Run W: conditional V-flip (see same block above around l.281)
+        # Run Y: removed X's U-flip. Lateral mirror fix moved to
+        # build_mv_dir (pre-flip back.png horizontally).
+        _is_back_azim_mv = abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0
         if (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
-                and abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0):
-            p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5  # no flip
+                and _is_back_azim_mv):
+            p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5  # no V flip
         else:
             p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
         # Same U-flip as in project_single_view — calibration stage 4 on

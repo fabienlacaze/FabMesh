@@ -37,6 +37,11 @@ def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     os.makedirs(mv_dir, exist_ok=True)
     front = Image.open(front_png).convert('RGB').resize((1024, 1024))
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
+    # Run Y (2026-04-18): back photos of a subject are naturally a
+    # mirror view (subject's right arm on viewer's left side of
+    # image). Pre-flip horizontally so the back pixels land on the
+    # correct side of the mesh at azim=180 projection.
+    back = back.transpose(Image.FLIP_LEFT_RIGHT)
 
     front.save(os.path.join(mv_dir, 'input.png'))
     # CRM slot convention (see scripts/multiview_crm_gen.py docstring):
