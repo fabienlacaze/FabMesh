@@ -266,6 +266,61 @@ def generate_3d(
     print(f"LOCAL_SF3D_PROGRESS: 90 export", flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
+    # FabMesh weld + UV repack: SF3D exports meshes with ~264 disconnected
+    # geometric components (duplicated vertices at seams). xatlas then
+    # generates ~347 UV charts which causes:
+    #   - leopard-pattern textures in texture_project winner-take-all
+    #   - Paint3D stage 2 UV-inpaint hallucinates mini-subjects (SD sees
+    #     347 dispersed tiny zones in the 2D atlas and fills each one)
+    # Fix: weld close vertices (process=True) -> 1 watertight component,
+    # then repack UVs with xatlas. Guard via FABMESH_SF3D_WELD_UV (default on).
+    if os.environ.get('FABMESH_SF3D_WELD_UV', '1') == '1':
+        try:
+            import trimesh as _tm_w, xatlas as _xa
+            import numpy as _np_w
+            _comps_before = len(mesh.split(only_watertight=False))
+            _verts_before = len(mesh.vertices)
+            # Keep UV+vertex color visuals if any (they get re-mapped below)
+            _had_uv = hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None
+            _old_uv = _np_w.asarray(mesh.visual.uv).copy() if _had_uv else None
+            _old_verts = mesh.vertices.copy()
+            _old_faces = mesh.faces.copy()
+            # process=True: merge near-duplicate vertices -> watertight
+            mesh = _tm_w.Trimesh(
+                vertices=mesh.vertices, faces=mesh.faces, process=True
+            )
+            _comps_after = len(mesh.split(only_watertight=False))
+            # xatlas repack with aggressive chart merging
+            _atlas = _xa.Atlas()
+            _atlas.add_mesh(
+                mesh.vertices.astype(_np_w.float32),
+                mesh.faces.astype(_np_w.uint32),
+            )
+            _copts = _xa.ChartOptions()
+            _copts.max_iterations = 10
+            _atlas.generate(chart_options=_copts)
+            _vmap, _indices, _uvs = _atlas[0]
+            mesh = _tm_w.Trimesh(
+                vertices=mesh.vertices[_vmap],
+                faces=_indices.astype(_np_w.int64),
+                visual=_tm_w.visual.TextureVisuals(uv=_uvs),
+                process=False,
+            )
+            print(
+                f"LOCAL_SF3D: weld+repack {_verts_before}v/{_comps_before}comp "
+                f"-> {len(mesh.vertices)}v/{_comps_after}comp, "
+                f"{_atlas.chart_count} UV charts, util {_atlas.utilization:.1%}",
+                flush=True,
+            )
+        except Exception as _weld_e:
+            print(
+                f"LOCAL_SF3D: weld+repack failed ({_weld_e}); "
+                "falling back to raw SF3D mesh",
+                flush=True,
+            )
+            import traceback as _tb_w
+            _tb_w.print_exc()
+
     # Track the auto-align rotation so downstream projection can compensate
     # multi-view azimuths (Zero123++ views were generated from the PRE-align
     # mesh, so they land on wrong parts of the rotated mesh otherwise).

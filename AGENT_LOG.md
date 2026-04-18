@@ -5182,3 +5182,91 @@ Status in-flight: agent a auto-override `look_at_height: 0.25 -> 0.7107`
 (centroid mesh était à 0.7107 en Y), stage1 done 51.8s. En attente
 stage2 + viewer.
 
+---
+
+## Paint3D v18-v22 UV atlas investigation (2026-04-18 22:30-23:50)
+
+### v18-v21 — série de runs Paint3D 2-view
+Runs successifs pour tenter de fixer le "leopard magenta" dans
+l'atlas stage 1 et les mini-enfants hallucinés par stage 2 :
+- v18/v19: Rz(180°) pre-rotate fix pour corriger le back→front leak.
+  Depth debug confirme 2 vues différentes (front debout / nuque+dos).
+- v20: 2-view + Rz fix combinés.
+- v21: FABMESH_PAINT3D_LOOSE_MASK=89 (quasi max hemisphere).
+
+**Résultat**: TOUS les atlas stage 1 sont quasi-identiques avec
+~95% magenta + 3 mini-gamins visibles en bas. LOOSE_MASK ne change
+rien. Stage 2 UV-inpaint invente 6+ mini-figurines d'enfants
+(SD+IPAdapter traite les mini-îles UV comme 311 scènes 2D à remplir).
+
+### Diagnostic UV atlas (mesh SF3D)
+Mesure sur `mesh_NORMALIZE_1.glb`:
+- **264 composants géométriques disconnectés** (pas watertight!)
+- 8420 verts / 12596 faces brut
+- xatlas default = **347 charts UV**, util 74.35%
+- Tuning xatlas (max_cost 20/50/100/500) = plafond 347 charts,
+  aucun changement → comportement intrinsèque xatlas sur mesh complexe
+
+### Fix 1 — weld mesh dans local_sf3d_bridge.py
+Patch ajouté dans generate_3d() après SF3D inference, avant
+auto-align:
+- `trimesh.Trimesh(process=True)` → merge vertices proches
+- `xatlas` repack UV
+- Guard `FABMESH_SF3D_WELD_UV=1` (défaut on)
+
+**Résultat**: 8426v/266comp → 9319v/**1 comp** watertight, mais
+**311 UV charts** (vs 347 avant). xatlas continue à segmenter
+aux seams de courbure même sur mesh watertight. Le weld ne suffit
+pas à réduire le nombre de charts.
+
+### Option Blender Smart UV (testée puis abandonnée)
+Script `scripts/blender_smart_uv.py` créé pour unwrap via Blender
+5.1 avec `bpy.ops.uv.smart_project(angle_limit=66°)`. Export OK
+mais **networkx.connected_components** lancé ensuite pour compter
+les îles UV a **fait planter l'ordi** (RAM 32GB saturée, swap
+massif, freeze total 2x de suite).
+
+**Leçon**: networkx est trop lourd pour graphes mesh. Utiliser
+`scipy.sparse.csgraph.connected_components` ou
+`trimesh.graph.connected_components` natif à l'avenir.
+
+### Insight critique — v22 Paint3D stage1 ONLY
+Run avec `--skip-stage2` pour voir l'atlas stage 1 brut sans
+inpaint. Résultat visuel:
+- Atlas = 95% magenta + **3 mini-enfants ENTIERS** côte à côte
+  en bas + morceaux éclatés sur les côtés.
+
+**Révélation**: Paint3D stage 1 **ne fait PAS de back-projection
+UV par face**. Il colle l'IMAGE SOURCE ENTIÈRE comme une
+"décalcomanie" sur l'atlas 2D dans les régions UV visibles de
+chaque vue. D'où les 3 mini-gamins complets = 3 vues projetées
+= 3 copies de la photo source.
+
+Donc:
+1. Le "leopard magenta" n'est PAS un problème de charts UV.
+2. C'est le **mode de projection** de Paint3D qui ne convient
+   pas aux UVs fragmentées SF3D (marche bien sur unwrap cylindrique
+   propre, mauvais sur 300+ charts).
+3. Stage 2 hallucine parce qu'il reçoit un atlas avec "mini-enfants
+   stickers" + vide → SD+IPAdapter conclut logiquement "plus
+   d'enfants à générer".
+
+### Conclusion architecturale
+Paint3D est structurellement incompatible avec les UVs SF3D. Deux
+voies possibles:
+- **A)** Retour à `texture_project.py` (vraie back-projection
+  par face) + fill CV2 pour trous. Déjà testé = "moche" mais
+  fidèle.
+- **B)** Remplacer SF3D par un générateur qui sort des UVs
+  propres (TRELLIS / Hunyuan3D 2.0 / MV-Adapter pipeline).
+
+Prochain step user-validated: comparer rendu `texture_project.py`
+vs Paint3D v22 stage1-only sur le même mesh.
+
+**Fichiers produits**:
+- `logs/child_ip45_2view/mesh_WELDED_TEST.glb` (SF3D + weld)
+- `logs/child_ip45_2view/mesh_BLENDER_UV.glb` (Blender smart UV)
+- `logs/child_ip45_2view/mesh_paint3d_v22_STAGE1_ONLY.glb`
+- `scripts/blender_smart_uv.py` (nouveau)
+- `scripts/local_sf3d_bridge.py` (patch weld_uv)
+
