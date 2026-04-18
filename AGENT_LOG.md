@@ -420,9 +420,86 @@ To fix REAL_D properly, we need either:
 User skipped past Run L's verdict. Run L = D + atlas tex_res 2048
 should be fine to evaluate later if the REAL_D direction is dropped.
 
-### Decision needed from user
+### Run P result — works but over-rotated (mesh upside-down)
 
-(awaiting input on Option A / B / C)
+User screenshot: mesh is upside-down (feet up, head down, but face
+visible on the now-bottom head). Textures are great, well-placed
+relative to body parts (visage à la tête, denim sur le buste).
+
+So Rx(180)@Ry(180) was too much. The "head toward feet" issue I
+inferred from the previous REAL_D back view was actually NOT a
+separate bug — it was just an artifact of viewing the mesh from a
+weird angle when the side-swap rotated unfamiliar parts into view.
+
+REAL_D actually has only ONE bug: side-swap (180° around Y). My
+Rx(180) was a false fix that turned the mesh upside-down on top of
+the correct Y rotation.
+
+### Run Q — REAL_D + Ry(180) only — RESULT: WORSE
+
+User verdict: "ca a baissé la qualité de la texture sans la faire
+tourner". Two surprises:
+1. Texture quality DROPPED vs REAL_D (less sharp denim, less defined
+   features).
+2. Mesh is NOT rotated — visually similar orientation to REAL_D.
+
+How can a post-export Y rotation reduce quality? It shouldn't touch
+texture data at all — only vertex positions. Possible explanations:
+- The trimesh load+save round-trip lost something (PBR material,
+  texture compression).
+- Or the mesh was rotated but the user looked at it from a different
+  angle that happened to match.
+- model-viewer might cache the GLB by URL and showed an older P or
+  REAL_D incorrectly.
+
+Either way: **Run Q is worse than REAL_D** per the user.
+
+### What we know now
+
+- D (NORMALIZE=0): correct orientation, lower texture quality.
+- REAL_D (NORMALIZE=1): high texture quality but 180° side-swapped.
+- P (REAL_D + Rx@Ry 180): textures preserved, mesh upside-down.
+- Q (REAL_D + Ry only): degraded textures, no visible rotation.
+
+P proved that post-rotation CAN preserve textures (Rx+Ry combo
+worked, just over-rotated). Q's degraded quality is suspicious —
+maybe the trimesh save lost the PBR material setup. P used the same
+function and DID preserve quality, so the difference between P and
+Q is just whether Rx is included.
+
+### Theory for Q's quality loss
+
+The trimesh load/export round-trip: trimesh may handle GLB PBR
+material differently when applying a rotation that changes the
+mesh's "up" axis. Rx(180) flips up/down; Ry(180) doesn't. For Y-only
+rotation, trimesh might re-tessellate or re-pack UVs differently
+than for X+Y rotation that keeps a "consistent" axis system.
+
+Or: model-viewer may simply have cached Q's previous attempt under
+the same path/URL.
+
+Need to verify: same compare with hard reload.
+
+### Decision: Option A — STARTING NOW
+
+User picked Option A: post-rotate the mesh Rx(180) @ Ry(180) on
+export AFTER the bridge produces the REAL_D-style high-quality
+texture mesh. Net effect = 180° rotation around Z axis, which:
+- swaps front/back (fixes "avant arrière inversée")
+- flips top/bottom (fixes "tête vers les pieds")
+
+Implementation plan:
+- New env flag: `FABMESH_POST_ROTATE_AXIS` (default empty, options
+  'x', 'y', 'z') and `FABMESH_POST_ROTATE_DEG` (default 0).
+- In ip45_2view_to_3d.py wrapper after run_sf3d, load mesh.glb,
+  apply trimesh rotation, re-export. Or do it in a small standalone
+  post-process step.
+- Easier: apply the rotation directly in the wrapper after
+  subprocess returns, no env machinery — but then it's
+  ip45-2view-specific (which is fine for this experiment).
+
+Run P = REAL_D config (NORMALIZE=1) + post-rotate Rx(180)Ry(180) on
+the exported GLB. Will be logged here, then commit.
 
 ### NEW PLAN — Run O: REAL_D + post-rotate mesh -180° Y on export
 

@@ -2,12 +2,12 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>OLD vs REAL D and E</title>
+<title>D vs REAL_D vs P</title>
 <style>
   html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
                font-family:system-ui, sans-serif; height:100%; }
   h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; border-bottom:1px solid #333; }
-  .grid { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:1px; background:#000; height:calc(100vh - 40px); }
+  .grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:1px; background:#000; height:calc(100vh - 40px); }
   .col { background:#181818; position:relative; }
   .col-title { position:absolute; top:6px; left:8px; background:rgba(0,0,0,0.75);
                padding:4px 9px; font-size:11px; border-radius:3px; z-index:5; color:#eee; }
@@ -19,35 +19,28 @@
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>BUG FIX: wrapper was forcing NORMALIZE=0. OLD vs REAL D/E now</h1>
+<h1>D (NORMALIZE=0) vs REAL_D (NORMALIZE=1) vs P (NORMALIZE=1 + post-rotate Rx180@Ry180)</h1>
 <div class="grid">
   <div class="col">
-    <div class="col-title">OLD D (was actually NORMALIZE=0)</div>
+    <div class="col-title">D: NORMALIZE=0 (correct, lower def)</div>
     <model-viewer src="mesh_NORMALIZE_1.glb" camera-controls
                   camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">previously thought to be NORMALIZE=1</div>
+    <div class="verdict">baseline correct</div>
   </div>
-  <div class="col" style="border-left:2px solid #4ade80;">
-    <div class="col-title">REAL D: NORMALIZE=1 (true)</div>
+  <div class="col">
+    <div class="col-title">REAL_D: NORMALIZE=1 (sharp but dual-bug)</div>
     <model-viewer src="mesh_REAL_D.glb" camera-controls
                   camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">bridge default rotation +180° Y applied</div>
-  </div>
-  <div class="col">
-    <div class="col-title">OLD E (NORMALIZE=0 + SHIFT_SOURCE)</div>
-    <model-viewer src="mesh_NORMALIZE_1_SHIFT.glb" camera-controls
-                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">flou + ghost</div>
+    <div class="verdict">side-swap + head-toward-feet</div>
   </div>
   <div class="col" style="border-left:2px solid #4ade80;">
-    <div class="col-title">REAL E: NORMALIZE=1 + SHIFT_SOURCE (true)</div>
-    <model-viewer src="mesh_REAL_E.glb" camera-controls
+    <div class="col-title">Q: REAL_D + Ry(180) only (NEW, fix from P)</div>
+    <model-viewer src="mesh_RUN_Q.glb" camera-controls
                   camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">true config — let's see</div>
+    <div class="verdict">target: REAL_D textures + correct orientation</div>
   </div>
 </div>
 </body>
