@@ -487,12 +487,43 @@ drop is real and measurable.
 ### Run R — REAL_D + Ry(180) via pygltflib (binary-preserving)
 
 New script: scripts/glb_post_rotate.py uses pygltflib to rotate ONLY
-the POSITION + NORMAL accessors in-place. Doesn't touch textures,
-materials, UVs, tangents, or any other binary content. The full GLB
-file size should be preserved.
+the POSITION + NORMAL accessors in-place.
 
-ip45_2view_to_3d.py now calls glb_post_rotate.py instead of using
-trimesh round-trip. About to test.
+Result:
+- File size preserved: 1,539,424 bytes (vs REAL_D 1,540,076).
+  ✓ Textures NOT lost.
+- BUT: visually identical to REAL_D — the rotation has **NO visible
+  effect** in the model-viewer.
+
+Theory: the GLB has a node with its own transform matrix (or TRS
+rotation). model-viewer applies the node transform on top of the
+vertex positions, so rotating the positions is cancelled by the
+node-level rotation that the bridge applied at l 408
+(`mesh.apply_transform(_R180)` -> trimesh probably writes that as
+node TRS, not into vertex positions directly).
+
+ALSO key revelation while looking at this compare: **D is actually
+sharp too** (visage net, denim avec coutures, t-shirt blanc, shorts
+cargo, baskets). My earlier impression that D was "lower def" was
+wrong — D and REAL_D have similar texture quality at this view.
+The difference between them is only orientation.
+
+So:
+- D works perfectly (correct orientation, sharp texture).
+- REAL_D and R are visually equivalent (both show the back).
+- The "post-rotate to fix REAL_D" path was solving a problem that
+  doesn't really exist — D was already the answer.
+
+### Decision
+
+D is the shipping config. Stop chasing "REAL_D + post-rotate".
+Going forward, if texture definition needs improvement, look at
+the SDXL refine strength, the input image quality, or the SF3D
+geometry — not at the orientation/projection chain.
+
+Restoring ip45_2view_to_3d.py: keep the pygltflib post-rotate code
+as opt-in (FABMESH_IP45_POST_ROTATE=1) but default OFF, so D config
+runs cleanly without the extra step.
 
 ### Fix needed
 

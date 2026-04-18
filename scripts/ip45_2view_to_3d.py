@@ -74,18 +74,22 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
     env = dict(os.environ)
     env['FABMESH_MV_REUSE'] = mv_dir
     env.setdefault('FABMESH_PROJECT_MODE', 'refine')
-    # Run P (2026-04-18): use NORMALIZE=1 (bridge default) to get
-    # REAL_D's high-quality textures, THEN post-rotate the exported
-    # mesh by Rx(180)@Ry(180) (= Rz(180) net) to fix the dual bug
-    # observed in REAL_D (side-swap + head-toward-feet inversion).
+    # Final shipping config (after runs A..R 2026-04-18):
+    # NORMALIZE=0 (mesh in SF3D native frame, face -Z), no SHIFT,
+    # no post-rotate. This is "Run D" config and was confirmed by
+    # the user as having both correct orientation AND sharp texture.
+    # Runs P/Q/R explored post-rotation to fix REAL_D's apparent
+    # side-swap, but it turned out D was already the answer.
+    env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
     cmd = [sys.executable, bridge, source_image, glb_out]
-    log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir}, NORMALIZE=1)')
+    log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir}, NORMALIZE=0)')
     r = subprocess.run(cmd, env=env, check=False)
     if r.returncode != 0:
         raise RuntimeError(f'sf3d bridge failed: rc={r.returncode}')
 
-    # Post-rotation: fix the dual bug in REAL_D output.
-    if os.environ.get('FABMESH_IP45_POST_ROTATE', '1') == '1':
+    # Optional post-rotation kept opt-in for future experiments.
+    # Default OFF — D config doesn't need it.
+    if os.environ.get('FABMESH_IP45_POST_ROTATE') == '1':
         _post_rotate_glb_xy180(glb_out)
 
 
