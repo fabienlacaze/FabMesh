@@ -39,23 +39,34 @@ def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
 
     front.save(os.path.join(mv_dir, 'input.png'))
-    # CRM slot convention (see scripts/multiview_crm_gen.py docstring):
-    #   view_0 front, view_1 right, view_2 back, view_3 left,
-    #   view_4 top, view_5 bottom.
-    # We dup front -> right+top, back -> left+bottom.
-    slots = {0: front, 1: front, 2: back, 3: back, 4: front, 5: back}
+    # texture_project ALWAYS adds input.png at azim=0 (or shifted to 180
+    # via FABMESH_TEXPROJ_SHIFT_SOURCE). It supplies the FRONT signal at
+    # native 1151px resolution.
+    # We therefore don't duplicate `front` into any mv slot — that creates
+    # subpixel ghosting between the 1151px source and the 1024px dups
+    # (visible as deformed eyes / dark patches on the face).
+    # All 6 mv slots = the BACK image. Yes the CRM "right/left/top/bottom"
+    # slots end up duplicated, but they only fill in directions that have
+    # no other coverage (sides, top, bottom), and those are far enough from
+    # the face that ghosting doesn't matter.
+    slots = {0: back, 1: back, 2: back, 3: back, 4: back, 5: back}
     for slot, img in slots.items():
         img.save(os.path.join(mv_dir, f'view_{slot}.png'))
 
+    # All slots labelled as the back view (azim=180 in SF3D-native frame).
+    # After bridge applies +180° rotation_offset, every mv slot lands at
+    # az=0 of the post-rotation mesh — i.e. the BACK of the rotated mesh.
+    # input.png (with SHIFT_SOURCE) lands at az=180 of the rotated mesh
+    # = the FRONT of the rotated mesh, which is what we want.
     schema = {
         'engine': 'ip45_2view',
         'views': [
-            {'azim':   0.0, 'elev':   0.0, 'label': 'front'},
-            {'azim':  90.0, 'elev':   0.0, 'label': 'right_dup_front'},
-            {'azim': 180.0, 'elev':   0.0, 'label': 'back'},
-            {'azim': 270.0, 'elev':   0.0, 'label': 'left_dup_back'},
-            {'azim':   0.0, 'elev':  90.0, 'label': 'top_dup_front'},
-            {'azim':   0.0, 'elev': -90.0, 'label': 'bottom_dup_back'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back_slot_0'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back_slot_1'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back_slot_2'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back_slot_3'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back_slot_4'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back_slot_5'},
         ],
     }
     with open(os.path.join(mv_dir, 'views.json'), 'w') as f:

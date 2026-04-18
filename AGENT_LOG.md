@@ -10,6 +10,122 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-18 — Sub-experiments hunting placement+definition (chronological)
+
+After the initial 2-view experiment shipped (entry below), we cycled
+through 5+ variants chasing the right combination of *placement* (face
+on the front, not on the calf) and *texture definition* (sharp denim,
+recognizable face). Same input pair every run:
+`images/child/_scale_sweep/ip45_front.png` + `ip45_back.png`. Output
+artifacts pile up in `logs/child_ip45_2view/mesh_*.glb`.
+
+**Run A — NORMALIZE_ORIENT=0** (commit 16489cf)
+- Bridge skips its +180° Y rotation. Mesh stays in raw SF3D frame
+  (face -> -Z). views.json uses front=0, back=180 in raw frame.
+- Result: placement looked decent from a flattering angle, but mesh
+  is **cireux/blanchâtre** all over — colors washed, denim grayed,
+  face flat & pasty. 426k texel holes (40%) filled by push-pull blur.
+- Misjudged at the time as "best placement so far". Actually worst
+  texture quality.
+
+**Run B — NORMALIZE_ORIENT=1 + FABMESH_TEXPROJ_SHIFT_SOURCE=1**
+(commit 2830058, reverted in cfdf6d3)
+- Bridge applies +180° Y normalize. texture_project shifts source
+  input.png azimuth too. All 7 slots end up at az=180 (front of
+  rotated mesh).
+- Result: placement OK, denim sharp & coloured. User reported "face
+  on the calf" — actually a memory of an earlier different run.
+  Reverted prematurely.
+
+**Run C — NORMALIZE_ORIENT=0 + R_undo += Ry(180)** (current code, gated
+on env)
+- Adds Ry(180) to R_undo when NORMALIZE_ORIENT=0 to compensate the
+  missing bridge rotation in projection sampling.
+- Result: textures get colour back, but face features
+  (eyes/nose/mouth) are **deformed/grotesque**. Patch over-rotates
+  by a fraction so face details land on neighbouring vertices. Bad.
+
+**Run D — NORMALIZE_ORIENT=1 (default), no SHIFT_SOURCE, no R_undo
+patch** — the "sharp" baseline
+- Standard pipeline path.
+- Result: **placement perfect** (face front, denim front, baskets
+  front), textures sharp and saturated. User confirmed: "le placement
+  est parfait, definition meilleure".
+- Latent issue: the native HD source (1151px) is at az=0 in the
+  post-rotation frame — i.e. it lands on the BACK. The face we see
+  is actually painted by mv/view_0, which is the front photo
+  *resized to 1024px*. We lose the HD bonus where it matters most.
+
+**Run E — NORMALIZE_ORIENT=1 + SHIFT_SOURCE=1** (today, flag re-added)
+- Reapply run B's idea: shift input.png to az=180 so the HD source
+  lands on the FACE of the rotated mesh.
+- Result: placement still perfect. But the **face is FLOU + dirty**
+  (dark patches around eyes, ghost-double of features).
+- Root cause: input.png HD (1151px) AND mv/view_0 (front dup 1024px)
+  both project to az=180. Their per-texel sample coords differ by
+  sub-pixel because of the resolution mismatch -> moiré + ghosting
+  on the face area where they fight for highest per-pixel weight.
+
+**Run F — NORMALIZE_ORIENT=1 + SHIFT_SOURCE=1 + no front dups in mv/**
+- Hypothesis: kill the doubled-front signal. Fill all 6 mv slots
+  with `back` only, all labelled azim=180 in raw frame -> az=0
+  post-rotation -> mesh BACK. input.png HD covers the FRONT alone.
+- Result: at the locked-frontal compare angle, **F shows the BACK of
+  the mesh** (denim back + nuque + cargo back pockets visible). Mesh
+  somehow flipped under the projection swap. Disqualified for face
+  quality comparison — you can't see the face in the pose F generated.
+
+### Locked-frontal 5-way compare — user verdict
+
+After locking all 5 panels to a fixed frontal camera
+(`camera-orbit="0deg 90deg 1.4m"`) for direct face-to-face comparison:
+
+- **A (NORMALIZE=0)**: face visible but cireux/blanchâtre, fade. Out.
+- **C (NORMALIZE=0 + Ry180 patch)**: shows the BACK at the locked
+  angle — mesh ended up rotated 180° vs the others. Out.
+- **F (NORMALIZE=1 + SHIFT + no front dups)**: also shows the BACK
+  at the locked angle. Same flip issue as C. Out.
+- **D (NORMALIZE=1 baseline)**: face visible, sharp, well-coloured. ✓
+- **E (NORMALIZE=1 + SHIFT_SOURCE)**: face visible, sharp, similar
+  to D at the wide angle. ✓
+
+User said: "D et E sont les mieux". Choice now narrowed to D vs E.
+
+### Why C and F flipped 180° at the same camera angle
+
+C and F both touch the rotation pipeline:
+- C adds Ry(180) to R_undo. This modifies how vertices are sampled
+  but ALSO changes which face of the mesh is "az=0" of the
+  texture_project camera basis — effectively flipping the rendered
+  result by 180° around Y.
+- F changes views.json so all 6 mv slots claim azim=180 (raw) which
+  the bridge then shifts to az=0 (post-rotation = back). Combined
+  with input.png shifted to az=180 (post-rotation = front), the back
+  texture lands on the "front" of the mesh as defined by the
+  texture_project camera convention. The user's frontal camera angle
+  in model-viewer then sees the back image painted on what model-
+  viewer thinks is the front face -> looks like a back view.
+
+Lesson: changing angles in views.json or R_undo also rotates the
+visible front of the mesh in the viewer's frame. The "face is in
+front" requirement is enforced not just by mesh geometry but by
+matching the texture_project frame to model-viewer's default camera.
+
+### D vs E — pending side-by-side face zoom
+
+Both D and E look sharp at wide frame. E was reported earlier as
+"face FLOU + ghosting" when zoomed in. Need final face-zoom
+verification to choose:
+- D wins -> ship as-is (NORMALIZE=1 baseline, no SHIFT_SOURCE).
+  Drawback: HD input.png is wasted on the back of the mesh.
+- E wins -> ship with FABMESH_TEXPROJ_SHIFT_SOURCE=1. HD on face is
+  recovered. Risk: subtle moiré if mv/view_0 still doubles the front
+  signal at low zoom.
+- Both equivalent -> prefer D (simpler, no extra env flag, no risk
+  of hidden moiré).
+
+---
+
 ## 2026-04-18 — IP-scale sweep on child + ip45 front+back → 3D experiment
 
 ### Existing artifacts
