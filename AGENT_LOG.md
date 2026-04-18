@@ -766,6 +766,28 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Paint3D capabilities — multi-view confirmed
+
+Cloned github.com/OpenTexture/Paint3D into external/Paint3D.
+
+Per paint3d/config/train_config_paint3d.py:
+- `n_views: int = 24` (default) — main rotation views around the mesh.
+- `views_before`, `views_after` — additional view tuples (azim, elev).
+- `views_init`, `views_inpaint` — which view indices are "init" (hold
+  reference images) vs "inpaint" (synthesized to fill gaps).
+- `alternate_views: True` — alternates left/right when sweeping azim.
+
+Paint3D is MULTI-VIEW NATIVE. Our 2 photos (ip45_front + ip45_back)
+can serve as init views at azim 0 and 180; Paint3D synthesizes the
+remaining views with SDXL + ControlNet depth-aware diffusion to keep
+consistency across the full mesh UV atlas.
+
+Integration plan:
+1. Keep our 2 photos as `views_init` at slots for azim=0 and azim=180.
+2. Set `n_views=24` (or less for speed during dev).
+3. Let Paint3D do its stage 1 (initial UV bake from the 24 views)
+   then stage 2 (inpaint the seams).
+
 ### Paint3D integration — STARTING NOW (2026-04-18)
 
 Plan:
