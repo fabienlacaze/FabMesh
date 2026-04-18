@@ -2,46 +2,156 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>D vs REAL_D vs P</title>
+<title>ALL 17 runs A..T — horizontal scroll</title>
 <style>
   html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
                font-family:system-ui, sans-serif; height:100%; }
-  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; border-bottom:1px solid #333; }
-  .grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:1px; background:#000; height:calc(100vh - 40px); }
-  .col { background:#181818; position:relative; }
-  .col-title { position:absolute; top:6px; left:8px; background:rgba(0,0,0,0.75);
-               padding:4px 9px; font-size:11px; border-radius:3px; z-index:5; color:#eee; }
+  h1 { padding:6px 16px; margin:0; font-size:13px; background:#000;
+       border-bottom:1px solid #333; }
+  .scroller { overflow-x:auto; overflow-y:hidden; height:calc(100vh - 32px);
+              white-space:nowrap; background:#000; }
+  .col { display:inline-block; width:340px; height:100%; background:#181818;
+         border-right:1px solid #222; position:relative; vertical-align:top; }
+  .col-title { position:absolute; top:6px; left:8px; right:8px;
+               background:rgba(0,0,0,0.78); padding:4px 8px; font-size:11px;
+               border-radius:3px; z-index:5; color:#eee; white-space:normal; }
   .col model-viewer { width:100%; height:100%; background:#1b1b1b; }
   .verdict { position:absolute; bottom:6px; left:8px; right:8px;
-             background:rgba(0,0,0,0.7); padding:5px 9px; font-size:10px;
-             border-radius:3px; z-index:5; color:#bbb; }
+             background:rgba(0,0,0,0.7); padding:5px 8px; font-size:10px;
+             border-radius:3px; z-index:5; color:#bbb; white-space:normal; }
 </style>
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>D (NORMALIZE=0) vs REAL_D (NORMALIZE=1) vs P (NORMALIZE=1 + post-rotate Rx180@Ry180)</h1>
-<div class="grid">
-  <div class="col">
-    <div class="col-title">D: NORMALIZE=0 (correct, lower def)</div>
-    <model-viewer src="mesh_NORMALIZE_1.glb" camera-controls
-                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">baseline correct</div>
-  </div>
-  <div class="col">
-    <div class="col-title">REAL_D: NORMALIZE=1 (sharp but dual-bug)</div>
-    <model-viewer src="mesh_REAL_D.glb" camera-controls
-                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">side-swap + head-toward-feet</div>
-  </div>
-  <div class="col" style="border-left:2px solid #4ade80;">
-    <div class="col-title">R: REAL_D + Ry(180) via pygltflib (NEW)</div>
-    <model-viewer src="mesh_RUN_R.glb" camera-controls
-                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">target: REAL_D textures + correct orientation, no trimesh roundtrip</div>
-  </div>
+<h1>ALL ip45 2-view runs (scroll horizontally) — drag in panel to rotate</h1>
+<div class="scroller">
+
+<div class="col">
+  <div class="col-title">A: NORMALIZE=0 baseline</div>
+  <model-viewer src="mesh_NORMALIZE_0.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">cireux/blanchâtre, "looked decent from flattering angle"</div>
+</div>
+
+<div class="col">
+  <div class="col-title">C: NORMALIZE=0 + R_undo Ry180</div>
+  <model-viewer src="mesh_NORMALIZE_0_PATCHED.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">sharper but face features deformed</div>
+</div>
+
+<div class="col" style="border-right:3px solid #4ade80;">
+  <div class="col-title">D: NORMALIZE=0 + canonical (mesh_NORMALIZE_1.glb)</div>
+  <model-viewer src="mesh_NORMALIZE_1.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">"definition meilleure" — was the working baseline</div>
+</div>
+
+<div class="col">
+  <div class="col-title">E: D + SHIFT_SOURCE</div>
+  <model-viewer src="mesh_NORMALIZE_1_SHIFT.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">face floue + ghosting (HD vs 1024 moiré)</div>
+</div>
+
+<div class="col" style="border-right:3px solid #4ade80;">
+  <div class="col-title">REAL_D: NORMALIZE=1 (true)</div>
+  <model-viewer src="mesh_REAL_D.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">"super textures mais inversées" — sharp but side-swap</div>
+</div>
+
+<div class="col">
+  <div class="col-title">REAL_E: NORMALIZE=1 + SHIFT_SOURCE</div>
+  <model-viewer src="mesh_REAL_E.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">side-swap + face on back</div>
+</div>
+
+<div class="col">
+  <div class="col-title">F: SHIFT + back-only mv</div>
+  <model-viewer src="mesh_RUN_F.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">flipped 180°</div>
+</div>
+
+<div class="col">
+  <div class="col-title">G: SHIFT + skip view_0</div>
+  <model-viewer src="mesh_RUN_G.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">flipped 180°</div>
+</div>
+
+<div class="col">
+  <div class="col-title">H: SHIFT + view_0=back</div>
+  <model-viewer src="mesh_RUN_H.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">flipped 180°</div>
+</div>
+
+<div class="col">
+  <div class="col-title">I: SHIFT + view_0 transparent</div>
+  <model-viewer src="mesh_RUN_I.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">flipped 180°</div>
+</div>
+
+<div class="col">
+  <div class="col-title">J: SHIFT + view_0 prio 0.5</div>
+  <model-viewer src="mesh_RUN_J.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">flipped 180°</div>
+</div>
+
+<div class="col">
+  <div class="col-title">K: D + mv slots @ 2048</div>
+  <model-viewer src="mesh_RUN_K.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">vertical inversion (face on calf)</div>
+</div>
+
+<div class="col">
+  <div class="col-title">L: D + tex_res 2048 (atlas)</div>
+  <model-viewer src="mesh_RUN_L.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">never evaluated — atlas 2048 baseline</div>
+</div>
+
+<div class="col">
+  <div class="col-title">P: REAL_D + Rx(180)Ry(180)</div>
+  <model-viewer src="mesh_RUN_P.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">tient sur la tête (over-rotated, trimesh roundtrip lost textures)</div>
+</div>
+
+<div class="col">
+  <div class="col-title">Q: REAL_D + Ry(180) trimesh</div>
+  <model-viewer src="mesh_RUN_Q.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">degraded textures (trimesh roundtrip lost 50% of file)</div>
+</div>
+
+<div class="col">
+  <div class="col-title">R: REAL_D + Ry(180) pygltflib</div>
+  <model-viewer src="mesh_RUN_R.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">no visible rotation (node TRS overrides)</div>
+</div>
+
+<div class="col">
+  <div class="col-title">V: atlas + UV_REPACK=0</div>
+  <model-viewer src="mesh_RUN_V.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">front OK, back still vertical-inverted (same as D)</div>
+</div>
+
+<div class="col" style="border-right:3px solid #4ade80;">
+  <div class="col-title">W: V config + SKIP_BACK_VFLIP (NEW)</div>
+  <model-viewer src="mesh_RUN_W.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="verdict">target: front OK AND back not inverted</div>
+</div>
+
 </div>
 </body>
 </html>

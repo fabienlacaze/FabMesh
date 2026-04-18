@@ -278,7 +278,17 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
         p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
         p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5
-        p_v = 1.0 - p_v  # flip V (image Y top-to-bottom)
+        # Run W (2026-04-18): skip V-flip for back-view when requested.
+        # For front (azim=0), the standard `p_v = 1 - p_v` maps the
+        # image's top row to the mesh's top. For back views (azim=180),
+        # that same formula flips the image vertically on the mesh
+        # (head ends up at feet). Skip the flip conditionally when
+        # FABMESH_TEXPROJ_SKIP_BACK_VFLIP=1 and azim is near 180.
+        if (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
+                and abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0):
+            pass  # leave p_v as is (no flip)
+        else:
+            p_v = 1.0 - p_v  # flip V (image Y top-to-bottom)
         # Empirical: the front render of the GT cube shows the letter F
         # as a horizontal mirror of the reference. The source image's
         # pixel (u=0, v=v) maps to world-space left, but our camera
@@ -552,7 +562,12 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         z = v_cs[:, 2]
         safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
         p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
-        p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
+        # Run W: conditional V-flip (see same block above around l.281)
+        if (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
+                and abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0):
+            p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5  # no flip
+        else:
+            p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
         # Same U-flip as in project_single_view — calibration stage 4 on
         # the GT cube confirmed the front face texture was horizontally
         # mirrored. The mirror is in the SF3D → GLB axis convention

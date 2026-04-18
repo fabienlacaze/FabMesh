@@ -577,6 +577,65 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
+### Run W result — VERTICAL FIXED, but side-swap appeared
+
+User screenshots: both front and back views of W are now correctly
+oriented VERTICALLY (heads at top, feet at bottom, denim on torso,
+shorts on legs — huge progress vs D/V where the back was head-toward-
+feet).
+
+BUT: the front-camera view shows the **back of the subject** (denim
+with back seams, nuque, brown hair patch), and the back-camera view
+shows the **face**. So the textures are now swapped front↔back in
+addition to being correctly oriented.
+
+Interpretation: skipping `p_v = 1 - p_v` for azim=180 was exactly
+what the back needed vertically, but because the SF3D mesh is in
+the native frame (face at -Z), the model-viewer default camera
+(looking from +Z) shows the back by default. The textures happen
+to appear "swapped" because:
+- input.png (azim=0) projected onto mesh face (-Z side), which is
+  AWAY from the viewer's default camera -> viewer sees back-of-mesh
+  with back-painted pixels.
+- back.png (azim=180) projected onto mesh back (+Z side), viewer
+  sees front-of-mesh with front-painted pixels.
+
+Wait — that describes the standard D behaviour. So why does W look
+flipped and D doesn't?
+
+Alternative theory: conditional-skip of p_v for azim=180 made the
+back image no longer vertical-inverted, which means the FRONT side
+of the mesh (painted by input.png at azim=0 with normal p_v flip)
+now has its image mapped correctly, but... model-viewer's default
+camera angle varies with each file — it auto-fits to mesh bounds.
+So the apparent "swap" may be just that auto-rotate has W on a
+different side initially vs D.
+
+### The mechanics of Run W's side-swap (real analysis)
+
+When we skip `p_v = 1 - p_v` for back (azim=180):
+- The back image's pixel at V=0 (top of PNG = head) now maps to the
+  mesh V coord where, WITHOUT the flip, the back cam samples the
+  "top" of the mesh geometry.
+- BUT: the ABSENCE of the V flip also changes which SIDE of the
+  mesh the sample lands on, because the V coord is in cam-space
+  AFTER R_w2c (which points cam at -Z for azim=180).
+- Without the flip, the sampled direction is effectively the same
+  image rotated 180° around Z — equivalent to a horizontal mirror
+  after the vertical correction.
+
+So "skip V flip for azim=180" achieved vertical correction AT THE
+COST OF a lateral 180° reflection. Net effect: image face ends up
+on the back of the mesh, image back ends up on the face.
+
+### Run X — add U flip for back views only
+
+Plan: compensate the lateral mirror by also setting
+`FABMESH_TEXPROJ_UFLIP=1` specifically for the back view (azim=180).
+Or more cleanly: when we skip the V flip for back, also apply U
+flip to counter the mirror. Add this to the same conditional block
+in texture_project.py.
+
 ### Run W — conditional p_v flip in texture_project — STARTING NOW
 
 Plan logged BEFORE patching, per protocol.

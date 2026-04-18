@@ -76,6 +76,10 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
     env['FABMESH_PROJECT_MODE'] = 'atlas'
     env['FABMESH_UV_REPACK'] = '0'
     env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
+    # Run W (2026-04-18): skip the p_v flip for back-view
+    # (azim=180) so the back image doesn't end up head-toward-feet
+    # on the mesh.
+    env['FABMESH_TEXPROJ_SKIP_BACK_VFLIP'] = '1'
     cmd = [sys.executable, bridge, source_image, glb_out]
     log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir})')
     r = subprocess.run(cmd, env=env, check=False)
