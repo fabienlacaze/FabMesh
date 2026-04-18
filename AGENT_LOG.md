@@ -782,6 +782,31 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Quick Win pack — STARTING NOW (2026-04-18)
+
+User picked: combine 3 changes in one test run:
+1. **ip_adapter_scale 1.0 → 1.5** in the 3 cnet scripts
+   (diffusers_cnet_txt2img/img2img/inpaint.py). After pipe creation,
+   call `pipe.set_ip_adapter_scale(1.5)` before inference.
+2. **strength 1.0 → 0.7** in the inpaint YAML
+   (controlnet/config/depth_based_inpaint_template.yaml line
+   "denoising_strength"). Preserves more of the reference photo
+   structure.
+3. **views_init 2 → 8** in train_config_paint3d.py:
+   views_init currently `[0, 23]` (2 views). Extend to
+   `[0, 3, 6, 9, 12, 15, 18, 21]` = 8 evenly-spaced angles.
+   Also adapt grid from 1x2 to e.g. 4x2 or 2x4 in gen_init_view.
+   Actually keep the grid generation flexible via `nrow` in
+   torchvision.utils.make_grid.
+
+Expected behavior:
+- IPA with scale 1.5 → better identity preservation
+- strength 0.7 → less SD1.5 hallucination, closer to ref
+- 8 views init → UV atlas covered more completely, less magenta
+
+Target: photoreal child identity, full-body coverage, no magenta
+gaps. Run time ~180-240s (4x more views = 4x SD1.5 calls in init).
+
 ### Option A (inject photos as init views) — ALSO FAILS (2026-04-18)
 
 User asked: inject front+back photos as init views directly
