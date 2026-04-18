@@ -782,6 +782,39 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### NEW PIPELINE DESIGN v2 (2026-04-18): FabMesh mv dir → Paint3D
+
+User clarified: replace texture_project.py with Paint3D in the
+pipeline, BUT feed Paint3D the 6-slot multi-view dir that
+ip45_2view_to_3d.py already builds:
+
+```
+photo front → SF3D → mesh 8k verts
+       +
+  photo back → multi-view dir (6 slots: front/front/back/back/front/back)
+       ↓
+  Paint3D consumes these 6 photos AS init views (no SD1.5 generation)
+       ↓
+  mesh.glb textured
+```
+
+Advantages:
+- NO SD1.5 hallucination — Paint3D gets real ip45 photos
+- Full resolution (1024px per view, no grid compression)
+- Full UV coverage (6 angles instead of 2)
+- Each view is a real projection from its azimuth
+
+Implementation:
+- Modify `pipeline_paint3d_stage1.py` to load the 6 PNG files from
+  the mv/ dir instead of generating via SD1.5.
+- Concat as grid (or feed one-by-one) to `forward_texturing` at
+  the right view_ids matching the mv/ angles.
+- Bridge gains a `--mv-dir` flag pointing at the FabMesh mv/.
+
+Note: this discards IPAdapter entirely — no "style reference"
+needed because we're not generating new texture, just projecting
+existing photos.
+
 ### NEW PIPELINE DESIGN (2026-04-18): mesh D → Paint3D refine
 
 User's key insight: instead of using Paint3D from scratch on a mesh
