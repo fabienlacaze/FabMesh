@@ -766,6 +766,30 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### IMPORTANT PRIOR — nvdiffrast was INTENTIONALLY skipped yesterday
+
+Searching AGENT_LOG shows we already hit the nvdiffrast compile
+wall on 2026-04-17 while integrating MV-Adapter. The prior
+resolution was to PATCH MV-Adapter to lazy-load nvdiffrast and
+avoid needing to compile it at all ("mesh/render paths need
+nvdiffrast which we don't want to compile").
+
+So the CUDA 12.8 coexist install plan (below) isn't new territory —
+we chose to avoid it yesterday because we didn't need the render
+paths. If we go this route TODAY, we're reversing that decision.
+
+The trade-off:
+- Pros: enables nvdiffrast (and by extension MV-Adapter mesh/render,
+  Paint3D-adjacent pipelines, TEXTure too eventually).
+- Cons: 3+ GB download, admin install, Visual Studio Build Tools
+  setup if missing (~2.5 GB more), 5-15 min compile, risk of
+  environment side-effects on the rest of the FabMesh pipeline.
+
+Alternative that sidesteps the compile: stay with the lazy-load
+pattern applied yesterday and handroll a texturing pipeline that
+doesn't need 3D rasterization (diffusers-only approach, run on CPU
+for UV work, GPU only for SDXL inference).
+
 ### Agent plan for CUDA 12.8 coexist + nvdiffrast (2026-04-18)
 
 Agent produced detailed step-by-step:
