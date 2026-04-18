@@ -37,11 +37,8 @@ def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     os.makedirs(mv_dir, exist_ok=True)
     front = Image.open(front_png).convert('RGB').resize((1024, 1024))
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
-    # Run Y (2026-04-18): back photos of a subject are naturally a
-    # mirror view (subject's right arm on viewer's left side of
-    # image). Pre-flip horizontally so the back pixels land on the
-    # correct side of the mesh at azim=180 projection.
-    back = back.transpose(Image.FLIP_LEFT_RIGHT)
+    # Run Y's pre-FLIP_LEFT_RIGHT removed — post-hoc UV analysis
+    # showed D's side mapping was already correct; Y swapped it.
 
     front.save(os.path.join(mv_dir, 'input.png'))
     # CRM slot convention (see scripts/multiview_crm_gen.py docstring):
@@ -81,10 +78,8 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
     env['FABMESH_PROJECT_MODE'] = 'atlas'
     env['FABMESH_UV_REPACK'] = '0'
     env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
-    # Run W (2026-04-18): skip the p_v flip for back-view
-    # (azim=180) so the back image doesn't end up head-toward-feet
-    # on the mesh.
-    env['FABMESH_TEXPROJ_SKIP_BACK_VFLIP'] = '1'
+    # SKIP_BACK_VFLIP removed — Run W/X/Y all failed, UV analysis
+    # showed D was already correct.
     cmd = [sys.executable, bridge, source_image, glb_out]
     log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir})')
     r = subprocess.run(cmd, env=env, check=False)

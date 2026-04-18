@@ -717,6 +717,65 @@ Y panel has `camera-orbit="180deg 90deg"` — force looking at the
 mesh's face side. If W/X/Y all then show the face correctly, the
 side-swap was a camera-angle illusion, not a real bug.
 
+### CRITICAL FINDING 2026-04-18 — UV→atlas correspondence measured
+
+Extracted baseColorTexture from D (mesh_NORMALIZE_1.glb) and Y
+(mesh_RUN_Y.glb). Both atlases show the child's head+body from
+multiple angles (front, back, profile, top/bottom "bake" islands).
+
+Then programmatically picked the mid-height mesh vertex closest to
+the **front of the mesh** (most negative Z, SF3D native frame) and
+the **back of the mesh** (most positive Z), and read their UV
+coordinates:
+
+| mesh | mid-FRONT vert UV | mid-BACK vert UV |
+|------|-------------------|------------------|
+| D    | (0.18, 0.16)      | (0.49, 0.16)     |
+| Y    | (0.49, 0.16)      | (0.18, 0.16)     |
+
+The UVs are SWAPPED between D and Y.
+
+Looking at the atlas: the FACE image is painted at UV region
+~(0.49, 0.16) (center-bottom) in both D and Y. The BACK image is
+painted at UV region ~(0.18, 0.16) (left-bottom) in both.
+
+So:
+- In D: front-of-mesh vertex has UV pointing to the **back**
+  region of the atlas → front-of-mesh gets the BACK image painted
+  on it. This means D's textures are REVERSED — the back image is
+  on the front of the mesh.
+- In Y: front-of-mesh vertex has UV pointing to the **face**
+  region → front-of-mesh gets the face. Y is CORRECT.
+
+But the user validates D and rejects Y. Contradiction.
+
+### Resolution — SF3D native frame has face at +Z, not -Z
+
+My earlier assumption that "SF3D native has face at -Z" is WRONG.
+In the raw SF3D frame, the face is probably at +Z. So:
+- In D: front-of-mesh (actually the -Z side = BACK of subject)
+  has UV→back region → back-of-subject painted on back-of-mesh.
+  Correct.
+- In Y: -Z side has UV→face → face painted on -Z side of mesh.
+  But -Z is the BACK of the subject → face ends up on the back.
+  Wrong.
+
+My Runs W/X/Y were based on the wrong axis convention. The
+`FABMESH_TEXPROJ_SKIP_BACK_VFLIP=1` flag swapped the UVs in the
+wrong direction.
+
+### Fix: revert Runs W/X/Y
+
+The correct behaviour was already D's. My conditional p_v skip for
+azim=180 flipped the atlas regions in the wrong direction. Revert
+all W/X/Y patches. Keep Run V's `PROJECT_MODE=atlas` +
+`UV_REPACK=0` for determinism but without the back-V-skip.
+
+Back to the original bug: in D, the back image lands on the mesh
+with a visible vertical inversion ("tête vers les pieds"). The
+real cause is DIFFERENT from what I patched. Need to look at the
+back image's orientation in the atlas region.
+
 ### Run X — NO improvement
 
 ### Run Y — PRE-FLIP back.png horizontally in build_mv_dir
