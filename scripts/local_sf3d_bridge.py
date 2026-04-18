@@ -276,40 +276,61 @@ def generate_3d(
     # then repack UVs with xatlas. Guard via FABMESH_SF3D_WELD_UV (default on).
     if os.environ.get('FABMESH_SF3D_WELD_UV', '1') == '1':
         try:
-            import trimesh as _tm_w, xatlas as _xa
+            import trimesh as _tm_w
             import numpy as _np_w
             _comps_before = len(mesh.split(only_watertight=False))
             _verts_before = len(mesh.vertices)
-            # Keep UV+vertex color visuals if any (they get re-mapped below)
-            _had_uv = hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None
-            _old_uv = _np_w.asarray(mesh.visual.uv).copy() if _had_uv else None
+            # Preserve SF3D's original UVs + material. We only merge
+            # geometrically-coincident vertices that have the SAME UV
+            # (so faces stay watertight without breaking UV islands).
+            # Vertices with different UVs at the same 3D position = UV
+            # seams — MUST keep separate.
             _old_verts = mesh.vertices.copy()
             _old_faces = mesh.faces.copy()
-            # process=True: merge near-duplicate vertices -> watertight
-            mesh = _tm_w.Trimesh(
-                vertices=mesh.vertices, faces=mesh.faces, process=True
-            )
+            _old_visual = mesh.visual
+            _had_uv = hasattr(_old_visual, 'uv') and _old_visual.uv is not None
+            if _had_uv:
+                _old_uv = _np_w.asarray(_old_visual.uv).copy()
+                # Build key = (x, y, z, u, v) quantized -> dedupe
+                _key = _np_w.concatenate(
+                    [_np_w.round(_old_verts, 6),
+                     _np_w.round(_old_uv, 6)], axis=1
+                )
+                _, _inv, _ = _np_w.unique(
+                    _key, axis=0, return_inverse=True, return_index=True
+                )
+                _new_faces = _inv[_old_faces]
+                _new_verts_idx = _np_w.zeros(_inv.max() + 1, dtype=_np_w.int64)
+                _new_verts_idx[_inv] = _np_w.arange(len(_inv))
+                # Collapse: pick first occurrence's vertex + UV
+                _uniq_idx = _np_w.zeros(_inv.max() + 1, dtype=_np_w.int64)
+                _seen = _np_w.zeros(_inv.max() + 1, dtype=bool)
+                for _i, _k in enumerate(_inv):
+                    if not _seen[_k]:
+                        _uniq_idx[_k] = _i
+                        _seen[_k] = True
+                _new_verts = _old_verts[_uniq_idx]
+                _new_uv = _old_uv[_uniq_idx]
+                mesh = _tm_w.Trimesh(
+                    vertices=_new_verts,
+                    faces=_new_faces,
+                    visual=_tm_w.visual.TextureVisuals(
+                        uv=_new_uv,
+                        material=_old_visual.material
+                        if hasattr(_old_visual, 'material') else None,
+                    ),
+                    process=False,
+                )
+            else:
+                # No UVs: fallback to standard merge
+                mesh = _tm_w.Trimesh(
+                    vertices=mesh.vertices, faces=mesh.faces, process=True
+                )
             _comps_after = len(mesh.split(only_watertight=False))
-            # xatlas repack with aggressive chart merging
-            _atlas = _xa.Atlas()
-            _atlas.add_mesh(
-                mesh.vertices.astype(_np_w.float32),
-                mesh.faces.astype(_np_w.uint32),
-            )
-            _copts = _xa.ChartOptions()
-            _copts.max_iterations = 10
-            _atlas.generate(chart_options=_copts)
-            _vmap, _indices, _uvs = _atlas[0]
-            mesh = _tm_w.Trimesh(
-                vertices=mesh.vertices[_vmap],
-                faces=_indices.astype(_np_w.int64),
-                visual=_tm_w.visual.TextureVisuals(uv=_uvs),
-                process=False,
-            )
             print(
-                f"LOCAL_SF3D: weld+repack {_verts_before}v/{_comps_before}comp "
-                f"-> {len(mesh.vertices)}v/{_comps_after}comp, "
-                f"{_atlas.chart_count} UV charts, util {_atlas.utilization:.1%}",
+                f"LOCAL_SF3D: weld-keep-uv {_verts_before}v/{_comps_before}comp "
+                f"-> {len(mesh.vertices)}v/{_comps_after}comp "
+                f"(UVs preserved)",
                 flush=True,
             )
         except Exception as _weld_e:
