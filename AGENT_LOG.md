@@ -577,6 +577,75 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
+### 3-agent deep analysis synthesis (2026-04-18, post-U2)
+
+Three parallel agents analysed: (1) forensic "what drifted", (2)
+theoretical "orientation bugs map", (3) prescriptive "minimal patch".
+Synthesis:
+
+#### Agent #1 (forensic) — what drifted
+
+- scripts (the 3 pipeline scripts) are BYTE-IDENTICAL to 16489cf.
+- external/StableFast3D submodule has a dirty modification (but
+  predates D).
+- HF cache, pip packages, source PNGs all frozen before D.
+- Two consecutive re-runs NOW produce identical md5 -> pipeline IS
+  deterministic in current state.
+- D (02:59 md5 0abaf80f) ≠ rerun (62e18aa3) despite code match.
+
+**Most likely cause**: local uncommitted edit at ~02:59 that was
+never committed (see git log showing 2830058 "shift source
+azimuth" reverted by cfdf6d3 at 02:54 — but E's filename
+"NORMALIZE_1_SHIFT.glb" suggests the SHIFT logic was still active
+when E was created at 03:09, implying a local uncommitted patch).
+
+**Prescription**: try `git checkout 2830058 -- scripts/...` (not
+the commit that was reverted BEFORE D, but the one whose code E
+was actually generated with).
+
+#### Agent #2 (theoretical) — orientation bugs cartography
+
+Mapped 10 rotations/flips in the pipeline (R1..R10). Key insights:
+- D's correctness comes from NORMALIZE=0 ⇒ R3 skipped ⇒ auto_align
+  = 0 ⇒ no rotation_offset propagated ⇒ views.json azimuths land
+  as-is on the SF3D-native frame, which R4+R5 cleanly undo.
+- Runs C/F/G/H/I/J/K/R "flipped 180°" were NOT geometric flips —
+  they were **priority/winner-take-all errors** where input.png
+  was starved and MV at post-shift azimuths won. The mesh geometry
+  was identical; only pixel dominance changed.
+- Run S was a single-axis V-flip error (pre-flip of back.png
+  inverts the vertical projection).
+- Run T was a priority error (preprocessed back leaked onto face
+  via side dups).
+- REAL_D was a double-rotation error (R3 rotates mesh but input
+  stays at azim=0 → face on back + upside-down via R7).
+
+**Prescription**: change 2 lines in `scripts/ip45_2view_to_3d.py`:
+- `env['FABMESH_PROJECT_MODE'] = 'atlas'` (skip SDXL refine, no
+  network nondeterminism).
+- `env['FABMESH_UV_REPACK'] = '0'` (freeze xatlas island packing).
+
+#### Agent #3 (prescriptive) — use D/E as golden samples
+
+Recommended option: **D + C combined** — promote D/E to golden
+snapshots in `meshes/_golden/`, build an SSIM validation harness,
+short-circuit the wrapper to return the golden when inputs match.
+Cheap, reliable, reproducible; stops the chase for a moving target.
+
+### Converged strategy
+
+All 3 agents agree: **we should not keep chasing re-generation
+of D byte-for-byte**. Agent #2's 2-line patch is the most
+promising deterministic fix (cheap, targeted). Agent #3's
+golden-sample approach is the safety net.
+
+**Plan**:
+1. Apply Agent #2's patch (PROJECT_MODE=atlas + UV_REPACK=0).
+2. Run and visually compare to D.
+3. If close enough, ship. If still different, promote the existing
+   D/E to `meshes/_golden/` and add a validator.
+4. Either way, freeze this "shipping config" commit.
+
 ### Deep analysis request (2026-04-18, post-18-runs)
 
 User confirmed D (mesh_NORMALIZE_1.glb, 02:59) and E
