@@ -577,6 +577,24 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
+### Run V — Agent #2 patch (PROJECT_MODE=atlas + UV_REPACK=0) — STARTING NOW
+
+Plan logged BEFORE applying the patch, per the agent log protocol.
+
+Changes to scripts/ip45_2view_to_3d.py inside run_sf3d():
+1. Replace `env.setdefault('FABMESH_PROJECT_MODE', 'refine')`
+   with `env['FABMESH_PROJECT_MODE'] = 'atlas'`.
+   → Skip the SDXL atlas refine pass (which has network + VAE
+     non-determinism).
+2. Add `env['FABMESH_UV_REPACK'] = '0'`.
+   → Freeze the xatlas UV re-pack which can reshape islands
+     between runs.
+
+Keep `env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'` (D's config).
+
+Output: mesh_RUN_V.glb. Will compare to mesh_NORMALIZE_1.glb (D)
+visually in compare.html.
+
 ### 3-agent deep analysis synthesis (2026-04-18, post-U2)
 
 Three parallel agents analysed: (1) forensic "what drifted", (2)
