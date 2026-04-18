@@ -300,6 +300,58 @@ where projection coords land on flipped vertical positions.
 from scripts/ip45_2view_to_3d.py:84. Bridge default (NORMALIZE=1)
 now applies — mesh face will point to +Z (three.js convention).
 
+### ERRATUM-OF-ERRATUM 2026-04-18 — NORMALIZE=0 was CORRECT all along
+
+After running REAL_D and REAL_E with NORMALIZE=1 (bridge default),
+user inspected the front and back views in the compare:
+
+- OLD D and OLD E (NORMALIZE=0): face devant, dos derrière, **correct orientation**.
+- REAL D and REAL E (NORMALIZE=1): the **face image is projected onto
+  the BACK of the mesh** — visible because the front view of the
+  model-viewer shows the back of the body with the face pasted on it.
+
+So my "erratum" above was wrong. **NORMALIZE=0 was the correct setting
+for this pipeline**, and the wrapper was right to force it. The
+reason it's correct:
+
+- bridge with NORMALIZE=1 rotates the mesh +180° around Y, then
+  propagates rotation_offset_deg=180 to texture_project.
+- texture_project applies that offset to the MV view azimuths, BUT
+  the source `input.png` stays at azim=0 (no shift).
+- Net result: mesh rotated 180°, MV azimuths shifted to compensate,
+  but the source HD photo is now at the wrong side -> face image
+  projected onto the back.
+
+With NORMALIZE=0:
+- mesh stays in SF3D native frame (face at -Z).
+- rotation_offset_deg=0 propagated.
+- All views (input + 6 mv) keep their raw azimuths from views.json.
+- Source input.png at azim=0 lands on the front of the mesh.
+- model-viewer's default camera (looking from +Z) sees the BACK of
+  the SF3D-frame mesh, but the front photo IS projected on the front
+  side, so when user rotates the camera to look at the SF3D-front
+  side, they see the actual face.
+
+Restored `env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'` in
+ip45_2view_to_3d.py with a long comment explaining why.
+
+### Final corrected verdict
+
+The "OLD D" config (= NORMALIZE=0 + no SHIFT_SOURCE) IS the working
+baseline. The previous Run K (NORMALIZE=0 + mv slots @ 2048) was
+essentially "OLD D + 2048 mv res", and the user reported it had
+face-on-calf — that's a **different** failure mode (vertical
+inversion in projection coords), unrelated to the front/back side
+swap. K is still flipped vertically.
+
+So:
+- **Working**: A, D, E (all in NORMALIZE=0, the working frame).
+- **Broken vertically**: K (the 2048 mv res broke p_v sampling).
+- **Broken side-swap**: REAL_D, REAL_E (NORMALIZE=1 with this wrapper).
+
+D remains the best-quality stable config for shipping. Future face
+definition work should stay within NORMALIZE=0 frame.
+
 ### Re-running D and E with TRUE NORMALIZE=1
 
 Run REAL_D = NORMALIZE=1 default + no SHIFT_SOURCE
