@@ -35,6 +35,10 @@ def log(msg):
 def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     from PIL import Image
     os.makedirs(mv_dir, exist_ok=True)
+    # mv slots stay at 1024 — Run K proved that 2048 flips the mesh
+    # (see AGENT_LOG). Even raising mv resolution above input.png's
+    # native ~1151px makes mv/view_0 dominant -> flip. The 1024
+    # bottleneck is structural for D placement.
     front = Image.open(front_png).convert('RGB').resize((1024, 1024))
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
 

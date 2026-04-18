@@ -258,6 +258,56 @@ resolution of `mv/view_0.png` itself. Currently
 Bumping that to 2048×2048 doubles the resolution that paints the face
 in D, no flip risk. Worth trying as **Run K** if user agrees.
 
+### Run K — D + mv slots at 2048 — ALSO FLIPPED
+
+After concluding D was the only viable shipping config, tried to
+boost its definition by raising the mv slot resolution from 1024 to
+2048 in build_mv_dir. Theory: with D (no SHIFT_SOURCE), the face is
+painted by mv/view_0 (front dup), currently downsized to 1024.
+Bumping it to 2048 should give a sharper face without changing
+priorities or layout — ZERO theoretical flip risk.
+
+Config: D config exactly (NORMALIZE=1, no SHIFT_SOURCE, canonical
+7-view layout), only difference: `front = Image.open(front_png)
+.convert('RGB').resize((2048, 2048))` instead of 1024.
+
+Result: **also flipped 180°**.
+
+Why it flipped (post-hoc analysis):
+- input.png native ~1151px, prio 1.0
+- mv/view_0 at 2048px (vs 1024 in D), still prio 1.0
+- At 2048, mv/view_0 has more detail than input.png in absolute pixel
+  count -> per-texel `pt_vis * src_alpha * priority` favors mv/view_0
+  more often during winner-take-all (l 676)
+- mv/view_0 wins more texels on the front -> dominance shifts back
+  toward mv frame -> the post-rotation orientation locks in -> mesh
+  appears flipped.
+
+Confirmation of the empirical law: **anything that gives input.png
+LESS-THAN-COMPLETE dominance on the front is the only way to keep
+the mesh non-flipped**. Both raising input HD's win rate (C/F/G/H/I/J)
+AND raising mv's win rate (K) flip the mesh. The non-flip "sweet
+spot" of D is when input.png at ~1151px and mv/view_0 at exactly
+1024px are roughly tied per-texel, with neither cleanly dominating —
+that ambiguity stabilizes the bake.
+
+### Final verdict (after runs A..K)
+
+**D is the only stable, viable configuration.** Cannot improve face
+definition through:
+- texture_project priority changes (J flipped)
+- View content swaps (F, H flipped)
+- View deletion or transparency (G, I flipped)
+- mv resolution increase (K flipped)
+- SHIFT_SOURCE flag (E gives moiré, lower res)
+
+To go beyond D's quality requires modifying the projection math
+(R_undo, R_w2c_base) so input.png's native SF3D frame and the MV
+post-rotation frame agree on which side is "front". That's a
+substantial engine change, not a parameter tune.
+
+Restoring mv slots to 1024 in build_mv_dir to reset to D-stable.
+
 ### 2-agent deep code analysis — synthesis (2026-04-18)
 
 Two general-purpose agents were run in parallel to read the
