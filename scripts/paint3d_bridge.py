@@ -149,7 +149,7 @@ def _run_paint3d_stage1(obj_path: str, ref_image: str,
         cmd += ['--ip_adapter_image_path', ref_image]
     log(f'cmd: {" ".join(cmd)}')
     t0 = time.time()
-    # Forward env (esp. FABMESH_INIT_VIEWS for Option A).
+    # Forward env (esp. FABMESH_INIT_VIEWS / FABMESH_MV_DIR).
     _sub_env = dict(os.environ)
     # Run from Paint3D dir so its relative paths work.
     r = subprocess.run(cmd, cwd=PAINT3D_DIR, check=False, env=_sub_env)
@@ -194,6 +194,10 @@ def main():
                     help='scratch dir (default: sibling of out_glb)')
     ap.add_argument('--skip-stage2', action='store_true',
                     help='skip the UV-inpaint stage 2 (faster but leaves magenta gaps)')
+    ap.add_argument('--mv-dir', default=None,
+                    help='6-slot CRM-layout mv_dir (front/right/back/left/top/bottom). '
+                         'When set, Paint3D bypasses SD1.5 init generation and uses '
+                         'these real photos as init views directly.')
     args = ap.parse_args()
 
     if not os.path.exists(args.in_mesh):
@@ -225,6 +229,11 @@ def main():
     ref_abs = ';'.join(
         os.path.abspath(p.strip()) for p in args.ref_image.split(';') if p.strip()
     )
+    # If --mv-dir given, export FABMESH_MV_DIR so stage1 pipeline
+    # bypasses SD1.5 and uses those real photos as init views.
+    if args.mv_dir:
+        os.environ['FABMESH_MV_DIR'] = os.path.abspath(args.mv_dir)
+        log(f'FABMESH_MV_DIR set to {os.environ["FABMESH_MV_DIR"]}')
     albedo1 = _run_paint3d_stage1(obj_path, ref_abs, args.prompt,
                                    args.negative, outdir1)
     # Stage 1 writes mesh.obj + albedo.png + mesh.mtl in outdir1/res-0/

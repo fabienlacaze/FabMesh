@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Paint3D mv_dir mode</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
+               font-family:system-ui, sans-serif; }
+  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; }
+  h2 { padding:10px 16px 4px; margin:0; font-size:12px; color:#4ade80; }
+  .row { display:grid; grid-template-columns: 1fr 1fr; gap:2px; background:#000; padding:2px; }
+  .card { background:#181818; padding:6px; position:relative; }
+  .card img { max-width:100%; max-height:500px; object-fit:contain; border:1px solid #333; }
+  .card model-viewer { width:100%; height:400px; background:#1b1b1b; }
+  .label { font-size:11px; color:#aaa; padding:2px 0 4px; }
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>Paint3D mv_dir mode — v10 (mesh D + mv/ as init views, no SD1.5 generation, no pre-rotate)</h1>
+
+<h2>v10 init-img-0.png (les 6 vues FabMesh pass\u00e9es directement)</h2>
+<div class="card">
+  <img src="mesh_paint3d_v10.glb.paint3d_work/stage1/init-img-0.png" />
+  <div class="label">6 views du mv/ dir charg\u00e9es comme init image</div>
+</div>
+
+<h2>v10 depth map que Paint3D a rendu</h2>
+<div class="card">
+  <img src="mesh_paint3d_v10.glb.paint3d_work/stage1/init_depth_render.png" />
+  <div class="label">6 depth maps — doit matcher les orientations des photos mv/</div>
+</div>
+
+<h2>v10 albedo final</h2>
+<div class="card">
+  <img src="mesh_paint3d_v10.glb.paint3d_work/stage1/res-0/albedo.png" />
+  <div class="label">atlas UV bak\u00e9</div>
+</div>
+
+<h2>v10 mesh 3D final</h2>
+<div class="card">
+  <model-viewer src="mesh_paint3d_v10.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="label">mesh_paint3d_v10.glb rotated</div>
+</div>
+
+<h2>Comparison side-by-side</h2>
+<div class="row">
+  <div class="card">
+    <div class="label">Mesh D (baseline)</div>
+    <model-viewer src="mesh_NORMALIZE_1.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="card">
+    <div class="label">v10 Paint3D mv_dir mode</div>
+    <model-viewer src="mesh_paint3d_v10.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+</div>
+
+</body>
+</html>
