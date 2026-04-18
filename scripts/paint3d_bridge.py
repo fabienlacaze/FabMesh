@@ -168,12 +168,25 @@ def _run_paint3d_stage1(obj_path: str, ref_image: str,
 
 
 def _pack_obj_to_glb(obj_dir: str, out_glb: str) -> None:
-    """Pack the Paint3D mesh.obj + mesh.mtl + albedo.png into a GLB."""
+    """Pack the Paint3D mesh.obj + mesh.mtl + albedo.png into a GLB.
+
+    If the input mesh was pre-rotated Rx(180°) in _glb_to_obj for
+    Paint3D compatibility, we UN-rotate here so the exported .glb
+    is in the original orientation. Texture follows vertices so no
+    quality loss. Disable with FABMESH_PAINT3D_SKIP_ROTATE=1.
+    """
     import trimesh
+    import numpy as np
     obj_path = os.path.join(obj_dir, 'mesh.obj')
     mesh = trimesh.load(obj_path, process=False)
     if isinstance(mesh, trimesh.Scene):
         mesh = list(mesh.geometry.values())[0]
+    # UN-rotate Rx(-180°) = Rx(180°) (180° rotation is self-inverse)
+    # to undo the pre-rotate done in _glb_to_obj.
+    if os.environ.get('FABMESH_PAINT3D_SKIP_ROTATE') != '1':
+        Rx180 = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
+        mesh.apply_transform(Rx180)
+        log('post-rotated mesh Rx(180°) to undo pre-rotate')
     # trimesh auto-loads the albedo.png via the .mtl file.
     mesh.export(out_glb)
     log(f'packed glb: {out_glb}')
