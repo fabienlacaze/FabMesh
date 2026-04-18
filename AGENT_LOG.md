@@ -577,16 +577,60 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
-### Plan to fix
+### Run S result — orientation FIXED, but spatial offset on back
 
-For the back view (and only the back), apply an extra V flip:
-`p_v = 1.0 - p_v` becomes `p_v = p_v` for views at azim=180.
+User confirmed: "l'orientation est ok par contre le positionnement
+n'est pas bon". Visible in profile view of mesh: skin tones (face
+color) appear in the BOTTOM of the mesh (at the feet) and on the
+arms; denim is misaligned vertically.
 
-OR equivalently: pre-flip the back image vertically before passing
-it to texture_project. Simpler: in build_mv_dir, vertically flip
-view_2 (and view_3, the back-side dups).
+So the FLIP_TOP_BOTTOM fix corrected the head/feet inversion BUT
+introduced a ~50% vertical shift: pixels from the top of back.png
+(hair) now land in the middle of the mesh, and pixels from the
+bottom (feet) land at the top.
 
-Will try the latter first (less code change, no env flag).
+Diagnostic: checked subject vertical extent in both PNGs:
+- front: rows 52..1004 (5%..98% of image)
+- back:  rows 71..1003 (7%..98% of image)
+Subjects are framed nearly identically, so it's NOT a framing
+difference between the two PNGs.
+
+Likely cause: SF3D generates the mesh from `_preprocessed_path`
+which is `resize_foreground(input.png, foreground_ratio=0.85)` —
+the input is centered at 85% of the canvas before SF3D sees it.
+The mesh is therefore proportioned for a subject at 85% of frame.
+When we feed back.png at raw 1024×1024 (subject at full 5%..98%
+of the image), the projection sample coords land 13% off
+vertically.
+
+### Run T — apply same resize_foreground to back.png — STARTING NOW
+
+Will pre-process back.png the same way the bridge pre-processes
+input.png:
+1. rembg background removal
+2. resize_foreground at 0.85
+Then save into mv/view_2 + 3 + 5. The flipped back will then
+match the mesh's vertical proportions.
+
+Implementation: in build_mv_dir, replace
+`Image.open(back_png).convert('RGB').resize((1024,1024))`
+with a call to the bridge's preprocessing chain (or a copy).
+
+User asked to apply to the back what already works for the front
+("tu as réussi à mettre la texture de face dans le bon sens, il faut
+faire pareil pour celle de derrière (la tête est vers les pieds)").
+
+Implementation: in build_mv_dir, before saving back.png into mv/
+view_2 (back) and view_3 (left dup back) and view_5 (bottom dup
+back), apply `Image.FLIP_TOP_BOTTOM`. Don't touch front, don't
+touch any view that currently looks correct — only the back image
+gets pre-flipped.
+
+Hypothesis: the back image will then be projected with its existing
+"head at top of png" -> arrives "head at top of mesh head" instead
+of "head at feet".
+
+Result file: mesh_RUN_S.glb, also overwrites mesh.glb in viewer.html.
 
 ### Fix needed
 

@@ -41,6 +41,13 @@ def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     # bottleneck is structural for D placement.
     front = Image.open(front_png).convert('RGB').resize((1024, 1024))
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
+    # Run S (2026-04-18): pre-flip back image vertically so that when
+    # texture_project applies its standard p_v = 1 - p_v formula
+    # (which is correct for the front), the back image arrives with
+    # its head at the top of the mesh head instead of at the feet.
+    # The face was already in the right orientation; only the back
+    # needs this compensation.
+    back = back.transpose(Image.FLIP_TOP_BOTTOM)
 
     front.save(os.path.join(mv_dir, 'input.png'))
     # CANONICAL E LAYOUT — confirmed unchangeable.
