@@ -766,6 +766,57 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Agent plan for CUDA 12.8 coexist + nvdiffrast (2026-04-18)
+
+Agent produced detailed step-by-step:
+
+**Step 1 — Download CUDA 12.8 Windows x86_64 local installer**
+URL: `https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_571.96_windows.exe`
+~3.1 GB.
+
+**Step 2 — Install as Administrator, Custom mode**
+Install to default `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\`.
+Check ONLY: CUDA > Development > Compiler (nvcc), CUDA > Development
+> Libraries, CUDA > Runtime > Libraries.
+UNCHECK: Display Driver, Nsight, Visual Studio Integration, Demo
+Suite, Documentation, Samples.
+
+**Step 3 — Verify both versions coexist (no reboot)**
+`dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin\nvcc.exe"`
+`dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\nvcc.exe"`
+
+**Step 4 — Point session to CUDA 12.8 (in a fresh cmd)**
+```
+set CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8
+set PATH=%CUDA_HOME%\bin;%CUDA_HOME%\libnvvp;%PATH%
+set TORCH_CUDA_ARCH_LIST=12.0
+```
+
+**Step 5 — Check cl.exe (Visual Studio Build Tools)**
+`where cl`. If missing, install VS Build Tools 2022 with only the
+"Desktop development with C++" workload (~2.5 GB).
+
+**Step 6 — Install nvdiffrast**
+```
+pip install setuptools wheel ninja
+pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast.git
+```
+Build time 5-15 min.
+
+**Step 7 — Smoke test sm_120 rasterization**
+Python snippet that creates RasterizeCudaContext and rasterizes a
+64x64 triangle. Expects capability (12, 0) on RTX 5080.
+
+**Step 8 — Verify no torch regression**
+Torch links its own bundled CUDA DLLs, so installing 12.8 toolkit
+alongside can't break torch cu128.
+
+**Contingency**: if cl.exe missing, 3 options:
+- Install VS Build Tools C++ workload (~2.5 GB, 2.5 GB)
+- Try prebuilt wheel (none official from nvdiffrast)
+- Use OpenGL context (`RasterizeGLContext`) instead of CUDA
+
 ### nvdiffrast install — ALSO BLOCKED (CUDA version mismatch)
 
 Tried `pip install nvdiffrast` (not on PyPI) then
