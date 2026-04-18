@@ -577,6 +577,44 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
+### Run V result — front OK, back still vertical-inverted
+
+User showed 2 views of Run V:
+- Front view: correctly oriented (face, denim on torso, shorts on
+  legs, feet at bottom). Texture looks reasonably sharp.
+- Back/profile view: VERTICAL INVERSION — denim on the legs, shorts
+  on the torso, baskets near the arms. Same back-flip bug that D has.
+
+User verdict: "c'est inversé" — but this confirms the back-flip is
+a STRUCTURAL bug of the D config, not an artefact of Run V. User
+reported D having this same bug earlier ("la texture de l'arrière
+est inversée (tete en bas)" — AGENT_LOG earlier entry).
+
+So Agent #2's patch (atlas mode + UV_REPACK=0) addressed
+**determinism** but NOT **back-flip orientation**, because the
+back-flip originates in the projection math itself (R7: `p_v =
+1 - p_v` applied uniformly to all views, but at azim=180 this
+flips the back image vertically on the mesh).
+
+### What D actually was, post-revelation
+
+D has always had the back-inverted bug; user tolerated it because
+the front view dominates the perception. Recent scrutiny exposed
+it as a real defect. So "D wins" was premature — D has a defect,
+and V shares it.
+
+### Next plan
+
+The real fix for the back-flip: skip `p_v = 1 - p_v` specifically
+for views at azim=180 (or any view whose source image already has
+its natural "up" in the image top). That's Run T's back pre-flip
+approach but applied selectively to avoid Run T's face-ghosting.
+
+The cleanest place to do this is inside texture_project.py:
+- Before the per-view loop, mark views where p_v should NOT be
+  flipped based on their azim (azim=180 for CRM layout).
+- Apply `p_v = 1 - p_v` conditionally.
+
 ### Run V — Agent #2 patch (PROJECT_MODE=atlas + UV_REPACK=0) — STARTING NOW
 
 Plan logged BEFORE applying the patch, per the agent log protocol.

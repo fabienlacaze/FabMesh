@@ -67,14 +67,14 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
     bridge = os.path.join(SCRIPTS, 'local_sf3d_bridge.py')
     env = dict(os.environ)
     env['FABMESH_MV_REUSE'] = mv_dir
-    # Keep the refine mode so texture projection consumes the multi-views.
-    env.setdefault('FABMESH_PROJECT_MODE', 'refine')
-    # Disable the bridge's +180° Y rotation. That rotation exists to make
-    # the face point to +Z (three.js default camera), but it also injects a
-    # 180° offset into every MV projection while leaving the source image
-    # at azim=0 — which puts the BACK image on the FRONT of the mesh (and
-    # the face on the back). Our views.json already uses the canonical
-    # SF3D frame (face at -Z), so we turn the normalizer off entirely.
+    # Run V patch (2026-04-18, per Agent #2 synthesis in AGENT_LOG):
+    # - PROJECT_MODE=atlas skips the SDXL atlas refine pass, which
+    #   is the main source of non-determinism (network + VAE).
+    # - UV_REPACK=0 freezes the xatlas UV re-pack that can reshape
+    #   islands between runs.
+    # D's config (NORMALIZE_ORIENT=0) is preserved.
+    env['FABMESH_PROJECT_MODE'] = 'atlas'
+    env['FABMESH_UV_REPACK'] = '0'
     env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
     cmd = [sys.executable, bridge, source_image, glb_out]
     log(f'SF3D: {" ".join(cmd)}  (FABMESH_MV_REUSE={mv_dir})')
