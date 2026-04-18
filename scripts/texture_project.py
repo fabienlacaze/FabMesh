@@ -576,6 +576,17 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             'priority': priority, 'azim': azim_deg, 'elev': elev_deg,
         })
 
+    # Diagnostic: per-texel source-view index + contribution count.
+    # Only allocated when FABMESH_TEXPROJ_DIAG=1 to keep the default
+    # memory footprint unchanged for production runs.
+    _diag_on = os.environ.get('FABMESH_TEXPROJ_DIAG') == '1'
+    if _diag_on:
+        source_view_arr = np.full((tex_res, tex_res), 255, dtype=np.uint8)
+        coverage_arr = np.zeros((tex_res, tex_res), dtype=np.uint16)
+    else:
+        source_view_arr = None
+        coverage_arr = None
+
     n_drawn = 0
     n_skipped = 0
     for fi in range(len(faces)):
@@ -621,7 +632,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             continue
 
         # Sample each view and keep the best per-pixel weight.
-        for vd in view_data:
+        for _vd_idx, vd in enumerate(view_data):
             tri_src_u = [vd['p_u'][v_idx[vi]] for vi in range(3)]
             tri_src_v = [vd['p_v'][v_idx[vi]] for vi in range(3)]
             tri_vis   = [vd['vis'][v_idx[vi]] for vi in range(3)]
@@ -644,16 +655,74 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
             better = w_pixel > weight_arr[ys, xs]
             if not better.any():
+                if _diag_on:
+                    # Still count contributors even if they don't win
+                    contributing = (w_pixel > 0.05) & mask
+                    if contributing.any():
+                        coverage_arr[ys, xs] = np.where(
+                            contributing,
+                            coverage_arr[ys, xs] + 1,
+                            coverage_arr[ys, xs])
                 continue
             for c in range(3):
                 proj_arr[ys, xs, c] = np.where(better, sampled[..., c], proj_arr[ys, xs, c])
             weight_arr[ys, xs] = np.where(better, w_pixel, weight_arr[ys, xs])
+            if _diag_on:
+                source_view_arr[ys, xs] = np.where(
+                    better, np.uint8(_vd_idx), source_view_arr[ys, xs])
+                contributing = (w_pixel > 0.05) & mask
+                coverage_arr[ys, xs] = np.where(
+                    contributing,
+                    coverage_arr[ys, xs] + 1,
+                    coverage_arr[ys, xs])
 
         n_drawn += 1
 
     log(f'per-pixel multi-view rasterization: {n_drawn}/{len(faces)} faces, {n_skipped} skipped, {len(view_data)} views')
     _evt('rasterize_done', drawn=n_drawn, skipped=n_skipped,
          total_faces=len(faces), views=len(view_data))
+
+    if _diag_on:
+        # 6-colour palette (same hue order as reports/). Index 255 = no-data.
+        _palette = np.array([
+            [239,  68,  68],   # 0 red    — view 0
+            [245, 158,  11],   # 1 amber  — view 1
+            [ 34, 197,  94],   # 2 green  — view 2
+            [ 14, 165, 233],   # 3 blue   — view 3
+            [168,  85, 247],   # 4 purple — view 4
+            [236,  72, 153],   # 5 pink   — view 5
+            [250, 204,  21],   # 6 yellow — view 6 (front input.png)
+        ], dtype=np.uint8)
+        src_rgb = np.zeros((tex_res, tex_res, 3), dtype=np.uint8)
+        for vi in range(min(len(view_data), len(_palette))):
+            m = source_view_arr == vi
+            src_rgb[m] = _palette[vi]
+        # Emptry texels left black.
+        src_img = Image.fromarray(src_rgb)
+        src_path = out_mesh_path + '.diag_sourceview.png'
+        src_img.save(src_path)
+        log(f'diag source-view map saved: {src_path}')
+
+        # Coverage: 0=black, 1=dim red, 2=orange, 3=yellow, 4=light green,
+        # 5+=bright green. Clamp to 6 for display.
+        cov_clamped = np.clip(coverage_arr, 0, 6).astype(np.uint8)
+        cov_palette = np.array([
+            [  0,   0,   0],   # 0 — hole
+            [127,  30,  30],   # 1 — single view, fragile
+            [200, 100,  20],   # 2
+            [230, 180,  40],   # 3
+            [180, 220,  80],   # 4
+            [120, 220, 120],   # 5
+            [ 40, 255,  40],   # 6+
+        ], dtype=np.uint8)
+        cov_rgb = cov_palette[cov_clamped]
+        cov_img = Image.fromarray(cov_rgb)
+        cov_path = out_mesh_path + '.diag_coverage.png'
+        cov_img.save(cov_path)
+        log(f'diag coverage map saved: {cov_path}  '
+            f'(holes={int((coverage_arr == 0).sum())}, '
+            f'single={int((coverage_arr == 1).sum())}, '
+            f'multi={int((coverage_arr >= 2).sum())})')
 
     # Reconstruct PIL images from numpy arrays
     proj_atlas = Image.fromarray(proj_arr.astype(np.uint8))

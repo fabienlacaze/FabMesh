@@ -93,6 +93,63 @@ source PNGs).
   SDXL view (profile at ip_scale 0.30-0.35 per _scale_sweep) before
   claiming this approach competes with CRM.
 
+### Follow-up: "mouth on the calf" bug (BIG bake-orientation bug)
+
+After viewing the first textured mesh in model-viewer, observed:
+human face features (eyes, mouth) baked **onto the calves and back of
+the legs** — clearly nonsense. Root cause:
+
+- `local_sf3d_bridge.py` rotates the SF3D mesh +180° around Y after
+  inference (env `FABMESH_SF3D_NORMALIZE_ORIENT=1`, default) so the
+  face points to +Z (three.js camera convention). It also propagates
+  this as `auto_align_rot_deg=180` to texture_project as
+  `rotation_offset_deg`.
+- `texture_project.py` applies that offset **only to multi-view
+  azimuths** (line 397: `shifted_azim = (azim + rotation_offset_deg)
+  % 360`) — but the source `input.png` is added separately at
+  `(0, 0, priority=1.0)` line 383, with NO offset.
+- Net effect on our 2-view setup:
+  - input.png (front photo) → projected at azim=0 in the rotated
+    frame → lands on the BACK of the mesh.
+  - mv/view_2 (ip45_back) → azim 180+180 = 360%360 = 0 → projected on
+    the FRONT of the mesh, with priority 0.7 (the `back` slot prio).
+  - mv/view_0 (ip45_front dup) → azim 0+180 = 180 → projected on the
+    back, with priority 1.0 (the `front` slot prio) — so the
+    duplicated front WINS over the real back. Hence the entire mesh
+    is dressed with mostly-front pixels, but on the **wrong side**,
+    upside-down and laterally swapped. Faces end up on the legs.
+
+This bug also affects the existing CRM pipeline whenever the
+`auto_align_rot_deg` is non-zero, but is masked because the CRM
+multi-view set is symmetric enough that the visual artifact looks
+just "blurry" rather than "facially deranged".
+
+### Fix
+
+`scripts/ip45_2view_to_3d.py` now exports
+`FABMESH_SF3D_NORMALIZE_ORIENT=0` to disable the bridge's +180°
+rotation entirely. Our `views.json` describes camera angles in the
+SF3D-native frame (face at -Z, azim=0 = camera looking from -Z = at
+the face), and we pass front at azim=0, back at azim=180 — which is
+now consistent with the source image at azim=0 (front).
+
+After fix, projected azimuths in the log are now `0,0,90,180,270,0,0`
+(no +180 offset injected), which is what we want for a 2-view ortho
+schema. Texture should now sit on the correct side of the mesh.
+
+### Diagnostic instrumentation added
+
+`texture_project.py` now writes two PNG diag maps when
+`FABMESH_TEXPROJ_DIAG=1`:
+- `<mesh.glb>.diag_sourceview.png`: per-texel source view (palette of
+  7 hues, black = no data).
+- `<mesh.glb>.diag_coverage.png`: per-texel contributor count (0 = hole,
+  1 = single fragile, 2..6+ = increasingly safe).
+
+These let us see at a glance whether a baked artifact is a
+projection-mapping bug (wrong source view dominant) vs. a coverage
+hole (push-pull guesswork).
+
 ---
 
 ## 2026-04-18 — Multi-view repair pass (option B): detector + SDXL-Inpaint
