@@ -258,6 +258,62 @@ resolution of `mv/view_0.png` itself. Currently
 Bumping that to 2048×2048 doubles the resolution that paints the face
 in D, no flip risk. Worth trying as **Run K** if user agrees.
 
+### ERRATUM 2026-04-18 — All previous "NORMALIZE=1" runs were actually NORMALIZE=0
+
+**MAJOR BUG in my analysis**: discovered when user said Run K had
+"face-on-calf" inversion (vertical, not just Y-flip). On inspection,
+`scripts/ip45_2view_to_3d.py:84` was setting
+`env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'` from the very first
+commit of the wrapper. So **every run since A** has been in
+NORMALIZE=0, despite being labelled NORMALIZE=1 in the table for
+runs D, E, F, G, H, I, J, K.
+
+The actual experimental matrix was therefore:
+
+| Run | NORMALIZE actual | SHIFT | What changed in mv/ |
+|-----|------------------|-------|---------------------|
+| A   | 0 | 0 | baseline |
+| C   | 0 | 0 | + R_undo Ry180 patch |
+| D   | **0** | 0 | (claimed: NORMALIZE=1, was =0) |
+| E   | **0** | 1 | (claimed: NORMALIZE=1, was =0) |
+| F   | **0** | 1 | + back-only mv |
+| G   | **0** | 1 | + skip view_0 |
+| H   | **0** | 1 | + view_0=back |
+| I   | **0** | 1 | + view_0 alpha=0 |
+| J   | **0** | 1 | + view_0 prio 0.5 |
+| K   | **0** | 0 | + mv slots @ 2048 |
+
+So the "flip 180°" observed in C/F/G/H/I/J/K was actually the
+NORMALIZE=0 mesh (face -> -Z) viewed by model-viewer's default
+camera (looking from +Z) — i.e. seeing the BACK by default. Runs D
+and E "happened to look correct" not because the bake was special,
+but because their texture distribution made the back-side somehow
+look more like a "front" to the user (probably because back image
+has hair, neck, jacket-back which are visually less distinguishable
+front-vs-back than the face-side).
+
+K's "face-on-calf" is the same bug as the very first session bug:
+NORMALIZE=0 + R_undo's standard rotation chain creates a mesh frame
+where projection coords land on flipped vertical positions.
+
+### Fix applied: removed `env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'`
+from scripts/ip45_2view_to_3d.py:84. Bridge default (NORMALIZE=1)
+now applies — mesh face will point to +Z (three.js convention).
+
+### Re-running D and E with TRUE NORMALIZE=1
+
+Run REAL_D = NORMALIZE=1 default + no SHIFT_SOURCE
+Run REAL_E = NORMALIZE=1 default + SHIFT_SOURCE=1
+
+Output files: mesh_REAL_D.glb, mesh_REAL_E.glb. Side-by-side compare
+in compare.html shows OLD D / REAL D / OLD E / REAL E.
+
+User verdict pending. If REAL D and REAL E both render correctly
+oriented (face on +Z), this validates the previous law (any front-
+azimuth dominance shift caused the apparent flip) was MEASURING THE
+WRONG THING. The pipeline should now be reasoned about with the
+actual NORMALIZE settings.
+
 ### Run K — D + mv slots at 2048 — ALSO FLIPPED
 
 After concluding D was the only viable shipping config, tried to
