@@ -782,6 +782,39 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### BREAKTHROUGH (2026-04-18) — Prebuilt wheels for sm_120 found!
+
+ComfyUI-3D-Pack README links to **MiroPsota/torch_packages_builder**
+which publishes prebuilt wheels for pytorch3d, nvdiffrast, tinycudann,
+detectron2, flash_attn, etc. — all across multiple torch + cuda
+combinations.
+
+**Found exact matches for our machine** (torch 2.7 + cu128 + cp311
++ Windows):
+- `pytorch3d-0.7.9+d9839a9pt2.7.0cu128-cp311-cp311-win_amd64.whl` (25 MB)
+- `nvdiffrast-0.4.0+253ac4fpt2.7.0cu128-cp311-cp311-win_amd64.whl` (6 MB)
+
+Both installed cleanly via `pip install <wheel>`. Tests on RTX 5080:
+- pytorch3d rasterize_meshes: ✓ OK, 512 nonzero pixels (64x64 triangle)
+- nvdiffrast RasterizeCudaContext: ✓ OK, 512 nonzero pixels
+
+**sm_120 / Blackwell support works out of the box** via these wheels.
+NO CUDA 12.8 toolkit install needed. NO SAC issues (signed wheels).
+NO source compile.
+
+MiroPsota does NOT publish kaolin wheels, but we don't need them —
+Paint3D agent forensic showed pytorch3d + trimesh cover 11 of 12
+kaolin calls; the 12th (rasterize) is the one pytorch3d provides.
+
+### Plan to finish Paint3D integration
+
+1. Write `external/Paint3D/paint3d/models/_kal_shim.py` implementing
+   kaolin's API surface backed by pytorch3d/trimesh.
+2. Replace `import kaolin as kal` in the 3 Paint3D model files
+   with `from paint3d.models import _kal_shim as kal`.
+3. Run Paint3D stage 1 on Suzanne demo.
+4. If OK, run on FabMesh's D mesh + ip45 photos.
+
 ### ComfyUI-3D-Pack integration attempt — STARTING NOW (2026-04-18)
 
 User picked ComfyUI-3D-Pack. Agent said "worth one attempt" —
