@@ -420,6 +420,19 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                 prio = PRIORITY_WEIGHTS_TUP.get(
                     (azim, elev),
                     PRIORITY_WEIGHTS.get(azim, 0.4))
+                # If SHIFT_SOURCE is on AND this mv slot collides with the
+                # source image's azimuth at the same priority, demote it.
+                # Otherwise the per-texel winner-take-all (l ~676) oscillates
+                # between input.png HD (1151px) and the mv resize (1024px),
+                # producing moiré ghost-doubles on the face. Demoting the mv
+                # slot lets input.png win cleanly on the shared azimuth.
+                if (os.environ.get('FABMESH_TEXPROJ_SHIFT_SOURCE') == '1'
+                        and abs(((shifted_azim - _src_azim + 180) % 360) - 180) < 1.0
+                        and abs(elev) < 1.0
+                        and prio >= PRIORITY_WEIGHTS[0.0] - 1e-6):
+                    log(f'view_{i}: demoting prio {prio} -> 0.5 '
+                        f'(collision with source at az={_src_azim})')
+                    prio = 0.5
                 views.append((vpath, shifted_azim, elev, prio))
             else:
                 log(f'WARNING: missing {vpath}, skipping')

@@ -2,18 +2,16 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>5-way compare</title>
+<title>D vs E vs I — face zoom</title>
 <style>
   html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
-               font-family:system-ui, sans-serif; }
-  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000;
-       border-bottom:1px solid #333; }
-  .row { display:grid; grid-template-columns: repeat(5, 1fr); gap:1px; background:#000; }
-  .col { background:#181818; min-height:520px; position:relative; }
+               font-family:system-ui, sans-serif; height:100%; }
+  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; border-bottom:1px solid #333; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:1px; background:#000; height:calc(100vh - 40px); }
+  .col { background:#181818; position:relative; }
   .col-title { position:absolute; top:6px; left:8px; background:rgba(0,0,0,0.75);
-               padding:4px 9px; font-size:11px; border-radius:3px; z-index:5; color:#eee;
-               max-width: 90%; }
-  .col model-viewer { width:100%; height:520px; background:#1b1b1b; }
+               padding:4px 9px; font-size:11px; border-radius:3px; z-index:5; color:#eee; }
+  .col model-viewer { width:100%; height:100%; background:#1b1b1b; }
   .verdict { position:absolute; bottom:6px; left:8px; right:8px;
              background:rgba(0,0,0,0.7); padding:5px 9px; font-size:10px;
              border-radius:3px; z-index:5; color:#bbb; }
@@ -21,38 +19,28 @@
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>5-way compare — Run F (right) drops front dups in mv/ to kill the HD vs 1024 ghost</h1>
-
-<div class="row">
+<h1>D vs E vs I — face zoom (use mousewheel inside each pane to zoom)</h1>
+<div class="grid">
   <div class="col">
-    <div class="col-title">A: NORMALIZE=0</div>
-    <model-viewer src="mesh_NORMALIZE_0.glb" camera-controls camera-orbit="0deg 90deg 1.4m" field-of-view="25deg"
+    <div class="col-title">D: NORMALIZE=1 baseline</div>
+    <model-viewer src="mesh_NORMALIZE_1.glb" camera-controls
+                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">cireux/blanchâtre</div>
+    <div class="verdict">your fav placement, "definition meilleure"</div>
   </div>
   <div class="col">
-    <div class="col-title">D: NORMALIZE=1 baseline (your fav placement)</div>
-    <model-viewer src="mesh_NORMALIZE_1.glb" camera-controls camera-orbit="0deg 90deg 1.4m" field-of-view="25deg"
+    <div class="col-title">E: + SHIFT_SOURCE</div>
+    <model-viewer src="mesh_NORMALIZE_1_SHIFT.glb" camera-controls
+                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">placement perfect, definition meilleure</div>
-  </div>
-  <div class="col">
-    <div class="col-title">C: NORMALIZE=0 + Ry(180) patch</div>
-    <model-viewer src="mesh_NORMALIZE_0_PATCHED.glb" camera-controls camera-orbit="0deg 90deg 1.4m" field-of-view="25deg"
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">colored but face deformed</div>
-  </div>
-  <div class="col">
-    <div class="col-title">E: NORMALIZE=1 + SHIFT_SOURCE</div>
-    <model-viewer src="mesh_NORMALIZE_1_SHIFT.glb" camera-controls camera-orbit="0deg 90deg 1.4m" field-of-view="25deg"
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">placement OK but face FLOU + ghosting</div>
+    <div class="verdict">placement OK, face FLOU + ghost</div>
   </div>
   <div class="col" style="border-left:2px solid #4ade80;">
-    <div class="col-title">F: NORMALIZE=1 + SHIFT_SOURCE + no front dups (NEW)</div>
-    <model-viewer src="mesh_RUN_F.glb" camera-controls camera-orbit="0deg 90deg 1.4m" field-of-view="25deg"
+    <div class="col-title">J: + SHIFT + view_0 prio 0.5 (NEW)</div>
+    <model-viewer src="mesh_RUN_J.glb" camera-controls
+                  camera-orbit="0deg 90deg 1.0m" field-of-view="20deg"
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
-    <div class="verdict">target: HD face from input.png, no moiré</div>
+    <div class="verdict">target: input HD wins on face, view_0 still contributes (no flip)</div>
   </div>
 </div>
 </body>

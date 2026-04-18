@@ -39,12 +39,12 @@ def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     back = Image.open(back_png).convert('RGB').resize((1024, 1024))
 
     front.save(os.path.join(mv_dir, 'input.png'))
-    # CANONICAL E LAYOUT — do NOT modify, see AGENT_LOG runs C/F/G/H.
-    # Any change to which image goes in which slot, or to views.json
-    # azimuths, FLIPS the rendered mesh 180° at the viewer's frontal
-    # camera angle. The only stable layout is the standard CRM 7-view
-    # ortho with front dups at the front-side slots and back dups at
-    # the back-side slots.
+    # CANONICAL E LAYOUT — confirmed unchangeable.
+    # Runs C/F/G/H/I all proved that ANY change to mv/ contents
+    # (back-only, skip view_0, swap view_0=back, view_0=transparent)
+    # FLIPS the rendered mesh 180° in the viewer. The fix for E's
+    # face moiré must come from texture_project.py priority logic,
+    # NOT from mv/ content changes.
     slots = {0: front, 1: front, 2: back, 3: back, 4: front, 5: back}
     for slot, img in slots.items():
         img.save(os.path.join(mv_dir, f'view_{slot}.png'))

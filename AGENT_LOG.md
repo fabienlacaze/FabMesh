@@ -172,6 +172,92 @@ views.json (but views.json doesn't carry priority, only azim/elev).
 Cleaner path: skip writing view_0 entirely. texture_project.py
 already logs `WARNING: missing {vpath}, skipping` for missing slots.
 
+### Run I — Path 2 (transparent view_0) — ALSO FLIPPED
+
+After the 2-agent synthesis pointed to two safe paths, tried Path 2
+first because it's a 1-line change with the lowest theoretical risk.
+
+Config: NORMALIZE=1 + SHIFT_SOURCE=1 + view_0.png written as fully
+transparent RGBA (alpha=0 everywhere) in build_mv_dir. Theory: src_alpha=0
+makes view_0's per-texel weight 0 (texture_project l 643:
+`w_pixel = pt_vis * src_alpha * priority * mask * in_b`), so input.png HD
+wins everywhere on the face, no moiré. Layout still has 7 entries
+(unchanged), just one is neutralized.
+
+Result: **also flipped 180°** at the locked frontal angle. User saw
+the back of the mesh in the I panel.
+
+Lesson: even **neutralizing a slot via alpha=0** flips the mesh. The
+flip is NOT specifically tied to changing pixel content of view_0 —
+it's tied to **whether view_0 contributes any winning weight at all**
+on the front azimuth. When view_0 stops winning *anything* there,
+xatlas / texture_project's per-texel arbitration shifts which side of
+the mesh ends up texturized as "front" in the viewer.
+
+### Run J — Path 1 (priority demote in texture_project.py) — ALSO FLIPPED
+
+Tried Agent #1's surgical priority drop. Patched texture_project.py
+l 423-431 to demote any mv slot whose `shifted_azim` collides with
+`_src_azim` and whose priority ties with the source's prio (1.0).
+The collision detection is precise (`abs(((shifted_azim - _src_azim
++ 180) % 360) - 180) < 1.0` for azim, `abs(elev) < 1.0` for elev).
+Only fires when `FABMESH_TEXPROJ_SHIFT_SOURCE=1`.
+
+Confirmed in logs: `view_0: demoting prio 1.0 -> 0.5 (collision with
+source at az=180.0)`. So the patch fired exactly as designed — view_0
+still contributes, but with half the weight, so input.png HD should
+own the face cleanly.
+
+Result: **also flipped 180°**. User saw the back of the mesh in J.
+
+### Definitive empirical conclusion (after runs A..J)
+
+| Run | NORMALIZE | SHIFT | What changed | Flipped? | Definition |
+|-----|-----------|-------|--------------|----------|------------|
+| A   | 0         | 0     | baseline     | no (luck) | cireux |
+| C   | 0         | 0     | R_undo+Ry180 | yes      | sharp face deformed |
+| D   | 1         | 0     | baseline     | **no**   | medium (mv 1024 paints face) |
+| E   | 1         | 1     | shift source | **no**   | flou (HD vs 1024 moiré) |
+| F   | 1         | 1     | back-only mv | yes      | sharp |
+| G   | 1         | 1     | skip view_0  | yes      | sharp |
+| H   | 1         | 1     | view_0=back  | yes      | sharp |
+| I   | 1         | 1     | view_0 alpha=0 | yes    | sharp (back side) |
+| J   | 1         | 1     | view_0 prio 0.5 | yes   | sharp (back side) |
+
+The pattern is now unambiguous:
+
+- **Anything that makes input.png HD dominate the front azimuth flips
+  the mesh** (C, F, G, H, I, J).
+- **Only configurations where mv/view_0 (1024px front dup) wins the
+  front azimuth are non-flipped** (D, E).
+
+Why? When input.png owns most of the front-side texels, the bake
+follows SF3D's native coordinate frame for those texels. The MV slots
+follow the bridge's post-rotation frame for theirs. Mixed dominance
+across the same hemisphere creates an inconsistent bake; xatlas/
+viewer ends up showing what was the "back" of the SF3D coords as the
+new "front".
+
+Net result: **D and E are the only viable configurations**. We cannot
+have HD-on-face AND non-flipped via env flags / priority tweaks /
+view content tricks. Achieving both would require modifying the
+R_undo / R_w2c basis math in texture_project.py so input.png's
+SF3D-native frame and the MV post-rotation frame agree on which side
+is "front" — a deeper engine change than env-flag tuning allows.
+
+### Pragmatic recommendation
+
+For shipping the 2-view pipeline today: use **D** (NORMALIZE=1
+baseline, no SHIFT_SOURCE, no priority tweaks, canonical 7-view mv
+layout). Confirmed by user as having "definition meilleure" + correct
+placement.
+
+To improve D's face definition without flipping: increase the
+resolution of `mv/view_0.png` itself. Currently
+`scripts/ip45_2view_to_3d.py:38` resizes the front PNG to 1024×1024.
+Bumping that to 2048×2048 doubles the resolution that paints the face
+in D, no flip risk. Worth trying as **Run K** if user agrees.
+
 ### 2-agent deep code analysis — synthesis (2026-04-18)
 
 Two general-purpose agents were run in parallel to read the
