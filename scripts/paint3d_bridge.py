@@ -1,0 +1,178 @@
+"""FabMesh Paint3D Bridge — texture an existing mesh using Paint3D.
+
+Pipeline:
+  existing .glb mesh + reference image (ip-adapter-style)
+  -> convert to .obj temp
+  -> Paint3D stage 1 (depth-aware SD1.5 + ControlNet + IPAdapter)
+  -> baked albedo UV atlas
+  -> pack back into .glb
+
+CLI:
+    python paint3d_bridge.py <in_mesh.glb> <ref_image.png> <out.glb>
+        [--prompt "..."] [--negative "..."] [--texture-size 1024]
+
+Dependencies (installed via prebuilt wheels, no source compile):
+    pytorch3d 0.7.9+d9839a9pt2.7.0cu128
+    nvdiffrast 0.4.0+253ac4fpt2.7.0cu128
+    trimesh, Pillow, numpy
+    diffusers, transformers, accelerate (already in FabMesh env)
+
+Also needs external/Paint3D/ in the repo. The paint3d package's kaolin
+imports are re-routed to `paint3d.models._kal_shim` (a pytorch3d+nvdiffrast+
+trimesh shim — see external/Paint3D/paint3d/models/_kal_shim.py).
+"""
+from __future__ import annotations
+import os
+import sys
+import time
+import shutil
+import argparse
+import subprocess
+import tempfile
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PAINT3D_DIR = os.path.join(ROOT, 'external', 'Paint3D')
+
+
+def log(msg: str):
+    print(f'[paint3d] {msg}', flush=True)
+
+
+def _glb_to_obj(glb_path: str, obj_path: str) -> None:
+    """Convert .glb -> .obj + .mtl + baseColor.png via trimesh.
+
+    Paint3D's mesh loader wants an .obj file with UVs. trimesh handles
+    GLB unpack cleanly including the embedded texture.
+    """
+    import trimesh
+    scene = trimesh.load(glb_path, force='mesh')
+    if isinstance(scene, trimesh.Scene):
+        # pick the first geometry
+        scene = list(scene.geometry.values())[0]
+    # Ensure UVs exist. SF3D output has them; fallback to xatlas.
+    if not hasattr(scene.visual, 'uv') or scene.visual.uv is None:
+        log('input mesh has no UVs — running xatlas unwrap')
+        import xatlas, numpy as np
+        v = scene.vertices.astype(np.float32)
+        f = scene.faces.astype(np.uint32)
+        vmap, idx, uv = xatlas.parametrize(v, f)
+        scene = trimesh.Trimesh(
+            vertices=scene.vertices[vmap],
+            faces=idx.astype(np.int64),
+            visual=trimesh.visual.TextureVisuals(uv=uv),
+            process=False,
+        )
+    scene.export(obj_path)
+    log(f'converted glb -> obj: {obj_path}')
+
+
+def _run_paint3d_stage1(obj_path: str, ref_image: str,
+                        prompt: str, negative: str,
+                        outdir: str) -> str:
+    """Run Paint3D stage 1 in-process. Returns the albedo.png path."""
+    # Make sure Paint3D is importable.
+    if PAINT3D_DIR not in sys.path:
+        sys.path.insert(0, PAINT3D_DIR)
+
+    # Paint3D's pipeline_paint3d_stage1.py takes CLI args; easier to call
+    # as subprocess so it stays isolated (its sys.path hacks and global
+    # state don't leak into FabMesh).
+    log(f'launching Paint3D stage 1 subprocess')
+    # Use the template config as base; we feed prompt via --prompt and
+    # ip_adapter_image via --ip_adapter_image_path (Paint3D's own CLI).
+    sd_cfg = os.path.join(PAINT3D_DIR, 'controlnet', 'config',
+                          'depth_based_inpaint_template.yaml')
+    render_cfg = os.path.join(PAINT3D_DIR, 'paint3d', 'config',
+                              'train_config_paint3d.py')
+    cmd = [
+        sys.executable,
+        os.path.join(PAINT3D_DIR, 'pipeline_paint3d_stage1.py'),
+        '--sd_config', sd_cfg,
+        '--render_config', render_cfg,
+        '--mesh_path', obj_path,
+        '--prompt', prompt,
+        '--outdir', outdir,
+    ]
+    # Paint3D stage 1 doesn't expose --neg_prompt as CLI — it's baked
+    # into the sd_config yaml. We leave negative prompt as default.
+    if ref_image:
+        cmd += ['--ip_adapter_image_path', ref_image]
+    log(f'cmd: {" ".join(cmd)}')
+    t0 = time.time()
+    # Run from Paint3D dir so its relative paths work.
+    r = subprocess.run(cmd, cwd=PAINT3D_DIR, check=False)
+    log(f'stage1 done in {time.time()-t0:.1f}s (rc={r.returncode})')
+    if r.returncode != 0:
+        raise RuntimeError(f'Paint3D stage1 failed: rc={r.returncode}')
+
+    # Find the albedo.png — it's in <outdir>/res-0/albedo.png by default.
+    # outdir passed to Paint3D is relative to PAINT3D_DIR (that's its
+    # own convention). We normalized to absolute, so it should match.
+    albedo = os.path.join(outdir, 'res-0', 'albedo.png')
+    if not os.path.exists(albedo):
+        raise RuntimeError(f'Paint3D stage1 produced no albedo at {albedo}')
+    log(f'albedo baked: {albedo}')
+    return albedo
+
+
+def _pack_obj_to_glb(obj_dir: str, out_glb: str) -> None:
+    """Pack the Paint3D mesh.obj + mesh.mtl + albedo.png into a GLB."""
+    import trimesh
+    obj_path = os.path.join(obj_dir, 'mesh.obj')
+    mesh = trimesh.load(obj_path, process=False)
+    if isinstance(mesh, trimesh.Scene):
+        mesh = list(mesh.geometry.values())[0]
+    # trimesh auto-loads the albedo.png via the .mtl file.
+    mesh.export(out_glb)
+    log(f'packed glb: {out_glb}')
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('in_mesh', help='input .glb or .obj mesh')
+    ap.add_argument('ref_image', help='reference image for IP-Adapter')
+    ap.add_argument('out_glb', help='output .glb with baked texture')
+    ap.add_argument('--prompt', default=' ', help='subject prompt')
+    ap.add_argument('--negative', default='', help='negative prompt')
+    ap.add_argument('--work-dir', default=None,
+                    help='scratch dir (default: sibling of out_glb)')
+    args = ap.parse_args()
+
+    for p in (args.in_mesh, args.ref_image):
+        if not os.path.exists(p):
+            log(f'MISSING: {p}')
+            sys.exit(2)
+
+    # Work dir: <out_glb>.paint3d_work/
+    work = args.work_dir or (os.path.abspath(args.out_glb) + '.paint3d_work')
+    os.makedirs(work, exist_ok=True)
+    log(f'work dir: {work}')
+
+    # Step 1: GLB -> OBJ (Paint3D wants .obj)
+    in_mesh = os.path.abspath(args.in_mesh)
+    if in_mesh.lower().endswith('.glb'):
+        obj_path = os.path.join(work, 'input_mesh.obj')
+        _glb_to_obj(in_mesh, obj_path)
+    else:
+        obj_path = in_mesh
+
+    # Step 2: run Paint3D stage 1
+    outdir = os.path.abspath(os.path.join(work, 'paint3d_out'))
+    ref_abs = os.path.abspath(args.ref_image)
+    _run_paint3d_stage1(obj_path, ref_abs, args.prompt, args.negative, outdir)
+
+    # Step 3: pack the textured OBJ back to GLB
+    res_dir = os.path.join(outdir, 'res-0')
+    _pack_obj_to_glb(res_dir, os.path.abspath(args.out_glb))
+    log(f'DONE: {args.out_glb}')
+    print(f'GLB_PATH: {args.out_glb}', flush=True)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        log(f'ERROR: {type(e).__name__}: {e}')
+        import traceback; traceback.print_exc()
+        sys.exit(1)
