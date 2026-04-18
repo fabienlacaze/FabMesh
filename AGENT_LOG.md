@@ -782,6 +782,43 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### NEW PIPELINE DESIGN (2026-04-18): mesh D → Paint3D refine
+
+User's key insight: instead of using Paint3D from scratch on a mesh
+(where SD1.5 has to invent everything), FEED IT mesh D (already well-
+textured by texture_project) and use Paint3D only as a POST-REFINE
+step. Paint3D's stage 2 is designed for exactly this — UV-inpaint
+conditioned on an existing texture.
+
+New pipeline:
+```
+photo front + back
+        ↓
+  SF3D + texture_project.py (existing FabMesh pipeline)
+        ↓
+  mesh D.glb (has a valid but slightly blurry/inverted texture)
+        ↓
+  Paint3D stage 2 ONLY (uses existing albedo as initial texture,
+                        UV-position ControlNet inpaints the gaps
+                        + refines details)
+        ↓
+  mesh.glb final (same identity, sharper + fuller UV coverage)
+```
+
+Advantages:
+- No SD1.5 hallucination — identity comes from photos via texture_project
+- No magenta gaps — mesh D has a valid starting albedo
+- Paint3D does what it's designed for: UV-aware refinement
+- Bypasses the stage 1 problems we've been fighting
+
+Implementation:
+1. Modify paint3d_bridge.py: add --skip-stage1 flag, extract the
+   existing albedo from mesh D's baseColorTexture, pass it as
+   stage 2's --texture_path.
+2. Run stage 2 only. It expects (mesh.obj, texture_path=initial
+   albedo) and runs UV-inpaint ControlNet on top.
+3. Pack the refined albedo into a new .glb.
+
 ### Back to basics: 2 views + pre-rotate Rx(180) (2026-04-18)
 
 User realized 8 views at 1024px width = 128px/view = SD1.5 noise.
