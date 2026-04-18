@@ -168,7 +168,11 @@ def _pack_obj_to_glb(obj_dir: str, out_glb: str) -> None:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('in_mesh', help='input .glb or .obj mesh')
-    ap.add_argument('ref_image', help='reference image for IP-Adapter')
+    ap.add_argument('ref_image',
+                    help='reference image(s) for IP-Adapter. '
+                         'Pass multiple as semicolon-separated paths, '
+                         'e.g. "front.png;back.png" — Paint3D patched to '
+                         'accept a list.')
     ap.add_argument('out_glb', help='output .glb with baked texture')
     ap.add_argument('--prompt', default=' ', help='subject prompt')
     ap.add_argument('--negative', default='', help='negative prompt')
@@ -178,9 +182,14 @@ def main():
                     help='skip the UV-inpaint stage 2 (faster but leaves magenta gaps)')
     args = ap.parse_args()
 
-    for p in (args.in_mesh, args.ref_image):
-        if not os.path.exists(p):
-            log(f'MISSING: {p}')
+    if not os.path.exists(args.in_mesh):
+        log(f'MISSING: {args.in_mesh}')
+        sys.exit(2)
+    # ref_image can be a semicolon-separated list.
+    for p in args.ref_image.split(';'):
+        p = p.strip()
+        if p and not os.path.exists(p):
+            log(f'MISSING ref: {p}')
             sys.exit(2)
 
     # Work dir: <out_glb>.paint3d_work/
@@ -198,7 +207,10 @@ def main():
 
     # Step 2: run Paint3D stage 1
     outdir1 = os.path.abspath(os.path.join(work, 'stage1'))
-    ref_abs = os.path.abspath(args.ref_image)
+    # Convert each semicolon-separated ref to absolute path; rejoin.
+    ref_abs = ';'.join(
+        os.path.abspath(p.strip()) for p in args.ref_image.split(';') if p.strip()
+    )
     albedo1 = _run_paint3d_stage1(obj_path, ref_abs, args.prompt,
                                    args.negative, outdir1)
     # Stage 1 writes mesh.obj + albedo.png + mesh.mtl in outdir1/res-0/

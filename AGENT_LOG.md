@@ -782,6 +782,35 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Multi-ref Paint3D result — REGRESSION (2026-04-18)
+
+Patched 3 Paint3D files (`diffusers_cnet_{txt2img,img2img,inpaint}.py`)
+to:
+- Accept semicolon-separated list of ref paths
+- Load N IP-Adapters (one per ref) via
+  `pipe.load_ip_adapter([...] * N, ...)`.
+
+Bridge updated to accept `"front.png;back.png"`. Stage 1+2 both ran
+successfully end-to-end (149s stage 2). Output albedo shown to user:
+
+- **Way more magenta** than single-ref stage 1 (UVs never covered)
+- Only a few scattered gray fragments visible
+- 2 "ninja shadow" figures in bottom of UV atlas, no child identity
+- Stage 2 UV-inpaint FAILED to fill gaps (ControlNet UV-position
+  didn't recognize the geometry — prompt too weak, UV Pos weights
+  maybe wrong for this mesh topology)
+
+Honest diagnosis: **Paint3D is not designed for photorealistic
+human subjects via IP-Adapter**. Its canonical demo is Suzanne in
+sci-fi painting style. SD1.5 + IPA can't preserve identity from a
+photo ref of a child.
+
+### Also: bridge looking in wrong dir for stage 2 output
+
+Stage 2 writes `albedo.png` directly in `stage2/` (not
+`stage2/res-0/` like stage 1). Bridge tried to find
+`stage2/res-0/albedo.png` and raised. Trivial path fix.
+
 ### Paint3D uses ONLY ONE reference image (user question)
 
 User asked: "dans paint3d on lui donne qu'une vue ?"
