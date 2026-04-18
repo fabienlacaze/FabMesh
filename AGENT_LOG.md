@@ -717,6 +717,81 @@ Y panel has `camera-orbit="180deg 90deg"` — force looking at the
 mesh's face side. If W/X/Y all then show the face correctly, the
 side-swap was a camera-angle illusion, not a real bug.
 
+### Root cause synthesis (2026-04-18, user asked "pourquoi on a des si mauvais positionnement")
+
+After 23+ runs (A..Y + variants), honest diagnosis of why we're stuck:
+
+1. **SF3D is single-view**. Mesh generated from front.png only.
+   Back-of-mesh geometry is INVENTED by the model, not observed.
+   UV coords for the back region correspond to a "plausible" guessed
+   geometry, not the real back of the subject. When we project the
+   back PNG onto these UVs, any sub-geometry mismatch surfaces as
+   visible dislocation.
+
+2. **texture_project is a camera-projection hack**, not a 3D-native
+   bake. It projects each photo from a fixed azimuth using `R_w2c`
+   + `p_u`, `p_v`. Works ONLY when the mesh's internal axis
+   convention matches the projection's internal axis convention.
+   Any mismatch flips V or U.
+
+3. **18 runs showed that tweaking any single axis convention
+   breaks another**. p_v flip, R_undo Ry(180), rotation_offset,
+   PNG pre-flip — each patch fixes its target but introduces a new
+   axis mismatch somewhere else in the chain.
+
+4. **The 2-view pipeline is a degenerate case** for this code.
+   texture_project was calibrated for Z123 (6 views at ±20° elev)
+   and CRM (6 views orthographic incl. top/bottom). Our 2 views at
+   azim=0/180 fill only 2/6 slots; the rest are dups. The dups
+   interact with axis conventions in ways the original code
+   never had to handle.
+
+### Conclusion
+
+The 2-view IP-Adapter pipeline is a BRICOLAGE on top of a
+single-view pipeline. It CANNOT reliably produce "both front and
+back correctly placed" because the underlying mesh geometry for
+the back is guessed, and the projection math was never designed
+for a 2-source back+front layout.
+
+**Real fix options** (not a patch of texture_project):
+- **Use MV-Adapter natively** — it's a 3D-aware multi-view
+  generator, designed for this exact problem.
+- **Use CRM full** — it produces 6 real ortho views AND a mesh
+  designed to accept them.
+- **Use TRELLIS** — sparse structured 3D, handles multi-view
+  inputs natively.
+
+All three are already scaffolded in the repo
+(external/MV-Adapter, external/CRM, external/TRELLIS). None are
+fully integrated yet.
+
+### Analyse observationnelle de l'atlas D — abandoned
+
+Aborted the atlas-sampling analysis because the user is right that
+we're chasing a fundamentally broken design. Patching won't fix it.
+
+### Analyse observationnelle de l'atlas D — STARTING NOW
+
+User picked option D (dig into the atlas). Plan:
+1. Open atlas_D.png (already extracted at
+   logs/child_ip45_2view/atlas_D.png) and identify visually each
+   region: front face, back, left profile, right profile, top
+   island, bottom island.
+2. For each region, note whether the image is upright, mirrored,
+   upside-down. The "back is upside-down" user report should be
+   visible directly in the atlas.
+3. Sample several mesh vertices (head top, feet bottom, front, back,
+   left arm, right arm) and read their UV coords. Compare:
+   - Where does the "head top" vertex's UV point in the atlas?
+   - Where does the "feet bottom" vertex's UV point?
+4. Check UV<->atlas alignment: does the atlas's back-region have
+   its head at high V or low V? Does the mesh's back vertex have
+   high or low V UV?
+
+Goal: understand the mismatch without any speculation. Then
+propose the smallest possible patch.
+
 ### CRITICAL FINDING 2026-04-18 — UV→atlas correspondence measured
 
 Extracted baseColorTexture from D (mesh_NORMALIZE_1.glb) and Y
