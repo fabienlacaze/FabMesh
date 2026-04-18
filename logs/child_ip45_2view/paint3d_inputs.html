@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Paint3D inputs explained</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
+               font-family:system-ui, sans-serif; }
+  h1 { padding:8px 16px; margin:0; font-size:14px; background:#000; border-bottom:1px solid #333; }
+  h2 { padding:12px 16px 4px; margin:0; font-size:13px; color:#4ade80; }
+  .desc { padding:4px 16px; color:#aaa; font-size:11px; line-height:1.5; max-width:1000px; }
+  .row { display:grid; grid-template-columns: repeat(3, 1fr); gap:1px;
+         background:#000; padding:4px; }
+  .card { background:#181818; padding:8px; }
+  .card img { width:100%; border:1px solid #333; }
+  .card model-viewer { width:100%; height:400px; background:#1b1b1b; }
+  .label { font-size:11px; color:#aaa; padding:4px 0; }
+  code { background:#2a2a2a; padding:2px 6px; border-radius:3px; color:#facc15; font-size:11px; }
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>Paint3D — tous les inputs que le pipeline reçoit (ce qu'il voit vraiment)</h1>
+
+<h2>Input A : les 2 photos de référence (IPAdapter)</h2>
+<div class="desc">Les 2 photos ip45_* générées par le SDXL IPA-Plus au début de la session. Passées à Paint3D via <code>--ref_image "front.png;back.png"</code>. Leur rôle : contraindre le <b>style</b> de l'identité générée par SD1.5 (pas leur projection géométrique).</div>
+<div class="row">
+  <div class="card">
+    <img src="../../images/child/_scale_sweep/ip45_front.png" />
+    <div class="label">ip45_front.png — 1024x1024</div>
+  </div>
+  <div class="card">
+    <img src="../../images/child/_scale_sweep/ip45_back.png" />
+    <div class="label">ip45_back.png — 1024x1024</div>
+  </div>
+</div>
+
+<h2>Input B : le mesh 3D (géométrie)</h2>
+<div class="desc">Paint3D reçoit le mesh D que FabMesh a produit via SF3D. C'est une géométrie humaine (enfant) avec UVs. Paint3D ne regénère PAS la géométrie, il ajoute juste une texture dessus.</div>
+<div class="card" style="max-width:500px;">
+  <model-viewer src="mesh_NORMALIZE_1.glb" auto-rotate camera-controls
+                shadow-intensity="1" environment-image="neutral"></model-viewer>
+  <div class="label">mesh_NORMALIZE_1.glb (mesh D, géométrie seulement)</div>
+</div>
+
+<h2>Input C : le prompt texte</h2>
+<div class="desc">Passé en ligne de commande à Paint3D :</div>
+<div class="card" style="max-width:1000px;">
+  <code style="white-space:pre-wrap; display:block; padding:8px;">--prompt "a young boy wearing denim jacket, white t-shirt, khaki cargo shorts, sneakers, photorealistic portrait, full body"</code>
+</div>
+
+<h2>Ce que Paint3D FAIT avec ces inputs</h2>
+<div class="desc">1. Paint3D rend le mesh depuis 8 angles (front, 45°, 90°, 135°, back, 225°, 270°, 315°) avec nvdiffrast → génère 8 depth maps.<br>
+2. Combine les 8 depth maps en une <b>grille 1x8 de 1024×512 px</b> (donc chaque vue = 128×512 px, très basse résolution).<br>
+3. Passe cette grille à SD1.5 + ControlNet-depth + IPAdapter (avec tes 2 photos comme style reference).<br>
+4. SD1.5 génère une image 1024×512 où chaque bloc 128px est une vue du mesh texturée.<br>
+5. Back-project cette image 2D sur l'atlas UV du mesh.</div>
+
+<h2>Ce que Paint3D VOIT (le résultat intermédiaire init-img-0.png)</h2>
+<div class="desc">Voici la grille de 8 vues générée par SD1.5 (avec la config Quick Win : 8 views, ip_scale 1.5, strength 0.7). Chaque bloc = 128x512 px.</div>
+<div class="card" style="max-width:1000px;">
+  <img src="mesh_paint3d_quickwin.glb.paint3d_work/stage1/init-img-0.png" />
+  <div class="label">init-img-0.png — grille 1024x512, 8 vues concaténées</div>
+</div>
+
+<h2>Le depth map que Paint3D envoie à ControlNet</h2>
+<div class="card" style="max-width:1000px;">
+  <img src="mesh_paint3d_quickwin.glb.paint3d_work/stage1/init_depth_render.png" />
+  <div class="label">init_depth_render.png — 8 depth maps concaténées que ControlNet-depth utilise</div>
+</div>
+
+<h2>Résultat — l'atlas UV baké</h2>
+<div class="desc">Paint3D back-projette l'init-img-0.png sur l'atlas UV. Le résultat montre que chaque vue 128px a produit une silhouette bruitée → atlas plein de magenta avec petites figures.</div>
+<div class="card" style="max-width:500px;">
+  <img src="mesh_paint3d_quickwin.glb.paint3d_work/stage1/res-0/albedo.png" />
+  <div class="label">albedo.png final</div>
+</div>
+
+</body>
+</html>

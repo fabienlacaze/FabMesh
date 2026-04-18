@@ -782,6 +782,27 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Back to basics: 2 views + pre-rotate Rx(180) (2026-04-18)
+
+User realized 8 views at 1024px width = 128px/view = SD1.5 noise.
+Going back to 2 views (512x512 each) + fixing the head-down mesh
+orientation via pre-rotate.
+
+Plan:
+1. Revert `views_init` in train_config_paint3d.py from
+   `[0, 3, 6, 9, 12, 15, 18, 21]` back to `[0, 23]` (2 views).
+2. Keep ip_scale 1.5 + strength 0.7 + neutral prompt (other Quick
+   Win changes).
+3. In `paint3d_bridge.py::_glb_to_obj`, rotate the mesh Rx(180°)
+   before export to .obj, so Paint3D's camera (which expects
+   up=[0,1,0]) sees the subject right-side up.
+
+Expected: init-img-0.png now shows 2 clean 512x512 renders of the
+upright child from front + back, with visage + torso + legs all
+visible. SD1.5 + ControlNet-depth + IPA produce a coherent texture.
+UV atlas has only 2 large magenta "gaps" (sides, top, bottom)
+instead of 8 tiny silhouettes.
+
 ### Quick Win pack result — NO visible improvement (2026-04-18)
 
 All 3 quick win patches applied:

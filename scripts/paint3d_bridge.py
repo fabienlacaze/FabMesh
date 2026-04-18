@@ -44,8 +44,14 @@ def _glb_to_obj(glb_path: str, obj_path: str) -> None:
 
     Paint3D's mesh loader wants an .obj file with UVs. trimesh handles
     GLB unpack cleanly including the embedded texture.
+
+    Also pre-rotates the mesh Rx(180°) so Paint3D's camera (up=[0,1,0],
+    look_at_height=0.25) sees the subject right-side up. SF3D exports
+    meshes with face pointing to -Z and with an axis convention that
+    makes Paint3D render them head-down in init views.
     """
     import trimesh
+    import numpy as np
     scene = trimesh.load(glb_path, force='mesh')
     if isinstance(scene, trimesh.Scene):
         # pick the first geometry
@@ -53,7 +59,7 @@ def _glb_to_obj(glb_path: str, obj_path: str) -> None:
     # Ensure UVs exist. SF3D output has them; fallback to xatlas.
     if not hasattr(scene.visual, 'uv') or scene.visual.uv is None:
         log('input mesh has no UVs — running xatlas unwrap')
-        import xatlas, numpy as np
+        import xatlas
         v = scene.vertices.astype(np.float32)
         f = scene.faces.astype(np.uint32)
         vmap, idx, uv = xatlas.parametrize(v, f)
@@ -63,6 +69,12 @@ def _glb_to_obj(glb_path: str, obj_path: str) -> None:
             visual=trimesh.visual.TextureVisuals(uv=uv),
             process=False,
         )
+    # Pre-rotate Rx(180°). SF3D mesh has "up" in a different convention
+    # than Paint3D expects. Without this, init views render upside-down.
+    if os.environ.get('FABMESH_PAINT3D_SKIP_ROTATE') != '1':
+        Rx180 = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
+        scene.apply_transform(Rx180)
+        log('pre-rotated mesh Rx(180°) for Paint3D orientation')
     scene.export(obj_path)
     log(f'converted glb -> obj: {obj_path}')
 
