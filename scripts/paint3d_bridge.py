@@ -67,6 +67,43 @@ def _glb_to_obj(glb_path: str, obj_path: str) -> None:
     log(f'converted glb -> obj: {obj_path}')
 
 
+def _run_paint3d_stage2(obj_path: str, stage1_albedo: str,
+                        ref_image: str, prompt: str,
+                        outdir: str) -> str:
+    """Run Paint3D stage 2 (UV-position ControlNet inpaint) on top of
+    stage 1's albedo. Fills the magenta gaps where stage 1's 2 init
+    views didn't cover."""
+    if PAINT3D_DIR not in sys.path:
+        sys.path.insert(0, PAINT3D_DIR)
+    sd_cfg = os.path.join(PAINT3D_DIR, 'controlnet', 'config',
+                          'UV_based_inpaint_template.yaml')
+    render_cfg = os.path.join(PAINT3D_DIR, 'paint3d', 'config',
+                              'train_config_paint3d.py')
+    cmd = [
+        sys.executable,
+        os.path.join(PAINT3D_DIR, 'pipeline_paint3d_stage2.py'),
+        '--sd_config', sd_cfg,
+        '--render_config', render_cfg,
+        '--mesh_path', obj_path,
+        '--texture_path', stage1_albedo,
+        '--prompt', prompt,
+        '--outdir', outdir,
+    ]
+    if ref_image:
+        cmd += ['--ip_adapter_image_path', ref_image]
+    log(f'stage 2 cmd: {" ".join(cmd)}')
+    t0 = time.time()
+    r = subprocess.run(cmd, cwd=PAINT3D_DIR, check=False)
+    log(f'stage 2 done in {time.time()-t0:.1f}s (rc={r.returncode})')
+    if r.returncode != 0:
+        raise RuntimeError(f'Paint3D stage 2 failed: rc={r.returncode}')
+    albedo = os.path.join(outdir, 'res-0', 'albedo.png')
+    if not os.path.exists(albedo):
+        raise RuntimeError(f'Paint3D stage 2 produced no albedo at {albedo}')
+    log(f'stage 2 albedo baked: {albedo}')
+    return albedo
+
+
 def _run_paint3d_stage1(obj_path: str, ref_image: str,
                         prompt: str, negative: str,
                         outdir: str) -> str:
@@ -137,6 +174,8 @@ def main():
     ap.add_argument('--negative', default='', help='negative prompt')
     ap.add_argument('--work-dir', default=None,
                     help='scratch dir (default: sibling of out_glb)')
+    ap.add_argument('--skip-stage2', action='store_true',
+                    help='skip the UV-inpaint stage 2 (faster but leaves magenta gaps)')
     args = ap.parse_args()
 
     for p in (args.in_mesh, args.ref_image):
@@ -158,13 +197,24 @@ def main():
         obj_path = in_mesh
 
     # Step 2: run Paint3D stage 1
-    outdir = os.path.abspath(os.path.join(work, 'paint3d_out'))
+    outdir1 = os.path.abspath(os.path.join(work, 'stage1'))
     ref_abs = os.path.abspath(args.ref_image)
-    _run_paint3d_stage1(obj_path, ref_abs, args.prompt, args.negative, outdir)
+    albedo1 = _run_paint3d_stage1(obj_path, ref_abs, args.prompt,
+                                   args.negative, outdir1)
+    # Stage 1 writes mesh.obj + albedo.png + mesh.mtl in outdir1/res-0/
+    stage1_obj = os.path.join(outdir1, 'res-0', 'mesh.obj')
 
-    # Step 3: pack the textured OBJ back to GLB
-    res_dir = os.path.join(outdir, 'res-0')
-    _pack_obj_to_glb(res_dir, os.path.abspath(args.out_glb))
+    # Step 3: run Paint3D stage 2 (UV-inpaint on top of stage 1)
+    if args.skip_stage2:
+        log('skipping stage 2 (--skip-stage2)')
+        final_res_dir = os.path.join(outdir1, 'res-0')
+    else:
+        outdir2 = os.path.abspath(os.path.join(work, 'stage2'))
+        _run_paint3d_stage2(stage1_obj, albedo1, ref_abs, args.prompt, outdir2)
+        final_res_dir = os.path.join(outdir2, 'res-0')
+
+    # Step 4: pack final textured OBJ back to GLB
+    _pack_obj_to_glb(final_res_dir, os.path.abspath(args.out_glb))
     log(f'DONE: {args.out_glb}')
     print(f'GLB_PATH: {args.out_glb}', flush=True)
 

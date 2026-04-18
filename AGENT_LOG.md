@@ -782,6 +782,28 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Paint3D uses ONLY ONE reference image (user question)
+
+User asked: "dans paint3d on lui donne qu'une vue ?"
+
+YES. `pipeline_paint3d_stage1.py` accepts a single
+`--ip_adapter_image_path <one_file>`, passed via `sd_cfg.*.ip_adapter_image_path`.
+At the ControlNet call (`diffusers_cnet_inpaint.py:56`,
+`diffusers_cnet_img2img.py:56`), exactly one PIL image is opened and
+sent to `pipe(ip_adapter_image=ip_adapter_image, ...)`. Scalar, not a list.
+
+Paint3D renders the mesh from 24 angles ITSELF (views_init, inpaint).
+The back side is HALLUCINATED by SD1.5, constrained only by:
+- ControlNet-depth (geometric structure)
+- IP-Adapter image (style/identity reference — but the ONE image)
+
+So our ip45_back.png is ignored by Paint3D. Options to integrate it:
+1. Composite front+back into a 2x1 grid image before passing to IPA.
+2. Modify diffusers_cnet_*.py to accept a list of IPA images (diffusers
+   supports `ip_adapter_image=[front, back]`).
+3. Use Paint3D's `views_init` override to feed real front+back renders
+   at the right azimuths (more invasive).
+
 ### Paint3D stage 2 integration — STARTING NOW (2026-04-18)
 
 User chose: add stage 2 UV-position ControlNet inpaint to fill the
