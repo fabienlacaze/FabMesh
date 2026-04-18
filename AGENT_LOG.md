@@ -766,6 +766,29 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Texturing AI survey (2026-04-18) — Paint3D is the answer
+
+User asked for a dedicated texturing AI matching: free, local,
+commercial-OK. Agent surveyed 6 options; verdict:
+
+| AI | License | Commercial | VRAM | Fit |
+|----|---------|------------|------|-----|
+| Paint3D | Apache 2.0 | **Yes, no limits** | ~8-12 GB | **WINNER** |
+| TEXTure | MIT | Yes | ~8-12 GB | Fallback, abandonware |
+| Hunyuan3D-Paint | Tencent Community | **NO in EU/UK/KR** | 10 GB | Blocked — user in France |
+| MVEdit | MIT | Yes | **24 GB** | Blocked by 16 GB RTX 5080 |
+| Text2Tex | CC BY-NC-SA | **NO commercial** | 12 GB | Blocked |
+| TripoSR | MIT | Yes | 6-8 GB | Wrong task (image→mesh, not texture) |
+
+**Paint3D winner**: Apache 2.0 (zero legal risk), designed to
+texture existing meshes from reference images, SD1.5 backbone fits
+comfortably in 16 GB VRAM. Github: OpenTexture/Paint3D.
+
+**Plan**: integrate Paint3D as a new texturing backend alongside
+the current texture_project. Input: (SF3D mesh .glb + front photo
++ back photo); output: (retextured .glb with high-quality PBR
+atlas). Keep current bricolage as fallback.
+
 ### Analyse observationnelle de l'atlas D — abandoned
 
 Aborted the atlas-sampling analysis because the user is right that
