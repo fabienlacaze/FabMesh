@@ -467,6 +467,50 @@ maybe the trimesh save lost the PBR material setup. P used the same
 function and DID preserve quality, so the difference between P and
 Q is just whether Rx is included.
 
+### CONFIRMED — trimesh round-trip drops texture data
+
+File sizes:
+- mesh_REAL_D.glb: 1,540,076 bytes (with full SDXL-refined 2048 atlas)
+- mesh_RUN_P.glb: 774,716 bytes (after trimesh round-trip)
+- mesh_RUN_Q.glb: 776,588 bytes (after trimesh round-trip)
+
+Both P and Q lost ~50% of the file — almost certainly the
+baseColorTexture (the SDXL-refined 2048×2048 atlas embedded in the
+binary chunk). trimesh's GLB exporter doesn't preserve embedded
+textures fully; it likely re-encodes them at lower quality or drops
+the high-res atlas in favour of a fallback.
+
+So Run P's "great textures" was a misperception — they were already
+degraded but the upside-down distraction masked it. Q's quality
+drop is real and measurable.
+
+### Run R — REAL_D + Ry(180) via pygltflib (binary-preserving)
+
+New script: scripts/glb_post_rotate.py uses pygltflib to rotate ONLY
+the POSITION + NORMAL accessors in-place. Doesn't touch textures,
+materials, UVs, tangents, or any other binary content. The full GLB
+file size should be preserved.
+
+ip45_2view_to_3d.py now calls glb_post_rotate.py instead of using
+trimesh round-trip. About to test.
+
+### Fix needed
+
+Don't use trimesh for the post-rotation. Need a method that
+preserves the GLB binary structure exactly (textures untouched) and
+only modifies the vertex positions. Options:
+- Patch the GLB binary chunk directly (read header, modify positions
+  buffer, re-write).
+- Use a different lib that preserves PBR materials (pygltflib?
+  gltflib? trimesh with explicit texture re-attachment?).
+- Apply the rotation BEFORE export inside SF3D bridge (modify the
+  mesh before SF3D's own GLB writer runs).
+
+Easiest: patch local_sf3d_bridge.py to apply the post-rotation just
+before its own GLB export step. The bridge already has the mesh in
+trimesh form before export, so applying the rotation there avoids
+the round-trip.
+
 ### Theory for Q's quality loss
 
 The trimesh load/export round-trip: trimesh may handle GLB PBR

@@ -90,22 +90,21 @@ def run_sf3d(source_image: str, mv_dir: str, glb_out: str) -> None:
 
 
 def _post_rotate_glb_xy180(glb_path: str) -> None:
-    """Apply Ry(180) to the mesh in `glb_path` and re-save.
+    """Apply Ry(180) to the mesh in `glb_path` in-place using
+    glb_post_rotate.py (binary-preserving — does NOT round-trip
+    through trimesh, so the SDXL-refined embedded baseColorTexture
+    is preserved).
 
-    Run Q (corrected from Run P): Run P used Rx(180)@Ry(180) which
-    over-rotated the mesh upside-down. The "head toward feet" issue
-    inferred from REAL_D back view was an artifact, not a separate
-    bug. REAL_D has only one rotation bug: side-swap (180° Y).
-    Texture is unchanged because it's UV-mapped to vertices.
+    Runs P+Q showed that trimesh load+apply_transform+export drops
+    ~50% of the GLB file (likely the high-res texture binary).
+    pygltflib-based positions-only rotation keeps everything else.
     """
-    import trimesh
-    import numpy as np
-    log(f'post-rotating mesh Ry(180) -> {glb_path}')
-    scene = trimesh.load(glb_path)
-    Ry = trimesh.transformations.rotation_matrix(np.pi, [0, 1, 0])
-    scene.apply_transform(Ry)
-    scene.export(glb_path)
-    log(f'post-rotation applied, re-saved {glb_path}')
+    rotator = os.path.join(SCRIPTS, 'glb_post_rotate.py')
+    log(f'post-rotating mesh Ry(180) via pygltflib -> {glb_path}')
+    r = subprocess.run([sys.executable, rotator, glb_path, 'y', '180'],
+                       check=False)
+    if r.returncode != 0:
+        raise RuntimeError(f'glb_post_rotate failed: rc={r.returncode}')
 
 
 def main():
