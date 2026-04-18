@@ -172,6 +172,110 @@ views.json (but views.json doesn't carry priority, only azim/elev).
 Cleaner path: skip writing view_0 entirely. texture_project.py
 already logs `WARNING: missing {vpath}, skipping` for missing slots.
 
+### 2-agent deep code analysis — synthesis (2026-04-18)
+
+Two general-purpose agents were run in parallel to read the
+texture_project.py / local_sf3d_bridge.py code in detail and explain
+exactly what differs between runs. Both agents read the AGENT_LOG +
+the scripts and reported with line numbers. Synthesis below.
+
+#### Agent #1 — Diff D vs E
+
+Single-variable diff: `FABMESH_TEXPROJ_SHIFT_SOURCE`. In E, `_src_azim`
+in texture_project.py:401-403 becomes 180.0 (instead of 0.0 in D).
+
+Mechanism of E's "lessivé/floue/moiré":
+1. With shift, input.png and mv/view_0 (front dup) BOTH project to
+   az=180 = the FACE of the rotated mesh.
+2. PRIORITY_WEIGHTS_TUP[(0,0)] = 1.0 (texture_project.py:375) and
+   PRIORITY_WEIGHTS[0.0] = 1.0 → both views compete with **identical
+   priority 1.0** on the face area.
+3. The per-texel arbitration (l 676-689) is **winner-take-all**, NOT
+   blend: `better = w_pixel > weight_arr[ys,xs]`, `np.where(better,
+   sampled, ...)`. Each texel picks ONE source view based on
+   sub-pixel `pt_vis` differences.
+4. The two sources are the same image at 1151px (input HD) vs 1024px
+   (mv resize ip45_2view_to_3d.py:38). With nearest sampling
+   (`astype(int)` l 669), each texel reads a slightly different
+   pixel from each source → ghost-double of features (eyes), dark
+   patches.
+
+Recommended patch (Agent #1, chirurgical):
+- texture_project.py:413-423, after `views.append`, demote any mv
+  slot whose shifted_azim collides with `_src_azim` AND whose
+  priority ties with the source: `prio = 0.5`.
+- Effect: input.png HD (prio 1.0) wins on the face, mv/view_0 (now
+  prio 0.5) only contributes where input is invisible.
+
+Alternative 1-line: change PRIORITY_WEIGHTS_TUP[(0.0, 0.0)] from
+1.0 to 0.85 — but affects other Z123 slots too.
+
+#### Agent #2 — Diff A/C/F/G/H
+
+Reconstructed the EFFECTIVE azimuths after rotation_offset:
+
+| Run | NORM | SHIFT | rot_offset | R_undo+Ry180 | input | mv |
+|-----|------|-------|------------|--------------|-------|----|
+| A   | 0    | 0     | 0          | no           | 0     | 0/90/180/270/0/0 |
+| C   | 0    | 0     | 0          | **yes**      | 0     | 0/90/180/270/0/0 |
+| F   | 1    | 1     | 180        | no           | 180   | all 0 |
+| G   | 1    | 1     | 180        | no           | 180   | (slot0 absent) 270/0/90/180/180 |
+| H   | 1    | 1     | 180        | no           | 180   | 180/270/0/90/180/180 (slot0=back) |
+
+Why C/F/G/H look "flipped 180°" in the locked frontal viewer:
+
+- **C**: NORMALIZE=0 means the mesh is exported with face at -Z.
+  The viewer (camera-orbit at +Z) sees the BACK by default. R_undo
+  is internal to texture_project — it makes the projection sample
+  the right pixels (so C's texture is sharp), but the GEOMETRY
+  exported to the GLB is unchanged. The "flip" is just the viewer
+  showing the back of the mesh. R_undo+Ry180 corrects sample
+  alignment vs camera basis but causes a few-degree feature
+  offset → "deformed face" because the rotation chain
+  `Rx(90)@Ry(-90)@Ry(180)@Ry(-azim)@Rx(elev)` doesn't compose to
+  identity in the photo frame.
+
+- **A**: same -Z geometry as C, but no R_undo patch. So R_undo (which
+  assumes face=+Z normalized frame) maps front-mesh vertices to
+  the gray rembg background area of input.png → samples are
+  background gray → cireux/blanchâtre atlas. 426k texel-holes
+  filled by push-pull blur. The "good placement" of A in early
+  screenshots was a flattering angle, NOT frontal-locked.
+
+- **F/G/H**: NORMALIZE=1 → mesh face at +Z (correct geometry). But
+  the mv content swap (back-only, skip view_0, swap view_0=back)
+  removes the front-discriminating signal at the post-shift
+  azimuths. Multiple competing views at prio ~1.0/0.9 share the
+  same hemisphere → the back image gets painted across the front
+  faces → looks like a flip.
+
+NOT the cause of any flip:
+- xatlas re-pack: UV layout is fixed by SF3D bake before
+  texture_project rasterizes (l 507 `face_uvs = uv[faces]`).
+- Bilateral auto-align: needs `FABMESH_SF3D_AUTOALIGN=1`, never set.
+
+#### Conjoint conclusion: what to ACTUALLY try next
+
+Both agents converge on the same insight: **the cause of E's blur is
+a priority tie at the face azimuth between input.png and mv/view_0,
+combined with winner-take-all per-texel arbitration**. NOT the layout
+change. So we don't need to touch mv/.
+
+Two parallel paths, both safe (no flip risk):
+
+**Path 1 (Agent #1)**: edit texture_project.py to demote mv slots
+that collide with `_src_azim` when SHIFT_SOURCE is on. ~5 lines.
+
+**Path 2 (Agent #2 alt)**: in build_mv_dir, write `view_0.png` as
+fully transparent (`Image.new('RGBA', (1024,1024), (0,0,0,0))`).
+src_alpha=0 in the projection (l 314+324) → contribution nulle, no
+moiré, input HD wins by default. ~1 line in ip45_2view_to_3d.py,
+no texture_project changes.
+
+Path 2 is simpler and risk-free. Will try it as Run I.
+
+---
+
 ### Run H result — also flipped 180°
 
 Run H (NORMALIZE=1 + SHIFT_SOURCE + view_0 = back image, all other
