@@ -766,6 +766,30 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Paint3D integration — STARTING NOW (2026-04-18)
+
+Plan:
+1. Clone github.com/OpenTexture/Paint3D into external/Paint3D.
+2. Install deps into current Python env (torch already installed).
+3. Download weights (HuggingFace: Paint3D checkpoints referenced in
+   the repo README).
+4. Create scripts/paint3d_bridge.py with CLI:
+   `python paint3d_bridge.py <mesh.glb> <image.png> <out.glb>
+   [--prompt "..."]`
+5. Test on logs/child_ip45_2view/mesh_NORMALIZE_1.glb + ip45_front.png.
+6. If result is clean, add a second pass with ip45_back.png to paint
+   the back side.
+7. Integrate into FabMesh Electron UI as new "Paint3D refine" button.
+
+Paint3D uses 2-stage pipeline internally:
+- Stage 1: UV position + depth-aware SDXL diffusion to generate an
+  initial UV texture from the prompt/image.
+- Stage 2: UV-space inpainting to refine seams.
+
+This replaces (or complements) the current texture_project.py
+bricolage. If Paint3D's output is good from the start, we can
+retire the 2-view projection math entirely.
+
 ### Texturing AI survey (2026-04-18) — Paint3D is the answer
 
 User asked for a dedicated texturing AI matching: free, local,
