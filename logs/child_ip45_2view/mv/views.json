@@ -1,0 +1,35 @@
+{
+  "engine": "ip45_2view",
+  "views": [
+    {
+      "azim": 0.0,
+      "elev": 0.0,
+      "label": "front"
+    },
+    {
+      "azim": 90.0,
+      "elev": 0.0,
+      "label": "right_dup_front"
+    },
+    {
+      "azim": 180.0,
+      "elev": 0.0,
+      "label": "back"
+    },
+    {
+      "azim": 270.0,
+      "elev": 0.0,
+      "label": "left_dup_back"
+    },
+    {
+      "azim": 0.0,
+      "elev": 90.0,
+      "label": "top_dup_front"
+    },
+    {
+      "azim": 0.0,
+      "elev": -90.0,
+      "label": "bottom_dup_back"
+    }
+  ]
+}

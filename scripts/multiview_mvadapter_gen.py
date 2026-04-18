@@ -186,10 +186,12 @@ def generate(input_image_path, output_dir, num_steps=50,
     pipe.to(device=device, dtype=dtype)
     pipe.cond_encoder.to(device=device, dtype=dtype)
     pipe.enable_vae_slicing()
-    # CPU offload: default OFF — it adds accelerate forward-hooks that
-    # can drop cross_attention_kwargs mid-forward and break the MV
-    # cache_hidden_states dance. Opt-in only when you hit OOM.
-    if os.environ.get('FABMESH_MVA_CPU_OFFLOAD') == '1':
+    # CPU offload: ON by default. 6-view batched SDXL at 768² overflows
+    # 16 GB VRAM, causing ~100s/step instead of 2-3s (GPU<->RAM
+    # thrashing). Offload accepts the overhead of swapping models
+    # per-block and keeps inference realistic.
+    # Set FABMESH_MVA_CPU_OFFLOAD=0 to disable (needs >20 GB VRAM).
+    if os.environ.get('FABMESH_MVA_CPU_OFFLOAD', '1') == '1':
         try:
             pipe.enable_model_cpu_offload()
             log('model CPU offload enabled')

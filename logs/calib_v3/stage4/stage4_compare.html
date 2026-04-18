@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Stage 4 — Expected vs Got</title></head>
+<body style="font-family:Segoe UI,sans-serif; background:#111; color:#ddd; padding:18px;">
+  <h2>Stage 4 — UV Projection Calibration</h2>
+  <div style="margin-bottom:14px; padding:10px; background:#1a1a1a; border-radius:4px;">
+    <b>Result:</b> 1/6 axes correct &nbsp;·&nbsp; pass threshold sim &ge; 0.60
+  </div>
+  <table style="border-collapse:collapse; width:100%;">
+    <thead>
+      <tr style="background:#222; color:#aaa; text-align:left;">
+        <th style="padding:8px;">Axis</th>
+        <th style="padding:8px;">Expected (GT)</th>
+        <th style="padding:8px;">Got (pipeline)</th>
+        <th style="padding:8px;">Similarity</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">FRONT (F)</td>
+          <td style="padding:4px;"><img src="../../../images/_calibration/ref_0_perfect_axes/front.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="stage4_front.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:#c33; font-family:monospace;">sim 0.508<br>FAIL</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">BACK (B)</td>
+          <td style="padding:4px;"><img src="../../../images/_calibration/ref_0_perfect_axes/back.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="stage4_back.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:#c33; font-family:monospace;">sim 0.529<br>FAIL</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">RIGHT (R)</td>
+          <td style="padding:4px;"><img src="../../../images/_calibration/ref_0_perfect_axes/right.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="stage4_right.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:#3a3; font-family:monospace;">sim 0.621<br>PASS</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">LEFT (L)</td>
+          <td style="padding:4px;"><img src="../../../images/_calibration/ref_0_perfect_axes/left.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="stage4_left.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:#c33; font-family:monospace;">sim 0.500<br>FAIL</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">TOP (T)</td>
+          <td style="padding:4px;"><img src="../../../images/_calibration/ref_0_perfect_axes/top.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="stage4_top.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:#c33; font-family:monospace;">sim 0.488<br>FAIL</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; font-weight:bold; color:#ccc;">BOTTOM (D)</td>
+          <td style="padding:4px;"><img src="../../../images/_calibration/ref_0_perfect_axes/bottom.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:4px;"><img src="stage4_bottom.png" width="200" style="border:1px solid #333;"></td>
+          <td style="padding:8px; color:#c33; font-family:monospace;">sim 0.407<br>FAIL</td>
+        </tr></tbody>
+  </table>
+</body></html>

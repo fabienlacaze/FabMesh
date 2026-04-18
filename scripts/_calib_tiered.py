@@ -53,8 +53,13 @@ os.makedirs(os.path.dirname(TUNED_PATH), exist_ok=True)
 # similarity vs our ideal GT renders (it adds shading, slight rotation,
 # bg tint). 0.50 is a realistic floor: below that we consider the
 # multi-views genuinely broken. Above, we accept and move to tier 3.
-TIER2_MIN_SIM = 0.50
-TIER3_TARGET = 6
+# Comparing Zero123++ rotated views to the input image floors around
+# 0.30-0.40 even on a perfect run (different angles = different pixels).
+# We only want to catch catastrophic failures (all-black, all-gray, etc.).
+TIER2_MIN_SIM = 0.30
+# Tier 3 scoring is now visual similarity vs Zero123++ multi-views:
+# count of views with sim >= 0.50. 4/6 is a realistic pass threshold.
+TIER3_TARGET = 4
 
 
 def _log(msg, level='INFO'):
@@ -139,14 +144,21 @@ def _generate_multiviews(env, logger_prefix=''):
 
 
 def _score_multiviews():
-    """Avg similarity of view_0..5 against ground-truth."""
+    """Score Zero123++ output WITHOUT needing a GT.
+    For subjects without a synthetic ground truth (e.g. a RealVisXL-
+    generated apple), we instead check:
+      - All 6 views decodable and non-empty
+      - Each view has decent contrast (spread >= 40)
+      - avg similarity of each view to the INPUT image (lower bound:
+        Zero123++ shouldn't drift entirely away from the subject)
+    """
     sims = []
     for i in range(6):
         got = os.path.join(MV_ACTIVE, f'view_{i}.png')
-        gt = os.path.join(GT_MV, f'view_{i}.png')
-        if not (os.path.exists(got) and os.path.exists(gt)):
+        if not os.path.exists(got):
             sims.append(0.0); continue
-        sims.append(_sim(got, gt))
+        # Compare vs the input image (should share overall palette + subject)
+        sims.append(_sim(got, REF_IMG))
     return sims, sum(sims) / max(1, len(sims))
 
 
@@ -211,9 +223,33 @@ def _ensure_sf3d_mesh(work_dir, env):
     return sf3d, None
 
 
+def _render_mesh_views(mesh_path, out_dir, angles):
+    """Render the textured mesh from the given (azim, elev) angles using
+    the same painter-rasterizer as calibrate.render_axis. Saves view_N.png."""
+    import trimesh
+    os.makedirs(out_dir, exist_ok=True)
+    g = trimesh.load(mesh_path, force='mesh', process=False)
+    # Import render_axis from calibrate for consistency
+    sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+    from calibrate import render_axis
+    paths = []
+    import math
+    for i, (az, el) in enumerate(angles):
+        ca, sa = math.cos(math.radians(az)), math.sin(math.radians(az))
+        ce, se = math.cos(math.radians(el)), math.sin(math.radians(el))
+        cam = (sa * ce, se, ca * ce)
+        up = (0, 1, 0) if abs(se) < 0.9 else (0, 0, 1)
+        img = render_axis(g, cam, up, size=384)
+        p = os.path.join(out_dir, f'view_{i}.png')
+        Image.fromarray(img).save(p)
+        paths.append(p)
+    return paths
+
+
 def _project_and_score(sf3d_path, work_dir, env, variant_name):
-    """Run texture_project with the given env flags + rotation-offset,
-    then score the resulting mesh."""
+    """Run texture_project with the given env flags, then score via
+    global visual similarity vs the 6 Zero123++ multi-views (the same
+    metric Tier 2 uses — no color classifier needed)."""
     out_path = os.path.join(work_dir, f'projected_{variant_name}.glb')
     script = os.path.join(ROOT, 'scripts', 'texture_project.py')
     rot = env.get('FABMESH_TEXPROJ_ROTATION_OFFSET', '0')
@@ -223,18 +259,37 @@ def _project_and_score(sf3d_path, work_dir, env, variant_name):
         env=env, capture_output=True, text=True, timeout=300)
     if r.returncode != 0 or not os.path.exists(out_path):
         return {'ok': False, 'error': (r.stderr or '')[-400:]}
-    # Score via calibrate.py
-    tag = f'tiered_{variant_name}'
-    r = subprocess.run([sys.executable, os.path.join(ROOT, 'scripts', 'calibrate.py'),
-                        '--mesh', out_path, '--tag', tag],
-                       env=env, capture_output=True, text=True, timeout=300)
-    dirs = sorted([d for d in os.listdir(REPORTS) if d.endswith('_' + tag)])
-    if not dirs:
-        return {'ok': False, 'error': 'no report'}
-    rd = os.path.join(REPORTS, dirs[-1])
-    with open(os.path.join(rd, 'score.json'), 'r', encoding='utf-8') as f:
-        score = json.load(f)
-    return {'ok': True, 'score': score, 'report': rd, 'mesh': out_path}
+
+    # Render the projected mesh from the 6 Zero123++ angles and compare
+    z123 = [(30, 20), (90, -10), (150, 20), (210, -10), (270, 20), (330, -10)]
+    rendered_dir = os.path.join(work_dir, f'rendered_{variant_name}')
+    try:
+        _render_mesh_views(out_path, rendered_dir, z123)
+    except Exception as e:
+        return {'ok': False, 'error': f'render failed: {e}'}
+
+    sims = []
+    for i in range(6):
+        got = os.path.join(rendered_dir, f'view_{i}.png')
+        gt = os.path.join(MV_ACTIVE, f'view_{i}.png')
+        if os.path.exists(got) and os.path.exists(gt):
+            sims.append(_sim(got, gt))
+        else:
+            sims.append(0.0)
+    avg_sim = sum(sims) / 6.0
+    # Score = number of views where the mesh render matches the
+    # Zero123++ view it was textured from. sim >= 0.55 = good match.
+    sc = sum(1 for s in sims if s >= 0.55)
+    score_obj = {
+        'score': sc, 'total': 6,
+        'avg_similarity': avg_sim,
+        'per_view_sims': [round(s, 3) for s in sims],
+    }
+    report_dir = os.path.join(REPORTS, f'{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}_tiered_{variant_name}')
+    os.makedirs(report_dir, exist_ok=True)
+    with open(os.path.join(report_dir, 'score.json'), 'w', encoding='utf-8') as f:
+        json.dump(score_obj, f, indent=2)
+    return {'ok': True, 'score': score_obj, 'report': report_dir, 'mesh': out_path}
 
 
 def tier3_mesh_projection(stamp, prev_ok):

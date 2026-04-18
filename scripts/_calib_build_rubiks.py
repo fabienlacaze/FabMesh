@@ -261,34 +261,15 @@ def main():
     mesh.export(gt_path)
     print(f'  mesh  -> {gt_path}')
 
-    # Reference image: trimesh's built-in scene.save_image() uses pyglet
-    # with proper z-buffering. Falls back to our painter's algo if it
-    # fails (headless environments, missing GL).
-    print('[rubiks] rendering reference image (3/4 view)...')
+    # Reference image: 3/4 view showing front + right + top so Zero123++
+    # and SF3D actually see three distinct colored faces. A pure front
+    # view (all red) would give them no information about the other sides
+    # and Zero123++ would hallucinate a fully-red cube.
+    print('[rubiks] rendering reference image (3/4 view, painter rasterizer)...')
     ref_path = os.path.join(IMG_DIR, 'ref_rubiks.png')
-    ref = None
-    try:
-        scene = trimesh.Scene(mesh)
-        # Orbit camera so we see front + right + top
-        scene.set_camera(angles=(math.radians(25), math.radians(35), 0),
-                         distance=max(mesh.bounds[1] - mesh.bounds[0]) * 2.2,
-                         fov=(40, 40))
-        png = scene.save_image(resolution=(768, 768), visible=False,
-                               background=[240, 240, 240, 255])
-        if png:
-            with open(ref_path, 'wb') as f:
-                f.write(png)
-            ref = Image.open(ref_path)
-            print('  used trimesh.Scene.save_image (GL path)')
-    except Exception as e:
-        print(f'  trimesh scene render failed: {type(e).__name__}: {str(e)[:80]}')
-    if ref is None:
-        # Fallback: pure front ortho (SF3D can still handle a single-face
-        # cube input, and the multi-views fill in the rest).
-        print('  falling back to pure front ortho view')
-        ref = render_view(mesh, atlas, azim_deg=0, elev_deg=0, size=768,
-                          margin=0.78, bg=(240, 240, 240))
-        ref.save(ref_path)
+    ref = render_view(mesh, atlas, azim_deg=35, elev_deg=25, size=768,
+                      margin=0.78, bg=(240, 240, 240))
+    ref.save(ref_path)
     print(f'  ref   -> {ref_path}')
 
     # Also save a pure-front ortho as the "input" Zero123++ will use

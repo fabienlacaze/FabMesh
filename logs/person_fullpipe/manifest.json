@@ -1,0 +1,24 @@
+{
+  "project": "person_fullpipe",
+  "created": "2026-04-17T14:01:03Z",
+  "fabmesh_commit": "3d27ee9",
+  "entries": [
+    {
+      "kind": "image_gen",
+      "path": "logs/person_fullpipe\\ref_0.png",
+      "engine": "local-realvis",
+      "model": "SG161222/RealVisXL_V4.0",
+      "prompt": "young man standing, T-pose, blue jeans and white t-shirt, photorealistic, full body, plain white background, studio lighting, sharp focus",
+      "full_prompt": "young man standing, T-pose, blue jeans and white t-shirt, photorealistic, full body, plain white background, studio lighting, sharp focus, arms extended straight out horizontally to the sides, legs apart shoulder-width, standing upright, symmetrical pose, perfectly centered, strict front view, orthographic-like flat view, looking directly at the camera, no tilt, no rotation, single character isolated on plain white background, studio lighting, sharp focus, ultra detailed, 8k, no text, no watermark, full body visible, feet on the ground",
+      "negative_prompt": "dynamic pose, action pose, combat stance, fighting, running, jumping, crouching, bent arms, bent legs, tilted head, twisted torso, asymmetric, side view, three-quarter view, profile view, back view, perspective distortion, foreshortening, blurry, low quality, text, watermark, signature, deformed, extra limbs, bad anatomy, cropped, worst quality",
+      "steps": 8,
+      "guidance_scale": 7.0,
+      "seed": 1776434444,
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1041905,
+      "ts": 1776434463359,
+      "iso": "2026-04-17T14:01:03Z"
+    }
+  ]
+}

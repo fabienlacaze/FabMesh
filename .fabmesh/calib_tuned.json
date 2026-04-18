@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-04-17T11:04:15.975280",
+  "tier2_env": {
+    "FABMESH_MV_IDENTITY_HARMONIZE": "1"
+  },
+  "tier3_env": {
+    "FABMESH_TEXPROJ_FLIP_AZIM": "False",
+    "FABMESH_TEXPROJ_FLIP_ELEV": "False",
+    "FABMESH_TEXPROJ_FLIP_CAMPOS_AZIM": "False",
+    "FABMESH_TEXPROJ_ROTATION_OFFSET": "0"
+  }
+}

@@ -9,7 +9,8 @@
       "Bash(wsl -d Ubuntu -- bash -c \"cd /tmp && /root/TRELLIS.2/.venv/bin/pip install --force-reinstall --no-deps git+https://github.com/NVlabs/nvdiffrast.git > /tmp/nvdiff_build.log 2>&1; tail -40 /tmp/nvdiff_build.log\")",
       "Bash(wsl -d Ubuntu -- bash -lc '/root/TRELLIS.2/.venv/bin/python -c \" *)",
       "Bash(git commit *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(start \"\" \"http://localhost:8765/compare.html\")"
     ],
     "additionalDirectories": [
       "\\\\wsl.localhost\\Ubuntu\\root\\TRELLIS.2\\trellis2\\modules\\sparse"
@@ -22,8 +23,8 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(*git commit*)",
-            "command": "LOG='c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/AGENT_LOG.md'; input=$(cat); cmd=$(echo \"$input\" | grep -o '\"command\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | sed 's/.*:[[:space:]]*\"//;s/\"$//'); if echo \"$cmd\" | grep -q 'git commit'; then now=$(date +%s); mtime=$(stat -c %Y \"$LOG\" 2>/dev/null || echo 0); age=$((now - mtime)); if [ \"$age\" -gt 3600 ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"AGENT_LOG.md pas mis a jour (derniere modif il y a %ds). Ajoute une entree decrivant ce commit avant de re-tenter.\"}}' \"$age\"; fi; fi"
+            "command": "LOG='c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/AGENT_LOG.md'; input=$(cat); cmd=$(echo \"$input\" | grep -o '\"command\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | sed 's/.*:[[:space:]]*\"//;s/\"$//'); if echo \"$cmd\" | grep -q 'git commit'; then now=$(date +%s); mtime=$(stat -c %Y \"$LOG\" 2>/dev/null || echo 0); age=$((now - mtime)); if [ \"$age\" -gt 3600 ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"AGENT_LOG.md pas mis a jour (derniere modif il y a %ds). Ajoute une entree decrivant ce commit avant de re-tenter.\"}}' \"$age\"; fi; fi",
+            "if": "Bash(*git commit*)"
           }
         ]
       }

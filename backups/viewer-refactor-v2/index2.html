@@ -1,0 +1,1733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: blob:; script-src 'self' 'unsafe-inline' file: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: http://127.0.0.1:* https:; connect-src 'self' file: blob: http://127.0.0.1:*">
+  <title>FabMesh</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/index2.css">
+</head>
+<body class="advanced-mode">
+  <div id="drop-overlay" class="hidden">
+    <div class="drop-overlay-msg">
+      <div class="drop-overlay-icon">&#11015;</div>
+      <div>Drop image or mesh file to import</div>
+    </div>
+  </div>
+  <div id="app2">
+    <header id="topbar">
+      <div class="topbar-left">
+        <button id="back-to-projects" class="icon-btn" title="Back to projects">&#8592;</button>
+        <h1 class="brand">FabMesh</h1>
+        <span id="breadcrumb"></span>
+      </div>
+      <div class="topbar-right">
+        <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
+        <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
+        <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
+      </div>
+    </header>
+
+    <!-- ============================================================
+         PAGE 1: PROJECTS HOME (grid of project cards)
+         ============================================================ -->
+    <section id="page-projects" class="page">
+      <div class="page-header" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <h2 style="margin:0; white-space:nowrap;">Your projects</h2>
+        <div style="flex:1; display:flex; justify-content:center;">
+          <input type="text" id="project-search" placeholder="&#128269; Search projects..." style="width:100%; max-width:350px; padding:8px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:20px; font-size:13px; outline:none;" />
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <button id="btn-new-project" class="primary-btn" style="white-space:nowrap;">+ New project</button>
+          <button id="btn-import-image" class="ghost-btn" style="white-space:nowrap;">&#128230; Import</button>
+        </div>
+      </div>
+      <div id="projects-grid" class="projects-grid">
+        <!-- project cards injected here -->
+      </div>
+      <div id="projects-empty" class="empty-state hidden">
+        <h3>No projects yet</h3>
+        <p>Create your first 3D character in 3 simple steps.</p>
+        <button class="primary-btn" onclick="document.getElementById('btn-new-project').click()">+ Create a project</button>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         PAGE 2: PROJECT WORKSPACE (3 vertical step cards)
+         ============================================================ -->
+    <section id="page-workspace" class="page hidden">
+      <div class="workspace-grid">
+        <!-- STEP 1: IMAGE -->
+        <article class="step-card" id="step-card-image">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="1">1</span>
+            <h3>Image</h3>
+            <span class="step-status" id="step1-status">Pending</span>
+          </header>
+          <div class="step-card-body two-stage">
+            <!-- ===== STAGE: CREATE NEW ===== -->
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Generate a new image from a text prompt</span>
+              </summary>
+              <div class="stage-body">
+                <div class="form-row">
+                  <label>Engine</label>
+                  <select id="ws-engine">
+                    <option value="local-flux" selected>RealVis XL (local)</option>
+                    <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Asset type</label>
+                  <select id="ws-asset-type">
+                    <option value="character" selected>Character / Unit (RTS, RPG)</option>
+                    <option value="building">Building / Structure</option>
+                    <option value="vehicle">Vehicle</option>
+                    <option value="weapon">Weapon</option>
+                    <option value="prop">Prop / Item</option>
+                    <option value="creature">Creature / Beast</option>
+                    <option value="environment">Environment piece</option>
+                    <option value="custom">Custom (no preset)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Style</label>
+                  <select id="ws-asset-style">
+                    <option value="realistic" selected>Realistic</option>
+                    <option value="stylized">Stylized (mid-poly)</option>
+                    <option value="lowpoly">Low-poly</option>
+                    <option value="cartoon">Cartoon</option>
+                    <option value="anime">Anime</option>
+                    <option value="pixelart">Pixel art</option>
+                    <option value="painterly">Painterly</option>
+                    <option value="pbr">PBR (high detail)</option>
+                    <option value="voxel">Voxel</option>
+                    <option value="custom">Custom (no preset)</option>
+                  </select>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                  <label>Describe your asset</label>
+                  <div style="display:flex; gap:4px;">
+                    <button id="ws-copy-prompt" class="ghost-btn" style="font-size:11px; padding:2px 8px;" title="Copy prompt to clipboard">&#128203; Copy</button>
+                    <button id="ws-enhance-prompt" class="ghost-btn" style="font-size:11px; padding:2px 8px;" title="Enhance the prompt with style and quality keywords">&#10024; Enhance</button>
+                  </div>
+                </div>
+                <textarea id="ws-prompt" rows="3" placeholder="An orc warrior with leather armor..."></textarea>
+                <div class="form-row">
+                  <label>Count</label>
+                  <select id="ws-count">
+                    <option value="1" selected>1</option>
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                    <option value="6">6</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>Quality</label>
+                  <input type="range" id="ws-quality" min="10" max="60" step="2" value="30" style="flex:1; accent-color: var(--accent);" />
+                  <span id="ws-quality-val" style="min-width: 90px; font-size: 11px; color: var(--text-2); text-align: right;">30 steps</span>
+                </div>
+                <div class="form-row check-row" id="ws-img-buildstages-row">
+                  <label class="inline-check">
+                    <input type="checkbox" id="ws-img-buildstages" />
+                    Construction stages (3 progressive versions)
+                  </label>
+                </div>
+                <div class="form-row check-row">
+                  <label class="inline-check">
+                    <input type="checkbox" id="ws-auto-multiview" checked />
+                    Auto Multi-Views (6 views for 3D texturing, ~70s)
+                  </label>
+                </div>
+                <button id="ws-generate-image" class="primary-btn">Generate</button>
+              </div>
+            </details>
+
+            <!-- ===== STAGE: EDIT SELECTED ===== -->
+            <details class="stage stage-edit" open>
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a version, preview it, modify or convert</span>
+              </summary>
+              <div class="stage-body stage-edit-body">
+                <div class="step-preview-col">
+                  <div class="step-card-preview" id="step1-preview">
+                    <div class="preview-placeholder">No image yet</div>
+                    <button id="ws-image-expand-btn" class="preview-expand-btn hidden" title="View image fullscreen">&#x26F6;</button>
+                    <button id="ws-img-prev" class="nav-arrow nav-arrow-left hidden" title="Previous version">&#10094;</button>
+                    <button id="ws-img-next" class="nav-arrow nav-arrow-right hidden" title="Next version">&#10095;</button>
+                    <div id="ws-img-counter" class="nav-counter hidden"></div>
+                    <!-- Multi-view face selector (shown when multi-views are generated) -->
+                    <div id="ws-multiview-bar" class="multiview-bar hidden">
+                      <button data-view="front" class="mv-btn mv-active" title="Front 0°">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="1" x2="9" y2="17" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/><line x1="1" y1="9" x2="17" y2="9" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg>
+                        <span>0°</span>
+                      </button>
+                      <button data-view="right" class="mv-btn" title="Right 90°">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="6" y1="1" x2="1" y2="6" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg>
+                        <span>90°</span>
+                      </button>
+                      <button data-view="back" class="mv-btn" title="Back 180°">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="9" x2="17" y2="9" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg>
+                        <span>180°</span>
+                      </button>
+                      <button data-view="left" class="mv-btn" title="Left 270°">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="1" x2="17" y2="6" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg>
+                        <span>270°</span>
+                      </button>
+                      <button data-view="top" class="mv-btn" title="Top (elev +90)">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 4 9 L 9 4 L 14 9" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+                        <span>TOP</span>
+                      </button>
+                      <button data-view="bottom" class="mv-btn" title="Bottom (elev -90)">
+                        <svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 4 9 L 9 14 L 14 9" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+                        <span>BOT</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div id="ws-image-filename" class="viewer-filename"></div>
+                  <div id="ws-image-actions" class="use-for-bar hidden" style="display:flex; gap:8px; justify-content:center; margin-top:6px;">
+                    <button id="ws-copy-prompt-btn" class="ghost-btn" title="Copy the prompt used to generate this image">&#128203; Copy prompt</button>
+                  </div>
+                  <div id="ws-use-for-3d-bar" class="use-for-bar hidden">
+                    <button id="ws-use-for-3d-btn" class="primary-btn">Use this image for 3D &rarr;</button>
+                  </div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-image-versions" class="versions-strip"></div>
+                  <div class="step-tools-scroll">
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">File</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-export-img-btn" class="ghost-btn tool-btn">&#128190; Export image</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">AI tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-modify-btn" class="ghost-btn tool-btn">&#9998; Modify</button>
+                        <button id="ws-autoinpaint-btn" class="ghost-btn tool-btn">&#129668; Auto Inpaint</button>
+                        <button id="ws-removebg-btn" class="ghost-btn tool-btn">&#9986; Remove BG</button>
+                        <button id="ws-resolution-btn" class="ghost-btn tool-btn">&#128300; Resolution</button>
+                        <div class="style-dropdown" style="position:relative;">
+                          <button id="ws-style-btn" type="button" class="ghost-btn tool-btn" style="width:100%; text-align:left; display:flex; align-items:center; justify-content:space-between;">
+                            <span id="ws-style-label">&#127912; Style...</span>
+                            <span style="opacity:0.6;">&#9662;</span>
+                          </button>
+                          <div id="ws-style-menu" class="hidden" style="position:absolute; top:100%; left:0; right:0; margin-top:4px; background:#000; border:1px solid var(--border); border-radius:var(--radius-sm); z-index:1000; max-height:320px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.6);">
+                            <div class="style-option" data-value="anime style, cel shading, vibrant colors">Anime</div>
+                            <div class="style-option" data-value="cartoon style, bold outlines, flat colors">Cartoon</div>
+                            <div class="style-option" data-value="low-poly 3D art, flat shaded, geometric">Low-poly</div>
+                            <div class="style-option" data-value="pixel art, 16-bit retro, limited palette">Pixel art</div>
+                            <div class="style-option" data-value="painterly, brushstrokes, oil painting">Painterly</div>
+                            <div class="style-option" data-value="PBR materials, ultra detailed, 8k textures">PBR HD</div>
+                            <div class="style-option" data-value="voxel art, blocky 3D, cubic geometry">Voxel</div>
+                            <div class="style-option" data-value="realistic style, photorealistic, sharp details">Realistic</div>
+                          </div>
+                        </div>
+                        <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
+                        <button id="ws-symmetrize-auto-btn" class="ghost-btn tool-btn">&#8651; Sym. Auto</button>
+                        <button id="ws-multiview-btn" class="ghost-btn tool-btn">&#128065; Multi-Views</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">Manual tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-clone-btn" class="ghost-btn tool-btn">&#128203; Clone Stamp</button>
+                        <button id="ws-mask-btn" class="ghost-btn tool-btn">&#9999; Draw Mask</button>
+                        <button id="ws-crop-btn" class="ghost-btn tool-btn">&#9986; Crop</button>
+                        <button id="ws-brightness-btn" class="ghost-btn tool-btn">&#9728; Brightness</button>
+                        <button id="ws-picker-btn" class="ghost-btn tool-btn">&#128167; Color Pick</button>
+                        <button id="ws-blur-btn" class="ghost-btn tool-btn">&#128168; Blur Brush</button>
+                        <button id="ws-symmetrize-btn" class="ghost-btn tool-btn">&#8651; Symmetrize</button>
+                        <button id="ws-paint-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </article>
+
+        <!-- STEP 2: 3D MESH -->
+        <article class="step-card disabled" id="step-card-mesh">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="2">2</span>
+            <h3>3D Mesh</h3>
+            <span class="step-status" id="step2-status">Pending</span>
+          </header>
+          <div class="step-card-body two-stage">
+            <!-- ===== STAGE: CREATE NEW ===== -->
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Convert the selected image into a 3D mesh</span>
+              </summary>
+              <div class="stage-body stage-create-with-source">
+                <div class="stage-create-form">
+                  <div class="form-row">
+                    <label>Engine</label>
+                    <select id="ws-3d-engine">
+                      <option value="sf3d" selected>Stable Fast 3D (local)</option>
+                      <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label>Texture</label>
+                    <select id="ws-3d-quality">
+                      <option value="draft">512 px</option>
+                      <option value="standard">1024 px</option>
+                      <option value="high" selected>2048 px</option>
+                      <option value="ultra">4096 px</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label>Target triangles</label>
+                    <select id="ws-3d-triangles">
+                      <option value="500">500 (ultra low-poly)</option>
+                      <option value="1000">1K (low-poly stylized)</option>
+                      <option value="3000">3K (mobile game)</option>
+                      <option value="5000">5K (mobile HD)</option>
+                      <option value="0" selected>~23K (SF3D native, best texture)</option>
+                      <option value="20k">~20K</option>
+                      <option value="30k">~30K</option>
+                      <option value="1">~50K (indie game)</option>
+                      <option value="75k">~75K</option>
+                      <option value="100k">~100K</option>
+                      <option value="150k">~150K</option>
+                      <option value="2">~200K (UE5 Nanite)</option>
+                      <option value="250k">~250K</option>
+                      <option value="300k">~300K</option>
+                      <option value="500k">~500K</option>
+                      <option value="3">~800K (cinematic)</option>
+                      <option value="1m">~1M</option>
+                      <option value="4">~3M (film / VFX)</option>
+                    </select>
+                  </div>
+                  <div id="ws-3d-quality-hint" class="form-hint">~200K triangles · 1024 px texture</div>
+                  <div class="form-hint" style="margin-top:2px;">Texture is baked by SF3D (GPU). Triangles are added via subdivision (CPU, no extra VRAM).</div>
+                  <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (SF3D micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
+                  <div class="form-row check-row">
+                    <label class="inline-check">
+                      <input type="checkbox" id="ws-3d-buildstages" />
+                      Construction stages (3 versions)
+                    </label>
+                  </div>
+                  <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
+                </div>
+                <div class="stage-create-source">
+                  <div class="stage-source-label">Source image for 3D</div>
+                  <div id="ws-3d-source-preview" class="stage-source-img">
+                    <div class="preview-placeholder">No image selected</div>
+                  </div>
+                  <div id="ws-3d-source-filename" class="viewer-filename"></div>
+                </div>
+              </div>
+            </details>
+
+            <!-- ===== STAGE: EDIT SELECTED ===== -->
+            <details class="stage stage-edit" open>
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a mesh version, preview, refine or export</span>
+              </summary>
+              <div class="stage-body stage-edit-body">
+                <div class="step-preview-col">
+                  <div class="step-card-preview" id="step2-preview">
+                    <canvas id="ws-mesh-canvas"></canvas>
+                    <div class="preview-placeholder" id="step2-placeholder">No mesh yet</div>
+                    <button id="ws-mesh-expand-btn" class="preview-expand-btn hidden" title="View 3D fullscreen">&#x26F6;</button>
+                    <div id="ws-mesh-toolbar" class="mesh-toolbar hidden">
+                      <button data-act="reset" title="Reset camera">&#10227;</button>
+                      <select data-act="view" title="Camera view">
+                        <option value="iso" selected>Iso</option>
+                        <option value="front">Front</option>
+                        <option value="back">Back</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                        <option value="top">Top</option>
+                        <option value="bottom">Bottom</option>
+                      </select>
+                      <select data-act="pivot" title="Pivot point">
+                        <option value="bottom" selected>Pivot: bottom</option>
+                        <option value="center">Pivot: center</option>
+                        <option value="top">Pivot: top</option>
+                      </select>
+                      <button data-act="pivot-show" title="Show pivot axes">&#9737;</button>
+                      <button data-act="wire" title="Wireframe">Wire</button>
+                      <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
+                      <button data-act="grid" class="active" title="Grid">Grid</button>
+                      <button data-act="xray" title="X-Ray (semi-transparent mesh)">X-Ray</button>
+                      <select data-act="bg" title="Background">
+                        <option value="dark" selected>Dark</option>
+                        <option value="studio">Studio</option>
+                        <option value="black">Black</option>
+                        <option value="gray">Gray</option>
+                      </select>
+                      <button data-act="shadows" title="Toggle shadows">Shadows</button>
+                      <span class="light-label" title="Light intensity">&#9728;</span>
+                      <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
+                    </div>
+                  </div>
+                  <div id="ws-mesh-filename" class="viewer-filename"></div>
+                  <div id="ws-mesh-stats" class="viewer-stats"></div>
+                  <div id="ws-use-for-rig-bar" class="use-for-bar hidden">
+                    <button id="ws-use-for-rig-btn" class="primary-btn">Use this mesh for Rig &rarr;</button>
+                  </div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-mesh-versions" class="versions-strip"></div>
+                  <div class="step-tools-scroll">
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">File</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-mesh-export-btn" class="ghost-btn tool-btn">&#128190; Export...</button>
+                        <button id="ws-mesh-blender-btn" class="ghost-btn tool-btn">&#129704; Open in Blender</button>
+                        <button id="ws-mesh-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">AI tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-mesh-smooth-btn" class="ghost-btn tool-btn">&#10024; Smooth</button>
+                        <button id="ws-mesh-decimate-btn" class="ghost-btn tool-btn">&#9660; Decimate</button>
+                        <button id="ws-mesh-subdivide-btn" class="ghost-btn tool-btn">&#9650; Subdivide</button>
+                        <button id="ws-mesh-fixnormals-btn" class="ghost-btn tool-btn">&#8634; Fix Normals</button>
+                        <button id="ws-mesh-fillholes-btn" class="ghost-btn tool-btn">&#9673; Fill Holes</button>
+                        <button id="ws-mesh-center-btn" class="ghost-btn tool-btn">&#9678; Center</button>
+                        <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn">&#127912; Re-Texture</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">Manual tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-mesh-sculpt-btn" class="ghost-btn tool-btn">&#9997; Sculpt</button>
+                        <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
+                        <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </article>
+
+        <!-- STEP 3: RIG -->
+        <article class="step-card disabled" id="step-card-rig">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="3">3</span>
+            <h3>Rig</h3>
+            <span class="step-status" id="step3-status">Pending</span>
+          </header>
+          <div class="step-card-body two-stage">
+            <!-- ===== STAGE: CREATE NEW ===== -->
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Bind a skeleton to your mesh for animation</span>
+              </summary>
+              <div class="stage-body stage-create-with-source">
+                <div class="stage-create-form">
+                  <div class="form-row">
+                    <label>Engine</label>
+                    <select id="ws-rig-engine">
+                      <option value="unirig" selected>UniRig (local)</option>
+                      <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+                    </select>
+                  </div>
+                  <button id="ws-generate-rig-ai" class="primary-btn" disabled>Generate Rig</button>
+                </div>
+                <div class="stage-create-source">
+                  <div class="stage-source-label">Source mesh for rig</div>
+                  <div id="ws-rig-source-preview" class="stage-source-img stage-source-mesh">
+                    <canvas id="ws-rig-source-canvas"></canvas>
+                    <div class="preview-placeholder" id="ws-rig-source-placeholder">No mesh selected</div>
+                  </div>
+                  <div id="ws-rig-source-filename" class="viewer-filename"></div>
+                </div>
+              </div>
+            </details>
+
+            <!-- ===== STAGE: EDIT SELECTED ===== -->
+            <details class="stage stage-edit" open>
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a rig, test animation or export</span>
+              </summary>
+              <div class="stage-body stage-edit-rig-body">
+                <div class="step-preview-col">
+                  <div id="ws-rig-anim-bar" class="rig-anim-bar hidden">
+                    <select id="ws-rig-anim-select"><option value="">No animation</option></select>
+                    <button id="ws-rig-anim-play" class="ghost-btn">&#9654; Play</button>
+                  </div>
+                  <div class="step-card-preview large" id="step3-preview">
+                    <canvas id="ws-rig-canvas"></canvas>
+                    <div class="preview-placeholder" id="step3-placeholder">No rig yet</div>
+                    <button id="ws-rig-expand-btn" class="preview-expand-btn hidden" title="View rig fullscreen">&#x26F6;</button>
+                    <div id="ws-rig-toolbar" class="mesh-toolbar hidden">
+                      <button data-act="reset" title="Reset camera">&#10227;</button>
+                      <select data-act="view" title="Camera view">
+                        <option value="iso" selected>Iso</option>
+                        <option value="front">Front</option>
+                        <option value="back">Back</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                        <option value="top">Top</option>
+                        <option value="bottom">Bottom</option>
+                      </select>
+                      <select data-act="pivot" title="Pivot point">
+                        <option value="bottom" selected>Pivot: bottom</option>
+                        <option value="center">Pivot: center</option>
+                        <option value="top">Pivot: top</option>
+                      </select>
+                      <button data-act="pivot-show" title="Show pivot axes">&#9737;</button>
+                      <button data-act="wire" title="Wireframe">Wire</button>
+                      <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
+                      <button data-act="grid" class="active" title="Grid">Grid</button>
+                      <button data-act="bones" title="Show skeleton">Bones</button>
+                      <button data-act="xray" title="X-Ray (semi-transparent mesh)">X-Ray</button>
+                      <select data-act="bg" title="Background">
+                        <option value="dark" selected>Dark</option>
+                        <option value="studio">Studio</option>
+                        <option value="black">Black</option>
+                        <option value="gray">Gray</option>
+                      </select>
+                      <button data-act="shadows" title="Toggle shadows">Shadows</button>
+                      <span class="light-label" title="Light intensity">&#9728;</span>
+                      <input type="range" data-act="light" min="0" max="500" value="100" title="Light intensity" />
+                    </div>
+                  </div>
+                  <div id="ws-rig-filename" class="viewer-filename"></div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-rig-versions" class="versions-strip"></div>
+                  <div class="step-tools-scroll">
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">File</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-rig-unreal-btn" class="ghost-btn tool-btn">&#127918; Export to Unreal</button>
+                        <button id="ws-rig-blender-btn" class="ghost-btn tool-btn">&#129704; Edit in Blender</button>
+                        <button id="ws-rig-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">AI tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-rig-reskin-btn" class="ghost-btn tool-btn">&#127814; Re-skin only</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">Manual tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-lm-manual" class="ghost-btn tool-btn">&#9999; Landmarks</button>
+                        <button id="ws-rig-test-btn" class="ghost-btn tool-btn">&#9654; Test animation</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         MODAL: NEW PROJECT
+         ============================================================ -->
+    <div id="modal-new-project" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>New project</h2>
+        <p class="modal-subtitle">Give your project a name and describe what you want to create.</p>
+        <label>Project name</label>
+        <input type="text" id="np-name" placeholder="orc_warrior" />
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label>Asset type</label>
+            <select id="np-asset-type" style="width:100%;">
+              <option value="character" selected>Character / Unit (RTS, RPG)</option>
+              <option value="building">Building / Structure</option>
+              <option value="vehicle">Vehicle</option>
+              <option value="weapon">Weapon</option>
+              <option value="prop">Prop / Item</option>
+              <option value="creature">Creature / Beast</option>
+              <option value="environment">Environment piece</option>
+              <option value="custom">Custom (no preset)</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label>Style</label>
+            <select id="np-asset-style" style="width:100%;">
+              <option value="realistic" selected>Realistic</option>
+              <option value="stylized">Stylized (mid-poly)</option>
+              <option value="lowpoly">Low-poly</option>
+              <option value="cartoon">Cartoon</option>
+              <option value="anime">Anime</option>
+              <option value="pixelart">Pixel art</option>
+              <option value="painterly">Painterly</option>
+              <option value="pbr">PBR (high detail)</option>
+              <option value="voxel">Voxel</option>
+              <option value="custom">Custom (no preset)</option>
+            </select>
+          </div>
+        </div>
+        <label>Description (prompt)</label>
+        <textarea id="np-prompt" rows="3" placeholder="An orc warrior with leather armor, full-body pose..."></textarea>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="np-cancel">Cancel</button>
+          <button class="primary-btn" id="np-create">Create project</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         LANDMARKS FULLSCREEN MODAL
+         ============================================================ -->
+    <div id="lm-fullscreen" class="hidden">
+      <button id="lm-fs-close" title="Close">&#10005;</button>
+      <div id="lm-fs-info" class="viewer-info-overlay"></div>
+      <div class="lm-fs-viewer lm-fs-viewer-split">
+        <div class="lm-fs-subviewer" data-pane="a">
+          <canvas id="lm-fs-canvas" data-pane="a"></canvas>
+          <div class="lm-fs-view-toolbar" data-pane="a">
+            <button data-view="front"  title="Front view">Front</button>
+            <button data-view="back"   title="Back view">Back</button>
+            <button data-view="left"   title="Left side">Left</button>
+            <button data-view="right"  title="Right side">Right</button>
+            <button data-view="top"    title="Top view">Top</button>
+            <button data-view="bottom" title="Bottom view">Bottom</button>
+            <button data-view="iso"    title="Isometric">Iso</button>
+          </div>
+          <div class="lm-fs-pane-label" id="lm-fs-pane-label-a">FRONT</div>
+        </div>
+        <div class="lm-fs-subviewer" data-pane="b">
+          <canvas id="lm-fs-canvas-b" data-pane="b"></canvas>
+          <div class="lm-fs-view-toolbar" data-pane="b">
+            <button data-view="front"  title="Front view">Front</button>
+            <button data-view="back"   title="Back view">Back</button>
+            <button data-view="left"   title="Left side">Left</button>
+            <button data-view="right"  title="Right side">Right</button>
+            <button data-view="top"    title="Top view">Top</button>
+            <button data-view="bottom" title="Bottom view">Bottom</button>
+            <button data-view="iso"    title="Isometric">Iso</button>
+          </div>
+          <div class="lm-fs-pane-label" id="lm-fs-pane-label-b">RIGHT</div>
+        </div>
+        <div id="lm-fs-instruction">Click a body part on the right, then click on either view to place its marker.</div>
+        <div id="lm-fs-undo-toolbar" class="lm-fs-undo-toolbar">
+          <button id="lm-fs-undo" title="Undo (Ctrl+Z)">&#8630; Undo</button>
+          <button id="lm-fs-redo" title="Redo (Ctrl+Y)">&#8631; Redo</button>
+        </div>
+      </div>
+      <div class="lm-fs-side">
+        <div class="lm-fs-side-header">
+          <div class="lm-fs-title">Landmarks</div>
+          <div class="lm-fs-actions">
+            <button id="lm-fs-auto" class="ghost-btn">Auto-detect</button>
+            <button id="lm-fs-guided" class="ghost-btn">&#9758; Guided</button>
+            <button id="lm-fs-clear" class="ghost-btn">Clear all</button>
+          </div>
+          <button id="lm-fs-regen-rig" class="primary-btn lm-fs-regen-btn">&#10227; Re-generate rig with these landmarks</button>
+        </div>
+        <div class="lm-fs-silhouettes">
+          <svg viewBox="0 0 100 200" class="lm-silhouette" id="lm-fs-svg-front" aria-label="Front view">
+            <text x="50" y="14" text-anchor="middle" font-size="9" fill="#7c7c95">FRONT</text>
+            <!-- humanoid front silhouette -->
+            <circle cx="50" cy="38" r="13" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 35 55 L 65 55 L 70 110 L 60 110 L 60 165 L 53 165 L 53 110 L 47 110 L 47 165 L 40 165 L 40 110 L 30 110 Z"
+                  fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1" />
+            <path d="M 35 60 L 18 105 L 22 110 L 38 70 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 65 60 L 82 105 L 78 110 L 62 70 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <!-- Feet (front view = two small ovals at the base of each leg) -->
+            <ellipse cx="42" cy="176" rx="6" ry="3" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <ellipse cx="58" cy="176" rx="6" ry="3" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <g id="lm-fs-svg-front-dots"></g>
+          </svg>
+          <svg viewBox="0 0 100 200" class="lm-silhouette" id="lm-fs-svg-side" aria-label="Side view">
+            <text x="50" y="14" text-anchor="middle" font-size="9" fill="#7c7c95">SIDE</text>
+            <circle cx="52" cy="38" r="13" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 42 55 L 58 55 L 60 110 L 56 110 L 60 165 L 50 165 L 52 110 L 48 110 L 50 165 L 40 165 L 42 110 Z"
+                  fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <path d="M 50 60 L 42 105 L 46 110 L 54 65 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <!-- Foot profile (side view = heel + sole extending forward) -->
+            <path d="M 46 165 L 46 176 L 64 176 L 66 172 L 54 165 Z" fill="rgba(168,85,247,0.15)" stroke="#5a5a7a" stroke-width="1"/>
+            <g id="lm-fs-svg-side-dots"></g>
+          </svg>
+        </div>
+        <div id="lm-fs-list" class="lm-list lm-fs-list"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         3D LIGHTBOX (fullscreen mesh preview)
+         ============================================================ -->
+    <div id="lightbox-3d" class="hidden">
+      <button id="lightbox-3d-close" title="Close">&#10005;</button>
+      <button id="lightbox-3d-prev" class="lightbox-nav prev" title="Previous (←)">&#10094;</button>
+      <button id="lightbox-3d-next" class="lightbox-nav next" title="Next (→)">&#10095;</button>
+      <div id="lightbox-3d-info" class="viewer-info-overlay"></div>
+      <canvas id="lightbox-3d-canvas"></canvas>
+      <div id="lightbox-3d-bottom">
+        <div id="lightbox-3d-filename"></div>
+        <button id="lightbox-3d-use" class="primary-btn">Use this for next step &rarr;</button>
+      </div>
+      <div id="lightbox-3d-toolbar" class="mesh-toolbar lb3d">
+        <button data-act="reset" title="Reset camera">&#10227;</button>
+        <select data-act="view" title="Camera view">
+          <option value="iso" selected>Iso</option>
+          <option value="front">Front</option>
+          <option value="back">Back</option>
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+          <option value="top">Top</option>
+          <option value="bottom">Bottom</option>
+        </select>
+        <select data-act="pivot" title="Pivot point">
+          <option value="bottom" selected>Pivot: bottom</option>
+          <option value="center">Pivot: center</option>
+          <option value="top">Pivot: top</option>
+        </select>
+        <button data-act="pivot-show" title="Show pivot axes">&#9737;</button>
+        <button data-act="lm-show" id="lb3d-lm-btn" class="active hidden" title="Show landmarks">&#11042;</button>
+        <button data-act="wire" title="Wireframe">Wire</button>
+        <button data-act="pbr" title="Toggle PBR / matcap">PBR</button>
+        <button data-act="grid" class="active" title="Grid">Grid</button>
+        <button data-act="bones" id="lb3d-bones-btn" class="hidden" title="Show skeleton">Bones</button>
+        <button data-act="xray" title="X-Ray (semi-transparent mesh)">X-Ray</button>
+        <select data-act="bg" title="Background">
+          <option value="dark" selected>Dark</option>
+          <option value="studio">Studio</option>
+          <option value="black">Black</option>
+          <option value="gray">Gray</option>
+        </select>
+        <button data-act="shadows" title="Toggle shadows">Shadows</button>
+        <input type="range" data-act="light" min="0" max="200" value="100" title="Light intensity" />
+      </div>
+    </div>
+
+    <!-- ============================================================
+         LIGHTBOX (fullscreen image preview)
+         ============================================================ -->
+    <div id="lightbox-2" class="hidden">
+      <button id="lightbox-2-close" title="Close">&#10005;</button>
+      <button id="lightbox-2-prev" class="lightbox-nav prev" title="Previous (←)">&#10094;</button>
+      <button id="lightbox-2-next" class="lightbox-nav next" title="Next (→)">&#10095;</button>
+      <div id="lightbox-2-info" class="viewer-info-overlay"></div>
+      <img id="lightbox-2-img" alt="" />
+      <!-- Tool column on the right side of the lightbox. Each button
+           triggers the same workspace handler, so the tool operates on
+           whichever angle is currently selected (editTarget reads
+           _activeMultiview which stays in sync with the lightbox). -->
+      <div id="lb-toolbox" class="lb-toolbox">
+        <div class="lb-toolbox-group-label">AI TOOLS</div>
+        <button class="lb-tool-btn" data-lb-tool="modify" title="Modify with SDXL">&#128736;&#65039; Modify</button>
+        <button class="lb-tool-btn" data-lb-tool="autoinpaint" title="Auto Inpaint">&#129668; Auto Inpaint</button>
+        <button class="lb-tool-btn" data-lb-tool="removebg" title="Remove background">&#9986;&#65039; Remove BG</button>
+        <button class="lb-tool-btn" data-lb-tool="resolution" title="Change resolution">&#127906; Resolution</button>
+        <button class="lb-tool-btn" data-lb-tool="facefix" title="Fix face details">&#128578; Face Fix</button>
+        <button class="lb-tool-btn" data-lb-tool="symmetry" title="Auto symmetry">&#8646; Sym. Auto</button>
+        <div class="lb-toolbox-group-label">MANUAL</div>
+        <button class="lb-tool-btn" data-lb-tool="mask" title="Draw Mask">&#9999;&#65039; Draw Mask</button>
+        <button class="lb-tool-btn" data-lb-tool="clone" title="Clone Stamp">&#128203; Clone Stamp</button>
+        <button class="lb-tool-btn" data-lb-tool="paint" title="Paint">&#127912; Paint</button>
+        <button class="lb-tool-btn" data-lb-tool="crop" title="Crop">&#9986;&#65039; Crop</button>
+      </div>
+      <!-- Multi-view face selector in lightbox -->
+      <div id="lb-multiview-bar" class="multiview-bar hidden" style="bottom:60px;">
+        <button data-view="front" class="mv-btn mv-active" title="Front 0°"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="1" x2="9" y2="17" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/><line x1="1" y1="9" x2="17" y2="9" stroke="currentColor" stroke-width="0.5" stroke-dasharray="2,2"/></svg><span>0°</span></button>
+        <button data-view="right" class="mv-btn" title="Right 90°"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="6" y1="1" x2="1" y2="6" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg><span>90°</span></button>
+        <button data-view="back" class="mv-btn" title="Back 180°"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="9" x2="17" y2="9" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg><span>180°</span></button>
+        <button data-view="left" class="mv-btn" title="Left 270°"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="1" x2="17" y2="6" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg><span>270°</span></button>
+        <button data-view="top" class="mv-btn" title="Top (elev +90)"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 4 9 L 9 4 L 14 9" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>TOP</span></button>
+        <button data-view="bottom" class="mv-btn" title="Bottom (elev -90)"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 4 9 L 9 14 L 14 9" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>BOT</span></button>
+      </div>
+      <div id="lightbox-2-bottom">
+        <div id="lightbox-2-filename"></div>
+        <button id="lightbox-2-use-3d" class="primary-btn">Use this image for 3D &rarr;</button>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         AUTO INPAINT MODAL (CLIPSeg target + replacement)
+         ============================================================ -->
+    <div id="modal-auto-inpaint" class="modal-overlay hidden">
+      <div class="modal-card modal-card-wide">
+        <h2>Auto Inpaint</h2>
+        <p class="modal-subtitle">CLIPSeg detects what to replace from a text description.</p>
+        <div class="modal-with-image">
+          <div class="modal-image-side">
+            <img id="ai-source-img" alt="" />
+          </div>
+          <div class="modal-form-side">
+            <label>Target (what to find)</label>
+            <input type="text" id="ai-target" placeholder="hat, shirt, background, sword..." />
+            <label>Replace with (empty = remove)</label>
+            <input type="text" id="ai-replace" placeholder="leather helmet, plain background..." />
+            <label>Detection padding <span id="ai-dilate-val" class="slider-val">15px</span></label>
+            <input type="range" id="ai-dilate" min="0" max="40" value="15" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="ai-cancel">Cancel</button>
+          <button class="primary-btn" id="ai-go">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         SETTINGS MODAL
+         ============================================================ -->
+    <div id="modal-settings" class="modal-overlay hidden">
+      <div class="modal-card settings-card">
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <button class="settings-close-x" id="set-close-x" title="Close">&#10005;</button>
+        </div>
+
+        <!-- ═══ CLOUD SERVICES ═══ -->
+        <div class="settings-section-header">Cloud Services</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Meshy.ai</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span class="settings-field-label">API key</span>
+            <input type="password" id="set-meshy-api-key" placeholder="msy_..." autocomplete="off" style="flex:1;" />
+            <button id="set-meshy-test" class="ghost-btn" style="white-space:nowrap; padding:4px 12px;">Test</button>
+          </div>
+          <div class="settings-box-footer">
+            Free &middot; CC-BY 4.0 &middot; <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">meshy.ai/api</a>
+          </div>
+        </div>
+
+        <!-- ═══ AI ASSISTANT ═══ -->
+        <div class="settings-section-header">AI Assistant</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Claude Desktop</div>
+          <div class="settings-box-desc">Let Claude generate batches of assets for you via text commands.</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <button id="set-claude-connect" class="ghost-btn" style="flex:1; padding:6px 12px;">&#129302; Connect to Claude Desktop</button>
+            <button id="set-claude-disconnect" class="ghost-btn danger" style="flex:1; padding:6px 12px; display:none;">Disconnect</button>
+            <span id="set-claude-status" class="settings-status-dot"></span>
+          </div>
+          <div class="settings-box-footer">
+            Free &middot; <a href="https://claude.ai/download" target="_blank" rel="noopener">claude.ai/download</a>
+          </div>
+        </div>
+
+        <div class="settings-box" id="set-control-api-box" style="margin-top:10px;">
+          <div class="settings-box-title">
+            <span id="set-api-dot" style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#666; margin-right:6px; vertical-align:middle;"></span>
+            <span id="set-api-status">Control API · checking...</span>
+          </div>
+          <div class="settings-box-desc" id="set-api-detail" style="font-size:11px; color:var(--text-2);">
+            Local HTTP control plane on 127.0.0.1:7331. Drive FabMesh from scripts (Claude Code, batch generators, CI...).
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:6px; font-size:11px;">
+            <span class="settings-field-label" style="min-width:50px;">Token</span>
+            <input id="set-api-token" type="text" readonly style="flex:1; background:var(--bg-0); border:1px solid var(--border); color:var(--text-2); border-radius:4px; padding:3px 6px; font-size:11px; font-family:monospace;">
+            <button id="set-api-copy-token" class="ghost-btn" style="padding:3px 8px; font-size:11px;">&#128203; Copy</button>
+          </div>
+          <div id="set-api-traffic" style="margin-top:8px; font-size:11px; color:var(--text-2);"></div>
+          <details style="margin-top:6px;">
+            <summary style="cursor:pointer; font-size:10px; color:var(--text-3);">Recent requests</summary>
+            <pre id="set-api-recent" style="margin:4px 0 0 0; padding:6px 8px; background:#000; border-radius:4px; font-size:10px; max-height:140px; overflow:auto; color:#9bbac8; line-height:1.35;"></pre>
+          </details>
+          <div class="settings-box-footer">
+            Free &middot; local &middot; <a href="FABMESH_API.md" id="set-api-docs">FABMESH_API.md</a>
+          </div>
+        </div>
+
+        <!-- ═══ HARDWARE ═══ -->
+        <div class="settings-section-header">Hardware</div>
+        <div class="settings-box" id="set-gpu-card">
+          <div class="settings-box-title" id="set-gpu-name">Loading...</div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">VRAM</span>
+              <span class="gpu-stat-val" id="set-gpu-vram-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="vram">
+              <div class="gpu-bar-fill" id="set-gpu-vram-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-vram-limit" style="left:90%" title="Drag to set max VRAM"></div>
+            </div>
+          </div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">GPU</span>
+              <span class="gpu-stat-val" id="set-gpu-util-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="util">
+              <div class="gpu-bar-fill" id="set-gpu-util-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-util-limit" style="left:95%" title="Drag to set max GPU usage"></div>
+            </div>
+          </div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">Temp</span>
+              <span class="gpu-stat-val" id="set-gpu-temp-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="temp">
+              <div class="gpu-bar-fill" id="set-gpu-temp-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-temp-limit" style="left:80%" title="Drag to set max temperature"></div>
+            </div>
+          </div>
+          <div class="settings-box-hint">Drag markers to set limits. Jobs queue until all limits are met.</div>
+
+          <div class="gpu-stat" style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">RAM</span>
+              <span class="gpu-stat-val" id="set-ram-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="ram">
+              <div class="gpu-bar-fill" id="set-ram-fill"></div>
+              <div class="gpu-bar-limit" id="set-ram-limit" style="left:85%" title="Drag to set max RAM usage"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ PARENTAL CONTROL ═══ -->
+        <div class="settings-section-header">Parental Control</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Content Filter</div>
+          <div class="settings-box-desc">Blocks NSFW, violent, and illegal content in prompts. Disable with a PIN code for unrestricted adult use.</div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+            <span id="parental-status" style="font-size:12px; font-weight:700;"></span>
+            <span style="flex:1;"></span>
+            <button id="parental-toggle" class="ghost-btn" style="padding:4px 12px; font-size:11px;"></button>
+          </div>
+        </div>
+
+        <!-- ═══ SYSTEM ═══ -->
+        <div class="settings-section-header">System</div>
+        <div class="settings-box">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <span class="settings-field-label">Processes</span>
+            <span style="font-size:11px; color:var(--text-2);"><span id="set-python-count">0</span> active &middot; SDXL <span id="set-python-sdxl">stopped</span></span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button id="set-kill-sdxl" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill SDXL</button>
+            <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill Processes</button>
+            <button id="set-kill-all" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill All</button>
+          </div>
+        </div>
+
+        <button id="set-open-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:8px;">&#128193; Open logs folder</button>
+        <button id="set-live-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:6px;">&#128269; Live logs viewer</button>
+
+        <!-- ═══ CALIBRATION ═══ -->
+        <div class="settings-section-header">Calibration</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Pipeline test</div>
+          <div class="settings-box-desc">Generates a textured mesh from the calibration cube and scores how many of the 6 painted faces end up on the correct axis.</div>
+          <div style="margin-top:8px;">
+            <button id="set-calib-diagnose" class="primary-btn" style="width:100%; padding:6px 12px;">&#127919; Run calibration</button>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:6px;">
+            <button id="set-calib-open" class="ghost-btn" style="flex:1; padding:6px 12px;">&#128444;&#65039; Open last report</button>
+            <button id="set-calib-gallery" class="ghost-btn" style="flex:1; padding:6px 12px;">&#127912; Gallery (all runs)</button>
+          </div>
+          <div id="set-calib-status" style="margin-top:10px; font-size:12px; color:var(--text-2);">
+            No run yet.
+          </div>
+          <div id="set-calib-score-row" style="display:none; margin-top:10px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+              <span id="set-calib-score" style="font-size:1.8em; font-weight:bold; padding:4px 14px; border-radius:6px;">0/6</span>
+              <span id="set-calib-similarity" style="font-size:11px; color:var(--text-2);"></span>
+              <span id="set-calib-timestamp" style="font-size:10px; color:var(--text-3); margin-left:auto;"></span>
+            </div>
+            <div id="set-calib-axes" style="display:grid; grid-template-columns:repeat(6,1fr); gap:4px;"></div>
+          </div>
+          <div class="settings-box-footer" style="margin-top:8px;">
+            Ground truth: 6 painted cube faces &middot; <a href="#" id="set-calib-docs">docs</a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CALIBRATION REPORT MODAL (in-app, replaces browser-opened HTML)
+         ============================================================ -->
+    <div id="modal-calib-report" class="modal-overlay hidden" style="z-index:9999;">
+      <div class="modal-card" style="width:92vw; max-width:1100px; max-height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#127919; Calibration report</h2>
+          <button class="settings-close-x" id="calib-report-close" title="Close">&#10005;</button>
+        </div>
+        <div id="calib-report-body" style="padding:16px; overflow:auto; flex:1;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         GENERIC CONFIRM MODAL (replaces window.confirm)
+         ============================================================ -->
+    <div id="modal-confirm" class="modal-overlay hidden" style="z-index:10000;">
+      <div class="modal-card" style="width:440px; max-width:92vw; padding:0;">
+        <div style="padding:14px 18px; border-bottom:1px solid var(--border); background:var(--bg-1); display:flex; align-items:center; gap:10px;">
+          <span id="confirm-icon" style="font-size:18px;">&#9888;&#65039;</span>
+          <h3 id="confirm-title" style="margin:0; font-size:14px; flex:1;">Confirm</h3>
+        </div>
+        <div style="padding:16px 18px;">
+          <p id="confirm-message" style="margin:0; line-height:1.5; color:var(--text-1);"></p>
+        </div>
+        <div style="padding:12px 18px; border-top:1px solid var(--border); background:var(--bg-1); display:flex; gap:8px; justify-content:flex-end;">
+          <button id="confirm-cancel" class="ghost-btn" style="padding:6px 16px;">Cancel</button>
+          <button id="confirm-ok" class="primary-btn danger" style="padding:6px 16px;">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .tier-spinner {
+        display: inline-block;
+        width: 22px;
+        height: 22px;
+        border: 3px solid #f59e0b;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: tier-spin 0.9s linear infinite;
+        vertical-align: middle;
+      }
+      @keyframes tier-spin { to { transform: rotate(360deg); } }
+    </style>
+
+    <!-- ============================================================
+         CALIBRATION LOG MODAL
+         ============================================================ -->
+    <div id="modal-calib-log" class="modal-overlay hidden" style="z-index:9998;">
+      <div class="modal-card" style="width:95vw; height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#128220; Calibration log</h2>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label style="font-size:11px; color:var(--text-2);">lines:
+              <input id="calib-log-lines" type="number" value="500" min="50" max="10000" step="50" style="width:70px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:4px; padding:3px 6px; font-size:11px;">
+            </label>
+            <button id="calib-log-refresh" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#8635; Reload</button>
+            <button class="settings-close-x" id="calib-log-close" title="Close">&#10005;</button>
+          </div>
+        </div>
+        <pre id="calib-log-body" style="margin:0; padding:14px; overflow:auto; flex:1; font-family:Consolas,Monaco,monospace; font-size:11px; color:#9bbac8; line-height:1.4; background:#0a0a0a;"></pre>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CALIBRATION DIAGNOSE MODAL (pipeline stages + verdict)
+         ============================================================ -->
+    <div id="modal-calib-diagnose" class="modal-overlay hidden">
+      <div class="modal-card" style="width:92vw; max-width:1000px; max-height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#129302; Pipeline auto-diagnosis</h2>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="calib-diagnose-cancel" class="ghost-btn danger" style="padding:4px 12px; font-size:12px; display:none;">&#9209;&#65039; Cancel</button>
+            <button class="settings-close-x" id="calib-diagnose-close" title="Close">&#10005;</button>
+          </div>
+        </div>
+        <div id="calib-diagnose-body" style="padding:16px; overflow:auto; flex:1;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CALIBRATION GALLERY MODAL (in-app grid of all runs)
+         ============================================================ -->
+    <div id="modal-calib-gallery" class="modal-overlay hidden">
+      <div class="modal-card" style="width:95vw; height:92vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <h2 style="margin:0; font-size:15px;">&#127912; Calibration gallery</h2>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span id="calib-gallery-count" style="font-size:11px; color:var(--text-2);"></span>
+            <button id="calib-gallery-refresh" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#8635; Refresh</button>
+            <button class="settings-close-x" id="calib-gallery-close" title="Close">&#10005;</button>
+          </div>
+        </div>
+        <div id="calib-gallery-body" style="padding:14px; overflow:auto; flex:1;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         LIVE LOGS VIEWER MODAL
+         ============================================================ -->
+    <div id="modal-live-logs" class="modal-overlay hidden">
+      <div class="modal-card" style="width:95vw; height:90vh; display:flex; flex-direction:column; padding:0;">
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); background:var(--bg-1);">
+          <strong style="font-size:13px;">&#128269; Live logs</strong>
+          <select id="ll-file" style="background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:4px; padding:3px 6px; font-size:12px;">
+            <option value="fabmesh" selected>fabmesh (main)</option>
+            <option value="renderer">renderer</option>
+            <option value="error">error</option>
+            <option value="agent">agent</option>
+          </select>
+          <input id="ll-filter" type="text" placeholder="filter (regex)..." style="flex:1; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:4px; padding:4px 8px; font-size:12px;">
+          <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-2);">
+            <input id="ll-autoscroll" type="checkbox" checked> Auto-scroll
+          </label>
+          <button id="ll-pause" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#9208;&#65039; Pause</button>
+          <button id="ll-clear" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#128465;&#65039; Clear</button>
+          <button id="ll-copy" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#128203; Copy</button>
+          <button id="ll-close" class="ghost-btn" style="padding:4px 10px; font-size:11px;">&#10005; Close</button>
+        </div>
+        <pre id="ll-output" style="flex:1; margin:0; padding:10px 14px; overflow:auto; font-family:'Cascadia Code','Consolas','Monaco',monospace; font-size:11px; line-height:1.4; color:#ddd; background:#0a0a0a; white-space:pre-wrap; word-break:break-all;"></pre>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 14px; border-top:1px solid var(--border); background:var(--bg-1); font-size:10px; color:var(--text-3);">
+          <span id="ll-status">disconnected</span>
+          <span id="ll-count">0 lines</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         REFINE MESH MODAL (AI-driven mesh modification)
+         ============================================================ -->
+    <div id="modal-refine-mesh" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Refine mesh with AI</h2>
+        <p class="modal-subtitle">Describe what to change. The AI rebuilds the mesh from a new script.</p>
+        <label>Modification</label>
+        <textarea id="rfn-prompt" rows="3" placeholder="add wheels, make it taller, smoother surface..."></textarea>
+        <label>Output format</label>
+        <select id="rfn-format">
+          <option value="glb" selected>GLB</option>
+          <option value="fbx">FBX</option>
+          <option value="obj">OBJ</option>
+          <option value="stl">STL</option>
+        </select>
+        <label>AI model</label>
+        <select id="rfn-model">
+          <option value="claude" selected>Claude (best)</option>
+          <option value="gpt-4o">GPT-4o</option>
+          <option value="local">Local LLM</option>
+        </select>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="rfn-cancel">Cancel</button>
+          <button class="primary-btn" id="rfn-go">Refine</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         EXPORT MESH MODAL
+         ============================================================ -->
+    <div id="modal-export-mesh" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Export 3D mesh</h2>
+        <p class="modal-subtitle">Pick a format and where to save the file.</p>
+        <label>Format</label>
+        <select id="exp-format">
+          <option value="glb">GLB (web/Three.js)</option>
+          <option value="gltf">GLTF + textures</option>
+          <option value="fbx">FBX (Autodesk)</option>
+          <option value="obj">OBJ (universal)</option>
+          <option value="stl">STL (3D printing)</option>
+          <option value="ply">PLY (point cloud)</option>
+          <option value="fbx_unreal">FBX for Unreal Engine (cm + Y-up)</option>
+        </select>
+        <label>Output path</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="exp-path" placeholder="(default: meshes/my_mesh.glb)" style="flex:1;" />
+          <button id="exp-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="exp-cancel">Cancel</button>
+          <button class="primary-btn" id="exp-go">Export</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         TEST RIG ANIMATION MODAL
+         ============================================================ -->
+    <div id="modal-test-anim" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Test rig animation</h2>
+        <p class="modal-subtitle">Apply a built-in animation to the rig and open it in Blender.</p>
+        <label>Animation</label>
+        <select id="anim-select">
+          <option value="idle">Idle</option>
+          <option value="walk">Walk</option>
+          <option value="run">Run</option>
+        </select>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="anim-cancel">Cancel</button>
+          <button class="primary-btn" id="anim-go">Open in Blender</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         JOB DETAILS MODAL
+         ============================================================ -->
+    <div id="modal-job-details" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width: 480px;">
+        <div id="job-gpu-monitor" class="job-gpu-monitor">
+          <div class="jgm-row"><span class="jgm-label">VRAM</span><span class="jgm-val" id="jgm-vram">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">GPU</span><span class="jgm-val" id="jgm-util">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">TEMP</span><span class="jgm-val" id="jgm-temp">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">RAM</span><span class="jgm-val" id="jgm-ram">--</span></div>
+        </div>
+        <div class="job-details-head">
+          <img id="jd-ref-img" alt="" />
+          <div class="job-details-head-text">
+            <h2 id="job-details-title">Running task</h2>
+            <p class="modal-subtitle" id="job-details-subtitle">--</p>
+          </div>
+        </div>
+        <div class="job-details-stats">
+          <div class="jd-row"><span class="jd-label">Status</span><span class="jd-value" id="jd-status">Running</span></div>
+          <div class="jd-row"><span class="jd-label">Started</span><span class="jd-value" id="jd-started">--</span></div>
+          <div class="jd-row"><span class="jd-label">Elapsed</span><span class="jd-value" id="jd-elapsed">--</span></div>
+          <div class="jd-row"><span class="jd-label">Estimated</span><span class="jd-value" id="jd-estimated">--</span></div>
+          <div class="jd-row"><span class="jd-label">Project</span><span class="jd-value" id="jd-project">--</span></div>
+        </div>
+        <div id="jd-params" class="job-details-stats hidden"></div>
+        <div class="jd-progress">
+          <div class="jd-progress-bar"><div class="jd-progress-fill" id="jd-progress-fill"></div></div>
+          <div class="jd-progress-pct" id="jd-progress-pct">0%</div>
+        </div>
+        <div id="jd-first-run-hint" class="jd-first-run-hint hidden">
+          <span class="jd-hint-icon">&#9432;</span>
+          <span class="jd-hint-text">
+            First run after idle loads <strong>~7&nbsp;GB</strong> into VRAM (~30&ndash;60&nbsp;s).
+            Subsequent runs are much faster (a few seconds).
+            Models are unloaded after 5&nbsp;min of inactivity to free VRAM.
+          </span>
+        </div>
+        <div id="jd-error-box" class="jd-error-box hidden"></div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="job-details-close">Close</button>
+          <button class="primary-btn" id="job-details-open-settings" style="display:none; background:linear-gradient(135deg,#6a5acd,#9370db);">&#9881; Open Settings</button>
+          <button class="primary-btn danger" id="job-details-cancel">Cancel task</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CONFIRM MODAL (custom-styled replacement for window.confirm)
+         ============================================================ -->
+    <div id="modal-confirm" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width: 400px;">
+        <h2 id="confirm-title">Confirm</h2>
+        <p class="modal-subtitle" id="confirm-message">Are you sure?</p>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="confirm-cancel">Cancel</button>
+          <button class="primary-btn danger" id="confirm-ok">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         MODIFY IMAGE MODAL (img2img)
+         ============================================================ -->
+    <div id="modal-modify-image" class="modal-overlay hidden">
+      <div class="modal-card modal-card-wide">
+        <h2>Modify image</h2>
+        <p class="modal-subtitle">Describe the changes you want. The AI keeps the composition.</p>
+        <div class="modal-with-image">
+          <div class="modal-image-side">
+            <img id="mod-source-img" alt="" />
+          </div>
+          <div class="modal-form-side">
+            <label>Modification prompt</label>
+            <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
+            <label>Engine</label>
+            <select id="mod-engine">
+              <option value="local-sdxl" selected>RealVis XL (local)</option>
+              <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+            </select>
+            <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
+            <input type="range" id="mod-strength" min="30" max="95" value="55" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="mod-cancel">Cancel</button>
+          <button class="primary-btn" id="mod-apply">Modify image</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         DRAW MASK MODAL (ported from legacy)
+         ============================================================ -->
+    <div id="mask-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Draw Mask (paint to remove)</h3>
+          <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Click & drag</strong> to paint &nbsp;|&nbsp;
+          <strong>E</strong> / eraser button to erase &nbsp;|&nbsp;
+          <strong>B</strong> for brush &nbsp;|&nbsp;
+          <strong>Right-click drag</strong> also erases &nbsp;|&nbsp;
+          <strong>Z</strong> to undo
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:4px; min-width:0; flex:1 1 140px;">
+            <span style="font-size:11px; white-space:nowrap;">Brush:</span>
+            <input type="range" id="mask-brush-size" min="5" max="200" value="50" style="flex:1; min-width:60px;" />
+            <span id="mask-brush-val" style="min-width:24px; font-size:11px;">50</span>
+          </label>
+          <div style="display:flex; gap:4px; flex-shrink:0;">
+            <button id="mask-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+            <button id="mask-brush-mode" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Paint mode (B)">&#128396;&#65039;</button>
+            <button id="mask-eraser-mode" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Eraser mode (E) — radius follows brush size">&#129529;</button>
+            <button id="mask-undo" class="secondary-btn tool-btn" disabled title="Undo (Z)">&#8630;</button>
+            <button id="mask-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+            <button id="mask-clear" class="secondary-btn tool-btn" title="Clear whole mask">&#8634;</button>
+          </div>
+        </div>
+        <div id="mask-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px;">
+          <canvas id="mask-base-canvas" style="position: absolute; left: 0; top: 0;"></canvas>
+          <canvas id="mask-overlay-canvas" style="position: absolute; left: 0; top: 0; cursor: none; pointer-events: auto; opacity: 0.55;"></canvas>
+          <div id="mask-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;">
+            <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <label for="mask-prompt" style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">Replace with:</label>
+          <input type="text" id="mask-prompt" placeholder="Describe replacement (empty = just remove)" style="flex: 1; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 13px;" />
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button id="mask-cancel" class="secondary-btn">Cancel</button>
+          <button id="mask-apply" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Apply Inpaint</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         CLONE STAMP MODAL (ported from legacy)
+         ============================================================ -->
+    <div id="clone-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Clone Stamp</h3>
+          <button id="clone-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          <strong>Ctrl+Click</strong> to set source point &nbsp;|&nbsp;
+          <strong>Click & drag</strong> to clone &nbsp;|&nbsp;
+          <strong>Z</strong> to undo
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:4px; min-width:0; flex:1 1 140px;">
+            <span style="font-size:11px; white-space:nowrap;">Brush:</span>
+            <input type="range" id="clone-brush-size" min="5" max="200" value="50" style="flex:1; min-width:60px;" />
+            <span id="clone-brush-val" style="min-width:24px; font-size:11px;">50</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:4px; min-width:0; flex:1 1 140px;">
+            <span style="font-size:11px; white-space:nowrap;">Hard:</span>
+            <input type="range" id="clone-hardness" min="0" max="100" value="50" style="flex:1; min-width:60px;" />
+            <span id="clone-hardness-val" style="min-width:24px; font-size:11px;">50</span>
+          </label>
+          <div style="display:flex; gap:4px; flex-shrink:0;">
+            <button id="clone-flip-toggle" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px;" title="Flip mode">Flip: Off</button>
+            <button id="clone-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+            <button id="clone-undo" class="secondary-btn tool-btn" disabled title="Undo (Z)">&#8630;</button>
+            <button id="clone-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+            <button id="clone-reset" class="secondary-btn tool-btn" title="Clear all paint">&#129529; Clear</button>
+          </div>
+        </div>
+        <div id="clone-canvas-container" style="position: relative; flex: 1 1 0; overflow: hidden; background: #1a1a2e; border-radius: 4px; min-height: 400px; max-width: 100%;">
+          <canvas id="clone-canvas" style="cursor: none; position: absolute; left: 0; top: 0;"></canvas>
+          <div id="clone-brush-cursor" style="position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.7); display: none; z-index: 1000;">
+            <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
+          </div>
+          <div id="clone-source-marker" style="position: fixed; pointer-events: none; border: 2px solid #00ff00; border-radius: 50%; background: rgba(0,255,0,0.15); display: none; z-index: 999; box-sizing: border-box;">
+            <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:#00ff00; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span id="clone-status" style="font-size:11px; color:var(--text-muted);">No source point set</span>
+          <div style="display:flex; gap:8px;">
+            <button id="clone-cancel" class="secondary-btn">Cancel</button>
+            <button id="clone-save" class="refine-btn" style="margin: 0; padding: 8px 24px; width: auto;">Save as new version</button>
+          </div>
+        </div>
+        <div id="clone-error" style="display:none; padding: 8px 12px; background: rgba(255,68,68,0.15); border: 1px solid var(--error); border-radius: 4px; color: var(--error); font-size: 12px; font-weight: 600;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         JOBS BUBBLE (collapsed jobs panel)
+         ============================================================ -->
+    <button id="jobs-bubble-2" class="hidden" title="Show running jobs">
+      <span id="jobs-bubble-count-2">0</span>
+    </button>
+    <div id="jobs-panel-2" class="hidden">
+      <div class="jobs-panel-header">
+        <span>Running jobs</span>
+        <button id="jobs-close-2" class="icon-btn">&#10005;</button>
+      </div>
+      <div id="jobs-list-2"></div>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../node_modules/three/build/three.module.js",
+        "three/addons/": "../../node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="test_api_client.js"></script>
+  <script src="canvas-utils.js"></script>
+  <script src="index2-edit-tools.js"></script>
+  <script type="module" src="index2.js"></script>
+  <!-- Resolution modal -->
+  <div id="modal-resolution" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:400px; text-align:center;">
+      <h2>Resolution</h2>
+      <img id="res-preview" alt="" style="max-width:300px; max-height:300px; border-radius:8px; margin:12px auto; display:block; border:1px solid var(--border);" />
+      <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin:8px 0 12px 0;">
+        <span id="res-current" style="font-size:16px; font-weight:700; color:var(--text-0);"></span>
+        <span id="res-arrow" style="font-size:16px; display:none;">→</span>
+        <span id="res-target" style="font-size:16px; font-weight:700; display:none;"></span>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:center; margin:12px 0;">
+        <button id="res-downscale" class="ghost-btn" style="padding:8px 0; flex:1;">&#8595; Downscale 0.5x</button>
+        <button id="res-upscale" class="primary-btn" style="padding:8px 0; flex:1;">&#8593; Upscale 2x</button>
+      </div>
+      <div class="modal-actions" style="justify-content:center;">
+        <button class="ghost-btn" id="res-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Brightness/Contrast modal -->
+  <div id="modal-brightness" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Brightness / Contrast</h3>
+        <button class="settings-close-x" id="bright-close-x">&#10005;</button>
+      </div>
+      <div style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px; display:flex; align-items:center; justify-content:center;">
+        <img id="bright-preview" alt="" style="max-width:100%; max-height:100%; border-radius:4px; object-fit:contain;" />
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px; margin:12px 0;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Brightness</span>
+          <input type="range" id="bright-brightness" min="50" max="200" value="100" style="flex:1;" />
+          <span id="bright-brightness-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Contrast</span>
+          <input type="range" id="bright-contrast" min="50" max="200" value="100" style="flex:1;" />
+          <span id="bright-contrast-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Saturation</span>
+          <input type="range" id="bright-saturation" min="0" max="200" value="100" style="flex:1;" />
+          <span id="bright-saturation-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="min-width:70px;">Sharpness</span>
+          <input type="range" id="bright-sharpness" min="0" max="300" value="100" style="flex:1;" />
+          <span id="bright-sharpness-val" style="min-width:35px; text-align:right; font-size:11px;">100%</span>
+        </label>
+      </div>
+      <div style="display:flex; justify-content:space-between;">
+        <button id="bright-reset" class="ghost-btn" style="padding:6px 16px;">Reset</button>
+        <div style="display:flex; gap:8px;">
+          <button id="bright-cancel" class="ghost-btn" style="padding:6px 16px;">Cancel</button>
+          <button id="bright-apply" class="primary-btn" style="padding:6px 16px;">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Color Picker modal -->
+  <div id="modal-colorpick" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Color Picker</h3>
+        <button class="settings-close-x" id="cpick-close-x">&#10005;</button>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted);">Click anywhere on the image to pick a color.</div>
+      <div id="cpick-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px; cursor:crosshair;">
+        <canvas id="cpick-canvas" style="position:absolute; left:0; top:0;"></canvas>
+        <div id="cpick-cursor" style="position:absolute; pointer-events:none; width:20px; height:20px; border:2px solid white; border-radius:50%; box-shadow:0 0 0 1px black; display:none; transform:translate(-50%,-50%);">
+          <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%);"></div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin:12px 0;">
+        <div id="cpick-swatch" style="width:48px; height:48px; border-radius:8px; border:2px solid var(--border);"></div>
+        <div>
+          <div id="cpick-hex" style="font-size:18px; font-weight:700; font-family:monospace;"></div>
+          <div id="cpick-rgb" style="font-size:11px; color:var(--text-2); white-space:nowrap;"></div>
+        </div>
+        <span style="flex:1;"></span>
+        <button id="cpick-copy" class="primary-btn" style="padding:6px 16px;">Copy HEX</button>
+      </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button id="cpick-close" class="ghost-btn" style="padding:6px 16px;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blur Brush modal -->
+  <div id="modal-blur" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Blur / Sharpen Brush</h3>
+        <button id="blur-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:4px; flex:1 1 140px;">
+          <span style="font-size:11px;">Brush:</span>
+          <input type="range" id="blur-brush-size" min="5" max="200" value="30" style="flex:1; min-width:60px;" />
+          <span id="blur-brush-val" style="min-width:24px; font-size:11px;">30</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; flex:1 1 140px;">
+          <span style="font-size:11px;">Strength:</span>
+          <input type="range" id="blur-strength" min="1" max="20" value="5" style="flex:1; min-width:60px;" />
+          <span id="blur-strength-val" style="min-width:24px; font-size:11px;">5</span>
+        </label>
+        <div style="display:flex; gap:4px; flex-shrink:0;">
+          <button id="blur-mode-blur" class="secondary-btn tool-btn tool-active" style="padding:4px 10px; font-size:11px;">Blur</button>
+          <button id="blur-mode-sharpen" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:11px;">Sharpen</button>
+          <button id="blur-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="blur-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="blur-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="blur-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+        </div>
+      </div>
+      <div id="blur-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+        <canvas id="blur-canvas" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+        <div id="blur-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid white; border-radius:50%; display:none; z-index:1000;">
+          <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%);"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="blur-cancel" class="secondary-btn">Cancel</button>
+        <button id="blur-save" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Save as new version</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crop modal -->
+  <div id="modal-crop" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Crop</h3>
+        <button id="crop-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <button id="crop-preset-free" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Free</button>
+        <button id="crop-preset-1-1" class="secondary-btn" style="padding:4px 10px; font-size:11px;">1:1</button>
+        <button id="crop-preset-4-3" class="secondary-btn" style="padding:4px 10px; font-size:11px;">4:3</button>
+        <button id="crop-preset-16-9" class="secondary-btn" style="padding:4px 10px; font-size:11px;">16:9</button>
+        <button id="crop-preset-center" class="secondary-btn" style="padding:4px 10px; font-size:11px;">Auto center</button>
+        <span style="flex:1;"></span>
+        <span id="crop-size-label" style="font-size:11px; color:var(--text-2);"></span>
+      </div>
+      <div style="font-size:10px; color:var(--text-3);">Drag to select the crop area. Use presets for fixed aspect ratios.</div>
+      <div id="crop-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px; cursor:crosshair;">
+        <canvas id="crop-canvas" style="position:absolute; left:0; top:0;"></canvas>
+        <canvas id="crop-overlay" style="position:absolute; left:0; top:0;"></canvas>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="crop-cancel" class="secondary-btn">Cancel</button>
+        <button id="crop-apply" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Apply Crop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Symmetrize modal -->
+  <div id="modal-symmetrize" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Symmetrize</h3>
+        <button id="sym-close" class="small-btn" style="font-size:18px;">&#10005;</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <label style="font-size:11px; display:flex; align-items:center; gap:4px;">
+          Direction:
+          <button id="sym-dir-lr" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">L &#8594; R</button>
+          <button id="sym-dir-rl" class="secondary-btn" style="padding:4px 10px; font-size:11px;">R &#8594; L</button>
+        </label>
+        <label style="font-size:11px; display:flex; align-items:center; gap:4px;">
+          Mode:
+          <button id="sym-mode-full" class="secondary-btn tool-active" style="padding:4px 10px; font-size:11px;">Full</button>
+          <button id="sym-mode-mask" class="secondary-btn" style="padding:4px 10px; font-size:11px;">Mask</button>
+        </label>
+        <label id="sym-brush-label" style="font-size:11px; display:none; align-items:center; gap:4px;">
+          Brush:
+          <input type="range" id="sym-brush-size" min="5" max="200" value="40" style="width:80px;" />
+          <span id="sym-brush-val">40</span>
+        </label>
+        <span style="flex:1;"></span>
+        <div style="display:flex; gap:4px; flex-shrink:0;">
+          <button id="sym-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="sym-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="sym-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="sym-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+        </div>
+      </div>
+      <div style="font-size:10px; color:var(--text-3);">
+        Drag the <strong style="color:#22c55e;">green line</strong> to move the axis. <strong>Shift+drag</strong> to rotate. In Mask mode: paint to select, <strong>Ctrl+drag</strong> to move axis, <strong>Shift+drag</strong> to rotate.
+      </div>
+      <div id="sym-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+        <canvas id="sym-canvas" style="position:absolute; left:0; top:0;"></canvas>
+        <canvas id="sym-overlay" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+        <div id="sym-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid rgba(255,60,60,0.8); border-radius:50%; display:none; z-index:1000;">
+          <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:rgba(255,60,60,0.9); border-radius:50%; transform:translate(-50%,-50%);"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="sym-cancel" class="secondary-btn">Cancel</button>
+        <button id="sym-apply" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Apply Symmetrize</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Paint Tools modal -->
+  <div id="modal-paint" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <h3 style="margin:0; white-space:nowrap;">Paint Tools</h3>
+        <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+          <button id="paint-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="paint-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="paint-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="paint-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
+          <button id="paint-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
+        </div>
+      </div>
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
+        <!-- Left panel: tools -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+          <!-- Tool buttons -->
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Select</span>
+            <button id="paint-tool-sel-rect" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#9634; Rect</button>
+            <button id="paint-tool-sel-lasso" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#10038; Lasso</button>
+            <button id="paint-tool-wand" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#10022; Wand</button>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Draw</span>
+            <button id="paint-tool-pen" class="secondary-btn tool-btn tool-active" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#9998; Pen</button>
+            <button id="paint-tool-spray" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#128168; Spray</button>
+            <button id="paint-tool-ink" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#128396; Ink</button>
+            <button id="paint-tool-line" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#9585; Line</button>
+            <button id="paint-tool-smudge" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#9775; Smudge</button>
+            <button id="paint-tool-fill" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#9781; Fill</button>
+            <button id="paint-tool-eraser" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">&#9003; Eraser</button>
+          </div>
+          <!-- Color -->
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <input type="color" id="paint-color" value="#ff0000" style="width:36px; height:36px; border:none; padding:0; cursor:pointer; border-radius:6px;" title="Pick color" />
+              <button id="paint-eyedropper" class="secondary-btn tool-btn" style="padding:6px 8px; font-size:11px;" title="Pick from image"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><path d="M2 22l1-1h3l9-9"/><path d="M3 21v-3l9-9"/><circle cx="17.5" cy="6.5" r="3.5"/></svg></button>
+            </div>
+          </div>
+          <!-- Brush size -->
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Brush <span id="paint-brush-val" style="color:var(--text-1);">20</span></span>
+            <input type="range" id="paint-brush-size" min="1" max="200" value="20" style="width:100%;" />
+          </div>
+          <!-- Opacity -->
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Opacity <span id="paint-opacity-val" style="color:var(--text-1);">100%</span></span>
+            <input type="range" id="paint-opacity" min="5" max="100" value="100" style="width:100%;" />
+          </div>
+          <!-- Tolerance (for Wand/Fill) -->
+          <div id="paint-tolerance-group" style="display:none; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tolerance <span id="paint-tolerance-val" style="color:var(--text-1);">32</span></span>
+            <input type="range" id="paint-tolerance" min="1" max="128" value="32" style="width:100%;" />
+          </div>
+        </div>
+        <!-- Right: canvas -->
+        <div id="paint-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+          <canvas id="paint-canvas" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+          <canvas id="paint-sel-overlay" style="position:absolute; left:0; top:0; pointer-events:none; opacity:0.4;"></canvas>
+          <div id="paint-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid white; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,0.7); display:none; z-index:1000;">
+            <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="paint-cancel" class="secondary-btn">Cancel</button>
+        <button id="paint-save" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Save as new version</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mesh Edit modal (Sculpt / Paint / Select) -->
+  <div id="modal-mesh-edit" class="modal hidden">
+    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <h3 style="margin:0;" id="mesh-edit-title">Mesh Edit</h3>
+        <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+          <button id="me-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
+          <button id="me-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
+          <button id="me-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
+        </div>
+      </div>
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
+        <!-- Left panel: tools -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Mode</span>
+            <button id="me-tool-sculpt" class="secondary-btn tool-btn tool-active" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9997; Sculpt</button>
+            <button id="me-tool-paint" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#127912; Paint</button>
+            <button id="me-tool-select" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9634; Select</button>
+          </div>
+          <!-- Sculpt options -->
+          <div id="me-sculpt-opts" style="display:flex; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Sculpt</span>
+            <button id="me-sculpt-push" class="secondary-btn tool-btn tool-active" style="padding:4px 8px; font-size:11px; width:100%;">&#9650; Push</button>
+            <button id="me-sculpt-pull" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#9660; Pull</button>
+            <button id="me-sculpt-smooth" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#10024; Smooth</button>
+            <button id="me-sculpt-flatten" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#9644; Flatten</button>
+          </div>
+          <!-- Select options -->
+          <div id="me-select-opts" style="display:none; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Selection</span>
+            <span style="font-size:9px; color:var(--text-muted);">Paint to select faces, then:</span>
+            <button id="me-sel-delete" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#128465; Delete</button>
+            <button id="me-sel-invert" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#8634; Invert</button>
+            <button id="me-sel-clear" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#10005; Clear</button>
+          </div>
+          <!-- Paint options -->
+          <div id="me-paint-opts" style="display:none; flex-direction:column; gap:4px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
+            <input type="color" id="me-paint-color" value="#ff0000" style="width:36px; height:36px; border:none; cursor:pointer; border-radius:6px;" />
+          </div>
+          <!-- Brush size -->
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Radius <span id="me-brush-val" style="color:var(--text-1);">0.05</span></span>
+            <input type="range" id="me-brush-size" min="1" max="100" value="25" style="width:100%;" />
+          </div>
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Strength <span id="me-strength-val" style="color:var(--text-1);">0.5</span></span>
+            <input type="range" id="me-strength" min="1" max="100" value="50" style="width:100%;" />
+          </div>
+        </div>
+        <!-- Right: 3D viewport -->
+        <div id="me-viewport" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+          <canvas id="me-canvas" style="width:100%; height:100%; display:block;"></canvas>
+          <div id="me-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid rgba(255,200,50,0.8); border-radius:50%; display:none; z-index:1000;"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="me-cancel" class="secondary-btn">Cancel</button>
+        <button id="me-save" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Save as new version</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global loupe magnifier (shared by Clone Stamp + Draw Mask) -->
+  <div id="clone-loupe" style="position:fixed; pointer-events:none; display:none; z-index:99999; width:120px; height:120px; border:3px solid #f59e0b; border-radius:50%; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.6);">
+    <canvas id="clone-loupe-canvas" width="120" height="120" style="width:120px; height:120px;"></canvas>
+  </div>
+</body>
+</html>
