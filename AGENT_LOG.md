@@ -782,6 +782,30 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### ComfyUI-3D-Pack integration attempt — STARTING NOW (2026-04-18)
+
+User picked ComfyUI-3D-Pack. Agent said "worth one attempt" —
+MIT license, MV-Adapter i2tex node for texturing. Prebuilt wheels
+exist; if they cover sm_120 (RTX 5080 Blackwell), turnkey.
+
+Plan:
+1. Clone github.com/MrForExample/ComfyUI-3D-Pack into external/
+2. Check if it depends on ComfyUI itself (it does — it's a node
+   pack). Evaluate: do we need a full ComfyUI install or can we
+   import the texturing modules standalone?
+3. Run their install.py or equivalent, let it fetch prebuilt
+   wheels for torch 2.7 + cu128 + Win11.
+4. Check if wheels resolve for Python 3.11 / Windows. If not,
+   it falls back to source compile → blocked (same as before),
+   abandon ComfyUI-3D-Pack.
+5. If wheels work, find the MV-Adapter i2tex entry point and
+   wire it to our SF3D mesh + ip45 photos.
+6. Test.
+
+Risk: ComfyUI-3D-Pack is a ComfyUI node pack, not a standalone
+library. Using it outside ComfyUI may require extracting the
+useful bits. Or we install ComfyUI alongside (~2 GB).
+
 ### Agent survey for no-compile, non-eliminated texturing AI (2026-04-18)
 
 User constraint: local + free + commercial + NOT already eliminated.
