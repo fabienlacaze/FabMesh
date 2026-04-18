@@ -188,8 +188,26 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         R_undo = rot_x(90) @ rot_y(-90)
     verts_cam = (R_undo @ vertices.T).T  # (V, 3) in SF3D's internal coords
     norms_cam = (R_undo @ normals.T).T
-    # The invert() call flips normals; undo that
-    norms_cam = -norms_cam
+    # 2026-04-18 FRAME FIX: the historical `-norms_cam` negation assumed
+    # that trimesh's loaded `vertex_normals` point INWARD after SF3D's
+    # `tmesh.invert()` post-processing. Empirical check on the current
+    # SF3D+weld pipeline shows normals actually point OUTWARD (81% of
+    # verts have positive dot with outward direction), so the negation
+    # flips every visibility test: the front camera (az=0) ends up
+    # marking the BACK of the mesh as visible (normal pointing toward
+    # camera after being flipped) and REJECTING the actual face
+    # vertices. Net effect: front photo lands on the back of the mesh,
+    # back photo lands on the face — the "mini-children" / mosaic bug.
+    #
+    # Fix: under FABMESH_TEXPROJ_FRAME_FIX=1 (default ON), drop the
+    # negation. Set FABMESH_TEXPROJ_FRAME_FIX=0 to keep the legacy
+    # inverted normal path for regression testing.
+    if os.environ.get('FABMESH_TEXPROJ_FRAME_FIX', '1') == '1':
+        log('FABMESH_TEXPROJ_FRAME_FIX=1: keeping normals outward '
+            '(drop legacy -norms_cam)')
+    else:
+        norms_cam = -norms_cam
+        log('FABMESH_TEXPROJ_FRAME_FIX=0: legacy norms_cam = -norms_cam')
 
     # ---------------------------------------------------------------
     # Step 2: Camera parameters
