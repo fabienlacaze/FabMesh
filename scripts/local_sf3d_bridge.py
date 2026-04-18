@@ -869,8 +869,11 @@ def generate_3d(
             # Step 1: multi-view projection pass if views are available.
             # Same call as the 'atlas' mode but we intentionally don't
             # bump tex_res (keep it modest, since refine will upscale).
+            # Guard FABMESH_REFINE_SKIP_MV=1 skips this — useful while
+            # texture_project.py has a front/back inversion bug.
             if (_multiview_dir and os.path.isdir(_multiview_dir)
-                    and os.path.exists(_atlas_script)):
+                    and os.path.exists(_atlas_script)
+                    and os.environ.get('FABMESH_REFINE_SKIP_MV') != '1'):
                 try:
                     _r_mv_proj = _sp_proj.run(
                         [sys.executable, _atlas_script, output_path,
@@ -890,8 +893,10 @@ def generate_3d(
                     print(f"LOCAL_SF3D: multi-view projection error ({_mvp_e}), continuing", flush=True)
 
             # Step 2: SDXL refine on top of the (possibly projected) atlas.
+            # strength=0.10 chosen 2026-04-19: user reported 0.25 hallucinates
+            # orange-skinned boy with broken face. 0.10 = light polish only.
             _cmd = [sys.executable, _refine_script, output_path,
-                    output_path, '--strength', '0.25',
+                    output_path, '--strength', '0.10',
                     '--target', str(_target)]
             if _refine_prompt:
                 _cmd += ['--prompt', _refine_prompt]
