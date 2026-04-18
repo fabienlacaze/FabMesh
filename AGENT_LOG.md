@@ -10,6 +10,51 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-18 — IP-scale sweep on child + ip45 front+back → 3D experiment
+
+### Existing artifacts
+
+`scripts/_scale_sweep.py` generated 15 images for the child ref across
+IP scales {0.20, 0.25, 0.30, 0.35, 0.45} × {front, right, back} — output
+in `images/child/_scale_sweep/`. Viewer at `_viewer.html` in same dir.
+
+Visual read (not yet scored): ip25/ip30 produce a credible back view
+that keeps the denim jacket + cargo shorts but clearly loses a bit of
+identity (face not relevant on back anyway). ip45 preserves outfit best
+but SDXL sometimes resists the `back view` prompt — still usable at
+this scale for our subject.
+
+### New experiment — 2-view 3D from ip45_front + ip45_back
+
+Hypothesis: an SDXL multi-view set only needs to be *coherent on the
+silhouette* to give SF3D enough signal for a decent textured mesh. So
+rather than chasing 4 or 6 coherent SDXL views, feed CRM/SF3D just the
+two best-scale images we already have, duplicated across the 6 slots.
+
+### Plan
+
+1. Patch `local_sf3d_bridge.py` to honor a new env var
+   `FABMESH_MV_REUSE=<dir>` that skips internal multi-view generation
+   and reuses a preexisting 6-slot dir (front/back/right/left/top/bot
+   with a matching views.json).
+2. New script `scripts/ip45_2view_to_3d.py`:
+   - Takes `front.png` and `back.png` (default: the existing ip45_*
+     from `images/child/_scale_sweep/`).
+   - Writes a CRM-compatible 6-slot mv dir (front dup→right/top,
+     back dup→left/bot).
+   - Invokes SF3D bridge with FABMESH_MV_REUSE pointed at that dir.
+3. Load resulting .glb in the Electron 3D viewer.
+
+Expected outcome: textured mesh where **front and back faithfully match
+the SDXL output**, but sides (being duplicates of front/back) may bleed
+at az=90/270 seams — acceptable for a first pass. If bad, next step is
+to add SDXL right/left at a lower ip_scale (0.30-0.35 per existing
+_scale_sweep finding).
+
+(entry kept open — will append result + timing once the run completes.)
+
+---
+
 ## 2026-04-18 — Multi-view repair pass (option B): detector + SDXL-Inpaint
 
 Follow-up to child analysis. Option B from the 3-way split:

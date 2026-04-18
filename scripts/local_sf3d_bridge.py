@@ -99,19 +99,24 @@ def generate_3d(
     # saves ~35 s of wasted GPU time per generation.
     # ------------------------------------------------------------------
     _multiview_dir = output_path + '.multiview'
+    _mv_reuse = os.environ.get('FABMESH_MV_REUSE', '').strip()
+    _mv_reuse_active = bool(_mv_reuse and os.path.isdir(_mv_reuse))
+    if _mv_reuse_active:
+        print(f"LOCAL_SF3D: reusing preexisting multi-view dir: {_mv_reuse}",
+              flush=True)
+        _multiview_dir = _mv_reuse
     _proj_mode_pre = os.environ.get('FABMESH_PROJECT_MODE', 'refine').lower()
     # 'refine' (default) is the Meshy-style SDXL atlas polish; it ALSO
     # benefits from having multi-views available because (a) texture_project
     # can densify coverage before refine runs, and (b) future IPAdapter-
-    # guided refine will consume them as conditions for fidelity. The
-    # previous commit 958b30d switched default to 'refine' WITHOUT adding
-    # it here, which silently disabled multi-views for every user-visible
-    # generation — root cause of the low back/sides fidelity.
+    # guided refine will consume them as conditions for fidelity.
     _modes_using_mv = ('atlas', 'vc', 'augment', 'atlas_refine', 'refine')
     if _proj_mode_pre not in _modes_using_mv:
         print(f"LOCAL_SF3D: multi-view skipped (mode={_proj_mode_pre}, not needed)",
               flush=True)
         _multiview_dir = None
+    elif _mv_reuse_active:
+        pass  # already set above
     else:
         try:
             print(f"LOCAL_SF3D_PROGRESS: 12 multiview_gen", flush=True)
