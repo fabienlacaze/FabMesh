@@ -137,8 +137,10 @@ def _run_paint3d_stage1(obj_path: str, ref_image: str,
         cmd += ['--ip_adapter_image_path', ref_image]
     log(f'cmd: {" ".join(cmd)}')
     t0 = time.time()
+    # Forward env (esp. FABMESH_INIT_VIEWS for Option A).
+    _sub_env = dict(os.environ)
     # Run from Paint3D dir so its relative paths work.
-    r = subprocess.run(cmd, cwd=PAINT3D_DIR, check=False)
+    r = subprocess.run(cmd, cwd=PAINT3D_DIR, check=False, env=_sub_env)
     log(f'stage1 done in {time.time()-t0:.1f}s (rc={r.returncode})')
     if r.returncode != 0:
         raise RuntimeError(f'Paint3D stage1 failed: rc={r.returncode}')

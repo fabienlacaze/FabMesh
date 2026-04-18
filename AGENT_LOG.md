@@ -782,6 +782,35 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Option A (inject photos as init views) — ALSO FAILS (2026-04-18)
+
+User asked: inject front+back photos as init views directly
+(bypass SD1.5 generation step).
+
+Patched `pipeline_paint3d_stage1.py` to accept
+`FABMESH_INIT_VIEWS="front.png;back.png"` env var. Instead of SD1.5
+generating 2 init views, load the photos, resize to sd_cfg target
+size, paste as a 1x2 grid, feed to `forward_texturing`.
+
+Ran on mesh D + ip45_front/back. 58s, produced albedo.png.
+
+Result: **SAME as multi-ref stage 1** (lots of magenta, ninja
+shadow figures in bottom-center of atlas, no identity).
+
+Why it didn't help:
+- `forward_texturing` back-projects using the MESH's depth map,
+  not the photo's geometry. The photo pixels land on the mesh via
+  kaolin/pytorch3d rasterize — not by matching photo perspective.
+- Paint3D's internal camera for views_init is at a fixed angle
+  that may not match our ip45 photos' implicit viewpoint.
+- The photos get resized to 512x512 (SD1.5 res), losing HD detail.
+
+Bottom line: Paint3D's pipeline is designed to start from SD1.5
+renderings of its own mesh views. Feeding external photos into
+that pipeline loses more than it gains. There's no simple path
+to make Paint3D use our photos as "real views" without rewriting
+its camera + back-projection logic.
+
 ### Multi-ref Paint3D result — REGRESSION (2026-04-18)
 
 Patched 3 Paint3D files (`diffusers_cnet_{txt2img,img2img,inpaint}.py`)
