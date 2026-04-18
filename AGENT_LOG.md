@@ -782,6 +782,27 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Safety analysis of CUDA 12.8 installer (user asked)
+
+**Not dangerous IF installed correctly**:
+- Installer signed by NVIDIA → SAC-compatible.
+- Coexist install into v12.8/ folder, does NOT touch v13.2.
+- No driver overwrite if "Display Driver" unchecked.
+- Fully reversible via Windows "Add/Remove Programs".
+
+**Must NOT do**:
+- Express install (may overwrite driver).
+- Check "Display Driver" (keep current).
+- Check "Visual Studio Integration" (modifies VS projects).
+- Check "Nsight" (unnecessary debug tools).
+
+**Correct selection** (Custom > UNCHECK ALL > recheck only):
+- ☑ CUDA > Development > Compiler
+- ☑ CUDA > Development > Libraries
+- ☑ CUDA > Runtime > Libraries
+
+3 items. Install into default `v12.8\` path.
+
 ### CUDA 12.8 download started (2026-04-18)
 
 Download kicked off in background to `c:\tmp\cuda_installer\cuda_12.8.0_571.96_windows.exe`. Expected 3.1 GB, 5-15 min depending on bandwidth.
