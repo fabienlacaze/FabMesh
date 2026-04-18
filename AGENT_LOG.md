@@ -782,6 +782,18 @@ pytorch3d / kaolin source / nvdiffrast all at once. If it fails,
 we know the environment is fundamentally incompatible and we
 accept D as the shipping baseline.
 
+### Agent launch: fix Paint3D back-projection onto SF3D UV atlas
+
+v13 confirmed: inputs are PERFECT (2 unique real photos, depth
+matches, pre/post rotate correct) but albedo is still shattered.
+Bottleneck is the back-projection itself (forward_texturing_render
+in paint3d/models/render.py). SF3D meshes have fragmented UV
+islands, and Paint3D's rasterize+projection is losing most of
+the face-to-UV correspondences.
+
+Launching agent to analyze exactly where pixels are being lost
+and propose a concrete patch.
+
 ### Paint3D v9/v10/v11/v12/v13 — mv_dir mode progression (2026-04-18)
 
 Chronological results of the "FabMesh mv/ dir as Paint3D init views"
