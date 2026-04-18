@@ -51,7 +51,47 @@ at az=90/270 seams — acceptable for a first pass. If bad, next step is
 to add SDXL right/left at a lower ip_scale (0.30-0.35 per existing
 _scale_sweep finding).
 
-(entry kept open — will append result + timing once the run completes.)
+### Result
+
+Run completed on child ip45_front + ip45_back in **81 s** total on RTX
+5080 (SF3D inference ~1.5 s, texture_project ~2 s, SDXL atlas refine
+~60 s for 9 tiles @ fp16). Output: `logs/child_ip45_2view/mesh.glb`
+(1.54 MB, 8462 verts / 12596 faces / 2048 atlas). Viewer at
+`logs/child_ip45_2view/viewer.html` (model-viewer side-by-side with
+source PNGs).
+
+### Bugs found + fixed along the way
+
+1. `scripts/ip45_2view_to_3d.py` first wrote `views.json` as a **list**,
+   but `texture_project.py` expects `{engine, views:[...]}` dict shape
+   and fell back to Z123 schema → wrong camera angles for every
+   projection. Fixed: wrap in dict with engine='ip45_2view'.
+2. `local_sf3d_bridge.py` finally block did `rmtree(_multiview_dir)` —
+   which, under `FABMESH_MV_REUSE`, was **deleting the user-supplied**
+   mv dir after the run. Fixed: gate the rmtree on
+   `not _mv_reuse_active`.
+3. `texture_refine.py` loaded RealVisXL img2img with
+   `torch_dtype=float16` but without `variant='fp16'` → some submodules
+   stayed in fp32, every tile crashed on
+   `mat1 and mat2 to have the same dtype, float != Half`, atlas was
+   never actually refined. Fixed: pass `variant='fp16'` +
+   `use_safetensors=True` + explicit `.to(float16)` cast loop on each
+   submodule.
+
+### Takeaways
+
+- `FABMESH_MV_REUSE=<dir>` is now a first-class override for the SF3D
+  bridge — any caller can supply a preexisting 6-slot dir and skip
+  internal multi-view generation entirely.
+- The tex_refine fp16 bug was silently dead code for every Electron
+  user who hit refine mode: tiles failed, original atlas was kept, no
+  error surfaced above WARN level. Worth a dedicated test once we have
+  a regression harness.
+- 2-view (front+back) with ip45 is **usable as a starting point** but
+  the sides are frankly front+back smeared onto az=90/270 — visually
+  wrong on a subject with asymmetric arms/pose. Need at minimum a 3rd
+  SDXL view (profile at ip_scale 0.30-0.35 per _scale_sweep) before
+  claiming this approach competes with CRM.
 
 ---
 

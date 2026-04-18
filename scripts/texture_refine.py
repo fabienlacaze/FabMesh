@@ -117,7 +117,16 @@ def _img2img_local_fallback(tile: Image.Image, prompt: str,
         p = StableDiffusionXLImg2ImgPipeline.from_pretrained(
             'SG161222/RealVisXL_V4.0',
             torch_dtype=torch.float16,
+            variant='fp16',
+            use_safetensors=True,
         )
+        # Force every sub-module to fp16 — `from_pretrained` can leave
+        # some buffers/projections in fp32 when fp16 weights are missing
+        # for a given submodule, which then crashes inference with
+        # "expected mat1 and mat2 to have the same dtype".
+        for _m in (p.unet, p.vae, p.text_encoder, p.text_encoder_2):
+            if _m is not None:
+                _m.to(torch.float16)
         p.enable_model_cpu_offload()
         _img2img_local_fallback._pipe = p
     pipe = _img2img_local_fallback._pipe

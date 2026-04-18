@@ -915,7 +915,8 @@ def generate_3d(
     finally:
         try: os.remove(_preprocessed_path)
         except: pass
-        if _multiview_dir and os.path.isdir(_multiview_dir):
+        if (_multiview_dir and os.path.isdir(_multiview_dir)
+                and not _mv_reuse_active):
             try:
                 import shutil
                 shutil.rmtree(_multiview_dir, ignore_errors=True)

@@ -47,16 +47,19 @@ def build_mv_dir(mv_dir: str, front_png: str, back_png: str) -> None:
     for slot, img in slots.items():
         img.save(os.path.join(mv_dir, f'view_{slot}.png'))
 
-    views = [
-        {'slot': 0, 'azim':   0, 'elev':   0, 'label': 'front'},
-        {'slot': 1, 'azim':  90, 'elev':   0, 'label': 'right_dup_front'},
-        {'slot': 2, 'azim': 180, 'elev':   0, 'label': 'back'},
-        {'slot': 3, 'azim': 270, 'elev':   0, 'label': 'left_dup_back'},
-        {'slot': 4, 'azim':   0, 'elev':  90, 'label': 'top_dup_front'},
-        {'slot': 5, 'azim':   0, 'elev': -90, 'label': 'bottom_dup_back'},
-    ]
+    schema = {
+        'engine': 'ip45_2view',
+        'views': [
+            {'azim':   0.0, 'elev':   0.0, 'label': 'front'},
+            {'azim':  90.0, 'elev':   0.0, 'label': 'right_dup_front'},
+            {'azim': 180.0, 'elev':   0.0, 'label': 'back'},
+            {'azim': 270.0, 'elev':   0.0, 'label': 'left_dup_back'},
+            {'azim':   0.0, 'elev':  90.0, 'label': 'top_dup_front'},
+            {'azim':   0.0, 'elev': -90.0, 'label': 'bottom_dup_back'},
+        ],
+    }
     with open(os.path.join(mv_dir, 'views.json'), 'w') as f:
-        json.dump(views, f, indent=2)
+        json.dump(schema, f, indent=2)
     log(f'mv dir built -> {mv_dir}')
 
 
