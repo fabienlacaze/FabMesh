@@ -10,6 +10,49 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-18 — Paint3D v14: views_init [0,12] was LEFT-SIDE not BACK
+
+**Diagnosis of shattered albedo in v13**: the override
+`render_cfg.render.views_init = [0, 12]` was based on a WRONG comment
+claiming "index 12 = phi=180° (back)". In fact with `n_views=24,
+base_theta=60°, alternate_views=True` the dataset's phi ordering is
+permuted by `alternate_lists`:
+  - idx  0 → phi=0°   (front)   ✓
+  - idx 12 → phi=270° (LEFT SIDE) ✗
+  - idx 23 → phi=180° (back)    ← what we actually wanted
+
+Consequence: Paint3D back-projected the BACK photo onto a mesh rendered
+from a LEFT-SIDE camera. With `render_angle_thres=68°`, most faces
+failed the normal-cosine threshold → shattered UV atlas, ~90% magenta,
+only a few fragment islands textured correctly.
+
+Proof: `init_depth_render.png` in v13 shows left=front, right=side-view
+(arms receding into body). In v14 it's front + back, both T-pose.
+
+**Fix** (commit pending):
+  1. `external/Paint3D/pipeline_paint3d_stage1.py`: change `[0, 12]`
+     → `[0, 23]` for the 2-view mv-dir case.
+  2. `external/Paint3D/paint3d/models/render.py`: add
+     `FABMESH_PAINT3D_LOOSE_MASK` env flag (default off) that replaces
+     `render_angle_thres`. Only active when set; preserves Suzanne demo.
+  3. Same pipeline file: when FABMESH_MV_DIR is active, auto-set
+     `FABMESH_PAINT3D_LOOSE_MASK=85` — 2-view front+back needs >90°
+     total coverage per view, so 68° rejects too many silhouette-edge
+     triangles.
+
+**Result**: v14 albedo now shows proper front+back body silhouettes in
+the UV atlas bottom row (where they belong in SF3D's view-aligned UV
+layout). Side coverage filled by inpaint views 5/6, 24/25 via SD. The
+remaining magenta is mostly genuine UV atlas empty space and interior/
+occluded mesh regions, not missing coverage.
+
+**File refs**:
+  - Bug: `external/Paint3D/pipeline_paint3d_stage1.py:235` (old=[0,12])
+  - Compare albedos: `logs/child_ip45_2view/mesh_paint3d_v13.glb.paint3d_work/stage1/res-0/albedo.png`
+    vs `logs/child_ip45_2view/mesh_paint3d_v14.glb.paint3d_work/stage1/res-0/albedo.png`
+
+---
+
 ## 2026-04-18 — Sub-experiments hunting placement+definition (chronological)
 
 After the initial 2-view experiment shipped (entry below), we cycled
