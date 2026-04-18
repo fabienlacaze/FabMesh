@@ -352,6 +352,39 @@ So:
 D remains the best-quality stable config for shipping. Future face
 definition work should stay within NORMALIZE=0 frame.
 
+### Plan after the double-erratum (2026-04-18)
+
+User asked to keep improving D's definition. Resetting all hypotheses
+(my "empirical law" was based on misreading NORMALIZE values, so I
+can't trust the conclusions of A..K runs about flips).
+
+What I actually know NOW after the double-erratum:
+- D = NORMALIZE=0 + no SHIFT_SOURCE + canonical mv 7-layout = WORKING
+  baseline (correct orientation, "definition meilleure" per user).
+- Anything tried so far at higher resolution (K @ 2048) breaks
+  VERTICAL projection (face on calf), independent of NORMALIZE.
+- REAL_D / REAL_E (NORMALIZE=1) project face on back — broken.
+
+What I will try NEXT, one variant at a time, each logged
+immediately to this file BEFORE running, then verdict added AFTER:
+
+1. Run L = D + tex_res 2048 in SF3D bridge (atlas size, NOT mv res)
+   - tex_res controls the destination atlas resolution. mv source
+     stays at 1024 (no flip / no vertical inversion risk).
+   - Expected: same texture content, just baked into a higher-res
+     atlas -> sharper rendering at zoom.
+
+2. Run M = D + disable atlas refine (FABMESH_PROJECT_MODE=atlas)
+   - The SDXL refine pass may be smoothing the bake. Disabling lets
+     us see the raw projection quality.
+
+3. Run N = D + xatlas repack OFF (FABMESH_UV_REPACK=0)
+   - Skips the UV re-pack that may be reducing effective per-face
+     texel density.
+
+Each run will be logged here BEFORE the bash invocation so you can
+see what's about to be tested.
+
 ### Re-running D and E with TRUE NORMALIZE=1
 
 Run REAL_D = NORMALIZE=1 default + no SHIFT_SOURCE
