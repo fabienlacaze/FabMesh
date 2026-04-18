@@ -766,6 +766,39 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Torch 2.8 upgrade BLOCKED by Windows Smart App Control (2026-04-18)
+
+User picked "Upgrade torch 2.7 -> 2.8". Installed torch 2.8.0+cu129
++ kaolin wheel torch-2.8.0_cu129. At import time:
+
+```
+OSError: [WinError 4551] An Application Control policy has blocked
+this file. Error loading
+C:\...\torch\lib\shm.dll or one of its dependencies.
+```
+
+Diagnosed: Windows Smart App Control is **ON**
+(`Get-MpComputerStatus | SmartAppControlState = On`). It blocks
+unsigned DLLs. Torch 2.8 wheels on pypi aren't signed with the
+Microsoft code-signing cert that SAC accepts, so every torch call
+fails at DLL load. Torch 2.7.1+cu128 was accepted (probably an
+earlier signed build or was previously whitelisted in this env).
+
+Reverted pip install to torch 2.7.1+cu128, kaolin wheel torch 2.7.
+Verified torch imports correctly again.
+
+### Next routes
+- Compile kaolin from source with sm_120 (TORCH_CUDA_ARCH_LIST=12.0)
+  keeping torch 2.7. Requires Visual Studio Build Tools + nvcc
+  cu128. 30-90 min, may fail.
+- Try TEXTure (uses nvdiffrast, not kaolin). Check if nvdiffrast
+  Blackwell-supports via JIT kernel compile (nvdiffrast uses
+  torch's extension builder at runtime, auto-picks sm_120 if
+  TORCH_CUDA_ARCH_LIST set).
+- Turn off Smart App Control (requires admin, system-wide setting,
+  user's call).
+- Abandon dedicated texturing AI, stay with current bricolage.
+
 ### Paint3D install BLOCKED — kaolin doesn't support RTX 5080 (sm_120)
 
 Tried to install Paint3D. Deps all fine (albumentations, lightning,
