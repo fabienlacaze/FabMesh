@@ -766,6 +766,38 @@ All three are already scaffolded in the repo
 (external/MV-Adapter, external/CRM, external/TRELLIS). None are
 fully integrated yet.
 
+### Kaolin from source build — STARTING NOW (2026-04-18)
+
+User refocused: we're installing Paint3D specifically, not chasing
+alternatives. The only Paint3D-compatible path that keeps torch
+2.7.1 (SAC-safe) is to compile kaolin from source with
+TORCH_CUDA_ARCH_LIST=12.0.
+
+Plan:
+1. Check prerequisites:
+   - `where cl.exe` — Visual Studio Build Tools 2022 with C++
+     workload. If missing, install.
+   - CUDA Toolkit 12.8 (to match torch cu128). If not installed,
+     install alongside existing CUDA 13.2.
+2. Clone github.com/NVIDIAGameWorks/kaolin.git into external/kaolin.
+3. Checkout tag v0.18.0 (same as the wheel we currently have).
+4. Set env:
+   - CUDA_HOME = path to CUDA 12.8
+   - PATH with CUDA 12.8 first
+   - TORCH_CUDA_ARCH_LIST=12.0
+5. `pip install -e external/kaolin` (editable install, builds
+   extensions locally).
+6. Test kaolin rasterize on sm_120.
+7. Test Paint3D Suzanne demo.
+
+Risks:
+- VS Build Tools may be missing (~2.5 GB install if needed)
+- CUDA 12.8 toolkit may be missing (~3 GB if needed)
+- Build may take 30-90 min
+- Kaolin 0.18 codebase may use CUDA features not supported on
+  sm_120 (unlikely since 2.8 wheel "added Blackwell compatibility",
+  but possible).
+
 ### IMPORTANT PRIOR — nvdiffrast was INTENTIONALLY skipped yesterday
 
 Searching AGENT_LOG shows we already hit the nvdiffrast compile
