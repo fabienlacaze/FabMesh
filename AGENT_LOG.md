@@ -577,6 +577,34 @@ have "up" at the top of the image just like front, but when projected
 from azim=180 onto a mesh in SF3D-native frame, the V coord lands
 inverted.
 
+### Run W — conditional p_v flip in texture_project — STARTING NOW
+
+Plan logged BEFORE patching, per protocol.
+
+Hypothesis: texture_project.py applies `p_v = 1 - p_v` uniformly
+to all views (lines 281 single-view and 555 multi-view). For the
+back view at azim=180, this flips the back image vertically on
+the mesh (head ends up at feet). The fix is to SKIP this flip
+when the effective view azimuth is close to 180° (post
+rotation_offset).
+
+Implementation plan:
+- At the per-view loop in texture_project.py (around l.537),
+  after computing `shifted_azim = (azim + rotation_offset_deg)
+  % 360`, decide whether to apply `p_v = 1 - p_v`:
+  - If `abs(shifted_azim - 180) < 10°`: skip the p_v flip (back
+    view — image top already aligns with mesh top).
+  - Otherwise: apply the flip as before.
+- Gate behind `FABMESH_TEXPROJ_SKIP_BACK_VFLIP=1` env flag to
+  stay safe (default OFF preserves existing behaviour for Z123
+  and CRM pipelines).
+- Wrapper ip45_2view_to_3d.py exports the flag.
+
+Output: mesh_RUN_W.glb. Will compare to D in compare.html.
+
+Note: keep V's config (atlas mode + UV_REPACK=0) because V's
+determinism fix is orthogonal to the back-flip fix.
+
 ### Run V result — front OK, back still vertical-inverted
 
 User showed 2 views of Run V:
