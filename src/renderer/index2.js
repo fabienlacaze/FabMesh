@@ -5363,13 +5363,14 @@ function _atUpdateOverlayTransform() {
   if (!atState.overlay) return;
   const tx = parseFloat(document.getElementById('at-tx')?.value) || 0;
   const ty = parseFloat(document.getElementById('at-ty')?.value) || 0;
+  const tz = parseFloat(document.getElementById('at-tz')?.value) || 0;
   const sc = parseFloat(document.getElementById('at-scale')?.value) || 1;
   const ry = (parseFloat(document.getElementById('at-roty')?.value) || 0)
              * Math.PI / 180;
   // Plane size = mesh half-extent x scale (so scale=1 covers mesh roughly)
   const baseSize = atState.overlayDistance * 2;
   atState.overlay.scale.set(baseSize * sc, baseSize * sc, 1);
-  atState.overlay.position.set(tx, ty, atState.overlayDistance);
+  atState.overlay.position.set(tx, ty, atState.overlayDistance + tz);
   atState.overlay.rotation.set(0, ry, 0);
 }
 
@@ -5391,6 +5392,7 @@ function openAlignTexture() {
   };
   sync('at-tx', 'at-tx-val', v => Number(v).toFixed(2));
   sync('at-ty', 'at-ty-val', v => Number(v).toFixed(2));
+  sync('at-tz', 'at-tz-val', v => Number(v).toFixed(2));
   sync('at-scale', 'at-scale-val', v => Number(v).toFixed(2));
   sync('at-roty', 'at-roty-val', v => `${v}\u00B0`);
   sync('at-vis', 'at-vis-val', v => Number(v).toFixed(2));
@@ -5398,7 +5400,7 @@ function openAlignTexture() {
   // Live preview: move the photo overlay plane as sliders move; the
   // mesh itself stays fixed. The overlay shows where the source photo
   // will project. Actual re-projection on Re-project click.
-  ['at-tx', 'at-ty', 'at-scale', 'at-roty'].forEach(id => {
+  ['at-tx', 'at-ty', 'at-tz', 'at-scale', 'at-roty'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', _atUpdateOverlayTransform);
   });
@@ -5415,6 +5417,7 @@ document.getElementById('at-cancel')?.addEventListener('click', () => {
 document.getElementById('at-reset')?.addEventListener('click', () => {
   document.getElementById('at-tx').value = 0;
   document.getElementById('at-ty').value = 0;
+  document.getElementById('at-tz').value = 0;
   document.getElementById('at-scale').value = 1.20;
   document.getElementById('at-roty').value = 0;
   document.getElementById('at-vis').value = 0.5;
@@ -5422,7 +5425,7 @@ document.getElementById('at-reset')?.addEventListener('click', () => {
   document.getElementById('at-framefix').checked = true;
   document.getElementById('at-skipvflip').checked = true;
   // Re-trigger value displays
-  ['at-tx','at-ty','at-scale','at-roty','at-vis'].forEach(id => {
+  ['at-tx','at-ty','at-tz','at-scale','at-roty','at-vis'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('input'));
   });
@@ -5438,6 +5441,7 @@ document.getElementById('at-reproject')?.addEventListener('click', async () => {
     imagePath: p.selectedImagePath,
     translateX: parseFloat(document.getElementById('at-tx').value),
     translateY: parseFloat(document.getElementById('at-ty').value),
+    translateZ: parseFloat(document.getElementById('at-tz').value),
     meshScale: parseFloat(document.getElementById('at-scale').value),
     rotY: parseFloat(document.getElementById('at-roty').value),
     visThresh: parseFloat(document.getElementById('at-vis').value),

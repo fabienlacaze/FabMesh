@@ -3842,7 +3842,7 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
 ipcMain.handle('mesh:align-texture', async (_event, params) => {
   const {
     meshPath, imagePath,
-    translateX = 0, translateY = 0,
+    translateX = 0, translateY = 0, translateZ = 0,
     meshScale = 1.0, rotY = 0,
     visThresh = 0.5,
     autofit = true, frameFix = true, skipVflip = true,
@@ -3878,6 +3878,7 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
   const needsPreTransform = (
     Math.abs(translateX) > 0.001 ||
     Math.abs(translateY) > 0.001 ||
+    Math.abs(translateZ) > 0.001 ||
     Math.abs(meshScale - 1) > 0.001
   );
   let workMeshPath = meshPath;
@@ -3889,7 +3890,7 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
       await new Promise((resolve, reject) => {
         execFile('python', [preScript, meshPath, tmpPath,
                             String(translateX), String(translateY),
-                            String(meshScale)], {
+                            String(meshScale), String(translateZ)], {
           timeout: 60000, maxBuffer: 4 * 1024 * 1024,
         }, (error, stdout, stderr) => {
           if (stdout) log.info('mesh:align-texture/pre', stdout.trim().slice(-1000));
