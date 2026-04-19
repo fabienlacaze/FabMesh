@@ -5671,6 +5671,125 @@ Files:
 Result expected: less artifacts on the dorsal mesh, smooth blend from
 front to back without pose mismatch.
 
+---
+
+# ============================================================
+# SYNTHÈSE GLOBALE — Journée 2026-04-19
+# Pipeline 2-view (front + back) intégré dans FabMesh
+# ============================================================
+
+## Objectif initial
+L'user veut une qualité de texture SUPÉRIEURE au pipeline single-view
+SF3D classique. La face arrière du mesh est toujours hallucinée par
+SF3D (qui n'a vu que la photo front), donc dorsalement laide.
+
+## Ce qu'on a construit (commits chronologiques)
+
+### 1. Outil "Align Texture" dans la card Mesh (manuel)
+Bouton 🎯 Align Texture dans Manual tools → ouvre un modal avec:
+- Viewer Three.js du mesh
+- Sliders TX/TY/TZ/Scale/RotY/Visibility/Opacity
+- Boutons FRONT/BACK (toggle quel overlay régler)
+- Boutons vue (Front/Right/Back/Left/Top/Bottom/Iso)
+- Checkboxes Live project on mesh / Show overlay plane / Auto-fit /
+  Frame fix / Skip back vflip
+- Re-project = pre_transform + texture_project re-projection
+- Live preview en temps réel via projective texture shader (GLSL custom)
+
+Commits: 41da4ff, 86078d9, c7e9116, e6f4b36, 47ce9e8, c280ac9,
+b46e048, e651aff, 2b688d2, 1c23570, 7bcf47e, b4db178, 1937a28,
+a19c118, 6d62eae, 314829a, df46418, ee1d89d, 3bcad8b, c0e3a3b,
+346d4cd, f032d43.
+
+### 2. Génération auto back-view (2-view)
+Checkbox "Auto 2-view" dans card Image → après front gen, déclenche
+automatiquement la génération de la photo back depuis la front.
+
+#### Évolution de la recette back-view
+- **Z123 multi-view (initial)**: 6 vues hallucinées Zero123++. Pas
+  photoréaliste. ABANDONNÉ.
+- **RealVis + IPAdapter (47ce9e8)**: même modèle que la front, ip=0.45,
+  prompt "back view". Marche sur enfant photoréaliste, échoue sur
+  perso CG/orc.
+- **Sweep ip_scale 0.45..0.85**: PURE 0.75 = meilleur sur fille_afghanne
+  (commit 4b2c7bf, viewer compare logs/ip_sweep/).
+- **BLIP captioning (b4fc4df, 8155a00)**: BLIP-large décrit l'outfit
+  du front automatiquement → enrichit le prompt back. Évite drift
+  vêtements. Sanitize les "is posing" / "naked body".
+- **Strip "front view" tokens (ef9dce8, 40ee919)**: prompt FabMesh
+  enhanced contient "strict front view, facing camera, symmetric"
+  qui contredit "back view". Regex strip avant injection.
+- **Raw user prompt (befc680)**: utiliser `userPrompt` brut (pas le
+  enhanced "RTS unit, T-pose, ...") évite la pollution.
+- **ControlNet OpenPose (commit 5GB DL)**: skeleton T-pose back
+  hardcodé force la pose identique front/back, peu importe IPAdapter.
+  Tag back-view-perfect.
+
+### 3. Pipeline mesh 2-view dans FabMesh
+- Si `imagePathBack` fourni à `image-to-3d`, build mv2 dir avec
+  view_0=front, view_1=back, views.json
+- Env vars 2-view: `FABMESH_MV_REUSE`, `FABMESH_PROJECT_MODE=...`,
+  `FABMESH_TEXPROJ_FRAME_FIX=1`, etc.
+
+#### Mode de projection back: atlas → augment (f42c0de)
+**Insight critique** de l'user: même avec ControlNet OpenPose lockant
+la T-pose, la photo back n'a pas la silhouette EXACTE de la dorsale du
+mesh (car SF3D n'utilise QUE la front pour générer le mesh, vérifié
+dans `external/StableFast3D/sf3d/system.py:245` — la liste d'images
+est un batch de meshes indépendants, pas un multi-view fusion).
+
+→ `PROJECT_MODE=atlas` (pixel-precise projection): échoue, artifacts.
+→ `PROJECT_MODE=augment` (additive blend): front=SF3D bake clean,
+  back=blend additif sur faces dorsales seulement quand back vis >>
+  front vis. Pas de pixel-precise = pas d'artifacts silhouette.
+
+Patch: `texture_augment.py` lit maintenant views.json (avant hardcoded
+6-view Z123 schema).
+
+### 4. UI updates
+- Slot "Optional back photo" dans card Mesh
+- Barre FRONT/BACK dans card Image (au lieu des 6 angles 0/90/180/...)
+- Barre FRONT/BACK dans lightbox grand viewer
+- Bouton ✨ Enhance dans modal new project
+- Popup "Regenerate multi-views?" → "Regenerate back view?"
+  (ac74e35) qui appelle le bon pipeline
+
+## Configuration finale validée (tag 2view-augment-best)
+1. **Front gen**: RealVis XL + prompt enhanced (asset-style template)
+2. **BLIP caption** sur la front → outfit description
+3. **Back gen**: RealVis + IPAdapter ip=0.55 + ControlNet OpenPose +
+   prompt = `<rawPrompt>, <BLIP outfit>` + skeleton T-pose hardcodé
+4. **SF3D** mesh + atlas natif depuis la front
+5. **AUGMENT** mode: dorsale enrichie par blend additif de la back
+
+## Backup branches créées aujourd'hui
+- backup-before-uv-weld-fix-20260418-223959
+- backup-weld-preserve-uv-20260419-001243
+- backup-before-quality-upgrades-20260419-004126
+- backup-before-blip-captioning-20260419-160818
+- backup-before-controlnet-openpose-20260419-163854
+- backup-2view-augment-validated-20260419-172540 (état validé)
+
+## Tags
+- `a-utiliser-v2`, `a-utiliser-v3`: étapes intermédiaires
+- `front-fixed-back-todo`: avant fix back
+- `back-view-perfect`: BLIP + ip=0.55 marche
+- `2view-augment-best`: pipeline complet validé user
+
+## Modèles téléchargés (commercial-safe)
+- RealVis XL v4.0 (CreativeML OpenRAIL++-M)
+- IPAdapter Plus SDXL (Apache 2.0)
+- BLIP-large (BSD-3) ~1 GB
+- xinsir/controlnet-openpose-sdxl-1.0 (Apache 2.0) ~5 GB
+- SF3D (Stability Community License, <$1M revenue)
+
+## Limitations connues (à explorer ensuite)
+- La back est ressemblante mais pas IDENTIQUE au front (drift
+  costume/coiffure résiduel ~10%)
+- Pour aller plus loin: TRELLIS ou Hunyuan3D 2.0 qui produisent
+  vraiment un mesh+textures cohérents en multi-view natif.
+
+
 
 
 
