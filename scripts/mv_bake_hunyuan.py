@@ -267,9 +267,14 @@ def step_sf3d_2view_augment(image_path, back_image, out_glb, tex_res=1024):
     env['PYTHONIOENCODING'] = 'utf-8'
     env['PYTHONUNBUFFERED'] = '1'
     # 2-view AUGMENT envvars (mirror of main.js:3514-3522)
+    # NOTE: FABMESH_SF3D_NORMALIZE_ORIENT='0' was set when this pipeline
+    # ran via the FabMesh UI's image-to-3d (which uses its own perspective
+    # back-projection). For voie F we let the bridge ROTATE 180° so the
+    # face ends up on +Z, then voie C's ortho cameras project through
+    # the correct hemisphere. Otherwise the front photo lands on the back.
     env['FABMESH_MV_REUSE'] = mv2_dir
     env['FABMESH_PROJECT_MODE'] = 'augment'
-    env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
+    # NORMALIZE_ORIENT default is '1' (rotate 180°). Don't override.
     env['FABMESH_TEXPROJ_FRAME_FIX'] = '1'
     env['FABMESH_TEXPROJ_SKIP_BACK_VFLIP'] = '1'
     env['FABMESH_AUTOFIT'] = '1'

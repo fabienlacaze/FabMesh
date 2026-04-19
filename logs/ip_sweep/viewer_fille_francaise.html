@@ -264,7 +264,7 @@
 </div>
 
 <!-- v9: VOIE F front-only + STACK_VIS_FLOOR=0.40 (fix bleed sur dos) -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v9 — VOIE F front + FLOOR fix</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
@@ -281,6 +281,31 @@
   <div class="grid6">
     <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
     <div class="cell" data-label="atlas v9"><img src="_francaise_voiefab_front_v2_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v10: VOIE F front + NORMALIZE_ORIENT=1 (fix orientation inversée) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v10 — VOIE F front + ORIENT fix</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">NORMALIZE_ORIENT=1 (default)</span>
+    <ul>
+      <li>Bug v8/v9: front HD plaqué sur le DOS du mesh</li>
+      <li>Cause: <b>FABMESH_SF3D_NORMALIZE_ORIENT='0'</b> (copié du mode UI 2-view qui utilise sa propre projection perspective)</li>
+      <li>En voie F (projection ortho voie C), le mesh SF3D doit être rotaté 180° (face → +Z) pour matcher la convention caméra ortho front</li>
+      <li>Fix: laisser le default NORMALIZE_ORIENT=1 (rotate 180°)</li>
+      <li>STACK_VIS_FLOOR=0.40 conservé</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v3.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas v10"><img src="_francaise_voiefab_front_v3_tex.png"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
