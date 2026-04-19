@@ -5647,6 +5647,30 @@ texturing on the mesh aligns properly.
 
 Cost: ~5 GB DL first run, +5s inference per back gen (~20s total).
 
+### 2026-04-19 — switch 2-view mode from atlas to AUGMENT
+
+User insight: even with ControlNet OpenPose locking the T-pose, the back
+photo's silhouette doesn't EXACTLY match the mesh dorsal shape (mesh is
+inferred from front only by SF3D, which does NOT support real multi-view
+input — verified in external/StableFast3D/sf3d/system.py:245). Pixel-
+precise projective texturing of back photo onto mesh fails.
+
+Solution: PROJECT_MODE=augment instead of atlas.
+- Front-facing faces: keep SF3D's native bake (clean, sharp).
+- Back/side faces: blend with the back-photo color additively only when
+  the back view has clearly better visibility than front (margin=0.3).
+- No pixel-precise projection — back photo only contributes COLOR, not
+  geometry.
+
+Files:
+- src/main/main.js: PROJECT_MODE 'atlas' -> 'augment' in mv2 env block.
+  Removed FABMESH_TEXPROJ_VIS_THRESH (augment uses its own logic).
+- scripts/texture_augment.py: now reads views.json from mv dir if
+  present (was hardcoded to Z123 6-view schema, broke on 2-view).
+
+Result expected: less artifacts on the dorsal mesh, smooth blend from
+front to back without pose mismatch.
+
 
 
 

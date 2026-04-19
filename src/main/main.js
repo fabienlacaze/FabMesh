@@ -3506,20 +3506,23 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       ..._ramLimitMB2 ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB2 } : {},
       ..._gpuLimit2   ? { FABMESH_GPU_LIMIT:   _gpuLimit2   } : {},
       ..._tempLimit2  ? { FABMESH_TEMP_LIMIT:  _tempLimit2  } : {},
-      // 2-view config (a-utiliser-v3 baseline) when back photo provided
+      // 2-view config (a-utiliser-v3 baseline) when back photo provided.
+      // PROJECT_MODE=augment: SF3D bake stays as-is on front-facing faces,
+      // only back/side faces get blended with the back photo (additive,
+      // no pixel-precise projection — avoids artifacts when the back
+      // photo's silhouette doesn't perfectly match the mesh dorsal shape).
       ...(mv2Dir ? {
         FABMESH_MV_REUSE: mv2Dir,
-        FABMESH_PROJECT_MODE: 'atlas',
+        FABMESH_PROJECT_MODE: 'augment',
         FABMESH_SF3D_NORMALIZE_ORIENT: '0',
         FABMESH_TEXPROJ_FRAME_FIX: '1',
         FABMESH_TEXPROJ_SKIP_BACK_VFLIP: '1',
-        FABMESH_TEXPROJ_VIS_THRESH: '0.5',
         FABMESH_AUTOFIT: '1',
         FABMESH_AUTOFIT_RATIO: '1.20',
       } : {}),
     };
     if (mv2Dir) {
-      log.info('main', '2-view env applied: AUTOFIT + FRAME_FIX + multi-view (front+back)');
+      log.info('main', '2-view env applied: AUGMENT mode (front=SF3D bake, back=additive blend)');
     }
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
     const result = await new Promise((resolve, reject) => {

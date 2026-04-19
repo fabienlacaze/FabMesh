@@ -156,8 +156,19 @@ def augment(mesh_path, front_image_path, output_path, multiview_dir=None,
                                          distance, focal, 0.0, 0.0)
 
     # ---- Multi-view source images + per-vertex uv/vis cache ----
+    # Prefer views.json schema if present (e.g. fabmesh_2view: front+back).
+    views_json = os.path.join(multiview_dir, 'views.json')
+    view_schema = MULTIVIEW_VIEWS
+    if os.path.exists(views_json):
+        try:
+            with open(views_json, 'r') as _f:
+                _vj = json.load(_f)
+            view_schema = [(v['azim'], v['elev']) for v in _vj.get('views', [])]
+            log(f'using views.json schema: {view_schema}')
+        except Exception as _e:
+            log(f'views.json parse failed ({_e}), falling back to Z123')
     view_data = []
-    for i, (azim, elev) in enumerate(MULTIVIEW_VIEWS):
+    for i, (azim, elev) in enumerate(view_schema):
         vp = os.path.join(multiview_dir, f'view_{i}.png')
         if not os.path.exists(vp):
             log(f'WARNING: missing {vp}, skipping')
