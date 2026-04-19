@@ -51,10 +51,27 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
 
     ref_img = Image.open(front_image).convert('RGB')
 
-    # EXACT recipe from _scale_sweep.py that produced child_ip45_back.png
-    # (the validated reference dataset). Subject context goes BEFORE the
-    # directional phrase so SDXL parses the structure correctly.
-    base = prompt_hint if prompt_hint else 'a person in T-pose'
+    # CRITICAL: strip FRONT-related tokens from the user hint. FabMesh's
+    # asset-style system appends 'strict front view, facing camera,
+    # symmetric' which directly contradicts the 'back view' directive and
+    # wins because it comes first in the prompt.
+    import re as _re
+    hint_clean = prompt_hint or ''
+    _front_patterns = [
+        r'strict front view',
+        r'front view',
+        r'facing camera',
+        r'symmetric',
+        r'three[- ]?quarter view',
+        r'three[- ]?fourth view',
+    ]
+    for pat in _front_patterns:
+        hint_clean = _re.sub(pat, '', hint_clean, flags=_re.IGNORECASE)
+    hint_clean = _re.sub(r',\s*,', ',', hint_clean)
+    hint_clean = _re.sub(r'\s+', ' ', hint_clean).strip(' ,')
+    print(f'[back-view] cleaned hint: "{hint_clean[:200]}"', flush=True)
+
+    base = hint_clean if hint_clean else 'a person in T-pose'
     prompt = (
         f'{base}, back view, from behind, back of head visible, '
         f'turned away from camera, full body centered, plain grey '
