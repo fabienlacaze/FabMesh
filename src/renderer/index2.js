@@ -5176,6 +5176,8 @@ const atState = {
   camera: null,
   controls: null,
   mesh: null,
+  overlay: null,        // semi-transparent photo plane preview
+  overlayDistance: 1,   // mesh half-size (set on mesh load), for plane Z position
 };
 
 async function _atInitViewport() {
@@ -5254,6 +5256,9 @@ async function _atLoadMesh(meshPath) {
       obj.position.sub(center);
       atState.mesh = obj;
       atState.scene.add(obj);
+      // Compute mesh half-size for overlay plane sizing/positioning
+      const bsize = box.getSize(new THREE.Vector3());
+      atState.overlayDistance = Math.max(bsize.x, bsize.y) * 0.7;
       // Frame camera
       atState.camera.position.set(0, 0, size * 1.2);
       atState.camera.lookAt(0, 0, 0);
@@ -5262,12 +5267,50 @@ async function _atLoadMesh(meshPath) {
         atState.controls.update();
       }
       if (status) status.style.display = 'none';
+      // Re-create / refresh overlay photo plane on top
+      _atUpdateOverlay();
     }, undefined, (err) => {
       if (status) status.textContent = 'Load error: ' + (err?.message || err);
     });
   } catch (e) {
     if (status) status.textContent = 'Loader error: ' + (e?.message || e);
   }
+}
+
+function _atUpdateOverlay() {
+  if (!atState.scene) return;
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) return;
+  // Lazy create overlay plane (textured with source image)
+  if (!atState.overlay) {
+    const tex = new THREE.TextureLoader().load(
+      'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now()
+    );
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide,
+    });
+    const geom = new THREE.PlaneGeometry(1, 1);
+    atState.overlay = new THREE.Mesh(geom, mat);
+    atState.overlay.renderOrder = 999;  // draw on top
+    atState.scene.add(atState.overlay);
+  }
+}
+
+// Live overlay update: place/rotate the photo plane in front of the mesh
+// so the user sees where photons would project. Mesh stays fixed.
+function _atUpdateOverlayTransform() {
+  if (!atState.overlay) return;
+  const tx = parseFloat(document.getElementById('at-tx')?.value) || 0;
+  const ty = parseFloat(document.getElementById('at-ty')?.value) || 0;
+  const sc = parseFloat(document.getElementById('at-scale')?.value) || 1;
+  const ry = (parseFloat(document.getElementById('at-roty')?.value) || 0)
+             * Math.PI / 180;
+  // Plane size = mesh half-extent x scale (so scale=1 covers mesh roughly)
+  const baseSize = atState.overlayDistance * 2;
+  atState.overlay.scale.set(baseSize * sc, baseSize * sc, 1);
+  atState.overlay.position.set(tx, ty, atState.overlayDistance);
+  atState.overlay.rotation.set(0, ry, 0);
 }
 
 function openAlignTexture() {
@@ -5292,23 +5335,12 @@ function openAlignTexture() {
   sync('at-roty', 'at-roty-val', v => `${v}\u00B0`);
   sync('at-vis', 'at-vis-val', v => Number(v).toFixed(2));
 
-  // Live preview: transform the Three.js mesh as sliders move so the
-  // user sees the effect instantly. Actual re-projection only happens
-  // on Re-project click (texture rebake takes ~5-10s).
-  const updateLivePreview = () => {
-    if (!atState.mesh) return;
-    const tx = parseFloat(document.getElementById('at-tx').value) || 0;
-    const ty = parseFloat(document.getElementById('at-ty').value) || 0;
-    const sc = parseFloat(document.getElementById('at-scale').value) || 1;
-    const ry = (parseFloat(document.getElementById('at-roty').value) || 0)
-               * Math.PI / 180;
-    atState.mesh.position.set(tx, ty, 0);
-    atState.mesh.scale.setScalar(sc);
-    atState.mesh.rotation.set(0, ry, 0);
-  };
+  // Live preview: move the photo overlay plane as sliders move; the
+  // mesh itself stays fixed. The overlay shows where the source photo
+  // will project. Actual re-projection on Re-project click.
   ['at-tx', 'at-ty', 'at-scale', 'at-roty'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', updateLivePreview);
+    if (el) el.addEventListener('input', _atUpdateOverlayTransform);
   });
   // Init viewer + load current mesh
   requestAnimationFrame(async () => {
