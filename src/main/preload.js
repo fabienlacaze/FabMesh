@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   meshTool: (opts) => ipcRenderer.invoke('mesh-tool', opts),
   alignTexture: (opts) => ipcRenderer.invoke('mesh:align-texture', opts),
   generateBackView: (opts) => ipcRenderer.invoke('generate-back-view', opts),
+  captionImage: (opts) => ipcRenderer.invoke('caption-image', opts),
   saveBuffer: (opts) => ipcRenderer.invoke('save-buffer', opts),
   logToFile: (line) => ipcRenderer.send('renderer-log', line),
   generateMultiview: (opts) => ipcRenderer.invoke('generate-multiview', opts),

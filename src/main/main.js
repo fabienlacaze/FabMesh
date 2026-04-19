@@ -3835,6 +3835,35 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
 });
 
 // ============================================================
+// CAPTION IMAGE — BLIP describes the front photo (clothes, hair, etc.)
+// for back-view prompt enrichment. Output is added to the back-view
+// promptHint so SDXL+IPAdapter generates the same outfit on the back.
+// ============================================================
+ipcMain.handle('caption-image', async (_event, { imagePath }) => {
+  if (!imagePath || !fs.existsSync(imagePath)) {
+    return { success: false, error: `image not found: ${imagePath}` };
+  }
+  const script = path.join(__dirname, '..', '..', 'scripts', 'caption_image.py');
+  return new Promise((resolve) => {
+    const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    execFile('python', [script, imagePath], {
+      env, timeout: 180000, maxBuffer: 10 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (stdout) log.info('caption-image', stdout.trim().slice(-500));
+      if (error) {
+        log.error('caption-image', error.message);
+        resolve({ success: false, error: error.message });
+      } else {
+        // Parse "CAPTION: ..." line
+        const match = (stdout || '').match(/CAPTION:\s*(.+)/);
+        const text = match ? match[1].trim() : '';
+        resolve({ success: true, caption: text });
+      }
+    });
+  });
+});
+
+// ============================================================
 // GENERATE BACK VIEW — RealVis XL + IPAdapter, replaces Z123 for the
 // 2-view texturing pipeline. Produces a photoreal back view of the
 // same subject, conditioned on the front photo.

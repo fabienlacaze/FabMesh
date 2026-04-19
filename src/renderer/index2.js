@@ -2936,9 +2936,26 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
             const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
                               || userPrompt || '';
             for (const imgPath of r.images) {
+              // STEP 1: BLIP-caption the front photo to extract outfit
+              // description. This is added to the prompt so the back has
+              // the same clothing as the front.
+              let outfitDesc = '';
+              try {
+                const cap = await window.meshyAPI.captionImage({ imagePath: imgPath });
+                if (cap?.success && cap.caption) {
+                  outfitDesc = cap.caption;
+                  console.log('[caption]', imgPath, '->', outfitDesc);
+                }
+              } catch (e) {
+                console.warn('[caption] failed:', e);
+              }
+              // Combine: subject (from raw user prompt) + outfit (BLIP)
+              const enrichedHint = outfitDesc
+                ? `${rawPrompt}, ${outfitDesc}`
+                : rawPrompt;
               const bvResult = await window.meshyAPI.generateBackView({
                 frontImage: imgPath,
-                promptHint: rawPrompt,
+                promptHint: enrichedHint,
                 numImages: 1,
               });
               if (bvResult?.success && bvResult.paths?.length) {

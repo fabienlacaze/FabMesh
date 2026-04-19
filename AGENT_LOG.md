@@ -5602,6 +5602,27 @@ Also fixed: lightbox FRONT/BACK bar didn't appear in 2-view mode
 (only worked with full Z123 _multiviews dir). Now shows for either
 hasFullMv OR hasBack, and the BACK button loads the back photo.
 
+### 2026-04-19 — BLIP outfit captioning for back-view
+
+Outfits between front and back kept drifting (jacket pockets present
+on front, absent on back, etc.) because the back-gen prompt only
+contained the subject name ("enfant"). RealVis+IPAdapter had no
+explicit text grounding for the clothing.
+
+Fix: BLIP image captioning step before back gen.
+- New script scripts/caption_image.py: tries BLIP-large
+  (Salesforce/blip-image-captioning-large, BSD-3, ~1 GB), falls back
+  to BLIP-2 OPT-2.7B if missing. Conditional caption seeded with
+  "a character wearing" so output is outfit-focused.
+- New IPC handler 'caption-image' in main.js → preload exposes as
+  meshyAPI.captionImage.
+- Image-gen flow now calls captionImage on each generated front,
+  builds enrichedHint = "<rawPrompt>, <BLIP outfit desc>", passes
+  it as promptHint to generateBackView.
+
+Both models BSD-3, commercial OK. Inference ~3s on RTX 5080.
+
+
 
 
 
