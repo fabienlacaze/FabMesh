@@ -2,13 +2,13 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>FabMesh — Voie B validée (SF3D vs TripoSG 200k)</title>
+<title>FabMesh — Voie B vs Voie C (fille_afghanne)</title>
 <style>
   html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
             font-family:system-ui;height:100%}
   h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
      border-bottom:1px solid #333}
-  .row{display:flex;height:calc((100vh - 72px) - 300px)}
+  .row{display:flex;height:420px}
   .col{flex:1;border-right:1px solid #333;position:relative}
   .col-title{position:absolute;top:6px;left:8px;right:8px;z-index:5;
              background:rgba(0,0,0,0.78);padding:4px 8px;border-radius:3px;
@@ -22,7 +22,7 @@
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>fille_afghanne — Voie B validée (SF3D natif vs Voie B SF3D 12k vs Voie B TripoSG 200k)</h1>
+<h1>fille_afghanne — Meshes comparés</h1>
 <div class="row">
   <div class="col">
     <div class="col-title">FRONT photo (input reference)</div>
@@ -31,36 +31,55 @@
   <div class="col">
     <div class="col-title">
       <b>SF3D natif</b> (baseline)<br>
-      <span class="stat">12k faces · atlas SF3D baked · ~110s</span>
+      <span class="stat">12k · SF3D atlas · ~110s</span>
     </div>
     <model-viewer src="_afghan_sf3d.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
   <div class="col">
     <div class="col-title">
-      <b>Voie B (SF3D 12k)</b><br>
-      <span class="stat">SF3D + MVAdapter 6v + cos⁴ + Telea<br>sharp=57%, 170s</span>
+      <b>Voie B</b> SF3D 12k + MVAdapter 6v 512²<br>
+      <span class="stat">sharp=57%, 170s · ⚠ nvdiffrast non-commercial</span>
     </div>
     <model-viewer src="_afghan_mvbake_sf3d_v3.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
-  <div class="col" style="border-left:3px solid #4cd964">
+  <div class="col">
     <div class="col-title">
-      <span class="new"><b>Voie B (TripoSG 200k)</b></span><br>
-      <span class="stat">TripoSG 200k + MVAdapter 6v + cos⁴ + Telea<br>sharp=58%, 439s — mesh 16× plus détaillé</span>
+      <b>Voie B</b> TripoSG 200k + MVAdapter<br>
+      <span class="stat">sharp=58%, 439s · mesh 16× plus détaillé</span>
     </div>
     <model-viewer src="_afghan_mvbake_triposg_200k.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title">
+      <span class="new"><b>Voie C</b> SF3D 12k + RealVis+IPA+CN 1024² HD</span><br>
+      <span class="stat">sharp=57%, 194s · ✅ 100% commercial-safe</span>
+    </div>
+    <model-viewer src="_afghan_voiec.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
 </div>
-<h1>MVAdapter 6 views — front / right / back / left / top / bottom (512×512, 20 steps SDXL)</h1>
+
+<h1>Voie B — MVAdapter 6 views (512×512, SDXL)</h1>
+<div class="row" style="height:200px">
+  <div class="col"><img class="ref" src="_mvbake_views/view_0.png" onerror="this.style.display='none'"><div class="col-title">v0 front</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_1.png" onerror="this.style.display='none'"><div class="col-title">v1 right</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_2.png" onerror="this.style.display='none'"><div class="col-title">v2 back</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_3.png" onerror="this.style.display='none'"><div class="col-title">v3 left</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_4.png" onerror="this.style.display='none'"><div class="col-title">v4 top</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_5.png" onerror="this.style.display='none'"><div class="col-title">v5 bottom</div></div>
+</div>
+
+<h1>Voie C — FabMesh 6 views (1024×1024, RealVis XL + IPAdapter + ControlNet OpenPose)</h1>
 <div class="row" style="height:300px">
-  <div class="col"><img class="ref" src="_mvbake_views/view_0.png"><div class="col-title">v0 front</div></div>
-  <div class="col"><img class="ref" src="_mvbake_views/view_1.png"><div class="col-title">v1 right</div></div>
-  <div class="col"><img class="ref" src="_mvbake_views/view_2.png"><div class="col-title">v2 back</div></div>
-  <div class="col"><img class="ref" src="_mvbake_views/view_3.png"><div class="col-title">v3 left</div></div>
-  <div class="col"><img class="ref" src="_mvbake_views/view_4.png"><div class="col-title">v4 top</div></div>
-  <div class="col"><img class="ref" src="_mvbake_views/view_5.png"><div class="col-title">v5 bottom</div></div>
+  <div class="col"><img class="ref" src="_voiec_v0.png"><div class="col-title">v0 front</div></div>
+  <div class="col"><img class="ref" src="_voiec_v1.png"><div class="col-title">v1 right</div></div>
+  <div class="col"><img class="ref" src="_voiec_v2.png"><div class="col-title">v2 back</div></div>
+  <div class="col"><img class="ref" src="_voiec_v3.png"><div class="col-title">v3 left</div></div>
+  <div class="col"><img class="ref" src="_voiec_v4.png"><div class="col-title">v4 top (no CN)</div></div>
+  <div class="col"><img class="ref" src="_voiec_v5.png"><div class="col-title">v5 bot (no CN)</div></div>
 </div>
 </body>
 </html>

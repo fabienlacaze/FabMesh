@@ -160,6 +160,33 @@ def step_mvadapter_views(mesh_path, image_path, out_dir, num_views=6,
     log(f'STEP 2 done in {time.time()-t0:.1f}s ({num_views} views)')
 
 
+def step_fabmesh_6views(mesh_path, image_path, out_dir,
+                        num_steps=30, seed=42,
+                        reuse_front=None, reuse_back=None):
+    """Voie C: generate 6 HD views via FabMesh stack
+    (RealVis XL + IPAdapter + ControlNet OpenPose). Commercial-safe,
+    no nvdiffrast. Output contract identical to step_mvadapter_views."""
+    mesh_path = os.path.abspath(mesh_path)
+    image_path = os.path.abspath(image_path)
+    out_dir = os.path.abspath(out_dir)
+    log(f'STEP 2 (voieC): fabmesh_6views -> 6 views in {out_dir}')
+    t0 = time.time()
+    runner = os.path.join(SCRIPTS, 'fabmesh_6views_runner.py')
+    cmd = [sys.executable, runner, mesh_path, image_path, out_dir,
+           str(num_steps), str(seed)]
+    if reuse_front:
+        cmd += ['--reuse-front', os.path.abspath(reuse_front)]
+    if reuse_back:
+        cmd += ['--reuse-back', os.path.abspath(reuse_back)]
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    rc, _, err = _run_streamed(cmd, prefix='voiec', timeout=1800, env=env)
+    if rc != 0:
+        log(f'fabmesh_6views_runner failed (rc={rc}): {err[-800:]}')
+        sys.exit(3)
+    log(f'STEP 2 done in {time.time()-t0:.1f}s (6 HD views)')
+
+
 def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
               bake_exp=4.0):
     log(f'STEP 3: texture_project with 6-view + cos^{bake_exp} + Telea inpaint')
@@ -184,16 +211,38 @@ def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
 
 
 def main():
-    if len(sys.argv) < 3:
-        print('Usage: mv_bake_hunyuan.py <front_image> <out.glb> '
-              '[mesh=sf3d|triposg] [bake_exp=4.0] [target_faces=50000]\n'
-              '  target_faces: only for triposg backend (default 50000)')
-        sys.exit(1)
-    front = sys.argv[1]
-    out_glb = sys.argv[2]
-    mesh_backend = sys.argv[3] if len(sys.argv) > 3 else 'sf3d'
-    bake_exp = float(sys.argv[4]) if len(sys.argv) > 4 else 4.0
-    target_faces = int(sys.argv[5]) if len(sys.argv) > 5 else 50000
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Voie B/C multi-view bake pipeline.')
+    parser.add_argument('front', help='Front image (PNG/JPG)')
+    parser.add_argument('out_glb', help='Output textured GLB path')
+    parser.add_argument('mesh_backend', nargs='?', default='sf3d',
+                        choices=['sf3d', 'triposg'],
+                        help='Bare mesh generator (default: sf3d)')
+    parser.add_argument('bake_exp', nargs='?', type=float, default=4.0,
+                        help='cos^N visibility exponent (default: 4.0)')
+    parser.add_argument('target_faces', nargs='?', type=int, default=50000,
+                        help='TripoSG face count (default: 50000)')
+    parser.add_argument('--engine', choices=['mvadapter', 'fabmesh'],
+                        default='mvadapter',
+                        help='View generator (mvadapter=voie B, '
+                             'fabmesh=voie C)')
+    parser.add_argument('--reuse-front', default=None,
+                        help='(voie C) reuse an existing front image '
+                             'instead of regenerating view_0')
+    parser.add_argument('--reuse-back', default=None,
+                        help='(voie C) reuse an existing back image '
+                             'instead of regenerating view_2')
+    args = parser.parse_args()
+
+    front = args.front
+    out_glb = args.out_glb
+    mesh_backend = args.mesh_backend
+    bake_exp = args.bake_exp
+    target_faces = args.target_faces
+    engine = args.engine
+    reuse_front = args.reuse_front
+    reuse_back = args.reuse_back
 
     out_dir = os.path.dirname(os.path.abspath(out_glb))
     os.makedirs(out_dir, exist_ok=True)
@@ -221,7 +270,14 @@ def main():
     else:
         log(f'unknown backend: {mesh_backend}'); sys.exit(1)
 
-    step_mvadapter_views(bare_mesh, front, mv_dir)
+    if engine == 'mvadapter':
+        step_mvadapter_views(bare_mesh, front, mv_dir)
+    elif engine == 'fabmesh':
+        step_fabmesh_6views(bare_mesh, front, mv_dir,
+                            reuse_front=reuse_front,
+                            reuse_back=reuse_back)
+    else:
+        log(f'unknown engine: {engine}'); sys.exit(1)
     step_bake(bare_mesh, front, out_glb, mv_dir, bake_exp=bake_exp)
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')
 
