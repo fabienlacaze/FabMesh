@@ -626,10 +626,23 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             base_tex_pil = sf3d_tex.convert('RGB').resize(
                 (tex_res, tex_res), Image.LANCZOS)
             base_arr = np.asarray(base_tex_pil, dtype=np.float64)
+            # Pre-fill black holes in the SF3D atlas (bras T-pose
+            # qui ne sont vus par aucune caméra SF3D laissent des
+            # zones noires/transparentes). Telea inpaint sur les
+            # pixels < seuil pour combler avec couleurs voisines.
+            try:
+                import cv2
+                gray = base_arr.mean(axis=2)
+                hole_mask = (gray < 8).astype(np.uint8) * 255
+                if hole_mask.any():
+                    bgr = base_arr.astype(np.uint8)[:, :, ::-1].copy()
+                    inp = cv2.inpaint(bgr, hole_mask, 4, cv2.INPAINT_TELEA)
+                    base_arr = inp[:, :, ::-1].astype(np.float64).copy()
+                    log(f'BASE_ATLAS: Telea pre-fill on '
+                        f'{int((hole_mask > 0).sum())} hole px')
+            except Exception as _bh:
+                log(f'BASE_ATLAS hole-fill skipped ({_bh})')
             proj_arr = base_arr.copy()
-            # Mark every pixel as "covered" with low weight so the
-            # downstream sharp_mask / push-pull treats them as present
-            # but lets new projections beat them.
             weight_arr[...] = 0.05
             log('FABMESH_TEXPROJ_BASE_ATLAS=1: SF3D atlas loaded as floor')
         except Exception as _ba_e:
