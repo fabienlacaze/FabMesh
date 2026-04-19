@@ -40,30 +40,35 @@ JOINT_NAMES = [
     'l_ear',        # 17
 ]
 
-# T-pose joint positions in MESH-STD frame (after mesh2std swap).
-# +X = right, +Y = up, +Z = toward camera for front view.
-# Dimensions approximate a ~1m-tall adult: shoulders at y=0.23,
-# hips at y=-0.05, knees at y=-0.28, ankles at y=-0.55.
-# Arms extended horizontally: wrists at x=±0.46.
+# T-pose joint positions in MVAdapter STD frame (Z-up).
+# MVAdapter applies azimuth offset of -90° → logical_azim=0 (front view)
+# places the camera at world position (0, -distance, 0) looking toward +Y.
+# So for the character to face the front camera:
+#   +Y = character's front (nose points toward +Y)
+#   +X = character's RIGHT (from character's own POV, which is LEFT on the camera image)
+#   +Z = UP
+# Side-profile depth (along +Y) matters for ControlNet: the side-view
+# skeleton must show the nose poking forward and ears behind, else
+# OpenPose cannot drive a profile pose.
 TPOSE_JOINTS = np.array([
-    [ 0.00,  0.44,  0.03],  # 0 nose
-    [ 0.00,  0.29,  0.00],  # 1 neck
-    [ 0.14,  0.24,  0.00],  # 2 r_shoulder  (character's right, so +X is LEFT in image → watch out)
-    [ 0.30,  0.24,  0.00],  # 3 r_elbow
-    [ 0.46,  0.24,  0.00],  # 4 r_wrist
-    [-0.14,  0.24,  0.00],  # 5 l_shoulder
-    [-0.30,  0.24,  0.00],  # 6 l_elbow
-    [-0.46,  0.24,  0.00],  # 7 l_wrist
-    [ 0.08, -0.05,  0.00],  # 8 r_hip
-    [ 0.08, -0.28,  0.00],  # 9 r_knee
-    [ 0.08, -0.55,  0.00],  # 10 r_ankle
-    [-0.08, -0.05,  0.00],  # 11 l_hip
-    [-0.08, -0.28,  0.00],  # 12 l_knee
-    [-0.08, -0.55,  0.00],  # 13 l_ankle
-    [ 0.04,  0.46,  0.03],  # 14 r_eye
-    [-0.04,  0.46,  0.03],  # 15 l_eye
-    [ 0.07,  0.44,  0.00],  # 16 r_ear
-    [-0.07,  0.44,  0.00],  # 17 l_ear
+    [ 0.00,  0.08,  0.44],  # 0 nose          (+Y = forward, head height)
+    [ 0.00, -0.01,  0.29],  # 1 neck          (slightly back)
+    [ 0.14,  0.00,  0.24],  # 2 r_shoulder    (character's right = +X)
+    [ 0.30,  0.00,  0.24],  # 3 r_elbow
+    [ 0.46,  0.00,  0.24],  # 4 r_wrist
+    [-0.14,  0.00,  0.24],  # 5 l_shoulder    (character's left = -X)
+    [-0.30,  0.00,  0.24],  # 6 l_elbow
+    [-0.46,  0.00,  0.24],  # 7 l_wrist
+    [ 0.08, -0.02, -0.05],  # 8 r_hip         (slight back)
+    [ 0.08,  0.00, -0.28],  # 9 r_knee
+    [ 0.08,  0.04, -0.55],  # 10 r_ankle      (slight forward)
+    [-0.08, -0.02, -0.05],  # 11 l_hip
+    [-0.08,  0.00, -0.28],  # 12 l_knee
+    [-0.08,  0.04, -0.55],  # 13 l_ankle
+    [ 0.04,  0.07,  0.46],  # 14 r_eye        (forward, inset vs nose)
+    [-0.04,  0.07,  0.46],  # 15 l_eye
+    [ 0.07, -0.01,  0.44],  # 16 r_ear        (behind nose)
+    [-0.07, -0.01,  0.44],  # 17 l_ear
 ], dtype=np.float64)
 
 # Limbs + color palette identical to _make_back_skeleton.py so the

@@ -77,23 +77,40 @@ def get_ortho_proj(L, R, B, T, near=0.1, far=100.0):
     return m
 
 
-# Per-view prompts. The "logical" azim is the FabMesh convention
-# (0 = front, 90 = right, 180 = back, 270 = left).
+# Per-view prompts. "logical" azim: 0=front, 90=right, 180=back, 270=left.
+# Params hard-tuned after observing IPAdapter dominance: with ip≥0.50
+# RealVis replicates the front photo regardless of CN/prompt. For the
+# 5 non-front views we drop ip to 0.18-0.25 (identity only, no pose)
+# and push cn to 1.15 (above 1.0 forces skeleton).
+# Top/bottom STILL use ControlNet even if the skeleton is degenerate —
+# a weak structural hint beats pure IPAdapter which always falls back
+# to a front view.
 VIEW_SPECS = [
     # (logical_azim, elev, prompt_suffix, ip_scale, cn_scale, use_controlnet)
-    (0,   0,      'front view, facing camera, symmetric full body',
+    (0,   0,      'front view, facing camera, symmetric full body T-pose',
         0.80, 0.70, True),
-    (90,  0,      'right side profile view, facing right, T-pose arms horizontal',
-        0.55, 0.85, True),
-    (180, 0,      'back view, from behind, back of head visible, '
-                  'turned away from camera',
-        0.55, 0.90, True),
-    (270, 0,      'left side profile view, facing left, T-pose arms horizontal',
-        0.55, 0.85, True),
-    (0,   89.99,  'top-down orthographic view from above, T-pose arms horizontal',
-        0.70, 0.0,  False),  # skip CN: OpenPose ill-defined overhead
-    (0,   -89.99, 'bottom-up orthographic view from below, feet toward camera',
-        0.70, 0.0,  False),
+    (90,  0,      'right side profile silhouette, only right half of body '
+                  'visible, nose pointing right, one ear visible, one arm '
+                  'extended toward camera, other arm extended away from '
+                  'camera, T-pose, strict 90 degree side view',
+        0.22, 1.15, True),
+    (180, 0,      'back view from behind, back of head, ponytail or hair '
+                  'visible from the back, no face, no facial features, '
+                  'shoulders and back visible, T-pose arms horizontal, '
+                  'turned 180 degrees away from camera',
+        0.28, 1.15, True),
+    (270, 0,      'left side profile silhouette, only left half of body '
+                  'visible, nose pointing left, one ear visible, T-pose, '
+                  'strict 90 degree side view from the left',
+        0.22, 1.15, True),
+    (0,   89.99,  'top-down bird eye view from directly above, head and '
+                  'shoulders from above, arms extended as a cross, feet '
+                  'hidden below body, foreshortening, T-pose',
+        0.25, 0.90, True),   # keep skeleton even if degenerate
+    (0,   -89.99, 'bottom-up worm eye view from directly below, feet in '
+                  'foreground pointing down at camera, body receding above, '
+                  'T-pose arms extended',
+        0.25, 0.90, True),
 ]
 
 
@@ -102,8 +119,17 @@ NEGATIVE_BASE = (
     'different clothes, watermark, text, duplicate, multiple people, '
     'cropped, low quality'
 )
+NEGATIVE_SIDE = NEGATIVE_BASE + (
+    ', front view, three-quarter view, facing camera, looking at camera, '
+    'both eyes visible, symmetric face'
+)
 NEGATIVE_BACK = NEGATIVE_BASE + (
-    ', face visible, eyes, nose, mouth, front view, facing camera'
+    ', face visible, eyes, nose, mouth, front view, three-quarter view, '
+    'facing camera, looking at camera'
+)
+NEGATIVE_TOP = NEGATIVE_BASE + (
+    ', front view, side view, level view, facing camera at eye level, '
+    'full height silhouette'
 )
 
 
@@ -269,7 +295,8 @@ def make_grid(images, rows=1):
 
 def run(mesh_path, front_image, out_dir,
         num_steps=30, guidance=7.0, seed=42, size=1024,
-        reuse_front=None, reuse_back=None):
+        reuse_front=None, reuse_back=None,
+        only_front_back=False):
     os.makedirs(out_dir, exist_ok=True)
     mesh_path = os.path.abspath(mesh_path)
     front_image = os.path.abspath(front_image)
@@ -300,8 +327,16 @@ def run(mesh_path, front_image, out_dir,
     # given, 4 views remain.
     pipe = load_pipeline()
 
-    images = []
-    for i, (logical_azim, elev, sfx, ip, cn, use_cn) in enumerate(VIEW_SPECS):
+    # Hybrid mode: only generate front + back. Return an incomplete
+    # views list where only indices 0 and 2 are filled. Caller
+    # (mv_bake_hunyuan.py hybrid) will fill the other slots from
+    # MVAdapter's output.
+    indices_to_generate = (
+        [0, 2] if only_front_back else list(range(len(VIEW_SPECS))))
+
+    images = [None] * len(VIEW_SPECS)
+    for i in indices_to_generate:
+        logical_azim, elev, sfx, ip, cn, use_cn = VIEW_SPECS[i]
         t0 = time.time()
         w2c, _proj = cams[i]
         # Skip-if-reuse shortcuts
@@ -309,18 +344,20 @@ def run(mesh_path, front_image, out_dir,
             log(f'view_0: reuse-front {reuse_front}')
             img = Image.open(reuse_front).convert('RGB').resize((size, size),
                                                                  Image.LANCZOS)
-            images.append(img)
+            images[0] = img
             continue
         if i == 2 and reuse_back and os.path.exists(reuse_back):
             log(f'view_2: reuse-back {reuse_back}')
             img = Image.open(reuse_back).convert('RGB').resize((size, size),
                                                                 Image.LANCZOS)
-            images.append(img)
+            images[2] = img
             continue
 
-        # Skeleton for ControlNet
+        # Skeleton for ControlNet — always try, even for top/bot
+        # (degenerate but better than no structural hint).
         if use_cn:
-            skel = render_skeleton_for_camera(w2c, proj, size=size)
+            skel = render_skeleton_for_camera(w2c, proj, size=size,
+                                              draw_invisible=True)
         else:
             skel = None
 
@@ -330,7 +367,15 @@ def run(mesh_path, front_image, out_dir,
             f'plain grey background, studio lighting, sharp focus, '
             f'ultra detailed, 8k, masterpiece'
         )
-        neg = NEGATIVE_BACK if logical_azim == 180 else NEGATIVE_BASE
+        # Pick negative prompt per view type
+        if logical_azim == 180:
+            neg = NEGATIVE_BACK
+        elif logical_azim in (90, 270):
+            neg = NEGATIVE_SIDE
+        elif abs(elev) > 45:
+            neg = NEGATIVE_TOP
+        else:
+            neg = NEGATIVE_BASE
 
         log(f'view_{i} ({sfx[:40]}...) ip={ip} cn={cn} cn_on={use_cn}')
         img = generate_view(
@@ -339,23 +384,31 @@ def run(mesh_path, front_image, out_dir,
             steps=num_steps, guidance=guidance,
             seed=seed, size=size,
         )
-        images.append(img)
+        images[i] = img
         log(f'view_{i} done in {time.time()-t0:.1f}s')
 
-    # Save individual + grid
-    for i, img in enumerate(images):
-        img.save(os.path.join(out_dir, f'view_{i}.png'))
-    make_grid(images, rows=1).save(os.path.join(out_dir, '_voiec_grid.png'))
+    # Save only the ones we generated (don't overwrite other slots'
+    # files — e.g. in hybrid mode MVAdapter wrote them first).
+    for i in indices_to_generate:
+        if images[i] is not None:
+            images[i].save(os.path.join(out_dir, f'view_{i}.png'))
+    if not only_front_back:
+        make_grid(images, rows=1).save(
+            os.path.join(out_dir, '_voiec_grid.png'))
     # Save skeletons for debug
     dbg = os.path.join(out_dir, '_skeletons')
     os.makedirs(dbg, exist_ok=True)
     for i, (w2c, _proj) in enumerate(cams):
         use_cn = VIEW_SPECS[i][5]
         if use_cn:
-            render_skeleton_for_camera(w2c, proj, size=size).save(
-                os.path.join(dbg, f'skel_{i}.png'))
+            render_skeleton_for_camera(
+                w2c, proj, size=size, draw_invisible=True).save(
+                    os.path.join(dbg, f'skel_{i}.png'))
 
-    build_views_json(out_dir, mesh_path)
+    # views.json: only write/overwrite in full mode. In hybrid mode,
+    # MVAdapter has already written the canonical schema.
+    if not only_front_back:
+        build_views_json(out_dir, mesh_path)
     log('DONE')
 
 
@@ -368,10 +421,14 @@ def main():
     p.add_argument('seed', type=int, nargs='?', default=42)
     p.add_argument('--reuse-front', default=None)
     p.add_argument('--reuse-back', default=None)
+    p.add_argument('--only-front-back', action='store_true',
+                   help='Hybrid mode: only regenerate view_0 and view_2, '
+                        'leave other slots untouched.')
     args = p.parse_args()
     run(args.mesh, args.front, args.out_dir,
         num_steps=args.num_steps, seed=args.seed,
-        reuse_front=args.reuse_front, reuse_back=args.reuse_back)
+        reuse_front=args.reuse_front, reuse_back=args.reuse_back,
+        only_front_back=args.only_front_back)
 
 
 if __name__ == '__main__':

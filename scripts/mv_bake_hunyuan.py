@@ -162,14 +162,19 @@ def step_mvadapter_views(mesh_path, image_path, out_dir, num_views=6,
 
 def step_fabmesh_6views(mesh_path, image_path, out_dir,
                         num_steps=30, seed=42,
-                        reuse_front=None, reuse_back=None):
+                        reuse_front=None, reuse_back=None,
+                        only_front_back=False):
     """Voie C: generate 6 HD views via FabMesh stack
     (RealVis XL + IPAdapter + ControlNet OpenPose). Commercial-safe,
-    no nvdiffrast. Output contract identical to step_mvadapter_views."""
+    no nvdiffrast. Output contract identical to step_mvadapter_views.
+    When only_front_back=True, only view_0 and view_2 are
+    (re)generated — used by hybrid mode to overlay HD front+back on
+    top of MVAdapter's 6-view output."""
     mesh_path = os.path.abspath(mesh_path)
     image_path = os.path.abspath(image_path)
     out_dir = os.path.abspath(out_dir)
-    log(f'STEP 2 (voieC): fabmesh_6views -> 6 views in {out_dir}')
+    mode = 'HYBRID front+back' if only_front_back else '6 HD views'
+    log(f'STEP 2 (voieC): fabmesh_6views -> {mode} in {out_dir}')
     t0 = time.time()
     runner = os.path.join(SCRIPTS, 'fabmesh_6views_runner.py')
     cmd = [sys.executable, runner, mesh_path, image_path, out_dir,
@@ -178,13 +183,15 @@ def step_fabmesh_6views(mesh_path, image_path, out_dir,
         cmd += ['--reuse-front', os.path.abspath(reuse_front)]
     if reuse_back:
         cmd += ['--reuse-back', os.path.abspath(reuse_back)]
+    if only_front_back:
+        cmd += ['--only-front-back']
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
     rc, _, err = _run_streamed(cmd, prefix='voiec', timeout=1800, env=env)
     if rc != 0:
         log(f'fabmesh_6views_runner failed (rc={rc}): {err[-800:]}')
         sys.exit(3)
-    log(f'STEP 2 done in {time.time()-t0:.1f}s (6 HD views)')
+    log(f'STEP 2 done in {time.time()-t0:.1f}s ({mode})')
 
 
 def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
@@ -223,10 +230,13 @@ def main():
                         help='cos^N visibility exponent (default: 4.0)')
     parser.add_argument('target_faces', nargs='?', type=int, default=50000,
                         help='TripoSG face count (default: 50000)')
-    parser.add_argument('--engine', choices=['mvadapter', 'fabmesh'],
+    parser.add_argument('--engine',
+                        choices=['mvadapter', 'fabmesh', 'hybrid'],
                         default='mvadapter',
-                        help='View generator (mvadapter=voie B, '
-                             'fabmesh=voie C)')
+                        help='View generator: mvadapter=voie B, '
+                             'fabmesh=voie C pure (lateral views unreliable), '
+                             'hybrid=MVAdapter for 6 views then voie C '
+                             'overwrites front+back with HD 1024²')
     parser.add_argument('--reuse-front', default=None,
                         help='(voie C) reuse an existing front image '
                              'instead of regenerating view_0')
@@ -276,6 +286,15 @@ def main():
         step_fabmesh_6views(bare_mesh, front, mv_dir,
                             reuse_front=reuse_front,
                             reuse_back=reuse_back)
+    elif engine == 'hybrid':
+        # 1. MVAdapter produces 6 coherent views + views.json
+        step_mvadapter_views(bare_mesh, front, mv_dir)
+        # 2. RealVis+IPA+CN HD overwrites view_0 (front) and view_2
+        #    (back). views.json stays unchanged (same cameras).
+        step_fabmesh_6views(bare_mesh, front, mv_dir,
+                            reuse_front=reuse_front,
+                            reuse_back=reuse_back,
+                            only_front_back=True)
     else:
         log(f'unknown engine: {engine}'); sys.exit(1)
     step_bake(bare_mesh, front, out_glb, mv_dir, bake_exp=bake_exp)

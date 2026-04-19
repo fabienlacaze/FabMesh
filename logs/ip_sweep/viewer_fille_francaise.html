@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>FabMesh — fille_francaise (voie C)</title>
+<title>FabMesh — fille_francaise (comparaison voies)</title>
 <style>
   html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
             font-family:system-ui;height:100%}
@@ -15,6 +15,8 @@
              font-size:11px;color:#eee;line-height:1.4}
   .col-title b{color:#87d9ff}
   .col-title .new{color:#4cd964}
+  .col-title .hd{color:#ffd700}
+  .col-title .mva{color:#ff8c1a}
   .col-title .stat{color:#bbb;font-size:10px}
   model-viewer{width:100%;height:100%;background:#1b1b1b}
   img.ref{width:100%;height:100%;object-fit:contain;background:#1b1b1b}
@@ -22,40 +24,52 @@
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>fille_francaise — Voie C (SF3D 12k + RealVis+IPA+CN 1024² HD, 100% commercial-safe)</h1>
+<h1>fille_francaise — Voie C pure vs Voie Hybrid (C pour front+back HD, B pour latéraux)</h1>
 <div class="row">
   <div class="col">
     <div class="col-title">
       FRONT photo input<br>
-      <span class="stat">RealVis XL v4.0 · prompt: "jeune fille francaise, cheveux chatains, robe d'ete fleurie, T-pose"</span>
+      <span class="stat">RealVis XL · prompt T-pose</span>
     </div>
     <img class="ref" src="_francaise_front.png">
   </div>
-  <div class="col" style="border-left:3px solid #4cd964">
+  <div class="col">
     <div class="col-title">
-      <span class="new"><b>Voie C mesh</b></span><br>
-      <span class="stat">SF3D 12k + RealVis+IPA+CN 1024² + Telea<br>
-      sharp=62%, 195s · 100% commercial-safe</span>
+      <b>Voie C pure</b> (6 vues RealVis+IPA+CN)<br>
+      <span class="stat">sharp=62%, 195s · latéraux cassés (IPA dominant)</span>
     </div>
     <model-viewer src="_francaise_voiec.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title">
+      <span class="new"><b>Voie HYBRID</b></span><br>
+      <span class="stat">Voie C front+back HD 1024² + Voie B (MVAdapter) right/left/top/bot 512²<br>
+      sharp=62%, 194s</span>
+    </div>
+    <model-viewer src="_francaise_hybrid.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
 </div>
 
-<h1>Voie C — 6 vues générées (1024×1024, RealVis XL + IPAdapter + ControlNet OpenPose)</h1>
+<h1>Voie Hybrid — 6 vues utilisées pour le bake</h1>
 <div class="row" style="height:320px">
-  <div class="col"><img class="ref" src="_francaise_voiec_v0.png"><div class="col-title">v0 front (reused)</div></div>
-  <div class="col"><img class="ref" src="_francaise_voiec_v1.png"><div class="col-title">v1 right (CN skeleton)</div></div>
-  <div class="col"><img class="ref" src="_francaise_voiec_v2.png"><div class="col-title">v2 back (CN skeleton)</div></div>
-  <div class="col"><img class="ref" src="_francaise_voiec_v3.png"><div class="col-title">v3 left (CN skeleton)</div></div>
-  <div class="col"><img class="ref" src="_francaise_voiec_v4.png"><div class="col-title">v4 top (no CN)</div></div>
-  <div class="col"><img class="ref" src="_francaise_voiec_v5.png"><div class="col-title">v5 bottom (no CN)</div></div>
+  <div class="col"><img class="ref" src="_francaise_hybrid_v0.png"><div class="col-title"><span class="hd">v0 front HD 1024²</span> (voie C RealVis+CN)</div></div>
+  <div class="col"><img class="ref" src="_francaise_hybrid_v1.png"><div class="col-title"><span class="mva">v1 right 512²</span> (voie B MVAdapter)</div></div>
+  <div class="col"><img class="ref" src="_francaise_hybrid_v2.png"><div class="col-title"><span class="hd">v2 back HD 1024²</span> (voie C RealVis+CN)</div></div>
+  <div class="col"><img class="ref" src="_francaise_hybrid_v3.png"><div class="col-title"><span class="mva">v3 left 512²</span> (voie B MVAdapter)</div></div>
+  <div class="col"><img class="ref" src="_francaise_hybrid_v4.png"><div class="col-title"><span class="mva">v4 top 512²</span> (voie B MVAdapter)</div></div>
+  <div class="col"><img class="ref" src="_francaise_hybrid_v5.png"><div class="col-title"><span class="mva">v5 bottom 512²</span> (voie B MVAdapter)</div></div>
 </div>
 
-<h1>Texture atlas projeté (debug)</h1>
-<div class="row" style="height:300px">
-  <div class="col"><img class="ref" src="_francaise_voiec_tex.png"><div class="col-title">Atlas UV final 1024² (après Telea inpaint)</div></div>
-  <div class="col"><img class="ref" src="_francaise_voiec_proj_debug.png"><div class="col-title">Debug overlay front projection</div></div>
+<h1>Voie C pure — 6 vues (comparatif, latéraux recopient le front)</h1>
+<div class="row" style="height:320px">
+  <div class="col"><img class="ref" src="_francaise_voiec_v0.png"><div class="col-title">v0 front</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v1.png"><div class="col-title">v1 right (bug: front)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v2.png"><div class="col-title">v2 back ✓</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v3.png"><div class="col-title">v3 left (bug: front)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v4.png"><div class="col-title">v4 top (bug: front)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v5.png"><div class="col-title">v5 bot (bug: front)</div></div>
 </div>
 </body>
 </html>
