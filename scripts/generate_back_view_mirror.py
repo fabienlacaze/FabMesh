@@ -92,19 +92,13 @@ def generate_back_mirror(front_image, out_dir, prompt_hint='', num_images=1,
     # 2. Upper-body mask (head + ~70% torso so face is fully covered)
     mask = detect_upper_body_mask(mirrored, height_frac=0.70, soft_px=32)
 
-    # 3. ControlNet Inpaint pipeline
-    print('[back-mirror] loading SDXL inpaint + ControlNet Tile...', flush=True)
-    from diffusers import (
-        StableDiffusionXLControlNetInpaintPipeline,
-        ControlNetModel,
-    )
-    cn = ControlNetModel.from_pretrained(
-        'xinsir/controlnet-tile-sdxl-1.0',
-        torch_dtype=torch.float16,
-    )
-    pipe = StableDiffusionXLControlNetInpaintPipeline.from_pretrained(
+    # 3. SDXL Inpaint pipeline (NO ControlNet — Tile would preserve the
+    # front face structure we're TRYING to remove). Pure inpaint with a
+    # strong prompt forces the masked area to become a back view.
+    print('[back-mirror] loading SDXL inpaint...', flush=True)
+    from diffusers import StableDiffusionXLInpaintPipeline
+    pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
         'SG161222/RealVisXL_V4.0',
-        controlnet=cn,
         torch_dtype=torch.float16, variant='fp16', use_safetensors=True,
     )
     pipe.unet.to(torch.float16)
@@ -152,11 +146,9 @@ def generate_back_mirror(front_image, out_dir, prompt_hint='', num_images=1,
             negative_prompt=neg,
             image=mirrored,           # base image (mirrored front)
             mask_image=mask,          # area to regenerate
-            control_image=mirrored,   # ControlNet Tile reference
-            controlnet_conditioning_scale=0.40,  # lower = let prompt win
             strength=1.0,             # full repaint inside mask
             num_inference_steps=steps,
-            guidance_scale=7.0,
+            guidance_scale=8.0,       # higher = stronger 'back view' bias
             height=front.size[1],
             width=front.size[0],
             generator=gen,
