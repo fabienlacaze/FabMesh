@@ -37,39 +37,101 @@ ROOT = os.path.dirname(SCRIPTS)
 MVA_DIR = os.path.join(ROOT, 'external', 'MV-Adapter')
 
 
+_PROGRESS_FILE = None  # set at main() start — tails every log line
+
+
 def log(msg):
-    print(f'[mv_bake] {msg}', flush=True)
+    line = f'[mv_bake] {msg}'
+    print(line, flush=True)
+    if _PROGRESS_FILE:
+        try:
+            with open(_PROGRESS_FILE, 'a', encoding='utf-8') as _f:
+                _f.write(line + '\n')
+        except Exception:
+            pass
+
+
+def _run_streamed(cmd, prefix, timeout, env=None, cwd=None):
+    """Run subprocess with stdout streamed live (prefixed + progress file).
+
+    Returns (returncode, captured_output_tail, stderr_tail). The whole
+    stdout is echoed live so we always see where the job is; last ~2000
+    chars are captured for error reporting on failure.
+    """
+    import threading
+    env = env or os.environ.copy()
+    env.setdefault('PYTHONIOENCODING', 'utf-8')
+    env.setdefault('PYTHONUNBUFFERED', '1')  # crucial for live stdout
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env, cwd=cwd, bufsize=1,
+    )
+    out_buf = []
+    err_buf = []
+
+    def _pump(stream, buf, tag):
+        for raw in iter(stream.readline, b''):
+            try:
+                line = raw.decode('utf-8', errors='replace').rstrip()
+            except Exception:
+                line = repr(raw)
+            if not line:
+                continue
+            buf.append(line)
+            if len(buf) > 200:
+                buf.pop(0)
+            out = f'[{prefix}:{tag}] {line}'
+            print(out, flush=True)
+            if _PROGRESS_FILE:
+                try:
+                    with open(_PROGRESS_FILE, 'a', encoding='utf-8') as _f:
+                        _f.write(out + '\n')
+                except Exception:
+                    pass
+        stream.close()
+
+    t_out = threading.Thread(target=_pump, args=(proc.stdout, out_buf, 'out'),
+                             daemon=True)
+    t_err = threading.Thread(target=_pump, args=(proc.stderr, err_buf, 'err'),
+                             daemon=True)
+    t_out.start(); t_err.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        log(f'{prefix}: TIMEOUT after {timeout}s')
+        return (124, '\n'.join(out_buf[-40:]), '\n'.join(err_buf[-40:]))
+    t_out.join(timeout=5); t_err.join(timeout=5)
+    return (proc.returncode, '\n'.join(out_buf[-40:]),
+            '\n'.join(err_buf[-40:]))
 
 
 def step_sf3d_mesh(image_path, out_glb, tex_res=1024):
     log(f'STEP 1 (SF3D): bare mesh -> {out_glb}')
     bridge = os.path.join(SCRIPTS, 'local_sf3d_bridge.py')
     t0 = time.time()
-    proc = subprocess.run(
-        [sys.executable, bridge, image_path, out_glb, str(tex_res), '-1', 'none', '0'],
-        capture_output=True, text=True, timeout=600,
+    rc, _, err = _run_streamed(
+        [sys.executable, bridge, image_path, out_glb, str(tex_res),
+         '-1', 'none', '0'],
+        prefix='sf3d', timeout=600,
     )
-    if proc.returncode != 0:
-        log(f'SF3D failed: {proc.stderr[-500:]}'); sys.exit(2)
+    if rc != 0:
+        log(f'SF3D failed (rc={rc}): {err[-500:]}'); sys.exit(2)
     log(f'STEP 1 done in {time.time()-t0:.1f}s')
 
 
 def step_triposg_mesh(image_path, out_glb, target_faces=50000):
     log(f'STEP 1 (TripoSG): raw + decimate to {target_faces} -> {out_glb}')
     full = os.path.join(SCRIPTS, 'triposg_full_pipeline.py')
-    # Use triposg_full_pipeline but stop after unwrap (mv_dir absent → no texture)
-    # Actually: triposg_full_pipeline always textures. Call it without mv_dir
-    # and use its _triposg_uvunwrapped.glb as output.
     out_dir = os.path.dirname(os.path.abspath(out_glb))
     tmp = os.path.join(out_dir, '_mvbake_tmp.glb')
     t0 = time.time()
-    proc = subprocess.run(
+    rc, _, err = _run_streamed(
         [sys.executable, full, image_path, tmp, str(target_faces), '1024'],
-        capture_output=True, text=True, timeout=600,
+        prefix='triposg', timeout=900,
     )
-    if proc.returncode != 0:
-        log(f'TripoSG failed: {proc.stderr[-500:]}'); sys.exit(2)
-    # Grab the uvunwrapped intermediate
+    if rc != 0:
+        log(f'TripoSG failed (rc={rc}): {err[-500:]}'); sys.exit(2)
     uvunwrap = os.path.join(out_dir, '_triposg_uvunwrapped.glb')
     if not os.path.exists(uvunwrap):
         log('TripoSG uvunwrap missing'); sys.exit(2)
@@ -92,12 +154,9 @@ def step_mvadapter_views(mesh_path, image_path, out_dir, num_views=6,
            str(num_views), str(num_steps)]
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
-    proc = subprocess.run(cmd, capture_output=True, timeout=1800, env=env)
-    _out = (proc.stdout or b'').decode('utf-8', errors='replace')
-    _err = (proc.stderr or b'').decode('utf-8', errors='replace')
-    if proc.returncode != 0:
-        log(f'mvadapter_runner failed:\nSTDOUT: {_out[-1200:]}\nSTDERR: {_err[-2000:]}')
-        sys.exit(3)
+    rc, _, err = _run_streamed(cmd, prefix='mva', timeout=1800, env=env)
+    if rc != 0:
+        log(f'mvadapter_runner failed (rc={rc}): {err[-800:]}'); sys.exit(3)
     log(f'STEP 2 done in {time.time()-t0:.1f}s ({num_views} views)')
 
 
@@ -113,30 +172,28 @@ def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
     # MVAdapter's view_0 IS the front — don't also inject the HD source
     # photo (creates double-face bleed since they have different cameras).
     env['FABMESH_TEXPROJ_NO_FRONT'] = '1'
-    proc = subprocess.run(
+    rc, _, err = _run_streamed(
         [sys.executable, os.path.join(SCRIPTS, 'texture_project.py'),
          mesh_path, front_image, out_glb, str(tex_res),
          '--multiview', mv_dir],
-        capture_output=True, text=True, timeout=600, env=env,
+        prefix='bake', timeout=600, env=env,
     )
-    if proc.returncode != 0:
-        log(f'bake failed: {proc.stderr[-500:]}'); sys.exit(4)
+    if rc != 0:
+        log(f'bake failed (rc={rc}): {err[-500:]}'); sys.exit(4)
     log(f'STEP 3 done in {time.time()-t0:.1f}s')
-    # Echo key metrics from the bake
-    for line in proc.stdout.splitlines():
-        if any(k in line for k in ('sharp_ratio', 'hole', 'inpaint',
-                                   'visible', 'blend')):
-            log(f'  {line}')
 
 
 def main():
     if len(sys.argv) < 3:
-        print('Usage: mv_bake_hunyuan.py <front_image> <out.glb> [mesh=sf3d|triposg] [bake_exp=4.0]')
+        print('Usage: mv_bake_hunyuan.py <front_image> <out.glb> '
+              '[mesh=sf3d|triposg] [bake_exp=4.0] [target_faces=50000]\n'
+              '  target_faces: only for triposg backend (default 50000)')
         sys.exit(1)
     front = sys.argv[1]
     out_glb = sys.argv[2]
     mesh_backend = sys.argv[3] if len(sys.argv) > 3 else 'sf3d'
     bake_exp = float(sys.argv[4]) if len(sys.argv) > 4 else 4.0
+    target_faces = int(sys.argv[5]) if len(sys.argv) > 5 else 50000
 
     out_dir = os.path.dirname(os.path.abspath(out_glb))
     os.makedirs(out_dir, exist_ok=True)
@@ -144,11 +201,23 @@ def main():
     bare_mesh = os.path.join(out_dir, '_mvbake_bare.glb')
     mv_dir = os.path.join(out_dir, '_mvbake_views')
 
+    # Live progress file: tail -f this at any time to see the pipeline state.
+    global _PROGRESS_FILE
+    _PROGRESS_FILE = os.path.join(out_dir, '_mvbake_progress.log')
+    try:
+        with open(_PROGRESS_FILE, 'w', encoding='utf-8') as _f:
+            _f.write(f'# Voie B pipeline start: {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
+            _f.write(f'# front={front}\n# out={out_glb}\n')
+            _f.write(f'# backend={mesh_backend} target_faces={target_faces}\n')
+    except Exception:
+        pass
+    log(f'progress log: {_PROGRESS_FILE}')
+
     t0 = time.time()
     if mesh_backend == 'sf3d':
         step_sf3d_mesh(front, bare_mesh)
     elif mesh_backend == 'triposg':
-        step_triposg_mesh(front, bare_mesh)
+        step_triposg_mesh(front, bare_mesh, target_faces=target_faces)
     else:
         log(f'unknown backend: {mesh_backend}'); sys.exit(1)
 
