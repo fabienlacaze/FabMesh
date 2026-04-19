@@ -5291,6 +5291,25 @@ function openAlignTexture() {
   sync('at-scale', 'at-scale-val', v => Number(v).toFixed(2));
   sync('at-roty', 'at-roty-val', v => `${v}\u00B0`);
   sync('at-vis', 'at-vis-val', v => Number(v).toFixed(2));
+
+  // Live preview: transform the Three.js mesh as sliders move so the
+  // user sees the effect instantly. Actual re-projection only happens
+  // on Re-project click (texture rebake takes ~5-10s).
+  const updateLivePreview = () => {
+    if (!atState.mesh) return;
+    const tx = parseFloat(document.getElementById('at-tx').value) || 0;
+    const ty = parseFloat(document.getElementById('at-ty').value) || 0;
+    const sc = parseFloat(document.getElementById('at-scale').value) || 1;
+    const ry = (parseFloat(document.getElementById('at-roty').value) || 0)
+               * Math.PI / 180;
+    atState.mesh.position.set(tx, ty, 0);
+    atState.mesh.scale.setScalar(sc);
+    atState.mesh.rotation.set(0, ry, 0);
+  };
+  ['at-tx', 'at-ty', 'at-scale', 'at-roty'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateLivePreview);
+  });
   // Init viewer + load current mesh
   requestAnimationFrame(async () => {
     await _atInitViewport();
