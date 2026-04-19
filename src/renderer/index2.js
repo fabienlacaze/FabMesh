@@ -1594,9 +1594,18 @@ function _normPath(p) { return (p || '').replace(/\\/g, '/'); }
 
 async function _checkMultiviewForCurrentImage() {
   const p = state.currentProject;
-  console.log('[mv-check] previewImagePath:', p?.previewImagePath, 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none');
+  console.log('[mv-check] previewImagePath:', p?.previewImagePath, 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none', 'backphotos:', p?._backPhotos ? Object.keys(p._backPhotos) : 'none');
   if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
   const key = _normPath(p.previewImagePath);
+  // 2-view mode: if a back photo was generated for this image, show the
+  // FRONT/BACK bar even without a full 6-view dir.
+  if (p._backPhotos) {
+    const backFound = Object.keys(p._backPhotos).find(k => _normPath(k) === key);
+    if (backFound) {
+      _showMultiviewBar(null);  // null = no full mv dir, just front+back
+      return;
+    }
+  }
   // First try the in-memory cache (populated when user clicks
   // Multi-Views during the same session).
   if (p._multiviews) {
@@ -1629,7 +1638,7 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
   const view = btn.dataset.view;
   const bar = document.getElementById('ws-multiview-bar');
   const dir = bar?.dataset.dir;
-  if (!dir || !view) return;
+  if (!view) return;
 
   // Update active button
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
@@ -1641,17 +1650,23 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
   const p = state.currentProject;
   let imgPath;
   if (view === 'front') {
-    imgPath = p?.previewImagePath || (dir + '/input.png');
+    imgPath = p?.previewImagePath || (dir ? dir + '/input.png' : null);
     if (p) { p._activeMultiview = null; p._activeMultiviewKey = 'front'; }
-  } else {
+  } else if (view === 'back' && p?._backPhotos && p.previewImagePath) {
+    // 2-view mode: use the RealVis-generated back photo for this image
+    const key = _normPath(p.previewImagePath);
+    const found = Object.keys(p._backPhotos).find(k => _normPath(k) === key);
+    if (found) {
+      imgPath = p._backPhotos[found];
+      p._activeMultiview = imgPath;
+      p._activeMultiviewKey = 'back';
+    }
+  } else if (dir) {
     const filename = _mvViewMap[view] || 'input';
     imgPath = dir + '/' + filename + '.png';
-    // Remember which multiview the user is currently focused on so tools
-    // (Draw Mask, Paint, etc.) operate on that view instead of the front.
-    // Also remember the KEY so switching image version preserves the
-    // same angle (90° stays 90° across v0/v1/v2).
     if (p) { p._activeMultiview = imgPath; p._activeMultiviewKey = view; }
   }
+  if (!imgPath) return;
 
   const preview = document.getElementById('step1-preview');
   const imgEl = preview?.querySelector('img');
