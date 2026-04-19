@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 
 
-def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.45,
+def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.25,
                   steps=30, seed=424242):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
@@ -54,22 +54,29 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
     # Use the user prompt hint if provided, else generic. The "back view"
     # phrasing is critical to avoid Identity drift via IPAdapter (which
     # would otherwise replicate the front pose).
+    # Strong "back view" emphasis — repeat the directional phrase so SDXL
+    # gives it priority over IPAdapter's identity bias toward the front pose.
     if prompt_hint:
         prompt = (
-            f'{prompt_hint}, back view, from behind, back of head visible, '
-            f'turned away from camera, full body centered, plain grey '
-            f'background, studio lighting, sharp focus, ultra detailed, 8k'
+            f'BACK VIEW from behind, rear view of {prompt_hint}, '
+            f'back of head visible, hair from behind, shoulders from behind, '
+            f'subject turned 180 degrees away from camera, full body centered, '
+            f'plain grey background, studio lighting, sharp focus, 8k'
         )
     else:
         prompt = (
-            'back view, from behind, back of head visible, turned away from '
-            'camera, full body centered, plain grey background, studio '
-            'lighting, sharp focus, ultra detailed, 8k, masterpiece'
+            'BACK VIEW from behind, rear view, back of head visible, hair '
+            'from behind, shoulders from behind, subject turned 180 degrees '
+            'away from camera, full body centered, plain grey background, '
+            'studio lighting, sharp focus, 8k, masterpiece'
         )
+    # Aggressively reject any front-facing output (IPAdapter tends to clone
+    # the front pose; we explicitly forbid it).
     neg = (
+        'front view, facing camera, eyes visible, face visible, mouth visible, '
+        'nose visible, side view, profile view, three-quarter view, '
         'blurry, deformed, extra limbs, bad anatomy, different person, '
-        'different clothes, watermark, text, duplicate, multiple people, '
-        'front view, facing camera, side view'
+        'different clothes, watermark, text, duplicate, multiple people'
     )
 
     out_paths = []
