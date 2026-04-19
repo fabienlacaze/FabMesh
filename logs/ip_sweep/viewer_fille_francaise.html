@@ -314,7 +314,7 @@
 </div>
 
 <!-- v11: front HD plus dominant (FULL=0.50) -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v11 — Front HD plus dominant</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
@@ -332,6 +332,32 @@
     <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
     <div class="cell" data-label="atlas v11"><img src="_francaise_voiefab_front_v4_tex.png"></div>
     <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v12: voiefab front+back avec orient + FLOOR=0.40 fix -->
+<div class="version latest">
+  <div class="meta">
+    <b>v12 — VOIE F front+back</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
+    <span class="stat new">orient fix + FLOOR=0.40 · 165s</span>
+    <ul>
+      <li>Pipeline complet voiefab (front+back HD overlay)</li>
+      <li>NORMALIZE_ORIENT=1 (default) → mesh face vers +Z</li>
+      <li>FLOOR=0.40 par vue → pas de bleed mutuel</li>
+      <li>Front HD recouvre devant, back HD recouvre dos</li>
+      <li>Atlas SF3D AUGMENT pour flancs/top/bot</li>
+    </ul>
+    <p><span class="tag ok">complet</span> 2 vues HD voie C ajoutées proprement</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_v2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
+    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
+    <div class="cell" data-label="atlas v12"><img src="_francaise_voiefab_v2_tex.png"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
