@@ -5606,8 +5606,14 @@ function _atApplyProjectiveToMesh(enable) {
 }
 
 function _atUpdateProjectiveUniforms() {
-  if (!atState.projectiveMats.length) return;
+  if (!atState.projectiveMats.length) {
+    console.log('[align-tex] no projective mats to update');
+    return;
+  }
   const tf = atState.transforms;
+  console.log('[align-tex] updating projective uniforms', {
+    front: tf.front, back: tf.back, planeSize: atState.meshHeight,
+  });
   for (const m of atState.projectiveMats) {
     m.uniforms.uFront.value  = atState.frontTex;
     m.uniforms.uBack.value   = atState.backTex;
