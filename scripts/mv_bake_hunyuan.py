@@ -194,6 +194,28 @@ def step_fabmesh_6views(mesh_path, image_path, out_dir,
     log(f'STEP 2 done in {time.time()-t0:.1f}s ({mode})')
 
 
+def step_sheet_6views(mesh_path, image_path, out_dir,
+                      num_steps=30, seed=42):
+    """Voie E: single-call multi-view sheet (RealVis + CN OpenPose +
+    IPAdapter) on a 1536x1024 canvas, cropped into 6 view_*.png.
+    Native color coherence (1 latent), no nvdiffrast."""
+    mesh_path = os.path.abspath(mesh_path)
+    image_path = os.path.abspath(image_path)
+    out_dir = os.path.abspath(out_dir)
+    log(f'STEP 2 (voieE/sheet): single-pass 6-view sheet -> {out_dir}')
+    t0 = time.time()
+    runner = os.path.join(SCRIPTS, 'fabmesh_sheet_runner.py')
+    cmd = [sys.executable, runner, mesh_path, image_path, out_dir,
+           str(num_steps), str(seed)]
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    rc, _, err = _run_streamed(cmd, prefix='sheet', timeout=1200, env=env)
+    if rc != 0:
+        log(f'fabmesh_sheet_runner failed (rc={rc}): {err[-800:]}')
+        sys.exit(3)
+    log(f'STEP 2 done in {time.time()-t0:.1f}s (sheet)')
+
+
 def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
               bake_exp=4.0):
     log(f'STEP 3: texture_project with 6-view + cos^{bake_exp} + Telea inpaint')
@@ -231,12 +253,14 @@ def main():
     parser.add_argument('target_faces', nargs='?', type=int, default=50000,
                         help='TripoSG face count (default: 50000)')
     parser.add_argument('--engine',
-                        choices=['mvadapter', 'fabmesh', 'hybrid'],
+                        choices=['mvadapter', 'fabmesh', 'hybrid', 'sheet'],
                         default='mvadapter',
                         help='View generator: mvadapter=voie B, '
                              'fabmesh=voie C pure (lateral views unreliable), '
                              'hybrid=MVAdapter for 6 views then voie C '
-                             'overwrites front+back with HD 1024²')
+                             'overwrites front+back with HD 1024², '
+                             'sheet=voie E single-pass 6-panel sheet '
+                             '1536x1024 (cohérence couleur native)')
     parser.add_argument('--reuse-front', default=None,
                         help='(voie C) reuse an existing front image '
                              'instead of regenerating view_0')
@@ -295,6 +319,9 @@ def main():
                             reuse_front=reuse_front,
                             reuse_back=reuse_back,
                             only_front_back=True)
+    elif engine == 'sheet':
+        # Voie E: single-pass 6-panel sheet (no MVAdapter, no nvdiffrast).
+        step_sheet_6views(bare_mesh, front, mv_dir)
     else:
         log(f'unknown engine: {engine}'); sys.exit(1)
     step_bake(bare_mesh, front, out_glb, mv_dir, bake_exp=bake_exp)
