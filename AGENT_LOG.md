@@ -5492,6 +5492,48 @@ Wired the child_ip45_2view experimental pipeline into FabMesh proper:
 a-utiliser-v3), 41da4ff, 86078d9, c7e9116, e6f4b36 (next: RealVis
 back-view replacement of Z123).
 
+---
+
+## 2026-04-19 — back-view: IPAdapter SCHEDULE fix
+
+### Symptom
+Après le commit `2c79a0c` qui appliquait la recette _scale_sweep.py
+(ip=0.45, gs=7.0, simple neg), la génération de back views reste
+inconsistante: sur perso photoréaliste l'enfant ça marchait, sur
+une femme CG en maillot ou un orc ça donne presque toujours une
+AUTRE vue frontale du même perso. Tests ip_scale 0.15/0.25/0.30/0.35/
+0.45/0.50/0.60/0.80 — tous donnent des fronts ou 3/4.
+
+### Diagnostic (agent)
+IPAdapter Plus encode l'image front ENTIERE (incluant visage). Le face
+embedding domine tout signal textuel. ip_scale haut = trop d'identité
+forcée (visage front), ip_scale bas = perte identité MAIS orientation
+pas corrigée car le text encoder SDXL ne gagne pas d'autorité face à
+l'embedding image. La recette originale marchait par coïncidence de
+seed sur un perso photoréaliste.
+
+### Fix: IPAdapter scale schedule
+Au lieu d'un scale constant, schedule à travers les steps:
+- steps 0..33%  : scale=0.0 (prompt texte seul -> composition fixe la
+  direction "back view")
+- steps 33..66% : ramp linéaire 0 -> full
+- steps 66..end : scale=ip_scale (identity lock-in)
+
+Principe: les premiers 30% d'un process diffusion SDXL commitent la
+composition/orientation. Laisser IPAdapter off pendant cette phase
+libère les tokens "back view" pour gagner. Puis on ramp l'identity
+quand le sujet est déjà commité dos-tourné.
+
+Implémenté via `callback_on_step_end` (diffusers >= 0.26).
+
+Coût: 0% inference additionnel.
+
+Si toujours échec sur perso stylisés (orc): option #2 agent = bootstrap
+2-pass img2img (pass 1 = back brute no-IP, pass 2 = img2img avec IP).
+Si #1+#2 échouent: ControlNet OpenPose (xinsir Apache 2.0 + DWPose
+Apache 2.0, commercial OK).
+
+
 
 
 

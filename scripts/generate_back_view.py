@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 
 
-def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.50,
+def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.45,
                   steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
@@ -70,11 +70,32 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
         'cropped, low quality'
     )
 
+    # IPAdapter scale SCHEDULE: steps 0..orient_end = 0 (prompt alone dictates
+    # orientation), orient_end..identity_start = ramp, identity_start..end =
+    # full ip_scale (identity lock-in once orientation is committed).
+    # The diffusion process commits composition in the first 30% of steps, so
+    # holding IPAdapter off during that phase frees 'back view' to win.
+    orient_end = max(1, int(steps * 0.33))
+    identity_start = max(orient_end + 1, int(steps * 0.66))
+
+    def _ip_schedule_cb(pipe_ref, step_index, timestep, cbk_kwargs):
+        if step_index < orient_end:
+            pipe_ref.set_ip_adapter_scale(0.0)
+        elif step_index < identity_start:
+            # Linear ramp between orient_end and identity_start
+            t = (step_index - orient_end) / max(1, identity_start - orient_end)
+            pipe_ref.set_ip_adapter_scale(ip_scale * t)
+        else:
+            pipe_ref.set_ip_adapter_scale(ip_scale)
+        return cbk_kwargs
+
     out_paths = []
     for i in range(num_images):
         # _scale_sweep used a CONSTANT seed across views — keeps the same
         # subject identity. Only vary across multiple back candidates.
         gen = torch.Generator('cuda').manual_seed(seed if num_images == 1 else seed + i)
+        # Start with IP off so the schedule callback drives it.
+        pipe.set_ip_adapter_scale(0.0)
         img = pipe(
             prompt=prompt,
             negative_prompt=neg,
@@ -83,6 +104,7 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
             guidance_scale=7.0,
             generator=gen,
             height=1024, width=1024,
+            callback_on_step_end=_ip_schedule_cb,
         ).images[0]
         suffix = f'_{name_suffix}' if name_suffix else ''
         out_path = os.path.join(out_dir, f'back{suffix}_{i}.png')
