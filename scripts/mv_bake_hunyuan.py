@@ -163,7 +163,7 @@ def step_mvadapter_views(mesh_path, image_path, out_dir, num_views=6,
 def step_fabmesh_6views(mesh_path, image_path, out_dir,
                         num_steps=30, seed=42,
                         reuse_front=None, reuse_back=None,
-                        only_front_back=False):
+                        only_front_back=False, only_front=False):
     """Voie C: generate 6 HD views via FabMesh stack
     (RealVis XL + IPAdapter + ControlNet OpenPose). Commercial-safe,
     no nvdiffrast. Output contract identical to step_mvadapter_views.
@@ -173,7 +173,12 @@ def step_fabmesh_6views(mesh_path, image_path, out_dir,
     mesh_path = os.path.abspath(mesh_path)
     image_path = os.path.abspath(image_path)
     out_dir = os.path.abspath(out_dir)
-    mode = 'HYBRID front+back' if only_front_back else '6 HD views'
+    if only_front:
+        mode = 'FRONT-only HD'
+    elif only_front_back:
+        mode = 'HYBRID front+back'
+    else:
+        mode = '6 HD views'
     log(f'STEP 2 (voieC): fabmesh_6views -> {mode} in {out_dir}')
     t0 = time.time()
     runner = os.path.join(SCRIPTS, 'fabmesh_6views_runner.py')
@@ -183,7 +188,9 @@ def step_fabmesh_6views(mesh_path, image_path, out_dir,
         cmd += ['--reuse-front', os.path.abspath(reuse_front)]
     if reuse_back:
         cmd += ['--reuse-back', os.path.abspath(reuse_back)]
-    if only_front_back:
+    if only_front:
+        cmd += ['--only-front']
+    elif only_front_back:
         cmd += ['--only-front-back']
     env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
@@ -338,7 +345,7 @@ def main():
                         help='TripoSG face count (default: 50000)')
     parser.add_argument('--engine',
                         choices=['mvadapter', 'fabmesh', 'hybrid', 'sheet',
-                                 'voiefab'],
+                                 'voiefab', 'voiefab-front'],
                         default='mvadapter',
                         help='View generator: mvadapter=voie B, '
                              'fabmesh=voie C pure (lateral views unreliable), '
@@ -409,30 +416,30 @@ def main():
     elif engine == 'sheet':
         # Voie E: single-pass 6-panel sheet (no MVAdapter, no nvdiffrast).
         step_sheet_6views(bare_mesh, front, mv_dir)
-    elif engine == 'voiefab':
+    elif engine in ('voiefab', 'voiefab-front'):
         # Voie F: 100% commercial-safe pipeline.
         # 1. Generate back via FabMesh (RealVis+IPA+CN)
         # 2. SF3D 2-view AUGMENT bake (front+back natively in atlas)
-        # 3. voie C HD front+back overlay on top of SF3D atlas
+        # 3. voie C HD front (+back if engine=voiefab) overlay on top
         # No MVAdapter, no nvdiffrast.
         bp_dir = os.path.join(out_dir, '_voief_back')
         back_path = step_back_view(front, bp_dir)
-        # SF3D 2-view AUGMENT writes the textured GLB to bare_mesh.
-        # We reuse this as our base (atlas is already baked with
-        # front+back additive blend). out_glb will REPLACE bare_mesh
-        # at the end via texture_project.
         step_sf3d_2view_augment(front, back_path, bare_mesh)
-        # Now generate voie C HD front+back into mv_dir for overlay.
-        # only_front_back=True to skip lateral generation; --reuse-front
-        # to reuse the existing T-pose front photo.
-        step_fabmesh_6views(bare_mesh, front, mv_dir,
-                            reuse_front=front,
-                            reuse_back=back_path,
-                            only_front_back=True)
+        if engine == 'voiefab-front':
+            # FRONT-only HD overlay: trust the SF3D AUGMENT atlas for
+            # back (no risk of mini-face on dorsal silhouette).
+            step_fabmesh_6views(bare_mesh, front, mv_dir,
+                                reuse_front=front,
+                                only_front=True)
+        else:
+            step_fabmesh_6views(bare_mesh, front, mv_dir,
+                                reuse_front=front,
+                                reuse_back=back_path,
+                                only_front_back=True)
     else:
         log(f'unknown engine: {engine}'); sys.exit(1)
     step_bake(bare_mesh, front, out_glb, mv_dir, bake_exp=bake_exp,
-              base_atlas=(engine == 'voiefab'))
+              base_atlas=engine.startswith('voiefab'))
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')
 
 

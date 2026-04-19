@@ -210,7 +210,7 @@
 </div>
 
 <!-- v7: VOIE F = SF3D 2-view AUGMENT + voie C HD overlay -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v7 — VOIE F</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C HD</span><br>
@@ -233,6 +233,32 @@
     <div class="cell" data-label="v2 HD voie C"><img src="_francaise_voiefab_v2.png"></div>
     <div class="cell" data-label="(atlas final)"><img src="_francaise_voiefab_tex.png"></div>
     <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_proj_debug.png"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v8: VOIE F front-only (skip back voie C) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v8 — VOIE F front-only</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">sharp=100% · 157s · 100% commercial-safe</span>
+    <ul>
+      <li>1. generate_back_view.py</li>
+      <li>2. SF3D 2-view AUGMENT (atlas baked front + back additif)</li>
+      <li>3. voie C HD <b>front uniquement</b> (skip back voie C, garde l'atlas SF3D arrière)</li>
+      <li>4. bake stack avec BASE_ATLAS=1</li>
+    </ul>
+    <p><span class="tag ok">fix</span> évite le mini-visage parasite que voie C back HD plaquait sur le dos</p>
+    <p><span class="tag ok">trust</span> SF3D AUGMENT atlas = back déjà cohérent</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas final"><img src="_francaise_voiefab_front_tex.png"></div>
+    <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_front_proj_debug.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
   </div>
 </div>
