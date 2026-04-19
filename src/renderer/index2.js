@@ -5170,6 +5170,106 @@ document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () =
 // ALIGN TEXTURE TOOL — manual position/scale/rotation of source
 // photos onto the mesh (texture_project re-projection with sliders).
 // ============================================================
+const atState = {
+  renderer: null,
+  scene: null,
+  camera: null,
+  controls: null,
+  mesh: null,
+};
+
+async function _atInitViewport() {
+  const canvas = document.getElementById('at-preview-canvas');
+  const wrap = document.getElementById('at-preview-canvas-wrap');
+  if (!canvas || !wrap) return;
+  const w = wrap.clientWidth || 380;
+  const h = wrap.clientHeight || 380;
+  if (!atState.renderer) {
+    atState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    atState.renderer.setSize(w, h, false);
+    atState.renderer.setPixelRatio(window.devicePixelRatio);
+    atState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    atState.renderer.toneMappingExposure = 1.0;
+    atState.scene = new THREE.Scene();
+    atState.scene.background = new THREE.Color(0x1b1b1b);
+    atState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+    atState.camera.position.set(0, 0.4, 2.0);
+    try {
+      atState.controls = new OrbitControls(atState.camera, canvas);
+      atState.controls.enableDamping = true;
+    } catch (e) {
+      try {
+        const { OrbitControls: OC } = await import('./lib/controls/OrbitControls.js');
+        atState.controls = new OC(atState.camera, canvas);
+        atState.controls.enableDamping = true;
+      } catch (_) { /* ignore */ }
+    }
+    atState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    dir.position.set(5, 8, 5);
+    atState.scene.add(dir);
+    atState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    function tick() {
+      if (!document.getElementById('modal-align-texture')?.classList.contains('hidden')) {
+        if (atState.controls) atState.controls.update();
+        atState.renderer.render(atState.scene, atState.camera);
+      }
+      requestAnimationFrame(tick);
+    }
+    tick();
+  } else {
+    atState.renderer.setSize(w, h, false);
+    atState.camera.aspect = w / h;
+    atState.camera.updateProjectionMatrix();
+  }
+}
+
+async function _atLoadMesh(meshPath) {
+  if (!atState.scene) return;
+  if (atState.mesh) {
+    atState.scene.remove(atState.mesh);
+    atState.mesh.traverse?.(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
+    atState.mesh = null;
+  }
+  const status = document.getElementById('at-preview-status');
+  if (status) { status.textContent = 'Loading mesh...'; status.style.display = 'block'; }
+  try {
+    const { GLTFLoader } = await import('./lib/loaders/GLTFLoader.js');
+    const loader = new GLTFLoader();
+    // Read file via fs (Electron file:// works via fetch in renderer with full path)
+    const url = 'file:///' + meshPath.replace(/\\/g, '/');
+    const cacheBuster = '?t=' + Date.now();
+    loader.load(url + cacheBuster, (gltf) => {
+      const obj = gltf.scene || gltf.scenes[0];
+      // Center + frame mesh
+      const box = new THREE.Box3().setFromObject(obj);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3()).length();
+      obj.position.sub(center);
+      atState.mesh = obj;
+      atState.scene.add(obj);
+      // Frame camera
+      atState.camera.position.set(0, 0, size * 1.2);
+      atState.camera.lookAt(0, 0, 0);
+      if (atState.controls) {
+        atState.controls.target.set(0, 0, 0);
+        atState.controls.update();
+      }
+      if (status) status.style.display = 'none';
+    }, undefined, (err) => {
+      if (status) status.textContent = 'Load error: ' + (err?.message || err);
+    });
+  } catch (e) {
+    if (status) status.textContent = 'Loader error: ' + (e?.message || e);
+  }
+}
+
 function openAlignTexture() {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
@@ -5191,6 +5291,11 @@ function openAlignTexture() {
   sync('at-scale', 'at-scale-val', v => Number(v).toFixed(2));
   sync('at-roty', 'at-roty-val', v => `${v}\u00B0`);
   sync('at-vis', 'at-vis-val', v => Number(v).toFixed(2));
+  // Init viewer + load current mesh
+  requestAnimationFrame(async () => {
+    await _atInitViewport();
+    _atLoadMesh(p.selectedMeshPath);
+  });
 }
 document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openAlignTexture);
 document.getElementById('at-cancel')?.addEventListener('click', () => {
