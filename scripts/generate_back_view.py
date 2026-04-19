@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 
 
-def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.15,
+def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.45,
                   steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
@@ -56,23 +56,20 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
     # would otherwise replicate the front pose).
     # Same exact identity (same person, same outfit) but VIEWED FROM BEHIND.
     # IPAdapter at scale 0.35 keeps clothing/colours; prompt forces 180° rotation.
-    # Strong directional prompt; IP scale lowered drastically (0.15) so
-    # IPAdapter only contributes identity/colors, not pose.
-    base = prompt_hint if prompt_hint else 'character'
+    # EXACT recipe from scripts/_scale_sweep.py that produced the
+    # validated child_ip45_back.png reference dataset (ip=0.45, simple
+    # back-view phrasing, guidance=7.0).
+    base = prompt_hint if prompt_hint else 'a character in T-pose'
     prompt = (
-        f'rear view photograph of a person from behind, back of {base}, '
-        f'we see only the back of the head, hair from behind, no face, '
-        f'shoulders and back visible, T-pose with arms extended sideways, '
-        f'full body shot, plain grey background, studio lighting, '
-        f'photorealistic, sharp focus, 8k, masterpiece'
+        f'{base}, back view, from behind, back of head visible, '
+        f'turned away from camera, full body centered, plain grey '
+        f'background, studio lighting, sharp focus, ultra detailed, '
+        f'8k, masterpiece'
     )
-    # Aggressively reject any front-facing output (IPAdapter tends to clone
-    # the front pose; we explicitly forbid it).
     neg = (
-        'front view, facing camera, eyes visible, face visible, mouth visible, '
-        'nose visible, side view, profile view, three-quarter view, '
         'blurry, deformed, extra limbs, bad anatomy, different person, '
-        'different clothes, watermark, text, duplicate, multiple people'
+        'different clothes, watermark, text, duplicate, multiple people, '
+        'cropped, low quality'
     )
 
     out_paths = []
@@ -83,7 +80,7 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
             negative_prompt=neg,
             ip_adapter_image=ref_img,
             num_inference_steps=steps,
-            guidance_scale=6.0,
+            guidance_scale=7.0,
             generator=gen,
             width=1024, height=1024,
         ).images[0]
