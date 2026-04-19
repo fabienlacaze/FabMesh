@@ -2,96 +2,142 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>FabMesh — fille_francaise (progression pipelines)</title>
+<title>FabMesh — fille_francaise versions</title>
 <style>
   html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
-            font-family:system-ui;height:100%}
+            font-family:system-ui;width:100%;overflow-x:hidden}
+  body{overflow-y:auto}
   h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
-     border-bottom:1px solid #333}
-  .row{display:flex;height:520px}
-  .col{flex:1;border-right:1px solid #333;position:relative}
-  .col-title{position:absolute;top:6px;left:8px;right:8px;z-index:5;
-             background:rgba(0,0,0,0.78);padding:4px 8px;border-radius:3px;
-             font-size:11px;color:#eee;line-height:1.4}
-  .col-title b{color:#87d9ff}
-  .col-title .new{color:#4cd964}
-  .col-title .hd{color:#ffd700}
-  .col-title .mva{color:#ff8c1a}
-  .col-title .stat{color:#bbb;font-size:10px}
-  model-viewer{width:100%;height:100%;background:#1b1b1b}
-  img.ref{width:100%;height:100%;object-fit:contain;background:#1b1b1b}
+     border-bottom:1px solid #333;position:sticky;top:0;z-index:10}
+  .version{display:flex;border-bottom:1px solid #333;
+           height:min(75vh, 640px); min-height:360px;width:100%}
+  .version.latest{border-left:4px solid #4cd964}
+  .meta{flex:0 0 280px;padding:12px;background:#151515;overflow-y:auto;
+        font-size:11px;line-height:1.5;box-sizing:border-box}
+  .meta b{color:#87d9ff}
+  .meta .new{color:#4cd964}
+  .meta .stat{color:#ffd700}
+  .meta ul{margin:4px 0;padding-left:16px}
+  .meta li{margin:2px 0}
+  .mesh{flex:1 1 auto;background:#1b1b1b;min-width:0;position:relative}
+  .mesh model-viewer{width:100%;height:100%;background:#1b1b1b}
+  img.ref{width:100%;height:100%;object-fit:contain;background:#1b1b1b;
+          display:block}
+  .tag{display:inline-block;padding:1px 6px;border-radius:3px;
+       font-size:10px;margin-right:4px}
+  .tag.c{background:#ffd70022;color:#ffd700}
+  .tag.b{background:#ff8c1a22;color:#ff8c1a}
+  .tag.bad{background:#e7484822;color:#e74848}
+  .tag.ok{background:#4cd96422;color:#4cd964}
 </style>
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>fille_francaise — Progression : voie C pure → hybrid → hybrid + T-pose front forcé</h1>
-<div class="row">
-  <div class="col">
-    <div class="col-title">
-      FRONT original (pas T-pose)<br>
-      <span class="stat">RealVis 8 steps, bras collés</span>
-    </div>
-    <img class="ref" src="_francaise_front.png">
+<h1>fille_francaise — toutes les versions (chronologique, 1 ligne = 1 version)</h1>
+
+<!-- Version 0: ref photo -->
+<div class="version">
+  <div class="meta">
+    <b>v0 — FRONT photo input (original)</b><br>
+    <span class="tag c">RealVis XL v4.0</span><br>
+    <span class="stat">1024² · bras collés (pas T-pose)</span>
+    <ul>
+      <li>prompt: "jeune fille francaise, robe d'été"</li>
+      <li>steps=8, guidance=7.0</li>
+      <li>seed=1776629428</li>
+      <li>Pas de ControlNet, pas d'IPA</li>
+    </ul>
+    <p><span class="tag bad">problème</span> bras le long du corps malgré prompt T-pose → cascade sur tout le pipeline</p>
   </div>
-  <div class="col">
-    <div class="col-title">
-      <b>Voie C pure</b><br>
-      <span class="stat">6 vues RealVis+CN 1024² · latéraux = front (IPA bleed)<br>195s · sharp=62%</span>
-    </div>
-    <model-viewer src="_francaise_voiec.glb" auto-rotate camera-controls
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-  </div>
-  <div class="col">
-    <div class="col-title">
-      <b>Voie HYBRID</b> (front non T-pose)<br>
-      <span class="stat">C front+back HD + B latéraux 512²<br>194s · sharp=62%</span>
-    </div>
-    <model-viewer src="_francaise_hybrid.glb" auto-rotate camera-controls
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-  </div>
-  <div class="col">
-    <div class="col-title">
-      <b>HYBRID + T-pose</b> (winner)<br>
-      <span class="stat">best-view-wins blend, démarcations nettes<br>211s · sharp=56%</span>
-    </div>
-    <model-viewer src="_francaise_hybrid_tpose.glb" auto-rotate camera-controls
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-  </div>
-  <div class="col" style="border-left:3px solid #4cd964">
-    <div class="col-title">
-      <span class="new"><b>HYBRID + T-pose + ACCUM</b></span><br>
-      <span class="stat">blend accum (sum w*rgb / sum w)<br>
-      back ip=0.70 cn=1.25 · sharp=56%</span>
-    </div>
-    <model-viewer src="_francaise_accum.glb" auto-rotate camera-controls
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-  </div>
+  <div class="mesh"><img class="ref" src="_francaise_front.png"></div>
 </div>
 
-<h1>FRONT photo utilisée : original (bras collés) vs T-pose forcé (rembg+center+IPA+CN)</h1>
-<div class="row" style="height:420px">
-  <div class="col"><img class="ref" src="_francaise_front.png"><div class="col-title">original (bras collés)</div></div>
-  <div class="col" style="border-left:3px solid #4cd964"><img class="ref" src="_francaise_front_tpose.png"><div class="col-title"><span class="new">T-pose forcé (bras étendus, pieds visibles, centré)</span></div></div>
+<!-- Version 1: voie C pure -->
+<div class="version">
+  <div class="meta">
+    <b>v1 — Voie C pure</b><br>
+    <span class="tag c">6 vues RealVis+IPA+CN</span><br>
+    <span class="stat">sharp=62% · 195s</span>
+    <ul>
+      <li>SF3D bare mesh 12k</li>
+      <li>6 vues RealVis 1024² front/right/back/left/top/bot</li>
+      <li>ControlNet OpenPose + IPA pour chaque angle</li>
+      <li>bake winner, cos⁴, Telea inpaint</li>
+    </ul>
+    <p><span class="tag bad">problème</span> RealVis/CN OpenPose ne sait pas produire des profils stricts → v1/v3/v4/v5 montrent des fronts → texturing décalé</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiec.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
 </div>
 
-<h1>HYBRID + T-pose — 6 vues pour le bake</h1>
-<div class="row" style="height:320px">
-  <div class="col"><img class="ref" src="_francaise_tpose_v0.png"><div class="col-title"><span class="hd">v0 front HD 1024²</span> (voie C)</div></div>
-  <div class="col"><img class="ref" src="_francaise_tpose_v1.png"><div class="col-title"><span class="mva">v1 right 512²</span> (MVAdapter)</div></div>
-  <div class="col"><img class="ref" src="_francaise_tpose_v2.png"><div class="col-title"><span class="hd">v2 back HD 1024²</span> (voie C)</div></div>
-  <div class="col"><img class="ref" src="_francaise_tpose_v3.png"><div class="col-title"><span class="mva">v3 left 512²</span> (MVAdapter)</div></div>
-  <div class="col"><img class="ref" src="_francaise_tpose_v4.png"><div class="col-title"><span class="mva">v4 top 512²</span> (MVAdapter)</div></div>
-  <div class="col"><img class="ref" src="_francaise_tpose_v5.png"><div class="col-title"><span class="mva">v5 bottom 512²</span> (MVAdapter)</div></div>
+<!-- Version 2: hybrid no T-pose -->
+<div class="version">
+  <div class="meta">
+    <b>v2 — HYBRID (front non T-pose)</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
+    <span class="stat">sharp=62% · 194s</span>
+    <ul>
+      <li>SF3D bare mesh 12k (pose= front original)</li>
+      <li>MVAdapter 6 vues cohérentes 512²</li>
+      <li>voie C overwrite view_0 + view_2 HD 1024²</li>
+      <li>bake winner</li>
+    </ul>
+    <p><span class="tag bad">problème</span> front original bras collés → SF3D mesh sans bras écartés → conflit avec v2 back T-pose → trous épaules</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_hybrid.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
 </div>
 
-<h1>HYBRID sans T-pose — 6 vues (comparatif, bras collés)</h1>
-<div class="row" style="height:320px">
-  <div class="col"><img class="ref" src="_francaise_hybrid_v0.png"><div class="col-title">v0 front (bras collés)</div></div>
-  <div class="col"><img class="ref" src="_francaise_hybrid_v1.png"><div class="col-title">v1 right</div></div>
-  <div class="col"><img class="ref" src="_francaise_hybrid_v2.png"><div class="col-title">v2 back (T-pose forcé) ← conflit</div></div>
-  <div class="col"><img class="ref" src="_francaise_hybrid_v3.png"><div class="col-title">v3 left</div></div>
-  <div class="col"><img class="ref" src="_francaise_hybrid_v4.png"><div class="col-title">v4 top</div></div>
-  <div class="col"><img class="ref" src="_francaise_hybrid_v5.png"><div class="col-title">v5 bottom</div></div>
+<!-- Version 3: front T-pose forcé -->
+<div class="version">
+  <div class="meta">
+    <b>v3 — Front T-pose forcé</b><br>
+    <span class="tag c">generate_front_tpose.py</span><br>
+    <span class="stat">1024² · bras étendus, centré</span>
+    <ul>
+      <li>ref = v0 front original (bras collés)</li>
+      <li>Pipeline: RealVis + CN OpenPose T-pose front skeleton + IPA (garde identité) + rembg + center canvas 1024²</li>
+      <li>ip=0.75, cn=1.15, 30 steps, 15.5s</li>
+    </ul>
+    <p><span class="tag ok">fix</span> vraie T-pose, pieds visibles, fond blanc propre → cascade le reste du pipeline</p>
+  </div>
+  <div class="mesh"><img class="ref" src="_francaise_front_tpose.png"></div>
 </div>
+
+<!-- Version 4: HYBRID + T-pose winner -->
+<div class="version">
+  <div class="meta">
+    <b>v4 — HYBRID + T-pose (winner)</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
+    <span class="stat">sharp=56% · 211s</span>
+    <ul>
+      <li>Front = v3 T-pose (1024² T-pose forcé)</li>
+      <li>SF3D mesh avec vrais bras écartés</li>
+      <li>MVAdapter 6 vues + voie C overwrite front+back HD</li>
+      <li>bake <b>winner</b> (best-view-wins) → démarcations nettes</li>
+      <li>back ip=0.55 cn=1.15</li>
+    </ul>
+    <p><span class="tag bad">problème</span> démarcations visibles entre zones front/back/latéraux + back RealVis = ponytail (pas la bonne fille)</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_hybrid_tpose.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+</div>
+
+<!-- Version 5: HYBRID + T-pose + back tune + accum -->
+<div class="version latest">
+  <div class="meta">
+    <b>v5 — HYBRID + T-pose + ACCUM</b> <span class="tag ok">latest</span><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD tuned</span><br>
+    <span class="stat new">sharp=56%</span>
+    <ul>
+      <li>Front = v3 T-pose</li>
+      <li>MVAdapter 6 vues (snapshot _francaise_tpose_v*)</li>
+      <li>voie C view_0 T-pose + view_2 back tune <b>ip=0.70 cn=1.25</b></li>
+      <li>bake <b>accum</b> (sum w·rgb / sum w) → blend doux sans démarcations</li>
+      <li>Telea inpaint sur 458k trous</li>
+    </ul>
+    <p><span class="tag ok">gain</span> démarcations lissées</p>
+    <p><span class="tag bad">reste</span> back ponytail ne ressemble pas à la fille du front</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_accum.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+</div>
+
 </body>
 </html>
