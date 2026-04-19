@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>FabMesh — pamela versions</title>
+<style>
+  html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
+            font-family:system-ui;width:100%;overflow-x:hidden}
+  body{overflow-y:auto}
+  h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
+     border-bottom:1px solid #333;position:sticky;top:0;z-index:10}
+  .version{display:flex;border-bottom:2px solid #333;
+           height:min(90vh,820px); min-height:560px;width:100%}
+  .version.latest{border-left:4px solid #4cd964}
+  .meta{flex:0 0 240px;padding:10px 12px;background:#151515;overflow-y:auto;
+        font-size:11px;line-height:1.45;box-sizing:border-box}
+  .meta b{color:#87d9ff}
+  .meta .new{color:#4cd964}
+  .meta .stat{color:#ffd700}
+  .meta ul{margin:3px 0;padding-left:14px}
+  .meta li{margin:1px 0}
+  .mesh{flex:1 1 0;background:#1b1b1b;min-width:0;position:relative}
+  .mesh model-viewer{width:100%;height:100%;background:#1b1b1b}
+  .mesh img.solo{width:100%;height:100%;object-fit:contain;background:#1b1b1b;display:block}
+  .grid6{flex:0 0 auto;width:min(60vw,780px);display:grid;
+         grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
+         gap:3px;background:#000;border-left:1px solid #333}
+  .grid6 .cell{position:relative;background:#1b1b1b;overflow:hidden}
+  .grid6 .cell img{width:100%;height:100%;object-fit:contain;display:block}
+  .grid6 .cell::after{content:attr(data-label);position:absolute;
+         bottom:4px;left:4px;right:4px;font-size:11px;color:#eee;
+         background:rgba(0,0,0,0.75);padding:2px 6px;border-radius:3px}
+  .tag{display:inline-block;padding:1px 6px;border-radius:3px;
+       font-size:10px;margin-right:4px}
+  .tag.c{background:#ffd70022;color:#ffd700}
+  .tag.b{background:#ff8c1a22;color:#ff8c1a}
+  .tag.bad{background:#e7484822;color:#e74848}
+  .tag.ok{background:#4cd96422;color:#4cd964}
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>pamela — pipeline hybrid (accum vs stack)</h1>
+
+<div class="version">
+  <div class="meta">
+    <b>v0 — FRONT photo</b><br>
+    <span class="tag c">RealVis XL v4.0</span><br>
+    <span class="stat">1024² T-pose, bikini rouge</span>
+    <ul>
+      <li>Prompt: "Pamela Anderson, blonde long hair, red bikini, T-pose"</li>
+      <li>Steps=30, seed auto</li>
+      <li>Bras déjà étendus (T-pose réussie au premier coup)</li>
+    </ul>
+  </div>
+  <div class="mesh"><img class="solo" src="_pamela_front.png"></div>
+  <div class="grid6"></div>
+</div>
+
+<div class="version">
+  <div class="meta">
+    <b>v5 — HYBRID + ACCUM</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
+    <span class="stat">sharp=48% · 200s</span>
+    <ul>
+      <li>SF3D bare mesh</li>
+      <li>MVAdapter 6 vues 512²</li>
+      <li>voie C view_0/view_2 HD 1024² (back ip=0.70 cn=1.25)</li>
+      <li>bake <b>accum</b> (sum w·rgb / sum w)</li>
+    </ul>
+    <p><span class="tag bad">attention</span> face peut être lavée par moyenne 6-vues</p>
+  </div>
+  <div class="mesh"><model-viewer src="_pamela_accum.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD"><img src="_pamela_accum_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_pamela_accum_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_pamela_accum_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_pamela_accum_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_pamela_accum_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_pamela_accum_v5.png"></div>
+  </div>
+</div>
+
+<div class="version latest">
+  <div class="meta">
+    <b>v6 — HYBRID + STACK</b> <span class="tag ok">latest</span><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
+    <span class="stat new">sharp=48%</span>
+    <ul>
+      <li>Mêmes 6 vues que v5</li>
+      <li>bake <b>stack</b>: top→bot→back→right→left→<b>front en dernier</b></li>
+      <li>Front recouvre tout ce qu'il voit (feather sur vis 0.10→0.30)</li>
+      <li>Latéraux ne contaminent plus le visage</li>
+    </ul>
+    <p><span class="tag ok">gain</span> face = front HD pure</p>
+  </div>
+  <div class="mesh"><model-viewer src="_pamela_stack.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD top"><img src="_pamela_accum_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_pamela_accum_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_pamela_accum_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_pamela_accum_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_pamela_accum_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_pamela_accum_v5.png"></div>
+  </div>
+</div>
+
+</body>
+</html>

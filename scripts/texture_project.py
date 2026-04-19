@@ -601,11 +601,16 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     #                        another.
     #   "accum":  weighted average of all contributing views (rgb * w
     #              accumulated, divided by total w at end). Smooths out
-    #              seams — the characteristic "démarcation nette"
-    #              between e.g. front-dominated and side-dominated
-    #              atlas regions disappears. Minor softness cost.
+    #              seams but can muddy the face (average of 6 views).
+    #   "stack":  Photoshop-style layer stack. Views are processed in
+    #              priority order (low priority first, high priority
+    #              last). Each view OVERWRITES the atlas where it sees
+    #              the surface. The front view comes LAST → covers
+    #              everything it sees → face is preserved exactly as
+    #              the front photo shows it. Default order:
+    #              top/bot → lat → back → front.
     _blend_mode = os.environ.get('FABMESH_TEXPROJ_BLEND', 'winner').lower()
-    if _blend_mode not in ('winner', 'accum'):
+    if _blend_mode not in ('winner', 'accum', 'stack'):
         _blend_mode = 'winner'
     log(f'blend mode: {_blend_mode}')
     proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
@@ -708,6 +713,17 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             'priority': priority, 'azim': azim_deg, 'elev': elev_deg,
         })
 
+    # Stack mode: sort view_data by ASCENDING priority so that the
+    # high-priority views are processed LAST — each later pass
+    # overwrites the atlas where it sees the surface, like Photoshop
+    # layers. Front (priority 1.0) ends up on top, covering everything
+    # it observes; laterals only fill the flanks that front can't see.
+    if _blend_mode == 'stack':
+        view_data.sort(key=lambda vd: float(vd.get('priority', 0.0)))
+        _order = [f"az={int(vd['azim'])}/el={int(vd['elev'])}(p={vd['priority']})"
+                  for vd in view_data]
+        log(f'stack order (bottom->top): {" -> ".join(_order)}')
+
     # Diagnostic: per-texel source-view index + contribution count.
     # Only allocated when FABMESH_TEXPROJ_DIAG=1 to keep the default
     # memory footprint unchanged for production runs.
@@ -785,7 +801,41 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             src_alpha = sampled[..., 3] / 255.0 if sampled.shape[-1] == 4 else 1.0
             w_pixel = pt_vis * src_alpha * vd['priority'] * mask.astype(np.float64) * in_b.astype(np.float64)
 
-            if _blend_mode == 'accum':
+            if _blend_mode == 'stack':
+                # Photoshop stack: processed in ascending priority order
+                # (sorted above). Each view overwrites where it sees
+                # the surface (vis > threshold). Alpha blend at the
+                # boundary (vis taper) gives a feathered transition.
+                # Threshold for "this view sees this pixel clearly":
+                # pt_vis > 0.10 (≈ normal angle < 75°). Below that we
+                # don't paint, preserving whatever earlier layers wrote.
+                STACK_VIS_FLOOR = 0.10
+                cover = ((pt_vis > STACK_VIS_FLOOR)
+                         & mask & in_b & (src_alpha > 0.5))
+                if not cover.any():
+                    continue
+                # Feather: alpha ramps from 0 at vis=0.10 to 1 at 0.30.
+                # Produces soft seams without killing the cover strength
+                # at grazing angles.
+                alpha = np.clip((pt_vis - 0.10) / 0.20, 0.0, 1.0)
+                alpha = np.where(cover, alpha, 0.0)
+                for c in range(3):
+                    proj_arr[ys, xs, c] = (
+                        alpha * sampled[..., c].astype(np.float64)
+                        + (1.0 - alpha) * proj_arr[ys, xs, c])
+                # Mark weight as "covered" for downstream
+                # sharp_mask/push-pull logic.
+                weight_arr[ys, xs] = np.maximum(
+                    weight_arr[ys, xs], alpha)
+                if _diag_on:
+                    source_view_arr[ys, xs] = np.where(
+                        cover, np.uint8(_vd_idx),
+                        source_view_arr[ys, xs])
+                    coverage_arr[ys, xs] = np.where(
+                        cover,
+                        coverage_arr[ys, xs] + 1,
+                        coverage_arr[ys, xs])
+            elif _blend_mode == 'accum':
                 # Accumulate weighted contribution from every view that
                 # sees this pixel. Final normalization (rgb /= weight)
                 # happens once after the loop. Produces a smooth blend

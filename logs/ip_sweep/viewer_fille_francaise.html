@@ -157,9 +157,9 @@
 </div>
 
 <!-- v5: hybrid + T-pose + back tune + accum -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
-    <b>v5 — HYBRID + T-pose + ACCUM</b> <span class="tag ok">latest</span><br>
+    <b>v5 — HYBRID + T-pose + ACCUM</b><br>
     <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD tuned</span><br>
     <span class="stat new">sharp=56%</span>
     <ul>
@@ -177,6 +177,32 @@
     <div class="cell" data-label="v0 HD"><img src="_francaise_accum_v0.png"></div>
     <div class="cell" data-label="v1 MVA"><img src="_francaise_accum_v1.png"></div>
     <div class="cell" data-label="v2 HD tuned"><img src="_francaise_accum_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_accum_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_accum_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_accum_v5.png"></div>
+  </div>
+</div>
+
+<!-- v6: hybrid + T-pose + STACK -->
+<div class="version latest">
+  <div class="meta">
+    <b>v6 — HYBRID + T-pose + STACK</b> <span class="tag ok">latest</span><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
+    <span class="stat new">sharp=48%</span>
+    <ul>
+      <li>Mêmes 6 vues que v5</li>
+      <li>bake <b>stack</b>: ordre top→bot→back→right→left→<b>front EN DERNIER</b></li>
+      <li>Front recouvre tout ce qu'il voit avec feather (vis>0.10)</li>
+      <li>Latéraux ne contaminent plus le visage</li>
+    </ul>
+    <p><span class="tag ok">gain</span> visage 100% front HD, plus de bouillie de moyenne</p>
+    <p><span class="tag bad">reste</span> back ponytail toujours présent (visible côté)</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_stack.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD top"><img src="_francaise_accum_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_accum_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_accum_v2.png"></div>
     <div class="cell" data-label="v3 MVA"><img src="_francaise_accum_v3.png"></div>
     <div class="cell" data-label="v4 MVA"><img src="_francaise_accum_v4.png"></div>
     <div class="cell" data-label="v5 MVA"><img src="_francaise_accum_v5.png"></div>
