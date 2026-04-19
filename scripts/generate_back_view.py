@@ -54,11 +54,29 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     ref_img = Image.open(front_image).convert('RGB')
 
     # EXACT recipe from _scale_sweep.py (verified pixel-perfect
-    # reproducible on seed=424242): the subject goes BEFORE the
-    # directional phrase. Default hint is generic human T-pose
-    # description; FabMesh may pass its own (e.g. 'A child in T-pose
-    # wearing denim jacket and cargo shorts').
-    base = prompt_hint if prompt_hint else 'a character in T-pose'
+    # reproducible on seed=424242).
+    # CRITICAL: strip FRONT-related tokens from the FabMesh hint
+    # (asset-style appends 'strict front view, facing camera, symmetric'
+    # which directly contradicts 'back view' and wins because it comes
+    # first in the prompt). Without this strip, FabMesh-generated back
+    # views are always fronts.
+    import re as _re
+    hint_clean = prompt_hint or ''
+    _front_patterns = [
+        r'strict front view',
+        r'front view',
+        r'facing camera',
+        r'symmetric',
+        r'three[- ]?quarter view',
+        r'three[- ]?fourth view',
+    ]
+    for pat in _front_patterns:
+        hint_clean = _re.sub(pat, '', hint_clean, flags=_re.IGNORECASE)
+    hint_clean = _re.sub(r',\s*,', ',', hint_clean)
+    hint_clean = _re.sub(r'\s+', ' ', hint_clean).strip(' ,')
+    print(f'[back-view] cleaned hint: "{hint_clean[:200]}"', flush=True)
+
+    base = hint_clean if hint_clean else 'a character in T-pose'
     prompt = (
         f'{base}, back view, from behind, back of head visible, '
         f'turned away from camera, full body centered, plain grey '
