@@ -23,7 +23,7 @@ from PIL import Image
 
 
 def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
-                  ip_scale=0.45, steps=30, seed=424242, name_suffix=''):
+                  ip_scale=0.70, steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
           f'n={num_images} ip_scale={ip_scale}', flush=True)
@@ -76,9 +76,10 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     hint_clean = _re.sub(r'\s+', ' ', hint_clean).strip(' ,')
     print(f'[back-view] cleaned hint: "{hint_clean[:200]}"', flush=True)
 
-    base = hint_clean if hint_clean else 'a character in T-pose'
+    base = hint_clean if hint_clean else 'a character'
     prompt = (
-        f'{base}, back view, from behind, back of head visible, '
+        f'{base}, T-pose, arms fully extended horizontally, legs apart, '
+        f'standing upright, back view, from behind, back of head visible, '
         f'turned away from camera, full body shot from head to feet, '
         f'entire body visible including shoes, wide shot, '
         f'plain grey background, studio lighting, sharp focus, '
@@ -90,18 +91,37 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
         'cropped, low quality, zoomed in, close-up, half body, feet out of frame'
     )
 
+    # IPAdapter scale SCHEDULE: 0 during the first third (orientation),
+    # ramp during middle third, full ip_scale at the end (identity lock-in).
+    # Lets the text prompt 'back view' dictate composition before IPAdapter
+    # injects identity. Essential when ip_scale >= 0.6, otherwise IP
+    # overrides the directional tokens.
+    orient_end = max(1, int(steps * 0.33))
+    identity_start = max(orient_end + 1, int(steps * 0.66))
+
+    def _ip_schedule_cb(pipe_ref, step_index, timestep, cbk_kwargs):
+        if step_index < orient_end:
+            pipe_ref.set_ip_adapter_scale(0.0)
+        elif step_index < identity_start:
+            t = (step_index - orient_end) / max(1, identity_start - orient_end)
+            pipe_ref.set_ip_adapter_scale(ip_scale * t)
+        else:
+            pipe_ref.set_ip_adapter_scale(ip_scale)
+        return cbk_kwargs
+
     out_paths = []
     for i in range(num_images):
-        # Constant seed for single image (matches scale_sweep).
         gen = torch.Generator('cuda').manual_seed(
             seed if num_images == 1 else seed + i)
         t0 = time.time()
+        pipe.set_ip_adapter_scale(0.0)  # start at 0 for schedule
         img = pipe(
             prompt=prompt, negative_prompt=neg,
             ip_adapter_image=ref_img,
             num_inference_steps=steps, guidance_scale=7.0,
             height=1024, width=1024,
             generator=gen,
+            callback_on_step_end=_ip_schedule_cb,
         ).images[0]
         print(f'[back-view] gen {i}: {time.time()-t0:.1f}s', flush=True)
         suffix = f'_{name_suffix}' if name_suffix else ''

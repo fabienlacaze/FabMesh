@@ -49,6 +49,16 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
          torch_cuda=torch.cuda.is_available())
 
     os.makedirs(output_dir, exist_ok=True)
+    # Find starting index so we don't overwrite earlier 'Generate new version'
+    # runs. Scan for existing ref_N.png in the output dir.
+    import re as _re_idx
+    _existing_idx = [-1]
+    for _f in os.listdir(output_dir):
+        _m = _re_idx.match(r'^ref_(\d+)\.png$', _f)
+        if _m:
+            _existing_idx.append(int(_m.group(1)))
+    _start_idx = max(_existing_idx) + 1
+    print(f'LOCAL_REALVIS: starting at ref_{_start_idx} (existing highest={max(_existing_idx)})', flush=True)
 
     # Enforce VRAM limit from FabMesh settings (FABMESH_VRAM_FRACTION env var).
     # The fraction is (slider% / 100), e.g. 0.75 for a 75% slider.
@@ -224,7 +234,7 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         else:
             result = pipe(**_pipe_kwargs)
 
-        img_path = os.path.join(output_dir, f"ref_{i}.png")
+        img_path = os.path.join(output_dir, f"ref_{_start_idx + i}.png")
         gen_img = result.images[0]
 
         # Post-generation safety check (parental control).
