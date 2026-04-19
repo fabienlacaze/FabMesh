@@ -5533,6 +5533,34 @@ Si toujours échec sur perso stylisés (orc): option #2 agent = bootstrap
 Si #1+#2 échouent: ControlNet OpenPose (xinsir Apache 2.0 + DWPose
 Apache 2.0, commercial OK).
 
+---
+
+## 2026-04-19 — Align Texture & 2-view pipeline hardening
+
+### Enhancements
+- **back-view**: rewrote generate_back_view.py as minimal _scale_sweep
+  clone (ip=0.45, gs=7.0, simple neg) after pixel-perfect replay
+  validated on child ref_0.png. Kept the FRONT-token regex strip
+  (mandatory to counter FabMesh asset-style appending 'strict front
+  view, facing camera, symmetric' which was contradicting 'back view'
+  in the prompt).
+- **back-view**: added full-body framing tokens to match front scale.
+- **Align Texture UI**: added Z translate slider, overlay opacity
+  slider, view-switch buttons (Front/Right/Back/Left/Top/Bottom/Iso),
+  FRONT/BACK overlay toggle with per-side stored transforms.
+- **Align Texture bug**: fixed empty viewer caused by mesh-load block
+  being misplaced in _atSetCameraView instead of openAlignTexture
+  (regression from UI upsize commit).
+- **Overlay sizing**: tied overlay plane to mesh Y-extent so scale=1
+  fits the mesh body (was using bbox diagonal → overlay became huge).
+- **2-view persistence**: list-image-folders now scans <project>/
+  _backphotos/ to rebuild p._backPhotos on project reload, so the
+  FRONT/BACK bar survives app restarts.
+- **New project modal**: added ✨ Enhance button next to description.
+
+### Commits this batch
+ee1d89d, b46e048, e651aff, plus persist-back-on-reload (current).
+
 
 
 

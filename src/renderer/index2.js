@@ -413,6 +413,12 @@ async function refreshProjectsPage() {
     if (f.created && f.created > p.latestTimestamp) p.latestTimestamp = f.created;
     // Keep the latest prompt for the project (folders are listed newest first)
     if (!p.prompt && f.prompt) p.prompt = f.prompt;
+    // Merge back-photo map from disk so the FRONT/BACK bar shows even
+    // after a reload (previously only in-memory after generation).
+    if (f.backPhotos && Object.keys(f.backPhotos).length) {
+      if (!p._backPhotos) p._backPhotos = {};
+      Object.assign(p._backPhotos, f.backPhotos);
+    }
   }
   // Meshes don't carry a project field — derive from filename.
   // Convention examples:

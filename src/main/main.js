@@ -4481,6 +4481,29 @@ ipcMain.handle('list-image-folders', () => {
         .sort((a, b) => new Date(b.created) - new Date(a.created));
       const promptFile = path.join(dir, 'prompt.txt');
       const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf-8').trim() : '';
+      // 2-view: look for back photos in <project>/_backphotos/ and map them
+      // back to their matching front by filename stem (back_<stem>_0.png).
+      const backDir = path.join(dir, '_backphotos');
+      const backPhotos = {};
+      if (fs.existsSync(backDir)) {
+        try {
+          const backFiles = fs.readdirSync(backDir)
+            .filter(f => /^back_.*\.png$/i.test(f));
+          for (const bf of backFiles) {
+            // back_<stem>_<i>.png — derive stem, find matching front image
+            const m = bf.match(/^back_(.+)_\d+\.png$/i);
+            if (!m) continue;
+            const stem = m[1];
+            const frontMatch = imgs.find(img => {
+              const fn = path.basename(img.path, path.extname(img.path));
+              return fn === stem;
+            });
+            if (frontMatch) {
+              backPhotos[frontMatch.path] = path.join(backDir, bf);
+            }
+          }
+        } catch (_) { /* ignore */ }
+      }
       // Get latest folder mtime from latest image
       const latestTime = imgs.length > 0 ? imgs[0].created : fs.statSync(dir).birthtime;
       return {
@@ -4490,7 +4513,8 @@ ipcMain.handle('list-image-folders', () => {
         imagesData: imgs,
         count: imgs.length,
         created: latestTime,
-        prompt
+        prompt,
+        backPhotos,
       };
     })
     .sort((a, b) => new Date(b.created) - new Date(a.created));
