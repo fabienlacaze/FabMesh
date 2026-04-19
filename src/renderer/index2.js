@@ -2863,20 +2863,23 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
             _saveImageStyle(imgPath, stylePrompt);
           }
         }
-        // 2-view mode: if checkbox is on, generate the back photo via Z123
-        // and attach it to ALL generated images so each image has its back
-        // ready when used for 3D. The back photo is sent later as
-        // imagePathBack to the SF3D bridge for true-back texturing.
+        // 2-view mode: generate a PHOTOREALISTIC back photo via RealVis XL
+        // + IPAdapter (replaces Zero123++ which was hallucinated). Conditioned
+        // on the front photo, prompted with the user's original asset prompt.
         if (multiView && r.images?.length > 0) {
           try {
-            showToast('Generating back photos (2-view)...', 'info', 8000);
+            showToast('Generating back photos (RealVis + IPAdapter)...', 'info', 10000);
             for (const imgPath of r.images) {
-              const mvResult = await API.generateMultiview({ imagePath: imgPath });
-              if (mvResult?.success && mvResult.outDir) {
-                // Z123 emits view_2.png = the back view (azim=180)
-                const backCandidate = `${mvResult.outDir}\\view_2.png`;
+              const bvResult = await window.meshyAPI.generateBackView({
+                frontImage: imgPath,
+                promptHint: userPrompt || '',
+                numImages: 1,
+              });
+              if (bvResult?.success && bvResult.paths?.length) {
                 if (!p._backPhotos) p._backPhotos = {};
-                p._backPhotos[imgPath] = backCandidate;
+                p._backPhotos[imgPath] = bvResult.paths[0];
+              } else {
+                console.warn('[back-view] failed for', imgPath, bvResult?.error);
               }
             }
             showToast('Back photos ready', 'success');

@@ -3835,6 +3835,39 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
 });
 
 // ============================================================
+// GENERATE BACK VIEW — RealVis XL + IPAdapter, replaces Z123 for the
+// 2-view texturing pipeline. Produces a photoreal back view of the
+// same subject, conditioned on the front photo.
+// ============================================================
+ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages }) => {
+  if (!frontImage || !fs.existsSync(frontImage)) {
+    return { success: false, error: `front image not found: ${frontImage}` };
+  }
+  const outDir = path.dirname(frontImage);
+  const script = path.join(__dirname, '..', '..', 'scripts',
+                            'generate_back_view.py');
+  const args = [script, frontImage, outDir, promptHint || '', String(numImages || 1)];
+  return new Promise((resolve) => {
+    const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    execFile('python', args, {
+      env, timeout: 600000, maxBuffer: 50 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (stdout) log.info('generate-back-view', stdout.trim().slice(-2000));
+      if (error) {
+        log.error('generate-back-view', error.message);
+        resolve({ success: false, error: error.message,
+                  stderr: (stderr || '').slice(-1000) });
+      } else {
+        const paths = (stdout || '').split('\n')
+          .filter(l => l.startsWith('BACK_VIEW_PATH:'))
+          .map(l => l.replace('BACK_VIEW_PATH:', '').trim());
+        resolve({ success: true, paths });
+      }
+    });
+  });
+});
+
+// ============================================================
 // ALIGN TEXTURE — manual photo→mesh projection re-trigger.
 // Calls texture_project.py directly with user-tweaked params from
 // the Align Texture modal. Writes back to the same mesh path.

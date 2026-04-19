@@ -5443,5 +5443,55 @@ Translate XY accurate only to ±5% on average. User says "if we can't
 do auto perfectly, we need a manual viewer in FabMesh to position
 textures and resize them." Next session: build that UI.
 
+---
+
+## 2026-04-19 03:00 — FabMesh integration: Align Texture tool + 2-view auto
+
+### Summary
+Wired the child_ip45_2view experimental pipeline into FabMesh proper:
+
+1. **"Align Texture" manual tool** in mesh-card → Manual tools.
+   Modal with Three.js viewport (mesh shown fixed) + semi-transparent
+   photo overlay plane that follows sliders. 6 sliders (TX/TY/TZ/Scale/
+   RotY/Visibility), opacity slider, view buttons (Front/Right/Back/
+   Left/Top/Bottom/Iso), checkboxes (autofit/framefix/skipvflip).
+   "Re-project" button calls texture_project.py with mesh_pre_transform.
+2. **"Auto 2-view" checkbox** in image gen.
+   Was generating 6 hallucinated Z123 views; now generates ONE
+   photoreal back view via RealVis XL + IPAdapter Plus, conditioned
+   on the front photo. Uses the same recipe as scripts/_scale_sweep.py
+   that produced the child_ip45_back.png reference dataset.
+3. **Back photo auto-attached** when user clicks "Use this image for 3D".
+   Stored in `p.backImagePath`, sent to imageTo3D as imagePathBack.
+4. **2-view bridge mode**: when imagePathBack provided, main.js builds
+   a `<mesh>_mv2/` dir with view_0=front, view_1=back, views.json,
+   and runs SF3D bridge with all `a-utiliser-v3` env vars set:
+   FABMESH_MV_REUSE, FABMESH_PROJECT_MODE=atlas,
+   FABMESH_TEXPROJ_FRAME_FIX=1, FABMESH_TEXPROJ_SKIP_BACK_VFLIP=1,
+   FABMESH_TEXPROJ_VIS_THRESH=0.5, FABMESH_AUTOFIT=1,
+   FABMESH_AUTOFIT_RATIO=1.20.
+5. **Multiview bar** in image card simplified to FRONT / BACK only
+   (was 0/90/180/270/TOP/BOT — confusing for the new pipeline).
+
+### New files
+- `scripts/generate_back_view.py` (RealVis XL + IPAdapter back-view gen)
+- `scripts/mesh_pre_transform.py` (apply translate/scale to mesh.glb
+  for align-texture tool)
+
+### New IPC handlers (main.js)
+- `mesh:align-texture` — pre-transform + texture_project re-projection
+- `generate-back-view` — RealVis IPAdapter back generation
+
+### Licensing (all commercial-safe verified)
+- RealVis XL v4.0: CreativeML OpenRAIL++-M
+- IPAdapter Plus: Apache 2.0
+- SF3D, scipy, numpy, trimesh: BSD/Apache permissive
+
+### Commits this session
+2b688d2, a19c118, 1c23570, 7bcf47e, b4db178, c280ac9, c66b93d (tag
+a-utiliser-v3), 41da4ff, 86078d9, c7e9116, e6f4b36 (next: RealVis
+back-view replacement of Z123).
+
+
 
 
