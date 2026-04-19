@@ -593,6 +593,21 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # Per-pixel rasterization: sample source image at projected vertex
     # coords (via barycentric interp) instead of using face avg color.
     # This preserves the full detail of the source image in the atlas.
+    #
+    # Blend mode (FABMESH_TEXPROJ_BLEND env):
+    #   "winner" (default): best-view-wins per pixel — sharpest but
+    #                        produces visible seams where view coverage
+    #                        transitions from one dominant source to
+    #                        another.
+    #   "accum":  weighted average of all contributing views (rgb * w
+    #              accumulated, divided by total w at end). Smooths out
+    #              seams — the characteristic "démarcation nette"
+    #              between e.g. front-dominated and side-dominated
+    #              atlas regions disappears. Minor softness cost.
+    _blend_mode = os.environ.get('FABMESH_TEXPROJ_BLEND', 'winner').lower()
+    if _blend_mode not in ('winner', 'accum'):
+        _blend_mode = 'winner'
+    log(f'blend mode: {_blend_mode}')
     proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
     weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)
 
@@ -770,34 +785,76 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             src_alpha = sampled[..., 3] / 255.0 if sampled.shape[-1] == 4 else 1.0
             w_pixel = pt_vis * src_alpha * vd['priority'] * mask.astype(np.float64) * in_b.astype(np.float64)
 
-            better = w_pixel > weight_arr[ys, xs]
-            if not better.any():
+            if _blend_mode == 'accum':
+                # Accumulate weighted contribution from every view that
+                # sees this pixel. Final normalization (rgb /= weight)
+                # happens once after the loop. Produces a smooth blend
+                # across seams instead of a hard cliff.
+                contributing = (w_pixel > 0.0) & mask
+                if not contributing.any():
+                    continue
+                w_masked = np.where(contributing, w_pixel, 0.0)
+                for c in range(3):
+                    proj_arr[ys, xs, c] = (
+                        proj_arr[ys, xs, c]
+                        + w_masked * sampled[..., c].astype(np.float64))
+                weight_arr[ys, xs] = weight_arr[ys, xs] + w_masked
                 if _diag_on:
-                    # Still count contributors even if they don't win
+                    source_view_arr[ys, xs] = np.where(
+                        contributing,
+                        np.uint8(_vd_idx),
+                        source_view_arr[ys, xs])
+                    coverage_arr[ys, xs] = np.where(
+                        contributing,
+                        coverage_arr[ys, xs] + 1,
+                        coverage_arr[ys, xs])
+            else:
+                # winner-takes-all: best-view-wins per pixel. Sharpest
+                # but shows hard seams.
+                better = w_pixel > weight_arr[ys, xs]
+                if not better.any():
+                    if _diag_on:
+                        contributing = (w_pixel > 0.05) & mask
+                        if contributing.any():
+                            coverage_arr[ys, xs] = np.where(
+                                contributing,
+                                coverage_arr[ys, xs] + 1,
+                                coverage_arr[ys, xs])
+                    continue
+                for c in range(3):
+                    proj_arr[ys, xs, c] = np.where(
+                        better, sampled[..., c], proj_arr[ys, xs, c])
+                weight_arr[ys, xs] = np.where(
+                    better, w_pixel, weight_arr[ys, xs])
+                if _diag_on:
+                    source_view_arr[ys, xs] = np.where(
+                        better, np.uint8(_vd_idx), source_view_arr[ys, xs])
                     contributing = (w_pixel > 0.05) & mask
-                    if contributing.any():
-                        coverage_arr[ys, xs] = np.where(
-                            contributing,
-                            coverage_arr[ys, xs] + 1,
-                            coverage_arr[ys, xs])
-                continue
-            for c in range(3):
-                proj_arr[ys, xs, c] = np.where(better, sampled[..., c], proj_arr[ys, xs, c])
-            weight_arr[ys, xs] = np.where(better, w_pixel, weight_arr[ys, xs])
-            if _diag_on:
-                source_view_arr[ys, xs] = np.where(
-                    better, np.uint8(_vd_idx), source_view_arr[ys, xs])
-                contributing = (w_pixel > 0.05) & mask
-                coverage_arr[ys, xs] = np.where(
-                    contributing,
-                    coverage_arr[ys, xs] + 1,
-                    coverage_arr[ys, xs])
+                    coverage_arr[ys, xs] = np.where(
+                        contributing,
+                        coverage_arr[ys, xs] + 1,
+                        coverage_arr[ys, xs])
 
         n_drawn += 1
 
     log(f'per-pixel multi-view rasterization: {n_drawn}/{len(faces)} faces, {n_skipped} skipped, {len(view_data)} views')
     _evt('rasterize_done', drawn=n_drawn, skipped=n_skipped,
          total_faces=len(faces), views=len(view_data))
+
+    # Accum mode: normalize rgb by the sum of weights so every pixel
+    # becomes the weighted average of all contributing views. Downstream
+    # code (sharp_mask, push-pull, Telea inpaint) treats weight_arr as
+    # a presence signal — re-scale it to [0, 1] the same way as the
+    # winner path so blend/holes logic behaves identically.
+    if _blend_mode == 'accum':
+        safe_w = np.where(weight_arr > 1e-8, weight_arr, 1.0)
+        for c in range(3):
+            proj_arr[:, :, c] = proj_arr[:, :, c] / safe_w
+        # Clamp weight_arr to [0, 1] like the winner path does (winner
+        # stored the single best w_pixel, already in [0, 1]). Accum sums
+        # can exceed 1 when multiple views overlap — squash via tanh-
+        # like mapping so "covered" pixels are marked as present.
+        weight_arr = 1.0 - np.exp(-weight_arr * 3.0)
 
     if _diag_on:
         # 6-colour palette (same hue order as reports/). Index 255 = no-data.

@@ -94,11 +94,12 @@ VIEW_SPECS = [
                   'extended toward camera, other arm extended away from '
                   'camera, T-pose, strict 90 degree side view',
         0.22, 1.15, True),
-    (180, 0,      'back view from behind, back of head, ponytail or hair '
-                  'visible from the back, no face, no facial features, '
-                  'shoulders and back visible, T-pose arms horizontal, '
-                  'turned 180 degrees away from camera',
-        0.28, 1.15, True),
+    (180, 0,      'back view from behind, back of head, long loose hair '
+                  'visible from the back, same hair color and length as '
+                  'reference, same dress and outfit as reference, no face, '
+                  'no facial features, shoulders and back visible, T-pose '
+                  'arms horizontal, turned 180 degrees away from camera',
+        0.70, 1.25, True),
     (270, 0,      'left side profile silhouette, only left half of body '
                   'visible, nose pointing left, one ear visible, T-pose, '
                   'strict 90 degree side view from the left',
