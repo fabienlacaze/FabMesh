@@ -23,7 +23,7 @@ from PIL import Image
 
 
 def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
-                  ip_scale=0.75, steps=30, seed=424242, name_suffix=''):
+                  ip_scale=0.55, steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
           f'n={num_images} ip_scale={ip_scale}', flush=True)
