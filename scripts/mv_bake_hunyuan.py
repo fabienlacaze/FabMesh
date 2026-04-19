@@ -78,7 +78,7 @@ def step_triposg_mesh(image_path, out_glb, target_faces=50000):
     log(f'STEP 1 done in {time.time()-t0:.1f}s')
 
 
-def step_mvadapter_views(mesh_path, image_path, out_dir, num_views=4,
+def step_mvadapter_views(mesh_path, image_path, out_dir, num_views=6,
                          num_steps=20, guidance=3.0):
     """Generate coherent views via mvadapter_runner.py (our wrapper
     that adds CPU offload + custom num_views on top of MVAdapter ig2mv_sdxl)."""

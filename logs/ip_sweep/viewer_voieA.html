@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Voie A — cos^4 + UV inpaint (Hunyuan-inspired)</title>
+<style>
+  html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
+            font-family:system-ui;height:100%}
+  h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
+     border-bottom:1px solid #333}
+  .row{display:flex;height:calc(100vh - 36px)}
+  .col{flex:1;border-right:1px solid #333;position:relative}
+  .col-title{position:absolute;top:6px;left:8px;right:8px;z-index:5;
+             background:rgba(0,0,0,0.78);padding:4px 8px;border-radius:3px;
+             font-size:11px;color:#eee;line-height:1.4}
+  .col-title b{color:#87d9ff}
+  .col-title .new{color:#4cd964}
+  model-viewer{width:100%;height:100%;background:#1b1b1b}
+  img.ref{width:100%;height:100%;object-fit:contain;background:#1b1b1b}
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>fille_afghanne — Voie B (SF3D + MVAdapter 6v + cos^4 + Telea) vs baselines</h1>
+<div class="row">
+  <div class="col">
+    <div class="col-title">FRONT photo (input)</div>
+    <img class="ref" src="_mirror_front.png">
+  </div>
+  <div class="col">
+    <div class="col-title"><b>SF3D natif</b> (baseline 1)</div>
+    <model-viewer src="_afghan_sf3d.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="col">
+    <div class="col-title"><b>TripoSG v1</b> (baseline 2, leopard)</div>
+    <model-viewer src="_afghan_triposg.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title"><span class="new"><b>Voie B</b> — SF3D + MVAdapter 6 vues @ 512 + cos^4 + Telea<br>
+    sharp=47%, 165s total</span></div>
+    <model-viewer src="_afghan_mvbake_sf3d.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+</div>
+<h1>MVAdapter 6 views — front/right/back/left/top/bottom</h1>
+<div class="row" style="height:300px">
+  <div class="col"><img class="ref" src="_mvbake_views/view_0.png"><div class="col-title">v0 front</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_1.png"><div class="col-title">v1 right</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_2.png"><div class="col-title">v2 back</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_3.png"><div class="col-title">v3 left</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_4.png"><div class="col-title">v4 top</div></div>
+  <div class="col"><img class="ref" src="_mvbake_views/view_5.png"><div class="col-title">v5 bottom</div></div>
+</div>
+</body>
+</html>

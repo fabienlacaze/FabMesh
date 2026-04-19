@@ -115,7 +115,7 @@ def fabmesh_schema(num_views):
 
 
 def run(mesh_path, image_path, out_dir, num_views=4, num_steps=20,
-        guidance=3.0, seed=42, height=768, width=768,
+        guidance=3.0, seed=42, height=512, width=512,
         base_model='stabilityai/stable-diffusion-xl-base-1.0',
         vae_model='madebyollin/sdxl-vae-fp16-fix',
         adapter_path='huanngzh/mv-adapter'):
@@ -141,13 +141,26 @@ def run(mesh_path, image_path, out_dir, num_views=4, num_steps=20,
     pipe.to(device=device, dtype=dtype)
     pipe.cond_encoder.to(device=device, dtype=dtype)
     pipe.enable_vae_slicing()
-    # CPU offload: frees ~8-10GB when diffusing — crucial on 16GB cards
-    # that also host the conditioning render + DINOv2.
-    try:
-        pipe.enable_model_cpu_offload()
-        log('CPU offload enabled')
-    except Exception as e:
-        log(f'CPU offload unavailable ({e}), running all-on-GPU')
+    # Offload strategy (set via FABMESH_MVA_OFFLOAD env):
+    #   "none"        -> all on GPU (fastest; needs ~12-14GB VRAM @ 512)
+    #   "model"       -> enable_model_cpu_offload (compat with custom hooks)
+    #   "sequential"  -> enable_sequential_cpu_offload (BREAKS ref_hidden_states
+    #                    dict propagation in MVAdapter)
+    _offload = os.environ.get('FABMESH_MVA_OFFLOAD', 'none').lower()
+    if _offload == 'sequential':
+        try:
+            pipe.enable_sequential_cpu_offload()
+            log('sequential CPU offload enabled')
+        except Exception as e:
+            log(f'sequential offload unavailable ({e})')
+    elif _offload == 'model':
+        try:
+            pipe.enable_model_cpu_offload()
+            log('model CPU offload enabled')
+        except Exception as e:
+            log(f'model offload unavailable ({e}), all-on-GPU')
+    else:
+        log('offload=none (all-on-GPU — ~12-14GB @ 512)')
 
     # Cameras + mesh render
     elev, azim_mva, _ = camera_schema(num_views)
