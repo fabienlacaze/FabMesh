@@ -5377,7 +5377,9 @@ async function _atLoadMesh(meshPath) {
     // Read file via fs (Electron file:// works via fetch in renderer with full path)
     const url = 'file:///' + meshPath.replace(/\\/g, '/');
     const cacheBuster = '?t=' + Date.now();
+    console.log('[align-tex] loading mesh from', url + cacheBuster);
     loader.load(url + cacheBuster, (gltf) => {
+      console.log('[align-tex] mesh loaded', gltf);
       const obj = gltf.scene || gltf.scenes[0];
       // Center + frame mesh
       const box = new THREE.Box3().setFromObject(obj);
@@ -5399,11 +5401,20 @@ async function _atLoadMesh(meshPath) {
       if (status) status.style.display = 'none';
       // Re-create / refresh overlay photo plane on top
       _atUpdateOverlay();
-    }, undefined, (err) => {
-      if (status) status.textContent = 'Load error: ' + (err?.message || err);
+    }, (p) => { console.log('[align-tex] progress', p); },
+       (err) => {
+      console.error('[align-tex] load error', err);
+      if (status) {
+        status.textContent = 'Load error: ' + (err?.message || err);
+        status.style.display = 'block';
+      }
     });
   } catch (e) {
-    if (status) status.textContent = 'Loader error: ' + (e?.message || e);
+    console.error('[align-tex] loader error', e);
+    if (status) {
+      status.textContent = 'Loader error: ' + (e?.message || e);
+      status.style.display = 'block';
+    }
   }
 }
 
