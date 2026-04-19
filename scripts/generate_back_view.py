@@ -18,8 +18,8 @@ import torch
 from PIL import Image
 
 
-def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.25,
-                  steps=30, seed=424242):
+def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.35,
+                  steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
           f'n={num_images} ip_scale={ip_scale}', flush=True)
@@ -54,22 +54,17 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
     # Use the user prompt hint if provided, else generic. The "back view"
     # phrasing is critical to avoid Identity drift via IPAdapter (which
     # would otherwise replicate the front pose).
-    # Strong "back view" emphasis — repeat the directional phrase so SDXL
-    # gives it priority over IPAdapter's identity bias toward the front pose.
-    if prompt_hint:
-        prompt = (
-            f'BACK VIEW from behind, rear view of {prompt_hint}, '
-            f'back of head visible, hair from behind, shoulders from behind, '
-            f'subject turned 180 degrees away from camera, full body centered, '
-            f'plain grey background, studio lighting, sharp focus, 8k'
-        )
-    else:
-        prompt = (
-            'BACK VIEW from behind, rear view, back of head visible, hair '
-            'from behind, shoulders from behind, subject turned 180 degrees '
-            'away from camera, full body centered, plain grey background, '
-            'studio lighting, sharp focus, 8k, masterpiece'
-        )
+    # Same exact identity (same person, same outfit) but VIEWED FROM BEHIND.
+    # IPAdapter at scale 0.35 keeps clothing/colours; prompt forces 180° rotation.
+    base = prompt_hint if prompt_hint else 'character'
+    prompt = (
+        f'EXACT same {base} as reference image, IDENTICAL outfit and clothing '
+        f'colors, BUT viewed strictly FROM BEHIND, back view, rear view, '
+        f'subject turned 180 degrees so the camera sees only the BACK OF HEAD, '
+        f'BACK OF NECK, BACK OF SHOULDERS, BACK OF JACKET, BACK OF PANTS, '
+        f'no face visible at all, hair from behind, full body T-pose, '
+        f'plain grey background, studio lighting, sharp focus, 8k'
+    )
     # Aggressively reject any front-facing output (IPAdapter tends to clone
     # the front pose; we explicitly forbid it).
     neg = (
@@ -91,7 +86,8 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
             generator=gen,
             width=1024, height=1024,
         ).images[0]
-        out_path = os.path.join(out_dir, f'back_{i}.png')
+        suffix = f'_{name_suffix}' if name_suffix else ''
+        out_path = os.path.join(out_dir, f'back{suffix}_{i}.png')
         img.save(out_path)
         out_paths.append(out_path)
         print(f'[back-view] saved {out_path}', flush=True)
@@ -109,7 +105,8 @@ if __name__ == '__main__':
     out = sys.argv[2]
     hint = sys.argv[3] if len(sys.argv) > 3 else ''
     n = int(sys.argv[4]) if len(sys.argv) > 4 else 1
-    paths = generate_back(front, out, hint, n)
+    name_suffix = sys.argv[5] if len(sys.argv) > 5 else ''
+    paths = generate_back(front, out, hint, n, name_suffix=name_suffix)
     # Print marker for main.js to parse
     for p in paths:
         print(f'BACK_VIEW_PATH: {p}', flush=True)

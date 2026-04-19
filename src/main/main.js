@@ -3843,10 +3843,18 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   if (!frontImage || !fs.existsSync(frontImage)) {
     return { success: false, error: `front image not found: ${frontImage}` };
   }
-  const outDir = path.dirname(frontImage);
+  // Save back photos in a subdir so the project image scan doesn't pick
+  // them up as new versions. The back is data attached to the front, not
+  // a sibling version.
+  const outDir = path.join(path.dirname(frontImage), '_backphotos');
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  // Per-front-image suffix so different fronts don't overwrite each other
+  const frontStem = path.basename(frontImage, path.extname(frontImage));
   const script = path.join(__dirname, '..', '..', 'scripts',
                             'generate_back_view.py');
-  const args = [script, frontImage, outDir, promptHint || '', String(numImages || 1)];
+  // Pass the front stem as a 5th arg so the python script names files
+  // back_<stem>_0.png (avoids collision when multiple fronts in same project).
+  const args = [script, frontImage, outDir, promptHint || '', String(numImages || 1), frontStem];
   return new Promise((resolve) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
     execFile('python', args, {
