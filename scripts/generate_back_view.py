@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 
 
-def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.30,
+def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.80,
                   steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
@@ -51,41 +51,38 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
 
     ref_img = Image.open(front_image).convert('RGB')
 
-    # Use the user prompt hint if provided, else generic. The "back view"
-    # phrasing is critical to avoid Identity drift via IPAdapter (which
-    # would otherwise replicate the front pose).
-    # Same exact identity (same person, same outfit) but VIEWED FROM BEHIND.
-    # IPAdapter at scale 0.35 keeps clothing/colours; prompt forces 180° rotation.
-    # Strong directional prompt; IP scale lowered drastically (0.15) so
-    # IPAdapter only contributes identity/colors, not pose.
-    base = prompt_hint if prompt_hint else 'character'
+    # EXACT recipe from _scale_sweep.py that produced child_ip45_back.png
+    # (the validated reference dataset). Subject context goes BEFORE the
+    # directional phrase so SDXL parses the structure correctly.
+    base = prompt_hint if prompt_hint else 'a person in T-pose'
     prompt = (
-        f'rear view photograph of a person from behind, back of {base}, '
-        f'we see only the back of the head, hair from behind, no face, '
-        f'shoulders and back visible, T-pose with arms extended sideways, '
-        f'full body shot, plain grey background, studio lighting, '
-        f'photorealistic, sharp focus, 8k, masterpiece'
+        f'{base}, back view, from behind, back of head visible, '
+        f'turned away from camera, full body centered, plain grey '
+        f'background, studio lighting, sharp focus, ultra detailed, '
+        f'8k, masterpiece'
     )
-    # Aggressively reject any front-facing output (IPAdapter tends to clone
-    # the front pose; we explicitly forbid it).
+    # Plain neg, NO 'front view' / 'face' bans (those over-constrain
+    # SDXL and force it to invent a NEW different person to avoid
+    # the forbidden tokens — exactly the bug the user reported).
     neg = (
-        'front view, facing camera, eyes visible, face visible, mouth visible, '
-        'nose visible, side view, profile view, three-quarter view, '
         'blurry, deformed, extra limbs, bad anatomy, different person, '
-        'different clothes, watermark, text, duplicate, multiple people'
+        'different clothes, watermark, text, duplicate, multiple people, '
+        'cropped, low quality'
     )
 
     out_paths = []
     for i in range(num_images):
-        gen = torch.Generator('cuda').manual_seed(seed + i)
+        # _scale_sweep used a CONSTANT seed across views — keeps the same
+        # subject identity. Only vary across multiple back candidates.
+        gen = torch.Generator('cuda').manual_seed(seed if num_images == 1 else seed + i)
         img = pipe(
             prompt=prompt,
             negative_prompt=neg,
             ip_adapter_image=ref_img,
             num_inference_steps=steps,
-            guidance_scale=6.0,
+            guidance_scale=7.0,
             generator=gen,
-            width=1024, height=1024,
+            height=1024, width=1024,
         ).images[0]
         suffix = f'_{name_suffix}' if name_suffix else ''
         out_path = os.path.join(out_dir, f'back{suffix}_{i}.png')
