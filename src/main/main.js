@@ -3381,9 +3381,14 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide }) => {
   let imagePath = _imagePath;
   let engine = _engine;
+  // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
+  // child_ip45_2view-style pipeline (front+back projected via texture_project,
+  // with FRAME_FIX, AUTOFIT, weld_uv) instead of single-view SF3D + Z123.
+  const useTwoView = engine === 'sf3d' && imagePathBack
+                     && fs.existsSync(imagePathBack);
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
@@ -3463,6 +3468,34 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
     const _ramLimitMB2 = process.env.FABMESH_RAM_LIMIT_MB || '';
     const _gpuLimit2   = process.env.FABMESH_GPU_LIMIT   || '';
     const _tempLimit2  = process.env.FABMESH_TEMP_LIMIT  || '';
+    // 2-view mode: pre-build mv/ dir alongside the mesh with view_0=front,
+    // view_1=back, then pass FABMESH_MV_REUSE + the child-style env vars.
+    let mv2Dir = null;
+    if (useTwoView) {
+      try {
+        const meshDir = path.dirname(meshPath);
+        const meshBase = path.basename(meshPath, '.glb');
+        mv2Dir = path.join(meshDir, `${meshBase}_mv2`);
+        fs.mkdirSync(mv2Dir, { recursive: true });
+        // Copy front + back as view_0 / view_1 (texture_project iterates by
+        // file index, so view_1 must literally be the back photo).
+        fs.copyFileSync(imagePath, path.join(mv2Dir, 'view_0.png'));
+        fs.copyFileSync(imagePathBack, path.join(mv2Dir, 'view_1.png'));
+        const viewsJson = {
+          engine: 'fabmesh_2view',
+          views: [
+            { azim: 0, elev: 0, label: 'front' },
+            { azim: 180, elev: 0, label: 'back' },
+          ],
+        };
+        fs.writeFileSync(path.join(mv2Dir, 'views.json'),
+                         JSON.stringify(viewsJson, null, 2));
+        log.info('main', `2-view mode: built mv dir at ${mv2Dir}`);
+      } catch (mvErr) {
+        log.error('main', `2-view mv build failed: ${mvErr.message}`);
+        mv2Dir = null;
+      }
+    }
     const env = {
       ...process.env,
       // Unbuffered stdout so LOCAL_TRIPOSR_PROGRESS markers arrive in
@@ -3473,7 +3506,21 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, outputName,
       ..._ramLimitMB2 ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB2 } : {},
       ..._gpuLimit2   ? { FABMESH_GPU_LIMIT:   _gpuLimit2   } : {},
       ..._tempLimit2  ? { FABMESH_TEMP_LIMIT:  _tempLimit2  } : {},
+      // 2-view config (a-utiliser-v3 baseline) when back photo provided
+      ...(mv2Dir ? {
+        FABMESH_MV_REUSE: mv2Dir,
+        FABMESH_PROJECT_MODE: 'atlas',
+        FABMESH_SF3D_NORMALIZE_ORIENT: '0',
+        FABMESH_TEXPROJ_FRAME_FIX: '1',
+        FABMESH_TEXPROJ_SKIP_BACK_VFLIP: '1',
+        FABMESH_TEXPROJ_VIS_THRESH: '0.5',
+        FABMESH_AUTOFIT: '1',
+        FABMESH_AUTOFIT_RATIO: '1.20',
+      } : {}),
     };
+    if (mv2Dir) {
+      log.info('main', '2-view env applied: AUTOFIT + FRAME_FIX + multi-view (front+back)');
+    }
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
     const result = await new Promise((resolve, reject) => {
       let stdoutBuf = '';
