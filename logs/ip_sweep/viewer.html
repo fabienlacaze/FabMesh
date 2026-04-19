@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>IP-scale sweep — back view comparison</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
+               font-family:system-ui, sans-serif; height:100%; overflow:hidden; }
+  h1 { padding:8px 16px; margin:0; font-size:13px; background:#000;
+       border-bottom:1px solid #333; }
+  .layout { display:flex; height:calc(100vh - 34px); }
+  /* Both ref and scroll cards use the SAME card width so images render
+     identical sizes for direct visual comparison. */
+  :root { --card-w: 180px; }
+  .ref-col { width:var(--card-w); flex-shrink:0;
+             background:#1a1a1a; border-right:2px solid #555;
+             padding:8px; box-sizing:border-box;
+             display:flex; flex-direction:column; }
+  .ref-col h2 { font-size:12px; margin:0 0 6px; color:#f0c056; }
+  .ref-col img { width:calc(var(--card-w) - 16px);
+                 height:calc(var(--card-w) - 16px); object-fit:contain;
+                 border:1px solid #444; border-radius:4px; background:#222; }
+  .ref-col .note { font-size:10px; color:#aaa; margin-top:6px; line-height:1.3; }
+  .scroll-col { flex:1; overflow-x:auto; overflow-y:hidden;
+                background:#000; white-space:nowrap; }
+  .card { display:inline-block; width:var(--card-w); padding:8px;
+          box-sizing:border-box; vertical-align:top; border-right:1px solid #222; }
+  .card h3 { margin:0 0 4px; font-size:11px; color:#87d9ff; text-align:center; }
+  .card img { width:calc(var(--card-w) - 16px);
+              height:calc(var(--card-w) - 16px); object-fit:contain;
+              border:1px solid #333; border-radius:4px; display:block; background:#222; }
+</style>
+</head>
+<body>
+<h1>ip_scale sweep — back view (same seed, same prompt, IP schedule enabled)</h1>
+<div class="layout">
+  <div class="ref-col">
+    <h2>FRONT reference (input)</h2>
+    <img src="_front_ref.png" />
+    <div class="note">
+      Scroll the right panel to compare all 9 ip_scale values (0.45 to 0.85).<br>
+      Schedule: steps 0-33% ip=0, steps 33-66% ramp, steps 66-end full.
+    </div>
+  </div>
+  <div class="scroll-col">
+    <div class="card"><h3>SCHED 0.45</h3><img src="back_ip45.png" /></div>
+    <div class="card"><h3>SCHED 0.50</h3><img src="back_ip50.png" /></div>
+    <div class="card"><h3>SCHED 0.55</h3><img src="back_ip55.png" /></div>
+    <div class="card"><h3>SCHED 0.60</h3><img src="back_ip60.png" /></div>
+    <div class="card"><h3>SCHED 0.65</h3><img src="back_ip65.png" /></div>
+    <div class="card"><h3>SCHED 0.70</h3><img src="back_ip70.png" /></div>
+    <div class="card"><h3>SCHED 0.75</h3><img src="back_ip75.png" /></div>
+    <div class="card"><h3>SCHED 0.80</h3><img src="back_ip80.png" /></div>
+    <div class="card"><h3>SCHED 0.85</h3><img src="back_ip85.png" /></div>
+    <div class="card" style="border-left:3px solid #f0c056"><h3>PURE 0.45</h3><img src="pure_back_ip45.png" /></div>
+    <div class="card"><h3>PURE 0.50</h3><img src="pure_back_ip50.png" /></div>
+    <div class="card"><h3>PURE 0.55</h3><img src="pure_back_ip55.png" /></div>
+    <div class="card"><h3>PURE 0.60</h3><img src="pure_back_ip60.png" /></div>
+    <div class="card"><h3>PURE 0.65</h3><img src="pure_back_ip65.png" /></div>
+    <div class="card"><h3>PURE 0.70</h3><img src="pure_back_ip70.png" /></div>
+    <div class="card"><h3>PURE 0.75</h3><img src="pure_back_ip75.png" /></div>
+    <div class="card"><h3>PURE 0.80</h3><img src="pure_back_ip80.png" /></div>
+    <div class="card"><h3>PURE 0.85</h3><img src="pure_back_ip85.png" /></div>
+  </div>
+</div>
+</body>
+</html>
