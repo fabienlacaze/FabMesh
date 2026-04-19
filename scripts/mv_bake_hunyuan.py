@@ -194,6 +194,86 @@ def step_fabmesh_6views(mesh_path, image_path, out_dir,
     log(f'STEP 2 done in {time.time()-t0:.1f}s ({mode})')
 
 
+def step_back_view(image_path, out_dir):
+    """Generate the back view via FabMesh's generate_back_view.py
+    (RealVis XL + IPAdapter Plus + ControlNet OpenPose T-pose back).
+    Returns the path to back.png."""
+    image_path = os.path.abspath(image_path)
+    out_dir = os.path.abspath(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    log(f'STEP back: generate_back_view -> {out_dir}')
+    t0 = time.time()
+    bv = os.path.join(SCRIPTS, 'generate_back_view.py')
+    cmd = [sys.executable, bv, image_path, out_dir, '', '1']
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    rc, _, err = _run_streamed(cmd, prefix='back', timeout=600, env=env)
+    if rc != 0:
+        log(f'generate_back_view failed (rc={rc}): {err[-500:]}')
+        sys.exit(2)
+    # Find the back image (back_*.png)
+    candidates = sorted(
+        f for f in os.listdir(out_dir)
+        if f.startswith('back') and f.endswith('.png'))
+    if not candidates:
+        log(f'no back.png found in {out_dir}')
+        sys.exit(2)
+    back_path = os.path.join(out_dir, candidates[-1])
+    log(f'STEP back done in {time.time()-t0:.1f}s -> {back_path}')
+    return back_path
+
+
+def step_sf3d_2view_augment(image_path, back_image, out_glb, tex_res=1024):
+    """Reproduce FabMesh's 2-view AUGMENT pipeline: SF3D bare mesh +
+    front bake + back additive blend (texture_augment). Same as the
+    UI's image-to-3d handler when useTwoView=true.
+
+    Outputs the same file structure: out_glb + out_glb_mv2/ alongside.
+    """
+    image_path = os.path.abspath(image_path)
+    back_image = os.path.abspath(back_image)
+    out_glb = os.path.abspath(out_glb)
+    out_dir = os.path.dirname(out_glb)
+    out_base = os.path.splitext(os.path.basename(out_glb))[0]
+    mv2_dir = os.path.join(out_dir, f'{out_base}_mv2')
+    os.makedirs(mv2_dir, exist_ok=True)
+
+    # Pre-build mv/ dir like main.js does (view_0=front, view_1=back)
+    import shutil
+    shutil.copy(image_path, os.path.join(mv2_dir, 'view_0.png'))
+    shutil.copy(back_image, os.path.join(mv2_dir, 'view_1.png'))
+    with open(os.path.join(mv2_dir, 'views.json'), 'w') as f:
+        json.dump({
+            'engine': 'fabmesh_2view',
+            'views': [
+                {'azim': 0, 'elev': 0, 'label': 'front'},
+                {'azim': 180, 'elev': 0, 'label': 'back'},
+            ],
+        }, f, indent=2)
+
+    log(f'STEP SF3D 2-view AUGMENT -> {out_glb}')
+    t0 = time.time()
+    bridge = os.path.join(SCRIPTS, 'local_sf3d_bridge.py')
+    cmd = [sys.executable, bridge, image_path, out_glb,
+           str(tex_res), '-1', 'none', '0']
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONUNBUFFERED'] = '1'
+    # 2-view AUGMENT envvars (mirror of main.js:3514-3522)
+    env['FABMESH_MV_REUSE'] = mv2_dir
+    env['FABMESH_PROJECT_MODE'] = 'augment'
+    env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
+    env['FABMESH_TEXPROJ_FRAME_FIX'] = '1'
+    env['FABMESH_TEXPROJ_SKIP_BACK_VFLIP'] = '1'
+    env['FABMESH_AUTOFIT'] = '1'
+    env['FABMESH_AUTOFIT_RATIO'] = '1.20'
+    rc, _, err = _run_streamed(cmd, prefix='sf3d2v', timeout=900, env=env)
+    if rc != 0:
+        log(f'SF3D 2-view failed (rc={rc}): {err[-500:]}')
+        sys.exit(2)
+    log(f'STEP SF3D 2-view done in {time.time()-t0:.1f}s')
+
+
 def step_sheet_6views(mesh_path, image_path, out_dir,
                       num_steps=30, seed=42):
     """Voie E: single-call multi-view sheet (RealVis + CN OpenPose +
@@ -217,7 +297,7 @@ def step_sheet_6views(mesh_path, image_path, out_dir,
 
 
 def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
-              bake_exp=4.0):
+              bake_exp=4.0, base_atlas=False):
     log(f'STEP 3: texture_project with 6-view + cos^{bake_exp} + Telea inpaint')
     t0 = time.time()
     env = os.environ.copy()
@@ -228,6 +308,10 @@ def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
     # MVAdapter's view_0 IS the front — don't also inject the HD source
     # photo (creates double-face bleed since they have different cameras).
     env['FABMESH_TEXPROJ_NO_FRONT'] = '1'
+    if base_atlas:
+        # Voie F: keep the SF3D AUGMENT atlas as floor, overlay only.
+        env['FABMESH_TEXPROJ_BASE_ATLAS'] = '1'
+        log('STEP 3 base_atlas=ON (SF3D AUGMENT atlas as floor)')
     rc, _, err = _run_streamed(
         [sys.executable, os.path.join(SCRIPTS, 'texture_project.py'),
          mesh_path, front_image, out_glb, str(tex_res),
@@ -253,14 +337,17 @@ def main():
     parser.add_argument('target_faces', nargs='?', type=int, default=50000,
                         help='TripoSG face count (default: 50000)')
     parser.add_argument('--engine',
-                        choices=['mvadapter', 'fabmesh', 'hybrid', 'sheet'],
+                        choices=['mvadapter', 'fabmesh', 'hybrid', 'sheet',
+                                 'voiefab'],
                         default='mvadapter',
                         help='View generator: mvadapter=voie B, '
                              'fabmesh=voie C pure (lateral views unreliable), '
                              'hybrid=MVAdapter for 6 views then voie C '
                              'overwrites front+back with HD 1024², '
-                             'sheet=voie E single-pass 6-panel sheet '
-                             '1536x1024 (cohérence couleur native)')
+                             'sheet=voie E single-pass 6-panel sheet, '
+                             'voiefab=voie F: SF3D 2-view AUGMENT '
+                             '(commercial-safe, no nvdiffrast) + voie C '
+                             'HD overlay on front/back')
     parser.add_argument('--reuse-front', default=None,
                         help='(voie C) reuse an existing front image '
                              'instead of regenerating view_0')
@@ -322,9 +409,30 @@ def main():
     elif engine == 'sheet':
         # Voie E: single-pass 6-panel sheet (no MVAdapter, no nvdiffrast).
         step_sheet_6views(bare_mesh, front, mv_dir)
+    elif engine == 'voiefab':
+        # Voie F: 100% commercial-safe pipeline.
+        # 1. Generate back via FabMesh (RealVis+IPA+CN)
+        # 2. SF3D 2-view AUGMENT bake (front+back natively in atlas)
+        # 3. voie C HD front+back overlay on top of SF3D atlas
+        # No MVAdapter, no nvdiffrast.
+        bp_dir = os.path.join(out_dir, '_voief_back')
+        back_path = step_back_view(front, bp_dir)
+        # SF3D 2-view AUGMENT writes the textured GLB to bare_mesh.
+        # We reuse this as our base (atlas is already baked with
+        # front+back additive blend). out_glb will REPLACE bare_mesh
+        # at the end via texture_project.
+        step_sf3d_2view_augment(front, back_path, bare_mesh)
+        # Now generate voie C HD front+back into mv_dir for overlay.
+        # only_front_back=True to skip lateral generation; --reuse-front
+        # to reuse the existing T-pose front photo.
+        step_fabmesh_6views(bare_mesh, front, mv_dir,
+                            reuse_front=front,
+                            reuse_back=back_path,
+                            only_front_back=True)
     else:
         log(f'unknown engine: {engine}'); sys.exit(1)
-    step_bake(bare_mesh, front, out_glb, mv_dir, bake_exp=bake_exp)
+    step_bake(bare_mesh, front, out_glb, mv_dir, bake_exp=bake_exp,
+              base_atlas=(engine == 'voiefab'))
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')
 
 

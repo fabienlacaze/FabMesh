@@ -616,6 +616,25 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
     weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)
 
+    # Voie F (SF3D 2-view AUGMENT base): if FABMESH_TEXPROJ_BASE_ATLAS=1
+    # the input mesh's existing baseColorTexture is loaded as the floor
+    # of the atlas. Subsequent view projections (esp. in 'stack' mode)
+    # only overwrite where they explicitly see the surface — the rest
+    # keeps the SF3D AUGMENT bake (with back additive blend etc.) intact.
+    if os.environ.get('FABMESH_TEXPROJ_BASE_ATLAS') == '1':
+        try:
+            base_tex_pil = sf3d_tex.convert('RGB').resize(
+                (tex_res, tex_res), Image.LANCZOS)
+            base_arr = np.asarray(base_tex_pil, dtype=np.float64)
+            proj_arr = base_arr.copy()
+            # Mark every pixel as "covered" with low weight so the
+            # downstream sharp_mask / push-pull treats them as present
+            # but lets new projections beat them.
+            weight_arr[...] = 0.05
+            log('FABMESH_TEXPROJ_BASE_ATLAS=1: SF3D atlas loaded as floor')
+        except Exception as _ba_e:
+            log(f'BASE_ATLAS load failed ({_ba_e}), starting from zero')
+
     # Precompute per-vertex projected image coords (normalized 0..1)
     # We need to pick ONE source view per vertex — pick the one with highest visibility
     # Simpler: use the accumulated color we already computed (from all views)
