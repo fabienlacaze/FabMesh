@@ -1224,6 +1224,65 @@ function showStep2SourceImage(imgPath) {
   setViewerFilename('ws-3d-source-filename', imgPath);
 }
 
+// ============================================================
+// 2-VIEW: optional back-photo selector under the front photo.
+// Sets state.currentProject.backImagePath which is then sent to
+// the image-to-3d IPC as imagePathBack.
+// ============================================================
+function showStep2BackImage(imgPath) {
+  const target = document.getElementById('ws-3d-source-back-preview');
+  const clearBtn = document.getElementById('ws-3d-source-back-clear');
+  if (!target) return;
+  if (imgPath) {
+    target.innerHTML = `<img src="file:///${imgPath.replace(/\\/g, '/')}">`;
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+  } else {
+    target.innerHTML = '<div class="preview-placeholder">+ Add back photo</div>';
+    if (clearBtn) clearBtn.style.display = 'none';
+  }
+  setViewerFilename('ws-3d-source-back-filename', imgPath);
+}
+document.getElementById('ws-3d-source-back-preview')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p) { showToast('Open a project first', 'error'); return; }
+  // Use Electron native file picker via meshyAPI if exposed, else simple input
+  try {
+    const res = await API.importMesh
+      ? await window.meshyAPI.importMesh()  // reuse import dialog if present
+      : null;
+    // Fallback: hidden input
+    if (!res || !res.path) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/webp';
+      input.onchange = async () => {
+        const f = input.files?.[0];
+        if (!f) return;
+        const arrBuf = await f.arrayBuffer();
+        const saveRes = await window.meshyAPI.saveBuffer({
+          buffer: Array.from(new Uint8Array(arrBuf)),
+          filename: `${p.name}_back_${Date.now()}.png`,
+          subdir: 'images',
+        });
+        if (saveRes?.path) {
+          p.backImagePath = saveRes.path;
+          showStep2BackImage(saveRes.path);
+          showToast('Back photo added', 'success');
+        }
+      };
+      input.click();
+    }
+  } catch (e) {
+    showToast(`Add back photo failed: ${e.message || e}`, 'error');
+  }
+});
+document.getElementById('ws-3d-source-back-clear')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p) return;
+  p.backImagePath = null;
+  showStep2BackImage(null);
+});
+
 // ----- Source mesh preview for the Rig "Create new" stage -----
 let rigSrcRenderer, rigSrcScene, rigSrcCamera, rigSrcControls, rigSrcModel, rigSrcRafId;
 let rigSrcMeshPath = null; // path of the mesh currently loaded in the rig source viewer
@@ -5014,6 +5073,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   if (buildStages) expectedMs *= 2.5;
   const params = {
     imagePath: p.selectedImagePath,
+    imagePathBack: p.backImagePath || null,  // 2-view mode if set
     outputName: p.name,
     engine,
     textureSize: preset.tex,

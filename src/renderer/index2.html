@@ -323,11 +323,17 @@
                   <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
                 </div>
                 <div class="stage-create-source">
-                  <div class="stage-source-label">Source image for 3D</div>
+                  <div class="stage-source-label">Source image for 3D (front)</div>
                   <div id="ws-3d-source-preview" class="stage-source-img">
                     <div class="preview-placeholder">No image selected</div>
                   </div>
                   <div id="ws-3d-source-filename" class="viewer-filename"></div>
+                  <div class="stage-source-label" style="margin-top:10px;">Optional back photo (2-view mode)</div>
+                  <div id="ws-3d-source-back-preview" class="stage-source-img" style="cursor:pointer;" title="Click to add a back photo for true-back texture">
+                    <div class="preview-placeholder">+ Add back photo</div>
+                  </div>
+                  <div id="ws-3d-source-back-filename" class="viewer-filename"></div>
+                  <button id="ws-3d-source-back-clear" class="ghost-btn" style="margin-top:4px; display:none; font-size:11px; padding:2px 8px;">Remove back photo</button>
                 </div>
               </div>
             </details>
