@@ -825,18 +825,25 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                 # (sorted above). Each view overwrites where it sees
                 # the surface (vis > threshold). Alpha blend at the
                 # boundary (vis taper) gives a feathered transition.
-                # Threshold for "this view sees this pixel clearly":
-                # pt_vis > 0.10 (≈ normal angle < 75°). Below that we
-                # don't paint, preserving whatever earlier layers wrote.
-                STACK_VIS_FLOOR = 0.10
+                # vis = cos(normal, view_dir)^bake_exp. With bake_exp=4
+                # default, vis stays ≥ 0.4 only for normals within ~63°
+                # of facing the camera. Below that, the front photo
+                # was bleeding onto the BACK of the head (low cosine
+                # but still > 0 → pixels near head/ear were getting
+                # the front face plastered as a tiny secondary face).
+                # Threshold env-tunable.
+                STACK_VIS_FLOOR = float(
+                    os.environ.get('FABMESH_TEXPROJ_STACK_FLOOR', '0.40'))
+                STACK_VIS_FULL = float(
+                    os.environ.get('FABMESH_TEXPROJ_STACK_FULL', '0.65'))
                 cover = ((pt_vis > STACK_VIS_FLOOR)
                          & mask & in_b & (src_alpha > 0.5))
                 if not cover.any():
                     continue
-                # Feather: alpha ramps from 0 at vis=0.10 to 1 at 0.30.
-                # Produces soft seams without killing the cover strength
-                # at grazing angles.
-                alpha = np.clip((pt_vis - 0.10) / 0.20, 0.0, 1.0)
+                # Feather: alpha ramps from 0 at vis=FLOOR to 1 at FULL.
+                _denom = max(1e-6, STACK_VIS_FULL - STACK_VIS_FLOOR)
+                alpha = np.clip(
+                    (pt_vis - STACK_VIS_FLOOR) / _denom, 0.0, 1.0)
                 alpha = np.where(cover, alpha, 0.0)
                 for c in range(3):
                     proj_arr[ys, xs, c] = (

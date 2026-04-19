@@ -238,7 +238,7 @@
 </div>
 
 <!-- v8: VOIE F front-only (skip back voie C) -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v8 — VOIE F front-only</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
@@ -257,6 +257,31 @@
     <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
     <div class="cell" data-label="atlas final"><img src="_francaise_voiefab_front_tex.png"></div>
     <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_front_proj_debug.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v9: VOIE F front-only + STACK_VIS_FLOOR=0.40 (fix bleed sur dos) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v9 — VOIE F front + FLOOR fix</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">STACK_VIS_FLOOR 0.10→0.40</span>
+    <ul>
+      <li>Même pipeline que v8</li>
+      <li>Mais bake: <b>STACK_VIS_FLOOR=0.40</b> au lieu de 0.10</li>
+      <li>Front HD ne touche que les pixels avec normale &lt; 63° de la caméra</li>
+      <li>Plus de bleed du visage front sur l'arrière du crâne / oreilles</li>
+    </ul>
+    <p><span class="tag ok">fix</span> "visage parasite dans le dos" éliminé</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas v9"><img src="_francaise_voiefab_front_v2_tex.png"></div>
+    <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
