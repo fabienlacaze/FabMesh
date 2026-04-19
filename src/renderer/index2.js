@@ -5297,8 +5297,16 @@ const atState = {
   camera: null,
   controls: null,
   mesh: null,
-  overlay: null,        // semi-transparent photo plane preview
-  overlayDistance: 1,   // mesh half-size (set on mesh load), for plane Z position
+  overlayFront: null,   // front photo plane
+  overlayBack: null,    // back photo plane
+  meshHeight: 1,        // mesh Y-extent (used to size overlay)
+  overlayDistance: 1,   // mesh half-size for plane positioning
+  activeSide: 'front',  // which overlay is currently being adjusted
+  // Per-side transforms (so switching FRONT/BACK restores values)
+  transforms: {
+    front: { tx: 0, ty: 0, tz: 0, sc: 1.0, ry: 0 },
+    back:  { tx: 0, ty: 0, tz: 0, sc: 1.0, ry: 0 },
+  },
 };
 
 async function _atInitViewport() {
@@ -5369,6 +5377,17 @@ async function _atLoadMesh(meshPath) {
     });
     atState.mesh = null;
   }
+  // Dispose previous overlays so reopening the modal starts fresh.
+  for (const k of ['overlayFront', 'overlayBack']) {
+    const ov = atState[k];
+    if (ov) {
+      atState.scene.remove(ov);
+      ov.geometry?.dispose();
+      if (ov.material?.map) ov.material.map.dispose();
+      ov.material?.dispose();
+      atState[k] = null;
+    }
+  }
   const status = document.getElementById('at-preview-status');
   if (status) { status.textContent = 'Loading mesh...'; status.style.display = 'block'; }
   try {
@@ -5388,9 +5407,10 @@ async function _atLoadMesh(meshPath) {
       obj.position.sub(center);
       atState.mesh = obj;
       atState.scene.add(obj);
-      // Compute mesh half-size for overlay plane sizing/positioning
+      // Compute mesh dims for overlay plane sizing/positioning
       const bsize = box.getSize(new THREE.Vector3());
-      atState.overlayDistance = Math.max(bsize.x, bsize.y) * 0.7;
+      atState.meshHeight = bsize.y;
+      atState.overlayDistance = Math.max(bsize.x, bsize.z) * 0.55;
       // Frame camera
       atState.camera.position.set(0, 0, size * 1.2);
       atState.camera.lookAt(0, 0, 0);
@@ -5418,41 +5438,90 @@ async function _atLoadMesh(meshPath) {
   }
 }
 
+function _atMakeOverlayPlane(imgPath, opacity) {
+  const tex = new THREE.TextureLoader().load(
+    'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now()
+  );
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, opacity, depthTest: false,
+    side: THREE.DoubleSide,
+  });
+  const geom = new THREE.PlaneGeometry(1, 1);
+  const plane = new THREE.Mesh(geom, mat);
+  plane.renderOrder = 999;
+  return plane;
+}
+
 function _atUpdateOverlay() {
   if (!atState.scene) return;
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) return;
-  // Lazy create overlay plane (textured with source image)
-  if (!atState.overlay) {
-    const tex = new THREE.TextureLoader().load(
-      'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now()
-    );
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex, transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide,
-    });
-    const geom = new THREE.PlaneGeometry(1, 1);
-    atState.overlay = new THREE.Mesh(geom, mat);
-    atState.overlay.renderOrder = 999;  // draw on top
-    atState.scene.add(atState.overlay);
+  // Front overlay: the project's selected image
+  if (!atState.overlayFront) {
+    atState.overlayFront = _atMakeOverlayPlane(p.selectedImagePath, 0.55);
+    atState.scene.add(atState.overlayFront);
   }
+  // Back overlay: the 2-view-generated back photo, if present
+  const backPath = p._backPhotos?.[p.selectedImagePath] || p.backImagePath;
+  if (backPath && !atState.overlayBack) {
+    atState.overlayBack = _atMakeOverlayPlane(backPath, 0.55);
+    atState.scene.add(atState.overlayBack);
+  }
+  _atApplyOverlayTransforms();
 }
 
-// Live overlay update: place/rotate the photo plane in front of the mesh
-// so the user sees where photons would project. Mesh stays fixed.
+// Apply stored per-side transforms to both overlays. Plane size is based
+// on the mesh HEIGHT (Y extent) times scale slider, so the photo covers
+// the mesh body at scale=1.
+function _atApplyOverlayTransforms() {
+  const baseSize = atState.meshHeight || 1;
+  const d = atState.overlayDistance || 0.5;
+  const apply = (plane, tf, z_sign) => {
+    if (!plane) return;
+    plane.scale.set(baseSize * tf.sc, baseSize * tf.sc, 1);
+    plane.position.set(tf.tx, tf.ty, z_sign * (d + tf.tz));
+    // Back plane is rotated 180° around Y so its texture faces the
+    // -Z side of the mesh (back of the character).
+    plane.rotation.set(0, (z_sign < 0 ? Math.PI : 0) + tf.ry, 0);
+  };
+  apply(atState.overlayFront, atState.transforms.front, +1);
+  apply(atState.overlayBack,  atState.transforms.back,  -1);
+}
+
+// Slider input -> update active side transform + re-apply
 function _atUpdateOverlayTransform() {
-  if (!atState.overlay) return;
-  const tx = parseFloat(document.getElementById('at-tx')?.value) || 0;
-  const ty = parseFloat(document.getElementById('at-ty')?.value) || 0;
-  const tz = parseFloat(document.getElementById('at-tz')?.value) || 0;
-  const sc = parseFloat(document.getElementById('at-scale')?.value) || 1;
-  const ry = (parseFloat(document.getElementById('at-roty')?.value) || 0)
-             * Math.PI / 180;
-  // Plane size = mesh half-extent x scale (so scale=1 covers mesh roughly)
-  const baseSize = atState.overlayDistance * 2;
-  atState.overlay.scale.set(baseSize * sc, baseSize * sc, 1);
-  atState.overlay.position.set(tx, ty, atState.overlayDistance + tz);
-  atState.overlay.rotation.set(0, ry, 0);
+  const side = atState.activeSide;
+  const tf = atState.transforms[side];
+  tf.tx = parseFloat(document.getElementById('at-tx')?.value) || 0;
+  tf.ty = parseFloat(document.getElementById('at-ty')?.value) || 0;
+  tf.tz = parseFloat(document.getElementById('at-tz')?.value) || 0;
+  tf.sc = parseFloat(document.getElementById('at-scale')?.value) || 1;
+  tf.ry = (parseFloat(document.getElementById('at-roty')?.value) || 0)
+          * Math.PI / 180;
+  _atApplyOverlayTransforms();
+}
+
+// Switch which side the sliders control. Loads the stored values for
+// that side back into the slider UI.
+function _atSetActiveSide(side) {
+  if (side !== 'front' && side !== 'back') return;
+  atState.activeSide = side;
+  const tf = atState.transforms[side];
+  document.getElementById('at-tx').value = tf.tx;
+  document.getElementById('at-ty').value = tf.ty;
+  document.getElementById('at-tz').value = tf.tz;
+  document.getElementById('at-scale').value = tf.sc;
+  document.getElementById('at-roty').value = (tf.ry * 180 / Math.PI).toFixed(0);
+  // Re-trigger value displays
+  ['at-tx','at-ty','at-tz','at-scale','at-roty'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.dispatchEvent(new Event('input'));
+  });
+  // Visual: highlight the active side button
+  document.querySelectorAll('#at-side-buttons button[data-side]').forEach(b => {
+    b.classList.toggle('tool-active', b.dataset.side === side);
+  });
 }
 
 function openAlignTexture() {
@@ -5501,6 +5570,12 @@ function openAlignTexture() {
   document.querySelectorAll('#at-view-buttons button[data-view]').forEach(btn => {
     btn.addEventListener('click', () => _atSetCameraView(btn.dataset.view));
   });
+  // Side toggle (which overlay the sliders control)
+  document.querySelectorAll('#at-side-buttons button[data-side]').forEach(btn => {
+    btn.onclick = () => _atSetActiveSide(btn.dataset.side);
+  });
+  // Default to FRONT
+  _atSetActiveSide('front');
   // Init viewer + load current mesh (must be last, after modal is visible
   // so canvas has real dimensions)
   requestAnimationFrame(async () => {

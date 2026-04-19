@@ -807,6 +807,11 @@
           </div>
           <!-- Right: compact sliders -->
           <div style="width:280px; flex-shrink:0;">
+            <!-- Side toggle: which texture we are adjusting -->
+            <div id="at-side-buttons" style="display:flex; gap:4px; margin-bottom:10px;">
+              <button data-side="front" class="ghost-btn tool-active" style="flex:1; padding:5px; font-size:11px;">FRONT</button>
+              <button data-side="back"  class="ghost-btn" style="flex:1; padding:5px; font-size:11px;">BACK</button>
+            </div>
             <div style="display:flex; flex-direction:column; gap:6px; font-size:11px;">
               <div>
                 <label style="display:flex; justify-content:space-between;">Translate X <span id="at-tx-val" class="slider-val">0.00</span></label>
