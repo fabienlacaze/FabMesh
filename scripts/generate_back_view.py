@@ -119,6 +119,23 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     # User A/B: PURE 0.75 beats SCHED at every value on fille_afghanne.
     pipe.set_ip_adapter_scale(ip_scale)
 
+    # Find highest existing back_<suffix>_<N>.png so successive
+    # 'Regenerate back view' clicks APPEND instead of overwriting.
+    # Same pattern as scripts/local_juggernaut_bridge.py (commit febbec5).
+    import re as _re_idx
+    suffix = f'_{name_suffix}' if name_suffix else ''
+    _existing_idx = [-1]
+    _pattern = _re_idx.compile(
+        rf'^back{_re_idx.escape(suffix)}_(\d+)\.png$'
+    )
+    for _f in os.listdir(out_dir):
+        _m = _pattern.match(_f)
+        if _m:
+            _existing_idx.append(int(_m.group(1)))
+    _start_idx = max(_existing_idx) + 1
+    print(f'[back-view] starting at back{suffix}_{_start_idx} '
+          f'(existing highest={max(_existing_idx)})', flush=True)
+
     out_paths = []
     for i in range(num_images):
         gen = torch.Generator('cuda').manual_seed(
@@ -134,8 +151,7 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
             generator=gen,
         ).images[0]
         print(f'[back-view] gen {i}: {time.time()-t0:.1f}s', flush=True)
-        suffix = f'_{name_suffix}' if name_suffix else ''
-        out_path = os.path.join(out_dir, f'back{suffix}_{i}.png')
+        out_path = os.path.join(out_dir, f'back{suffix}_{_start_idx + i}.png')
         img.save(out_path)
         out_paths.append(out_path)
         print(f'[back-view] saved {out_path}', flush=True)

@@ -5789,6 +5789,43 @@ Patch: `texture_augment.py` lit maintenant views.json (avant hardcoded
 - Pour aller plus loin: TRELLIS ou Hunyuan3D 2.0 qui produisent
   vraiment un mesh+textures cohérents en multi-view natif.
 
+---
+
+## 2026-04-19 — Audit overwrite + 2 fixes
+
+User: "certains outils écrasent la version précédente de l'image".
+Audit complet (24 IPC handlers + 15 scripts). Résultats:
+
+### Bugs confirmés et fixés
+
+1. **`generate_back_view.py`**: utilisait `back_<stem>_0.png` constant.
+   Chaque "Regenerate back view" écrasait la précédente. Fix: scan
+   `back_<stem>_<N>.png` existants → start at max+1 (même pattern que
+   `local_juggernaut_bridge.py` fixé hier en `febbec5`).
+
+2. **`mesh:align-texture`**: écrivait directement sur `meshPath`
+   (input == output dans `texture_project` call). Si l'align donne
+   un mauvais résultat, perte définitive de la texture précédente.
+   Fix: snapshot l'ancien mesh dans `<meshDir>/.history/<base>_prealign_
+   <ts>.glb` avant le swap. Permet revert manuel.
+
+### Tous les autres outils audités: OK
+- `image-quick-edit`, `mask-inpaint`, `auto-inpaint`, `img2img`,
+  `image-adjust`, `remove-background`, `mesh-tool` (smooth/decimate/...)
+  → tous utilisent suffix `${operation}_${ts}` = safe.
+- `image-to-3d`, `refine-mesh`, `auto-rig*` → outputs timestampés.
+- `save-image-data-url`, `import-image-file` → suffix timestampé.
+
+### Suspects (non-bugs probables)
+- `generate-multiview` réécrit `<stem>_multiview/view_0..5.png` (1:1
+  par identité-image, by design)
+- `export-to-unreal` écrit `${baseName}.fbx` (convention "latest wins")
+
+### Bugs UI à investiguer ensuite
+- Draw / Paint Tools: résultat = image inchangée (édition pas appliquée)
+- Clone Stamp: garde l'image initiale en mémoire au lieu de la version
+  courante
+
 
 
 

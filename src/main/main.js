@@ -3991,6 +3991,27 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
         }
         resolve({ ok: false, error: error.message, stderr: (stderr || '').slice(-1000) });
       } else {
+        // BACKUP previous version before overwriting (mesh history).
+        // Even when texture_project rewrites in place (workMeshPath === meshPath),
+        // we want a snapshot so the user can revert a bad align.
+        try {
+          const meshDir = path.dirname(meshPath);
+          const meshExt = path.extname(meshPath);
+          const meshBase = path.basename(meshPath, meshExt);
+          const histDir = path.join(meshDir, '.history');
+          if (!fs.existsSync(histDir)) fs.mkdirSync(histDir, { recursive: true });
+          // Snapshot the OLD mesh (if any). If we used a temp pre-transform
+          // copy, the original meshPath still has the un-edited mesh.
+          if (fs.existsSync(meshPath)) {
+            const backupPath = path.join(histDir,
+              `${meshBase}_prealign_${Date.now()}${meshExt}`);
+            fs.copyFileSync(meshPath, backupPath);
+            log.info('mesh:align-texture',
+                     `backed up previous mesh to ${backupPath}`);
+          }
+        } catch (bkErr) {
+          log.warn('mesh:align-texture', `backup failed: ${bkErr.message}`);
+        }
         // Swap transformed+textured mesh into the original path on success
         if (workMeshPath !== meshPath) {
           try {
