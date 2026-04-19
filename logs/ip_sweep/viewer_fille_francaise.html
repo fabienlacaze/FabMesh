@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>FabMesh — fille_francaise (voie C)</title>
+<style>
+  html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
+            font-family:system-ui;height:100%}
+  h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
+     border-bottom:1px solid #333}
+  .row{display:flex;height:520px}
+  .col{flex:1;border-right:1px solid #333;position:relative}
+  .col-title{position:absolute;top:6px;left:8px;right:8px;z-index:5;
+             background:rgba(0,0,0,0.78);padding:4px 8px;border-radius:3px;
+             font-size:11px;color:#eee;line-height:1.4}
+  .col-title b{color:#87d9ff}
+  .col-title .new{color:#4cd964}
+  .col-title .stat{color:#bbb;font-size:10px}
+  model-viewer{width:100%;height:100%;background:#1b1b1b}
+  img.ref{width:100%;height:100%;object-fit:contain;background:#1b1b1b}
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<h1>fille_francaise — Voie C (SF3D 12k + RealVis+IPA+CN 1024² HD, 100% commercial-safe)</h1>
+<div class="row">
+  <div class="col">
+    <div class="col-title">
+      FRONT photo input<br>
+      <span class="stat">RealVis XL v4.0 · prompt: "jeune fille francaise, cheveux chatains, robe d'ete fleurie, T-pose"</span>
+    </div>
+    <img class="ref" src="_francaise_front.png">
+  </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title">
+      <span class="new"><b>Voie C mesh</b></span><br>
+      <span class="stat">SF3D 12k + RealVis+IPA+CN 1024² + Telea<br>
+      sharp=62%, 195s · 100% commercial-safe</span>
+    </div>
+    <model-viewer src="_francaise_voiec.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+</div>
+
+<h1>Voie C — 6 vues générées (1024×1024, RealVis XL + IPAdapter + ControlNet OpenPose)</h1>
+<div class="row" style="height:320px">
+  <div class="col"><img class="ref" src="_francaise_voiec_v0.png"><div class="col-title">v0 front (reused)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v1.png"><div class="col-title">v1 right (CN skeleton)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v2.png"><div class="col-title">v2 back (CN skeleton)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v3.png"><div class="col-title">v3 left (CN skeleton)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v4.png"><div class="col-title">v4 top (no CN)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_v5.png"><div class="col-title">v5 bottom (no CN)</div></div>
+</div>
+
+<h1>Texture atlas projeté (debug)</h1>
+<div class="row" style="height:300px">
+  <div class="col"><img class="ref" src="_francaise_voiec_tex.png"><div class="col-title">Atlas UV final 1024² (après Telea inpaint)</div></div>
+  <div class="col"><img class="ref" src="_francaise_voiec_proj_debug.png"><div class="col-title">Debug overlay front projection</div></div>
+</div>
+</body>
+</html>
