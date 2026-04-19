@@ -289,7 +289,7 @@
 </div>
 
 <!-- v10: VOIE F front + NORMALIZE_ORIENT=1 (fix orientation inversée) -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v10 — VOIE F front + ORIENT fix</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
@@ -306,6 +306,31 @@
   <div class="grid6">
     <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
     <div class="cell" data-label="atlas v10"><img src="_francaise_voiefab_front_v3_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v11: front HD plus dominant (FULL=0.50) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v11 — Front HD plus dominant</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">STACK_FLOOR=0.40 → FULL=0.50</span>
+    <ul>
+      <li>Même setup que v10</li>
+      <li>Mais transition feather <b>0.40 → 0.50</b> (au lieu de 0.65)</li>
+      <li>Zone "100% front HD" arrive plus tôt → moins rongée par atlas SF3D blurry</li>
+      <li>Front bien net partout où la normale fait &lt; 60° avec la caméra</li>
+    </ul>
+    <p><span class="tag ok">gain</span> visage HD voie C dominant, moins "lavé" sur les bords</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v4.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas v11"><img src="_francaise_voiefab_front_v4_tex.png"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
