@@ -5544,30 +5544,43 @@ function _atBuildProjectiveMaterial() {
 
       // Project world (x,y) onto a plane of uPlaneSize, with TRS.
       // Returns UV in [0,1] or -1 if out-of-bounds.
+      // Project world XY -> UV [0,1] of a virtual photo plane.
+      // The plane is centered, scaled by sc, translated by (tx,ty),
+      // and rotated by ry around its own center.
+      // To sample the texture at world point (wp.x, wp.y):
+      //   1. Translate world point by -(tx,ty) to undo plane translation
+      //   2. Rotate by -ry to undo plane rotation
+      //   3. Divide by sc to undo plane scale
+      //   4. Map [-planeSize/2, +planeSize/2] -> [0, 1]
       vec2 project(vec3 wp, float tx, float ty, float sc, float ry) {
+        // Step 1: undo translation
+        float x = wp.x - tx;
+        float y = wp.y - ty;
+        // Step 2: undo rotation (R(-ry) = R(ry).T)
         float cr = cos(ry), sr = sin(ry);
-        // Inverse rotate around plane center (before scale+translate invert)
-        float x = cr * wp.x + sr * wp.y;
-        float y = -sr * wp.x + cr * wp.y;
-        // Apply inverse scale around center
-        x /= sc; y /= sc;
-        // Apply inverse translation
-        x -= tx; y -= ty;
-        // Normalize to [0,1] using plane size
-        float u = x / uPlaneSize + 0.5;
-        float v = y / uPlaneSize + 0.5;
+        float xr = cr * x + sr * y;
+        float yr = -sr * x + cr * y;
+        // Step 3: undo scale
+        xr /= sc; yr /= sc;
+        // Step 4: normalize to UV [0,1]
+        float u = xr / uPlaneSize + 0.5;
+        float v = yr / uPlaneSize + 0.5;
         return vec2(u, v);
       }
       void main() {
+        // SF3D meshes have their face at -Z (native convention), so
+        // normal.z < 0 means a front-facing surface (camera looking +Z->-Z).
         float nz = vWorldNormal.z;
         vec3 color = uFallback;
-        if (nz > 0.0) {
+        if (nz < 0.0) {
+          // FRONT face of mesh: project front photo
           vec2 uv = project(vWorldPos, uFrontTx, uFrontTy, uFrontSc, uFrontRy);
           if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
             color = texture2D(uFront, vec2(uv.x, 1.0 - uv.y)).rgb;
           }
         } else {
-          // Back face: flip X so the back photo isn't mirrored
+          // BACK face of mesh: project back photo (X flipped so left-right
+          // not mirrored when seen from behind).
           vec2 uv = project(vec3(-vWorldPos.x, vWorldPos.y, vWorldPos.z),
                             uBackTx, uBackTy, uBackSc, uBackRy);
           if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
@@ -5606,14 +5619,8 @@ function _atApplyProjectiveToMesh(enable) {
 }
 
 function _atUpdateProjectiveUniforms() {
-  if (!atState.projectiveMats.length) {
-    console.log('[align-tex] no projective mats to update');
-    return;
-  }
+  if (!atState.projectiveMats.length) return;
   const tf = atState.transforms;
-  console.log('[align-tex] updating projective uniforms', {
-    front: tf.front, back: tf.back, planeSize: atState.meshHeight,
-  });
   for (const m of atState.projectiveMats) {
     m.uniforms.uFront.value  = atState.frontTex;
     m.uniforms.uBack.value   = atState.backTex;
