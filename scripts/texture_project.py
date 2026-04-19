@@ -614,7 +614,13 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         cam_dirs = -v_cs
         cam_dirs_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
         norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
-        vvis = np.clip(np.sum(norms_n * cam_dirs_n, axis=1), 0, 1) ** 0.8
+        # Hunyuan-inspired bake_exp: cos(n,view)^exp. exp=4 downweights
+        # oblique projections aggressively (anti-leopard on fragmented
+        # UV atlases) — but ONLY helps with 6+ views. With 1-2 views it
+        # kills visibility on flanks. Default kept at 0.8 (original);
+        # set FABMESH_TEXPROJ_BAKE_EXP=4.0 when using 6+ multi-views.
+        _bake_exp = float(os.environ.get('FABMESH_TEXPROJ_BAKE_EXP', '0.8'))
+        vvis = np.clip(np.sum(norms_n * cam_dirs_n, axis=1), 0, 1) ** _bake_exp
 
         view_data.append({
             'pixels': vsrc_pixels, 'w': vsrc_w, 'h': vsrc_h,
@@ -868,6 +874,29 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
             proj_arr * w3 + filled * (1.0 - w3), 0, 255
         ).astype(np.uint8)
         log('fill: push-pull Gaussian pyramid (no SF3D blur leak)')
+
+        # Hunyuan-inspired UV inpaint pass on remaining hole pixels. The
+        # push-pull gives smooth color continuity; Telea inpaint gives
+        # edge-aware structure on truly empty texels (between UV islands).
+        # Triggered when FABMESH_TEXPROJ_UV_INPAINT=1 (default ON).
+        if os.environ.get('FABMESH_TEXPROJ_UV_INPAINT', '1') == '1':
+            try:
+                import cv2
+                t_inp = time.time()
+                # Hole mask: pixels that never got a direct projection.
+                # Keep the inpaint radius modest — large radius smears.
+                hole_mask = (~sharp_mask).astype(np.uint8) * 255
+                # cv2 expects BGR.
+                bgr = result_arr[:, :, ::-1].copy()
+                inp = cv2.inpaint(bgr, hole_mask, 3, cv2.INPAINT_TELEA)
+                result_arr = inp[:, :, ::-1].copy()
+                _n_holes = int((hole_mask > 0).sum())
+                log(f'uv_inpaint: Telea on {_n_holes} hole px in '
+                    f'{time.time()-t_inp:.1f}s')
+                _evt('uv_inpaint_done', holes=_n_holes,
+                     ms=int((time.time() - t_inp) * 1000))
+            except Exception as _inp_e:
+                log(f'uv_inpaint skipped ({_inp_e})')
     except Exception as _dil_e:
         log(f'push-pull unavailable ({_dil_e}), falling back to SF3D baked')
         w3 = sharp_mask.astype(np.float64)[:, :, np.newaxis]

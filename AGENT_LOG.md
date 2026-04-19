@@ -10,6 +10,40 @@ what happened, conclusion.
 
 ---
 
+## 2026-04-19 — Voie A: texture_project cos^4 + UV inpaint (Hunyuan-inspired)
+
+**Contexte**: après avoir épuisé les options TripoSG (xatlas direct, KDTree UV
+transfer, raycast SF3D atlas — tous leopard), lecture du code Hunyuan3D-Paint.
+Insight: leur secret n'est PAS xatlas (même outil que nous), mais:
+1. `bake_exp=4` → `cos(n,view)^4` weighting → anti-leopard sur atlas fragmenté
+2. UV inpaint post-bake sur les trous restants
+
+**Modifs texture_project.py** (inspiration, pas plagiat):
+- `vvis ** 0.8` → `vvis ** FABMESH_TEXPROJ_BAKE_EXP` (défaut 4.0)
+- Post push-pull: cv2.inpaint Telea sur hole_mask (défaut ON via
+  `FABMESH_TEXPROJ_UV_INPAINT=1`)
+
+**Test 1** (`_afghan_triposg_v2.glb`, BAKE_EXP=4.0, 1 view front):
+- sharp_ratio = **14.1%** (cos^4 tue les flancs)
+- 900k trous comblés par Telea → garbage blanc/gris
+- Pire qu'avant: photo front entière plaquée en mini au torse
+- User verdict: "catastrophique"
+
+**Test 2** (BAKE_EXP=1.5): sharp_ratio=19.5%, toujours insuffisant.
+
+**Conclusion**: cos^N weighting fonctionne SEULEMENT avec 6+ vues (comme
+Hunyuan). Avec 1-2 vues (notre cas: front photo ou front+back), aucun
+bake_exp ne corrige. Le vrai problème est que xatlas sur TripoSG 50k
+produit 2456 charts → la projection front ne couvre qu'un petit %
+d'atlas; tout le reste de l'atlas = trous que Telea devine mal.
+
+**Action**: rollback BAKE_EXP default à 0.8 (comportement pré-voie-A).
+Garde le `FABMESH_TEXPROJ_BAKE_EXP` env var + Telea inpaint (inoffensif,
+aide sur trous résiduels). **Seule voie restante = B (multi-view gen)**.
+
+
+---
+
 ## 2026-04-18 — Paint3D v14: views_init [0,12] was LEFT-SIDE not BACK
 
 **Diagnosis of shattered albedo in v13**: the override
