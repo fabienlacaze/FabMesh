@@ -37,10 +37,14 @@
     <model-viewer src="_afghan_mvbake_sf3d.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
-  <div class="col" style="border-left:3px solid #4cd964">
-    <div class="col-title"><span class="new"><b>Voie B v2</b> — cam ortho alignée MVAdapter + NO_FRONT<br>
-    sharp=57%, 170s total</span></div>
+  <div class="col">
+    <div class="col-title"><b>Voie B v2</b> — ortho aligné mais V inversé (tête en bas)</div>
     <model-viewer src="_afghan_mvbake_sf3d_v2.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title"><span class="new"><b>Voie B v3</b> — ortho + V-flip fix (MVAdapter proj_mtx[1,1] négatif déjà inversé Y)<br>sharp=57%</span></div>
+    <model-viewer src="_afghan_mvbake_sf3d_v3.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
 </div>

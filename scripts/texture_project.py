@@ -638,8 +638,12 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                 # Convert NDC -> image UV (texture_project convention:
                 # p_u in [0,1] left-to-right, p_v in [0,1] top-to-bottom).
                 p_u = 0.5 * (ndc[:, 0] + 1.0)
-                # NDC y in [-1, +1] with +1 at top. Image: top=0.
-                p_v = 0.5 * (1.0 - ndc[:, 1])
+                # MVAdapter's get_orthogonal_projection_matrix uses
+                # projection_matrix[1,1] = -2/(top-bottom) — the NEGATIVE
+                # sign already inverts Y during the proj. So ndc_y is
+                # already in image convention (ndc_y=-1 at top, +1 at
+                # bottom); we just remap to [0,1] without re-flipping.
+                p_v = 0.5 * (ndc[:, 1] + 1.0)
                 # Visibility via view-space normal. n_view = R_w2c @ n_std.
                 R_w2c = w2c[:3, :3]
                 n_cs = (R_w2c @ _n_std.T).T
