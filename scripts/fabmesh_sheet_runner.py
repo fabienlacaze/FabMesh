@@ -167,16 +167,18 @@ def build_views_json(out_dir, mesh_path,
 def load_pipeline():
     from diffusers import (
         ControlNetModel,
-        StableDiffusionXLControlNetPipeline,
+        StableDiffusionXLControlNetInpaintPipeline,
     )
     from transformers import CLIPVisionModelWithProjection
-    log('loading SDXL + ControlNet OpenPose + IPAdapter')
+    log('loading SDXL ControlNet INPAINT OpenPose + IPAdapter')
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
         'h94/IP-Adapter', subfolder='models/image_encoder',
         torch_dtype=torch.float16)
     controlnet = ControlNetModel.from_pretrained(
         'xinsir/controlnet-openpose-sdxl-1.0', torch_dtype=torch.float16)
-    pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+    # Use the Inpaint variant of the CN pipeline so we can lock the
+    # front photo as cell 0 and only inpaint the 5 other cells.
+    pipe = StableDiffusionXLControlNetInpaintPipeline.from_pretrained(
         'SG161222/RealVisXL_V4.0',
         controlnet=controlnet,
         torch_dtype=torch.float16, variant='fp16',
@@ -258,25 +260,46 @@ def run(mesh_path, front_image, out_dir,
     ref_img = preprocess_ref(Image.open(front_image), size=1024)
     ref_img.save(os.path.join(out_dir, '_reference.png'))
 
+    # Build init sheet: cell 0 (front, top-left) = the front photo
+    # rescaled to CELL×CELL. Other 5 cells = neutral grey (will be
+    # inpainted from the skeleton + IPA reference).
+    init_sheet = Image.new('RGB', (SHEET_W, SHEET_H), (160, 160, 160))
+    front_cell = ref_img.resize((CELL, CELL), Image.LANCZOS)
+    init_sheet.paste(front_cell, (0, 0))
+    init_sheet.save(os.path.join(out_dir, '_init_sheet.png'))
+
+    # Build mask: 0 = keep (front cell), 255 = inpaint (5 other cells).
+    # 8px border around the front cell stays at 0 too, so the model
+    # has a clean "anchor" to reference from.
+    mask = Image.new('L', (SHEET_W, SHEET_H), 255)
+    from PIL import ImageDraw
+    md = ImageDraw.Draw(mask)
+    md.rectangle([0, 0, CELL - 1, CELL - 1], fill=0)
+    mask.save(os.path.join(out_dir, '_inpaint_mask.png'))
+
     pipe = load_pipeline()
     pipe.set_ip_adapter_scale(ip_scale)
 
-    log(f'diffusing 1 sheet @ {SHEET_W}x{SHEET_H}, '
+    log(f'diffusing 1 INPAINT sheet @ {SHEET_W}x{SHEET_H}, '
         f'steps={num_steps} cn={cn_scale} ip={ip_scale}')
+    log(f'cell 0 LOCKED to front photo, cells 1-5 inpainted')
     t0 = time.time()
     gen = torch.Generator('cuda').manual_seed(int(seed))
     sheet = pipe(
         prompt=SHEET_PROMPT,
         negative_prompt=SHEET_NEG,
-        image=skel_sheet,
+        image=init_sheet,
+        mask_image=mask,
+        control_image=skel_sheet,
         controlnet_conditioning_scale=cn_scale,
         ip_adapter_image=ref_img,
+        strength=0.99,                # high — fill the masked area
         num_inference_steps=num_steps,
         guidance_scale=guidance,
         height=SHEET_H, width=SHEET_W,
         generator=gen,
     ).images[0]
-    log(f'sheet diffusion done in {time.time()-t0:.1f}s')
+    log(f'sheet inpaint done in {time.time()-t0:.1f}s')
 
     sheet.save(os.path.join(out_dir, '_sheet_raw.png'))
 
