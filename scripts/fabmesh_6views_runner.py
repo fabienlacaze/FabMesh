@@ -300,7 +300,7 @@ def make_grid(images, rows=1):
 def run(mesh_path, front_image, out_dir,
         num_steps=30, guidance=7.0, seed=42, size=1024,
         reuse_front=None, reuse_back=None,
-        only_front_back=False):
+        only_front_back=False, only_front=False):
     os.makedirs(out_dir, exist_ok=True)
     mesh_path = os.path.abspath(mesh_path)
     front_image = os.path.abspath(front_image)
@@ -335,8 +335,12 @@ def run(mesh_path, front_image, out_dir,
     # views list where only indices 0 and 2 are filled. Caller
     # (mv_bake_hunyuan.py hybrid) will fill the other slots from
     # MVAdapter's output.
-    indices_to_generate = (
-        [0, 2] if only_front_back else list(range(len(VIEW_SPECS))))
+    if only_front:
+        indices_to_generate = [0]
+    elif only_front_back:
+        indices_to_generate = [0, 2]
+    else:
+        indices_to_generate = list(range(len(VIEW_SPECS)))
 
     images = [None] * len(VIEW_SPECS)
     for i in indices_to_generate:
@@ -396,7 +400,8 @@ def run(mesh_path, front_image, out_dir,
     for i in indices_to_generate:
         if images[i] is not None:
             images[i].save(os.path.join(out_dir, f'view_{i}.png'))
-    if not only_front_back:
+    # Grid only when ALL 6 slots are filled.
+    if all(img is not None for img in images):
         make_grid(images, rows=1).save(
             os.path.join(out_dir, '_voiec_grid.png'))
     # Save skeletons for debug
@@ -409,12 +414,14 @@ def run(mesh_path, front_image, out_dir,
                 w2c, proj, size=size, draw_invisible=True).save(
                     os.path.join(dbg, f'skel_{i}.png'))
 
-    # views.json: list ALL 6 views in hybrid mode (MVAdapter wrote
-    # view_1/3/4/5 too), but ONLY the indices we generated in voie F
-    # (only_front_back=True, MVAdapter not called → only view_0+view_2
-    # exist on disk and texture_project mustn't try to load missing
-    # files).
-    json_indices = [0, 2] if only_front_back else None
+    # views.json: list only the indices that exist on disk so that
+    # texture_project doesn't try to load missing view_*.png files.
+    if only_front:
+        json_indices = [0]
+    elif only_front_back:
+        json_indices = [0, 2]
+    else:
+        json_indices = None
     build_views_json(out_dir, mesh_path, indices=json_indices)
     log('DONE')
 
@@ -431,11 +438,15 @@ def main():
     p.add_argument('--only-front-back', action='store_true',
                    help='Hybrid mode: only regenerate view_0 and view_2, '
                         'leave other slots untouched.')
+    p.add_argument('--only-front', action='store_true',
+                   help='Voie F front-only: only generate view_0 (front HD), '
+                        'leave back to the SF3D AUGMENT atlas floor.')
     args = p.parse_args()
     run(args.mesh, args.front, args.out_dir,
         num_steps=args.num_steps, seed=args.seed,
         reuse_front=args.reuse_front, reuse_back=args.reuse_back,
-        only_front_back=args.only_front_back)
+        only_front_back=args.only_front_back,
+        only_front=args.only_front)
 
 
 if __name__ == '__main__':
