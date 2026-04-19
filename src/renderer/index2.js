@@ -6836,8 +6836,11 @@ async function reloadCurrentProject() {
   else console.log('[reload] NO MATCH for project:', name, '(sanitized:', sanitizedName, ') in:', state.projects.map(p => p.name).slice(0, 10));
   if (refreshed) {
     refreshed._reloadTs = Date.now();
-    // Carry over multiview data
+    // Carry over multiview data + 2-view back photos (not on disk in
+    // a way reload would naturally pick up — they live in _backphotos/
+    // and are referenced by per-image map state)
     if (state.currentProject._multiviews) refreshed._multiviews = state.currentProject._multiviews;
+    if (state.currentProject._backPhotos) refreshed._backPhotos = state.currentProject._backPhotos;
     state.currentProject = refreshed;
     console.log('[reload] images:', refreshed.images?.length, 'meshes:', refreshed.meshes?.length);
     populateWorkspace(refreshed);
