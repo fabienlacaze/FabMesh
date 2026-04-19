@@ -2,53 +2,58 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Voie A — cos^4 + UV inpaint (Hunyuan-inspired)</title>
+<title>FabMesh — Voie B validée (SF3D vs TripoSG 200k)</title>
 <style>
   html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
             font-family:system-ui;height:100%}
   h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
      border-bottom:1px solid #333}
-  .row{display:flex;height:calc(100vh - 36px)}
+  .row{display:flex;height:calc((100vh - 72px) - 300px)}
   .col{flex:1;border-right:1px solid #333;position:relative}
   .col-title{position:absolute;top:6px;left:8px;right:8px;z-index:5;
              background:rgba(0,0,0,0.78);padding:4px 8px;border-radius:3px;
              font-size:11px;color:#eee;line-height:1.4}
   .col-title b{color:#87d9ff}
   .col-title .new{color:#4cd964}
+  .col-title .stat{color:#bbb;font-size:10px}
   model-viewer{width:100%;height:100%;background:#1b1b1b}
   img.ref{width:100%;height:100%;object-fit:contain;background:#1b1b1b}
 </style>
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>fille_afghanne — Voie B v2 (cam ortho alignée) vs v1 (mix perspective)</h1>
+<h1>fille_afghanne — Voie B validée (SF3D natif vs Voie B SF3D 12k vs Voie B TripoSG 200k)</h1>
 <div class="row">
   <div class="col">
-    <div class="col-title">FRONT photo (input)</div>
+    <div class="col-title">FRONT photo (input reference)</div>
     <img class="ref" src="_mirror_front.png">
   </div>
   <div class="col">
-    <div class="col-title"><b>SF3D natif</b> (baseline)</div>
+    <div class="col-title">
+      <b>SF3D natif</b> (baseline)<br>
+      <span class="stat">12k faces · atlas SF3D baked · ~110s</span>
+    </div>
     <model-viewer src="_afghan_sf3d.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
   <div class="col">
-    <div class="col-title"><b>Voie B v1</b> — cam perspective (2 visages, dos cassé)<br>sharp=47%</div>
-    <model-viewer src="_afghan_mvbake_sf3d.glb" auto-rotate camera-controls
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-  </div>
-  <div class="col">
-    <div class="col-title"><b>Voie B v2</b> — ortho aligné mais V inversé (tête en bas)</div>
-    <model-viewer src="_afghan_mvbake_sf3d_v2.glb" auto-rotate camera-controls
-                  shadow-intensity="1" environment-image="neutral"></model-viewer>
-  </div>
-  <div class="col" style="border-left:3px solid #4cd964">
-    <div class="col-title"><span class="new"><b>Voie B v3</b> — ortho + V-flip fix (MVAdapter proj_mtx[1,1] négatif déjà inversé Y)<br>sharp=57%</span></div>
+    <div class="col-title">
+      <b>Voie B (SF3D 12k)</b><br>
+      <span class="stat">SF3D + MVAdapter 6v + cos⁴ + Telea<br>sharp=57%, 170s</span>
+    </div>
     <model-viewer src="_afghan_mvbake_sf3d_v3.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title">
+      <span class="new"><b>Voie B (TripoSG 200k)</b></span><br>
+      <span class="stat">TripoSG 200k + MVAdapter 6v + cos⁴ + Telea<br>sharp=58%, 439s — mesh 16× plus détaillé</span>
+    </div>
+    <model-viewer src="_afghan_mvbake_triposg_200k.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
 </div>
-<h1>MVAdapter 6 views — front/right/back/left/top/bottom</h1>
+<h1>MVAdapter 6 views — front / right / back / left / top / bottom (512×512, 20 steps SDXL)</h1>
 <div class="row" style="height:300px">
   <div class="col"><img class="ref" src="_mvbake_views/view_0.png"><div class="col-title">v0 front</div></div>
   <div class="col"><img class="ref" src="_mvbake_views/view_1.png"><div class="col-title">v1 right</div></div>
