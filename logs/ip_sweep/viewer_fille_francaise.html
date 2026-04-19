@@ -365,7 +365,7 @@
 </div>
 
 <!-- v13: front+back HD voie C, transition FULL=0.55 (entre v11 et v10) -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v13 — Front+back HD softer</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
@@ -382,6 +382,31 @@
     <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
     <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
     <div class="cell" data-label="atlas v13"><img src="_francaise_voiefab_front_v5_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v14: BASE_ATLAS Telea pre-fill (comble les bras T-pose blancs) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v14 — BASE_ATLAS hole-fill</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT (pré-rempli)</span><span class="tag c">+ voie C front+back HD</span><br>
+    <span class="stat new">770k holes pre-filled by Telea</span>
+    <ul>
+      <li>Bug v12/v13: <b>770003 pixels noirs</b> dans l'atlas SF3D AUGMENT (les bras T-pose vu d'aucune caméra SF3D)</li>
+      <li>Fix: Telea inpaint <b>AVANT</b> de l'utiliser comme base atlas</li>
+      <li>Pixels < 8 (noirs/transparents) → comblés par couleurs voisines</li>
+      <li>Voie C HD overlay reste identique (FLOOR=0.40, FULL=0.55)</li>
+    </ul>
+    <p><span class="tag ok">gain</span> bras et zones non vues par SF3D ne sont plus blancs</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_v3.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
+    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
+    <div class="cell" data-label="atlas v14"><img src="_francaise_voiefab_v3_tex.png"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
