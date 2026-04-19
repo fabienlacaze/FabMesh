@@ -3825,16 +3825,38 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
     FABMESH_TEXPROJ_SKIP_BACK_VFLIP: skipVflip ? '1' : '0',
     FABMESH_TEXPROJ_VIS_THRESH: String(visThresh),
   };
-  // Translate/scale/autofit are applied via local_sf3d_bridge which
-  // we DON'T re-run here (would re-bake SF3D). For now the alignment
-  // tool just re-projects with multi-view + thresholds. Translate
-  // and scale require a mesh transform pass on the input glb before
-  // texture_project — TODO.
-  if (Math.abs(translateX) > 0.001 || Math.abs(translateY) > 0.001
-      || Math.abs(meshScale - 1) > 0.001) {
-    log.warn('mesh:align-texture',
-             `transform tx=${translateX} ty=${translateY} scale=${meshScale} `
-             + `not yet wired through (need pre-projection mesh transform)`);
+  // Translate/scale: pre-transform mesh in a temp copy if any transform
+  // is non-default, then re-project on the transformed copy. The original
+  // mesh stays untouched until success, then we swap.
+  const needsPreTransform = (
+    Math.abs(translateX) > 0.001 ||
+    Math.abs(translateY) > 0.001 ||
+    Math.abs(meshScale - 1) > 0.001
+  );
+  let workMeshPath = meshPath;
+  if (needsPreTransform) {
+    const tmpPath = meshPath.replace(/\.glb$/i, '.aligntemp.glb');
+    const preScript = path.join(__dirname, '..', '..', 'scripts',
+                                 'mesh_pre_transform.py');
+    try {
+      await new Promise((resolve, reject) => {
+        execFile('python', [preScript, meshPath, tmpPath,
+                            String(translateX), String(translateY),
+                            String(meshScale)], {
+          timeout: 60000, maxBuffer: 4 * 1024 * 1024,
+        }, (error, stdout, stderr) => {
+          if (stdout) log.info('mesh:align-texture/pre', stdout.trim().slice(-1000));
+          if (error) reject(new Error(`pre_transform: ${error.message}`));
+          else resolve();
+        });
+      });
+      workMeshPath = tmpPath;
+      // Update args to use the transformed mesh as input AND output
+      args[1] = tmpPath;
+      args[3] = tmpPath;
+    } catch (preErr) {
+      return { ok: false, error: preErr.message };
+    }
   }
   return new Promise((resolve) => {
     execFile('python', args, {
@@ -3843,8 +3865,20 @@ ipcMain.handle('mesh:align-texture', async (_event, params) => {
       if (stdout) log.info('mesh:align-texture', stdout.trim().slice(-2000));
       if (error) {
         log.error('mesh:align-texture', error.message);
+        if (workMeshPath !== meshPath) {
+          try { fs.unlinkSync(workMeshPath); } catch (_) {}
+        }
         resolve({ ok: false, error: error.message, stderr: (stderr || '').slice(-1000) });
       } else {
+        // Swap transformed+textured mesh into the original path on success
+        if (workMeshPath !== meshPath) {
+          try {
+            fs.copyFileSync(workMeshPath, meshPath);
+            fs.unlinkSync(workMeshPath);
+          } catch (swapErr) {
+            log.error('mesh:align-texture', `swap failed: ${swapErr.message}`);
+          }
+        }
         resolve({ ok: true, meshPath });
       }
     });
