@@ -131,6 +131,31 @@ if (usedPct > gpuLimits.vram && freeGB < cost)
 
 ---
 
+## Versioning & changelog system (inspired by Lokizio)
+
+User screenshot 2026-04-19 — Lokizio affiche une popup verticale
+"Historique des mises à jour" listant `v8.95 (DERNIÈRE)`, `v8.94`,
+`v8.93`, ... avec un bullet point par changement (Refactoring, Fix,
+Nouveau rôle, etc.). Reproduire la même logique pour FabMesh.
+
+- [ ] Bump auto de la version semver dans `package.json` à chaque
+  release / commit avec marqueur (`[release]`)
+- [ ] Fichier `CHANGELOG.md` à la racine, format Keep a Changelog
+  (`Added` / `Changed` / `Fixed` / `Removed` par version)
+- [ ] Modal "À propos / Mises à jour" dans FabMesh: bouton dans la
+  barre du haut → popup qui lit `CHANGELOG.md` (ou JSON dérivé) et
+  l'affiche comme Lokizio (timeline verticale, badge "DERNIÈRE",
+  bullets par version)
+- [ ] Notification toast au démarrage si l'app vient d'être mise à
+  jour ("FabMesh vX.Y.Z — voir le changelog")
+- [ ] Optionnel: hook git pre-commit qui force l'ajout d'une entrée
+  dans `CHANGELOG.md` quand le diff touche `src/` ou `scripts/`
+
+Pratique pour communiquer aux beta-testeurs ce qui a changé sans
+qu'ils aient à fouiller le git log.
+
+---
+
 ## Known limitations to document in the README
 
 - GPU required (RTX 30/40/50 with >=8 GB VRAM) — CPU fallback not supported

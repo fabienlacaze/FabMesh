@@ -3871,7 +3871,7 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
 // 2-view texturing pipeline. Produces a photoreal back view of the
 // same subject, conditioned on the front photo.
 // ============================================================
-ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages }) => {
+ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages, mode }) => {
   if (!frontImage || !fs.existsSync(frontImage)) {
     return { success: false, error: `front image not found: ${frontImage}` };
   }
@@ -3882,8 +3882,15 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   // Per-front-image suffix so different fronts don't overwrite each other
   const frontStem = path.basename(frontImage, path.extname(frontImage));
+  // mode='mirror' uses generate_back_view_mirror.py (mirror+inpaint =
+  // pixel-identical lower body, only head+torso regenerated).
+  // mode='realvis' (default) uses generate_back_view.py (RealVis +
+  // IPAdapter + ControlNet OpenPose, full regenerated).
+  const useMirror = mode === 'mirror';
   const script = path.join(__dirname, '..', '..', 'scripts',
-                            'generate_back_view.py');
+                            useMirror ? 'generate_back_view_mirror.py'
+                                       : 'generate_back_view.py');
+  log.info('generate-back-view', `mode=${useMirror ? 'mirror' : 'realvis'}`);
   // Pass the front stem as a 5th arg so the python script names files
   // back_<stem>_0.png (avoids collision when multiple fronts in same project).
   const args = [script, frontImage, outDir, promptHint || '', String(numImages || 1), frontStem];

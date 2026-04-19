@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Mirror+Inpaint back-view test</title>
+<style>
+  html, body { margin:0; padding:0; background:#0d0d0d; color:#ddd;
+               font-family:system-ui, sans-serif; height:100%; }
+  h1 { padding:8px 16px; margin:0; font-size:13px; background:#000;
+       border-bottom:1px solid #333; }
+  .row { display:flex; gap:12px; padding:12px; flex-wrap:wrap; }
+  .card { background:#1a1a1a; border:1px solid #333; border-radius:6px;
+          padding:8px; }
+  .card h3 { margin:0 0 6px; font-size:12px; color:#87d9ff;
+             text-align:center; }
+  .card img { width:280px; height:280px; object-fit:contain;
+              border:1px solid #333; border-radius:4px; background:#222;
+              display:block; }
+</style>
+</head>
+<body>
+<h1>Mirror+Inpaint back-view — same outfit, only head+torso regenerated</h1>
+<div class="row">
+  <div class="card">
+    <h3>FRONT reference (input)</h3>
+    <img src="_mirror_front.png">
+  </div>
+  <div class="card">
+    <h3>BACK v1 — height_frac=0.55, CN=0.55, str=0.95</h3>
+    <img src="_mirror_back.png">
+  </div>
+  <div class="card">
+    <h3>BACK v2 — height_frac=0.70, CN=0.40, str=1.0</h3>
+    <img src="_mirror_v2_back.png">
+  </div>
+</div>
+</body>
+</html>
