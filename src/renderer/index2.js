@@ -1173,6 +1173,15 @@ document.getElementById('ws-use-for-3d-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.previewImagePath) return;
   p.selectedImagePath = p.previewImagePath;
+  // Auto-attach the back photo if 2-view was generated for this image.
+  if (p._backPhotos && p._backPhotos[p.selectedImagePath]) {
+    p.backImagePath = p._backPhotos[p.selectedImagePath];
+    if (typeof showStep2BackImage === 'function') {
+      showStep2BackImage(p.backImagePath);
+    }
+  } else {
+    p.backImagePath = null;
+  }
   // Mark the used-for-3d thumb visually
   const strip = document.getElementById('ws-image-versions');
   strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('used-for-3d'));
@@ -2854,16 +2863,27 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
             _saveImageStyle(imgPath, stylePrompt);
           }
         }
-        // Generate multi-views if checkbox is checked (inside the job)
+        // 2-view mode: if checkbox is on, generate the back photo via Z123
+        // and attach it to ALL generated images so each image has its back
+        // ready when used for 3D. The back photo is sent later as
+        // imagePathBack to the SF3D bridge for true-back texturing.
         if (multiView && r.images?.length > 0) {
           try {
-            showToast('Generating multi-views...', 'info', 5000);
-            const mvResult = await API.generateMultiview({ imagePath: r.images[0] });
-            if (mvResult?.success) {
-              if (!p._multiviews) p._multiviews = {};
-              p._multiviews[r.images[0]] = mvResult.outDir;
+            showToast('Generating back photos (2-view)...', 'info', 8000);
+            for (const imgPath of r.images) {
+              const mvResult = await API.generateMultiview({ imagePath: imgPath });
+              if (mvResult?.success && mvResult.outDir) {
+                // Z123 emits view_2.png = the back view (azim=180)
+                const backCandidate = `${mvResult.outDir}\\view_2.png`;
+                if (!p._backPhotos) p._backPhotos = {};
+                p._backPhotos[imgPath] = backCandidate;
+              }
             }
-          } catch (e) { console.warn('[multiview in job]', e); }
+            showToast('Back photos ready', 'success');
+          } catch (e) {
+            console.warn('[2-view back gen]', e);
+            showToast('Back photo generation failed (continuing with front-only)', 'warn');
+          }
         }
         completeJob(job.id, true);
         await reloadCurrentProject();
