@@ -79,14 +79,15 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     base = hint_clean if hint_clean else 'a character in T-pose'
     prompt = (
         f'{base}, back view, from behind, back of head visible, '
-        f'turned away from camera, full body centered, plain grey '
-        f'background, studio lighting, sharp focus, ultra detailed, '
-        f'8k, masterpiece'
+        f'turned away from camera, full body shot from head to feet, '
+        f'entire body visible including shoes, wide shot, '
+        f'plain grey background, studio lighting, sharp focus, '
+        f'ultra detailed, 8k, masterpiece'
     )
     neg = (
         'blurry, deformed, extra limbs, bad anatomy, different person, '
         'different clothes, watermark, text, duplicate, multiple people, '
-        'cropped, low quality'
+        'cropped, low quality, zoomed in, close-up, half body, feet out of frame'
     )
 
     out_paths = []
