@@ -209,6 +209,92 @@ frontal HD**. Combiner les deux selon leurs points forts.
 
 ---
 
+---
+
+## Suite session du 2026-04-20 nuit — blend modes + tests pamela
+
+### Essai 13 — restoration MVAdapter latéraux (D1 abandonné)
+- Diagnostic D1 (img2img depuis front HD avec ControlNet skeleton latéral):
+  même bug que voie C pure — RealVis+ControlNet OpenPose SDXL ne sait
+  pas générer un profil latéral strict, peu importe `strength`,
+  `cn_scale`, `ip_scale`. Dataset training majoritairement frontal.
+- Conclusion: pour les vues **lat/top/bot**, **MVAdapter reste seul
+  capable** de produire des angles cohérents. Sa cross-view attention
+  est la seule chose entraînée pour ça.
+- Restoration des snapshots `_francaise_tpose_v1/3/4/5.png` dans
+  `_mvbake_views/`.
+
+### Essai 14 — blend mode `accum`
+- Modif `texture_project.py`: nouveau env `FABMESH_TEXPROJ_BLEND=accum`.
+- Au lieu de winner-takes-all par pixel: accumule `sum(w·rgb) / sum(w)`
+  de toutes les vues qui voient un pixel → moyenne pondérée → seams
+  lissées.
+- Test fille_francaise: démarcations entre front/back/lat **disparaissent**.
+- Limite: la **face devient floue** car moyenne de 6 vues — la front HD
+  est diluée par les MVAdapter 512² qui voient aussi le visage.
+
+### Essai 15 — back IPA tune (ip=0.70 cn=1.25)
+- Bug essai 9: la v2 back HD montre une autre fille (ponytail lisse).
+- Tentative ip=0.85 cn=1.05 → back devient **front view** (IPA domine CN).
+- Tentative ip=0.70 cn=1.25 ✅ → back correct (vraie vue arrière, hair
+  cohérent), mais sur fille_francaise reste un ponytail au lieu de loose
+  hair → identité **partiellement** capturée par IPA.
+- Prompt enrichi "long loose hair, same hair color and length as
+  reference" insuffisant pour vaincre le default RealVis "elegant back
+  ponytail".
+
+### Essai 16 — blend mode `stack` (Photoshop-style)
+- Idée user: empiler les vues comme dans Photoshop, le **front HD
+  passe en DERNIER** → recouvre tout ce qu'il voit, latéraux ne
+  contaminent que les flancs invisibles depuis le front.
+- Modif `texture_project.py`: nouveau env `FABMESH_TEXPROJ_BLEND=stack`.
+- Algorithme:
+  1. Trier `view_data` par priority croissante (top/bot d'abord, front
+     en dernier)
+  2. Chaque vue OVERWRITES (`alpha * sampled + (1-alpha) * existing`)
+     où visibility > 0.10
+  3. Feather: alpha ramps de 0 à 1 sur l'intervalle vis [0.10, 0.30]
+     pour éviter les frontières franches
+- **Avantage**: face = 100% front HD, latéraux ne polluent plus.
+- **Cost**: sharp_ratio baisse à 48% (vs 56% winner/accum) car le seuil
+  de visibilité strict laisse plus de trous comblés par Telea.
+- Ordre par défaut sur 6 vues:
+  `top(0.7) → bot(0.7) → back(0.8) → right(0.9) → left(0.9) → front(1.0)`
+
+### Essai 17 — pamela
+- Front RealVis "Pamela Anderson, blonde long hair, red bikini, T-pose"
+  — généré T-pose **dès le 1er coup** (steps=30), pas besoin de
+  `generate_front_tpose.py` post-fix.
+- Pipeline hybrid + accum: 200s, sharp=48%, GLB 1.7MB
+  (`_pamela_accum.glb`).
+- Pipeline hybrid + stack: même set de vues, sharp=48%
+  (`_pamela_stack.glb`).
+- Viewer dédié: `viewer_pamela.html` (3 lignes: front / accum / stack).
+
+### État du codebase fin de session 2026-04-20
+
+| Fichier | Rôle |
+|---|---|
+| `scripts/_make_back_skeleton.py` | OpenPose skeleton T-pose back (existant) |
+| `scripts/_make_front_skeleton.py` | OpenPose skeleton T-pose front (mirror) **(nouveau)** |
+| `scripts/_tpose_joints_3d.py` | 18 joints body_18 en 3D pour render skeleton via cam ortho **(nouveau)** |
+| `scripts/generate_front_tpose.py` | Force T-pose sur un front existant via IPA+CN+rembg+center **(nouveau)** |
+| `scripts/generate_back_view.py` | Génère back HD via RealVis+IPA+CN OpenPose back (existant) |
+| `scripts/mvadapter_runner.py` | Wrapper MVAdapter (CPU offload, 6 vues 512², dump matrices ortho) **(amélioré)** |
+| `scripts/fabmesh_6views_runner.py` | Voie C pure: 6 vues RealVis+IPA+CN. Mode `--only-front-back` pour hybrid **(nouveau)** |
+| `scripts/fabmesh_lateral_refine.py` | Voie D1: img2img latéraux depuis front HD. **Échec confirmé**, kept as reference **(nouveau)** |
+| `scripts/mv_bake_hunyuan.py` | Orchestrateur. `--engine {mvadapter,fabmesh,hybrid}`, streaming logs **(amélioré)** |
+| `scripts/texture_project.py` | Bake. `FABMESH_TEXPROJ_BLEND={winner,accum,stack}` **(amélioré)** |
+
+### Backups branches Git
+- `backup-before-hunyuan-inspired-texproject-20260419-194710`
+- `backup-voie-b-working-20260419-214108`
+- `backup-voie-hybrid-20260419-231038`
+- `backup-voie-hybrid-d1-20260419-235124`
+- `backup-stack-blend-20260420-001717` ← session courante
+
+---
+
 ## Prochaines étapes
 
 - [ ] **Replacer nvdiffrast par pyrender** → voie B/hybrid 100%
