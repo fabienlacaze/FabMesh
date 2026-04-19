@@ -5501,6 +5501,13 @@ function openAlignTexture() {
   document.querySelectorAll('#at-view-buttons button[data-view]').forEach(btn => {
     btn.addEventListener('click', () => _atSetCameraView(btn.dataset.view));
   });
+  // Init viewer + load current mesh (must be last, after modal is visible
+  // so canvas has real dimensions)
+  requestAnimationFrame(async () => {
+    console.log('[align-tex] init start, meshPath=', p.selectedMeshPath);
+    await _atInitViewport();
+    _atLoadMesh(p.selectedMeshPath);
+  });
 }
 
 function _atSetCameraView(view) {
@@ -5519,11 +5526,6 @@ function _atSetCameraView(view) {
   atState.camera.position.set(pos[0], pos[1], pos[2]);
   atState.controls.target.set(0, 0, 0);
   atState.controls.update();
-  // Init viewer + load current mesh
-  requestAnimationFrame(async () => {
-    await _atInitViewport();
-    _atLoadMesh(p.selectedMeshPath);
-  });
 }
 document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openAlignTexture);
 document.getElementById('at-cancel')?.addEventListener('click', () => {
