@@ -5313,6 +5313,11 @@ const atState = {
     front: { tx: 0, ty: 0, tz: 0, sc: 1.0, ry: 0 },
     back:  { tx: 0, ty: 0, tz: 0, sc: 1.0, ry: 0 },
   },
+  // Projective texture shader state
+  projectiveMats: [],   // materials we injected (for cleanup/toggle)
+  origMaterials: [],    // original materials of mesh submeshes
+  frontTex: null,
+  backTex: null,
 };
 
 async function _atInitViewport() {
@@ -5394,6 +5399,13 @@ async function _atLoadMesh(meshPath) {
       atState[k] = null;
     }
   }
+  // Dispose shared textures + projective shader state from previous mesh
+  for (const k of ['frontTex', 'backTex']) {
+    if (atState[k]) { atState[k].dispose(); atState[k] = null; }
+  }
+  for (const pm of atState.projectiveMats || []) pm.dispose();
+  atState.projectiveMats = [];
+  atState.origMaterials = [];
   const status = document.getElementById('at-preview-status');
   if (status) { status.textContent = 'Loading mesh...'; status.style.display = 'block'; }
   try {
@@ -5416,16 +5428,18 @@ async function _atLoadMesh(meshPath) {
       // Compute mesh dims for overlay plane sizing/positioning
       const bsize = box.getSize(new THREE.Vector3());
       atState.meshHeight = bsize.y;
-      atState.overlayDistance = Math.max(bsize.x, bsize.z) * 0.55;
-      // Frame camera
-      atState.camera.position.set(0, 0, size * 1.2);
+      // overlayDistance = half-depth of mesh bounding box (Z).
+      // Plane sits exactly in front of mesh (+Z for front, -Z for back).
+      atState.overlayDistance = (bsize.z * 0.5) + 0.01;
+      // Frame camera on FRONT view by default (looking down -Z)
+      atState.camera.position.set(0, 0, size * 1.4);
       atState.camera.lookAt(0, 0, 0);
       if (atState.controls) {
         atState.controls.target.set(0, 0, 0);
         atState.controls.update();
       }
       if (status) status.style.display = 'none';
-      // Re-create / refresh overlay photo plane on top
+      // Re-create / refresh overlay photo planes (front + back)
       _atUpdateOverlay();
     }, (p) => { console.log('[align-tex] progress', p); },
        (err) => {
@@ -5441,6 +5455,132 @@ async function _atLoadMesh(meshPath) {
       status.textContent = 'Loader error: ' + (e?.message || e);
       status.style.display = 'block';
     }
+  }
+}
+
+// =============================================================
+// Projective texturing: replace the mesh material with a shader that
+// samples the front/back photo textures using orthographic projection
+// from +Z (front cam) and -Z (back cam) with per-side TRS.
+// The shader picks front or back based on the vertex's world normal:
+//   normal.z > 0 -> front texture, normal.z < 0 -> back texture.
+// =============================================================
+function _atBuildProjectiveMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uFront: { value: atState.frontTex || null },
+      uBack:  { value: atState.backTex  || null },
+      // front transform: translate + 2D scale + rotY (in UV-style space)
+      uFrontTx: { value: 0 },
+      uFrontTy: { value: 0 },
+      uFrontSc: { value: 1 },
+      uFrontRy: { value: 0 },
+      uBackTx:  { value: 0 },
+      uBackTy:  { value: 0 },
+      uBackSc:  { value: 1 },
+      uBackRy:  { value: 0 },
+      // plane size (world units) = meshHeight
+      uPlaneSize: { value: atState.meshHeight || 1 },
+      uFallback:  { value: new THREE.Color(0.55, 0.55, 0.55) },
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      uniform sampler2D uFront;
+      uniform sampler2D uBack;
+      uniform float uFrontTx, uFrontTy, uFrontSc, uFrontRy;
+      uniform float uBackTx,  uBackTy,  uBackSc,  uBackRy;
+      uniform float uPlaneSize;
+      uniform vec3  uFallback;
+
+      // Project world (x,y) onto a plane of uPlaneSize, with TRS.
+      // Returns UV in [0,1] or -1 if out-of-bounds.
+      vec2 project(vec3 wp, float tx, float ty, float sc, float ry) {
+        float cr = cos(ry), sr = sin(ry);
+        // Inverse rotate around plane center (before scale+translate invert)
+        float x = cr * wp.x + sr * wp.y;
+        float y = -sr * wp.x + cr * wp.y;
+        // Apply inverse scale around center
+        x /= sc; y /= sc;
+        // Apply inverse translation
+        x -= tx; y -= ty;
+        // Normalize to [0,1] using plane size
+        float u = x / uPlaneSize + 0.5;
+        float v = y / uPlaneSize + 0.5;
+        return vec2(u, v);
+      }
+      void main() {
+        float nz = vWorldNormal.z;
+        vec3 color = uFallback;
+        if (nz > 0.0) {
+          vec2 uv = project(vWorldPos, uFrontTx, uFrontTy, uFrontSc, uFrontRy);
+          if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            color = texture2D(uFront, vec2(uv.x, 1.0 - uv.y)).rgb;
+          }
+        } else {
+          // Back face: flip X so the back photo isn't mirrored
+          vec2 uv = project(vec3(-vWorldPos.x, vWorldPos.y, vWorldPos.z),
+                            uBackTx, uBackTy, uBackSc, uBackRy);
+          if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            color = texture2D(uBack, vec2(uv.x, 1.0 - uv.y)).rgb;
+          }
+        }
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+  });
+}
+
+function _atApplyProjectiveToMesh(enable) {
+  if (!atState.mesh) return;
+  if (enable) {
+    atState.origMaterials = [];
+    atState.projectiveMats = [];
+    atState.mesh.traverse(obj => {
+      if (obj.isMesh) {
+        atState.origMaterials.push({ obj, mat: obj.material });
+        const pm = _atBuildProjectiveMaterial();
+        atState.projectiveMats.push(pm);
+        obj.material = pm;
+      }
+    });
+    _atUpdateProjectiveUniforms();
+  } else {
+    // Restore original materials
+    for (const { obj, mat } of atState.origMaterials) {
+      obj.material = mat;
+    }
+    for (const pm of atState.projectiveMats) pm.dispose();
+    atState.origMaterials = [];
+    atState.projectiveMats = [];
+  }
+}
+
+function _atUpdateProjectiveUniforms() {
+  if (!atState.projectiveMats.length) return;
+  const tf = atState.transforms;
+  for (const m of atState.projectiveMats) {
+    m.uniforms.uFront.value  = atState.frontTex;
+    m.uniforms.uBack.value   = atState.backTex;
+    m.uniforms.uFrontTx.value = tf.front.tx;
+    m.uniforms.uFrontTy.value = tf.front.ty;
+    m.uniforms.uFrontSc.value = tf.front.sc;
+    m.uniforms.uFrontRy.value = tf.front.ry;
+    m.uniforms.uBackTx.value  = tf.back.tx;
+    m.uniforms.uBackTy.value  = tf.back.ty;
+    m.uniforms.uBackSc.value  = tf.back.sc;
+    m.uniforms.uBackRy.value  = tf.back.ry;
+    m.uniforms.uPlaneSize.value = atState.meshHeight;
   }
 }
 
@@ -5463,18 +5603,34 @@ function _atUpdateOverlay() {
   if (!atState.scene) return;
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) return;
+  // Load textures (shared with projective shader)
+  if (!atState.frontTex) {
+    atState.frontTex = new THREE.TextureLoader().load(
+      'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now()
+    );
+    atState.frontTex.colorSpace = THREE.SRGBColorSpace;
+  }
+  const backPath = p._backPhotos?.[p.selectedImagePath] || p.backImagePath;
+  if (backPath && !atState.backTex) {
+    atState.backTex = new THREE.TextureLoader().load(
+      'file:///' + backPath.replace(/\\/g, '/') + '?t=' + Date.now()
+    );
+    atState.backTex.colorSpace = THREE.SRGBColorSpace;
+  }
   // Front overlay: the project's selected image
   if (!atState.overlayFront) {
     atState.overlayFront = _atMakeOverlayPlane(p.selectedImagePath, 0.55);
     atState.scene.add(atState.overlayFront);
   }
   // Back overlay: the 2-view-generated back photo, if present
-  const backPath = p._backPhotos?.[p.selectedImagePath] || p.backImagePath;
   if (backPath && !atState.overlayBack) {
     atState.overlayBack = _atMakeOverlayPlane(backPath, 0.55);
     atState.scene.add(atState.overlayBack);
   }
   _atApplyOverlayTransforms();
+  // If live-project is checked, swap mesh material to projective shader
+  const liveProj = document.getElementById('at-project-live')?.checked;
+  if (liveProj) _atApplyProjectiveToMesh(true);
 }
 
 // Apply stored per-side transforms to both overlays. Plane size is based
@@ -5506,6 +5662,7 @@ function _atUpdateOverlayTransform() {
   tf.ry = (parseFloat(document.getElementById('at-roty')?.value) || 0)
           * Math.PI / 180;
   _atApplyOverlayTransforms();
+  _atUpdateProjectiveUniforms();
 }
 
 // Switch which side the sliders control. Loads the stored values for
@@ -5582,6 +5739,16 @@ function openAlignTexture() {
   });
   // Default to FRONT
   _atSetActiveSide('front');
+  // Live project toggle
+  document.getElementById('at-project-live')?.addEventListener('change', (e) => {
+    _atApplyProjectiveToMesh(!!e.target.checked);
+  });
+  // Show overlay toggle
+  document.getElementById('at-show-overlay')?.addEventListener('change', (e) => {
+    const visible = !!e.target.checked;
+    if (atState.overlayFront) atState.overlayFront.visible = visible;
+    if (atState.overlayBack)  atState.overlayBack.visible = visible;
+  });
   // Init viewer + load current mesh (must be last, after modal is visible
   // so canvas has real dimensions)
   requestAnimationFrame(async () => {
