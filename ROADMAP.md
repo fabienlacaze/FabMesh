@@ -121,6 +121,90 @@ if (usedPct > gpuLimits.vram && freeGB < cost)
 
 ---
 
+## Cloud Boost — Phase 1 (low-GPU users + speedup option)
+
+**Goal**: allow users without a strong GPU (or anyone who wants a faster
+pipeline) to run SF3D / TripoSG / MVAdapter in the cloud instead of
+locally. Meshy-style. **Phase 1 uses an existing provider (Replicate or
+fal.ai) so we don't run our own servers yet.** No ongoing ops cost, user
+pays per mesh with their own credits.
+
+**Why Phase 1 first**: zero infrastructure. We keep local as default
+(offline, free, private). Cloud becomes an optional "turbo" toggle — no
+lock-in, no recurring backend cost while the userbase is < 1000 users.
+
+### User-facing behaviour
+
+- New "Compute" selector in Settings (or top bar): **Local GPU** / **Cloud Boost**.
+- Local stays exactly as today.
+- Cloud Boost asks once for a Replicate/fal.ai API key (stored encrypted in
+  `%APPDATA%/FabMesh/credentials.json`, never shipped).
+- When active, every pipeline step that has a cloud equivalent is routed
+  over HTTP instead of subprocess.
+- Progress bar streams from the provider's webhook.
+- If network fails → fall back to local automatically, show toast.
+
+### P1 — Required for Cloud Boost MVP
+
+- [ ] Provider selection: **start with Replicate** (best model catalog: SF3D,
+      TripoSG, Hunyuan3D, SDXL, MVAdapter all available as single-call APIs).
+      Keep fal.ai as fallback adapter.
+- [ ] `src/main/cloud/replicate_client.js` — wraps Replicate REST API with
+      retry + webhook polling + error normalization.
+- [ ] `scripts/cloud_sf3d_bridge.py` — same CLI signature as
+      `local_sf3d_bridge.py` but POSTs to Replicate and writes the returned
+      GLB to disk. Makes the swap a one-line change in `main.js`.
+- [ ] Same shim for `cloud_triposg_bridge.py`, `cloud_mvadapter_bridge.py`,
+      `cloud_sdxl_bridge.py` (image gen).
+- [ ] API key modal in Settings:
+  - Encrypts key with Electron `safeStorage` (OS keychain-backed)
+  - "Test key" button that runs a ping call
+  - Link to Replicate signup + $0-to-start explanation
+- [ ] Per-request cost estimate BEFORE firing (Replicate returns
+      `predict_time` estimates): show "~$0.008 · ~12s" next to the button.
+- [ ] Usage log in `%APPDATA%/FabMesh/cloud_usage.jsonl`: timestamp, model,
+      cost, duration. Surface "This month: $X.XX · N meshes" in Settings.
+- [ ] Health check on startup: if Cloud Boost is selected but API is
+      unreachable, auto-demote to Local GPU for the session.
+
+### P2 — Nice-to-have
+
+- [ ] "Hybrid" mode: local geometry (SF3D fast), cloud texture (Hunyuan3D
+      Paint) — gets us Hunyuan quality without the VRAM cost, without the
+      non-commercial EU restriction (since Hunyuan's EU ban only hits
+      operators hosting the model — end users calling a third-party's API
+      are usually OK, but verify legal wording).
+- [ ] Cost cap per day/month — user sets a $ ceiling, app blocks above it.
+- [ ] Offline queue: if network drops mid-pipeline, queue the job locally
+      and retry on reconnect.
+- [ ] Benchmark tab: compare local vs cloud timing + quality on a known
+      input, help users decide.
+
+### Phase 2 (out of scope for v1 release — track separately)
+
+Once Phase 1 is stable and we see >$50/month of cloud usage across users,
+consider running our own GPU workers on **RunPod Serverless** or
+**Lambda Cloud**:
+
+- $0.40/h for RTX 4090 → ~$0.013 per 2-min mesh vs Replicate's ~$0.05
+- Own pipeline version in lockstep with local (no "provider removed SF3D")
+- Requires: auth/billing (Stripe), job queue (Redis), Docker image
+  pipeline, monitoring (Sentry + Grafana), support SLA
+- Revisit Phase 2 scope when Cloud Boost MAU > 500.
+
+### Legal / commercialisation notes
+
+- **User-bring-your-own-API-key** model: we don't store or proxy their key,
+  they pay Replicate directly. Reduces our PCI/billing exposure to zero.
+- **Model licenses**: we're calling Replicate's hosted models, so OUR
+  binary only contains HTTP code — no Hunyuan weights, no nvdiffrast. All
+  non-commercial licenses become Replicate's problem, not ours.
+- **Privacy**: user photos transit to Replicate. Disclose in the "Cloud
+  Boost" modal + Privacy section of the store listing. Local stays
+  available for privacy-sensitive users.
+
+---
+
 ## Marketing / Store-listing prep (out of scope for coding, but track here)
 
 - [ ] Fab.com listing (title, short description, 4-5 screenshots, demo video)
