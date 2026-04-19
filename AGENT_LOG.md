@@ -5397,3 +5397,51 @@ Visible artefacts:
 - The bridge's `auto_align_rot_deg` propagation still works
   identically — this fix is orthogonal to the rotation_offset story.
 
+---
+
+## 2026-04-19 02:30 — AUTOFIT + multi-view baseline (a-utiliser-v3)
+
+### Configuration validée user
+- `FABMESH_PROJECT_MODE=atlas` (multi-view UV projection)
+- `FABMESH_MV_REUSE=mv/` (use existing 2-view dir, view_0=front, view_1=back)
+- `FABMESH_SF3D_NORMALIZE_ORIENT=0`
+- `FABMESH_TEXPROJ_FRAME_FIX=1` (the 5124f8c fix)
+- `FABMESH_TEXPROJ_SKIP_BACK_VFLIP=1` (back not vertically flipped)
+- `FABMESH_TEXPROJ_VIS_THRESH=0.5` (reject grazing-angle faces)
+- `FABMESH_AUTOFIT=1` + `FABMESH_AUTOFIT_RATIO=1.20` (scale mesh to fit
+  rembg silhouette of source photo, 20% larger than naive bbox match)
+
+### New env vars (added to local_sf3d_bridge.py)
+| Env var | Default | What |
+|---|---|---|
+| FABMESH_AUTOFIT | 0 | Compute photo bbox vs mesh XY bbox → scale + translate |
+| FABMESH_AUTOFIT_RATIO | 0.85 | Multiplier on top of autofit scale (1.20 best for child_ip45) |
+| FABMESH_ROT_OFFSET_DEG | 0 | Manual Y rotation (yaw) of mesh in degrees |
+| FABMESH_ROT_Z_DEG | 0 | Manual Z rotation (head tilt) of mesh in degrees |
+| FABMESH_TRANSLATE_X | 0 | Manual X translation in mesh units |
+| FABMESH_MESH_SCALE | 1.0 | Manual uniform scale multiplier |
+
+### And in texture_project.py
+| Env var | Default | What |
+|---|---|---|
+| FABMESH_TEXPROJ_FRAME_FIX | 1 | Drop legacy `-norms_cam` (5124f8c fix) |
+| FABMESH_TEXPROJ_VIS_THRESH | 0 | Reject faces with dot(N, cam_dir) < threshold |
+| FABMESH_TEXPROJ_SKIP_BACK_VFLIP | 0 | Don't vflip back-view azim≈180 photos |
+| FABMESH_TEXPROJ_UFLIP | 0 | Legacy U-flip (default off) |
+
+### Critical step before run
+The `mv/` dir contains `view_0.png..view_5.png` but for the 2-view
+ip45 schema the duplicates (view_1 = right_dup_front, view_3 =
+left_dup_back, view_4 = top_dup_front, view_5 = bottom_dup_back)
+are NOT real photos. To use only the 2 real photos:
+1. Edit `mv/views.json` to keep only entries with labels `front`/`back`.
+2. **Copy view_2.png → view_1.png** so view_1 IS the real back photo.
+   (texture_project iterates by file index, not by label.)
+
+### Known limitation
+Translate XY accurate only to ±5% on average. User says "if we can't
+do auto perfectly, we need a manual viewer in FabMesh to position
+textures and resize them." Next session: build that UI.
+
+
+

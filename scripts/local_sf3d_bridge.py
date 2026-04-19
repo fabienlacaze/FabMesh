@@ -488,6 +488,122 @@ def generate_3d(
         except Exception as _no_e:
             print(f"LOCAL_SF3D: orientation normalize failed ({_no_e})", flush=True)
 
+    # Manual rotation override via FABMESH_ROT_OFFSET_DEG (degrees around Y).
+    # Use for fine tuning when auto-align detects wrong angle; positive shifts
+    # multi-view azimuths (and mesh rotation) clockwise looking from +Y.
+    _manual_rot = os.environ.get('FABMESH_ROT_OFFSET_DEG', '').strip()
+    if _manual_rot:
+        try:
+            _m_deg = float(_manual_rot)
+            import numpy as _np3, trimesh as _tm3
+            _Rm = _tm3.transformations.rotation_matrix(_np3.radians(_m_deg), [0, 1, 0])
+            mesh.apply_transform(_Rm)
+            auto_align_rot_deg += _m_deg
+            print(f"LOCAL_SF3D: manual Y-rotation override {_m_deg}° applied "
+                  f"(total rotation_offset={auto_align_rot_deg}°)", flush=True)
+        except Exception as _mre:
+            print(f"LOCAL_SF3D: manual rotation failed ({_mre})", flush=True)
+
+    # Manual mesh scale via FABMESH_MESH_SCALE (multiplier).
+    # Use to compensate when source photo subject doesn't match mesh size.
+    # < 1.0 = mesh smaller = photo appears larger on mesh.
+    _ms = os.environ.get('FABMESH_MESH_SCALE', '').strip()
+    if _ms:
+        try:
+            _ms_v = float(_ms)
+            mesh.apply_scale(_ms_v)
+            print(f"LOCAL_SF3D: manual mesh scale x{_ms_v} applied", flush=True)
+        except Exception as _mse:
+            print(f"LOCAL_SF3D: mesh scale failed ({_mse})", flush=True)
+
+    # Auto-fit mesh to source photo silhouette via FABMESH_AUTOFIT=1.
+    # Both photo and mesh are normalized to coords [-1, 1]. We compare
+    # foreground bboxes and apply scale + XY translation to make them
+    # coincide. Photo bbox in pixel→[-1,1], mesh bbox already in mesh
+    # units which texture_project treats as world coords.
+    if os.environ.get('FABMESH_AUTOFIT', '0') == '1':
+        try:
+            import numpy as _npa
+            from PIL import Image as _PILa
+            _pp_path = output_path + '.preprocessed.png'
+            if not os.path.exists(_pp_path):
+                raise FileNotFoundError(_pp_path)
+            _pp = _npa.asarray(_PILa.open(_pp_path).convert('RGBA'))
+            _alpha = _pp[:, :, 3] > 16
+            _ys, _xs = _npa.where(_alpha)
+            if len(_ys) < 100:
+                raise ValueError('too few foreground pixels')
+            _ph_h, _ph_w = _pp.shape[:2]
+            _ph_y0, _ph_y1 = _ys.min(), _ys.max()
+            _ph_x0, _ph_x1 = _xs.min(), _xs.max()
+            # Photo silhouette in [-1,1] coords (image center = origin, +Y up)
+            _ph_cx = ((_ph_x0 + _ph_x1) / 2.0 / _ph_w) * 2.0 - 1.0
+            _ph_cy = -(((_ph_y0 + _ph_y1) / 2.0 / _ph_h) * 2.0 - 1.0)
+            _ph_height_norm = (_ph_y1 - _ph_y0) / _ph_h * 2.0  # [0..2]
+            # Mesh XY bbox (front view ortho projection)
+            _bb_min, _bb_max = mesh.bounds
+            _mesh_cx = (_bb_min[0] + _bb_max[0]) / 2.0
+            _mesh_cy = (_bb_min[1] + _bb_max[1]) / 2.0
+            _mesh_height = _bb_max[1] - _bb_min[1]
+            # Inverse scale: we want mesh_height_after = photo_height_norm
+            # so scale = photo_height_norm / mesh_height. But texture_project
+            # uses focal length, NOT direct mapping. Empirically the SF3D
+            # mesh native scale already matches a foreground_ratio=0.85
+            # photo when projected through texture_project. So we should
+            # only adjust if there's a real mismatch.
+            # Better approach: use ratio of (photo bbox / image full size)
+            # vs (mesh bbox in mesh coords). SF3D mesh has bounds ~[-0.5..+0.5]
+            # so height ~1.0 corresponds to "100% of camera frustum".
+            # Photo at fg_ratio=0.85 means subject takes 85% of image height.
+            # We want mesh height = fg_ratio (so mesh fills 85% of camera frame).
+            # Empirically: SF3D mesh native scale already matches the photo
+            # via internal focal length calibration. Just shrink the mesh
+            # slightly so the camera frustum captures head-to-toe + a bit
+            # of margin. Target ratio adjustable via FABMESH_AUTOFIT_RATIO.
+            _autofit_ratio = float(os.environ.get('FABMESH_AUTOFIT_RATIO', '0.85'))
+            _target_mesh_h = _ph_height_norm * 0.5 * _autofit_ratio
+            _scale_factor = _target_mesh_h / max(_mesh_height, 1e-6)
+            mesh.apply_scale(_scale_factor)
+            # Re-center mesh in XY
+            _bb_min2, _bb_max2 = mesh.bounds
+            _mesh_cx2 = (_bb_min2[0] + _bb_max2[0]) / 2.0
+            _mesh_cy2 = (_bb_min2[1] + _bb_max2[1]) / 2.0
+            _tx_world = _ph_cx * 0.5 - _mesh_cx2  # photo coord [-1..1] → mesh [-0.5..0.5]
+            _ty_world = _ph_cy * 0.5 - _mesh_cy2
+            mesh.apply_translation([_tx_world, _ty_world, 0])
+            print(f"LOCAL_SF3D: autofit — scale x{_scale_factor:.3f}, "
+                  f"translate=({_tx_world:+.3f}, {_ty_world:+.3f}) "
+                  f"[photo_h_norm={_ph_height_norm:.3f}, mesh_h={_mesh_height:.3f}]",
+                  flush=True)
+        except Exception as _afe:
+            print(f"LOCAL_SF3D: autofit failed ({_afe})", flush=True)
+
+    # Manual X translation via FABMESH_TRANSLATE_X (mesh units).
+    # Use to compensate when the source photo's subject is off-center.
+    _tx = os.environ.get('FABMESH_TRANSLATE_X', '').strip()
+    if _tx:
+        try:
+            _tx_v = float(_tx)
+            mesh.apply_translation([_tx_v, 0, 0])
+            print(f"LOCAL_SF3D: manual X-translation {_tx_v} applied", flush=True)
+        except Exception as _txe:
+            print(f"LOCAL_SF3D: X-translation failed ({_txe})", flush=True)
+
+    # Manual Z-axis rotation (head-tilt on shoulder) via FABMESH_ROT_Z_DEG.
+    # Useful when the input photo subject tilts left/right and the back photo
+    # needs to match. Positive = tilt mesh head toward +X (looks like right
+    # ear closer to right shoulder when viewed from front).
+    _manual_rotz = os.environ.get('FABMESH_ROT_Z_DEG', '').strip()
+    if _manual_rotz:
+        try:
+            _z_deg = float(_manual_rotz)
+            import numpy as _np4, trimesh as _tm4
+            _Rz = _tm4.transformations.rotation_matrix(_np4.radians(_z_deg), [0, 0, 1])
+            mesh.apply_transform(_Rz)
+            print(f"LOCAL_SF3D: manual Z-rotation {_z_deg}° applied", flush=True)
+        except Exception as _mze:
+            print(f"LOCAL_SF3D: Z-rotation failed ({_mze})", flush=True)
+
     mesh.export(output_path, include_normals=True)
 
     # ------------------------------------------------------------------

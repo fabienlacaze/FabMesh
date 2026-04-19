@@ -346,6 +346,14 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         # get projected color instead of falling back to blurry SF3D.
         vis = vis ** 0.8
 
+        # 2026-04-19: optional strict threshold to prevent front photo from
+        # bleeding onto side faces (cause of "face on profile" bug in 2-view
+        # mode). Faces with dot(normal, cam_dir) < threshold are rejected
+        # entirely (vis=0) instead of getting attenuated contribution.
+        _vis_thresh = float(os.environ.get('FABMESH_TEXPROJ_VIS_THRESH', '0'))
+        if _vis_thresh > 0:
+            vis = np.where(vis < _vis_thresh, 0.0, vis)
+
         return v_colors, vis
 
     # -------------------------------------------------------------------
