@@ -123,6 +123,13 @@ def run(mesh_path, image_path, out_dir, num_views=4, num_steps=20,
     device = 'cuda'
     dtype = torch.float16
 
+    # Release any stale CUDA allocations from prior subprocess runs.
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+    free_mb = torch.cuda.mem_get_info()[0] // (1024 * 1024)
+    log(f'VRAM free at start: {free_mb} MB')
     log(f'loading SDXL + MVAdapter (num_views={num_views})')
     pipe = MVAdapterI2MVSDXLPipeline.from_pretrained(
         base_model,
