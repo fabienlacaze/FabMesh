@@ -5264,8 +5264,17 @@ async function _atInitViewport() {
   const canvas = document.getElementById('at-preview-canvas');
   const wrap = document.getElementById('at-preview-canvas-wrap');
   if (!canvas || !wrap) return;
-  const w = wrap.clientWidth || 380;
-  const h = wrap.clientHeight || 380;
+  // Force a layout flush so flex sizing is computed before we measure
+  void wrap.offsetWidth;
+  let w = wrap.clientWidth || 800;
+  let h = wrap.clientHeight || 560;
+  if (w < 50 || h < 50) {
+    // Layout not ready yet; defer one frame
+    await new Promise(r => requestAnimationFrame(r));
+    w = wrap.clientWidth || 800;
+    h = wrap.clientHeight || 560;
+  }
+  console.log('[align-tex] viewport size', w, h);
   if (!atState.renderer) {
     atState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     atState.renderer.setSize(w, h, false);
