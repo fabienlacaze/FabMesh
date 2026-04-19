@@ -5576,7 +5576,7 @@ function _atBuildProjectiveMaterial() {
           // FRONT face of mesh: project front photo
           vec2 uv = project(vWorldPos, uFrontTx, uFrontTy, uFrontSc, uFrontRy);
           if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            color = texture2D(uFront, vec2(uv.x, 1.0 - uv.y)).rgb;
+            color = texture2D(uFront, uv).rgb;
           }
         } else {
           // BACK face of mesh: project back photo (X flipped so left-right
@@ -5584,7 +5584,7 @@ function _atBuildProjectiveMaterial() {
           vec2 uv = project(vec3(-vWorldPos.x, vWorldPos.y, vWorldPos.z),
                             uBackTx, uBackTy, uBackSc, uBackRy);
           if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            color = texture2D(uBack, vec2(uv.x, 1.0 - uv.y)).rgb;
+            color = texture2D(uBack, uv).rgb;
           }
         }
         gl_FragColor = vec4(color, 1.0);
