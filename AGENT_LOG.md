@@ -5622,6 +5622,31 @@ Fix: BLIP image captioning step before back gen.
 
 Both models BSD-3, commercial OK. Inference ~3s on RTX 5080.
 
+### 2026-04-19 — ControlNet OpenPose locks T-pose for back-view
+
+User reported pose drift between front and back (slight bras-baissés,
+etc.) breaks projective texturing. Solution: ControlNet OpenPose with
+a hardcoded T-pose back-view skeleton image.
+
+Files:
+- `scripts/_make_back_skeleton.py`: generates a 1024x1024 OpenPose
+  skeleton (18 keypoints, T-pose, back-view orientation). Output:
+  `scripts/_back_tpose_skeleton.png`. Run once.
+- `scripts/generate_back_view.py`: switched from
+  `StableDiffusionXLPipeline` to `StableDiffusionXLControlNetPipeline`
+  with `ControlNetModel` from `xinsir/controlnet-openpose-sdxl-1.0`
+  (Apache 2.0). Skeleton image passed as `image` arg with
+  `controlnet_conditioning_scale=0.85`.
+
+Models:
+- xinsir/controlnet-openpose-sdxl-1.0 (Apache 2.0, ~5 GB DL)
+- existing RealVisXL_V4.0 + IPAdapter Plus
+
+Now front+back have IDENTICAL pose (skeleton-locked) so projective
+texturing on the mesh aligns properly.
+
+Cost: ~5 GB DL first run, +5s inference per back gen (~20s total).
+
 
 
 

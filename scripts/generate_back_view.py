@@ -23,21 +23,43 @@ from PIL import Image
 
 
 def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
-                  ip_scale=0.55, steps=30, seed=424242, name_suffix=''):
+                  ip_scale=0.55, steps=30, seed=424242, name_suffix='',
+                  cn_scale=0.85):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
-          f'n={num_images} ip_scale={ip_scale}', flush=True)
+          f'n={num_images} ip_scale={ip_scale} cn_scale={cn_scale}', flush=True)
 
-    from diffusers import StableDiffusionXLPipeline
+    from diffusers import (
+        StableDiffusionXLControlNetPipeline,
+        ControlNetModel,
+        StableDiffusionXLPipeline,
+    )
     from transformers import CLIPVisionModelWithProjection
 
-    print('[back-view] loading RealVisXL + IPAdapter Plus...', flush=True)
+    # Load OpenPose skeleton (T-pose back) — generated once by
+    # scripts/_make_back_skeleton.py.
+    skel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              '_back_tpose_skeleton.png')
+    if not os.path.exists(skel_path):
+        # Fallback: regenerate
+        from _make_back_skeleton import make_tpose_back
+        make_tpose_back().save(skel_path)
+    skel_img = Image.open(skel_path).convert('RGB')
+    print(f'[back-view] using ControlNet OpenPose skeleton: {skel_path}',
+          flush=True)
+
+    print('[back-view] loading ControlNet OpenPose + RealVisXL + IPAdapter...',
+          flush=True)
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
         'h94/IP-Adapter', subfolder='models/image_encoder',
         torch_dtype=torch.float16)
-
-    pipe = StableDiffusionXLPipeline.from_pretrained(
+    controlnet = ControlNetModel.from_pretrained(
+        'xinsir/controlnet-openpose-sdxl-1.0',
+        torch_dtype=torch.float16,
+    )
+    pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
         'SG161222/RealVisXL_V4.0',
+        controlnet=controlnet,
         torch_dtype=torch.float16, variant='fp16', use_safetensors=True,
         image_encoder=image_encoder)
     pipe.unet.to(torch.float16)
@@ -104,6 +126,8 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
         t0 = time.time()
         img = pipe(
             prompt=prompt, negative_prompt=neg,
+            image=skel_img,                # ControlNet conditioning
+            controlnet_conditioning_scale=cn_scale,
             ip_adapter_image=ref_img,
             num_inference_steps=steps, guidance_scale=7.0,
             height=1024, width=1024,
