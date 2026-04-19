@@ -18,7 +18,7 @@ import torch
 from PIL import Image
 
 
-def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.35,
+def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0.15,
                   steps=30, seed=424242, name_suffix=''):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
@@ -56,14 +56,15 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1, ip_scale=0
     # would otherwise replicate the front pose).
     # Same exact identity (same person, same outfit) but VIEWED FROM BEHIND.
     # IPAdapter at scale 0.35 keeps clothing/colours; prompt forces 180° rotation.
+    # Strong directional prompt; IP scale lowered drastically (0.15) so
+    # IPAdapter only contributes identity/colors, not pose.
     base = prompt_hint if prompt_hint else 'character'
     prompt = (
-        f'EXACT same {base} as reference image, IDENTICAL outfit and clothing '
-        f'colors, BUT viewed strictly FROM BEHIND, back view, rear view, '
-        f'subject turned 180 degrees so the camera sees only the BACK OF HEAD, '
-        f'BACK OF NECK, BACK OF SHOULDERS, BACK OF JACKET, BACK OF PANTS, '
-        f'no face visible at all, hair from behind, full body T-pose, '
-        f'plain grey background, studio lighting, sharp focus, 8k'
+        f'rear view photograph of a person from behind, back of {base}, '
+        f'we see only the back of the head, hair from behind, no face, '
+        f'shoulders and back visible, T-pose with arms extended sideways, '
+        f'full body shot, plain grey background, studio lighting, '
+        f'photorealistic, sharp focus, 8k, masterpiece'
     )
     # Aggressively reject any front-facing output (IPAdapter tends to clone
     # the front pose; we explicitly forbid it).
