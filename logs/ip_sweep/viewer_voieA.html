@@ -21,26 +21,26 @@
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
-<h1>fille_afghanne — Voie B (SF3D + MVAdapter 6v + cos^4 + Telea) vs baselines</h1>
+<h1>fille_afghanne — Voie B v2 (cam ortho alignée) vs v1 (mix perspective)</h1>
 <div class="row">
   <div class="col">
     <div class="col-title">FRONT photo (input)</div>
     <img class="ref" src="_mirror_front.png">
   </div>
   <div class="col">
-    <div class="col-title"><b>SF3D natif</b> (baseline 1)</div>
+    <div class="col-title"><b>SF3D natif</b> (baseline)</div>
     <model-viewer src="_afghan_sf3d.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
   <div class="col">
-    <div class="col-title"><b>TripoSG v1</b> (baseline 2, leopard)</div>
-    <model-viewer src="_afghan_triposg.glb" auto-rotate camera-controls
+    <div class="col-title"><b>Voie B v1</b> — cam perspective (2 visages, dos cassé)<br>sharp=47%</div>
+    <model-viewer src="_afghan_mvbake_sf3d.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
   <div class="col" style="border-left:3px solid #4cd964">
-    <div class="col-title"><span class="new"><b>Voie B</b> — SF3D + MVAdapter 6 vues @ 512 + cos^4 + Telea<br>
-    sharp=47%, 165s total</span></div>
-    <model-viewer src="_afghan_mvbake_sf3d.glb" auto-rotate camera-controls
+    <div class="col-title"><span class="new"><b>Voie B v2</b> — cam ortho alignée MVAdapter + NO_FRONT<br>
+    sharp=57%, 170s total</span></div>
+    <model-viewer src="_afghan_mvbake_sf3d_v2.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
 </div>

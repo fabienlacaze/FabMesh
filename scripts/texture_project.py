@@ -371,6 +371,7 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     #   [(0,0), (90,0), (180,0), (270,0), (0,+90), (0,-90)]
     # This adds TOP and BOTTOM coverage which Zero123 cannot produce.
     MULTIVIEW_VIEWS = None
+    _schema = None  # full schema dict when available (used for orthographic mode)
     if multiview_dir:
         _schema_path = os.path.join(multiview_dir, 'views.json')
         if os.path.exists(_schema_path):
@@ -379,9 +380,10 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
                     _schema = json.load(_sf)
                 MULTIVIEW_VIEWS = [(float(v['azim']), float(v['elev']))
                                    for v in _schema.get('views', [])]
-                log(f'using views.json schema (engine={_schema.get("engine","?")}): {MULTIVIEW_VIEWS}')
+                log(f'using views.json schema (engine={_schema.get("engine","?")}, projection={_schema.get("projection","perspective")}): {MULTIVIEW_VIEWS}')
             except Exception as _e:
                 log(f'views.json read failed: {_e}, falling back to Z123 schema')
+                _schema = None
     if MULTIVIEW_VIEWS is None:
         MULTIVIEW_VIEWS = [
             (30.0,   20.0),  # view_0
@@ -417,8 +419,14 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
 
     views = []  # list of (image_path, azim_deg, elev_deg, priority)
 
-    # Always include the front view at (0, 0)
-    views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
+    # Include the original HD front photo by default. Skip it when
+    # FABMESH_TEXPROJ_NO_FRONT=1 (used by voie B / MVAdapter where view_0
+    # IS the front and mixing in the perspective HD photo on top of the
+    # MVAdapter ortho view creates double-face bleed).
+    _include_front_photo = (
+        os.environ.get('FABMESH_TEXPROJ_NO_FRONT', '0') != '1')
+    if _include_front_photo:
+        views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
 
     # If the bridge applied an auto-align rotation around Y between SF3D
     # inference and this projection, we must shift every multi-view azimuth
@@ -448,8 +456,39 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
         ', '.join(f'az={v[1]:.0f}/el={v[2]:.0f}(p={v[3]})' for v in views))
 
     # -------------------------------------------------------------------
-    # Step 2b: Project all views and accumulate weighted colors per vertex
+    # Orthographic path: when views.json declares projection=orthographic
+    # (MVAdapter / voie B), use the per-view w2c + proj_mtx matrices and
+    # the load_mesh rescale+axis transforms so projection lines up
+    # exactly with what the diffusion model saw.
     # -------------------------------------------------------------------
+    _is_ortho = (_schema is not None
+                 and _schema.get('projection') == 'orthographic')
+    if _is_ortho:
+        _m2s = np.array(_schema['mesh2std'], dtype=np.float64)  # (3,3)
+        _rescale = _schema.get('mesh_rescale_factor')  # scalar or None
+        _offset = _schema.get('mesh_offset')
+        _offset = np.array(_offset, dtype=np.float64) if _offset else None
+
+        # Apply the EXACT same mesh transforms MVAdapter applied:
+        #   v' = mesh2std @ ((v - offset) / max(|v|) * 0.5)
+        # where rescale_factor = max(|v_centered|) / 0.5
+        # so v_scaled = v_centered / rescale_factor.
+        _v_std = vertices.copy()
+        if _offset is not None:
+            _v_std = _v_std - _offset
+        if _rescale is not None and _rescale > 0:
+            _v_std = _v_std / _rescale
+        _v_std = (_m2s @ _v_std.T).T  # (V, 3) in MVAdapter std frame
+        _n_std = (_m2s @ normals.T).T
+        log(f'orthographic mode: rescale={_rescale}, offset={_offset}')
+
+        # Build per-view w2c + proj (4x4) tensors.
+        _view_mats = []
+        for v in _schema['views']:
+            w2c = np.array(v['w2c'], dtype=np.float64)
+            proj = np.array(v['proj_mtx'], dtype=np.float64)
+            _view_mats.append((w2c, proj))
+
     n_verts = len(vertices)
     accum_color = np.zeros((n_verts, 3), dtype=np.float64)
     accum_weight = np.zeros(n_verts, dtype=np.float64)
@@ -572,55 +611,77 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # makes multi-view projection actually work on surfaces invisible from front
     # (e.g. back of head, sides).
     view_data = []
-    for img_path, azim_deg, elev_deg, priority in views:
+    for _vi, (img_path, azim_deg, elev_deg, priority) in enumerate(views):
         vsrc_img = Image.open(img_path).convert('RGBA')
         vsrc_w, vsrc_h = vsrc_img.size
         vsrc_pixels = np.asarray(vsrc_img)
 
-        # Full orbit: azimuth around Y + elevation around X (Zero123++
-        # alternates +20 / -10 elevation per view — projecting these
-        # as pure azimuth produced the mosaic atlas bug).
-        R_w2c_v = R_w2c_base @ rot_x(elev_deg) @ rot_y(-azim_deg)
-        cam_pos_w = (rot_y(azim_deg) @ rot_x(-elev_deg) @
-                     np.array([distance, 0.0, 0.0]))
-        t_w2c_v = -R_w2c_v @ cam_pos_w
-
-        v_cs = (R_w2c_v @ verts_cam.T).T + t_w2c_v
-        n_cs = (R_w2c_v @ norms_cam.T).T
-        z = v_cs[:, 2]
-        safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
-        p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
-        # Run W: conditional V-flip (see same block above around l.281)
-        # Run Y: removed X's U-flip. Lateral mirror fix moved to
-        # build_mv_dir (pre-flip back.png horizontally).
-        _is_back_azim_mv = abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0
-        if (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
-                and _is_back_azim_mv):
-            p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5  # no V flip
+        if _is_ortho:
+            # --- Orthographic path: use w2c + proj_mtx from views.json ---
+            # Skip front HD photo (if present) when no matching ortho matrix
+            # exists. Front photo (if kept) goes through the legacy path
+            # below by falling into the else branch.
+            _ortho_idx = _vi - (1 if _include_front_photo else 0)
+            if _ortho_idx < 0 or _ortho_idx >= len(_view_mats):
+                # Front HD photo in ortho schema: use perspective path.
+                use_perspective = True
+            else:
+                use_perspective = False
+                w2c, proj = _view_mats[_ortho_idx]
+                # Homogeneous transform: clip = proj @ w2c @ [v; 1]
+                v_h = np.concatenate([_v_std,
+                                      np.ones((len(_v_std), 1))], axis=1)
+                clip = (proj @ w2c @ v_h.T).T  # (V, 4)
+                # Ortho: w=1, just divide for safety
+                w = np.where(np.abs(clip[:, 3]) < 1e-8, 1.0, clip[:, 3])
+                ndc = clip[:, :3] / w[:, np.newaxis]  # (V, 3) in [-1, 1]
+                # Convert NDC -> image UV (texture_project convention:
+                # p_u in [0,1] left-to-right, p_v in [0,1] top-to-bottom).
+                p_u = 0.5 * (ndc[:, 0] + 1.0)
+                # NDC y in [-1, +1] with +1 at top. Image: top=0.
+                p_v = 0.5 * (1.0 - ndc[:, 1])
+                # Visibility via view-space normal. n_view = R_w2c @ n_std.
+                R_w2c = w2c[:3, :3]
+                n_cs = (R_w2c @ _n_std.T).T
+                # Camera space pos = w2c @ v. Camera looks along -Z in cam
+                # space, so visible faces have n_cs.z > 0.
+                norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
+                vvis = np.clip(norms_n[:, 2], 0, 1)
+                _bake_exp = float(os.environ.get('FABMESH_TEXPROJ_BAKE_EXP', '4.0'))
+                vvis = vvis ** _bake_exp
+                # Out-of-frame vertices: zero visibility.
+                in_frame = ((p_u >= 0) & (p_u <= 1) &
+                            (p_v >= 0) & (p_v <= 1))
+                vvis = vvis * in_frame.astype(np.float64)
         else:
-            p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
-        # Same U-flip as in project_single_view — calibration stage 4 on
-        # the GT cube confirmed the front face texture was horizontally
-        # mirrored. The mirror is in the SF3D → GLB axis convention
-        # interacting with our camera basis; simplest fix is to flip U.
-        # 2026-04-17 re-test on CRM output: the U-flip that was correct
-        # on Z123 calibration in April now DUPLICATES the face onto the
-        # back of SF3D meshes (chat_vert: visage visible sur front AND
-        # back). Default flipped to OFF. Set FABMESH_TEXPROJ_UFLIP=1 to
-        # re-enable the legacy behaviour.
-        if os.environ.get('FABMESH_TEXPROJ_UFLIP') == '1':
-            p_u = 1.0 - p_u
+            use_perspective = True
 
-        cam_dirs = -v_cs
-        cam_dirs_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
-        norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
-        # Hunyuan-inspired bake_exp: cos(n,view)^exp. exp=4 downweights
-        # oblique projections aggressively (anti-leopard on fragmented
-        # UV atlases) — but ONLY helps with 6+ views. With 1-2 views it
-        # kills visibility on flanks. Default kept at 0.8 (original);
-        # set FABMESH_TEXPROJ_BAKE_EXP=4.0 when using 6+ multi-views.
-        _bake_exp = float(os.environ.get('FABMESH_TEXPROJ_BAKE_EXP', '0.8'))
-        vvis = np.clip(np.sum(norms_n * cam_dirs_n, axis=1), 0, 1) ** _bake_exp
+        if use_perspective:
+            # --- Legacy perspective path (SF3D cam) ---
+            R_w2c_v = R_w2c_base @ rot_x(elev_deg) @ rot_y(-azim_deg)
+            cam_pos_w = (rot_y(azim_deg) @ rot_x(-elev_deg) @
+                         np.array([distance, 0.0, 0.0]))
+            t_w2c_v = -R_w2c_v @ cam_pos_w
+
+            v_cs = (R_w2c_v @ verts_cam.T).T + t_w2c_v
+            n_cs = (R_w2c_v @ norms_cam.T).T
+            z = v_cs[:, 2]
+            safe_z = np.where(np.abs(z) < 1e-8, -1e-8, z)
+            p_u = focal * v_cs[:, 0] / (-safe_z) + 0.5
+            _is_back_azim_mv = abs(((azim_deg - 180.0 + 180.0) % 360.0) - 180.0) < 10.0
+            if (os.environ.get('FABMESH_TEXPROJ_SKIP_BACK_VFLIP') == '1'
+                    and _is_back_azim_mv):
+                p_v = focal * v_cs[:, 1] / (-safe_z) + 0.5
+            else:
+                p_v = 1.0 - (focal * v_cs[:, 1] / (-safe_z) + 0.5)
+            if os.environ.get('FABMESH_TEXPROJ_UFLIP') == '1':
+                p_u = 1.0 - p_u
+
+            cam_dirs = -v_cs
+            cam_dirs_n = cam_dirs / (np.linalg.norm(cam_dirs, axis=1, keepdims=True) + 1e-10)
+            norms_n = n_cs / (np.linalg.norm(n_cs, axis=1, keepdims=True) + 1e-10)
+            _bake_exp = float(os.environ.get('FABMESH_TEXPROJ_BAKE_EXP', '0.8'))
+            vvis = np.clip(np.sum(norms_n * cam_dirs_n, axis=1), 0, 1) ** _bake_exp
 
         view_data.append({
             'pixels': vsrc_pixels, 'w': vsrc_w, 'h': vsrc_h,

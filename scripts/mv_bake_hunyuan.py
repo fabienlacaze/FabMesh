@@ -110,6 +110,9 @@ def step_bake(mesh_path, front_image, out_glb, mv_dir, tex_res=1024,
     env['FABMESH_TEXPROJ_UV_INPAINT'] = '1'
     # Re-packing already done (mesh already has xatlas UVs) → skip.
     env['FABMESH_UV_REPACK'] = '0'
+    # MVAdapter's view_0 IS the front — don't also inject the HD source
+    # photo (creates double-face bleed since they have different cameras).
+    env['FABMESH_TEXPROJ_NO_FRONT'] = '1'
     proc = subprocess.run(
         [sys.executable, os.path.join(SCRIPTS, 'texture_project.py'),
          mesh_path, front_image, out_glb, str(tex_res),

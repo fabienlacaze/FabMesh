@@ -164,15 +164,27 @@ def run(mesh_path, image_path, out_dir, num_views=4, num_steps=20,
 
     # Cameras + mesh render
     elev, azim_mva, _ = camera_schema(num_views)
+    cam_distance = 1.8
+    cam_L, cam_R, cam_B, cam_T = -0.55, 0.55, -0.55, 0.55
     cameras = get_orthogonal_camera(
         elevation_deg=elev,
-        distance=[1.8] * num_views,
-        left=-0.55, right=0.55, bottom=-0.55, top=0.55,
+        distance=[cam_distance] * num_views,
+        left=cam_L, right=cam_R, bottom=cam_B, top=cam_T,
         azimuth_deg=azim_mva,
         device=device,
     )
     ctx = NVDiffRastContextWrapper(device=device)
-    mesh = load_mesh(mesh_path, rescale=True, device=device)
+    # rescale=True normalises the mesh (vertices /= max(|v|) * 0.5) and
+    # swaps axes (+Y mesh up -> +Z std up). We MUST pass the same
+    # transform info to texture_project so its back-projection lines up.
+    mesh_obj = load_mesh(mesh_path, rescale=True, device=device,
+                         return_transform=True)
+    # load_mesh returns (textured_mesh, offset, scale) when return_transform
+    # is True. move_to_center defaults to False so offset may be None.
+    if isinstance(mesh_obj, tuple):
+        mesh, mesh_offset, mesh_scale = mesh_obj
+    else:
+        mesh, mesh_offset, mesh_scale = mesh_obj, None, None
     render_out = render(
         ctx, mesh, cameras,
         height=height, width=width,
@@ -213,9 +225,45 @@ def run(mesh_path, image_path, out_dir, num_views=4, num_steps=20,
     for i, img in enumerate(images):
         img.save(os.path.join(out_dir, f'view_{i}.png'))
 
-    # Write views.json in FabMesh convention
+    # Write views.json with FULL camera info for alignment-exact back
+    # projection. texture_project will use 'projection=orthographic'
+    # + w2c + proj_mtx + mesh transforms to recreate the EXACT same
+    # pixel->world mapping MVAdapter used.
     import json
-    schema = {'engine': 'mvadapter', 'views': fabmesh_schema(num_views)}
+
+    # Extract numpy tensors
+    w2c_np = cameras.w2c.detach().cpu().numpy()          # (N, 4, 4)
+    proj_mtx_np = cameras.proj_mtx.detach().cpu().numpy()  # (N, 4, 4)
+
+    # mesh2std: load_mesh applies  v_std = mesh2std @ v_mesh  (after
+    # centering + rescaling). For defaults up=+y, front=+x:
+    #   mesh2std = [[1,0,0], [0,0,1], [0,-1,0]]
+    # We compute it dynamically in case defaults change in future.
+    up_vec = np.array([0, 1, 0], dtype=np.float32)     # +y
+    front_vec = np.array([1, 0, 0], dtype=np.float32)  # +x
+    y_vec = np.cross(up_vec, front_vec)
+    std2mesh = np.stack([front_vec, y_vec, up_vec], axis=0).T
+    mesh2std = np.linalg.inv(std2mesh)
+
+    schema = {
+        'engine': 'mvadapter',
+        'projection': 'orthographic',
+        'cam_distance': float(cam_distance),
+        'cam_bounds': [float(cam_L), float(cam_R),
+                       float(cam_B), float(cam_T)],
+        # Mesh transforms applied by load_mesh(rescale=True)
+        'mesh_rescale_factor': float(mesh_scale) if mesh_scale is not None else None,
+        'mesh_offset': mesh_offset.tolist() if mesh_offset is not None else None,
+        'mesh2std': mesh2std.tolist(),
+        'views': [
+            {
+                **fabmesh_schema(num_views)[i],
+                'w2c': w2c_np[i].tolist(),
+                'proj_mtx': proj_mtx_np[i].tolist(),
+            }
+            for i in range(num_views)
+        ],
+    }
     with open(os.path.join(out_dir, 'views.json'), 'w') as f:
         json.dump(schema, f, indent=2)
     log(f'wrote {num_views} views + views.json to {out_dir}')
