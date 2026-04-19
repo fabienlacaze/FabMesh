@@ -162,6 +162,53 @@ frontal HD**. Combiner les deux selon leurs points forts.
 
 ---
 
+---
+
+## Suite de la session du 2026-04-19 soir — raffinements voie hybrid
+
+### Essai 7 — fille_francaise voie HYBRID (baseline)
+- Pipeline: SF3D (front RealVis bras collés) → MVAdapter 6 vues → voie C overwrite view_0 + view_2 HD 1024².
+- Résultat: **sharp=62%, 194s**. Mesh **cassé** aux épaules — front photo avec bras le long du corps donne un mesh SF3D sans bras écartés, mais back RealVis force T-pose → incohérence pose.
+- Bug visible: doublement de tête, trous blancs aux épaules.
+
+### Essai 8 — `generate_front_tpose.py`
+- Nouveau script: RealVis + ControlNet OpenPose T-pose front + IPAdapter depuis le front original + rembg + center sur canvas 1024².
+- Deux modes: `--prompt` (text2img) et `--from-image` (img2img avec IPA, garde identité).
+- Modifs `mvadapter_runner.py`: `torch.cuda.empty_cache()` + log VRAM free au start pour éviter OOM inter-subprocess.
+- Résultat: front T-pose parfaite (bras étendus, centrée, pieds visibles) en **15.5s**.
+
+### Essai 9 — voie HYBRID + front T-pose forcé
+- Même pipeline qu'essai 7 mais avec `ref_0_tpose.png` comme front input.
+- Résultat: **sharp=56%, 211s**. Mesh beaucoup plus cohérent en pose. sharp baisse car bras étendus = plus de surface à texturer = plus de trous Telea (pas un défaut de qualité).
+
+### Essai 10 — fix back IPA
+- Problème observé sur essai 9: la **v2 back HD** montre une fille différente (ponytail lisse, autre identité). IPAdapter ip_scale=0.55 insuffisant pour la new front T-pose.
+- Tentative 1: `ip_scale=0.85, cn_scale=1.05` → back devient **front view** (IPA domine CN).
+- Tentative 2 **✅**: `ip_scale=0.70, cn_scale=1.25` → back correct (vraie vue arrière, cheveux lâchés cohérents, même robe).
+- Prompt enrichi: "long loose hair, same hair color, same outfit as reference".
+
+### Essai 11 — blend accum mode (texture_project)
+- Problème: démarcations nettes entre zones front/back/latéraux sur l'atlas ("best-view-wins" = winner-takes-all par pixel).
+- Modif `texture_project.py`: nouveau env `FABMESH_TEXPROJ_BLEND=accum` qui accumule `sum(w*rgb) / sum(w)` de toutes les vues qui voient un pixel, au lieu de garder la meilleure seule. Transitions lisses sans coût.
+- Pas encore testé visuellement (à faire en combo avec voie D1).
+
+### Essai 12 (en cours) — voie D1 : latéraux en img2img depuis front HD
+- Problème: v1/v3 MVAdapter 512² sont soft + décentrés + pose héritée.
+- Idée (user): utiliser le **front HD T-pose** comme init img2img, piloté par le skeleton OpenPose latéral (azim=90 / 270).
+- Nouveau script `scripts/fabmesh_lateral_refine.py`:
+  - `StableDiffusionXLControlNetImg2ImgPipeline` (img2img + CN)
+  - Init = view_0 front HD 1024²
+  - control_image = skeleton projeté depuis la caméra ortho right/left (`_tpose_joints_3d.render_skeleton_for_camera`)
+  - IPAdapter ref = même front HD (identity anchor)
+  - Params: `strength=0.80, cn_scale=1.15, ip_scale=0.50`
+- Prochain test: appliquer ce refine au mv_dir existant puis re-baker en mode `accum`.
+
+### Licences (voie C + D1)
+- Toutes les briques: **commercial-safe** (RealVis XL RAIL++-M, IPAdapter Apache 2.0, ControlNet OpenPose xinsir Apache 2.0, rembg MIT, SF3D Stability Community <$1M).
+- Seul bloqueur restant: `nvdiffrast` dans voie B/hybrid pour les latéraux MVAdapter. Si D1 remplace les 4 latéraux MVAdapter par img2img maison, **voie D1 pure = 100% commercial-safe** (pas besoin de MVAdapter → pas besoin de nvdiffrast).
+
+---
+
 ## Prochaines étapes
 
 - [ ] **Replacer nvdiffrast par pyrender** → voie B/hybrid 100%
