@@ -5826,6 +5826,34 @@ Audit complet (24 IPC handlers + 15 scripts). Résultats:
 - Clone Stamp: garde l'image initiale en mémoire au lieu de la version
   courante
 
+### 2026-04-19 — Fixes UI: Paint, Clone, Blur, multiview-bar
+
+3 bugs UI fixés (agent diagnosis):
+
+1. **Paint Tools** (`paint-save` handler ~4791): appelait
+   `refreshProjectImages(state.currentProject)` — fonction inexistante.
+   ReferenceError silencieusement avalée par catch chain → pas de
+   refresh = user croit que rien n'a été appliqué. Replaced by
+   `await reloadCurrentProject()`.
+
+2. **Clone Stamp** (`populateWorkspace` ~990): `_activeMultiviewKey`
+   n'était pas reset au reload, donc `_showMultiviewBar` ré-attachait
+   `_activeMultiview` à un ancien chemin multiview. `editTarget()`
+   priorisait alors cette frame figée → Clone clonait depuis v0.
+   Fix: reset `_activeMultiviewKey = null` + pre-set sync defaults
+   `previewImagePath` / `selectedImagePath` = images[0] avant l'async
+   `renderImageVersions`.
+
+3. **Blur tool**: passait `imagePath: tgt` au handler
+   `save-image-data-url` qui attend `basePath`. Corrigé.
+
+4. **Petit viewer FRONT/BACK bar manquante**: `populateWorkspace`
+   appelait `renderImageVersions(p)` sans await, et le 1er
+   `_checkMultiviewForCurrentImage()` se déclenchait avant que
+   `p._backPhotos` ne soit peuplé par le scan disque. Ajout d'un
+   `.then(_checkMultiviewForCurrentImage)` pour re-checker une fois
+   le rendu async terminé.
+
 
 
 

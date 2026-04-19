@@ -991,14 +991,32 @@ function populateWorkspace(p) {
   // (index 0 because the lists are sorted newest first).
   p.selectedImagePath = null;
   p._activeMultiview = null;
+  p._activeMultiviewKey = null;  // <-- also reset, otherwise the bar's
+                                  // stored key from a previous session
+                                  // re-attaches to the OLD multiview path
+                                  // and Clone Stamp picks v0 instead of
+                                  // the latest version
   p.previewImagePath = null;
   p.selectedMeshPath = null;
   p.previewMeshPath = null;
+  // SYNC default: pre-set the latest image as preview so editTarget()
+  // never sees null while the async renderImageVersions completes.
+  // Otherwise tools like Clone Stamp / Paint can fire with a stale or
+  // null target during the brief NSFW-check race.
+  if (p.images && p.images.length > 0) {
+    p.previewImagePath = p.images[0].path;
+    p.selectedImagePath = p.images[0].path;
+  }
   // If a single item exists, it's automatically the one used for the next step.
   // Nothing extra to do here — renderImageVersions/renderMeshVersions handle it.
 
-  // Image step
-  renderImageVersions(p);
+  // Image step. renderImageVersions is async (NSFW check) — chain a
+  // multiview-bar refresh once it settles, otherwise the small viewer's
+  // FRONT/BACK bar can stay hidden after a cold reload because the
+  // p._backPhotos map was populated AFTER the first showStep1Preview.
+  renderImageVersions(p).then(() => {
+    _checkMultiviewForCurrentImage();
+  }).catch(() => {});
   if (p.images.length > 0) {
     setStepStatus(1, 'done');
     showStep1Preview(p.images[0].path);
@@ -4209,7 +4227,7 @@ document.getElementById('blur-save')?.addEventListener('click', async () => {
   showToast('Saving...', 'info', 1500);
   try {
     const dataUrl = bCanvas.toDataURL('image/png');
-    const r = await API.saveImageDataUrl({ imagePath: tgt, dataUrl, suffix: 'blur' });
+    const r = await API.saveImageDataUrl({ basePath: tgt, dataUrl, suffix: 'blur' });
     if (r?.success) { showToast('Saved!', 'success'); await reloadCurrentProject(); }
     else showToast('Save failed: ' + (r?.error || ''), 'error');
   } catch (e) { showToast('Error: ' + e.message, 'error'); }
@@ -4788,20 +4806,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Save
-document.getElementById('paint-save')?.addEventListener('click', () => {
+document.getElementById('paint-save')?.addEventListener('click', async () => {
   if (!paintState.imgPath || !_paintMgr) return;
   const dataUrl = _paintMgr.toDataURL();
-  window.meshyAPI.saveImageDataUrl({ basePath: paintState.imgPath, dataUrl, suffix: 'painted' })
-    .then(result => {
-      if (result && result.success) {
-        showToast('Painted version saved!', 'success');
-        _closePaint();
-        if (state.currentProject) refreshProjectImages(state.currentProject);
-      } else {
-        showToast('Save failed: ' + ((result && result.error) || 'unknown'), 'error');
-      }
-    })
-    .catch(e => showToast('Save error: ' + e.message, 'error'));
+  try {
+    const result = await window.meshyAPI.saveImageDataUrl({
+      basePath: paintState.imgPath, dataUrl, suffix: 'painted',
+    });
+    if (result && result.success) {
+      showToast('Painted version saved!', 'success');
+      _closePaint();
+      // refreshProjectImages doesn't exist — use reloadCurrentProject
+      // which rebuilds the version strip + previews.
+      if (state.currentProject) await reloadCurrentProject();
+    } else {
+      showToast('Save failed: ' + ((result && result.error) || 'unknown'), 'error');
+    }
+  } catch (e) {
+    showToast('Save error: ' + e.message, 'error');
+  }
 });
 
 // ----- Mesh step -----
