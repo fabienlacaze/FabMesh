@@ -1,0 +1,181 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>FabMesh — multivues comparées</title>
+<style>
+  html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
+            font-family:system-ui;width:100%;overflow-x:hidden}
+  h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
+     border-bottom:1px solid #333;position:sticky;top:0;z-index:10}
+  .set{display:flex;border-bottom:2px solid #333;width:100%;
+       min-height:200px}
+  .set.latest{border-left:4px solid #4cd964}
+  .meta{flex:0 0 200px;padding:10px;background:#151515;
+        font-size:11px;line-height:1.45;box-sizing:border-box;
+        overflow-y:auto}
+  .meta b{color:#87d9ff}
+  .meta .new{color:#4cd964}
+  .meta .stat{color:#ffd700}
+  .meta ul{margin:3px 0;padding-left:14px}
+  .grid6{flex:1 1 auto;display:grid;
+         grid-template-columns:repeat(6,1fr);
+         gap:2px;background:#000;min-width:0}
+  .grid6 .cell{position:relative;background:#1b1b1b;overflow:hidden;
+               aspect-ratio:1/1}
+  .grid6 .cell img{width:100%;height:100%;object-fit:contain;display:block}
+  .grid6 .cell::after{content:attr(data-label);position:absolute;
+         bottom:3px;left:3px;right:3px;font-size:10px;color:#eee;
+         background:rgba(0,0,0,0.8);padding:2px 5px;border-radius:2px}
+  .tag{display:inline-block;padding:1px 6px;border-radius:3px;
+       font-size:10px;margin-right:4px}
+  .tag.c{background:#ffd70022;color:#ffd700}
+  .tag.b{background:#ff8c1a22;color:#ff8c1a}
+  .tag.bad{background:#e7484822;color:#e74848}
+  .tag.ok{background:#4cd96422;color:#4cd964}
+  .tag.e{background:#a855f722;color:#a855f7}
+  .raw{flex:1 1 auto;padding:8px;background:#000}
+  .raw img{max-width:100%;max-height:380px;object-fit:contain;display:block;
+           margin:0 auto}
+</style>
+</head>
+<body>
+<h1>Multivues générées — comparaison side-by-side par engine</h1>
+
+<!-- ============ FILLE FRANCAISE ============ -->
+<h1>fille_francaise</h1>
+
+<!-- voie C pure -->
+<div class="set">
+  <div class="meta">
+    <b>Voie C pure</b><br>
+    <span class="tag c">RealVis+IPA+CN</span><br>
+    <span class="stat">6× 1024² séquentiels</span>
+    <p>Front original (bras collés)</p>
+    <p><span class="tag bad">bug</span> latéraux = fronts</p>
+  </div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front"><img src="_francaise_voiec_v0.png"></div>
+    <div class="cell" data-label="v1 right"><img src="_francaise_voiec_v1.png"></div>
+    <div class="cell" data-label="v2 back"><img src="_francaise_voiec_v2.png"></div>
+    <div class="cell" data-label="v3 left"><img src="_francaise_voiec_v3.png"></div>
+    <div class="cell" data-label="v4 top"><img src="_francaise_voiec_v4.png"></div>
+    <div class="cell" data-label="v5 bot"><img src="_francaise_voiec_v5.png"></div>
+  </div>
+</div>
+
+<!-- hybrid (front non T-pose) -->
+<div class="set">
+  <div class="meta">
+    <b>Hybrid (no T-pose)</b><br>
+    <span class="tag b">MVA 4 lat 512²</span><span class="tag c">C 2 HD 1024²</span>
+    <p>Front original bras collés</p>
+    <p><span class="tag bad">bug</span> back T-pose ≠ front pose</p>
+  </div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD"><img src="_francaise_hybrid_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_hybrid_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_hybrid_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_hybrid_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_hybrid_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_hybrid_v5.png"></div>
+  </div>
+</div>
+
+<!-- hybrid + T-pose -->
+<div class="set">
+  <div class="meta">
+    <b>Hybrid + T-pose</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span>
+    <p>Front T-pose forcé via generate_front_tpose</p>
+    <p><span class="tag ok">ok</span> pose cohérente</p>
+    <p><span class="tag bad">bug</span> back ip=0.55 → ponytail ≠ front</p>
+  </div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD"><img src="_francaise_tpose_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_tpose_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_tpose_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_tpose_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_tpose_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_tpose_v5.png"></div>
+  </div>
+</div>
+
+<!-- accum: T-pose + back tuned -->
+<div class="set latest">
+  <div class="meta">
+    <b>Accum / Stack (final)</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD tuned</span><br>
+    <span class="stat new">back ip=0.70 cn=1.25</span>
+    <p>Set utilisé par bake accum + stack</p>
+  </div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD"><img src="_francaise_accum_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_accum_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_accum_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_accum_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_accum_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_accum_v5.png"></div>
+  </div>
+</div>
+
+<!-- voie E sheet (échec) -->
+<div class="set">
+  <div class="meta">
+    <b>Voie E sheet (ÉCHEC)</b><br>
+    <span class="tag e">RealVis 1 pass</span><br>
+    <span class="stat">1536×1024 grid 3×2</span>
+    <p>1 seul appel SDXL sur sheet de skeletons</p>
+    <p><span class="tag bad">échec</span> SDXL ne respecte pas la grille → multi-perso</p>
+  </div>
+  <div class="raw">
+    <img src="_mvbake_views/_sheet_raw.png" alt="sheet raw">
+  </div>
+</div>
+
+<!-- ============ PAMELA ============ -->
+<h1>pamela</h1>
+
+<div class="set latest">
+  <div class="meta">
+    <b>Hybrid + accum</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span>
+    <p>Front Pamela bikini rouge (T-pose dès le 1er coup)</p>
+  </div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD"><img src="_pamela_accum_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_pamela_accum_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_pamela_accum_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_pamela_accum_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_pamela_accum_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_pamela_accum_v5.png"></div>
+  </div>
+</div>
+
+<!-- ============ VIEWS BRUTES ============ -->
+<h1>Sheets brutes (artefacts intermédiaires)</h1>
+
+<div class="set">
+  <div class="meta">
+    <b>Voie B MVAdapter grid</b><br>
+    <span class="tag b">512² × 6 panels</span>
+    <p>Grid 1×6 produit nativement par MVAdapter (=concat horizontal des 6 vues)</p>
+  </div>
+  <div class="raw">
+    <img src="_mvbake_views/_mvadapter_grid.png" alt="MVAdapter grid">
+  </div>
+</div>
+
+<div class="set">
+  <div class="meta">
+    <b>Voie E skeleton sheet (input)</b><br>
+    <span class="tag e">3×2 grid</span>
+    <p>Skeletons OpenPose projetés depuis les 6 caméras ortho</p>
+  </div>
+  <div class="raw">
+    <img src="_mvbake_views/_skeleton_sheet.png" alt="skeleton sheet">
+  </div>
+</div>
+
+</body>
+</html>
