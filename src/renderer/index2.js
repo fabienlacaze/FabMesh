@@ -2803,6 +2803,29 @@ document.getElementById('ws-copy-prompt')?.addEventListener('click', () => {
     .catch(() => showToast('Copy failed', 'error'));
 });
 
+// Enhance prompt in the "New project" modal (same logic as the one in the
+// workspace, using np-* inputs instead of ws-* inputs).
+document.getElementById('np-enhance-prompt')?.addEventListener('click', () => {
+  const textarea = document.getElementById('np-prompt');
+  const raw = textarea.value.trim();
+  if (!raw) { showToast('Type a description first.', 'error'); return; }
+  const assetType = document.getElementById('np-asset-type')?.value || 'character';
+  const assetStyle = document.getElementById('np-asset-style')?.value || 'realistic';
+  const alreadyEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(raw);
+  if (alreadyEnhanced) {
+    showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
+    return;
+  }
+  textarea.value = buildFullPrompt(raw, assetType, assetStyle);
+  const btn = document.getElementById('np-enhance-prompt');
+  if (btn) {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; Enhanced';
+    btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 1500);
+  }
+});
+
 document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
   const textarea = document.getElementById('ws-prompt');
   const raw = textarea.value.trim();

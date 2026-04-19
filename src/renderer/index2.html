@@ -573,7 +573,10 @@
             </select>
           </div>
         </div>
-        <label>Description (prompt)</label>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="margin:0;">Description (prompt)</label>
+          <button id="np-enhance-prompt" class="ghost-btn" style="font-size:11px; padding:2px 8px;" title="Enhance the prompt with style and quality keywords">&#10024; Enhance</button>
+        </div>
         <textarea id="np-prompt" rows="3" placeholder="An orc warrior with leather armor, full-body pose..."></textarea>
         <div class="modal-actions">
           <button class="ghost-btn" id="np-cancel">Cancel</button>
