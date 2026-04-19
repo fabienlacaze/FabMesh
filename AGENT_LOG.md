@@ -5585,6 +5585,23 @@ Future: build a CLIP captioning step to enrich the prompt hint with
 auto-detected outfit description, which should narrow the residual
 drift further.
 
+### 2026-04-19 — back-view uses RAW user prompt + lightbox FRONT/BACK bar
+
+User insight: "si je ne mets pas de prompt enhanced j'ai un meilleur
+résultat". Confirmed in logs — when user clicks Enhance, the long
+asset-style template ("RTS unit, T-pose neutral stance, plain white
+background, even studio lighting...") gets passed to back-view gen
+and fights the IPAdapter photo reference.
+
+Fix: stash the original raw user input in textarea.dataset.rawPrompt
+before Enhance overwrites it. Back-view gen then uses rawPrompt (e.g.
+"fille afghanne") instead of the enhanced version. Front gen stays on
+enhanced template (it's appropriate for from-scratch SDXL).
+
+Also fixed: lightbox FRONT/BACK bar didn't appear in 2-view mode
+(only worked with full Z123 _multiviews dir). Now shows for either
+hasFullMv OR hasBack, and the BACK button loads the back photo.
+
 
 
 

@@ -2525,9 +2525,11 @@ async function openLightbox(imgPath) {
   // Show multiview bar in lightbox if available for this image
   const lbMvBar = document.getElementById('lb-multiview-bar');
   if (lbMvBar) {
-    if (p?._multiviews?.[imgPath]) {
+    const hasFullMv = !!(p?._multiviews?.[imgPath]);
+    const hasBack   = !!(p?._backPhotos?.[imgPath]);
+    if (hasFullMv || hasBack) {
       lbMvBar.classList.remove('hidden');
-      lbMvBar.dataset.dir = p._multiviews[imgPath];
+      lbMvBar.dataset.dir = hasFullMv ? p._multiviews[imgPath] : '';
       lbMvBar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
       // Respect whichever angle the user had selected in the small
       // preview so small and big viewer stay in sync.
@@ -2537,10 +2539,14 @@ async function openLightbox(imgPath) {
       if (activeBtn) activeBtn.classList.add('mv-active');
       // If active key is non-front, swap the lightbox image to that view
       if (currentKey && currentKey !== 'front') {
-        const filename = _mvViewMap[currentKey];
-        if (filename) {
-          const viewPath = p._multiviews[imgPath] + '/' + filename + '.png';
-          // Defer so the img element is in the DOM when we set src
+        let viewPath = null;
+        if (currentKey === 'back' && hasBack) {
+          viewPath = p._backPhotos[imgPath];
+        } else if (hasFullMv) {
+          const filename = _mvViewMap[currentKey];
+          if (filename) viewPath = p._multiviews[imgPath] + '/' + filename + '.png';
+        }
+        if (viewPath) {
           setTimeout(() => {
             const lbImg = document.getElementById('lightbox-2-img');
             if (lbImg) lbImg.src = 'file:///' + viewPath.replace(/\\/g, '/') + '?t=' + Date.now();
@@ -2560,21 +2566,28 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
   const bar = document.getElementById('lb-multiview-bar');
   const dir = bar?.dataset.dir;
   const view = btn.dataset.view;
-  if (!dir || !view) return;
+  if (!view) return;
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
   btn.classList.add('mv-active');
   const p = state.currentProject;
+  const currentFront = _lightboxImages[_lightboxIndex];
   let imgPath;
   if (view === 'front') {
-    imgPath = _lightboxImages[_lightboxIndex] || (dir + '/input.png');
+    imgPath = currentFront || (dir ? dir + '/input.png' : null);
     if (p) { p._activeMultiview = null; p._activeMultiviewKey = 'front'; }
-  } else {
+  } else if (view === 'back' && p?._backPhotos?.[currentFront]) {
+    // 2-view: use the RealVis-generated back photo for this front
+    imgPath = p._backPhotos[currentFront];
+    p._activeMultiview = imgPath;
+    p._activeMultiviewKey = 'back';
+  } else if (dir) {
     const filename = _mvViewMap[view] || 'input';
     imgPath = dir + '/' + filename + '.png';
     // Persist BOTH the path (for tools) AND the key (so small and big
     // viewers stay in sync when the user flips between them).
     if (p) { p._activeMultiview = imgPath; p._activeMultiviewKey = view; }
   }
+  if (!imgPath) return;
   document.getElementById('lightbox-2-img').src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   // Also sync the SMALL preview so when the lightbox closes the
   // user sees the same view they were looking at.
@@ -2844,6 +2857,9 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
     showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
     return;
   }
+  // Stash the original raw prompt so the back-view generator can use it
+  // (clean subject description, no asset-style pollution).
+  textarea.dataset.rawPrompt = raw;
   const enhanced = buildFullPrompt(raw, assetType, assetStyle);
   textarea.value = enhanced;
   // Persist to localStorage
@@ -2913,10 +2929,16 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         if (multiView && r.images?.length > 0) {
           try {
             showToast('Generating back photos (RealVis + IPAdapter)...', 'info', 10000);
+            // Use the RAW user prompt (subject only, no asset-style template)
+            // for the back view. The enhanced prompt's 'RTS unit, T-pose
+            // neutral stance, plain white background' tokens hurt IPAdapter
+            // because they fight the photo reference style.
+            const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
+                              || userPrompt || '';
             for (const imgPath of r.images) {
               const bvResult = await window.meshyAPI.generateBackView({
                 frontImage: imgPath,
-                promptHint: userPrompt || '',
+                promptHint: rawPrompt,
                 numImages: 1,
               });
               if (bvResult?.success && bvResult.paths?.length) {
