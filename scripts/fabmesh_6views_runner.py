@@ -251,13 +251,16 @@ def generate_view(pipe, ref_img, skel_img, prompt, neg_prompt,
 
 
 def build_views_json(out_dir, mesh_path,
-                     cam_distance=1.8, L=-0.55, R=0.55, B=-0.55, T=0.55):
+                     cam_distance=1.8, L=-0.55, R=0.55, B=-0.55, T=0.55,
+                     indices=None):
     """Write views.json with the same contract as mvadapter_runner.py
     so texture_project's ortho path works unchanged."""
     rescale_factor, offset, mesh2std = load_mesh_transforms(mesh_path)
     proj = get_ortho_proj(L, R, B, T)
     views = []
     for i, (logical_azim, elev, *_rest) in enumerate(VIEW_SPECS):
+        if indices is not None and i not in indices:
+            continue
         mva_azim = logical_azim - 90
         c2w = get_c2w(mva_azim, elev, cam_distance)
         w2c = np.linalg.inv(c2w)
@@ -406,10 +409,13 @@ def run(mesh_path, front_image, out_dir,
                 w2c, proj, size=size, draw_invisible=True).save(
                     os.path.join(dbg, f'skel_{i}.png'))
 
-    # views.json: only write/overwrite in full mode. In hybrid mode,
-    # MVAdapter has already written the canonical schema.
-    if not only_front_back:
-        build_views_json(out_dir, mesh_path)
+    # views.json: list ALL 6 views in hybrid mode (MVAdapter wrote
+    # view_1/3/4/5 too), but ONLY the indices we generated in voie F
+    # (only_front_back=True, MVAdapter not called → only view_0+view_2
+    # exist on disk and texture_project mustn't try to load missing
+    # files).
+    json_indices = [0, 2] if only_front_back else None
+    build_views_json(out_dir, mesh_path, indices=json_indices)
     log('DONE')
 
 

@@ -184,7 +184,7 @@
 </div>
 
 <!-- v6: hybrid + T-pose + STACK -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v6 — HYBRID + T-pose + STACK</b> <span class="tag ok">latest</span><br>
     <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
@@ -206,6 +206,34 @@
     <div class="cell" data-label="v3 MVA"><img src="_francaise_accum_v3.png"></div>
     <div class="cell" data-label="v4 MVA"><img src="_francaise_accum_v4.png"></div>
     <div class="cell" data-label="v5 MVA"><img src="_francaise_accum_v5.png"></div>
+  </div>
+</div>
+
+<!-- v7: VOIE F = SF3D 2-view AUGMENT + voie C HD overlay -->
+<div class="version latest">
+  <div class="meta">
+    <b>v7 — VOIE F</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C HD</span><br>
+    <span class="stat new">sharp=100% · 158s · 100% commercial-safe</span>
+    <ul>
+      <li>1. generate_back_view.py (RealVis+IPA+CN T-pose back)</li>
+      <li>2. SF3D 2-view AUGMENT (front bake + back additif natif)</li>
+      <li>3. voie C HD front+back 1024² (RealVis+IPA+CN T-pose)</li>
+      <li>4. bake stack avec FABMESH_TEXPROJ_BASE_ATLAS=1 (atlas SF3D = floor, voie C = overlay)</li>
+      <li><b>Pas de MVAdapter, pas de nvdiffrast</b></li>
+    </ul>
+    <p><span class="tag ok">gain</span> atlas SF3D natif fournit lat/top/bot, voie C HD recouvre front/back</p>
+    <p><span class="tag ok">gain</span> sharp=100% (0 trous Telea, atlas complètement texturé)</p>
+    <p><span class="tag ok">licences</span> RealVis RAIL++-M + IPA Apache 2.0 + CN Apache 2.0 + SF3D Stability Community</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_v0.png"></div>
+    <div class="cell" data-label="(SF3D atlas)"><img src="_francaise_voiefab_tex.png"></div>
+    <div class="cell" data-label="v2 HD voie C"><img src="_francaise_voiefab_v2.png"></div>
+    <div class="cell" data-label="(atlas final)"><img src="_francaise_voiefab_tex.png"></div>
+    <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_proj_debug.png"></div>
+    <div class="cell" data-label="—"></div>
   </div>
 </div>
 
