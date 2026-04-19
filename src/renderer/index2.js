@@ -3036,39 +3036,54 @@ function _offerMultiviewRegenerate() {
   const modal = document.createElement('div');
   modal.id = 'mv-regen-modal';
   modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:10000; display:flex; align-items:center; justify-content:center;';
+  const isBack = info.viewKey === 'back';
   modal.innerHTML = `
     <div style="background:#1a1a2a; border:1px solid #3a3a4d; border-radius:8px; padding:20px; max-width:480px;">
-      <h3 style="margin:0 0 8px; color:#fff;">Regenerate multi-views?</h3>
+      <h3 style="margin:0 0 8px; color:#fff;">Regenerate back view?</h3>
       <p style="color:#aaa; margin:0 0 16px; font-size:13px;">
         You edited the <b>${info.viewKey.toUpperCase()}</b> view.
-        The other 5 angles still reflect the pre-edit state and may look
-        inconsistent with it during 3D texturing.
+        ${isBack
+          ? 'The back is now out of sync with the front photo it was generated from.'
+          : 'The back view was generated from the previous front, it may now look inconsistent.'}
       </p>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button id="mv-regen-keep" class="ghost-btn">Keep single-view edit</button>
-        <button id="mv-regen-do" class="primary-btn">Regenerate all 6 from front</button>
+        <button id="mv-regen-keep" class="ghost-btn">Keep current</button>
+        <button id="mv-regen-do" class="primary-btn">Regenerate back from front</button>
       </div>
       <p style="color:#777; font-size:11px; margin:10px 0 0;">
-        Regenerating replaces all 6 multi-views (CRM/Z123 runs on the current front image).
-        Your local edit on ${info.viewKey} will be lost.
+        Regenerates the back view via RealVis + IPAdapter + ControlNet
+        OpenPose using the current front image. Takes ~25 s.
       </p>
     </div>`;
   document.body.appendChild(modal);
   document.getElementById('mv-regen-keep').onclick = () => modal.remove();
   document.getElementById('mv-regen-do').onclick = async () => {
     modal.remove();
-    // Relaunch multi-view on the current front image. Target = the
-    // image referenced by the current project preview (post-edit).
     const frontImg = p.previewImagePath || p.selectedImagePath;
     if (!frontImg) {
       showToast('No front image to regenerate from.', 'error');
       return;
     }
-    showToast('Regenerating multi-views...', 'info', 3000);
+    showToast('Regenerating back view...', 'info', 5000);
     try {
-      const r = await API.generateMultiview({ imagePath: frontImg });
-      if (r?.success) {
-        showToast('Multi-views regenerated.', 'success');
+      // Optional outfit captioning (same as the auto pipeline)
+      let outfitDesc = '';
+      try {
+        const cap = await window.meshyAPI.captionImage({ imagePath: frontImg });
+        if (cap?.success && cap.caption) outfitDesc = cap.caption;
+      } catch (_) {}
+      const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
+                        || (p.prompt || '');
+      const enrichedHint = outfitDesc ? `${rawPrompt}, ${outfitDesc}` : rawPrompt;
+      const r = await window.meshyAPI.generateBackView({
+        frontImage: frontImg,
+        promptHint: enrichedHint,
+        numImages: 1,
+      });
+      if (r?.success && r.paths?.length) {
+        if (!p._backPhotos) p._backPhotos = {};
+        p._backPhotos[frontImg] = r.paths[0];
+        showToast('Back view regenerated.', 'success');
         await reloadCurrentProject();
       } else {
         showToast('Regeneration failed: ' + (r?.error || 'unknown'), 'error');
