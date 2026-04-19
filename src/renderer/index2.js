@@ -5404,6 +5404,40 @@ function openAlignTexture() {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', _atUpdateOverlayTransform);
   });
+  // Overlay opacity slider
+  const opacityEl = document.getElementById('at-opacity');
+  const opacityValEl = document.getElementById('at-opacity-val');
+  if (opacityEl) {
+    const updateOpacity = () => {
+      const v = parseFloat(opacityEl.value);
+      if (atState.overlay) atState.overlay.material.opacity = v / 100;
+      if (opacityValEl) opacityValEl.textContent = `${v}%`;
+    };
+    opacityEl.addEventListener('input', updateOpacity);
+    updateOpacity();
+  }
+  // View buttons (front/right/back/left/top/bottom/iso)
+  document.querySelectorAll('#at-view-buttons button[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => _atSetCameraView(btn.dataset.view));
+  });
+}
+
+function _atSetCameraView(view) {
+  if (!atState.camera || !atState.controls) return;
+  const d = (atState.overlayDistance || 1) * 2.5;
+  const positions = {
+    front:  [0, 0, d],
+    back:   [0, 0, -d],
+    right:  [d, 0, 0],
+    left:   [-d, 0, 0],
+    top:    [0, d, 0],
+    bottom: [0, -d, 0],
+    iso:    [d * 0.7, d * 0.6, d * 0.7],
+  };
+  const pos = positions[view] || positions.front;
+  atState.camera.position.set(pos[0], pos[1], pos[2]);
+  atState.controls.target.set(0, 0, 0);
+  atState.controls.update();
   // Init viewer + load current mesh
   requestAnimationFrame(async () => {
     await _atInitViewport();
