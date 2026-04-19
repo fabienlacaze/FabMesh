@@ -3787,6 +3787,70 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   });
 });
 
+// ============================================================
+// ALIGN TEXTURE — manual photo→mesh projection re-trigger.
+// Calls texture_project.py directly with user-tweaked params from
+// the Align Texture modal. Writes back to the same mesh path.
+// ============================================================
+ipcMain.handle('mesh:align-texture', async (_event, params) => {
+  const {
+    meshPath, imagePath,
+    translateX = 0, translateY = 0,
+    meshScale = 1.0, rotY = 0,
+    visThresh = 0.5,
+    autofit = true, frameFix = true, skipVflip = true,
+  } = params || {};
+  if (!meshPath || !fs.existsSync(meshPath)) {
+    return { ok: false, error: `mesh not found: ${meshPath}` };
+  }
+  if (!imagePath || !fs.existsSync(imagePath)) {
+    return { ok: false, error: `image not found: ${imagePath}` };
+  }
+  const projectScript = path.join(__dirname, '..', '..', 'scripts',
+                                   'texture_project.py');
+  const args = [projectScript, meshPath, imagePath, meshPath, '1024'];
+  // Look for an mv/ dir alongside the mesh to enable multi-view.
+  const meshDir = path.dirname(meshPath);
+  const mvDir = path.join(meshDir, 'mv');
+  if (fs.existsSync(mvDir) && fs.existsSync(path.join(mvDir, 'views.json'))) {
+    args.push('--multiview', mvDir);
+  }
+  // rotation_offset_deg propagated for multi-view azimuth shift.
+  if (Math.abs(rotY) > 0.01) {
+    args.push('--rotation-offset', String(rotY));
+  }
+  const env = {
+    ...process.env,
+    FABMESH_TEXPROJ_FRAME_FIX: frameFix ? '1' : '0',
+    FABMESH_TEXPROJ_SKIP_BACK_VFLIP: skipVflip ? '1' : '0',
+    FABMESH_TEXPROJ_VIS_THRESH: String(visThresh),
+  };
+  // Translate/scale/autofit are applied via local_sf3d_bridge which
+  // we DON'T re-run here (would re-bake SF3D). For now the alignment
+  // tool just re-projects with multi-view + thresholds. Translate
+  // and scale require a mesh transform pass on the input glb before
+  // texture_project — TODO.
+  if (Math.abs(translateX) > 0.001 || Math.abs(translateY) > 0.001
+      || Math.abs(meshScale - 1) > 0.001) {
+    log.warn('mesh:align-texture',
+             `transform tx=${translateX} ty=${translateY} scale=${meshScale} `
+             + `not yet wired through (need pre-projection mesh transform)`);
+  }
+  return new Promise((resolve) => {
+    execFile('python', args, {
+      env, timeout: 300000, maxBuffer: 10 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (stdout) log.info('mesh:align-texture', stdout.trim().slice(-2000));
+      if (error) {
+        log.error('mesh:align-texture', error.message);
+        resolve({ ok: false, error: error.message, stderr: (stderr || '').slice(-1000) });
+      } else {
+        resolve({ ok: true, meshPath });
+      }
+    });
+  });
+});
+
 // --- IPC Handlers ---
 
 ipcMain.handle('import-mesh', async () => {

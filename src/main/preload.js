@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   getFileInfo: (filePath) => ipcRenderer.invoke('get-file-info', filePath),
   importMesh: () => ipcRenderer.invoke('import-mesh'),
   meshTool: (opts) => ipcRenderer.invoke('mesh-tool', opts),
+  alignTexture: (opts) => ipcRenderer.invoke('mesh:align-texture', opts),
   saveBuffer: (opts) => ipcRenderer.invoke('save-buffer', opts),
   logToFile: (line) => ipcRenderer.send('renderer-log', line),
   generateMultiview: (opts) => ipcRenderer.invoke('generate-multiview', opts),

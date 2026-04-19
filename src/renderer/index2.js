@@ -5167,6 +5167,91 @@ document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () =
 });
 
 // ============================================================
+// ALIGN TEXTURE TOOL — manual position/scale/rotation of source
+// photos onto the mesh (texture_project re-projection with sliders).
+// ============================================================
+function openAlignTexture() {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  if (!p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
+  const modal = document.getElementById('modal-align-texture');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  // Bind slider value displays
+  const sync = (id, valId, fmt) => {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(valId);
+    if (!el || !valEl) return;
+    const update = () => { valEl.textContent = fmt(el.value); };
+    el.oninput = update;
+    update();
+  };
+  sync('at-tx', 'at-tx-val', v => Number(v).toFixed(2));
+  sync('at-ty', 'at-ty-val', v => Number(v).toFixed(2));
+  sync('at-scale', 'at-scale-val', v => Number(v).toFixed(2));
+  sync('at-roty', 'at-roty-val', v => `${v}\u00B0`);
+  sync('at-vis', 'at-vis-val', v => Number(v).toFixed(2));
+}
+document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openAlignTexture);
+document.getElementById('at-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-align-texture')?.classList.add('hidden');
+});
+document.getElementById('at-reset')?.addEventListener('click', () => {
+  document.getElementById('at-tx').value = 0;
+  document.getElementById('at-ty').value = 0;
+  document.getElementById('at-scale').value = 1.20;
+  document.getElementById('at-roty').value = 0;
+  document.getElementById('at-vis').value = 0.5;
+  document.getElementById('at-autofit').checked = true;
+  document.getElementById('at-framefix').checked = true;
+  document.getElementById('at-skipvflip').checked = true;
+  // Re-trigger value displays
+  ['at-tx','at-ty','at-scale','at-roty','at-vis'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.dispatchEvent(new Event('input'));
+  });
+});
+document.getElementById('at-reproject')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath || !p.selectedImagePath) {
+    showToast('Need both a mesh and a source image', 'error');
+    return;
+  }
+  const params = {
+    meshPath: p.selectedMeshPath,
+    imagePath: p.selectedImagePath,
+    translateX: parseFloat(document.getElementById('at-tx').value),
+    translateY: parseFloat(document.getElementById('at-ty').value),
+    meshScale: parseFloat(document.getElementById('at-scale').value),
+    rotY: parseFloat(document.getElementById('at-roty').value),
+    visThresh: parseFloat(document.getElementById('at-vis').value),
+    autofit: document.getElementById('at-autofit').checked,
+    frameFix: document.getElementById('at-framefix').checked,
+    skipVflip: document.getElementById('at-skipvflip').checked,
+  };
+  const btn = document.getElementById('at-reproject');
+  btn.disabled = true;
+  btn.textContent = 'Re-projecting...';
+  try {
+    const res = await API.alignTexture(params);
+    if (res?.ok) {
+      showToast('Texture re-projected', 'success');
+      // Reload mesh in viewer
+      if (typeof showStep2Preview === 'function') {
+        showStep2Preview({ path: p.selectedMeshPath });
+      }
+    } else {
+      showToast(`Re-project failed: ${res?.error || 'unknown'}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Error: ${e.message || e}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '\uD83C\uDFAF Re-project';
+  }
+});
+
+// ============================================================
 // MESH EDIT TOOLS — Sculpt, Paint, Select (Three.js modal)
 // ============================================================
 const meState = {

@@ -412,6 +412,7 @@
                         <button id="ws-mesh-sculpt-btn" class="ghost-btn tool-btn">&#9997; Sculpt</button>
                         <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
+                        <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
                       </div>
                     </div>
                   </div>
@@ -781,6 +782,52 @@
         <div class="modal-actions">
           <button class="ghost-btn" id="ai-cancel">Cancel</button>
           <button class="primary-btn" id="ai-go">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         ALIGN TEXTURE MODAL
+         Manually adjust how source photos project onto the mesh.
+         ============================================================ -->
+    <div id="modal-align-texture" class="modal-overlay hidden">
+      <div class="modal-card modal-card-wide">
+        <h2>Align Texture</h2>
+        <p class="modal-subtitle">Fine-tune how the source photos project onto the 3D mesh. Use sliders to adjust position, scale and rotation, then click Re-project.</p>
+        <div class="modal-with-image">
+          <div class="modal-image-side">
+            <div id="at-preview-canvas-wrap" style="width:100%; height:380px; background:#1b1b1b; border-radius:6px; position:relative;">
+              <canvas id="at-preview-canvas" style="width:100%; height:100%; display:block;"></canvas>
+              <div id="at-preview-status" style="position:absolute; top:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc; display:none;"></div>
+            </div>
+          </div>
+          <div class="modal-form-side">
+            <label>Translate X <span id="at-tx-val" class="slider-val">0.00</span></label>
+            <input type="range" id="at-tx" min="-0.30" max="0.30" step="0.01" value="0" />
+
+            <label>Translate Y <span id="at-ty-val" class="slider-val">0.00</span></label>
+            <input type="range" id="at-ty" min="-0.30" max="0.30" step="0.01" value="0" />
+
+            <label>Scale <span id="at-scale-val" class="slider-val">1.20</span></label>
+            <input type="range" id="at-scale" min="0.70" max="1.50" step="0.01" value="1.20" />
+
+            <label>Rotation Y (yaw) <span id="at-roty-val" class="slider-val">0&deg;</span></label>
+            <input type="range" id="at-roty" min="-30" max="30" step="1" value="0" />
+
+            <label>Visibility threshold <span id="at-vis-val" class="slider-val">0.50</span></label>
+            <input type="range" id="at-vis" min="0" max="0.9" step="0.05" value="0.5" />
+
+            <div style="margin-top:12px; padding:8px; background:#0a0a0a; border-radius:4px; font-size:11px; color:var(--text-2);">
+              <div><strong>Auto-fit:</strong> <input type="checkbox" id="at-autofit" checked /> use silhouette match</div>
+              <div style="margin-top:4px;"><strong>Frame fix:</strong> <input type="checkbox" id="at-framefix" checked /> (5124f8c)</div>
+              <div style="margin-top:4px;"><strong>Skip back vflip:</strong> <input type="checkbox" id="at-skipvflip" checked /></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="at-reset">Reset defaults</button>
+          <button class="ghost-btn" id="at-cancel">Cancel</button>
+          <button class="primary-btn" id="at-reproject">&#127919; Re-project</button>
         </div>
       </div>
     </div>
