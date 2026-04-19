@@ -49,13 +49,21 @@
     <model-viewer src="_francaise_hybrid.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
-  <div class="col" style="border-left:3px solid #4cd964">
+  <div class="col">
     <div class="col-title">
-      <span class="new"><b>HYBRID + T-pose forcé</b></span><br>
-      <span class="stat">generate_front_tpose: IPA+CN T-pose → SF3D voit T-pose<br>
-      C front+back HD + B latéraux 512²<br>211s · sharp=56%</span>
+      <b>HYBRID + T-pose</b> (winner)<br>
+      <span class="stat">best-view-wins blend, démarcations nettes<br>211s · sharp=56%</span>
     </div>
     <model-viewer src="_francaise_hybrid_tpose.glb" auto-rotate camera-controls
+                  shadow-intensity="1" environment-image="neutral"></model-viewer>
+  </div>
+  <div class="col" style="border-left:3px solid #4cd964">
+    <div class="col-title">
+      <span class="new"><b>HYBRID + T-pose + ACCUM</b></span><br>
+      <span class="stat">blend accum (sum w*rgb / sum w)<br>
+      back ip=0.70 cn=1.25 · sharp=56%</span>
+    </div>
+    <model-viewer src="_francaise_accum.glb" auto-rotate camera-controls
                   shadow-intensity="1" environment-image="neutral"></model-viewer>
   </div>
 </div>
