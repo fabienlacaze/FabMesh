@@ -414,7 +414,7 @@
 </div>
 
 <!-- v15: NORMALIZE_ORIENT=0 + BASE_ATLAS pre-fill + FULL=0.55 -->
-<div class="version latest">
+<div class="version">
   <div class="meta">
     <b>v15 — Voie F complète</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
@@ -434,6 +434,76 @@
     <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v4_v0.png"></div>
     <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v4_v2.png"></div>
     <div class="cell" data-label="atlas v15"><img src="_francaise_voiefab_v4_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v16: voiefab-front FULL=0.55 (baseline v10 + un peu plus de front) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v16 — Voie F front-only (FULL=0.55)</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">FLOOR=0.40, FULL=0.55, cos⁴</span>
+    <ul>
+      <li>Base v10 (NORMALIZE=1 + front-only) + Telea pre-fill</li>
+      <li>FULL baissé 0.65 → 0.55 : zone 100% front arrive plus tôt</li>
+      <li>Front HD plus dominant sans bleed sur le dos</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_v10b.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="atlas v16"><img src="_francaise_v10b_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v17: FLOOR=0.30 FULL=0.50 (front élargi encore plus) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v17 — FLOOR=0.30 FULL=0.50</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">cos⁴, front très dominant</span>
+    <ul>
+      <li>FLOOR baissé 0.40 → 0.30 : zone front commence plus tôt</li>
+      <li>FULL 0.50 : transition rapide</li>
+      <li>Risque: bleed sur l'arrière des oreilles</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_v10c.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="atlas v17"><img src="_francaise_v10c_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v18: bake_exp=2.0 (cos² au lieu de cos⁴) -->
+<div class="version latest">
+  <div class="meta">
+    <b>v18 — bake_exp=2.0 (cos²)</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">FLOOR=0.40 FULL=0.65 mais cos²</span>
+    <ul>
+      <li>bake_exp baissé 4.0 → 2.0</li>
+      <li>cos² décroît moins vite → vis reste élevée plus longtemps</li>
+      <li>Même seuils stack mais vis globalement plus forte</li>
+      <li>Front HD domine une zone plus large angulairement</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_v10d.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="atlas v18"><img src="_francaise_v10d_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
     <div class="cell" data-label="—"></div>
