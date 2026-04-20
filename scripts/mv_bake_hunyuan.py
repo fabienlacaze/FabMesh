@@ -276,9 +276,14 @@ def step_sf3d_2view_augment(image_path, back_image, out_glb, tex_res=1024):
     # convention.
     env['FABMESH_MV_REUSE'] = mv2_dir
     env['FABMESH_PROJECT_MODE'] = 'augment'
-    env['FABMESH_SF3D_NORMALIZE_ORIENT'] = '0'
+    # NORMALIZE_ORIENT='1' (default, rotate 180°) aligns SF3D face
+    # with voie C front camera (azim=0, cam at -Y looking +Y).
+    # Confirmed on v10 front-only test.
     env['FABMESH_TEXPROJ_FRAME_FIX'] = '1'
-    env['FABMESH_TEXPROJ_SKIP_BACK_VFLIP'] = '1'
+    # FABMESH_TEXPROJ_SKIP_BACK_VFLIP='1' was for the perspective
+    # bake path used by FabMesh UI; in voie F we use the ortho
+    # path which doesn't need it. Leave OFF here.
+    env['FABMESH_TEXPROJ_SKIP_BACK_VFLIP'] = '0'
     env['FABMESH_AUTOFIT'] = '1'
     env['FABMESH_AUTOFIT_RATIO'] = '1.20'
     rc, _, err = _run_streamed(cmd, prefix='sf3d2v', timeout=900, env=env)
