@@ -47,112 +47,330 @@
 <body>
 <h1>fille_francaise — toutes les versions (metadata · mesh · 6 vues utilisées)</h1>
 
-<!-- v0 -->
-<div class="version">
+<!-- v18: bake_exp=2.0 (cos² au lieu de cos⁴) -->
+<div class="version latest">
   <div class="meta">
-    <b>v0 — FRONT photo original</b><br>
-    <span class="tag c">RealVis XL v4.0</span><br>
-    <span class="stat">1024² · bras collés (pas T-pose)</span>
+    <b>v18 — bake_exp=2.0 (cos²)</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">FLOOR=0.40 FULL=0.65 mais cos²</span>
     <ul>
-      <li>Prompt: "jeune fille francaise, robe d'été"</li>
-      <li>steps=8, guidance=7.0, seed=1776629428</li>
-      <li>Pas de ControlNet, pas d'IPA</li>
+      <li>bake_exp baissé 4.0 → 2.0</li>
+      <li>cos² décroît moins vite → vis reste élevée plus longtemps</li>
+      <li>Même seuils stack mais vis globalement plus forte</li>
+      <li>Front HD domine une zone plus large angulairement</li>
     </ul>
-    <p><span class="tag bad">problème</span> bras le long du corps → cascade sur tout le pipeline</p>
   </div>
-  <div class="mesh"><img class="solo" src="_francaise_front.png"></div>
-  <div class="grid6"></div>
-</div>
-
-<!-- v1: voie C pure -->
-<div class="version">
-  <div class="meta">
-    <b>v1 — Voie C pure</b><br>
-    <span class="tag c">6× RealVis+IPA+CN</span><br>
-    <span class="stat">sharp=62% · 195s</span>
-    <ul>
-      <li>SF3D bare mesh 12k</li>
-      <li>6 vues RealVis 1024² front/right/back/left/top/bot</li>
-      <li>ControlNet OpenPose + IPA par angle</li>
-      <li>bake winner, cos⁴, Telea</li>
-    </ul>
-    <p><span class="tag bad">problème</span> RealVis ne sait pas faire de profils stricts → v1/v3/v4/v5 = fronts dupliqués</p>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_voiec.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="mesh"><model-viewer src="_francaise_v10d.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
   <div class="grid6">
-    <div class="cell" data-label="v0 front"><img src="_francaise_voiec_v0.png"></div>
-    <div class="cell" data-label="v1 right"><img src="_francaise_voiec_v1.png"></div>
-    <div class="cell" data-label="v2 back"><img src="_francaise_voiec_v2.png"></div>
-    <div class="cell" data-label="v3 left"><img src="_francaise_voiec_v3.png"></div>
-    <div class="cell" data-label="v4 top"><img src="_francaise_voiec_v4.png"></div>
-    <div class="cell" data-label="v5 bot"><img src="_francaise_voiec_v5.png"></div>
+    <div class="cell" data-label="atlas v18"><img src="_francaise_v10d_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
   </div>
 </div>
 
-<!-- v2: hybrid no T-pose -->
+<!-- v17: FLOOR=0.30 FULL=0.50 (front élargi encore plus) -->
 <div class="version">
   <div class="meta">
-    <b>v2 — HYBRID (front non T-pose)</b><br>
+    <b>v17 — FLOOR=0.30 FULL=0.50</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">cos⁴, front très dominant</span>
+    <ul>
+      <li>FLOOR baissé 0.40 → 0.30 : zone front commence plus tôt</li>
+      <li>FULL 0.50 : transition rapide</li>
+      <li>Risque: bleed sur l'arrière des oreilles</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_v10c.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="atlas v17"><img src="_francaise_v10c_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v16: voiefab-front FULL=0.55 (baseline v10 + un peu plus de front) -->
+<div class="version">
+  <div class="meta">
+    <b>v16 — Voie F front-only (FULL=0.55)</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">FLOOR=0.40, FULL=0.55, cos⁴</span>
+    <ul>
+      <li>Base v10 (NORMALIZE=1 + front-only) + Telea pre-fill</li>
+      <li>FULL baissé 0.65 → 0.55 : zone 100% front arrive plus tôt</li>
+      <li>Front HD plus dominant sans bleed sur le dos</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_v10b.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="atlas v16"><img src="_francaise_v10b_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v15: NORMALIZE_ORIENT=0 + BASE_ATLAS pre-fill + FULL=0.55 -->
+<div class="version">
+  <div class="meta">
+    <b>v15 — Voie F complète</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
+    <span class="stat new">NORMALIZE_ORIENT=0 · Telea pre-fill · FULL=0.55 · 207s</span>
+    <ul>
+      <li>Pipeline complet voie F:</li>
+      <li>1. generate_back_view.py (RealVis+IPA+CN back)</li>
+      <li>2. SF3D 2-view AUGMENT (NORMALIZE_ORIENT=0, AUTOFIT=1.20)</li>
+      <li>3. Telea pre-fill atlas SF3D (770k holes)</li>
+      <li>4. Voie C HD front+back 1024²</li>
+      <li>5. Bake stack: FLOOR=0.40 FULL=0.55 BASE_ATLAS=1</li>
+    </ul>
+    <p><span class="tag ok">100%</span> commercial-safe · RealVis + IPA + CN OpenPose + SF3D</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_v4.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v4_v0.png"></div>
+    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v4_v2.png"></div>
+    <div class="cell" data-label="atlas v15"><img src="_francaise_voiefab_v4_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v14: BASE_ATLAS Telea pre-fill (comble les bras T-pose blancs) -->
+<div class="version">
+  <div class="meta">
+    <b>v14 — BASE_ATLAS hole-fill</b><br>
+    <span class="tag c">SF3D 2v AUGMENT (pré-rempli)</span><span class="tag c">+ voie C front+back HD</span><br>
+    <span class="stat new">770k holes pre-filled by Telea</span>
+    <ul>
+      <li>Bug v12/v13: <b>770003 pixels noirs</b> dans l'atlas SF3D AUGMENT (les bras T-pose vu d'aucune caméra SF3D)</li>
+      <li>Fix: Telea inpaint <b>AVANT</b> de l'utiliser comme base atlas</li>
+      <li>Pixels < 8 (noirs/transparents) → comblés par couleurs voisines</li>
+      <li>Voie C HD overlay reste identique (FLOOR=0.40, FULL=0.55)</li>
+    </ul>
+    <p><span class="tag ok">gain</span> bras et zones non vues par SF3D ne sont plus blancs</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_v3.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
+    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
+    <div class="cell" data-label="atlas v14"><img src="_francaise_voiefab_v3_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v13: front+back HD voie C, transition FULL=0.55 (entre v11 et v10) -->
+<div class="version">
+  <div class="meta">
+    <b>v13 — Front+back HD softer</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
+    <span class="stat new">FLOOR=0.40 → FULL=0.55 (intermédiaire)</span>
+    <ul>
+      <li>Set: front + back HD voie C (même que v12)</li>
+      <li>Transition feather <b>0.40 → 0.55</b></li>
+      <li>v11 (FULL=0.50) trop tranché, v10 (FULL=0.65) trop lavé</li>
+      <li>v13 = compromis intermédiaire</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v5.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
+    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
+    <div class="cell" data-label="atlas v13"><img src="_francaise_voiefab_front_v5_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v12: voiefab front+back avec orient + FLOOR=0.40 fix -->
+<div class="version">
+  <div class="meta">
+    <b>v12 — VOIE F front+back</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
+    <span class="stat new">orient fix + FLOOR=0.40 · 165s</span>
+    <ul>
+      <li>Pipeline complet voiefab (front+back HD overlay)</li>
+      <li>NORMALIZE_ORIENT=1 (default) → mesh face vers +Z</li>
+      <li>FLOOR=0.40 par vue → pas de bleed mutuel</li>
+      <li>Front HD recouvre devant, back HD recouvre dos</li>
+      <li>Atlas SF3D AUGMENT pour flancs/top/bot</li>
+    </ul>
+    <p><span class="tag ok">complet</span> 2 vues HD voie C ajoutées proprement</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_v2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
+    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
+    <div class="cell" data-label="atlas v12"><img src="_francaise_voiefab_v2_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v11: front HD plus dominant (FULL=0.50) -->
+<div class="version">
+  <div class="meta">
+    <b>v11 — Front HD plus dominant</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">STACK_FLOOR=0.40 → FULL=0.50</span>
+    <ul>
+      <li>Même setup que v10</li>
+      <li>Mais transition feather <b>0.40 → 0.50</b> (au lieu de 0.65)</li>
+      <li>Zone "100% front HD" arrive plus tôt → moins rongée par atlas SF3D blurry</li>
+      <li>Front bien net partout où la normale fait &lt; 60° avec la caméra</li>
+    </ul>
+    <p><span class="tag ok">gain</span> visage HD voie C dominant, moins "lavé" sur les bords</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v4.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas v11"><img src="_francaise_voiefab_front_v4_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v10: VOIE F front + NORMALIZE_ORIENT=1 (fix orientation inversée) -->
+<div class="version">
+  <div class="meta">
+    <b>v10 — VOIE F front + ORIENT fix</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">NORMALIZE_ORIENT=1 (default)</span>
+    <ul>
+      <li>Bug v8/v9: front HD plaqué sur le DOS du mesh</li>
+      <li>Cause: <b>FABMESH_SF3D_NORMALIZE_ORIENT='0'</b> (copié du mode UI 2-view qui utilise sa propre projection perspective)</li>
+      <li>En voie F (projection ortho voie C), le mesh SF3D doit être rotaté 180° (face → +Z) pour matcher la convention caméra ortho front</li>
+      <li>Fix: laisser le default NORMALIZE_ORIENT=1 (rotate 180°)</li>
+      <li>STACK_VIS_FLOOR=0.40 conservé</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v3.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas v10"><img src="_francaise_voiefab_front_v3_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v9: VOIE F front-only + STACK_VIS_FLOOR=0.40 (fix bleed sur dos) -->
+<div class="version">
+  <div class="meta">
+    <b>v9 — VOIE F front + FLOOR fix</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">STACK_VIS_FLOOR 0.10→0.40</span>
+    <ul>
+      <li>Même pipeline que v8</li>
+      <li>Mais bake: <b>STACK_VIS_FLOOR=0.40</b> au lieu de 0.10</li>
+      <li>Front HD ne touche que les pixels avec normale &lt; 63° de la caméra</li>
+      <li>Plus de bleed du visage front sur l'arrière du crâne / oreilles</li>
+    </ul>
+    <p><span class="tag ok">fix</span> "visage parasite dans le dos" éliminé</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas v9"><img src="_francaise_voiefab_front_v2_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v8: VOIE F front-only (skip back voie C) -->
+<div class="version">
+  <div class="meta">
+    <b>v8 — VOIE F front-only</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">sharp=100% · 157s · 100% commercial-safe</span>
+    <ul>
+      <li>1. generate_back_view.py</li>
+      <li>2. SF3D 2-view AUGMENT (atlas baked front + back additif)</li>
+      <li>3. voie C HD <b>front uniquement</b> (skip back voie C, garde l'atlas SF3D arrière)</li>
+      <li>4. bake stack avec BASE_ATLAS=1</li>
+    </ul>
+    <p><span class="tag ok">fix</span> évite le mini-visage parasite que voie C back HD plaquait sur le dos</p>
+    <p><span class="tag ok">trust</span> SF3D AUGMENT atlas = back déjà cohérent</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab_front.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
+    <div class="cell" data-label="atlas final"><img src="_francaise_voiefab_front_tex.png"></div>
+    <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_front_proj_debug.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v7: VOIE F = SF3D 2-view AUGMENT + voie C HD overlay -->
+<div class="version">
+  <div class="meta">
+    <b>v7 — VOIE F</b><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C HD</span><br>
+    <span class="stat new">sharp=100% · 158s · 100% commercial-safe</span>
+    <ul>
+      <li>1. generate_back_view.py (RealVis+IPA+CN T-pose back)</li>
+      <li>2. SF3D 2-view AUGMENT (front bake + back additif natif)</li>
+      <li>3. voie C HD front+back 1024² (RealVis+IPA+CN T-pose)</li>
+      <li>4. bake stack avec FABMESH_TEXPROJ_BASE_ATLAS=1 (atlas SF3D = floor, voie C = overlay)</li>
+      <li><b>Pas de MVAdapter, pas de nvdiffrast</b></li>
+    </ul>
+    <p><span class="tag ok">gain</span> atlas SF3D natif fournit lat/top/bot, voie C HD recouvre front/back</p>
+    <p><span class="tag ok">gain</span> sharp=100% (0 trous Telea, atlas complètement texturé)</p>
+    <p><span class="tag ok">licences</span> RealVis RAIL++-M + IPA Apache 2.0 + CN Apache 2.0 + SF3D Stability Community</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_voiefab.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_v0.png"></div>
+    <div class="cell" data-label="(SF3D atlas)"><img src="_francaise_voiefab_tex.png"></div>
+    <div class="cell" data-label="v2 HD voie C"><img src="_francaise_voiefab_v2.png"></div>
+    <div class="cell" data-label="(atlas final)"><img src="_francaise_voiefab_tex.png"></div>
+    <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_proj_debug.png"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v6: hybrid + T-pose + STACK -->
+<div class="version">
+  <div class="meta">
+    <b>v6 — HYBRID + T-pose + STACK</b><br>
     <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
-    <span class="stat">sharp=62% · 194s</span>
+    <span class="stat new">sharp=48%</span>
     <ul>
-      <li>SF3D mesh pose = front original (bras collés)</li>
-      <li>MVAdapter 6 vues cohérentes 512²</li>
-      <li>voie C overwrite view_0/view_2 HD 1024²</li>
+      <li>Mêmes 6 vues que v5</li>
+      <li>bake <b>stack</b>: ordre top→bot→back→right→left→<b>front EN DERNIER</b></li>
+      <li>Front recouvre tout ce qu'il voit avec feather (vis>0.10)</li>
+      <li>Latéraux ne contaminent plus le visage</li>
     </ul>
-    <p><span class="tag bad">problème</span> mesh sans bras écartés ↔ back T-pose → trous aux épaules</p>
+    <p><span class="tag ok">gain</span> visage 100% front HD, plus de bouillie de moyenne</p>
+    <p><span class="tag bad">reste</span> back ponytail toujours présent (visible côté)</p>
   </div>
-  <div class="mesh"><model-viewer src="_francaise_hybrid.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="mesh"><model-viewer src="_francaise_stack.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
   <div class="grid6">
-    <div class="cell" data-label="v0 HD"><img src="_francaise_hybrid_v0.png"></div>
-    <div class="cell" data-label="v1 MVA"><img src="_francaise_hybrid_v1.png"></div>
-    <div class="cell" data-label="v2 HD"><img src="_francaise_hybrid_v2.png"></div>
-    <div class="cell" data-label="v3 MVA"><img src="_francaise_hybrid_v3.png"></div>
-    <div class="cell" data-label="v4 MVA"><img src="_francaise_hybrid_v4.png"></div>
-    <div class="cell" data-label="v5 MVA"><img src="_francaise_hybrid_v5.png"></div>
-  </div>
-</div>
-
-<!-- v3: front T-pose forcé (photo only) -->
-<div class="version">
-  <div class="meta">
-    <b>v3 — Front T-pose forcé</b><br>
-    <span class="tag c">generate_front_tpose.py</span><br>
-    <span class="stat">1024² · bras étendus</span>
-    <ul>
-      <li>ref = v0 front original</li>
-      <li>RealVis + CN T-pose front + IPA + rembg + center</li>
-      <li>ip=0.75, cn=1.15, 30 steps, 15.5s</li>
-    </ul>
-    <p><span class="tag ok">fix</span> vraie T-pose, pieds visibles, fond blanc → cascade le reste</p>
-  </div>
-  <div class="mesh"><img class="solo" src="_francaise_front_tpose.png"></div>
-  <div class="grid6"></div>
-</div>
-
-<!-- v4: hybrid + T-pose winner -->
-<div class="version">
-  <div class="meta">
-    <b>v4 — HYBRID + T-pose (winner)</b><br>
-    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
-    <span class="stat">sharp=56% · 211s</span>
-    <ul>
-      <li>Front = v3 T-pose</li>
-      <li>SF3D mesh vrais bras étendus</li>
-      <li>MVAdapter 6 vues + voie C overwrite</li>
-      <li>bake <b>winner</b> (best-view-wins)</li>
-      <li>back ip=0.55 cn=1.15</li>
-    </ul>
-    <p><span class="tag bad">problème</span> démarcations nettes entre vues + back ponytail (identité perdue)</p>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_hybrid_tpose.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 HD"><img src="_francaise_tpose_v0.png"></div>
-    <div class="cell" data-label="v1 MVA"><img src="_francaise_tpose_v1.png"></div>
-    <div class="cell" data-label="v2 HD"><img src="_francaise_tpose_v2.png"></div>
-    <div class="cell" data-label="v3 MVA"><img src="_francaise_tpose_v3.png"></div>
-    <div class="cell" data-label="v4 MVA"><img src="_francaise_tpose_v4.png"></div>
-    <div class="cell" data-label="v5 MVA"><img src="_francaise_tpose_v5.png"></div>
+    <div class="cell" data-label="v0 HD top"><img src="_francaise_accum_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_accum_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_accum_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_accum_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_accum_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_accum_v5.png"></div>
   </div>
 </div>
 
@@ -183,331 +401,113 @@
   </div>
 </div>
 
-<!-- v6: hybrid + T-pose + STACK -->
+<!-- v4: hybrid + T-pose winner -->
 <div class="version">
   <div class="meta">
-    <b>v6 — HYBRID + T-pose + STACK</b> <span class="tag ok">latest</span><br>
+    <b>v4 — HYBRID + T-pose (winner)</b><br>
     <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
-    <span class="stat new">sharp=48%</span>
+    <span class="stat">sharp=56% · 211s</span>
     <ul>
-      <li>Mêmes 6 vues que v5</li>
-      <li>bake <b>stack</b>: ordre top→bot→back→right→left→<b>front EN DERNIER</b></li>
-      <li>Front recouvre tout ce qu'il voit avec feather (vis>0.10)</li>
-      <li>Latéraux ne contaminent plus le visage</li>
+      <li>Front = v3 T-pose</li>
+      <li>SF3D mesh vrais bras étendus</li>
+      <li>MVAdapter 6 vues + voie C overwrite</li>
+      <li>bake <b>winner</b> (best-view-wins)</li>
+      <li>back ip=0.55 cn=1.15</li>
     </ul>
-    <p><span class="tag ok">gain</span> visage 100% front HD, plus de bouillie de moyenne</p>
-    <p><span class="tag bad">reste</span> back ponytail toujours présent (visible côté)</p>
+    <p><span class="tag bad">problème</span> démarcations nettes entre vues + back ponytail (identité perdue)</p>
   </div>
-  <div class="mesh"><model-viewer src="_francaise_stack.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="mesh"><model-viewer src="_francaise_hybrid_tpose.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
   <div class="grid6">
-    <div class="cell" data-label="v0 HD top"><img src="_francaise_accum_v0.png"></div>
-    <div class="cell" data-label="v1 MVA"><img src="_francaise_accum_v1.png"></div>
-    <div class="cell" data-label="v2 HD"><img src="_francaise_accum_v2.png"></div>
-    <div class="cell" data-label="v3 MVA"><img src="_francaise_accum_v3.png"></div>
-    <div class="cell" data-label="v4 MVA"><img src="_francaise_accum_v4.png"></div>
-    <div class="cell" data-label="v5 MVA"><img src="_francaise_accum_v5.png"></div>
+    <div class="cell" data-label="v0 HD"><img src="_francaise_tpose_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_tpose_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_tpose_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_tpose_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_tpose_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_tpose_v5.png"></div>
   </div>
 </div>
 
-<!-- v7: VOIE F = SF3D 2-view AUGMENT + voie C HD overlay -->
+<!-- v3: front T-pose forcé (photo only) -->
 <div class="version">
   <div class="meta">
-    <b>v7 — VOIE F</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C HD</span><br>
-    <span class="stat new">sharp=100% · 158s · 100% commercial-safe</span>
+    <b>v3 — Front T-pose forcé</b><br>
+    <span class="tag c">generate_front_tpose.py</span><br>
+    <span class="stat">1024² · bras étendus</span>
     <ul>
-      <li>1. generate_back_view.py (RealVis+IPA+CN T-pose back)</li>
-      <li>2. SF3D 2-view AUGMENT (front bake + back additif natif)</li>
-      <li>3. voie C HD front+back 1024² (RealVis+IPA+CN T-pose)</li>
-      <li>4. bake stack avec FABMESH_TEXPROJ_BASE_ATLAS=1 (atlas SF3D = floor, voie C = overlay)</li>
-      <li><b>Pas de MVAdapter, pas de nvdiffrast</b></li>
+      <li>ref = v0 front original</li>
+      <li>RealVis + CN T-pose front + IPA + rembg + center</li>
+      <li>ip=0.75, cn=1.15, 30 steps, 15.5s</li>
     </ul>
-    <p><span class="tag ok">gain</span> atlas SF3D natif fournit lat/top/bot, voie C HD recouvre front/back</p>
-    <p><span class="tag ok">gain</span> sharp=100% (0 trous Telea, atlas complètement texturé)</p>
-    <p><span class="tag ok">licences</span> RealVis RAIL++-M + IPA Apache 2.0 + CN Apache 2.0 + SF3D Stability Community</p>
+    <p><span class="tag ok">fix</span> vraie T-pose, pieds visibles, fond blanc → cascade le reste</p>
   </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_v0.png"></div>
-    <div class="cell" data-label="(SF3D atlas)"><img src="_francaise_voiefab_tex.png"></div>
-    <div class="cell" data-label="v2 HD voie C"><img src="_francaise_voiefab_v2.png"></div>
-    <div class="cell" data-label="(atlas final)"><img src="_francaise_voiefab_tex.png"></div>
-    <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_proj_debug.png"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
+  <div class="mesh"><img class="solo" src="_francaise_front_tpose.png"></div>
+  <div class="grid6"></div>
 </div>
 
-<!-- v8: VOIE F front-only (skip back voie C) -->
+<!-- v2: hybrid no T-pose -->
 <div class="version">
   <div class="meta">
-    <b>v8 — VOIE F front-only</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">sharp=100% · 157s · 100% commercial-safe</span>
+    <b>v2 — HYBRID (front non T-pose)</b><br>
+    <span class="tag b">MVA 4 lat</span><span class="tag c">C 2 HD</span><br>
+    <span class="stat">sharp=62% · 194s</span>
     <ul>
-      <li>1. generate_back_view.py</li>
-      <li>2. SF3D 2-view AUGMENT (atlas baked front + back additif)</li>
-      <li>3. voie C HD <b>front uniquement</b> (skip back voie C, garde l'atlas SF3D arrière)</li>
-      <li>4. bake stack avec BASE_ATLAS=1</li>
+      <li>SF3D mesh pose = front original (bras collés)</li>
+      <li>MVAdapter 6 vues cohérentes 512²</li>
+      <li>voie C overwrite view_0/view_2 HD 1024²</li>
     </ul>
-    <p><span class="tag ok">fix</span> évite le mini-visage parasite que voie C back HD plaquait sur le dos</p>
-    <p><span class="tag ok">trust</span> SF3D AUGMENT atlas = back déjà cohérent</p>
+    <p><span class="tag bad">problème</span> mesh sans bras écartés ↔ back T-pose → trous aux épaules</p>
   </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_front.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="mesh"><model-viewer src="_francaise_hybrid.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
   <div class="grid6">
-    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
-    <div class="cell" data-label="atlas final"><img src="_francaise_voiefab_front_tex.png"></div>
-    <div class="cell" data-label="proj debug"><img src="_francaise_voiefab_front_proj_debug.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="v0 HD"><img src="_francaise_hybrid_v0.png"></div>
+    <div class="cell" data-label="v1 MVA"><img src="_francaise_hybrid_v1.png"></div>
+    <div class="cell" data-label="v2 HD"><img src="_francaise_hybrid_v2.png"></div>
+    <div class="cell" data-label="v3 MVA"><img src="_francaise_hybrid_v3.png"></div>
+    <div class="cell" data-label="v4 MVA"><img src="_francaise_hybrid_v4.png"></div>
+    <div class="cell" data-label="v5 MVA"><img src="_francaise_hybrid_v5.png"></div>
   </div>
 </div>
 
-<!-- v9: VOIE F front-only + STACK_VIS_FLOOR=0.40 (fix bleed sur dos) -->
+<!-- v1: voie C pure -->
 <div class="version">
   <div class="meta">
-    <b>v9 — VOIE F front + FLOOR fix</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">STACK_VIS_FLOOR 0.10→0.40</span>
+    <b>v1 — Voie C pure</b><br>
+    <span class="tag c">6× RealVis+IPA+CN</span><br>
+    <span class="stat">sharp=62% · 195s</span>
     <ul>
-      <li>Même pipeline que v8</li>
-      <li>Mais bake: <b>STACK_VIS_FLOOR=0.40</b> au lieu de 0.10</li>
-      <li>Front HD ne touche que les pixels avec normale &lt; 63° de la caméra</li>
-      <li>Plus de bleed du visage front sur l'arrière du crâne / oreilles</li>
+      <li>SF3D bare mesh 12k</li>
+      <li>6 vues RealVis 1024² front/right/back/left/top/bot</li>
+      <li>ControlNet OpenPose + IPA par angle</li>
+      <li>bake winner, cos⁴, Telea</li>
     </ul>
-    <p><span class="tag ok">fix</span> "visage parasite dans le dos" éliminé</p>
+    <p><span class="tag bad">problème</span> RealVis ne sait pas faire de profils stricts → v1/v3/v4/v5 = fronts dupliqués</p>
   </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="mesh"><model-viewer src="_francaise_voiec.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
   <div class="grid6">
-    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
-    <div class="cell" data-label="atlas v9"><img src="_francaise_voiefab_front_v2_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="v0 front"><img src="_francaise_voiec_v0.png"></div>
+    <div class="cell" data-label="v1 right"><img src="_francaise_voiec_v1.png"></div>
+    <div class="cell" data-label="v2 back"><img src="_francaise_voiec_v2.png"></div>
+    <div class="cell" data-label="v3 left"><img src="_francaise_voiec_v3.png"></div>
+    <div class="cell" data-label="v4 top"><img src="_francaise_voiec_v4.png"></div>
+    <div class="cell" data-label="v5 bot"><img src="_francaise_voiec_v5.png"></div>
   </div>
 </div>
 
-<!-- v10: VOIE F front + NORMALIZE_ORIENT=1 (fix orientation inversée) -->
+<!-- v0 -->
 <div class="version">
   <div class="meta">
-    <b>v10 — VOIE F front + ORIENT fix</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">NORMALIZE_ORIENT=1 (default)</span>
+    <b>v0 — FRONT photo original</b><br>
+    <span class="tag c">RealVis XL v4.0</span><br>
+    <span class="stat">1024² · bras collés (pas T-pose)</span>
     <ul>
-      <li>Bug v8/v9: front HD plaqué sur le DOS du mesh</li>
-      <li>Cause: <b>FABMESH_SF3D_NORMALIZE_ORIENT='0'</b> (copié du mode UI 2-view qui utilise sa propre projection perspective)</li>
-      <li>En voie F (projection ortho voie C), le mesh SF3D doit être rotaté 180° (face → +Z) pour matcher la convention caméra ortho front</li>
-      <li>Fix: laisser le default NORMALIZE_ORIENT=1 (rotate 180°)</li>
-      <li>STACK_VIS_FLOOR=0.40 conservé</li>
+      <li>Prompt: "jeune fille francaise, robe d'été"</li>
+      <li>steps=8, guidance=7.0, seed=1776629428</li>
+      <li>Pas de ControlNet, pas d'IPA</li>
     </ul>
+    <p><span class="tag bad">problème</span> bras le long du corps → cascade sur tout le pipeline</p>
   </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v3.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
-    <div class="cell" data-label="atlas v10"><img src="_francaise_voiefab_front_v3_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v11: front HD plus dominant (FULL=0.50) -->
-<div class="version">
-  <div class="meta">
-    <b>v11 — Front HD plus dominant</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">STACK_FLOOR=0.40 → FULL=0.50</span>
-    <ul>
-      <li>Même setup que v10</li>
-      <li>Mais transition feather <b>0.40 → 0.50</b> (au lieu de 0.65)</li>
-      <li>Zone "100% front HD" arrive plus tôt → moins rongée par atlas SF3D blurry</li>
-      <li>Front bien net partout où la normale fait &lt; 60° avec la caméra</li>
-    </ul>
-    <p><span class="tag ok">gain</span> visage HD voie C dominant, moins "lavé" sur les bords</p>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v4.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 HD voie C"><img src="_francaise_voiefab_front_v0.png"></div>
-    <div class="cell" data-label="atlas v11"><img src="_francaise_voiefab_front_v4_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v12: voiefab front+back avec orient + FLOOR=0.40 fix -->
-<div class="version">
-  <div class="meta">
-    <b>v12 — VOIE F front+back</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
-    <span class="stat new">orient fix + FLOOR=0.40 · 165s</span>
-    <ul>
-      <li>Pipeline complet voiefab (front+back HD overlay)</li>
-      <li>NORMALIZE_ORIENT=1 (default) → mesh face vers +Z</li>
-      <li>FLOOR=0.40 par vue → pas de bleed mutuel</li>
-      <li>Front HD recouvre devant, back HD recouvre dos</li>
-      <li>Atlas SF3D AUGMENT pour flancs/top/bot</li>
-    </ul>
-    <p><span class="tag ok">complet</span> 2 vues HD voie C ajoutées proprement</p>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_v2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
-    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
-    <div class="cell" data-label="atlas v12"><img src="_francaise_voiefab_v2_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v13: front+back HD voie C, transition FULL=0.55 (entre v11 et v10) -->
-<div class="version">
-  <div class="meta">
-    <b>v13 — Front+back HD softer</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
-    <span class="stat new">FLOOR=0.40 → FULL=0.55 (intermédiaire)</span>
-    <ul>
-      <li>Set: front + back HD voie C (même que v12)</li>
-      <li>Transition feather <b>0.40 → 0.55</b></li>
-      <li>v11 (FULL=0.50) trop tranché, v10 (FULL=0.65) trop lavé</li>
-      <li>v13 = compromis intermédiaire</li>
-    </ul>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_front_v5.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
-    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
-    <div class="cell" data-label="atlas v13"><img src="_francaise_voiefab_front_v5_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v14: BASE_ATLAS Telea pre-fill (comble les bras T-pose blancs) -->
-<div class="version">
-  <div class="meta">
-    <b>v14 — BASE_ATLAS hole-fill</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT (pré-rempli)</span><span class="tag c">+ voie C front+back HD</span><br>
-    <span class="stat new">770k holes pre-filled by Telea</span>
-    <ul>
-      <li>Bug v12/v13: <b>770003 pixels noirs</b> dans l'atlas SF3D AUGMENT (les bras T-pose vu d'aucune caméra SF3D)</li>
-      <li>Fix: Telea inpaint <b>AVANT</b> de l'utiliser comme base atlas</li>
-      <li>Pixels < 8 (noirs/transparents) → comblés par couleurs voisines</li>
-      <li>Voie C HD overlay reste identique (FLOOR=0.40, FULL=0.55)</li>
-    </ul>
-    <p><span class="tag ok">gain</span> bras et zones non vues par SF3D ne sont plus blancs</p>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_v3.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v2_v0.png"></div>
-    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v2_v2.png"></div>
-    <div class="cell" data-label="atlas v14"><img src="_francaise_voiefab_v3_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v15: NORMALIZE_ORIENT=0 + BASE_ATLAS pre-fill + FULL=0.55 -->
-<div class="version">
-  <div class="meta">
-    <b>v15 — Voie F complète</b> <span class="tag ok">latest</span><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front+back HD</span><br>
-    <span class="stat new">NORMALIZE_ORIENT=0 · Telea pre-fill · FULL=0.55 · 207s</span>
-    <ul>
-      <li>Pipeline complet voie F:</li>
-      <li>1. generate_back_view.py (RealVis+IPA+CN back)</li>
-      <li>2. SF3D 2-view AUGMENT (NORMALIZE_ORIENT=0, AUTOFIT=1.20)</li>
-      <li>3. Telea pre-fill atlas SF3D (770k holes)</li>
-      <li>4. Voie C HD front+back 1024²</li>
-      <li>5. Bake stack: FLOOR=0.40 FULL=0.55 BASE_ATLAS=1</li>
-    </ul>
-    <p><span class="tag ok">100%</span> commercial-safe · RealVis + IPA + CN OpenPose + SF3D</p>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_voiefab_v4.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="v0 front HD"><img src="_francaise_voiefab_v4_v0.png"></div>
-    <div class="cell" data-label="v2 back HD"><img src="_francaise_voiefab_v4_v2.png"></div>
-    <div class="cell" data-label="atlas v15"><img src="_francaise_voiefab_v4_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v16: voiefab-front FULL=0.55 (baseline v10 + un peu plus de front) -->
-<div class="version latest">
-  <div class="meta">
-    <b>v16 — Voie F front-only (FULL=0.55)</b><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">FLOOR=0.40, FULL=0.55, cos⁴</span>
-    <ul>
-      <li>Base v10 (NORMALIZE=1 + front-only) + Telea pre-fill</li>
-      <li>FULL baissé 0.65 → 0.55 : zone 100% front arrive plus tôt</li>
-      <li>Front HD plus dominant sans bleed sur le dos</li>
-    </ul>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_v10b.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="atlas v16"><img src="_francaise_v10b_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v17: FLOOR=0.30 FULL=0.50 (front élargi encore plus) -->
-<div class="version latest">
-  <div class="meta">
-    <b>v17 — FLOOR=0.30 FULL=0.50</b><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">cos⁴, front très dominant</span>
-    <ul>
-      <li>FLOOR baissé 0.40 → 0.30 : zone front commence plus tôt</li>
-      <li>FULL 0.50 : transition rapide</li>
-      <li>Risque: bleed sur l'arrière des oreilles</li>
-    </ul>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_v10c.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="atlas v17"><img src="_francaise_v10c_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
-</div>
-
-<!-- v18: bake_exp=2.0 (cos² au lieu de cos⁴) -->
-<div class="version latest">
-  <div class="meta">
-    <b>v18 — bake_exp=2.0 (cos²)</b><br>
-    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
-    <span class="stat new">FLOOR=0.40 FULL=0.65 mais cos²</span>
-    <ul>
-      <li>bake_exp baissé 4.0 → 2.0</li>
-      <li>cos² décroît moins vite → vis reste élevée plus longtemps</li>
-      <li>Même seuils stack mais vis globalement plus forte</li>
-      <li>Front HD domine une zone plus large angulairement</li>
-    </ul>
-  </div>
-  <div class="mesh"><model-viewer src="_francaise_v10d.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
-  <div class="grid6">
-    <div class="cell" data-label="atlas v18"><img src="_francaise_v10d_tex.png"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-    <div class="cell" data-label="—"></div>
-  </div>
+  <div class="mesh"><img class="solo" src="_francaise_front.png"></div>
+  <div class="grid6"></div>
 </div>
 
 </body>
