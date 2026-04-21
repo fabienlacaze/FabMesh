@@ -5,12 +5,17 @@
 <title>FabMesh — fille_francaise versions</title>
 <style>
   html,body{margin:0;padding:0;background:#0d0d0d;color:#ddd;
-            font-family:system-ui;width:100%;overflow-x:hidden}
-  body{overflow-y:auto}
+            font-family:system-ui;width:100%}
+  body{overflow-y:auto;overflow-x:auto}
   h1{padding:8px 16px;margin:0;font-size:13px;background:#000;
-     border-bottom:1px solid #333;position:sticky;top:0;z-index:10}
+     border-bottom:1px solid #333;position:sticky;top:0;z-index:10;
+     min-width:max-content}
+  /* Each row has a minimum layout width = meta (240) + mesh min (420) +
+     grid6 min (520) = ~1180px. Below that the page scrolls horizontally
+     instead of squeezing / clipping the grid. */
   .version{display:flex;border-bottom:2px solid #333;
-           height:min(90vh,820px); min-height:560px;width:100%}
+           height:min(90vh,820px); min-height:560px;
+           min-width:1180px}
   .version.latest{border-left:4px solid #4cd964}
   .meta{flex:0 0 240px;padding:10px 12px;background:#151515;overflow-y:auto;
         font-size:11px;line-height:1.45;box-sizing:border-box}
@@ -19,7 +24,7 @@
   .meta .stat{color:#ffd700}
   .meta ul{margin:3px 0;padding-left:14px}
   .meta li{margin:1px 0}
-  .mesh{flex:1 1 0;background:#1b1b1b;min-width:0;position:relative}
+  .mesh{flex:1 1 0;background:#1b1b1b;min-width:420px;position:relative}
   .mesh model-viewer{width:100%;height:100%;background:#1b1b1b}
   .mesh img.solo{width:100%;height:100%;object-fit:contain;background:#1b1b1b;
                  display:block}
