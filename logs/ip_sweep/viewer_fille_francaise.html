@@ -52,8 +52,62 @@
 <body>
 <h1>fille_francaise — toutes les versions (metadata · mesh · 6 vues utilisées)</h1>
 
-<!-- v20: FLOOR=0.65 FULL=0.85 cos² (front encore plus restreint) -->
+<!-- v23: TRELLIS-2 native (Microsoft, Blackwell sm_120 patches appliqués) -->
 <div class="version latest">
+  <div class="meta">
+    <b>v23 — TRELLIS-2 native</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">Microsoft TRELLIS.2-4B</span><span class="tag c">+ Blackwell fix</span><br>
+    <span class="stat new">3.78M verts · 139k faces · 62MB · 97s</span>
+    <ul>
+      <li>Microsoft TRELLIS-2 (MIT) image→3D mesh + texture native</li>
+      <li>WSL Ubuntu venv torch 2.8 cu128 + flash_attn 2.8.3 + xformers 0.0.32</li>
+      <li>blackwell_fix.patch_all() — torch CC patched (12,0)→(9,0)</li>
+      <li>Reactivation rescale latents (z_s / std avant decoder, std=0.036)</li>
+      <li>Patch Mesh.fill_holes monkey-patched (CuMesh broken sm_120)</li>
+      <li>Export trimesh direct vertex_colors (skip o_voxel.to_glb CuMesh)</li>
+      <li>Vertex colors via KDTree nearest voxel attrs[0:3]</li>
+    </ul>
+    <p><span class="tag ok">native</span> mesh + texture en 1 pipeline (vs voie F: SF3D + voie C overlay)</p>
+    <p><span class="tag bad">caveats</span> ⚠️ nvdiffrast/CuMesh = NSCL non-commercial, à patcher pour ship</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_trellis2.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="TRELLIS-2 native"><img src="_francaise_front_tpose.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v21: subdivide x2 (12k → ~192k faces) + FLOOR=0.55 FULL=0.75 cos² -->
+<div class="version">
+  <div class="meta">
+    <b>v21 — Mesh sub-divisé x2</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ Loop subdiv x2</span><span class="tag c">+ voie C front HD</span><br>
+    <span class="stat new">12k → ~192k faces · 187s · 4.6MB</span>
+    <ul>
+      <li>Bug v20 résolu: visage paraissait "facetté/enfoncé" car SF3D 12k = topology grossière</li>
+      <li>Fix: <b>Loop subdivision x2</b> sur le mesh SF3D AVANT bake</li>
+      <li>16× plus de faces → silhouette lisse</li>
+      <li>Front HD voie C s'applique sur surface plus fine</li>
+      <li>FLOOR=0.55 FULL=0.75 cos² (params v19)</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_v21.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="atlas v21"><img src="_francaise_v21_tex.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v20: FLOOR=0.65 FULL=0.85 cos² (front encore plus restreint) -->
+<div class="version">
   <div class="meta">
     <b>v20 — Front HD très centré</b> <span class="tag ok">latest</span><br>
     <span class="tag c">SF3D 2v AUGMENT</span><span class="tag c">+ voie C front HD</span><br>
