@@ -45,6 +45,14 @@ sys.path.insert(0, ".")
 import blackwell_fix
 blackwell_fix.patch_all(verbose=True)
 
+# Patch CuMesh.fill_holes() — CUDA error 209 "no kernel image" on
+# Blackwell (sm_120). It's a cosmetic step (closes mesh boundaries),
+# safe to skip — the mesh is still usable, just may have small holes.
+import trellis2.representations.mesh.base as _t2_base
+def _noop_fill_holes(self, max_hole_perimeter=3e-2):
+    print("[blackwell_fix] Mesh.fill_holes() skipped (CuMesh broken on sm_120)", flush=True)
+_t2_base.Mesh.fill_holes = _noop_fill_holes
+
 import torch
 # Disable TF32 — extra safety on top of the Blackwell patch.
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -124,23 +132,46 @@ except Exception as e:
     print(f"TRELLIS2: simplify warning: {{e}}", flush=True)
 
 print("TRELLIS2: Exporting to GLB...", flush=True)
+# CuMesh-free export path for Blackwell. o_voxel.postprocess.to_glb
+# uses CuMesh (CUDA error 209 on sm_120). We build a trimesh GLB
+# directly from mesh.vertices + mesh.faces and sample mesh.attrs
+# (the texture latent volume) at each vertex to get RGB.
 try:
-    glb = o_voxel.postprocess.to_glb(
-        vertices=mesh.vertices,
-        faces=mesh.faces,
-        attr_volume=mesh.attrs,
-        coords=mesh.coords,
-        attr_layout=mesh.layout,
-        voxel_size=mesh.voxel_size,
-        aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
-        decimation_target=1000000,
-        texture_size=1024,
-        remesh=True,
-        remesh_band=1,
-        remesh_project=0,
-        verbose=True,
-    )
-    glb.export("{wsl_output}")
+    import trimesh
+    import torch as _torch
+    verts = mesh.vertices.detach().cpu().numpy()
+    faces = mesh.faces.detach().cpu().numpy()
+    print(f"TRELLIS2: mesh {{len(verts)}}v / {{len(faces)}}f", flush=True)
+
+    # Sample texture from mesh.attrs (sparse voxel attribute volume)
+    # mesh.attrs is the per-voxel feature tensor at coords mesh.coords
+    # mesh.layout maps voxel positions to attr indices.
+    # For each vertex, find nearest voxel coord and grab its attrs[0:3] = RGB.
+    attrs = mesh.attrs.detach().cpu().numpy()         # (N, C)
+    coords = mesh.coords.detach().cpu().numpy()       # (N, 3 or 4)
+    voxel_size = float(mesh.voxel_size)
+    print(f"TRELLIS2: attrs shape={{attrs.shape}} coords shape={{coords.shape}} voxel_size={{voxel_size}}", flush=True)
+    # Voxel coords -> world coords
+    if coords.shape[1] == 4:
+        coords_xyz = coords[:, 1:4]
+    else:
+        coords_xyz = coords
+    voxel_world = coords_xyz.astype(np.float32) * voxel_size - 0.5
+    # KDTree nearest neighbour
+    from scipy.spatial import cKDTree
+    tree = cKDTree(voxel_world)
+    _, nn_idx = tree.query(verts, k=1, workers=-1)
+    if attrs.shape[1] >= 3:
+        rgb = np.clip(attrs[nn_idx, :3], 0.0, 1.0)
+        rgba = np.concatenate([rgb, np.ones((len(rgb), 1), dtype=rgb.dtype)], axis=1)
+        rgba_u8 = (rgba * 255).astype(np.uint8)
+    else:
+        rgba_u8 = None
+
+    tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False, validate=False)
+    if rgba_u8 is not None:
+        tm.visual = trimesh.visual.ColorVisuals(mesh=tm, vertex_colors=rgba_u8)
+    tm.export("{wsl_output}", file_type="glb")
     size = os.path.getsize("{wsl_output}")
     print(f"TRELLIS2_SUCCESS: {{size}} bytes", flush=True)
 except Exception as e:
