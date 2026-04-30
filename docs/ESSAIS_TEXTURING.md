@@ -295,6 +295,153 @@ frontal HD**. Combiner les deux selon leurs points forts.
 
 ---
 
+---
+
+## Suite session du 2026-05-01 matin — TRELLIS-2 sur RTX 5080 Blackwell
+
+### Contexte / motivation
+Voie F SF3D + voie C HD validée mais limitée par la résolution mesh SF3D
+(12k faces grossières). Veille tech 2026 (cf agent veille) identifie
+**TRELLIS-2** (Microsoft, MIT code+weights) comme candidat principal pour
+remplacer SF3D : meshes 3D natifs texturés UV haute qualité, decoder
+unifié (Gaussian/RadianceField/Mesh), licence MIT.
+
+### Essai 23 — Install TRELLIS v1 native Windows
+- Cloné `external/TRELLIS/` (microsoft/TRELLIS) + submodule flexicubes
+  (MaxtirError fork → **Apache 2.0** confirmé, pas la NSCL NVIDIA originale)
+- Issue #3 du repo donne 2 chemins:
+  - WSL Ubuntu 24.04 + gcc-11 + libstdc++ symlinks
+  - Windows native conda + wheels prebuilt iiiytn1k
+- **Pas de conda installé** sur cette machine. Bascule sur option WSL.
+
+### Essai 24 — Pivot vers TRELLIS-2 déjà installé en WSL
+- Bridge `scripts/local_trellis2_bridge.py` existait déjà, ciblait
+  `~/TRELLIS.2/.venv` (Python 3.12, torch 2.8 cu128)
+- Premier test : crash `ImportError flash_attn_2_cuda undefined symbol`
+  → ABI break torch 2.8 vs flash_attn pré-compilé.
+
+### Essai 25 — Rebuild flash_attn (annulé)
+- Tentative compile flash_attn from source (estimé 30-60min)
+- Annulée → recherche d'un wheel précompilé.
+- **Trouvé** : Dao-AILab releases ont des wheels précis par
+  combo (torch_version × cu_version × cxx11abi × cp_version × OS).
+  Match exact :
+  `flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl`
+  Vérifié `torch._C._GLIBCXX_USE_CXX11_ABI=True` côté venv.
+
+### Essai 26 — Cascade de fix dépendances
+- flash_attn wheel installé ✓
+- Nouveau crash : `ModuleNotFoundError: No module named 'triton.runtime'`
+  → triton corrompu (présent mais sous-modules absents) + marker
+  `~riton` (pip aborted install)
+  → fix: `rm -rf ~riton*` + `pip install --force-reinstall triton`
+  → triton 3.6.0 OK
+- Nouveau crash: import xformers manquant
+  → `pip install xformers --index-url cu128` mais ça **upgrade torch
+  2.8 → 2.11** silencieusement → casse tout
+  → rollback: torch 2.8 + flash_attn wheel re-installé + xformers
+  0.0.32.post2 (compatible 2.8)
+- Final state cohérent: torch 2.8.0+cu128, xformers 0.0.32.post2,
+  flash_attn 2.8.3, triton 3.6.0, torchvision 0.23.0+cu128
+
+### Essai 27 — Bug Blackwell sm_120 (RTX 5080)
+- Pipeline charge OK sur GPU
+- **Crash systématique au stage SLAT** :
+  `IndexError: max(): Expected reduction dim 0` (coords tensor empty)
+- Recherche web → **issue #243 microsoft/TRELLIS** confirme bug Blackwell.
+- Trouvaille majeure : **`visualbruno/ComfyUI-Trellis2`** (MIT) fournit:
+  - Wheels Windows torch 2.7.0 ET 2.8.0 pour cumesh/nvdiffrast/
+    nvdiffrec_render/flex_gemm/o_voxel (cp311 ET cp312)
+  - **`blackwell_fix.py`** : monkey-patches `torch.cuda.get_device_capability`
+    + `cumm.tensorview` pour renvoyer (9,0) au lieu de (12,0) → spconv/
+    cumm/flex_gemm sélectionnent kernels sm_90 PTX qui JIT-compilent
+    correctement sur Blackwell
+- Fix copié dans `scripts/_blackwell_fix.py`, injecté dans le bridge
+  AVANT `import trellis2`.
+
+### Essai 28 — Cascade fix Blackwell
+- patch_all() → forcer SPARSE_CONV_BACKEND=spconv (au lieu de
+  flex_gemm qui crashait). Mais spconv pas installé !
+  → `pip install spconv-cu126` (closest cu128)
+- Re-test → toujours crash, mais avec diagnostic prints :
+  ```
+  DIAG: torch CC seen = (9, 0)        ← patch OK
+  DIAG: cumm CC seen = (9, 0)         ← patch OK
+  DIAG: ATTN_BACKEND=sdpa SPARSE_CONV_BACKEND=spconv ← OK
+  Sampling sparse structure: 100%|...| 12/12 [00:04<00:00, 2.95it/s]
+  [DBG] z_s raw shape=(1,8,16,16,16) mean=-0.0051 std=0.0363
+  [DBG] decoder raw: min=-176 max=-76 mean=-156 >0=0/262144
+  ```
+  → Decoder produit **toutes valeurs négatives** → 0 voxel occupé.
+
+### Essai 29 — Désactivation cuDNN (n'a rien changé)
+- Hypothèse: bug TF32/cuDNN conv3d sur Blackwell
+- `torch.backends.cudnn.enabled = False` + `set_float32_matmul_precision("highest")`
+- → Identique. Decoder toujours min=-176, std=0.036 inchangé.
+
+### Essai 30 — DIAGNOSTIC RÉEL TROUVÉ
+En lisant `~/TRELLIS.2/trellis2/pipelines/trellis2_image_to_3d.py`,
+**un commentaire FabMesh existant** révèle le vrai bug :
+> "FIX (FabMesh 2026-04): Trellis2's public pipeline.json does not
+> include a sparse_structure_normalization block, so the raw output
+> of the ss_flow_img_dit model is fed straight into the v1 decoder.
+> The flow was trained on latents with std ~= 0.057 while the
+> decoder expects std ~= 1 (N(0,1)), so the raw logits come out all
+> negative (mean ~= -155) and `raw > 0` yields an empty coords
+> tensor"
+
+→ **Le bug n'a RIEN à voir avec Blackwell !** C'est un bug
+**upstream TRELLIS-2** : fichier `pipeline.json` HuggingFace incomplet,
+manque le block `sparse_structure_normalization`.
+
+Une fix avait été codée :
+```python
+_ss_std = z_s.std().item()
+if _ss_std > 1e-4 and _ss_std < 0.5:
+    z_s = z_s / _ss_std
+```
+Mais commentée plus tard ("HACK rescale DISABLED — was covering up the
+real issue") en pensant que flash_attn règlerait → faux.
+
+→ **Réactivation du rescale** dans le fichier WSL avec sed inline. Test
+en cours...
+
+### Enseignements
+1. **Cascade de bugs** : sur RTX 5080 Blackwell + TRELLIS-2, on enchaîne
+   ABI flash_attn, triton corrompu, xformers manquant, torch upgrade
+   accidentel, kernels sm_120, **et finalement** un bug pipeline.json
+   upstream non-Blackwell.
+2. **Ne pas désactiver les fix existants** sans valider le root cause.
+3. La cascade a coûté ~2-3h. Sur ce type de pipeline expérimental, il
+   faut un journal de fix continu (chaque step de bug + fix) pour ne
+   pas oublier les workarounds.
+4. **Blackwell-friendliness check-list** validée pour FabMesh:
+   - blackwell_fix.patch_all() AVANT import trellis2 ✓
+   - SPARSE_CONV_BACKEND=spconv (pas flex_gemm/triton) ✓
+   - ATTN_BACKEND=sdpa OK pour DINOv2 mais flash_attn pour trellis ✓
+   - TF32 désactivé partout ✓
+   - cuDNN n'est PAS la cause ici (mais à garder désactivé par sécurité)
+   - **Rescale latents si std < 0.5 avant decoder** ← critique
+
+### Wheels prebuilt cp312 disponibles dans `c:/tmp/ComfyUI-Trellis2/wheels/Windows/Torch280/`
+| Wheel | Usage |
+|---|---|
+| cumesh-1.0-cp312 | Mesh extraction post-decoder |
+| custom_rasterizer-0.1-cp312 | Used by texture baking |
+| flex_gemm-0.0.1-cp312 | Sparse conv backend (alternative à spconv) |
+| nvdiffrast-0.4.0-cp312 | ⚠️ **NVIDIA NSCL non-commercial** |
+| nvdiffrec_render-0.0.0-cp312 | Mesh renderer |
+| o_voxel-0.0.1-cp312 | TRELLIS-2 voxel postproc |
+
+⚠️ Ces wheels sont **WINDOWS** (`win_amd64`) — incompatibles WSL Linux.
+On reste sur l'install WSL pour cette session, mais ils seraient
+réutilisables si on bascule en install Windows native plus tard.
+
+### Backups branches
+- `backup-voie-f-final-20260430-232125` ← avant bascule TRELLIS
+
+---
+
 ## Prochaines étapes
 
 - [ ] **Replacer nvdiffrast par pyrender** → voie B/hybrid 100%

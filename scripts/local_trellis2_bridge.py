@@ -36,13 +36,28 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import sys, time, traceback
 sys.path.insert(0, ".")
 
+# CRITICAL: Apply Blackwell (RTX 5070/5080/5090) fix BEFORE importing
+# trellis2 / o_voxel. Sets ATTN_BACKEND=sdpa, SPARSE_CONV_BACKEND=spconv,
+# patches torch.cuda.get_device_capability to return (9, 0) so spconv
+# / cumm / flex_gemm select sm_90 PTX which JIT-compiles on sm_120.
+# Without this, sparse_structure_decoder produces empty coords -> max() crash.
+# Source: visualbruno/ComfyUI-Trellis2 (MIT)
+import blackwell_fix
+blackwell_fix.patch_all(verbose=True)
+
 import torch
-# Disable TF32 — it can silently corrupt conv3d outputs on Blackwell
-# (sm_120), which is what was making sparse_structure_decoder spit out
-# all-negative values (min=-170, max=-74) instead of normal logits.
+# Disable TF32 — extra safety on top of the Blackwell patch.
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 torch.backends.cudnn.deterministic = True
+# Extra safety: some PyTorch 2.x paths use the new precision API which
+# overrides allow_tf32. Force highest precision globally.
+try:
+    torch.set_float32_matmul_precision("highest")
+except Exception:
+    pass
+# Disable cuDNN entirely for conv3d to bypass any sm_120 cuDNN bug.
+torch.backends.cudnn.enabled = False
 import numpy as np
 from PIL import Image
 
@@ -76,6 +91,20 @@ if needs_rembg:
         print(f"TRELLIS2: rembg failed ({{re}}), Trellis2 will try its own", flush=True)
 
 print("TRELLIS2: Running pipeline...", flush=True)
+# Diagnostics: dump image stats + capability seen by cumm/spconv
+print(f"DIAG: img mode={{img_in.mode}} size={{img_in.size}}", flush=True)
+arr = np.asarray(img_in.convert("RGBA"))
+alpha = arr[..., 3]
+print(f"DIAG: alpha min={{alpha.min()}} max={{alpha.max()}} nonzero={{(alpha>0).sum()}}", flush=True)
+print(f"DIAG: torch CC seen = {{torch.cuda.get_device_capability(0)}}", flush=True)
+try:
+    import cumm.tensorview as _tv
+    print(f"DIAG: cumm CC seen = {{_tv.get_compute_capability(0)}}", flush=True)
+except Exception as _e:
+    print(f"DIAG: cumm import error: {{_e}}", flush=True)
+import os as _os
+print(f"DIAG: ATTN_BACKEND={{_os.environ.get('ATTN_BACKEND','unset')}} SPARSE_CONV_BACKEND={{_os.environ.get('SPARSE_CONV_BACKEND','unset')}}", flush=True)
+
 start = time.time()
 try:
     # Force 512 pipeline on 16 GB Blackwell (RTX 5080) -- 1024_cascade
