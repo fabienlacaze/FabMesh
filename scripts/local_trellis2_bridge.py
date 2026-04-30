@@ -139,9 +139,38 @@ print("TRELLIS2: Exporting to GLB...", flush=True)
 try:
     import trimesh
     import torch as _torch
-    verts = mesh.vertices.detach().cpu().numpy()
-    faces = mesh.faces.detach().cpu().numpy()
-    print(f"TRELLIS2: mesh {{len(verts)}}v / {{len(faces)}}f", flush=True)
+    print(f"TRELLIS2: voxel coords shape={{tuple(mesh.coords.shape)}}", flush=True)
+    # Use blackwell_fix.voxel_to_mesh which does marching cubes + Taubin
+    # smoothing on the coord grid. Produces a clean closed surface mesh
+    # instead of the raw voxel grid (3.7M micro-triangles = visually a
+    # point cloud).
+    print("TRELLIS2: voxel_to_mesh (marching cubes + Taubin)...", flush=True)
+    tm_clean = blackwell_fix.voxel_to_mesh(
+        mesh,
+        target_height_mm=0,        # don't rescale to mm
+        sigma=1.5,                 # Gaussian smoothing
+        coarse_downsample=4,
+        taubin_iterations=50,
+        verbose=True,
+    )
+    print(f"TRELLIS2: marching cubes -> {{len(tm_clean.vertices)}}v / {{len(tm_clean.faces)}}f", flush=True)
+    # Decimate: 4.58M faces is too heavy for browsers + downstream UV
+    # bake. Target 100k faces (still dense vs SF3D 12k).
+    if len(tm_clean.faces) > 200000:
+        try:
+            import fast_simplification as _fs
+            _v, _f = _fs.simplify(
+                np.asarray(tm_clean.vertices, dtype=np.float32),
+                np.asarray(tm_clean.faces, dtype=np.uint32),
+                target_count=100000,
+            )
+            tm_clean = trimesh.Trimesh(vertices=_v, faces=_f,
+                                       process=False, validate=False)
+            print(f"TRELLIS2: decimated -> {{len(tm_clean.vertices)}}v / {{len(tm_clean.faces)}}f", flush=True)
+        except Exception as _de:
+            print(f"TRELLIS2: decimation skipped ({{_de}})", flush=True)
+    verts = np.asarray(tm_clean.vertices)
+    faces = np.asarray(tm_clean.faces)
 
     # Sample texture from mesh.attrs (sparse voxel attribute volume)
     # mesh.attrs is the per-voxel feature tensor at coords mesh.coords
