@@ -52,8 +52,36 @@
 <body>
 <h1>fille_francaise — toutes les versions (metadata · mesh · 6 vues utilisées)</h1>
 
-<!-- v23: TRELLIS-2 native (Microsoft, Blackwell sm_120 patches appliqués) -->
+<!-- v24: TRELLIS-2 natif Windows OFFICIEL (visualbruno wheels + DINOv3 alias) -->
 <div class="version latest">
+  <div class="meta">
+    <b>v24 — TRELLIS-2 NATIF Windows OFFICIEL</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">Microsoft TRELLIS.2-4B</span><span class="tag c">+ visualbruno wheels</span><br>
+    <span class="stat new">213k v / 415k f / 23 MB / UV native</span>
+    <ul>
+      <li>Python 3.11 natif Windows + venv .venv311</li>
+      <li>torch 2.8.0+cu128, flash_attn 2.8.2, transformers 5.5.0</li>
+      <li>Wheels visualbruno cp311 Torch280: cumesh, custom_rasterizer, flex_gemm, nvdiffrast, nvdiffrec_render, o_voxel</li>
+      <li>blackwell_fix.patch_all() (CC 12,0 → 9,0)</li>
+      <li>DINOv3 alias model.layer → model.model.layer</li>
+      <li>BiRefNet rembg bypass (gated → u2net pre-process)</li>
+      <li><b>o_voxel.postprocess.to_glb COMPLET</b> avec remeshing + xatlas UV + texture sampling natif</li>
+    </ul>
+    <p><span class="tag ok">UV textures natives</span> (pas vertex colors fluo!)</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_trellis2_native.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="TRELLIS-2 native"><img src="_francaise_front_tpose.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v23: TRELLIS-2 native (Microsoft, Blackwell sm_120 patches appliqués) -->
+<div class="version">
   <div class="meta">
     <b>v23 — TRELLIS-2 native</b> <span class="tag ok">latest</span><br>
     <span class="tag c">Microsoft TRELLIS.2-4B</span><span class="tag c">+ Blackwell fix</span><br>
