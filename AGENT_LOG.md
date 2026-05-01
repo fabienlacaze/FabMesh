@@ -10,6 +10,54 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-01 — TRELLIS-2 Blackwell sm_120: 12+ fix tentés, BLOQUÉ upstream
+
+**Contexte**: TRELLIS-2 (Microsoft) sur RTX 5080 Blackwell. Géo OK.
+Texture = bruit RGB random (chaque voxel = couleur uniforme aléatoire).
+
+### Découverte clé
+Bug racine = **`tex_slat_flow_model_512` (DiT bf16) produit du bruit
+spatial sur sm_120**. Spatial coherence ratio à l'INPUT du tex_slat_decoder:
+- 12 steps Euler: 0.799
+- 50 steps Euler: 0.836 (pire — flow ne converge PAS)
+- Le decoder lui-même fait passer 0.79 → 0.55 (moyennage convolutionnel,
+  ne peut créer du signal à partir de bruit)
+
+### Ce qui a été tenté (tous ECHEC, ratio reste 0.55±0.04)
+1. nvdiffrast retiré (bonus: commercial-safe via `o_voxel_patch.py` BSD-3 PyTorch)
+2. `flex_gemm.grid_sample_3d` patché PyTorch
+3. spoof CC (9,0) Hopper / (8,6) Ampere + DISABLE_JIT
+4. fp32 ss_decoder
+5. fp32 tex_decoder (sans / avec MLP wrap)
+6. spconv ConvAlgo Native vs MaskImplicitGemm vs ImplicitGemm
+7. flex_gemm backend (au lieu de spconv) — Triton crash sm_120
+8. bf16 tex_decoder — spconv KeyError
+9. **Recompile spconv NATIF sm_120** (cumm-cu128-0.8.2 + spconv-cu128-2.3.8,
+   2h build, wheels dans `c:/tmp/wheels_sm120/`) — ratio 0.549, IDENTIQUE
+10. Conversion tex_slat_flow_model bf16 → fp32: crash `FlashAttention only
+    support fp16 and bf16`
+11. Conversion bf16 → fp16: crash `mat1 and mat2 must have the same dtype`
+12. Augmenter steps Euler 12 → 50: ratio s'aggrave 0.799 → 0.836
+
+### Issues upstream IDENTIQUES (OPEN, 0 réponse Microsoft)
+- [visualbruno/ComfyUI-Trellis2#157](https://github.com/visualbruno/ComfyUI-Trellis2/issues/157) RTX 5090
+- [microsoft/TRELLIS.2#102](https://github.com/microsoft/TRELLIS.2/issues/102) RTX 5080 "silent failure SparseConvNeXtBlock3d"
+- [microsoft/TRELLIS.2#99](https://github.com/microsoft/TRELLIS.2/issues/99) RTX 5060 Ti
+
+### Décision business
+**STOP debug TRELLIS-2 sm_120. Ship voie F (SF3D + voie C HD overlay)
+qui est validée et commercial-safe.**
+
+TRELLIS-2 = R&D bloqué jusqu'à ce que Microsoft réponde à #102.
+Tag git `trellis2-rnd-blackwell-blocked` à mettre.
+
+Acquis utiles si on reprend plus tard:
+- `external/TRELLIS2_win/o_voxel_patch.py` (BSD-3 pure PyTorch, retire nvdiffrast)
+- `c:/tmp/wheels_sm120/cumm_cu128-0.8.2-cp311-cp311-win_amd64.whl`
+- `c:/tmp/wheels_sm120/spconv_cu128-2.3.8-cp311-cp311-win_amd64.whl`
+
+---
+
 ## 2026-04-19 — Voie A: texture_project cos^4 + UV inpaint (Hunyuan-inspired)
 
 **Contexte**: après avoir épuisé les options TripoSG (xatlas direct, KDTree UV

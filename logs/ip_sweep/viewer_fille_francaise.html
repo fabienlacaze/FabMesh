@@ -52,10 +52,115 @@
 <body>
 <h1>fille_francaise — toutes les versions (metadata · mesh · 6 vues utilisées)</h1>
 
-<!-- v24: TRELLIS-2 natif Windows OFFICIEL (visualbruno wheels + DINOv3 alias) -->
+<!-- v28: Fix sm_86 spoof + DISABLE_JIT (visualbruno#157 strategy) -->
 <div class="version latest">
   <div class="meta">
-    <b>v24 — TRELLIS-2 NATIF Windows OFFICIEL</b> <span class="tag ok">latest</span><br>
+    <b>v28 — Fix sm_86 spoof + DISABLE_JIT</b> <span class="tag ok">latest</span><br>
+    <span class="tag c">CC (8,6) Ampere</span><span class="tag c">SPCONV/CUMM_DISABLE_JIT=1</span><br>
+    <span class="stat new">Ratio 0.553 / 18.9 MB (target &lt; 0.20)</span>
+    <ul>
+      <li><b>Fix tenté</b>: spoof torch.cuda.get_device_capability → (8,6) Ampere au lieu de (9,0) Hopper</li>
+      <li>+ SPCONV_DISABLE_JIT=1 + CUMM_DISABLE_JIT=1 (force PTX précompilé sm_86)</li>
+      <li>Stratégie validée par visualbruno/ComfyUI-Trellis2#157 + NVIDIA/cutlass#3096</li>
+      <li><b>RÉSULTAT: ÉCHEC</b> ratio 0.553 (vs 0.51 avant) — IDENTIQUE</li>
+      <li>Conclusion: bug est plus profond, dans les kernels CUDA précompilés de spconv</li>
+      <li>Plan B: recompile spconv from source pour sm_120 (kenomo)</li>
+      <li>Plan C: bypass tex_decoder, utiliser texture projection (voie F)</li>
+    </ul>
+    <p><span class="tag bad">Texture toujours fluo</span></p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_trellis2_sm86_fix.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="v28 sm86 fix"><img src="_francaise_trellis2_sm86_fix_voxel_front.png"></div>
+    <div class="cell" data-label="v27 lin_fp32"><img src="_francaise_trellis2_lin_fp32_voxel_front.png"></div>
+    <div class="cell" data-label="v26 no_nvdiffrast"><img src="_francaise_trellis2_no_nvdiffrast_voxel_front.png"></div>
+    <div class="cell" data-label="v25 native"><img src="_francaise_trellis2_native_voxel_front.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v27: Debug Blackwell tex_decoder MLP fp16 explosion -->
+<div class="version">
+  <div class="meta">
+    <b>v27 — Debug tex_decoder MLP fp16 explosion</b><br>
+    <span class="tag c">Linear fp32 wrap</span><span class="tag bad">fix incomplet</span><br>
+    <span class="stat new">341k v / atlas fluo</span>
+    <ul>
+      <li><b>Diagnostic identifié</b>: SparseConvNeXtBlock3d.mlp explose en fp16 sur sm_120</li>
+      <li>conv std=0.74 OK, norm std=0.57 OK, <b>mlp std=10.5 max=102 ❌</b></li>
+      <li>Forçage 66 nn.Linear en fp32 + autocast wrap → ne suffit pas</li>
+      <li>L'amplification persiste dans le mlp final</li>
+      <li>Hypothèse: SiLU fp16 ou la 2ème Linear du mlp (zero_module) sur sm_120</li>
+    </ul>
+    <p>Comparer atlas v27 (lin_fp32) vs v26 (no_nvdiffrast) — devrait être identique si le fix ne fait rien</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_trellis2_lin_fp32.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="lin_fp32 voxels"><img src="_francaise_trellis2_lin_fp32_voxel_front.png"></div>
+    <div class="cell" data-label="ref no_nvdiffrast"><img src="_francaise_trellis2_no_nvdiffrast_voxel_front.png"></div>
+    <div class="cell" data-label="ref native"><img src="_francaise_trellis2_native_voxel_front.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v26: TRELLIS-2 SANS nvdiffrast (commercial-safe) + ss_decoder fp32 -->
+<div class="version">
+  <div class="meta">
+    <b>v26 — TRELLIS-2 commercial-safe + fp32 ss</b><br>
+    <span class="tag ok">o_voxel_patch.py BSD-3</span><span class="tag c">ss_decoder fp32</span><br>
+    <span class="stat new">174k v / 336k f / 19.9 MB / pure PyTorch rasteriser</span>
+    <ul>
+      <li><b>nvdiffrast retiré</b> — remplacé par o_voxel_patch.py (BSD-3, ~21KB, pure PyTorch)</li>
+      <li>_pytorch_rasterize_uv (edge-function vectorisé GPU)</li>
+      <li>_pytorch_interpolate_attr (barycentrique)</li>
+      <li>ss_decoder forcé fp32 (test fp16 overflow Blackwell — sans effet)</li>
+      <li>Mesh + UV xatlas identiques au pipeline original</li>
+      <li>GLB exportable, ouvre dans tout viewer 3D</li>
+    </ul>
+    <p><span class="tag ok">100% commercial</span> (MIT/BSD/Apache uniquement)<br>
+       <span class="tag bad">Texture toujours fluo</span> (bug tex_slat_decoder Blackwell, à fixer)</p>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_trellis2_no_nvdiffrast.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="voxel front"><img src="_francaise_trellis2_no_nvdiffrast_voxel_front.png"></div>
+    <div class="cell" data-label="fp32 ss voxels"><img src="_francaise_trellis2_fp32_ss_voxel_front.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v25: TRELLIS-2 NATIF (avec nvdiffrast non-commercial) -->
+<div class="version">
+  <div class="meta">
+    <b>v25 — TRELLIS-2 natif (référence)</b><br>
+    <span class="tag bad">nvdiffrast non-comm</span><br>
+    <span class="stat">213k v / 415k f / 23 MB</span>
+    <ul>
+      <li>Pipeline TRELLIS-2 original (nvdiffrast utilisé)</li>
+      <li>Référence pour comparer qualité du remplacement</li>
+      <li><b>NON utilisable en production</b> (licence NVIDIA SCL)</li>
+    </ul>
+  </div>
+  <div class="mesh"><model-viewer src="_francaise_trellis2_native.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer></div>
+  <div class="grid6">
+    <div class="cell" data-label="voxel front"><img src="_francaise_trellis2_native_voxel_front.png"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+    <div class="cell" data-label="—"></div>
+  </div>
+</div>
+
+<!-- v24: TRELLIS-2 natif Windows OFFICIEL (visualbruno wheels + DINOv3 alias) -->
+<div class="version">
+  <div class="meta">
+    <b>v24 — TRELLIS-2 NATIF Windows OFFICIEL</b><br>
     <span class="tag c">Microsoft TRELLIS.2-4B</span><span class="tag c">+ visualbruno wheels</span><br>
     <span class="stat new">213k v / 415k f / 23 MB / UV native</span>
     <ul>
