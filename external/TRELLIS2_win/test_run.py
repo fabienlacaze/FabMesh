@@ -422,33 +422,36 @@ class DenseConv3dWrapper(_nn.Module):
         self.out_channels = sp_conv.conv.out_channels
         self.stride = sp_conv.stride
         kernel_size = sp_conv.conv.kernel_size if hasattr(sp_conv.conv, 'kernel_size') else (3, 3, 3)
-        self.kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size,)*3
+        # spconv exposes kernel_size as list, tuple or int. Normalize to tuple of 3 ints.
+        if isinstance(kernel_size, (list, tuple)):
+            self.kernel_size = tuple(int(k) for k in kernel_size)
+        else:
+            self.kernel_size = (int(kernel_size),) * 3
         # Build dense Conv3d
         self.conv = _nn.Conv3d(
             self.in_channels, self.out_channels,
             self.kernel_size, padding=tuple(k//2 for k in self.kernel_size), bias=True
         )
-        # Copy weights from spconv (KdKhKw layout) to PyTorch (Co Ci Kd Kh Kw)
-        spconv_weight = sp_conv.conv.weight.data  # may be (Kd Kh Kw Ci Co) or other
-        # Try to detect layout by shape
+        # Copy weights from spconv to PyTorch (Co Ci Kd Kh Kw).
+        # spconv 2.x SubMConv3d stores weight as (Kd Kh Kw Ci Co).
+        spconv_weight = sp_conv.conv.weight.data
         sw = spconv_weight
-        if sw.shape == (self.out_channels, self.in_channels, *self.kernel_size):
+        ks = self.kernel_size
+        target_shape = (self.out_channels, self.in_channels, *ks)
+        if sw.shape == target_shape:
             self.conv.weight.data.copy_(sw)
-        elif sw.shape == (*self.kernel_size, self.in_channels, self.out_channels):
+        elif sw.shape == (*ks, self.in_channels, self.out_channels):
             # spconv: (Kd Kh Kw Ci Co) -> torch: (Co Ci Kd Kh Kw)
             self.conv.weight.data.copy_(sw.permute(4, 3, 0, 1, 2).contiguous())
-        elif sw.shape == (self.kernel_size[0]*self.kernel_size[1]*self.kernel_size[2], self.in_channels, self.out_channels):
+        elif sw.shape == (ks[0]*ks[1]*ks[2], self.in_channels, self.out_channels):
             # Flat KKK -> Co Ci Kd Kh Kw
-            sw_r = sw.reshape(*self.kernel_size, self.in_channels, self.out_channels)
+            sw_r = sw.reshape(*ks, self.in_channels, self.out_channels)
             self.conv.weight.data.copy_(sw_r.permute(4, 3, 0, 1, 2).contiguous())
         else:
-            print(f"[DenseConv3dWrapper] WARN: unknown weight shape {sw.shape}, expected one of "
-                  f"({self.out_channels},{self.in_channels},{self.kernel_size}) or transposed")
-            # Fallback: copy raw
-            try:
-                self.conv.weight.data.copy_(sw.reshape_as(self.conv.weight.data))
-            except Exception as e:
-                print(f"  reshape fail: {e}")
+            raise RuntimeError(
+                f"unknown spconv weight layout {tuple(sw.shape)}, "
+                f"expected {target_shape} or transposed"
+            )
         if hasattr(sp_conv.conv, 'bias') and sp_conv.conv.bias is not None:
             self.conv.bias.data.copy_(sp_conv.conv.bias.data)
         self.conv = self.conv.cuda()
@@ -477,23 +480,43 @@ class DenseConv3dWrapper(_nn.Module):
                          layout=x.layout, scale=x._scale, spatial_cache=x._spatial_cache)
 
 # Apply to all SparseConv3d in tex_slat_decoder (only stride=1 SubMConv3d)
-_n_replaced = 0
-import spconv.pytorch as _spconv_pytorch
-for _name, _mod in pipe.models['tex_slat_decoder'].named_modules():
-    if isinstance(_mod, _SpConv3d) and _mod.stride == (1, 1, 1) and _mod.padding is None:
-        # Replace inner spconv module with our wrapper
-        try:
-            wrapper = DenseConv3dWrapper(_mod).cuda()
-            # Patch the forward method of this _SpConv3d instance
-            _mod._dense_wrapper = wrapper
-            _orig_fwd = _mod.forward
-            def _new_fwd(x, _w=wrapper):
-                return _w(x)
-            _mod.forward = _new_fwd
-            _n_replaced += 1
-        except Exception as e:
-            print(f"[DenseConv] FAIL replace {_name}: {e}")
-print(f"[blackwell_fix] Replaced {_n_replaced} SparseConv3d with dense Conv3d wrapper in tex_decoder")
+# Phase 1: enumerate candidates and report their layout
+_all_spconvs = [
+    (_n, _m) for _n, _m in pipe.models['tex_slat_decoder'].named_modules()
+    if isinstance(_m, _SpConv3d)
+]
+print(f"[DenseConv] tex_slat_decoder has {len(_all_spconvs)} SparseConv3d modules total")
+_candidates = [(_n, _m) for _n, _m in _all_spconvs
+               if _m.stride == (1, 1, 1) and _m.padding is None]
+print(f"[DenseConv] {len(_candidates)} match stride=(1,1,1) padding=None")
+if _candidates:
+    _sample_name, _sample_mod = _candidates[0]
+    print(f"[DenseConv] sample {_sample_name}: weight.shape={tuple(_sample_mod.conv.weight.data.shape)} "
+          f"kernel_size={_sample_mod.conv.kernel_size if hasattr(_sample_mod.conv, 'kernel_size') else 'unknown'}")
+
+# Phase 2: build all wrappers FIRST (no forward patching). Only patch
+# forwards if every wrapper builds successfully — avoid polluting the
+# module if some fail.
+_wrappers = {}
+_fail = 0
+for _name, _mod in _candidates:
+    try:
+        _wrappers[_name] = (DenseConv3dWrapper(_mod).cuda(), _mod)
+    except Exception as e:
+        print(f"[DenseConv] BUILD FAIL {_name}: {type(e).__name__}: {e}")
+        _fail += 1
+
+if _fail > 0:
+    print(f"[DenseConv] ABORTING: {_fail}/{len(_candidates)} wrappers failed to build, "
+          f"NOT patching forwards (avoid polluting decoder)")
+else:
+    # Phase 3: all wrappers built successfully -> patch forwards
+    for _name, (wrapper, _mod) in _wrappers.items():
+        _mod._dense_wrapper = wrapper
+        def _new_fwd(x, _w=wrapper):
+            return _w(x)
+        _mod.forward = _new_fwd
+    print(f"[blackwell_fix] Replaced {len(_wrappers)} SparseConv3d with dense Conv3d wrapper in tex_decoder")
 '''
 
 # [Angle E 2026-05-12] Activate DenseConv3dWrapper to bypass spconv.
