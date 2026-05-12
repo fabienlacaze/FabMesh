@@ -10,6 +10,105 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-12 — TRELLIS-2 Blackwell reprise: Angle A (SDPA math backend)
+
+**Contexte**: relance du debug TRELLIS-2 après les 12 essais de mai 2026.
+Nouvelles pistes neuves identifiées (sm_120 + DiT bf16 noise).
+
+**Vérification pipeline.json (issue #160)** : confirmé que
+`sparse_structure_decoder` pointe vers le checkpoint de l'ANCIEN TRELLIS
+(`microsoft/TRELLIS-image-large/ckpts/ss_dec_conv3d_16l8_fp16`) — bug
+Microsoft réel. MAIS on bypass déjà ce decoder via `voxel_to_mesh`
+maison (marching cubes), donc ce n'est pas notre problème actuel. Tous
+les autres checkpoints (tex_slat_decoder, tex_slat_flow_model_512,
+shape_slat_*) pointent vers des artifacts TRELLIS-2 légitimes.
+
+**Angle A — Force SDPA math-only backend (PyTorch)** :
+Ajout du flag env `SDPA_MATH_ONLY=1` qui désactive flash/mem_eff/cudnn
+SDPA et ne garde que le math backend (lent mais bit-exact).
+Implémenté dans `external/TRELLIS2_win/test_run.py`.
+
+Résultats sur `images/enfant_roux/ref_0.png` (créature orange/blanche) :
+
+| Métrique | flash_attn (avant) | SDPA math (Angle A) |
+|---|---|---|
+| Sparse structure | 1.5s/step | 1.3s/step (identique) |
+| Shape SLat | ~5s/step | ~19s/step (4x plus lent) |
+| Tex SLat | ~5s/step | ~12s/step (2.5x) |
+| **Ratio cohérence spatiale (input decoder)** | **0.799** | **0.439** ✓ |
+| sample_tex_slat OUTPUT std | ~0.05 (cassé) | 3.632 (sain) |
+
+**Verdict mitigé** : le ratio s'améliore SIGNIFICATIVEMENT (0.79 → 0.44,
+= signal spatial structuré). Le sample_tex_slat OUTPUT a une std saine
+de 3.6. MAIS la projection front du voxel cloud reste **visuellement
+bruitée** (checkerboard de couleurs aléatoires, pas le kangourou
+orange attendu).
+
+**Hypothèse**: soit le ratio doit descendre encore plus (~0.2), soit
+le **tex_slat_decoder est aussi cassé indépendamment du flow** sur
+sm_120 — il prendrait des features cohérentes en input mais produirait
+des RGB random en output.
+
+**Test suivant** : BYPASS_TEX_FLOW=mean + SDPA_MATH_ONLY → si le
+decoder produit une couleur uniforme avec input constant, il est OK
+et c'est le flow qu'il faut peaufiner. Si le decoder produit du bruit
+même avec input constant, le bug est plus profond.
+
+**Test #2 (BYPASS_TEX_FLOW=mean + SDPA_MATH_ONLY)** : on envoie le
+mean des stats de normalisation à TOUS les voxels (même feature
+vector partout). Un decoder sain produirait une couleur UNIFORME sur
+toute la silhouette.
+
+Résultat: **même bruit visuel qu'un run normal** (checkerboard de
+couleurs random). attr_volume mean=0.445 std=0.444, projection
+front PNG = bruit.
+
+➡️ **CONCLUSION CRITIQUE : le tex_slat_decoder lui-même produit du
+bruit sur sm_120, indépendamment de son input.** Le bug est dans le
+decoder, pas dans le flow. Ça explique pourquoi améliorer le ratio
+du flow (Angle A) n'a pas fixé la texture. Voxels recevant exactement
+la même feature 32D produisent des RGB différents → bug dans la
+chaîne SparseConv3d / SubMConv3d / activations / normalizations
+internes du decoder.
+
+**Tentative Angle E — DenseConv3dWrapper (REMPLACER SparseConv3d par
+nn.Conv3d densifié)** : code déjà préparé dans test_run.py mais bug
+détecté à l'exécution. `kernel_size` retourné par spconv est une
+LIST (`[3, 3, 3]`) pas tuple — le check `isinstance(kernel_size, tuple)`
+échoue, fallback `(kernel_size,)*3` produit `([3,3,3], [3,3,3], [3,3,3])`,
+crash en chaîne sur `k//2 for k in self.kernel_size`. **0 SparseConv3d
+remplacés**, run se déroule comme un run normal MAIS le shape_slat
+ralentit dramatiquement (274s/step au step 7-9 vs 19s normal) —
+probablement parce que l'override `_mod.forward = _new_fwd` reste
+attaché à tous les SubMConv3d et casse leur cache interne spconv.
+**RAM système monte à 20 GB, swap commence**.
+
+Le job a été tué après 25 min pour libérer la machine.
+
+**Fix à appliquer demain** (avant relance) :
+```python
+self.kernel_size = (
+    tuple(kernel_size) if isinstance(kernel_size, (list, tuple))
+    else (kernel_size,) * 3
+)
+```
+Et NE PAS attacher de wrapper si la détection de layout échoue (skip
+proprement au lieu de polluer la forward).
+
+**Acquis du 2026-05-12** :
+1. Bug n'est PAS dans le flow → ratio amélioré ≠ texture fixée.
+2. Bug EST dans le decoder → BYPASS_TEX_FLOW=mean reproduit le bruit
+   avec input constant.
+3. Très probablement dans les SparseConv3d / spconv kernels sm_120.
+4. DenseConv3dWrapper est la bonne piste mais code à debugger.
+5. CPU decoder = piste alternative mais nécessite migration récursive
+   du sub-module Linear `from_latent` aussi (pas juste `.cpu()`
+   sur le module top-level).
+6. ATTENTION : ne pas relancer test_run.py avec un wrapper buggé,
+   il ralentit shape_slat et bouffe la RAM système.
+
+---
+
 ## 2026-05-12 — Fix dtype mismatch dans local_juggernaut_bridge.py
 
 **Symptôme**: "Image generation failed — expected mat1 and mat2 to have
