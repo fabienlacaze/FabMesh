@@ -141,6 +141,15 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             use_safetensors=True,
             variant="fp16",
         )
+        try:
+            pipe.unet.to(torch.float16)
+            pipe.vae.to(torch.float16)
+            pipe.text_encoder.to(torch.float16)
+            pipe.text_encoder_2.to(torch.float16)
+            if hasattr(pipe, 'controlnet'):
+                pipe.controlnet.to(torch.float16)
+        except Exception as _e:
+            print(f"LOCAL_REALVIS: fp16 cast skipped: {_e}", flush=True)
         pipe.enable_model_cpu_offload()
         _ctrl_pipe = pipe
         steps = min(int(steps), 8)
@@ -155,6 +164,13 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             variant="fp16",
             use_safetensors=True,
         )
+        try:
+            pipe.unet.to(torch.float16)
+            pipe.vae.to(torch.float16)
+            pipe.text_encoder.to(torch.float16)
+            pipe.text_encoder_2.to(torch.float16)
+        except Exception as _e:
+            print(f"LOCAL_REALVIS: fp16 cast skipped: {_e}", flush=True)
         pipe.enable_model_cpu_offload()
         print("LOCAL_REALVIS: Loaded with CPU offload (VAE decodes on CPU if needed)")
         sys.stdout.flush()

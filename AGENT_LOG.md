@@ -10,6 +10,27 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-12 — Fix dtype mismatch dans local_juggernaut_bridge.py
+
+**Symptôme**: "Image generation failed — expected mat1 and mat2 to have
+the same dtype, but got: float != struct c10::Half" lors d'un click sur
+"Generate". Crash dans `encode_prompt` (text_encoder).
+
+**Cause**: même bug que sdxl_server.py (déjà fix il y a un moment).
+Diffusers 0.34 + torch 2.7.1+cu128 laisse certains buffers en fp32
+après `from_pretrained(torch_dtype=torch.float16, variant="fp16")`. Le
+text_encoder voit du fp32 sur des poids fp16 → mismatch.
+
+**Fix**: ajouter `pipe.unet/vae/text_encoder/text_encoder_2.to(torch.float16)`
+APRÈS `from_pretrained` et AVANT `enable_model_cpu_offload()`, dans les
+deux branches (RealVisXL par défaut + DreamShaper XL Lightning + CN
+OpenPose pour T-pose). Le fix est identique à celui appliqué à
+`sdxl_server.py:147-148` / `201-202` / `248-249`.
+
+**Statut**: à valider — relancer un "Generate" dans l'UI.
+
+---
+
 ## 2026-05-01 — TRELLIS-2 Blackwell sm_120: 12+ fix tentés, BLOQUÉ upstream
 
 **Contexte**: TRELLIS-2 (Microsoft) sur RTX 5080 Blackwell. Géo OK.
