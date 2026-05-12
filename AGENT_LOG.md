@@ -95,6 +95,27 @@ self.kernel_size = (
 Et NE PAS attacher de wrapper si la détection de layout échoue (skip
 proprement au lieu de polluer la forward).
 
+**Update 2026-05-12 soir** : kernel_size fix appliqué + dry-run pattern
+(build all wrappers FIRST, patch forwards only if 0 failures).
+
+Test relancé → **diagnostic du vrai layout spconv** :
+- tex_slat_decoder a **40 SparseConv3d** au total, tous stride=(1,1,1) padding=None
+- Sample weight shape : `(1024, 3, 3, 3, 1024)`, `(4096, 3, 3, 3, 1024)`,
+  `(512, 3, 3, 3, 512)`, etc.
+- Donc spconv 2.x stocke en `(out_channels, Kd, Kh, Kw, in_channels)`
+- Ni le layout attendu PyTorch `(Co Ci Kd Kh Kw)` ni les transposes
+  testés. → **PROPRE ABORT, 0 forward patché**, decoder intact ✓
+
+**À faire prochaine session** : ajouter ce layout dans le wrapper :
+```python
+elif sw.shape == (self.out_channels, *ks, self.in_channels):
+    # spconv 2.x SubMConv3d: (Co Kd Kh Kw Ci) -> torch: (Co Ci Kd Kh Kw)
+    self.conv.weight.data.copy_(sw.permute(0, 4, 1, 2, 3).contiguous())
+```
+
+Avec ça, les 40 wrappers devraient se construire et on aura la
+réponse finale sur le bug spconv sm_120.
+
 **Acquis du 2026-05-12** :
 1. Bug n'est PAS dans le flow → ratio amélioré ≠ texture fixée.
 2. Bug EST dans le decoder → BYPASS_TEX_FLOW=mean reproduit le bruit
