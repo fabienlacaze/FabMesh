@@ -51,6 +51,12 @@ external/TRELLIS2_win/src/
 external/TRELLIS2_win/_dbg_*.npy
 external/TRELLIS2_win/test_*.py
 
+# Isolated venv for MV-Adapter (diffusers 0.30 + torch cu128, ~5 GB)
+.venv-mvadapter/
+
+# Isolated venv for SyncMVD (PyTorch3D, planned)
+.venv-syncmvd/
+
 # Secrets / tokens
 .test_api_token
 
