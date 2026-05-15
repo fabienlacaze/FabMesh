@@ -3401,7 +3401,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const bridgeScripts = {
       'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
       'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
-      'triposg': path.join(__dirname, '..', '..', 'scripts', 'local_triposg_bridge.py'),
+      // TripoSG: route via the full pipeline wrapper (raw → decim → UV unwrap
+      // → texture_project) so the output is a textured GLB usable downstream.
+      // The raw bridge alone produces geometry without UVs.
+      'triposg': path.join(__dirname, '..', '..', 'scripts', 'triposg_full_pipeline.py'),
       'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py'),
       'meshy':   path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py')
     };
@@ -3413,6 +3416,13 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const sf3dRemesh = (targetFaces && Number(targetFaces) > 0) ? 'triangle' : 'none';
     const sf3dSubdivide = String(typeof subdivide === 'number' ? subdivide : 0);
 
+    // TripoSG full pipeline args: <front_image> <out.glb> [target_faces=0] [tex_res=1024]
+    // target_faces=0 means keep TripoSG's native ~1.4M faces (no decimation).
+    // We clamp to the same UI triangle slider as SF3D, defaulting to 50k for
+    // a sensible bake/web preview.
+    const triposgTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Number(targetFaces)) : '50000';
+    const triposgTexRes = String(textureSize || 1024);
+
     // Meshy needs its API key as argv[2] — fetched from config.json.
     const meshyApiKey = (loadConfig() || {}).meshyApiKey || '';
     const meshyTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Math.min(300000, Number(targetFaces))) : '50000';
@@ -3421,7 +3431,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const argsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
-      'triposg': [bridgeScript, imagePath, meshPath, '30', '7.0'],
+      'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
@@ -3450,7 +3460,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const fixedArgsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
-      'triposg': [bridgeScript, imagePath, meshPath, '30', '7.0'],
+      'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };

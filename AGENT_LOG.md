@@ -10,6 +10,38 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-15 (matin) — TripoSG activé dans l'UI (option A: quick win MIT)
+
+**Contexte**: après bilan complet de la stack (TRELLIS-2 bloqué Blackwell,
+MV-Adapter bug profond, SyncMVD inadéquat), décision d'attaquer le quick
+win **TripoSG** qui était déjà bridged mais pas exposé en UI.
+
+**Bénéfice business**: TripoSG est **MIT pur**, donc libère le plafond
+$1M de Stability Community License qui pèse sur SF3D. Mondial commercial
+sans restriction.
+
+**Modifs**:
+- `src/renderer/index2.html:262` — ajout `<option value="triposg">TripoSG (local, MIT)</option>`
+- `src/renderer/index2.js:5210` — expectedMs=150s pour engine triposg (vs 60s default)
+- `src/main/main.js:3404` — bridgeScript pour engine=triposg pointe maintenant
+  vers `triposg_full_pipeline.py` (PAS `local_triposg_bridge.py`) car ce
+  dernier produit du mesh sans UV/texture. Le full_pipeline fait:
+  1. TripoSG raw mesh (~1.4M faces)
+  2. Décimation à `targetFaces` (50k par défaut)
+  3. xatlas UV unwrap
+  4. texture_project.py avec front image
+- Args: `[script, imagePath, meshPath, targetFaces, texRes]`
+
+**Backup**: branche `backup-before-triposg-ui-20260515-164907` créée
+avant modif.
+
+**À tester**: smoke test sur 3-5 images variées (humain, animal, prop)
+pour comparer qualité TripoSG vs SF3D côte à côte. Si TripoSG donne
+des résultats équivalents ou meilleurs, ce sera le default pour les
+nouveaux projects.
+
+---
+
 ## 2026-05-15 — Pivot vers SyncMVD (abandon MV-Adapter)
 
 **Contexte**: après échec TRELLIS-2 Blackwell et analyse du marché, pivot
