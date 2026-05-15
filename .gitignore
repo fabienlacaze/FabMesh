@@ -38,6 +38,19 @@ scripts/_*.py
 scripts/export_*.py
 scripts/_prompt_*.txt
 
+# Debug dump dirs (per-experiment artifacts, too noisy to track)
+logs/ip_sweep/
+logs/child_ip45_2view/
+logs/trellis2_sdpa_math_test/
+logs/test_mirror_back/
+
+# TRELLIS-2 native Windows install (third-party source + venv)
+external/TRELLIS/
+external/TRELLIS2_win/.venv/
+external/TRELLIS2_win/src/
+external/TRELLIS2_win/_dbg_*.npy
+external/TRELLIS2_win/test_*.py
+
 # Secrets / tokens
 .test_api_token
 
