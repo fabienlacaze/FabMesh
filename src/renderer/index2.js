@@ -5209,6 +5209,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   let expectedMs;
   if (engine === 'sf3d') {
     expectedMs = preset.expectedMs + triPreset.extraMs;
+  } else if (engine === 'triposg') {
+    // TripoSG full pipeline: geo ~30s + decim + xatlas + texture_project ~90s
+    expectedMs = 150000;
   } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {
