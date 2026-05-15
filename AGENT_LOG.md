@@ -10,6 +10,23 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-12 — Housekeeping: gitignore cleanup
+
+Le repo accumulait **346 changements actifs** (VSCode warning "too many
+active changes"). 321 venaient de 2 dossiers de debug
+(`logs/ip_sweep/` 190, `logs/child_ip45_2view/` 131) et du clone
+natif TRELLIS-2 (`external/TRELLIS2_win/.venv` + `src/`).
+
+Ajout au `.gitignore` :
+- `logs/ip_sweep/`, `logs/child_ip45_2view/`, `logs/trellis2_sdpa_math_test/`, `logs/test_mirror_back/`
+- `external/TRELLIS/`, `external/TRELLIS2_win/.venv/`, `external/TRELLIS2_win/src/`
+- `external/TRELLIS2_win/_dbg_*.npy`, `external/TRELLIS2_win/test_*.py`
+
+Résultat : 346 → 34 changes. Les fichiers déjà trackés (M/D) restent
+visibles (à nettoyer plus tard si nécessaire via `git rm --cached`).
+
+---
+
 ## 2026-05-12 — TRELLIS-2 Blackwell reprise: Angle A (SDPA math backend)
 
 **Contexte**: relance du debug TRELLIS-2 après les 12 essais de mai 2026.
