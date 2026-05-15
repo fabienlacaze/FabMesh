@@ -10,6 +10,47 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-15 — Pivot vers SyncMVD (abandon MV-Adapter)
+
+**Contexte**: après échec TRELLIS-2 Blackwell et analyse du marché, pivot
+vers pipeline 100% MIT/Apache mondial commercial. MV-Adapter (Apache 2.0,
+ICCV 2025) identifié comme la meilleure piste pour texture multi-view.
+
+**Tentative MV-Adapter** (script déjà présent `multiview_mvadapter_gen.py`,
+clone `external/MV-Adapter/`, poids HF en cache):
+1. Smoke test avec diffusers 0.34 (notre version) → KeyError sur 70/70
+   self-attn processors (`attn1`). La passe ref ne peuple pas `ref_hidden_states`.
+2. Patch ref-skip dans `attention_processor.py` → fait fonctionner l'inference
+   mais vues sortent en **bruit cubiste** vert/rose (ref ignorée = pas de
+   guidance image).
+3. Création `.venv-mvadapter/` isolé avec diffusers 0.30 + torch 2.7.1+cu128 +
+   transformers 4.45.2 + matplotlib + jaxtyping + typeguard + onnxruntime.
+   Setup OK.
+4. Re-test avec diffusers 0.30 → **MÊME KeyError**. Donc ce n'est pas un bug
+   diffusers 0.34 API.
+5. Test sans `enable_model_cpu_offload` (hypothèse accelerate filtrant
+   les kwargs) → **MÊME KeyError**. Donc ce n'est pas accelerate.
+6. Debug print confirme : à la 1ère itération diffusion, processors voient
+   `cache_hidden_states=None` → donc la passe ref n'a JAMAIS appelé ces
+   processors avec un dict cache. Le bug est dans la pipeline MV-Adapter
+   elle-même (la passe ref ne traverse pas les attn1 self-attention).
+
+**Conclusion** : MV-Adapter dans son état actuel est cassé sur diffusers
+récents (0.30+). Le bug est profond, ~1-2h de R&D pour comprendre.
+Sans Unreal (libère 5 GB VRAM), une itération prend 100s. Avec, 2h
+(VRAM swap). Pas viable ce soir.
+
+**Décision**: pivot SyncMVD. MIT, utilise PyTorch3D natif (pas la
+complexité diffusers/accelerate de MV-Adapter). Plus simple, plus
+robuste long-terme.
+
+**Acquis utiles à conserver**:
+- `.venv-mvadapter/` reste utilisable si on veut tenter le debug profond
+- `external/MV-Adapter/` cloné, patch `o_voxel_patch` style possible
+- Script `multiview_mvadapter_gen.py` reste là, désactivé par défaut
+
+---
+
 ## 2026-05-12 — Housekeeping: gitignore cleanup
 
 Le repo accumulait **346 changements actifs** (VSCode warning "too many
