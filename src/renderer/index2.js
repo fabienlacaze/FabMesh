@@ -1524,27 +1524,73 @@ function _navigateImage(delta) {
 document.getElementById('ws-img-prev')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(-1); });
 document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(1); });
 
-// Generate Multi-Views button
-document.getElementById('ws-multiview-btn')?.addEventListener('click', async () => {
+// Generate Multi-Views button — opens an options modal first.
+// User picks post-gen refinements (RealVis harmonize, ESRGAN upscale)
+// and clicks "Start". Then we (a) duplicate the source image into a
+// new version (so the original stays clean), (b) generate 6 MVs on
+// that new version's <stem>_multiview/ dir, (c) reload the project
+// so the gallery shows the new version with MV badge.
+document.getElementById('ws-multiview-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-  const imgPath = p.previewImagePath || p.selectedImagePath;
-  // Register a proper job so the "Running task" dialog + progress bar
-  // show up like for image/3D generation. Without this the user only
-  // saw a bottom toast and no way to know multi-view was running.
-  // Multi-view gen typically takes ~70 s (first run can add 4 GB DL).
-  const job = pushJob(`Multi-views: ${p.name}`, null, {
-    Image: (imgPath || '').split(/[\\/]/).pop(),
-  }, 70000);
-  showToast('Generating 6 multi-views... (first run downloads ~4GB model)', 'info', 5000);
+  const modal = document.getElementById('modal-multiview-options');
+  if (modal) modal.classList.remove('hidden');
+});
+
+document.getElementById('mv-opt-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-multiview-options')?.classList.add('hidden');
+});
+
+document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
+  const modal = document.getElementById('modal-multiview-options');
+  if (modal) modal.classList.add('hidden');
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const srcImgPath = p.previewImagePath || p.selectedImagePath;
+  const harmonize = document.getElementById('mv-opt-harmonize')?.checked ?? true;
+  const upscale   = document.getElementById('mv-opt-upscale')?.checked ?? false;
+
+  // Step 1: duplicate the image into a new version. The new version
+  // will host the multi-view dir; the original image stays untouched
+  // so the user can compare or revert.
+  let mvImagePath = srcImgPath;
   try {
-    const result = await API.generateMultiview({ imagePath: imgPath });
+    const dup = await window.meshyAPI.duplicateImageVersion({
+      imagePath: srcImgPath, suffix: 'mv',
+    });
+    if (dup && dup.success) {
+      mvImagePath = dup.path;
+    } else {
+      showToast('Could not duplicate image: ' + (dup?.error || 'unknown'), 'error', 5000);
+      return;
+    }
+  } catch (e) {
+    showToast('Duplicate failed: ' + e.message, 'error', 5000);
+    return;
+  }
+
+  // Step 2: kick off the multi-view generation on the duplicated image.
+  const expectedMs = 70000 + (harmonize ? 30000 : 0) + (upscale ? 10000 : 0);
+  const job = pushJob(`Multi-views: ${p.name}`, null, {
+    Image: (mvImagePath || '').split(/[\\/]/).pop(),
+    Harmonize: harmonize ? 'yes' : 'no',
+    Upscale: upscale ? 'yes' : 'no',
+  }, expectedMs);
+  showToast('Generating 6 multi-views...', 'info', 5000);
+  try {
+    const result = await API.generateMultiview({
+      imagePath: mvImagePath, harmonize, upscale,
+    });
     if (result && result.success) {
       showToast('Multi-views generated!', 'success');
       if (!p._multiviews) p._multiviews = {};
-      p._multiviews[imgPath] = result.outDir;
-      _showMultiviewBar(result.outDir);
+      p._multiviews[mvImagePath] = result.outDir;
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
+      // Reload project so the duplicated image shows up in the gallery
+      // (as the newest "v0"), then select it so the MV bar appears.
+      if (typeof reloadCurrentProject === 'function') {
+        await reloadCurrentProject();
+      }
     } else {
       const msg = (result && result.error) || 'unknown';
       showToast('Multi-view failed: ' + msg, 'error', 5000);

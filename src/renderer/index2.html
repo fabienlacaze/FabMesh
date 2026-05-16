@@ -800,6 +800,38 @@
     </div>
 
     <!-- ============================================================
+         MULTI-VIEW OPTIONS MODAL
+         Picks post-gen refinements before launching 6-view generation.
+         A new image version is created so the original stays untouched.
+         ============================================================ -->
+    <div id="modal-multiview-options" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Generate Multi-Views</h2>
+        <p class="modal-subtitle">6 ortho views (front/right/back/left/top/bottom) via MV-Adapter.<br/>A new image version will be created so the original stays untouched.</p>
+        <div style="display:flex; flex-direction:column; gap:10px; margin:14px 0;">
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="mv-opt-harmonize" checked style="margin-top:3px;" />
+            <span>
+              <strong>RealVis img2img harmonize</strong><br/>
+              <span style="color:var(--text-3); font-size:12px;">Passe les 6 vues dans RealVis img2img (strength 0.3) pour récupérer le style photoréaliste. Recommandé. +30s.</span>
+            </span>
+          </label>
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="mv-opt-upscale" style="margin-top:3px;" />
+            <span>
+              <strong>Upscale Real-ESRGAN 768→1024</strong><br/>
+              <span style="color:var(--text-3); font-size:12px;">Augmente la résolution des 6 vues pour matcher l'image source. Rapide. +10s.</span>
+            </span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="mv-opt-cancel">Cancel</button>
+          <button class="primary-btn" id="mv-opt-start">Start Multi-Views</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
          ALIGN TEXTURE MODAL
          Manually adjust how source photos project onto the mesh.
          ============================================================ -->

@@ -2434,6 +2434,30 @@ ipcMain.handle('import-image-file', (event, filePath) => {
   }
 });
 
+// Duplicate an image into a new version (same project dir, suffix + timestamp).
+// Used by Multi-Views button so the original image stays untouched while the
+// new version receives the 6-view dir + any subsequent view edits.
+ipcMain.handle('duplicate-image-version', (event, { imagePath, suffix }) => {
+  try {
+    if (!imagePath || !fs.existsSync(imagePath)) {
+      return { success: false, error: 'Source image not found' };
+    }
+    if (!isPathAllowed(imagePath)) {
+      return { success: false, error: 'Path not allowed' };
+    }
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = path.basename(imagePath, ext);
+    const safeSuffix = (suffix || 'copy').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16);
+    const ts = Date.now();
+    const dest = path.join(dir, `${base}_${safeSuffix}_${ts}${ext}`);
+    fs.copyFileSync(imagePath, dest);
+    return { success: true, path: dest, filename: path.basename(dest) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Manual mask inpaint: user paints the mask in-app, we send it to SDXL
 ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt }) => {
   try {
@@ -4013,7 +4037,8 @@ function _mvScriptForEngine() {
   return path.join(__dirname, '..', '..', 'scripts', name);
 }
 
-ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
+ipcMain.handle('generate-multiview', async (_event, opts) => {
+  const { imagePath, harmonize, upscale } = (opts || {});
   const script = _mvScriptForEngine();
   // Multi-views are tied to the EXACT image version. Output dir derived
   // from the image file path:
@@ -4024,17 +4049,20 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
   const imgBasename = path.basename(imagePath, path.extname(imagePath));
   const outDir = path.join(path.dirname(imagePath), imgBasename + '_multiview');
   return new Promise((resolve) => {
-    // Enable IPAdapter-guided identity harmonize by default (2026-04-16).
-    // SDXL img2img at strength 0.3 guided by the ref image's CLIP embed
-    // cleans up Zero123++ hallucinations (occluded limbs, wrong skin
-    // colour) while keeping the subject's identity intact. Cost ~+30s.
-    // User can opt out via FABMESH_MV_IDENTITY_HARMONIZE=0.
+    // Options forwarded from the renderer's Multi-Views modal:
+    // - harmonize (default true): RealVis img2img strength 0.3 to recover
+    //   photoreal style on top of MV-Adapter / Z123 output (+30s).
+    // - upscale (default false): Real-ESRGAN 768->1024 to match source
+    //   resolution (+10s). Read by the Python multiview scripts.
+    const harmonizeFlag = (harmonize === undefined ? true : !!harmonize) ? '1' : '0';
+    const upscaleFlag   = (upscale === true) ? '1' : '0';
     const mvEnv = {
       ...process.env,
       PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True',
-      FABMESH_MV_IDENTITY_HARMONIZE:
-        process.env.FABMESH_MV_IDENTITY_HARMONIZE ?? '1',
+      FABMESH_MV_IDENTITY_HARMONIZE: harmonizeFlag,
+      FABMESH_MV_UPSCALE: upscaleFlag,
     };
+    log.info('multiview', `options: harmonize=${harmonizeFlag} upscale=${upscaleFlag}`);
     const proc = execFile('python', [script, imagePath, outDir], {
       timeout: 900000, maxBuffer: 10 * 1024 * 1024,
       env: mvEnv
