@@ -7935,7 +7935,11 @@ async function refreshJobDetailsModal(id) {
   const refImg = document.getElementById('jd-ref-img');
   const p = state.currentProject;
   const isRigJob = /rig/i.test(j.name || '');
-  const isImageGenJob = /^generate images?\b/i.test(j.name || '');
+  // Match all phases of an image-creation job so the popup never shows the
+  // previously-selected image as a thumb. The phase-2 rename ("Generating
+  // 6 views: ..." / "Generate back views: ...") used to escape the original
+  // regex and reveal the stale thumb mid-generation.
+  const isImageGenJob = /^(generate images?|generating (back|6) views|generate back views|multi-views)\b/i.test(j.name || '');
   let thumbUrl = null;
   if (isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
     try {
