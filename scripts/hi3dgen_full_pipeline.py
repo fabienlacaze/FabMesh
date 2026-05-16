@@ -37,11 +37,12 @@ def step_hi3dgen(image_path, out_glb):
     log(f'STEP 1: Hi3DGen raw mesh -> {out_glb}')
     bridge = os.path.join(SCRIPTS, 'local_hi3dgen_bridge.py')
     t0 = time.time()
-    # Inherit stdout/stderr so progress markers (LOCAL_HI3DGEN_PROGRESS)
-    # reach Electron's progress mapper.
+    # Tell the bridge it's wrapped so it caps progress markers at 50%
+    # (leaving 50-100 for unwrap + texture bake steps).
+    env = {**os.environ, 'FABMESH_HI3DGEN_WRAPPED': '1'}
     rc = subprocess.run(
         [TRELLIS2_VENV_PY, bridge, image_path, out_glb],
-        timeout=600,
+        timeout=600, env=env,
     ).returncode
     if rc != 0:
         log(f'Hi3DGen failed with rc={rc}')
@@ -114,8 +115,11 @@ def main():
 
     t0 = time.time()
     step_hi3dgen(image_path, raw_glb)
+    print('LOCAL_HI3DGEN_PROGRESS: 55 step1_done', flush=True)
     step_unwrap(raw_glb, uv_glb)
+    print('LOCAL_HI3DGEN_PROGRESS: 70 unwrap_done', flush=True)
     step_texture(uv_glb, image_path, out_glb, tex_res)
+    print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
     # Final 100% marker so Electron's progress mapper completes.
     print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')
