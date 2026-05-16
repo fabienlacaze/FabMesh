@@ -1350,10 +1350,67 @@ if ($p) {
   }, 300);
 }
 
-// Back-compat alias used in older spawn sites — now points to the
-// OS-level cap (no kill, no clamp).
+// SAFETY watchdog: monitors GLOBAL system RAM (not just this process).
+// Kills the job if total system RAM hits the panic threshold (default
+// 95 percent of total). This is the LAST LINE OF DEFENSE that prevents
+// the OS from crashing entirely — happens when multiple subprocesses
+// cumulate or when commit charge exceeds pagefile capacity, in
+// situations where the per-process working-set cap is not enough.
+//
+// Distinct from the working-set cap above:
+//   - cap (setProcessHardMemoryLimit) tells Windows to swap THIS
+//     process when it grows its working set above the per-process
+//     limit. Normal swap behavior, no kill.
+//   - safety (installSystemRamSafetyKill) is a global RAM guard.
+//     When system RAM is about to exhaust (and the OS would crash
+//     hard with black screen), we kill the job to save the PC.
+//
+// Threshold from FABMESH_RAM_PANIC_PCT (default 95 percent).
+function installSystemRamSafetyKill(proc, jobName) {
+  if (!proc || !proc.pid) return;
+  const panicPct = Math.min(99, Math.max(80,
+    parseFloat(process.env.FABMESH_RAM_PANIC_PCT || '95')
+  ));
+  let _killed = false;
+  let _consecutiveBreaches = 0;
+  const _interval = setInterval(() => {
+    if (_killed || proc.killed || proc.exitCode !== null) {
+      clearInterval(_interval);
+      return;
+    }
+    const _os = require('os');
+    const _total = _os.totalmem();
+    const _free = _os.freemem();
+    const _usedPct = ((_total - _free) / _total) * 100;
+    if (_usedPct > panicPct) {
+      _consecutiveBreaches += 1;
+      // Need 2 consecutive readings (2 seconds) to avoid killing on a
+      // single transient spike that the OS would have absorbed.
+      if (_consecutiveBreaches >= 2) {
+        log.error('main', `[ram-safety] PANIC: system RAM ${_usedPct.toFixed(1)}% > ${panicPct}% — killing ${jobName} pid=${proc.pid} to save the PC`);
+        try { safeSend('ram-panic-killed', { value: _usedPct, limit: panicPct, job: jobName }); } catch (e) {}
+        _killed = true;
+        killProcTree(proc);
+        // Also nuke orphans to free up whatever Python leaked.
+        try { killOrphanPythonSubprocesses(); } catch (e) {}
+        clearInterval(_interval);
+      } else {
+        log.warn('main', `[ram-safety] system RAM ${_usedPct.toFixed(1)}% > ${panicPct}% (1/2 — will kill if persists)`);
+      }
+    } else {
+      _consecutiveBreaches = 0;
+    }
+  }, 1000);
+  proc.on('exit', () => clearInterval(_interval));
+  proc.on('close', () => clearInterval(_interval));
+}
+
+// Back-compat alias: legacy spawn sites call installJobLimitsWatchdog.
+// Apply BOTH the working-set cap (preventive) AND the safety kill
+// (emergency last line of defense).
 function installJobLimitsWatchdog(proc, jobName) {
-  return setProcessHardMemoryLimit(proc, jobName);
+  setProcessHardMemoryLimit(proc, jobName);
+  installSystemRamSafetyKill(proc, jobName);
 }
 
 function killProcTree(proc) {
@@ -3650,10 +3707,15 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout, meshVerts, meshFaces });
       });
       if (jobId) activeProcs.set(jobId, proc);
-      // Apply OS-level RAM hard cap so the job can never exceed the
-      // user-configured limit. The process is paged to disk under
-      // pressure (slower) instead of taking down the system.
+      // Two-layer memory safety:
+      //   1) Working-set cap: tell Windows to swap THIS process to disk
+      //      if it tries to grow beyond the per-process limit. Normal
+      //      slower behavior, no kill.
+      //   2) System RAM panic kill: if total system RAM hits 95% (despite
+      //      the cap, e.g. multiple subprocesses cumulating or commit
+      //      charge exhausting pagefile), kill the job to save the OS.
       setProcessHardMemoryLimit(proc, `image-to-3d (${engine})`);
+      installSystemRamSafetyKill(proc, `image-to-3d (${engine})`);
       const flushStdout = () => {
         if (stdoutBuf) {
           safeSend('ai3d-progress', stdoutBuf);
