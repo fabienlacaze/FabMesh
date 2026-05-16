@@ -1534,7 +1534,7 @@ document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.sto
 // keeps working: it triggers iff enable && mode='2view'.
 function _wsMvSync() {
   const enable = document.getElementById('ws-mv-enable')?.checked ?? true;
-  const mode = document.querySelector('input[name="ws-mv-mode"]:checked')?.value || '2view';
+  const mode = document.getElementById('ws-mv-mode-select')?.value || '2view';
   const modeRow = document.getElementById('ws-mv-mode-row');
   const sixOpts = document.getElementById('ws-mv-6view-opts');
   const legacy = document.getElementById('ws-auto-multiview');
@@ -1543,9 +1543,7 @@ function _wsMvSync() {
   if (legacy) legacy.checked = enable && mode === '2view';
 }
 document.getElementById('ws-mv-enable')?.addEventListener('change', _wsMvSync);
-document.querySelectorAll('input[name="ws-mv-mode"]').forEach(r => {
-  r.addEventListener('change', _wsMvSync);
-});
+document.getElementById('ws-mv-mode-select')?.addEventListener('change', _wsMvSync);
 _wsMvSync();
 // ----------------------------------------------------------------
 
@@ -2997,7 +2995,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   // multiView (= 2-view legacy) is false and we trigger MV-Adapter post-gen
   // instead of the RealVis+IPAdapter back photo.
   const mvEnable = document.getElementById('ws-mv-enable')?.checked ?? false;
-  const mvMode = document.querySelector('input[name="ws-mv-mode"]:checked')?.value || '2view';
+  const mvMode = document.getElementById('ws-mv-mode-select')?.value || '2view';
   const mv6view = mvEnable && mvMode === '6view';
   const mv6Harmonize = document.getElementById('ws-mv-6v-harmonize')?.checked ?? true;
   const mv6Upscale   = document.getElementById('ws-mv-6v-upscale')?.checked ?? false;
