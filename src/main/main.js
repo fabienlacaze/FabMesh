@@ -3648,8 +3648,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       // The raw bridge alone produces geometry without UVs.
       'triposg': path.join(__dirname, '..', '..', 'scripts', 'triposg_full_pipeline.py'),
       // Hi3DGen: direct image-to-3D via normal bridging (MIT, ByteDance+CUHK).
-      // Geometry only — texture is added downstream via texture_project.py.
-      'hi3dgen': path.join(__dirname, '..', '..', 'scripts', 'local_hi3dgen_bridge.py'),
+      // Routed through the full pipeline wrapper that adds xatlas UV unwrap
+      // + texture_project.py so the output is a textured GLB (the bare
+      // bridge alone produces geometry-only mesh).
+      'hi3dgen': path.join(__dirname, '..', '..', 'scripts', 'hi3dgen_full_pipeline.py'),
       'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py'),
       'meshy':   path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py')
     };
@@ -3677,7 +3679,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
-      'hi3dgen': [bridgeScript, imagePath, meshPath],
+      'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
@@ -3707,7 +3709,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
-      'hi3dgen': [bridgeScript, imagePath, meshPath],
+      'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };

@@ -5241,9 +5241,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     // TripoSG full pipeline: geo ~30s + decim + xatlas + texture_project ~90s
     expectedMs = 150000;
   } else if (engine === 'hi3dgen') {
-    // Hi3DGen: image -> StableNormal (~10s) -> TRELLIS-normal-v0.1 (~30s)
-    // -> mesh (no texture bake step in bridge).
-    expectedMs = 60000;
+    // Hi3DGen full pipeline: normal (~10s) + mesh inference (~10s) +
+    // xatlas unwrap (~10s) + texture_project (~30s) = ~60s typical.
+    expectedMs = 90000;
   } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {
