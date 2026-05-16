@@ -127,3 +127,10 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # Force-exit so any non-daemon threads hanging around (xformers/
+    # diffusers workers, torch.hub side-effects) don't keep the process
+    # alive after we're done. Without this the parent (Electron) waits
+    # forever for the callback and the 'Running task' modal stays open.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
