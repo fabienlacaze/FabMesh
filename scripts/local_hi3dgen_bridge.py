@@ -48,6 +48,10 @@ def _ensure_weights():
 
 def generate_3d(image_path, output_path):
     """Run Hi3DGen on `image_path`, save textured-less mesh to `output_path`."""
+    # Convert to absolute paths BEFORE chdir into Hi3DGen dir (we chdir below
+    # so relative paths from the caller would no longer resolve).
+    image_path = os.path.abspath(image_path)
+    output_path = os.path.abspath(output_path)
     print(f"LOCAL_HI3DGEN: image={image_path}", flush=True)
     print(f"LOCAL_HI3DGEN: output={output_path}", flush=True)
     print(f"LOCAL_HI3DGEN_PROGRESS: 5 import_start", flush=True)
