@@ -56,6 +56,11 @@ def generate_3d(image_path, output_path):
     os.environ['SPCONV_ALGO'] = 'native'
     # PyTorch CUDA alloc — large allocations during sparse structure flow
     os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+    # Use PyTorch native SDPA instead of xformers (xformers 0.0.35 is
+    # broken against PyTorch 2.7: imports a missing GroupName from
+    # torch.distributed.distributed_c10d). Hi3DGen reads ATTN_BACKEND
+    # env at import time and gives us SDPA fallback.
+    os.environ['ATTN_BACKEND'] = 'sdpa'
 
     if not os.path.isdir(HI3DGEN_DIR):
         print(f"LOCAL_HI3DGEN_ERROR: Hi3DGen repo not found at {HI3DGEN_DIR}", flush=True)
