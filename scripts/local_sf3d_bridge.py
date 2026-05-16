@@ -30,8 +30,94 @@ overhead when ``SF3D_DIAG`` is unset.
 import sys
 import os
 import time
+import threading
 import traceback
 from contextlib import nullcontext
+
+
+# ---------------------------------------------------------------------------
+# Hard watchdog (2026-05-16). When SF3D triggers a TDR / kernel hang on
+# sm_120, the main thread is stuck inside a native CUDA call and the OS
+# may freeze the desktop entirely. A daemon thread spawned BEFORE any
+# torch import waits SF3D_TIMEOUT_SEC seconds then force-exits the
+# process with os._exit(124). Note: if the GPU/driver freezes hard,
+# even this thread cannot run — only a hardware reset will recover.
+# But for software-level deadlocks (Python lock, NCCL, autotuner) it
+# limits the damage and writes a final breadcrumb to the diag log.
+# Default 180s; override with SF3D_TIMEOUT_SEC=N (set to 0 to disable).
+# ---------------------------------------------------------------------------
+_WATCHDOG_TIMEOUT = float(os.environ.get("SF3D_TIMEOUT_SEC", "180"))
+_WATCHDOG_DISARMED = False
+
+
+def _watchdog_disarm():
+    """Disable the watchdog (call when inference completes successfully)."""
+    global _WATCHDOG_DISARMED
+    _WATCHDOG_DISARMED = True
+
+
+def _watchdog_main():
+    # Sleep in 1s slices so disarm can interrupt early.
+    deadline = time.time() + _WATCHDOG_TIMEOUT
+    while time.time() < deadline:
+        if _WATCHDOG_DISARMED:
+            return
+        time.sleep(1)
+    # Timeout reached. Two-step escalation:
+    # 1) Log + os._exit(124) — works for pure-Python deadlocks.
+    # 2) If main thread is stuck inside a native CUDA call (e.g. TDR),
+    #    os._exit cannot run from this thread either. Spawn a detached
+    #    `taskkill /F /T /PID <self>` which Windows can execute even
+    #    against a process blocked in a kernel call. This is the only
+    #    soft recovery from a partial driver hang; a full GPU freeze
+    #    still requires a hardware reset.
+    try:
+        log_path = os.environ.get(
+            "SF3D_DIAG_PATH",
+            os.path.join(os.getcwd(), "logs", "sf3d_diag.log"),
+        )
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(
+                f"SF3D_DIAG: WATCHDOG TIMEOUT after {_WATCHDOG_TIMEOUT}s — "
+                "main thread stuck in CUDA. Force-killing process.\n"
+            )
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        print(
+            f"LOCAL_SF3D_ERROR: watchdog timeout after {_WATCHDOG_TIMEOUT}s",
+            flush=True,
+        )
+    except Exception:
+        pass
+    # Escalation 2: spawn Windows taskkill (detached, no wait). Works
+    # against processes stuck in native CUDA calls.
+    try:
+        import subprocess as _sp
+        _sp.Popen(
+            ["taskkill", "/F", "/T", "/PID", str(os.getpid())],
+            creationflags=getattr(_sp, "DETACHED_PROCESS", 0)
+            | getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0),
+            close_fds=True,
+        )
+    except Exception:
+        pass
+    # Escalation 1: try os._exit anyway (in case main is responsive).
+    try:
+        os._exit(124)
+    except Exception:
+        pass
+
+
+if _WATCHDOG_TIMEOUT > 0:
+    _wd_thread = threading.Thread(target=_watchdog_main, daemon=True)
+    _wd_thread.start()
 
 
 # ---------------------------------------------------------------------------
@@ -1217,6 +1303,10 @@ def generate_3d(
     size = os.path.getsize(output_path)
     print(f"LOCAL_SF3D_SUCCESS: {output_path} ({size} bytes)", flush=True)
     print(f"LOCAL_SF3D_PROGRESS: 100 done", flush=True)
+
+    # Inference succeeded — disarm the watchdog so it doesn't fire after the
+    # process is about to exit normally.
+    _watchdog_disarm()
 
     # Free GPU
     del model
