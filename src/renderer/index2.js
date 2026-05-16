@@ -1609,18 +1609,26 @@ document.getElementById('mv-opt-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-multiview-options')?.classList.add('hidden');
 });
 
+// Show/hide the 6-view sub-options block depending on the mode select.
+document.getElementById('mv-opt-mode')?.addEventListener('change', () => {
+  const mode = document.getElementById('mv-opt-mode')?.value || '6view';
+  const block = document.getElementById('mv-opt-6view-block');
+  if (block) block.style.display = (mode === '6view') ? '' : 'none';
+});
+
 document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
   const modal = document.getElementById('modal-multiview-options');
   if (modal) modal.classList.add('hidden');
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
   const srcImgPath = p.previewImagePath || p.selectedImagePath;
+  const mode = document.getElementById('mv-opt-mode')?.value || '6view';
   const harmonize = document.getElementById('mv-opt-harmonize')?.checked ?? true;
   const upscale   = document.getElementById('mv-opt-upscale')?.checked ?? false;
 
   // Step 1: duplicate the image into a new version. The new version
-  // will host the multi-view dir; the original image stays untouched
-  // so the user can compare or revert.
+  // will host the multi-view dir / back photo; the original image stays
+  // untouched so the user can compare or revert.
   let mvImagePath = srcImgPath;
   try {
     const dup = await window.meshyAPI.duplicateImageVersion({
@@ -1637,10 +1645,43 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
     return;
   }
 
-  // Step 2: kick off the multi-view generation on the duplicated image.
+  // Step 2: dispatch based on selected mode.
+  if (mode === '2view') {
+    const expectedMs = 25000;
+    const job = pushJob(`2-view back photo: ${p.name}`, null, {
+      Image: (mvImagePath || '').split(/[\\/]/).pop(),
+      Mode: '2-view (back photo)',
+    }, expectedMs);
+    showToast('Generating back photo (RealVis + IPAdapter)...', 'info', 5000);
+    try {
+      const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
+                        || document.getElementById('ws-prompt')?.value || '';
+      const bv = await window.meshyAPI.generateBackView({
+        frontImage: mvImagePath, promptHint: rawPrompt, numImages: 1,
+      });
+      if (bv?.success && bv.paths?.length) {
+        showToast('Back photo ready', 'success');
+        if (!p._backPhotos) p._backPhotos = {};
+        p._backPhotos[mvImagePath] = bv.paths[0];
+        if (job && typeof completeJob === 'function') completeJob(job.id, true);
+        if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+      } else {
+        const msg = bv?.error || 'unknown';
+        showToast('Back photo failed: ' + msg, 'error', 5000);
+        if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      }
+    } catch (e) {
+      showToast('Back photo error: ' + e.message, 'error', 5000);
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
+    }
+    return;
+  }
+
+  // 6-view mode
   const expectedMs = 70000 + (harmonize ? 30000 : 0) + (upscale ? 10000 : 0);
   const job = pushJob(`Multi-views: ${p.name}`, null, {
     Image: (mvImagePath || '').split(/[\\/]/).pop(),
+    Mode: '6 views (MV-Adapter)',
     Harmonize: harmonize ? 'yes' : 'no',
     Upscale: upscale ? 'yes' : 'no',
   }, expectedMs);
@@ -1654,8 +1695,6 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
       if (!p._multiviews) p._multiviews = {};
       p._multiviews[mvImagePath] = result.outDir;
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
-      // Reload project so the duplicated image shows up in the gallery
-      // (as the newest "v0"), then select it so the MV bar appears.
       if (typeof reloadCurrentProject === 'function') {
         await reloadCurrentProject();
       }
