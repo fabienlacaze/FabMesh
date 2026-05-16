@@ -630,8 +630,14 @@ def generate_3d(
                 f"(symmetry drift {_np.degrees(_rot_angle):.2f}° < 0.5°)",
                 flush=True,
             )
+    except _SkipAutoAlign:
+        # Expected path when FABMESH_SF3D_AUTOALIGN is unset — silent skip.
+        # Previously this was caught by the broad Exception handler below
+        # which dumped a fake traceback to stderr, making Electron think
+        # the bridge crashed even though it continued normally.
+        pass
     except Exception as _align_e:
-        print(f"LOCAL_SF3D: auto-align skipped ({_align_e})", flush=True)
+        print(f"LOCAL_SF3D: auto-align skipped due to error ({_align_e})", flush=True)
         import traceback as _tb
         _tb.print_exc()
 
