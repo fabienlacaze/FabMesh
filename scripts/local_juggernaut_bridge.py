@@ -229,16 +229,23 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             "blurry, low quality, text, watermark, signature, deformed, "
             "extra limbs, bad anatomy, distorted, cropped, worst quality, "
             "flat profile, "
-            # Anti-doubling: training data of vehicle/product photos often
-            # has two angles side-by-side; explicitly negate that pattern.
+            # Anti-doubling: product/vehicle/kitchenware datasets often pair
+            # 2 angles of the same item OR show a "set" of 2-3 items
+            # side-by-side. We weighted-block the doubling pattern across
+            # all common subject categories.
             # WEIGHTED tokens (parenthesis+:1.4) get extra strength from
             # the SDXL prompt parser; we go aggressive on duplication.
-            "(two cars:1.5), (two vehicles:1.5), (duplicate:1.4), "
-            "(twin:1.4), (multiple instances:1.4), (second car:1.5), "
+            "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
+            "(set of two:1.5), (multiple instances:1.5), "
+            "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
+            "(two cars:1.5), (two vehicles:1.5), (two knives:1.5), "
+            "(two characters:1.5), (two props:1.5), (two weapons:1.5), "
+            "(second instance:1.5), (second copy:1.4), (companion item:1.4), "
+            "(side by side:1.5), (paired:1.4), (matched set:1.4), "
             "(rear view inset:1.4), (front and back:1.4), "
-            "split image, side by side, stacked vertically, "
-            "stacked horizontally, collage, grid layout, comparison view, "
-            "two objects, two subjects, second instance, paired"
+            "split image, stacked vertically, stacked horizontally, "
+            "collage, grid layout, comparison view, "
+            "product comparison, kitchenware set, catalog grid"
         )
 
     _throttle_cb = make_throttle_callback()  # None if disabled
