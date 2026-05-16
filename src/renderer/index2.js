@@ -7859,11 +7859,16 @@ const gpuLimits = (() => {
       if (parsed && typeof parsed === 'object') v = { ...v, ...parsed };
     }
   } catch (e) {}
-  // Clamp to safe ranges so the queue logic always has room
-  v.vram = Math.max(50, Math.min(100, Number(v.vram) || 90));
-  v.util = Math.max(50, Math.min(100, Number(v.util) || 95));
-  v.temp = Math.max(60, Math.min(100, Number(v.temp) || 80));
-  v.ram  = Math.max(30, Math.min(100, Number(v.ram)  || 85));
+  // Clamp to functional ranges so FabMesh stays usable. Minimums match
+  // the per-stat MIN_BY_STAT table used while dragging (setupGpuLimitDragging):
+  //   RAM   ≥ 50% : SF3D needs ~8 GB at tex_res=1024 → 50% of 32 GB
+  //   VRAM  ≥ 60% : SDXL + SF3D need ~9 GB → 60% of 16 GB
+  //   GPU%  ≥ 30% : below = throttle 70% of time (unusable)
+  //   TEMP  ≥ 50% : slider 50% maps to 65°C (below = throttle constant)
+  v.vram = Math.max(60, Math.min(100, Number(v.vram) || 90));
+  v.util = Math.max(30, Math.min(100, Number(v.util) || 95));
+  v.temp = Math.max(50, Math.min(100, Number(v.temp) || 80));
+  v.ram  = Math.max(50, Math.min(100, Number(v.ram)  || 85));
   return v;
 })();
 function saveGpuLimits() {
@@ -7930,10 +7935,21 @@ function setupGpuLimitDragging() {
       };
       tip.textContent = formatValue(stat, gpuLimits[stat]);
       tip.classList.add('visible');
+      // Minimum thresholds: below these values FabMesh becomes unusable
+      // (SF3D needs ~8 GB RAM for tex_res=1024, SDXL needs ~9 GB VRAM,
+      // GPU < 30% throttles 70% of the time = super slow, TEMP < 50% =
+      // 65°C max which is below normal idle on a working GPU).
+      const MIN_BY_STAT = {
+        ram: 50,    // 50% of total system RAM (16 GB on a 32 GB PC)
+        vram: 60,   // 60% of total VRAM (~9.6 GB on 16 GB)
+        util: 30,   // 30% GPU minimum (below = unusably slow)
+        temp: 50,   // 50% slider = 65°C max (anything lower = throttle constant)
+      };
       function onMove(ev) {
         const rect = bar.getBoundingClientRect();
         let pct = ((ev.clientX - rect.left) / rect.width) * 100;
-        pct = Math.max(5, Math.min(100, pct));
+        const minPct = MIN_BY_STAT[stat] || 5;
+        pct = Math.max(minPct, Math.min(100, pct));
         handle.style.left = pct + '%';
         gpuLimits[stat] = pct;
         tip.textContent = formatValue(stat, pct);
