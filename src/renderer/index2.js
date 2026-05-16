@@ -1524,6 +1524,31 @@ function _navigateImage(delta) {
 document.getElementById('ws-img-prev')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(-1); });
 document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.stopPropagation(); _navigateImage(1); });
 
+// ----------------------------------------------------------------
+// CREATE NEW form: Multi-view checkbox + 2-view/6-view radio + 6-view sub-options.
+// Visibility rules:
+//   - mv-mode-row visible iff ws-mv-enable is checked
+//   - mv-6view-opts visible iff ws-mv-enable is checked AND mode = '6view'
+// The legacy hidden checkbox ws-auto-multiview is kept in sync so the
+// existing generate-images backend path (which expects a single boolean)
+// keeps working: it triggers iff enable && mode='2view'.
+function _wsMvSync() {
+  const enable = document.getElementById('ws-mv-enable')?.checked ?? true;
+  const mode = document.querySelector('input[name="ws-mv-mode"]:checked')?.value || '2view';
+  const modeRow = document.getElementById('ws-mv-mode-row');
+  const sixOpts = document.getElementById('ws-mv-6view-opts');
+  const legacy = document.getElementById('ws-auto-multiview');
+  if (modeRow) modeRow.style.display = enable ? '' : 'none';
+  if (sixOpts) sixOpts.classList.toggle('hidden', !(enable && mode === '6view'));
+  if (legacy) legacy.checked = enable && mode === '2view';
+}
+document.getElementById('ws-mv-enable')?.addEventListener('change', _wsMvSync);
+document.querySelectorAll('input[name="ws-mv-mode"]').forEach(r => {
+  r.addEventListener('change', _wsMvSync);
+});
+_wsMvSync();
+// ----------------------------------------------------------------
+
 // Generate Multi-Views button — opens an options modal first.
 // User picks post-gen refinements (RealVis harmonize, ESRGAN upscale)
 // and clicks "Start". Then we (a) duplicate the source image into a
@@ -2968,6 +2993,14 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const count = parseInt(document.getElementById('ws-count').value) || 4;
   const steps = parseInt(document.getElementById('ws-quality').value) || 30;
   const multiView = document.getElementById('ws-auto-multiview')?.checked || false;
+  // 6-view mode flags (CREATE NEW form). When user picks "6 views" radio,
+  // multiView (= 2-view legacy) is false and we trigger MV-Adapter post-gen
+  // instead of the RealVis+IPAdapter back photo.
+  const mvEnable = document.getElementById('ws-mv-enable')?.checked ?? false;
+  const mvMode = document.querySelector('input[name="ws-mv-mode"]:checked')?.value || '2view';
+  const mv6view = mvEnable && mvMode === '6view';
+  const mv6Harmonize = document.getElementById('ws-mv-6v-harmonize')?.checked ?? true;
+  const mv6Upscale   = document.getElementById('ws-mv-6v-upscale')?.checked ?? false;
   const buildStages = document.getElementById('ws-img-buildstages')?.checked || false;
   // Estimate: Juggernaut ~0.5s/step on RTX 5080, plus model load ~10s on first call.
   // SDXL Turbo ~0.2s/step. Pollinations ~5s/image.
@@ -2988,7 +3021,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       Engine: engineLabel(engine),
       Count: count,
       Steps: steps,
-      'Multi-view': multiView ? 'yes' : 'no',
+      'Multi-view': mv6view ? '6 views (MV-Adapter)' : (multiView ? '2 views (back)' : 'no'),
       'Construction stages': buildStages ? 'yes' : 'no',
       Prompt: userPrompt,
     }, expectedMs);
@@ -3073,6 +3106,42 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
           } catch (e) {
             console.warn('[2-view back gen]', e);
             showToast('Back photo generation failed (continuing with front-only)', 'warn');
+          }
+        }
+        // 6-view mode: after image gen, run MV-Adapter on each generated
+        // image. The 2-view back gen above is skipped (multiView=false in
+        // this branch). Reuses _wsMvSync's UI state (mv6Harmonize/Upscale).
+        if (mv6view && r.images?.length > 0) {
+          if (job.tickTimer) { clearInterval(job.tickTimer); job.tickTimer = null; }
+          job.progress = Math.max(job.progress, 60);
+          job.name = `Generating 6 views: ${p.name}`;
+          renderJobs();
+          const _mvStart = Date.now();
+          const _mvTotal = (70000 + (mv6Harmonize?30000:0) + (mv6Upscale?10000:0)) * r.images.length;
+          job.tickTimer = setInterval(() => {
+            const _pct = Math.min(1, (Date.now()-_mvStart)/_mvTotal);
+            const _np = 60 + (95 - 60) * _pct;
+            if (_np > job.progress) { job.progress = _np; renderJobs(); }
+          }, 500);
+          try {
+            showToast('Generating 6 views (MV-Adapter)...', 'info', 8000);
+            for (const imgPath of r.images) {
+              const mvRes = await API.generateMultiview({
+                imagePath: imgPath,
+                harmonize: mv6Harmonize,
+                upscale: mv6Upscale,
+              });
+              if (mvRes?.success) {
+                if (!p._multiviews) p._multiviews = {};
+                p._multiviews[imgPath] = mvRes.outDir;
+              } else {
+                console.warn('[mv-6view] failed for', imgPath, mvRes?.error);
+              }
+            }
+            showToast('6 views ready', 'success');
+          } catch (e) {
+            console.warn('[mv-6view]', e);
+            showToast('Multi-view generation failed (continuing with front-only)', 'warn');
           }
         }
         completeJob(job.id, true);
