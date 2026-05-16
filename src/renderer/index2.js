@@ -7661,11 +7661,15 @@ async function refreshJobDetailsModal(id) {
     }
   }
   // Reference thumbnail: for rig jobs we want to show the SOURCE 3D MESH
-  // (the GLB being rigged), not the image. For image/3D gen we show the
-  // project's selected image as before.
+  // (the GLB being rigged), not the image. For 3D-gen / modify / inpaint
+  // / back-view we show the source image. But for a FRESH image generation
+  // (`Generate images: ...`) there is no source asset yet — showing the
+  // project's previously-selected image is misleading ("looks like the new
+  // gen has the old image"), so we hide the thumb in that case.
   const refImg = document.getElementById('jd-ref-img');
   const p = state.currentProject;
   const isRigJob = /rig/i.test(j.name || '');
+  const isImageGenJob = /^generate images?\b/i.test(j.name || '');
   let thumbUrl = null;
   if (isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
     try {
@@ -7673,7 +7677,7 @@ async function refreshJobDetailsModal(id) {
       if (t) thumbUrl = t + '?t=' + Date.now();
     } catch (_) {}
   }
-  if (!thumbUrl && p) {
+  if (!thumbUrl && p && !isImageGenJob) {
     const imgPath = p.selectedImagePath || p.previewImagePath || p.thumb;
     if (imgPath) thumbUrl = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
   }
