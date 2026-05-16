@@ -626,6 +626,7 @@ async function handleGenerateImages(params) {
       safeSend('mcp-job-end', { type: 'image', success: true, count: imgs.length });
       resolve({ success: true, images: imgs, count: imgs.length, project: safeName });
     });
+    installJobLimitsWatchdog(proc, 'generate-image (RealVis)');
     proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
     proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
   });
@@ -673,6 +674,7 @@ async function handleImageTo3D(params) {
       safeSend('mcp-job-end', { type: 'mesh', success: true, meshPath, meshVerts, meshFaces });
       resolve({ success: true, meshPath, meshFilename, size: stats.size, meshVerts, meshFaces });
     });
+    installJobLimitsWatchdog(proc, `image-to-3d (${engine})`);
     proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
     proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
   });
@@ -1287,6 +1289,75 @@ ipcMain.handle('cancel-job', (event, jobId) => {
   killOrphanPythonSubprocesses();
   return true;
 });
+
+// Hard-limit watchdog: polls VRAM + system RAM every 2s while a heavy
+// Python job is running. Kills the process if either exceeds the user's
+// configured limits (UI sliders FABMESH_VRAM_FRACTION + FABMESH_RAM_LIMIT_PCT).
+// Without this, the soft cap PyTorch enforces via
+// `torch.cuda.set_per_process_memory_fraction()` only kicks in for
+// pure-PyTorch allocations — native libs (spconv, SDXL refine, uv_padding,
+// rembg) allocate freely and we've seen RAM hit 100% / VRAM 96%.
+function installJobLimitsWatchdog(proc, jobName) {
+  if (!proc || !proc.pid) return;
+  // Seuils par défaut PRUDENTS (laissent de la marge pour les autres apps).
+  // L'utilisateur peut les surcharger via les sliders Settings qui
+  // populent ces env vars (déjà gérés par setGpuLimits).
+  const _vramPctMax = (() => {
+    const f = parseFloat(process.env.FABMESH_VRAM_FRACTION || '0.95');
+    return Math.min(99, Math.max(50, f * 100));
+  })();
+  const _ramPctMax = (() => {
+    const v = parseFloat(process.env.FABMESH_RAM_LIMIT_PCT || '90');
+    return Math.min(99, Math.max(50, v));
+  })();
+  let _killed = false;
+  let _missing_nvsmi_logged = false;
+  const _interval = setInterval(() => {
+    if (_killed || proc.killed || proc.exitCode !== null) {
+      clearInterval(_interval);
+      return;
+    }
+    // System RAM (Node.js os module, instant)
+    const _os = require('os');
+    const _totalRam = _os.totalmem();
+    const _freeRam = _os.freemem();
+    const _usedRamPct = ((_totalRam - _freeRam) / _totalRam) * 100;
+    // VRAM via nvidia-smi (sync, ~50ms; tolerable every 2s)
+    let _usedVramPct = 0;
+    try {
+      const _out = require('child_process').execFileSync(
+        'nvidia-smi',
+        ['--query-gpu=memory.used,memory.total', '--format=csv,noheader,nounits'],
+        { encoding: 'utf-8', timeout: 1500 }
+      );
+      const _parts = _out.trim().split('\n')[0].split(',').map(s => parseInt(s.trim()));
+      if (_parts.length === 2 && _parts[1] > 0) {
+        _usedVramPct = (_parts[0] / _parts[1]) * 100;
+      }
+    } catch (e) {
+      if (!_missing_nvsmi_logged) {
+        log.warn('main', `[limits-watchdog] nvidia-smi unavailable, VRAM cap not enforced: ${e.message}`);
+        _missing_nvsmi_logged = true;
+      }
+    }
+    if (_usedVramPct > _vramPctMax) {
+      log.error('main', `[limits-watchdog] VRAM ${_usedVramPct.toFixed(1)}% > limit ${_vramPctMax.toFixed(0)}% — killing ${jobName} pid=${proc.pid}`);
+      try { safeSend('limits-exceeded', { kind: 'vram', value: _usedVramPct, limit: _vramPctMax, job: jobName }); } catch (e) {}
+      _killed = true;
+      killProcTree(proc);
+      clearInterval(_interval);
+    } else if (_usedRamPct > _ramPctMax) {
+      log.error('main', `[limits-watchdog] RAM ${_usedRamPct.toFixed(1)}% > limit ${_ramPctMax.toFixed(0)}% — killing ${jobName} pid=${proc.pid}`);
+      try { safeSend('limits-exceeded', { kind: 'ram', value: _usedRamPct, limit: _ramPctMax, job: jobName }); } catch (e) {}
+      _killed = true;
+      killProcTree(proc);
+      clearInterval(_interval);
+    }
+  }, 2000);
+  // Clear on proc exit so we don't leak intervals.
+  proc.on('exit', () => clearInterval(_interval));
+  proc.on('close', () => clearInterval(_interval));
+}
 
 function killProcTree(proc) {
   if (process.platform !== 'win32' || !proc.pid) {
@@ -3786,6 +3857,7 @@ ipcMain.handle('generate-multiview', async (_event, { imagePath }) => {
         resolve({ success: true, views, inputCopy, outDir });
       }
     });
+    installJobLimitsWatchdog(proc, 'generate-multiview');
     // Forward progress — multiview is the last 10% of the parent job
     // (image gen 0..90, multiview 90..99, finalise 100). Map the
     // sub-script's 0..100 into the 90..99 slice and re-emit as
