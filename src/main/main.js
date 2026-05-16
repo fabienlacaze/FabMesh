@@ -1340,18 +1340,20 @@ function installJobLimitsWatchdog(proc, jobName) {
         _missing_nvsmi_logged = true;
       }
     }
-    if (_usedVramPct > _vramPctMax) {
-      log.error('main', `[limits-watchdog] VRAM ${_usedVramPct.toFixed(1)}% > limit ${_vramPctMax.toFixed(0)}% — killing ${jobName} pid=${proc.pid}`);
-      try { safeSend('limits-exceeded', { kind: 'vram', value: _usedVramPct, limit: _vramPctMax, job: jobName }); } catch (e) {}
-      _killed = true;
-      killProcTree(proc);
-      clearInterval(_interval);
-    } else if (_usedRamPct > _ramPctMax) {
-      log.error('main', `[limits-watchdog] RAM ${_usedRamPct.toFixed(1)}% > limit ${_ramPctMax.toFixed(0)}% — killing ${jobName} pid=${proc.pid}`);
-      try { safeSend('limits-exceeded', { kind: 'ram', value: _usedRamPct, limit: _ramPctMax, job: jobName }); } catch (e) {}
-      _killed = true;
-      killProcTree(proc);
-      clearInterval(_interval);
+    // SOFT watchdog: warn but DO NOT kill. Killing breaks the job;
+    // the user's intent is "don't exceed budget", which we enforce
+    // up-front via the pre-flight clamp (clampParamsForBudget below).
+    // This in-flight monitor only logs that we crossed the line so
+    // the next pre-flight knows to be more aggressive.
+    if (_usedVramPct > _vramPctMax && !proc._warnedVram) {
+      log.warn('main', `[limits-watchdog] VRAM ${_usedVramPct.toFixed(1)}% > limit ${_vramPctMax.toFixed(0)}% in ${jobName} pid=${proc.pid} (NOT killing — soft warn)`);
+      try { safeSend('limits-exceeded', { kind: 'vram', value: _usedVramPct, limit: _vramPctMax, job: jobName, action: 'warn' }); } catch (e) {}
+      proc._warnedVram = true;
+    }
+    if (_usedRamPct > _ramPctMax && !proc._warnedRam) {
+      log.warn('main', `[limits-watchdog] RAM ${_usedRamPct.toFixed(1)}% > limit ${_ramPctMax.toFixed(0)}% in ${jobName} pid=${proc.pid} (NOT killing — soft warn)`);
+      try { safeSend('limits-exceeded', { kind: 'ram', value: _usedRamPct, limit: _ramPctMax, job: jobName, action: 'warn' }); } catch (e) {}
+      proc._warnedRam = true;
     }
   }, 2000);
   // Clear on proc exit so we don't leak intervals.
@@ -3503,7 +3505,41 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['sf3d'];
 
     // SF3D args: <img> <out> <tex_res> <vertex_count> <remesh> <subdivide_levels>
-    const sf3dTexRes = String(textureSize || 1024);
+    // Pre-flight budget clamp: ensure tex_res fits in the current RAM
+    // budget (avoids running into the in-flight watchdog warning).
+    // Empirical SF3D peak RAM by tex_res:
+    //   512  -> ~4 GB,  1024 -> ~8 GB,  2048 -> ~18 GB,  4096 -> ~40 GB.
+    // We compare against (free RAM - 4 GB safety buffer for OS/Electron).
+    let _clampedTexRes = Number(textureSize || 1024);
+    try {
+      const _os = require('os');
+      const _ramLimitPct = parseFloat(process.env.FABMESH_RAM_LIMIT_PCT || '90') / 100;
+      const _totalGB = _os.totalmem() / (1024 ** 3);
+      const _freeGB = _os.freemem() / (1024 ** 3);
+      // Budget = min(free RAM - 4GB safety, total * limit_pct - used)
+      const _usedGB = _totalGB - _freeGB;
+      const _budgetByLimit = (_totalGB * _ramLimitPct) - _usedGB;
+      const _budgetBySafety = _freeGB - 4;
+      const _budgetGB = Math.max(0, Math.min(_budgetByLimit, _budgetBySafety));
+      const _peakByRes = { 512: 4, 1024: 8, 2048: 18, 4096: 40 };
+      const _candidates = [4096, 2048, 1024, 512];
+      const _origTexRes = _clampedTexRes;
+      for (const _r of _candidates) {
+        if (_r <= _origTexRes && (_peakByRes[_r] || 8) <= _budgetGB) {
+          _clampedTexRes = _r;
+          break;
+        }
+      }
+      if (_clampedTexRes < _origTexRes) {
+        log.warn('main', `[pre-flight] texture ${_origTexRes} clamped to ${_clampedTexRes} (RAM budget ${_budgetGB.toFixed(1)}/${(_peakByRes[_origTexRes] || 8)} GB, ${_freeGB.toFixed(1)} GB free of ${_totalGB.toFixed(1)})`);
+        try { safeSend('preflight-clamp', { kind: 'texture', requested: _origTexRes, clamped: _clampedTexRes, budgetGB: _budgetGB, freeGB: _freeGB }); } catch (e) {}
+      } else {
+        log.info('main', `[pre-flight] texture ${_origTexRes} fits budget (${_budgetGB.toFixed(1)} GB available)`);
+      }
+    } catch (e) {
+      log.warn('main', `[pre-flight] budget check failed (${e.message}), running with requested tex_res ${_clampedTexRes}`);
+    }
+    const sf3dTexRes = String(_clampedTexRes);
     const sf3dVerts = (targetFaces && Number(targetFaces) > 0) ? String(Math.max(500, Number(targetFaces) * 0.5)) : '-1';
     const sf3dRemesh = (targetFaces && Number(targetFaces) > 0) ? 'triangle' : 'none';
     const sf3dSubdivide = String(typeof subdivide === 'number' ? subdivide : 0);
@@ -3513,7 +3549,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     // We clamp to the same UI triangle slider as SF3D, defaulting to 50k for
     // a sensible bake/web preview.
     const triposgTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Number(targetFaces)) : '50000';
-    const triposgTexRes = String(textureSize || 1024);
+    const triposgTexRes = String(_clampedTexRes);
 
     // Meshy needs its API key as argv[2] — fetched from config.json.
     const meshyApiKey = (loadConfig() || {}).meshyApiKey || '';
