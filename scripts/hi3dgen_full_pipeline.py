@@ -114,7 +114,10 @@ def step_mvadapter(image_path, mv_dir):
 
     Reuses existing views if `mv_dir` already has view_0..5 + views.json —
     so a manual "Multi-Views" button click before 3D gen is honored, and
-    a re-run of the 3D pipeline doesn't recompute MV-Adapter."""
+    a re-run of the 3D pipeline doesn't recompute MV-Adapter.
+
+    Captures the subprocess stdout+stderr so a failure leaves a diagnostic
+    trace in the parent log instead of vanishing silently."""
     if _mv_dir_complete(mv_dir):
         log(f'STEP 2.5: reusing existing multi-views -> {mv_dir}')
         return True
@@ -122,18 +125,38 @@ def step_mvadapter(image_path, mv_dir):
     t0 = time.time()
     script = os.path.join(SCRIPTS, 'multiview_mvadapter_gen.py')
     try:
-        rc = subprocess.run(
+        proc = subprocess.run(
             [sys.executable, script, image_path, mv_dir],
             timeout=900,
-        ).returncode
+            capture_output=True,
+            text=True,
+        )
+        rc = proc.returncode
+        if proc.stdout:
+            # Forward last ~50 lines so the parent log shows MV progress markers
+            # but isn't drowned by tqdm bars.
+            for line in proc.stdout.splitlines()[-50:]:
+                log(f'mvadapter-stdout: {line}')
+        if rc != 0 and proc.stderr:
+            for line in proc.stderr.splitlines()[-50:]:
+                log(f'mvadapter-stderr: {line}')
+    except subprocess.TimeoutExpired as e:
+        log(f'MV-Adapter timed out after 900s: {e}')
+        return False
     except Exception as e:
-        log(f'MV-Adapter exception: {e}')
+        log(f'MV-Adapter exception: {type(e).__name__}: {e}')
         return False
     if rc != 0:
         log(f'MV-Adapter failed with rc={rc}, falling back to single-view')
         return False
     if not _mv_dir_complete(mv_dir):
-        log(f'MV-Adapter output incomplete in {mv_dir}, falling back')
+        # Diagnose what's missing so we know if the subprocess crashed mid-flight
+        # vs. wrote nothing at all.
+        if os.path.isdir(mv_dir):
+            present = sorted(os.listdir(mv_dir))
+            log(f'MV-Adapter output incomplete in {mv_dir} — present files: {present}')
+        else:
+            log(f'MV-Adapter never created {mv_dir}')
         return False
     log(f'STEP 2.5 done in {time.time()-t0:.1f}s')
     return True
