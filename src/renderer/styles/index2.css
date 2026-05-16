@@ -675,6 +675,25 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   max-height: 100%;
   object-fit: contain;
 }
+/* Mini-thumbs in the 3D-mesh multi-view grid: override stage-source-img
+   defaults (min-height 240, flex 1) since they're laid out by CSS grid
+   and need to fit 3-per-row in a narrow sidebar. */
+.stage-source-mv-thumb {
+  background: var(--bg-0);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+.stage-source-mv-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
 .stage-source-img .preview-placeholder {
   color: var(--text-3);
   font-size: 11px;

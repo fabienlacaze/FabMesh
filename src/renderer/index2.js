@@ -681,7 +681,13 @@ document.getElementById('np-create').addEventListener('click', async () => {
   if (restricted) {
     const keywords = await _getNsfwKeywords();
     const text = (name + ' ' + prompt).toLowerCase();
-    const blocked = keywords.find(kw => text.includes(kw));
+    // Word-boundary match: substring "ass" must not flag "asset",
+    // "tit" must not flag "title", etc. Multi-word keywords like
+    // "naked body" use \b on the outer edges only.
+    const blocked = keywords.find(kw => {
+      const escaped = kw.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp('\\b' + escaped + '\\b').test(text);
+    });
     if (blocked) {
       showToast(`Blocked: "${blocked}" is not allowed with parental control active.`, 'error', 5000);
       return;
@@ -1281,8 +1287,7 @@ async function _refreshStep2MvPreviews(imgPath) {
     grid.innerHTML = LABELS.map((label, i) => {
       const vp = (mvDir + '/view_' + i + '.png').replace(/\\/g, '/');
       return (
-        '<div class="stage-source-img stage-source-mv-thumb" '
-        + 'style="position:relative; aspect-ratio:1/1;">'
+        '<div class="stage-source-mv-thumb" style="position:relative;">'
         + '<img src="file:///' + vp + '?t=' + Date.now() + '">'
         + '<span style="position:absolute; bottom:2px; left:2px; '
         + 'background:rgba(0,0,0,0.7); color:#fff; font-size:9px; '
