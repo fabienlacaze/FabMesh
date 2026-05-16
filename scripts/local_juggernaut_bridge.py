@@ -93,11 +93,19 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
     # Drives both (a) the model choice — DreamShaper XL Lightning + ControlNet
     # OpenPose gives a GUARANTEED T-pose that RealVisXL cannot match, and
     # (b) the prompt enhancement.
+    #
+    # STRICT KEYWORD LIST: previously we matched generic phrases like
+    # "front view" / "facing camera" which now appear in the prop/vehicle/
+    # weapon templates (added to fight RealVis doubling — see commit ca7086c).
+    # That caused a prop prompt for "couteau" to load the T-pose skeleton
+    # ControlNet and produce a mannequin holding a knife + fork instead of
+    # a knife. Restrict to UNAMBIGUOUS character markers.
     _p_low = prompt.lower()
     _is_tpose = any(kw in _p_low for kw in (
         't-pose', 't pose', 'tpose',
-        'front view', 'frontal view', 'front-facing', 'facing camera',
-        'facing the camera', 'straight-on',
+        'arms extended horizontally',  # character template (legs apart)
+        'rts unit',                    # character template token
+        'neutral stance',              # character/creature templates only
     ))
 
     _ctrl_pipe = None
