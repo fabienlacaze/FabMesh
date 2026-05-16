@@ -1498,6 +1498,38 @@ button.tool-active {
   box-shadow: 0 0 0 2px rgba(255,255,255,0.15), 0 0 8px rgba(255,255,255,0.5);
   z-index: 2;
 }
+/* Grayed-out zone showing the unreachable lower portion of each slider.
+   Width set inline by setupGpuLimitDragging() based on MIN_BY_STAT. */
+.gpu-bar-disabled-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px 0 0 6px;
+  pointer-events: none;
+  z-index: 1;
+}
+/* Reset button in the Hardware section header. */
+.settings-box-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.gpu-limits-reset {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 8px;
+  transition: background 0.15s, color 0.15s;
+}
+.gpu-limits-reset:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-1);
+}
 .gpu-bar-limit::after {
   content: "";
   position: absolute;
