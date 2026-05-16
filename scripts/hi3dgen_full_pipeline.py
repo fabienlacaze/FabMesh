@@ -96,13 +96,18 @@ def _mv_dir_for_image(image_path):
 
 
 def _mv_dir_complete(mv_dir):
-    """True iff view_0..view_5.png AND views.json all exist."""
+    """True iff view_0..view_5.png exist. views.json is OPTIONAL —
+    texture_project.py falls back to the Z123 schema (the historical
+    default for FabMesh) when views.json is absent. Previously this
+    check required views.json, which made hi3dgen reject perfectly
+    valid Z123-generated dirs and fall through to bare single-view
+    texture (= white mesh)."""
     if not os.path.isdir(mv_dir):
         return False
     for i in range(6):
         if not os.path.isfile(os.path.join(mv_dir, f'view_{i}.png')):
             return False
-    return os.path.isfile(os.path.join(mv_dir, 'views.json'))
+    return True
 
 
 def step_mvadapter(image_path, mv_dir):
