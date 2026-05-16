@@ -1582,6 +1582,15 @@ function _showMultiviewBar(multiviewDir) {
   bar.classList.remove('hidden');
   bar.dataset.dir = multiviewDir;
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+  // 2-view mode (no full multiview dir): hide right/left/top/bottom, keep
+  // only front + back. With a full <stem>_multiview/ dir we have 6 ortho
+  // views and show them all.
+  const has6 = !!multiviewDir;
+  bar.querySelectorAll('.mv-btn').forEach(b => {
+    const v = b.dataset.view;
+    const shouldShow = (v === 'front' || v === 'back') || has6;
+    b.style.display = shouldShow ? '' : 'none';
+  });
   // Restore the previously selected angle if the user has one pinned.
   // Multi-views use the same 6 standardized keys (front/fr/right/br/bl/
   // left/fl) across every image version, so switching from v0 to v1 while
@@ -2550,6 +2559,12 @@ async function openLightbox(imgPath) {
       lbMvBar.classList.remove('hidden');
       lbMvBar.dataset.dir = hasFullMv ? p._multiviews[imgPath] : '';
       lbMvBar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
+      // Hide right/left/top/bottom in 2-view mode (back-only, no full dir).
+      lbMvBar.querySelectorAll('.mv-btn').forEach(b => {
+        const v = b.dataset.view;
+        const shouldShow = (v === 'front' || v === 'back') || hasFullMv;
+        b.style.display = shouldShow ? '' : 'none';
+      });
       // Respect whichever angle the user had selected in the small
       // preview so small and big viewer stay in sync.
       const currentKey = (p && p._activeMultiviewKey) || 'front';
