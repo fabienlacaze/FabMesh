@@ -1280,6 +1280,15 @@ async function _refreshStep2MvPreviews(imgPath) {
       if (info && info.exists && info.dir) mvDir = info.dir;
     }
   } catch (_) { /* ignore */ }
+  // Decide which optional block to show under the front photo:
+  // - 6-view dir present  -> show the MV grid, hide back slot
+  // - back photo present  -> show back slot only (legacy 2-view)
+  // - neither             -> hide both (single image, no clutter)
+  const p = state.currentProject;
+  const hasBackPhoto = !!(p && (
+    (p._backPhotos && p._backPhotos[imgPath]) ||
+    p.backImagePath
+  ));
   if (mvDir) {
     mvBlock.classList.remove('hidden');
     if (backBlock) backBlock.classList.add('hidden');
@@ -1298,7 +1307,12 @@ async function _refreshStep2MvPreviews(imgPath) {
     }).join('');
   } else {
     mvBlock.classList.add('hidden');
-    if (backBlock) backBlock.classList.remove('hidden');
+    if (backBlock) {
+      // Only show the "+ Add back photo" slot when a back photo already
+      // exists for this image. Otherwise hide it so single-image jobs
+      // aren't cluttered with an unused 2-view slot.
+      backBlock.classList.toggle('hidden', !hasBackPhoto);
+    }
     grid.innerHTML = '';
   }
 }
