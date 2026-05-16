@@ -2945,6 +2945,15 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         // + IPAdapter (replaces Zero123++ which was hallucinated). Conditioned
         // on the front photo, prompted with the user's original asset prompt.
         if (multiView && r.images?.length > 0) {
+          // Phase 2 — front image is done, now generating back views.
+          // Without this bump, the progress bar would stay frozen at ~40%
+          // while back-view runs silently for ~30s (no progress markers),
+          // making the user think the job is stuck even though the listing
+          // already shows the generated front image.
+          if (job.tickTimer) { clearInterval(job.tickTimer); job.tickTimer = null; }
+          job.progress = Math.max(job.progress, 60);
+          job.name = `Generate back views: ${p.name}`;
+          renderJobs();
           try {
             showToast('Generating back photos (RealVis + IPAdapter)...', 'info', 10000);
             // Use the RAW user prompt (subject only, no asset-style template)
