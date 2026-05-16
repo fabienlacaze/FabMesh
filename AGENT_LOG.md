@@ -10,6 +10,37 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-17 — Bug critique: front photo demoted to p=0.7 (was 1.0)
+
+**Symptôme**: même en mode stack avec priorité front=1.0 dans le dict
+`PRIORITY_WEIGHTS_TUP`, les logs montrent `az=0/el=0(p=0.7)` au lieu
+de p=1.0 → le front est PLUS BAS que les vues latérales Z123 (p=0.9)
+dans le stack → écrasement de la HD source par les vues hallucinées.
+
+**Cause**: ligne 418 de `texture_project.py`:
+```python
+PRIORITY_WEIGHTS = {a: p for (a, _), p in PRIORITY_WEIGHTS_TUP.items()}
+```
+Cette compréhension de dict collapses sur azim seul. Pour azim=0.0
+il y a 3 entrées dans `PRIORITY_WEIGHTS_TUP`:
+- (0.0, 0.0): 1.0   ← front (la bonne valeur)
+- (0.0, 90.0): 0.7  ← CRM TOP
+- (0.0, -90.0): 0.7 ← CRM BOTTOM
+
+L'itération garde la DERNIÈRE entrée → PRIORITY_WEIGHTS[0.0] = 0.7.
+
+**Fix** ligne 429: lire `PRIORITY_WEIGHTS_TUP[(0.0, 0.0)]` au lieu de
+`PRIORITY_WEIGHTS[0.0]` quand on append le front photo.
+
+**Vérification**: log v5 montre maintenant
+`stack order: ... az=0/el=0(p=1.0)` en TOP du stack ✓
+La texture extraite reste fragmentée mais c'est dû à xatlas qui
+atomise le mesh Hi3DGen (92k faces / 3099 charts) — pas un bug du
+blend mode. Pour des props simples comme un couteau, TripoSG ou
+SF3D produisent moins de faces et un atlas plus propre.
+
+---
+
 ## 2026-05-16 — 3 fixes texture pour props: mvadapter + stack + front view honored
 
 **Symptôme post-fix-précédent**: pipeline Hi3DGen tourne sans crash mais

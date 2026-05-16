@@ -426,7 +426,14 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     _include_front_photo = (
         os.environ.get('FABMESH_TEXPROJ_NO_FRONT', '0') != '1')
     if _include_front_photo:
-        views.append((source_image_path, 0.0, 0.0, PRIORITY_WEIGHTS[0.0]))
+        # Use the (azim, elev) tuple — the legacy azim-only PRIORITY_WEIGHTS
+        # dict collapses 3 entries for azim=0 (front=1.0, top=0.7, bottom=0.7)
+        # and keeps only the last one. That bug was demoting the front photo
+        # from priority 1.0 to 0.7, so in stack-mode the lateral Z123 views
+        # (p=0.9) overwrote the HD source photo. Read from the tuple dict
+        # explicitly to keep the front at 1.0.
+        views.append((source_image_path, 0.0, 0.0,
+                      PRIORITY_WEIGHTS_TUP[(0.0, 0.0)]))
 
     # If the bridge applied an auto-align rotation around Y between SF3D
     # inference and this projection, we must shift every multi-view azimuth
