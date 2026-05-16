@@ -1420,23 +1420,16 @@ function installAllLimitsSafetyKill(proc, jobName) {
               if (_breaches.vram >= 2) _tripped = 'vram';
             } else _breaches.vram = 0;
           }
-          // GPU util %
-          if (!_tripped && _gpuLimit > 0) {
-            if (gpuUtil > _gpuLimit * SAFETY_FRACTION) {
-              _breaches.gpu += 1;
-              _detail = `GPU ${gpuUtil.toFixed(0)}% > ${(_gpuLimit * SAFETY_FRACTION).toFixed(0)}% (99% of ${_gpuLimit}% limit)`;
-              if (_breaches.gpu >= 2) _tripped = 'gpu';
-            } else _breaches.gpu = 0;
-          }
-          // TEMP (slider 0..100 -> 30..100 °C linearly)
-          if (!_tripped && _tempLimitSlider > 0) {
-            const _tempLimitC = 30 + (_tempLimitSlider / 100) * 70;
-            if (tempC > _tempLimitC * SAFETY_FRACTION) {
-              _breaches.temp += 1;
-              _detail = `TEMP ${tempC.toFixed(1)}°C > ${(_tempLimitC * SAFETY_FRACTION).toFixed(1)}°C (99% of ${_tempLimitC.toFixed(0)}°C limit)`;
-              if (_breaches.temp >= 2) _tripped = 'temp';
-            } else _breaches.temp = 0;
-          }
+          // NOTE: GPU util % and TEMP are NOT safety-killed here.
+          // - GPU 100% is the normal/healthy state during a 3D inference;
+          //   killing on GPU% would tear down every healthy job (mygale
+          //   was killed at GPU 97% > 89%, but the job was fine).
+          // - TEMP throttling is already handled by gpu_throttle.py inside
+          //   each Python bridge (sleeps between steps when temp too high).
+          //   No need to kill — let the throttle slow the work instead.
+          // The GPU and TEMP sliders STILL apply via gpu_throttle.py
+          // (read FABMESH_GPU_LIMIT / FABMESH_TEMP_LIMIT). They are
+          // soft limits (throttle), not panic kills.
         }
       } catch (e) { /* nvidia-smi failed; skip GPU checks this tick */ }
     }
