@@ -1245,7 +1245,7 @@ document.getElementById('ws-use-for-3d-btn')?.addEventListener('click', () => {
   setTimeout(() => step2Card?.classList.remove('pulse-highlight'), 1500);
 });
 
-function showStep2SourceImage(imgPath) {
+async function showStep2SourceImage(imgPath) {
   // Populate the source-image preview shown next to the "Create new" form
   // in the 3D Mesh card. This is independent of the Edit-selected mesh viewer.
   const target = document.getElementById('ws-3d-source-preview');
@@ -1256,6 +1256,46 @@ function showStep2SourceImage(imgPath) {
     target.innerHTML = '<div class="preview-placeholder">No image selected</div>';
   }
   setViewerFilename('ws-3d-source-filename', imgPath);
+  // Auto-detect multi-view dir for the selected image:
+  // - 6 ortho views present (<stem>_multiview/ complete) -> show grid, hide back slot
+  // - Otherwise -> show back slot (2-view legacy), hide grid
+  await _refreshStep2MvPreviews(imgPath);
+}
+
+async function _refreshStep2MvPreviews(imgPath) {
+  const mvBlock = document.getElementById('ws-3d-source-mv-block');
+  const backBlock = document.getElementById('ws-3d-source-back-block');
+  const grid = document.getElementById('ws-3d-source-mv-grid');
+  if (!mvBlock || !grid) return;
+  let mvDir = null;
+  try {
+    if (imgPath && window.meshyAPI?.checkMultiviewDir) {
+      const info = await window.meshyAPI.checkMultiviewDir(imgPath);
+      if (info && info.exists && info.dir) mvDir = info.dir;
+    }
+  } catch (_) { /* ignore */ }
+  if (mvDir) {
+    mvBlock.classList.remove('hidden');
+    if (backBlock) backBlock.classList.add('hidden');
+    const LABELS = ['FRONT', 'RIGHT', 'BACK', 'LEFT', 'TOP', 'BOTTOM'];
+    grid.innerHTML = LABELS.map((label, i) => {
+      const vp = (mvDir + '/view_' + i + '.png').replace(/\\/g, '/');
+      return (
+        '<div class="stage-source-img stage-source-mv-thumb" '
+        + 'style="position:relative; aspect-ratio:1/1;">'
+        + '<img src="file:///' + vp + '?t=' + Date.now() + '">'
+        + '<span style="position:absolute; bottom:2px; left:2px; '
+        + 'background:rgba(0,0,0,0.7); color:#fff; font-size:9px; '
+        + 'padding:1px 4px; border-radius:3px; letter-spacing:0.5px;">'
+        + label + '</span>'
+        + '</div>'
+      );
+    }).join('');
+  } else {
+    mvBlock.classList.add('hidden');
+    if (backBlock) backBlock.classList.remove('hidden');
+    grid.innerHTML = '';
+  }
 }
 
 // ============================================================
