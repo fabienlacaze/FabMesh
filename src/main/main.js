@@ -3650,6 +3650,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout, meshVerts, meshFaces });
       });
       if (jobId) activeProcs.set(jobId, proc);
+      // Apply OS-level RAM hard cap so the job can never exceed the
+      // user-configured limit. The process is paged to disk under
+      // pressure (slower) instead of taking down the system.
+      setProcessHardMemoryLimit(proc, `image-to-3d (${engine})`);
       const flushStdout = () => {
         if (stdoutBuf) {
           safeSend('ai3d-progress', stdoutBuf);
