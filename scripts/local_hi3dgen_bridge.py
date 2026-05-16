@@ -132,7 +132,12 @@ def generate_3d(image_path, output_path):
         )
         print(f"LOCAL_HI3DGEN: inference done in {time.time()-t0:.1f}s", flush=True)
 
-        print(f"LOCAL_HI3DGEN_PROGRESS: 90 export", flush=True)
+        # When wrapped by hi3dgen_full_pipeline.py, cap progress at 50
+        # so the parent can emit higher markers for UV unwrap + texture
+        # bake steps without the bar getting stuck at 99% early.
+        _wrapped = os.environ.get('FABMESH_HI3DGEN_WRAPPED') == '1'
+        _final_pct = 50 if _wrapped else 100
+        print(f"LOCAL_HI3DGEN_PROGRESS: {min(45, _final_pct)} export", flush=True)
         mesh = outputs['mesh'][0].to_trimesh(transform_pose=True)
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         mesh.export(output_path)
@@ -142,7 +147,7 @@ def generate_3d(image_path, output_path):
             f"{len(mesh.vertices)} verts, {len(mesh.faces)} faces)",
             flush=True,
         )
-        print(f"LOCAL_HI3DGEN_PROGRESS: 100 done", flush=True)
+        print(f"LOCAL_HI3DGEN_PROGRESS: {_final_pct} done", flush=True)
 
         del pipeline, normal_predictor
         if torch.cuda.is_available():

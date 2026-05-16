@@ -53,10 +53,10 @@ def step_unwrap(in_glb, out_glb):
     log('STEP 2: xatlas UV unwrap')
     t0 = time.time()
     m = trimesh.load(in_glb, force='mesh')
-    # Hi3DGen outputs mesh with subject facing -Z (TRELLIS convention).
-    # FabMesh viewer (Three.js camera at +X+Y+Z) expects facing +Z, so
-    # apply Ry(180°) by default. Override via FABMESH_HI3DGEN_ROT_DEG=N.
-    rot_deg = float(os.environ.get('FABMESH_HI3DGEN_ROT_DEG', '180'))
+    # Hi3DGen calls to_trimesh(transform_pose=True) which already aligns
+    # the mesh to a standard pose. Apply additional Y rotation if needed
+    # via FABMESH_HI3DGEN_ROT_DEG (default 0 — no extra rotation).
+    rot_deg = float(os.environ.get('FABMESH_HI3DGEN_ROT_DEG', '0'))
     if abs(rot_deg) > 0.5:
         R = trimesh.transformations.rotation_matrix(
             np.radians(rot_deg), [0, 1, 0]
@@ -87,7 +87,11 @@ def step_texture(mesh_glb, image_path, out_glb, tex_res):
     t0 = time.time()
     args = [sys.executable, os.path.join(SCRIPTS, 'texture_project.py'),
             mesh_glb, image_path, out_glb, str(tex_res)]
-    rc = subprocess.run(args, timeout=600).returncode
+    # Hi3DGen mesh has NO SF3D-style internal transforms, so skip the
+    # undo step in texture_project (otherwise it double-rotates the
+    # mesh and the front photo lands on the side/wings).
+    env = {**os.environ, 'FABMESH_TEXPROJ_SKIP_UNDO': '1'}
+    rc = subprocess.run(args, timeout=600, env=env).returncode
     if rc != 0:
         log(f'texture_project failed with rc={rc}')
         sys.exit(3)
