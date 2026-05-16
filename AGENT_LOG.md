@@ -10,6 +10,60 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Instrumentation logs SF3D (diag freeze hardware sm_120)
+
+**Contexte**: depuis l'update driver NVIDIA récente, SF3D freeze TOUT le
+PC pendant `model.run_image()` (écran noir, artefacts, hard reset).
+Diagnostic CUDA basique + `from_pretrained()` + `.to('cuda')` OK; le
+crash est dans l'inférence elle-même. Crash si violent que stdout
+buffer est vide après reboot.
+
+**Modifs**:
+- `external/StableFast3D/sf3d/system.py` — ajout d'un helper
+  `_sf3d_diag()` qui écrit chaque étape (avec `torch.cuda.synchronize()`
+  + `os.fsync()`) dans `logs/sf3d_diag.log` AVANT que l'op risquée
+  démarre. Couvre: `run_image` (prepare/batch/generate), `generate_mesh`
+  (image_processor, get_scene_codes, image_estimator,
+  triplane_to_meshes, baker.rasterize, baker.interpolate, query_triplane,
+  decoder, normal tangent-space bmm, dilate_fill uv_padding x2).
+  Activé via `SF3D_DIAG=1` (zero overhead sinon).
+- `scripts/local_sf3d_bridge.py` — mirror du helper côté bridge,
+  même chemin de log, breadcrumbs avant chaque sous-step
+  (from_pretrained, .to(device), .eval(), run_image entry/exit).
+
+**Top suspects sm_120 identifiés** (à tester dans l'ordre):
+1. `dilate_fill` UV padding (max_pool2d/unfold/fold/conv2d itératif sur
+   `bake_res²` tensors)
+2. `texture_baker` CUDA kernels `rasterize_gpu` + `interpolate_gpu`
+   (custom .cu non recompilé pour sm_120, BVH stack de 64 ints)
+3. `F.grid_sample` dans `query_triplane` (N énorme sur les vertices de
+   marching tetrahedra)
+4. `MarchingTetrahedraHelper` (`torch.unique(dim=0)` sur tenseur géant)
+5. `scaled_dot_product_attention` dans
+   `TwoStreamInterleaveTransformer` (FlashAttention dispatch sur
+   sm_120 peut tomber sur un chemin cassé)
+
+**Procédure de test progressif** (sans recrasher):
+1. `SF3D_DIAG=1 python scripts/local_sf3d_bridge.py images/scorpion/ref_0.png /tmp/out.glb 512 -1 none 0`
+   avec `bake_res=512` (réduit massivement uv_padding + texture_baker).
+   Si ça passe ⇒ suspect = dilate_fill ou texture_baker scale-dependant.
+2. Si crash persiste ⇒ regarder le DERNIER `SF3D_DIAG:` dans
+   `logs/sf3d_diag.log` après reboot ⇒ identifie l'étape coupable.
+3. Tests d'isolation possibles selon le coupable:
+   - dilate_fill: monkey-patch `sf3d.models.utils.dilate_fill` vers
+     une version CPU (`.cpu()` autour de l'op)
+   - texture_baker: désactiver `rasterize_gpu` en faisant le rasterize
+     sur CPU (PIL ou skimage), suit déjà le pattern `rasterize_cpu` que
+     l'upstream a probablement
+   - SDPA: forcer `torch.nn.attention.sdpa_kernel(SDPBackend.MATH)`
+     pour court-circuiter Flash / cuDNN
+   - marching_tet: réduire `isosurface_resolution` dans `config.yaml`
+4. Test ultime: désactiver autocast bfloat16 (sm_120 bf16 sur Blackwell
+   peut avoir des bugs driver récents) ⇒ remplacer
+   `torch.bfloat16` par `torch.float16` dans le bridge.
+
+---
+
 ## 2026-05-15 (matin) — TripoSG activé dans l'UI (option A: quick win MIT)
 
 **Contexte**: après bilan complet de la stack (TRELLIS-2 bloqué Blackwell,
