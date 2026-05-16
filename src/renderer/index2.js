@@ -3011,7 +3011,14 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   let totalImages = count;
   if (multiView) totalImages *= 3;
   if (buildStages) totalImages *= 3;
-  const expectedMs = totalImages * perImage + 3000; // + small warm-up
+  let expectedMs = totalImages * perImage + 3000; // + small warm-up
+  // 6-view mode adds MV-Adapter run per image (NOT multiplied by 3 like
+  // 2-view back gen because each MV run produces 6 views from 1 image).
+  // MV-Adapter base ~70s + 30s if harmonize + 10s if upscale.
+  if (mv6view) {
+    const mvPerImage = 70000 + (mv6Harmonize ? 30000 : 0) + (mv6Upscale ? 10000 : 0);
+    expectedMs += count * mvPerImage;
+  }
   gatedRun('image', `Generate images: ${p.name}`, async () => {
     const job = pushJob(`Generate images: ${p.name}`, null, {
       'Asset type': assetType,
