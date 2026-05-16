@@ -1702,7 +1702,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
   showToast('Generating 6 multi-views...', 'info', 5000);
   try {
     const result = await API.generateMultiview({
-      imagePath: mvImagePath, harmonize, upscale, engine: 'mvadapter',
+      imagePath: mvImagePath, harmonize, upscale, engine: 'z123',  // MV-Adapter cassé avec diffusers 0.32 (output halluciné) — Z123 par défaut
     });
     if (result && result.success) {
       showToast('Multi-views generated!', 'success');
@@ -3292,7 +3292,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 imagePath: imgPath,
                 harmonize: mv6Harmonize,
                 upscale: mv6Upscale,
-                engine: 'mvadapter',
+                engine: 'z123',  // MV-Adapter cassé avec diffusers 0.32 (output halluciné) — Z123 par défaut
               });
               if (mvRes?.success) {
                 if (!p._multiviews) p._multiviews = {};
