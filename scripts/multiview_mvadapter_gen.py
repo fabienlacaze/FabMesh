@@ -276,6 +276,44 @@ def generate(input_image_path, output_dir, num_steps=50,
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+    # Optional post-gen: upscale 768 -> 1024 via Real-ESRGAN. MV-Adapter
+    # native resolution is 768, but the source photo is usually 1024 so
+    # the 6 views look softer in the viewer. ESRGAN x4 + downsample to
+    # 1024 closes the gap at low cost (~10s for 6 tiles).
+    if os.environ.get('FABMESH_MV_UPSCALE') == '1':
+        try:
+            _subpct(92, 'esrgan_upscale')
+            log('upscaling 6 views 768->1024 via Real-ESRGAN...')
+            from realesrgan import RealESRGANer
+            from basicsr.archs.rrdbnet_arch import RRDBNet
+            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                            num_block=23, num_grow_ch=32, scale=4)
+            up = RealESRGANer(
+                scale=4, model_path=(
+                    'https://github.com/xinntao/Real-ESRGAN/releases/'
+                    'download/v0.1.0/RealESRGAN_x4plus.pth'),
+                model=model, tile=0, tile_pad=10, pre_pad=0, half=True)
+            t_up = time.time()
+            for slot_idx in range(len(VIEW_SLOTS)):
+                vp = os.path.join(output_dir, f'view_{slot_idx}.png')
+                im = Image.open(vp).convert('RGBA')
+                arr = np.asarray(im)
+                rgb_up, _ = up.enhance(arr[:, :, :3], outscale=4)
+                # Downsample 3072 -> 1024 for memory + viewer parity.
+                rgb_out = np.asarray(
+                    Image.fromarray(rgb_up).resize((1024, 1024), Image.LANCZOS))
+                alpha_up = np.asarray(
+                    Image.fromarray(arr[:, :, 3]).resize((1024, 1024),
+                                                         Image.LANCZOS))
+                Image.fromarray(np.dstack([rgb_out, alpha_up]), 'RGBA') \
+                    .save(vp)
+            log(f'  ESRGAN upscale done in {time.time()-t_up:.1f}s')
+            del up
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as e:
+            log(f'  ESRGAN upscale failed: {e} — keeping 768px views')
+
     elapsed = time.time() - t0
     slog.info('pipeline_done', total_ms=int(elapsed * 1000),
               engine='mvadapter', views=len(VIEW_SLOTS))

@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   logToFile: (line) => ipcRenderer.send('renderer-log', line),
   generateMultiview: (opts) => ipcRenderer.invoke('generate-multiview', opts),
   checkMultiviewDir: (imagePath) => ipcRenderer.invoke('check-multiview-dir', imagePath),
+  duplicateImageVersion: (opts) => ipcRenderer.invoke('duplicate-image-version', opts),
   copyMeshToProject: (srcPath) => ipcRenderer.invoke('copy-mesh-to-project', srcPath),
   createProjectFromMesh: (opts) => ipcRenderer.invoke('create-project-from-mesh', opts),
   flashTaskbar: () => ipcRenderer.invoke('flash-taskbar'),
