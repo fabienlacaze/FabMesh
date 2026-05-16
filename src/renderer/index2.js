@@ -5241,14 +5241,13 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     // TripoSG full pipeline: geo ~30s + decim + xatlas + texture_project ~90s
     expectedMs = 150000;
   } else if (engine === 'hi3dgen') {
-    // Hi3DGen full pipeline timings depend heavily on mesh complexity:
-    //   - simple subject (mygale ~50K verts):  ~60s total
-    //   - complex subject (avion ~200K verts): ~3 min total
-    //     - Hi3DGen inference: ~30s
-    //     - xatlas unwrap on 200K verts: ~45s
-    //     - texture_project bake at 1024: ~60s
-    // Use 180s as a realistic upper-bound for typical jobs.
-    expectedMs = 180000;
+    // Hi3DGen full pipeline (with MV-Adapter 6 views):
+    //   - Hi3DGen inference: ~30s
+    //   - xatlas unwrap on 200K verts: ~45s
+    //   - MV-Adapter 6 views (RealVisXL + adapter): ~60s
+    //   - texture_project bake at 1024 (6 views): ~60s
+    // Total ~3-4 min for complex meshes, ~2 min for simple.
+    expectedMs = 240000;
   } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {

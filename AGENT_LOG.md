@@ -10,6 +10,38 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Hi3DGen: ajout MV-Adapter 6 vues pour combler trous de texture
+
+**Contexte**: Hi3DGen produit un mesh dense (175k verts pour avion) qui
+couvre toutes les faces (dessus/dessous/côtés/arrière), mais on n'a
+qu'une photo front 1024×1024. La projection front-only ne couvre que
+~40% du mesh → trous noirs partout (faces non-visibles depuis l'avant
+restent à la couleur initiale 0,0,0 puisque le inpaint Telea ne touche
+que les pixels entourés d'îlots UV valides).
+
+**Modif**: `scripts/hi3dgen_full_pipeline.py`
+- Nouveau `step_mvadapter(image_path, mv_dir)` qui appelle
+  `multiview_mvadapter_gen.py` (i2mv-sdxl, Apache 2.0, 6 vues 768px:
+  front/right/back/left/top/bottom) via sys.executable (venv système,
+  torch 2.7).
+- `step_texture` accepte `mv_dir=None`; si fourni, passe
+  `--multiview <dir>` à `texture_project.py` qui sait déjà lire
+  `view_0..view_5.png` + `views.json` (utilisé pour CRM/Z123/SF3D).
+- Markers progress: 55/65/85/95/100 (insertion de mvadapter à 85).
+- Env `FABMESH_HI3DGEN_SKIP_MV=1` pour désactiver et revenir au
+  single-view (debug).
+- Fallback gracieux: si MV-Adapter échoue (timeout, fichiers manquants),
+  on continue en single-view.
+
+**Estimate**: 180s → 240s (RealVisXL load ~60s en plus).
+
+**Test attendu**: l'avion devrait avoir une texture couvrant 360°
+(plus de trous noirs), bien que la couleur des vues générées par
+MV-Adapter pour les angles non vus dans la photo source peut diverger
+de la photo réelle (hallucination IA).
+
+---
+
 ## 2026-05-16 — Fix Hi3DGen popup "stuck at 70%" 1-2 min après fin
 
 **Contexte**: après mes fix précédents (os._exit(0), markers wrapped

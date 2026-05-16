@@ -83,11 +83,44 @@ def step_unwrap(in_glb, out_glb):
     log(f'STEP 2 done in {time.time()-t0:.1f}s -> {out_glb}')
 
 
-def step_texture(mesh_glb, image_path, out_glb, tex_res):
-    log(f'STEP 3: bake atlas via texture_project (res={tex_res})')
+def step_mvadapter(image_path, mv_dir):
+    """Generate 6 multi-view consistent images via MV-Adapter i2mv-sdxl.
+    Returns True on success, False otherwise (caller falls back to single-view).
+    Single-view projection leaves ~60% of the Hi3DGen mesh untextured (visible
+    holes) because only the front is covered. Multi-view fills sides+back+top+
+    bottom from one reference image."""
+    log(f'STEP 2.5: MV-Adapter 6 views -> {mv_dir}')
+    t0 = time.time()
+    script = os.path.join(SCRIPTS, 'multiview_mvadapter_gen.py')
+    try:
+        rc = subprocess.run(
+            [sys.executable, script, image_path, mv_dir],
+            timeout=900,
+        ).returncode
+    except Exception as e:
+        log(f'MV-Adapter exception: {e}')
+        return False
+    if rc != 0:
+        log(f'MV-Adapter failed with rc={rc}, falling back to single-view')
+        return False
+    # Sanity check: confirm view_0..view_5 + views.json all landed.
+    expected = [f'view_{i}.png' for i in range(6)] + ['views.json']
+    missing = [f for f in expected if not os.path.exists(os.path.join(mv_dir, f))]
+    if missing:
+        log(f'MV-Adapter output incomplete (missing {missing}), falling back')
+        return False
+    log(f'STEP 2.5 done in {time.time()-t0:.1f}s')
+    return True
+
+
+def step_texture(mesh_glb, image_path, out_glb, tex_res, mv_dir=None):
+    log(f'STEP 3: bake atlas via texture_project (res={tex_res}'
+        f'{", multi-view" if mv_dir else ", single-view"})')
     t0 = time.time()
     args = [sys.executable, os.path.join(SCRIPTS, 'texture_project.py'),
             mesh_glb, image_path, out_glb, str(tex_res)]
+    if mv_dir:
+        args += ['--multiview', mv_dir]
     # Hi3DGen mesh has NO SF3D-style internal transforms, so skip the
     # undo step in texture_project (otherwise it double-rotates the
     # mesh and the front photo lands on the side/wings).
@@ -112,13 +145,21 @@ def main():
 
     raw_glb = os.path.join(out_dir, '_hi3dgen_raw.glb')
     uv_glb = os.path.join(out_dir, '_hi3dgen_uvunwrapped.glb')
+    mv_dir = os.path.join(out_dir, '_hi3dgen_mv')
+
+    # Skip MV-Adapter if disabled (e.g. testing single-view) via env.
+    skip_mv = os.environ.get('FABMESH_HI3DGEN_SKIP_MV') == '1'
 
     t0 = time.time()
     step_hi3dgen(image_path, raw_glb)
     print('LOCAL_HI3DGEN_PROGRESS: 55 step1_done', flush=True)
     step_unwrap(raw_glb, uv_glb)
-    print('LOCAL_HI3DGEN_PROGRESS: 70 unwrap_done', flush=True)
-    step_texture(uv_glb, image_path, out_glb, tex_res)
+    print('LOCAL_HI3DGEN_PROGRESS: 65 unwrap_done', flush=True)
+    mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
+    print(f'LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_{"done" if mv_ok else "skipped"}',
+          flush=True)
+    step_texture(uv_glb, image_path, out_glb, tex_res,
+                 mv_dir=(mv_dir if mv_ok else None))
     print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
     # Final 100% marker so Electron's progress mapper completes.
     print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
