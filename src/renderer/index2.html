@@ -356,12 +356,22 @@
                     <div class="preview-placeholder">No image selected</div>
                   </div>
                   <div id="ws-3d-source-filename" class="viewer-filename"></div>
-                  <div class="stage-source-label" style="margin-top:10px;">Optional back photo (2-view mode)</div>
-                  <div id="ws-3d-source-back-preview" class="stage-source-img" style="cursor:pointer;" title="Click to add a back photo for true-back texture">
-                    <div class="preview-placeholder">+ Add back photo</div>
+                  <!-- 2-view back photo slot (hidden when 6-view dir is present) -->
+                  <div id="ws-3d-source-back-block">
+                    <div class="stage-source-label" style="margin-top:10px;">Optional back photo (2-view mode)</div>
+                    <div id="ws-3d-source-back-preview" class="stage-source-img" style="cursor:pointer;" title="Click to add a back photo for true-back texture">
+                      <div class="preview-placeholder">+ Add back photo</div>
+                    </div>
+                    <div id="ws-3d-source-back-filename" class="viewer-filename"></div>
+                    <button id="ws-3d-source-back-clear" class="ghost-btn" style="margin-top:4px; display:none; font-size:11px; padding:2px 8px;">Remove back photo</button>
                   </div>
-                  <div id="ws-3d-source-back-filename" class="viewer-filename"></div>
-                  <button id="ws-3d-source-back-clear" class="ghost-btn" style="margin-top:4px; display:none; font-size:11px; padding:2px 8px;">Remove back photo</button>
+                  <!-- 6-view grid (auto-shown when <stem>_multiview/ exists) -->
+                  <div id="ws-3d-source-mv-block" class="hidden" style="margin-top:10px;">
+                    <div class="stage-source-label">Multi-views (6) — used by texture bake</div>
+                    <div id="ws-3d-source-mv-grid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:4px;">
+                      <!-- 6 mini viewers injected by JS -->
+                    </div>
+                  </div>
                 </div>
               </div>
             </details>
