@@ -2895,17 +2895,22 @@ if (qualityEl && qualityLabel) {
 // doesn't also scream "3/4 view" at the model. Inanimate assets (buildings,
 // vehicles, props) keep the 3/4 view since they don't need rigging.
 // Anti-doubling tokens: RealVis XL tends to generate 2 instances of the
-// subject when prompted with "three-quarter view" (studio composition bias
-// from training data). We add explicit "single instance" tokens and let
-// the negative prompt in local_juggernaut_bridge.py block grid layouts.
+// subject in one frame when prompted with angle keywords ("three-quarter
+// view", "angled side view") because vehicle/product photo datasets
+// often pair two angles side-by-side. We now:
+//  1. Force "strict front view" on subjects that 6-view MV-Adapter will
+//     re-angle anyway (vehicle/prop/weapon/environment) — no angle in
+//     source image, MV-Adapter does the work.
+//  2. Pile up "ONE X only" / "single instance" tokens.
+//  3. Negative prompt (local_juggernaut_bridge.py) blocks grid layouts.
 const ASSET_TYPE_PROMPTS = {
   character: 'single isolated 3D character, one character only, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
-  building: 'one single building, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric angle, clean silhouette, no text, no UI',
-  vehicle: 'one single vehicle, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, angled side view, clean silhouette, no text, no UI',
-  weapon: 'one single weapon, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI',
-  prop: 'one single prop, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, angled view, clean silhouette, no text, no UI',
-  creature: 'one single creature, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI',
-  environment: 'one single environment piece, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, angled view, clean silhouette, no text, no UI',
+  building: 'ONE building only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric angle, clean silhouette, no text, no UI, no duplicate, no second building',
+  vehicle: 'ONE car only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second car, no twin, no rear view inset',
+  weapon: 'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
+  prop: 'ONE prop only, single instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
+  creature: 'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
+  environment: 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
   custom: '',
 };
 
@@ -2953,6 +2958,49 @@ function stripKnownPromptSuffixes(raw) {
       const next = txt.replace(re, (_, sep) => (sep === ',' || sep === ', ' ? '' : ''));
       if (next !== txt) { txt = next; changed = true; }
     }
+  }
+  // Token-level pass: kill any leftover canonical tokens from previous
+  // template versions (legacy projects don't match the exact current
+  // template strings, but the individual tokens still pollute the user
+  // textarea and end up doubled with the new template at gen time).
+  const KNOWN_TOKENS = [
+    // angle keywords (any version)
+    'three-quarter view', 'three quarter view', '3/4 view',
+    'angled side view', 'angled view', 'isometric three-quarter view',
+    'isometric three-quarter', 'isometric angle', 'isometric view',
+    'side view', 'side profile', 'strict front view', 'front view',
+    'facing camera',
+    // isolation / dedup tokens
+    'single isolated 3D character', 'single isolated 3D building',
+    'single isolated 3D vehicle', 'single isolated 3D weapon',
+    'single isolated 3D prop', 'single isolated 3D creature',
+    'single isolated 3D environment piece',
+    'one single character', 'one single building', 'one single vehicle',
+    'one single weapon', 'one single prop', 'one single creature',
+    'one single environment piece',
+    'ONE car only', 'ONE building only', 'ONE weapon only',
+    'ONE prop only', 'ONE creature only', 'ONE environment piece only',
+    'one character only', 'single vehicle', 'only one instance',
+    'single instance', 'isolated', 'complete vehicle',
+    // staging / lighting / framing
+    'plain white background', 'even studio lighting', 'no shadows',
+    'no characters', 'no other characters', 'no other creatures',
+    'centered', 'clean silhouette', 'no text', 'no UI',
+    'full body', 'full structure', 'full weapon', 'full item',
+    // dedup negatives (sometimes leak into positive)
+    'no duplicate', 'no second car', 'no second building',
+    'no twin', 'no rear view inset',
+    // T-pose tokens (legacy character)
+    'T-pose neutral stance', 'arms extended horizontally', 'legs apart',
+    'symmetric', 'RTS unit game asset', 'neutral stance',
+    // style tokens (any version)
+    'realistic style', 'photorealistic', 'sharp details',
+    'detailed materials',
+  ];
+  for (const tok of KNOWN_TOKENS) {
+    const esc = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(^|,\\s*)' + esc + '(?=$|,\\s*)', 'gi');
+    txt = txt.replace(re, (_, sep) => '');
   }
   // Collapse any resulting double commas / leading comma / extra whitespace.
   txt = txt.replace(/\s*,\s*,\s*/g, ', ').replace(/^\s*,\s*/, '').replace(/\s*,\s*$/, '').trim();
@@ -3026,8 +3074,15 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
 document.getElementById('ws-generate-image').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p) return;
-  const userPrompt = document.getElementById('ws-prompt').value.trim();
-  if (!userPrompt) { showToast('Type a description first.', 'error'); return; }
+  const rawTextarea = document.getElementById('ws-prompt').value.trim();
+  if (!rawTextarea) { showToast('Type a description first.', 'error'); return; }
+  // Strip any leftover enrichment from a previous template version so
+  // buildFullPrompt() doesn't pile up legacy tokens on top of the
+  // current template (e.g. user textarea still has the old
+  // "angled side view" from an earlier session — without this strip,
+  // the next gen would receive both that AND the new "strict front
+  // view", triggering RealVis's 2-cars hallucination).
+  const userPrompt = stripKnownPromptSuffixes(rawTextarea);
   const assetType = document.getElementById('ws-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
   const prompt = buildFullPrompt(userPrompt, assetType, assetStyle);
