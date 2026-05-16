@@ -1290,73 +1290,70 @@ ipcMain.handle('cancel-job', (event, jobId) => {
   return true;
 });
 
-// Hard-limit watchdog: polls VRAM + system RAM every 2s while a heavy
-// Python job is running. Kills the process if either exceeds the user's
-// configured limits (UI sliders FABMESH_VRAM_FRACTION + FABMESH_RAM_LIMIT_PCT).
-// Without this, the soft cap PyTorch enforces via
-// `torch.cuda.set_per_process_memory_fraction()` only kicks in for
-// pure-PyTorch allocations — native libs (spconv, SDXL refine, uv_padding,
-// rembg) allocate freely and we've seen RAM hit 100% / VRAM 96%.
-function installJobLimitsWatchdog(proc, jobName) {
-  if (!proc || !proc.pid) return;
-  // Seuils par défaut PRUDENTS (laissent de la marge pour les autres apps).
-  // L'utilisateur peut les surcharger via les sliders Settings qui
-  // populent ces env vars (déjà gérés par setGpuLimits).
-  const _vramPctMax = (() => {
-    const f = parseFloat(process.env.FABMESH_VRAM_FRACTION || '0.95');
-    return Math.min(99, Math.max(50, f * 100));
-  })();
-  const _ramPctMax = (() => {
-    const v = parseFloat(process.env.FABMESH_RAM_LIMIT_PCT || '90');
-    return Math.min(99, Math.max(50, v));
-  })();
-  let _killed = false;
-  let _missing_nvsmi_logged = false;
-  const _interval = setInterval(() => {
-    if (_killed || proc.killed || proc.exitCode !== null) {
-      clearInterval(_interval);
-      return;
-    }
-    // System RAM (Node.js os module, instant)
-    const _os = require('os');
-    const _totalRam = _os.totalmem();
-    const _freeRam = _os.freemem();
-    const _usedRamPct = ((_totalRam - _freeRam) / _totalRam) * 100;
-    // VRAM via nvidia-smi (sync, ~50ms; tolerable every 2s)
-    let _usedVramPct = 0;
+// OS-level hard memory cap: applies a Windows Working Set hard limit to
+// the spawned Python process via SetProcessWorkingSetSizeEx() with
+// QUOTA_LIMITS_HARDWS_MAX_ENABLE. Once set, Windows pages the process to
+// disk (swap) instead of letting it allocate more physical RAM. The job
+// stays alive but runs slower under memory pressure — exactly what the
+// user asked for: "ça mettra plus de temps mais ne dépassera pas".
+//
+// Limit source: FABMESH_RAM_LIMIT_GB (preferred, absolute GB) OR
+// FABMESH_RAM_LIMIT_PCT (% of total RAM, default 90%).
+//
+// On non-Windows or if PowerShell fails, this is a no-op — the existing
+// pre-flight gate (handleImageTo3D) prevents impossible-to-fit jobs from
+// being launched.
+function setProcessHardMemoryLimit(proc, jobName) {
+  if (process.platform !== 'win32' || !proc || !proc.pid) return;
+  const pid = proc.pid;
+  const _os = require('os');
+  const totalRam = _os.totalmem();
+  // Priority: explicit GB cap (FABMESH_RAM_LIMIT_GB) > percentage > default 90%
+  let capBytes;
+  const explicitGB = parseFloat(process.env.FABMESH_RAM_LIMIT_GB || '');
+  if (explicitGB > 0) {
+    capBytes = Math.round(explicitGB * 1024 ** 3);
+  } else {
+    const pct = Math.min(99, Math.max(50, parseFloat(process.env.FABMESH_RAM_LIMIT_PCT || '90'))) / 100;
+    capBytes = Math.round(totalRam * pct);
+  }
+  // Min working set = 100 MB. Max = our cap. Flags = HARDWS_MIN (0x1) | HARDWS_MAX (0x4).
+  const minBytes = 100 * 1024 * 1024;
+  // PowerShell + P/Invoke into kernel32.dll. Delayed so Python has time to spawn.
+  setTimeout(() => {
     try {
+      const psScript = `
+$sig = @'
+[DllImport("kernel32.dll", SetLastError=true)]
+public static extern bool SetProcessWorkingSetSizeEx(IntPtr hProcess, IntPtr min, IntPtr max, uint flags);
+'@;
+Add-Type -MemberDefinition $sig -Name K -Namespace W;
+$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue;
+if ($p) {
+  $ok = [W.K]::SetProcessWorkingSetSizeEx($p.Handle, [IntPtr]${minBytes}, [IntPtr]${capBytes}, 0x5);
+  if ($ok) { Write-Output "OK" } else { Write-Output "FAIL $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
+} else { Write-Output "NOPROC" }
+      `.trim();
       const _out = require('child_process').execFileSync(
-        'nvidia-smi',
-        ['--query-gpu=memory.used,memory.total', '--format=csv,noheader,nounits'],
-        { encoding: 'utf-8', timeout: 1500 }
+        'powershell', ['-NoProfile', '-Command', psScript],
+        { encoding: 'utf-8', timeout: 5000 }
       );
-      const _parts = _out.trim().split('\n')[0].split(',').map(s => parseInt(s.trim()));
-      if (_parts.length === 2 && _parts[1] > 0) {
-        _usedVramPct = (_parts[0] / _parts[1]) * 100;
+      const _r = (_out || '').trim();
+      if (_r === 'OK') {
+        log.info('main', `[ram-cap] set hard working set ${(capBytes / 1024 ** 3).toFixed(1)} GB on ${jobName} pid=${pid}`);
+      } else {
+        log.warn('main', `[ram-cap] SetProcessWorkingSetSizeEx returned ${_r} for pid=${pid} (job=${jobName})`);
       }
     } catch (e) {
-      if (!_missing_nvsmi_logged) {
-        log.warn('main', `[limits-watchdog] nvidia-smi unavailable, VRAM cap not enforced: ${e.message}`);
-        _missing_nvsmi_logged = true;
-      }
+      log.warn('main', `[ram-cap] failed to set hard working set on pid=${pid}: ${e.message}`);
     }
-    if (_usedVramPct > _vramPctMax) {
-      log.error('main', `[limits-watchdog] VRAM ${_usedVramPct.toFixed(1)}% > limit ${_vramPctMax.toFixed(0)}% — killing ${jobName} pid=${proc.pid}`);
-      try { safeSend('limits-exceeded', { kind: 'vram', value: _usedVramPct, limit: _vramPctMax, job: jobName }); } catch (e) {}
-      _killed = true;
-      killProcTree(proc);
-      clearInterval(_interval);
-    } else if (_usedRamPct > _ramPctMax) {
-      log.error('main', `[limits-watchdog] RAM ${_usedRamPct.toFixed(1)}% > limit ${_ramPctMax.toFixed(0)}% — killing ${jobName} pid=${proc.pid}`);
-      try { safeSend('limits-exceeded', { kind: 'ram', value: _usedRamPct, limit: _ramPctMax, job: jobName }); } catch (e) {}
-      _killed = true;
-      killProcTree(proc);
-      clearInterval(_interval);
-    }
-  }, 2000);
-  // Clear on proc exit so we don't leak intervals.
-  proc.on('exit', () => clearInterval(_interval));
-  proc.on('close', () => clearInterval(_interval));
+  }, 300);
+}
+
+// Back-compat alias used in older spawn sites — now points to the
+// OS-level cap (no kill, no clamp).
+function installJobLimitsWatchdog(proc, jobName) {
+  return setProcessHardMemoryLimit(proc, jobName);
 }
 
 function killProcTree(proc) {
