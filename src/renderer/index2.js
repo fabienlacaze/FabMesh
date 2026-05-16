@@ -5159,11 +5159,14 @@ function gatedRun(kind, displayName, runFn) {
 // 3D quality presets: map a single dropdown to safe (tex_res, vertex_count) combos.
 // These are VRAM-safe on 16 GB cards. The Python bridge auto-clamps further
 // based on actual GPU VRAM detected at runtime.
+// Pipeline complet SF3D ~ multi-view(30s) + inference(30s) + SDXL refine 9 tiles
+// (~35s) + atlas final(~10s). Mygale 1024px ran in 2m10s real time, validated
+// 2026-05-16. Previous estimates assumed SF3D inference alone (~20s).
 const MESH_QUALITY_PRESETS = {
-  draft:    { tex: 512,  verts: 3000,  expectedMs: 12000 },
-  standard: { tex: 1024, verts: -1,    expectedMs: 20000 },
-  high:     { tex: 2048, verts: -1,    expectedMs: 45000 },
-  ultra:    { tex: 4096, verts: -1,    expectedMs: 90000 },
+  draft:    { tex: 512,  verts: 3000,  expectedMs: 80000 },
+  standard: { tex: 1024, verts: -1,    expectedMs: 130000 },
+  high:     { tex: 2048, verts: -1,    expectedMs: 180000 },
+  ultra:    { tex: 4096, verts: -1,    expectedMs: 300000 },
 };
 // subdivide value convention:
 //   negative = decimate to abs(val) faces (low-poly)
