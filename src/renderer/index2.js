@@ -2954,6 +2954,21 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
           job.progress = Math.max(job.progress, 60);
           job.name = `Generate back views: ${p.name}`;
           renderJobs();
+          // Start a new smooth-climb timer for Phase 2 (60->92%) so the
+          // progress bar keeps moving while back-view IPAdapter runs without
+          // emitting progress markers. ~30s per image is a typical RealVis
+          // + IPAdapter back-view; once completeJob() fires it'll snap to 100%.
+          const _ph2Start = Date.now();
+          const _ph2Total = 30000 * r.images.length;
+          job.tickTimer = setInterval(() => {
+            const _elapsed = Date.now() - _ph2Start;
+            const _pct = Math.min(1, _elapsed / _ph2Total);
+            const _np = 60 + (92 - 60) * _pct;
+            if (_np > job.progress) {
+              job.progress = _np;
+              renderJobs();
+            }
+          }, 500);
           try {
             showToast('Generating back photos (RealVis + IPAdapter)...', 'info', 10000);
             // Use the RAW user prompt (subject only, no asset-style template)
