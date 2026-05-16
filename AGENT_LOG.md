@@ -10,6 +10,52 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — T-pose detection fire on every prop/vehicle prompt (BUG)
+
+**Symptôme**: user demande un couteau (Prop / Item), RealVis génère un
+mannequin en T-pose qui tient un couteau ET une fourchette.
+
+**Cause**: `scripts/local_juggernaut_bridge.py:97-101` détectait le mode
+T-pose dès qu'il voyait `front view`, `facing camera`, `straight-on`,
+etc. Mon fix anti-doubling (commit ca7086c) avait ajouté `strict front
+view, facing camera` aux templates prop/vehicle/weapon/environment →
+le bridge basculait sur DreamShaper XL Lightning + ControlNet OpenPose
++ skeleton T-pose comme control image → mannequin.
+
+**Fix**: restreindre la détection T-pose à des markers strictement
+"character":
+- `t-pose`, `t pose`, `tpose` (littéral)
+- `arms extended horizontally` (template character uniquement)
+- `rts unit` (template character uniquement)
+- `neutral stance` (templates character + creature uniquement)
+
+Les hard-surface (prop, vehicle, weapon, environment) tombent
+maintenant dans le path RealVis XL normal.
+
+---
+
+## 2026-05-16 — Texture mosaïque: capture MV-Adapter stderr + blend default accum
+
+**Symptôme**: mygale Hi3DGen avec texture en grosses plaques marron/
+blanc alternées au lieu d'une vraie texture d'araignée.
+
+**Diagnostic**: double cause confirmée par 2 analyses indépendantes :
+1. `step_mvadapter()` dans `hi3dgen_full_pipeline.py` échouait
+   silencieusement (subprocess rc != 0, stderr non capturé).
+2. Le blend mode par défaut `winner` (`texture_project.py`) produit
+   des seams abruptes sur les meshes complexes (mygale 8 pattes,
+   véhicules), surtout combiné à un UV atlas atomisé par xatlas.
+
+**Fix**:
+- `step_mvadapter` : `capture_output=True` + forward 50 dernières
+  lignes stdout/stderr au parent log via `log()`. Diagnostic des
+  fichiers présents si output incomplet.
+- `FABMESH_TEXPROJ_BLEND` default `winner` → `accum` (moyenne
+  pondérée, transitions douces). User peut toujours opt back via
+  l'env var.
+
+---
+
 ## 2026-05-16 — CREATE NEW: case "Multi-view" hiérarchique (2-view / 6-view)
 
 **Contexte**: l'user voulait remplacer la checkbox "Auto 2-view" plate
