@@ -452,7 +452,7 @@ async function refreshProjectsPage() {
     // names like test_e2e_sf3d_apilive_1776274212 that would otherwise form
     // their own phantom projects.
     base = base.replace(
-      /_(sf3d|meshy|hunyuan|local|trellis2|trellis|triposg|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
+      /_(sf3d|meshy|hunyuan|local|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
       ''
     );
     // Remove a trailing _<number> if any (legacy index naming)
