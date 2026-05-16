@@ -44,9 +44,13 @@ from contextlib import nullcontext
 # even this thread cannot run — only a hardware reset will recover.
 # But for software-level deadlocks (Python lock, NCCL, autotuner) it
 # limits the damage and writes a final breadcrumb to the diag log.
-# Default 180s; override with SF3D_TIMEOUT_SEC=N (set to 0 to disable).
+# Default 360s; override with SF3D_TIMEOUT_SEC=N (set to 0 to disable).
+# Pipeline complet (multi-view + SF3D + SDXL refine 9 tiles + uv_padding):
+#   - tex_res=1024 : ~130s typique
+#   - tex_res=2048 : ~270s typique (uv_padding 13 itérations ×2 maps + 9 tiles)
+# 360s donne marge confortable pour 2048 sans tuer prematurement.
 # ---------------------------------------------------------------------------
-_WATCHDOG_TIMEOUT = float(os.environ.get("SF3D_TIMEOUT_SEC", "180"))
+_WATCHDOG_TIMEOUT = float(os.environ.get("SF3D_TIMEOUT_SEC", "360"))
 _WATCHDOG_DISARMED = False
 
 
