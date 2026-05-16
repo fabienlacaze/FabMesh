@@ -595,23 +595,24 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     # This preserves the full detail of the source image in the atlas.
     #
     # Blend mode (FABMESH_TEXPROJ_BLEND env):
-    #   "winner" (default): best-view-wins per pixel — sharpest but
-    #                        produces visible seams where view coverage
-    #                        transitions from one dominant source to
-    #                        another.
-    #   "accum":  weighted average of all contributing views (rgb * w
-    #              accumulated, divided by total w at end). Smooths out
-    #              seams but can muddy the face (average of 6 views).
-    #   "stack":  Photoshop-style layer stack. Views are processed in
+    #   "winner":  best-view-wins per pixel — sharpest but produces
+    #              visible seams where view coverage transitions from
+    #              one dominant source to another (mosaic-plaque look
+    #              on complex meshes like spider legs / vehicle wheels).
+    #   "accum" (default since 2026-05-16): weighted average of all
+    #              contributing views. Smooths out seams; slight loss
+    #              of micro-detail acceptable on the texture projection
+    #              workflow because the front view is weighted highest.
+    #   "stack":   Photoshop-style layer stack. Views are processed in
     #              priority order (low priority first, high priority
     #              last). Each view OVERWRITES the atlas where it sees
     #              the surface. The front view comes LAST → covers
     #              everything it sees → face is preserved exactly as
     #              the front photo shows it. Default order:
     #              top/bot → lat → back → front.
-    _blend_mode = os.environ.get('FABMESH_TEXPROJ_BLEND', 'winner').lower()
+    _blend_mode = os.environ.get('FABMESH_TEXPROJ_BLEND', 'accum').lower()
     if _blend_mode not in ('winner', 'accum', 'stack'):
-        _blend_mode = 'winner'
+        _blend_mode = 'accum'
     log(f'blend mode: {_blend_mode}')
     proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
     weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)
