@@ -197,21 +197,34 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         )
         print(f"LOCAL_REALVIS: T-pose mode detected (keywords in prompt)", flush=True)
     else:
-        # Three-quarter view bias for hard-surface / prop subjects: SF3D
-        # textures only what the front shows and "invents" the back/sides
-        # as a duller version of the front. By asking RealVisXL for a 3/4
-        # angle we expose the side of the subject in the source image
-        # itself, so SF3D bakes a richer, more accurate texture.
+        # Hard-surface / prop subjects: SF3D textures only what the front
+        # shows and "invents" the back/sides as a duller version of the
+        # front. A slight angle in the source helps SF3D bake a richer
+        # texture. BUT: if the renderer template already injected an
+        # angle keyword (three-quarter / angled / isometric / side view),
+        # don't add another — RealVis interprets the duplicate as a
+        # "studio composition" cue and generates 2 instances of the
+        # subject stacked in one frame.
+        _lc = prompt.lower()
+        _has_angle = any(t in _lc for t in (
+            'three-quarter', 'three quarter', '3/4', 'angled view',
+            'angled side view', 'isometric', 'side profile', 'side view',
+        ))
+        _angle_token = '' if _has_angle else 'slight angle, one side visible, '
         optimized_prompt = (
-            f"{prompt}, three-quarter view showing one side, slight rotation, "
-            f"single object centered on plain white background, "
+            f"{prompt}, {_angle_token}"
+            f"single instance only, one subject, no duplicate, no composition grid, "
             f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
             f"masterpiece, no text, no watermark"
         )
         negative_prompt = (
             "blurry, low quality, text, watermark, signature, deformed, "
             "extra limbs, bad anatomy, distorted, cropped, worst quality, "
-            "strict frontal view, flat profile"
+            "strict frontal view, flat profile, "
+            # Anti-doubling: training data of vehicle photos often has two
+            # angles side-by-side; explicitly negate that pattern.
+            "two objects, duplicate, twin, multiple instances, "
+            "split image, side by side, stacked, collage, grid layout, comparison view"
         )
 
     _throttle_cb = make_throttle_callback()  # None if disabled
