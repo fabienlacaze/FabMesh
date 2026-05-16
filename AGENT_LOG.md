@@ -10,6 +10,35 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Fix Hi3DGen popup "stuck at 70%" 1-2 min après fin
+
+**Contexte**: après mes fix précédents (os._exit(0), markers wrapped
+55/70/95/100, FABMESH_TEXPROJ_SKIP_UNDO), le pipeline Hi3DGen produit
+bien le GLB textured sur disque, mais la popup Electron reste à 70%
+pendant 1-2 min avant d'afficher "Task complete". Le user a vu
+elapsed=3m9s pour un job dont le mesh existait depuis ~1m45s.
+
+**Cause racine**: `execFile()` n'invoque le callback final qu'après que
+stdout + stderr soient totalement drainés. Hi3DGen accumule 10+ MB de
+logs (tqdm progress bars, diffusers warnings, normal predictor verbosity,
+xatlas, texture_project), donc même quand le Python exit proprement via
+`os._exit(0)`, Node attend que le pipe stdout finisse d'être lu avant
+de résoudre la promesse.
+
+**Modif**: `src/main/main.js` handler `image-to-3d` — early-resolve dès
+qu'on détecte `LOCAL_*_PROGRESS: 100 done` dans stdoutBuf ET que le
+fichier GLB existe sur disque. Le subprocess est laissé tranquille (il
+exit naturellement via os._exit(0)). Le callback `execFile` ignore la
+résolution s'il arrive après (`if (resolvedEarly) return`).
+
+**Pattern général**: marche pour tous les bridges qui émettent
+`LOCAL_<engine>_PROGRESS: 100 done` (sf3d, triposg, hi3dgen, trellis2).
+
+**Test attendu**: prochain run Hi3DGen devrait passer de 70% à "Task
+complete" en quelques secondes au lieu de 1-2 min.
+
+---
+
 ## 2026-05-16 — Instrumentation logs SF3D (diag freeze hardware sm_120)
 
 **Contexte**: depuis l'update driver NVIDIA récente, SF3D freeze TOUT le

@@ -3794,12 +3794,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       let stdoutBuf = '';
       let stderrBuf = '';
       let lastSent = 0;
+      let resolvedEarly = false;
       const proc = execFile(_pythonExe, fixedArgs, {
         timeout: 1800000,
         maxBuffer: 50 * 1024 * 1024,
         env,
       }, (error, stdout, stderr) => {
         if (jobId) activeProcs.delete(jobId);
+        if (resolvedEarly) return;
         if (error) { reject({ error: error.message, stdout, stderr }); return; }
         if (!fs.existsSync(meshPath)) { reject({ error: 'GLB not created (Python did not produce output)', stdout, stderr }); return; }
         const stats = fs.statSync(meshPath);
@@ -3815,6 +3817,30 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         }
         resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout, meshVerts, meshFaces });
       });
+      // Early-resolve: once a bridge emits LOCAL_*_PROGRESS: 100 done AND the
+      // GLB exists on disk, resolve immediately without waiting for the
+      // subprocess to exit. Hi3DGen accumulates 10+ MB of tqdm/diffusers
+      // stdout that Node has to fully drain before firing execFile's
+      // callback — causing a 1-2 min "stuck at 70%" delay even though the
+      // mesh has been written. The process is left to exit on its own
+      // (wrapper calls os._exit(0)).
+      const checkEarlyResolve = () => {
+        if (resolvedEarly) return;
+        if (!/LOCAL_[A-Z0-9_]+_PROGRESS:\s*100\s+done/.test(stdoutBuf)) return;
+        if (!fs.existsSync(meshPath)) return;
+        resolvedEarly = true;
+        if (jobId) activeProcs.delete(jobId);
+        const stats = fs.statSync(meshPath);
+        try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
+        let meshVerts = null, meshFaces = null;
+        const statsMatch = stdoutBuf.match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
+        if (statsMatch) {
+          meshVerts = parseInt(statsMatch[1]);
+          meshFaces = parseInt(statsMatch[2]);
+        }
+        log.info('main', `image-to-3d EARLY-RESOLVE: marker 100 done + GLB ready (${(stats.size/1024).toFixed(0)} KB)`);
+        resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout: stdoutBuf, meshVerts, meshFaces });
+      };
       if (jobId) activeProcs.set(jobId, proc);
       // Two-layer memory safety:
       //   1) Working-set cap: tell Windows to swap THIS process to disk
@@ -3846,8 +3872,9 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         }
         const now = Date.now();
         if (now - lastSent > 200) flushStdout();
+        checkEarlyResolve();
       });
-      proc.stdout?.on('end', flushStdout);
+      proc.stdout?.on('end', () => { flushStdout(); checkEarlyResolve(); });
       // Forward stderr too - Python errors were silently ignored!
       proc.stderr?.on('data', d => {
         const s = d.toString();
