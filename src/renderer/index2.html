@@ -147,14 +147,10 @@
                      Default = 2-view (back photo only). 6-views opens a
                      further sub-panel with harmonize / upscale options. -->
                 <div id="ws-mv-mode-row" class="form-row" style="flex-direction:column; gap:6px; padding-left:22px;">
-                  <label class="inline-check">
-                    <input type="radio" name="ws-mv-mode" value="2view" checked />
-                    Auto 2-view (RealVis+IPAdapter back view, ~25s)
-                  </label>
-                  <label class="inline-check">
-                    <input type="radio" name="ws-mv-mode" value="6view" />
-                    6 views (MV-Adapter front/right/back/left/top/bottom, ~70s)
-                  </label>
+                  <select id="ws-mv-mode-select" style="width:100%;">
+                    <option value="2view" selected>Auto 2-view (RealVis+IPAdapter back, ~25s)</option>
+                    <option value="6view">6 views (MV-Adapter front/right/back/left/top/bottom, ~70s)</option>
+                  </select>
                   <!-- Sub-options for the 6-views mode -->
                   <div id="ws-mv-6view-opts" class="hidden" style="display:flex; flex-direction:column; gap:4px; padding-left:22px; padding-top:4px;">
                     <label class="inline-check">
