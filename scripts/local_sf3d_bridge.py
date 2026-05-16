@@ -16,12 +16,72 @@ Usage:
 Defaults: texture_res=1024, target_vertex_count=-1 (no reduction), remesh=none
 
 Exit code 0 on success, non-zero on error.
+
+Diagnostic mode (sm_120 hardware-crash investigation, 2026-05-16)
+-----------------------------------------------------------------
+Set the env var ``SF3D_DIAG=1`` BEFORE launching this bridge to get a
+persistent step-by-step log of every GPU operation that runs in
+``SF3D.run_image()``. The log lives at ``logs/sf3d_diag.log`` (override
+with ``SF3D_DIAG_PATH=...``). Each step issues ``torch.cuda.synchronize()``
+and ``os.fsync()`` BEFORE the next op starts, so the last surviving line
+in the file pinpoints the kernel that triggered the TDR / freeze. Zero
+overhead when ``SF3D_DIAG`` is unset.
 """
 import sys
 import os
 import time
 import traceback
 from contextlib import nullcontext
+
+
+# ---------------------------------------------------------------------------
+# Bridge-side diagnostic logger (mirrors the helper inside sf3d/system.py so
+# the bridge can drop breadcrumbs BEFORE SF3D is even imported). Same file
+# format, single timeline.
+# ---------------------------------------------------------------------------
+_BRIDGE_DIAG_ENABLED = os.environ.get("SF3D_DIAG", "0") == "1"
+_BRIDGE_DIAG_PATH = os.environ.get(
+    "SF3D_DIAG_PATH",
+    os.path.join(os.getcwd(), "logs", "sf3d_diag.log"),
+)
+_BRIDGE_DIAG_T0 = time.time()
+
+
+def _bdiag(msg, sync_cuda=False):
+    if not _BRIDGE_DIAG_ENABLED:
+        return
+    try:
+        if sync_cuda:
+            import torch as _t  # local: avoids import at module load
+            if _t.cuda.is_available():
+                _t.cuda.synchronize()
+    except Exception:
+        pass
+    line = f"SF3D_DIAG: t={time.time() - _BRIDGE_DIAG_T0:7.2f}s [bridge] {msg}"
+    try:
+        print(line, flush=True)
+        sys.stdout.flush()
+    except Exception:
+        pass
+    try:
+        os.makedirs(os.path.dirname(_BRIDGE_DIAG_PATH), exist_ok=True)
+        with open(_BRIDGE_DIAG_PATH, "a", encoding="utf-8") as _f:
+            _f.write(line + "\n")
+            _f.flush()
+            try:
+                os.fsync(_f.fileno())
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+if _BRIDGE_DIAG_ENABLED:
+    _bdiag(
+        f"=== bridge diag enabled "
+        f"pid={os.getpid()} cwd={os.getcwd()} "
+        f"path={_BRIDGE_DIAG_PATH} ==="
+    )
 
 
 def generate_3d(
@@ -180,14 +240,18 @@ def generate_3d(
     # Download + load SF3D weights (~3 GB, one-time, gated on HF)
     # ------------------------------------------------------------------
     print(f"LOCAL_SF3D_PROGRESS: 25 load_pipeline", flush=True)
+    _bdiag("SF3D.from_pretrained START")
     t0 = time.time()
     model = SF3D.from_pretrained(
         "stabilityai/stable-fast-3d",
         config_name="config.yaml",
         weight_name="model.safetensors",
     )
+    _bdiag("SF3D.from_pretrained DONE; about to .to(device)")
     model.to(device)
+    _bdiag("model.to(device) DONE; .eval()", sync_cuda=True)
     model.eval()
+    _bdiag("model.eval() DONE; ready for inference", sync_cuda=True)
     print(f"LOCAL_SF3D: model loaded in {time.time()-t0:.1f}s", flush=True)
 
     # ------------------------------------------------------------------
@@ -234,6 +298,11 @@ def generate_3d(
     # Run inference
     # ------------------------------------------------------------------
     print(f"LOCAL_SF3D_PROGRESS: 50 inference_start", flush=True)
+    _bdiag(
+        f"about to call model.run_image image_size={image.size} "
+        f"tex_res={tex_res} verts={vert_count} remesh={remesh_option}",
+        sync_cuda=True,
+    )
     t0 = time.time()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
@@ -244,12 +313,20 @@ def generate_3d(
             else nullcontext()
         )
         with ctx:
-            mesh, glob_dict = model.run_image(
-                image,
-                bake_resolution=tex_res,
-                remesh=remesh_option,
-                vertex_count=vert_count,
-            )
+            _bdiag("entered torch.no_grad + autocast(bfloat16) context",
+                   sync_cuda=True)
+            try:
+                mesh, glob_dict = model.run_image(
+                    image,
+                    bake_resolution=tex_res,
+                    remesh=remesh_option,
+                    vertex_count=vert_count,
+                )
+            except Exception as _ri_e:
+                _bdiag(f"model.run_image RAISED: "
+                       f"{type(_ri_e).__name__}: {_ri_e}")
+                raise
+            _bdiag("model.run_image RETURNED OK", sync_cuda=True)
     elapsed = time.time() - t0
     print(f"LOCAL_SF3D: inference done in {elapsed:.1f}s", flush=True)
     if torch.cuda.is_available():
