@@ -53,6 +53,16 @@ def step_unwrap(in_glb, out_glb):
     log('STEP 2: xatlas UV unwrap')
     t0 = time.time()
     m = trimesh.load(in_glb, force='mesh')
+    # Hi3DGen outputs mesh with subject facing -Z (TRELLIS convention).
+    # FabMesh viewer (Three.js camera at +X+Y+Z) expects facing +Z, so
+    # apply Ry(180°) by default. Override via FABMESH_HI3DGEN_ROT_DEG=N.
+    rot_deg = float(os.environ.get('FABMESH_HI3DGEN_ROT_DEG', '180'))
+    if abs(rot_deg) > 0.5:
+        R = trimesh.transformations.rotation_matrix(
+            np.radians(rot_deg), [0, 1, 0]
+        )
+        m.apply_transform(R)
+        log(f'  applied Ry({rot_deg}°) to align with viewer convention')
     v = m.vertices.astype(np.float32)
     f = m.faces.astype(np.uint32)
     log(f'  unwrapping {len(v)}v / {len(f)}f...')
