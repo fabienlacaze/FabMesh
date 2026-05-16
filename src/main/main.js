@@ -1375,10 +1375,18 @@ function installAllLimitsSafetyKill(proc, jobName) {
   if (!proc || !proc.pid) return;
   const _os = require('os');
   const totalRamMB = _os.totalmem() / (1024 * 1024);
-  const SAFETY_FRACTION = 0.99;
-  // Track consecutive breaches per metric (avoid suspending on single
-  // transient spike).
+  // SAFETY_FRACTION 0.95 instead of 0.99: PyTorch can allocate >1 GB
+  // between two polls (observed: 14589 -> 15721 MB in 1s). A 5% margin
+  // ensures the actual VRAM usage stays under the user's slider value
+  // even when the allocator burst-grabs memory between two ticks.
+  const SAFETY_FRACTION = 0.95;
+  // Track consecutive breaches per metric. VRAM uses threshold=1
+  // (immediate suspend) because GPU allocations escalate fast; RAM
+  // uses threshold=2 (more stable signal, less prone to transient
+  // spikes from filesystem cache).
   const _breaches = { ram: 0, vram: 0, gpu: 0, temp: 0 };
+  const _vramBreachThreshold = 1;
+  const _ramBreachThreshold = 2;
   const _interval = setInterval(() => {
     if (proc.killed || proc.exitCode !== null) {
       // If we exit while suspended, the process would stay frozen forever.
@@ -1406,8 +1414,8 @@ function installAllLimitsSafetyKill(proc, jobName) {
     let _detail = '';
     if (_ramLimitMB > 0 && _usedMB > _ramLimitMB * SAFETY_FRACTION) {
       _breaches.ram += 1;
-      _detail = `RAM ${_usedMB.toFixed(0)} MB > ${(_ramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (99% of ${_ramLimitMB} MB limit)`;
-      if (_breaches.ram >= 2) _tripped = 'ram';
+      _detail = `RAM ${_usedMB.toFixed(0)} MB > ${(_ramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (${(SAFETY_FRACTION*100).toFixed(0)}% of ${_ramLimitMB} MB limit)`;
+      if (_breaches.ram >= _ramBreachThreshold) _tripped = 'ram';
     } else _breaches.ram = 0;
     // --- VRAM + GPU + TEMP via single nvidia-smi call ---
     if (!_tripped) {
@@ -1429,8 +1437,8 @@ function installAllLimitsSafetyKill(proc, jobName) {
             const _vramLimitMB = vramTotal * _vramFrac;
             if (vramUsed > _vramLimitMB * SAFETY_FRACTION) {
               _breaches.vram += 1;
-              _detail = `VRAM ${vramUsed.toFixed(0)} MB > ${(_vramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (99% of ${(_vramFrac * 100).toFixed(0)}% cap on ${vramTotal} MB)`;
-              if (_breaches.vram >= 2) _tripped = 'vram';
+              _detail = `VRAM ${vramUsed.toFixed(0)} MB > ${(_vramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (${(SAFETY_FRACTION*100).toFixed(0)}% of ${(_vramFrac * 100).toFixed(0)}% cap on ${vramTotal} MB)`;
+              if (_breaches.vram >= _vramBreachThreshold) _tripped = 'vram';
             } else _breaches.vram = 0;
           }
           // NOTE: GPU util % and TEMP are NOT safety-killed here.
