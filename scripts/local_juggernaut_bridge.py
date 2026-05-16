@@ -220,11 +220,17 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         negative_prompt = (
             "blurry, low quality, text, watermark, signature, deformed, "
             "extra limbs, bad anatomy, distorted, cropped, worst quality, "
-            "strict frontal view, flat profile, "
-            # Anti-doubling: training data of vehicle photos often has two
-            # angles side-by-side; explicitly negate that pattern.
-            "two objects, duplicate, twin, multiple instances, "
-            "split image, side by side, stacked, collage, grid layout, comparison view"
+            "flat profile, "
+            # Anti-doubling: training data of vehicle/product photos often
+            # has two angles side-by-side; explicitly negate that pattern.
+            # WEIGHTED tokens (parenthesis+:1.4) get extra strength from
+            # the SDXL prompt parser; we go aggressive on duplication.
+            "(two cars:1.5), (two vehicles:1.5), (duplicate:1.4), "
+            "(twin:1.4), (multiple instances:1.4), (second car:1.5), "
+            "(rear view inset:1.4), (front and back:1.4), "
+            "split image, side by side, stacked vertically, "
+            "stacked horizontally, collage, grid layout, comparison view, "
+            "two objects, two subjects, second instance, paired"
         )
 
     _throttle_cb = make_throttle_callback()  # None if disabled
