@@ -624,6 +624,38 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
     weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)
 
+    # Pre-fill: when 80%+ of the atlas will end up being hole-inpaint
+    # (typical on Hi3DGen meshes — only ~38% of verts visible across
+    # all views), Telea + push-pull smear the dark Z123 lateral pixels
+    # across the empty UV regions → big black patches on the rendered
+    # mesh. Pre-fill the atlas with the SOURCE photo's dominant subject
+    # colour so the inpaint starts from a sensible base instead of zero.
+    # The actual projected pixels still overwrite this floor.
+    # Disable via FABMESH_TEXPROJ_PREFILL_DOMINANT=0.
+    if os.environ.get('FABMESH_TEXPROJ_PREFILL_DOMINANT', '1') == '1':
+        try:
+            _src = Image.open(source_image_path).convert('RGBA')
+            _src_arr = np.asarray(_src)
+            _alpha = _src_arr[:, :, 3] if _src_arr.shape[2] == 4 else None
+            if _alpha is not None and (_alpha > 128).any():
+                _mask = _alpha > 128
+                _rgb = _src_arr[_mask][:, :3].astype(np.float64)
+            else:
+                # No alpha → take everything except near-white background
+                _rgb_full = _src_arr[:, :, :3].astype(np.float64)
+                _gray = _rgb_full.mean(axis=2)
+                _mask = _gray < 240
+                _rgb = _rgb_full[_mask]
+            if len(_rgb) > 100:
+                # Median is more robust than mean to highlights/shadows.
+                _dom = np.median(_rgb, axis=0)
+                proj_arr[:] = _dom
+                log(f'pre-fill atlas with source dominant '
+                    f'RGB=({int(_dom[0])},{int(_dom[1])},{int(_dom[2])}) '
+                    f'from {len(_rgb)} subject px')
+        except Exception as _e:
+            log(f'pre-fill skipped: {_e}')
+
     # Voie F (SF3D 2-view AUGMENT base): if FABMESH_TEXPROJ_BASE_ATLAS=1
     # the input mesh's existing baseColorTexture is loaded as the floor
     # of the atlas. Subsequent view projections (esp. in 'stack' mode)
