@@ -2894,14 +2894,18 @@ if (qualityEl && qualityLabel) {
 // OpenPose which guarantees the T-pose — but that only works if the prompt
 // doesn't also scream "3/4 view" at the model. Inanimate assets (buildings,
 // vehicles, props) keep the 3/4 view since they don't need rigging.
+// Anti-doubling tokens: RealVis XL tends to generate 2 instances of the
+// subject when prompted with "three-quarter view" (studio composition bias
+// from training data). We add explicit "single instance" tokens and let
+// the negative prompt in local_juggernaut_bridge.py block grid layouts.
 const ASSET_TYPE_PROMPTS = {
-  character: 'single isolated 3D character, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
-  building: 'single isolated 3D building, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric three-quarter view, clean silhouette, no text, no UI',
-  vehicle: 'single isolated 3D vehicle, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, three-quarter view, clean silhouette, no text, no UI',
-  weapon: 'single isolated 3D weapon, full weapon, plain white background, even studio lighting, no shadows, centered, side view, clean silhouette, no text, no UI',
-  prop: 'single isolated 3D prop, full item, plain white background, even studio lighting, no shadows, no characters, centered, three-quarter view, clean silhouette, no text, no UI',
-  creature: 'single isolated 3D creature, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI',
-  environment: 'single isolated 3D environment piece, full structure, plain white background, even studio lighting, no shadows, no characters, centered, three-quarter view, clean silhouette, no text, no UI',
+  character: 'single isolated 3D character, one character only, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
+  building: 'one single building, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric angle, clean silhouette, no text, no UI',
+  vehicle: 'one single vehicle, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, angled side view, clean silhouette, no text, no UI',
+  weapon: 'one single weapon, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI',
+  prop: 'one single prop, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, angled view, clean silhouette, no text, no UI',
+  creature: 'one single creature, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI',
+  environment: 'one single environment piece, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, angled view, clean silhouette, no text, no UI',
   custom: '',
 };
 
