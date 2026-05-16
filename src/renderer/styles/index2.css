@@ -1498,16 +1498,27 @@ button.tool-active {
   box-shadow: 0 0 0 2px rgba(255,255,255,0.15), 0 0 8px rgba(255,255,255,0.5);
   z-index: 2;
 }
-/* Grayed-out zone showing the unreachable lower portion of each slider.
+/* Marks the unreachable lower portion of each slider with diagonal
+   hatching, BEHIND the colored fill so the active gauge stays vivid.
    Width set inline by setupGpuLimitDragging() based on MIN_BY_STAT. */
 .gpu-bar-disabled-zone {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255,255,255,0.06) 0,
+    rgba(255,255,255,0.06) 4px,
+    rgba(0,0,0,0.18) 4px,
+    rgba(0,0,0,0.18) 8px
+  );
   border-radius: 6px 0 0 6px;
   pointer-events: none;
+  z-index: 0;
+}
+.gpu-bar-fill {
+  position: relative;
   z-index: 1;
 }
 /* Reset button in the Hardware section header. */
