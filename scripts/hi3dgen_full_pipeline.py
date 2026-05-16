@@ -1,11 +1,13 @@
-"""Hi3DGen full pipeline: image -> mesh + UV + textured atlas.
+"""Hi3DGen full pipeline: image -> mesh + UV + multi-view textured atlas.
 
 Hi3DGen produces high-quality bare geometry (no UVs, no texture).
 This wrapper adds the missing steps so the output is a textured GLB.
 
-  1. local_hi3dgen_bridge.py -> raw mesh (no UV, no texture)
+  1. local_hi3dgen_bridge.py    -> raw mesh (no UV, no texture)
   2. xatlas UV unwrap
-  3. texture_project.py     -> back-project the front photo to UV atlas
+  2.5 multiview_mvadapter_gen.py -> 6 views into <image_stem>_multiview/
+      (reused if already present — e.g. from the "Multi-Views" UI button)
+  3. texture_project.py         -> back-project all 6 views to UV atlas
 
 Usage:
     python hi3dgen_full_pipeline.py <front_image> <out.glb> [tex_res=1024]
@@ -83,12 +85,39 @@ def step_unwrap(in_glb, out_glb):
     log(f'STEP 2 done in {time.time()-t0:.1f}s -> {out_glb}')
 
 
+def _mv_dir_for_image(image_path):
+    """FabMesh standard multiview location: <image_stem>_multiview/ next to
+    the image. This is the SAME convention as the "Multi-Views" button in
+    the image editor (src/main/main.js:4024) — so views generated here
+    appear in the image viewer toggle, are editable with image tools, and
+    are reused if the user re-runs the 3D pipeline."""
+    stem = os.path.splitext(os.path.basename(image_path))[0]
+    return os.path.join(os.path.dirname(image_path), stem + '_multiview')
+
+
+def _mv_dir_complete(mv_dir):
+    """True iff view_0..view_5.png AND views.json all exist."""
+    if not os.path.isdir(mv_dir):
+        return False
+    for i in range(6):
+        if not os.path.isfile(os.path.join(mv_dir, f'view_{i}.png')):
+            return False
+    return os.path.isfile(os.path.join(mv_dir, 'views.json'))
+
+
 def step_mvadapter(image_path, mv_dir):
     """Generate 6 multi-view consistent images via MV-Adapter i2mv-sdxl.
     Returns True on success, False otherwise (caller falls back to single-view).
     Single-view projection leaves ~60% of the Hi3DGen mesh untextured (visible
     holes) because only the front is covered. Multi-view fills sides+back+top+
-    bottom from one reference image."""
+    bottom from one reference image.
+
+    Reuses existing views if `mv_dir` already has view_0..5 + views.json —
+    so a manual "Multi-Views" button click before 3D gen is honored, and
+    a re-run of the 3D pipeline doesn't recompute MV-Adapter."""
+    if _mv_dir_complete(mv_dir):
+        log(f'STEP 2.5: reusing existing multi-views -> {mv_dir}')
+        return True
     log(f'STEP 2.5: MV-Adapter 6 views -> {mv_dir}')
     t0 = time.time()
     script = os.path.join(SCRIPTS, 'multiview_mvadapter_gen.py')
@@ -103,11 +132,8 @@ def step_mvadapter(image_path, mv_dir):
     if rc != 0:
         log(f'MV-Adapter failed with rc={rc}, falling back to single-view')
         return False
-    # Sanity check: confirm view_0..view_5 + views.json all landed.
-    expected = [f'view_{i}.png' for i in range(6)] + ['views.json']
-    missing = [f for f in expected if not os.path.exists(os.path.join(mv_dir, f))]
-    if missing:
-        log(f'MV-Adapter output incomplete (missing {missing}), falling back')
+    if not _mv_dir_complete(mv_dir):
+        log(f'MV-Adapter output incomplete in {mv_dir}, falling back')
         return False
     log(f'STEP 2.5 done in {time.time()-t0:.1f}s')
     return True
@@ -145,7 +171,11 @@ def main():
 
     raw_glb = os.path.join(out_dir, '_hi3dgen_raw.glb')
     uv_glb = os.path.join(out_dir, '_hi3dgen_uvunwrapped.glb')
-    mv_dir = os.path.join(out_dir, '_hi3dgen_mv')
+    # Multi-views live in the FabMesh-standard "<image_stem>_multiview/"
+    # next to the image (NOT next to the mesh), so they appear in the
+    # image-side viewer, are reusable across runs, and editable with
+    # the standard image AI tools.
+    mv_dir = _mv_dir_for_image(image_path)
 
     # Skip MV-Adapter if disabled (e.g. testing single-view) via env.
     skip_mv = os.environ.get('FABMESH_HI3DGEN_SKIP_MV') == '1'
