@@ -7899,7 +7899,41 @@ function applyGpuLimitMarkers() {
 function isJobRunning() {
   return state.jobs.some(j => j.status === 'running');
 }
+// Minimums per stat — also used by the disabled-zone overlay.
+const GPU_LIMITS_MIN = {
+  ram: 50, vram: 60, util: 30, temp: 50,
+};
+// Defaults used by the Reset button.
+const GPU_LIMITS_DEFAULTS = {
+  ram: 85, vram: 90, util: 95, temp: 80,
+};
+// Paint the gray "disabled" zone on each slider (from 0% to MIN_BY_STAT).
+function paintGpuDisabledZones() {
+  document.querySelectorAll('.gpu-bar').forEach(bar => {
+    const stat = bar.dataset.stat;
+    const minPct = GPU_LIMITS_MIN[stat] || 5;
+    let zone = bar.querySelector('.gpu-bar-disabled-zone');
+    if (!zone) {
+      zone = document.createElement('div');
+      zone.className = 'gpu-bar-disabled-zone';
+      bar.insertBefore(zone, bar.firstChild);
+    }
+    zone.style.width = minPct + '%';
+  });
+}
+// Reset all sliders to their default values.
+function resetGpuLimits() {
+  Object.assign(gpuLimits, GPU_LIMITS_DEFAULTS);
+  saveGpuLimits();
+  applyGpuLimitMarkers();
+}
 function setupGpuLimitDragging() {
+  paintGpuDisabledZones();
+  const resetBtn = document.getElementById('gpu-limits-reset');
+  if (resetBtn && !resetBtn.dataset.bound) {
+    resetBtn.dataset.bound = '1';
+    resetBtn.addEventListener('click', resetGpuLimits);
+  }
   document.querySelectorAll('.gpu-bar-limit').forEach(handle => {
     if (handle.dataset.bound) return;
     handle.dataset.bound = '1';
@@ -7935,20 +7969,10 @@ function setupGpuLimitDragging() {
       };
       tip.textContent = formatValue(stat, gpuLimits[stat]);
       tip.classList.add('visible');
-      // Minimum thresholds: below these values FabMesh becomes unusable
-      // (SF3D needs ~8 GB RAM for tex_res=1024, SDXL needs ~9 GB VRAM,
-      // GPU < 30% throttles 70% of the time = super slow, TEMP < 50% =
-      // 65°C max which is below normal idle on a working GPU).
-      const MIN_BY_STAT = {
-        ram: 50,    // 50% of total system RAM (16 GB on a 32 GB PC)
-        vram: 60,   // 60% of total VRAM (~9.6 GB on 16 GB)
-        util: 30,   // 30% GPU minimum (below = unusably slow)
-        temp: 50,   // 50% slider = 65°C max (anything lower = throttle constant)
-      };
       function onMove(ev) {
         const rect = bar.getBoundingClientRect();
         let pct = ((ev.clientX - rect.left) / rect.width) * 100;
-        const minPct = MIN_BY_STAT[stat] || 5;
+        const minPct = GPU_LIMITS_MIN[stat] || 5;
         pct = Math.max(minPct, Math.min(100, pct));
         handle.style.left = pct + '%';
         gpuLimits[stat] = pct;
