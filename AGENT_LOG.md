@@ -10,6 +10,40 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Hi3DGen ignorait les 6 vues Zero123 existantes (mesh tout blanc)
+
+**Symptôme**: user fait Multi-Views (Zero123 default) sur image couteau,
+puis Generate 3D Hi3DGen. Le mesh sort tout blanc / sans texture
+correcte. Logs : `LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_skipped` 5s
+après unwrap, alors que les 6 vues view_0..5.png existent dans
+`ref_2_multiview/`.
+
+**Cause**: `_mv_dir_complete()` dans `hi3dgen_full_pipeline.py`
+exigeait `views.json` en plus de view_0..5.png. Or Zero123++
+(`multiview_gen.py`) ne génère PAS views.json (c'est un format
+MV-Adapter / CRM). Donc :
+- _mv_dir_complete() retournait False
+- step_mvadapter() retentait MV-Adapter (venv potentiellement
+  indisponible) → échec rc != 0 → retourne False
+- main() print marker mvadapter_skipped → step_texture appelé
+  avec `mv_dir=None` → projection single-view de la photo front
+  + push-pull inpainting des zones non vues
+- Couteau a 95% de zones non vues (lame fine, fond blanc) →
+  inpaint produit du blanc → mesh blanc
+
+**Fix `scripts/hi3dgen_full_pipeline.py:_mv_dir_complete`**:
+- views.json devient OPTIONNEL (texture_project.py a déjà un
+  fallback "Z123 schema" hardcoded si views.json absent)
+- Donc tout dossier `<stem>_multiview/` avec view_0..5.png est
+  considéré valide, peu importe l'engine MV qui l'a généré.
+
+**Note**: le default `FABMESH_MV_ENGINE=z123` dans main.js explique
+pourquoi le clic "Multi-Views" utilise Zero123 et pas MV-Adapter.
+Ce default pourrait être changé pour matcher l'UI 6-view de
+CREATE NEW — TODO séparé.
+
+---
+
 ## 2026-05-16 — Anti-doubling v3: weighted negatives élargi à tous les sujets
 
 **Symptôme**: après les fix v1 (template) + v2 (strict front view + negative
