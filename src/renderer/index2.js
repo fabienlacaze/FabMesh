@@ -132,6 +132,7 @@ const ENGINE_LABELS = {
   'sf3d':           'Stable Fast 3D (PBR, Stability Community License)',
   'local':          'TripoSR (CC0)',
   'triposg':        'TripoSG (MIT)',
+  'hi3dgen':        'Hi3DGen (MIT, ByteDance+CUHK)',
   'trellis':        'Trellis 2 (MIT)',
   'meshy':          'Meshy.ai (cloud, CC-BY 4.0)',
 };
@@ -5239,6 +5240,10 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   } else if (engine === 'triposg') {
     // TripoSG full pipeline: geo ~30s + decim + xatlas + texture_project ~90s
     expectedMs = 150000;
+  } else if (engine === 'hi3dgen') {
+    // Hi3DGen: image -> StableNormal (~10s) -> TRELLIS-normal-v0.1 (~30s)
+    // -> mesh (no texture bake step in bridge).
+    expectedMs = 60000;
   } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {

@@ -3647,6 +3647,9 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       // → texture_project) so the output is a textured GLB usable downstream.
       // The raw bridge alone produces geometry without UVs.
       'triposg': path.join(__dirname, '..', '..', 'scripts', 'triposg_full_pipeline.py'),
+      // Hi3DGen: direct image-to-3D via normal bridging (MIT, ByteDance+CUHK).
+      // Geometry only — texture is added downstream via texture_project.py.
+      'hi3dgen': path.join(__dirname, '..', '..', 'scripts', 'local_hi3dgen_bridge.py'),
       'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py'),
       'meshy':   path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py')
     };
@@ -3674,6 +3677,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
+      'hi3dgen': [bridgeScript, imagePath, meshPath],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
@@ -3703,6 +3707,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
+      'hi3dgen': [bridgeScript, imagePath, meshPath],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
