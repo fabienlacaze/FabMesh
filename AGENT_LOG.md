@@ -10,6 +10,40 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Hi3DGen MV: re-cabler sur le dossier standard `<stem>_multiview/`
+
+**Contexte**: l'étape MV-Adapter du pipeline Hi3DGen écrivait dans
+`_hi3dgen_mv/` à côté du MESH, ce qui isolait ces vues du système
+multi-vues existant de l'image editor (bouton "Multi-Views",
+toggle FRONT/BACK, héritage de silhouette, édition image).
+
+**Modif `scripts/hi3dgen_full_pipeline.py`**:
+- `_mv_dir_for_image(image_path)` retourne `<dir>/<stem>_multiview/`
+  (même convention que `src/main/main.js:4024` — handler
+  `generate-multiview`).
+- `_mv_dir_complete(mv_dir)` check view_0..view_5.png + views.json.
+- `step_mvadapter` réutilise les vues si dossier déjà complet
+  (l'user a peut-être cliqué "Multi-Views" avant la 3D gen, ou re-run
+  la 3D sur la même image).
+- `main()` utilise `_mv_dir_for_image(image_path)` au lieu de
+  `os.path.join(out_dir, '_hi3dgen_mv')`.
+
+**Conséquence**:
+- Les vues apparaissent dans le viewer image (toggle FRONT/BACK et
+  potentiellement TOP/BOTTOM si on étend l'UI).
+- Les vues sont éditables avec les outils image standard (Modify,
+  Auto Inpaint, Clone Stamp, etc.).
+- Plus de regénération inutile si le user a déjà cliqué Multi-Views.
+- L'héritage de multi-vues entre images (silhouette-matching dans
+  `src/main/main.js:824-875`) marche aussi pour les vues
+  Hi3DGen-générées.
+
+**Note suivi**: le toggle viewer ne supporte actuellement que FRONT/
+BACK (4 cardinales hardcoded `src/renderer/index2.js:1573-1576`).
+Extension à 6 vues (ajout TOP/BOTTOM) = travail séparé si besoin.
+
+---
+
 ## 2026-05-16 — Hi3DGen: ajout MV-Adapter 6 vues pour combler trous de texture
 
 **Contexte**: Hi3DGen produit un mesh dense (175k verts pour avion) qui
