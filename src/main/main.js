@@ -1289,15 +1289,26 @@ ipcMain.handle('cancel-job', (event, jobId) => {
 });
 
 function killProcTree(proc) {
+  if (process.platform !== 'win32' || !proc.pid) {
+    try { proc.kill('SIGKILL'); } catch (e) {}
+    return;
+  }
+  // Two-step Windows kill: taskkill /T /F is usually enough but fails on
+  // CUDA-zombie processes (driver hang). PowerShell Stop-Process gets them.
+  const pid = String(proc.pid);
   try {
-    if (process.platform === 'win32' && proc.pid) {
-      // Synchronous taskkill so the kill is done before we return
-      require('child_process').execFileSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
-      proc.kill('SIGKILL');
-    }
+    require('child_process').execFileSync('taskkill', ['/pid', pid, '/T', '/F'], { stdio: 'ignore' });
   } catch (e) {
-    log.warn('main', 'killProcTree failed: ' + e.message);
+    log.warn('main', `killProcTree taskkill failed for pid=${pid}, trying Stop-Process: ${e.message}`);
+    try {
+      require('child_process').execFileSync(
+        'powershell', ['-NoProfile', '-Command', `Stop-Process -Force -Id ${pid} -ErrorAction Stop`],
+        { stdio: 'ignore' }
+      );
+      log.info('main', `Stop-Process succeeded for pid=${pid}`);
+    } catch (e2) {
+      log.error('main', `killProcTree FAILED for pid=${pid} (both taskkill and Stop-Process): ${e2.message}`);
+    }
   }
 }
 
@@ -1320,11 +1331,21 @@ function killOrphanPythonSubprocesses() {
     log.info('main', `killOrphanPython: found ${pids.length} python.exe (sdxl pid=${sdxlPid})`);
     for (const pid of pids) {
       if (pid === sdxlPid) continue;
+      const pidStr = String(pid);
       try {
-        require('child_process').execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+        require('child_process').execFileSync('taskkill', ['/pid', pidStr, '/T', '/F'], { stdio: 'ignore' });
         log.info('main', `Killed orphan python pid=${pid}`);
       } catch (e) {
-        log.warn('main', `Could not kill pid=${pid}: ` + e.message);
+        // taskkill failed (usually CUDA-zombie) — fall back to PowerShell Stop-Process.
+        try {
+          require('child_process').execFileSync(
+            'powershell', ['-NoProfile', '-Command', `Stop-Process -Force -Id ${pidStr} -ErrorAction Stop`],
+            { stdio: 'ignore' }
+          );
+          log.info('main', `Killed orphan python pid=${pid} via Stop-Process fallback`);
+        } catch (e2) {
+          log.warn('main', `Could NOT kill pid=${pid} (both taskkill and Stop-Process failed) — process is CUDA-locked, RAM will leak until reboot: ${e2.message}`);
+        }
       }
     }
   } catch (e) {
