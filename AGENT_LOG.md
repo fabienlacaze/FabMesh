@@ -10,6 +10,36 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Viewer toggle: 2 vues → 6 vues (front/right/back/left/top/bottom)
+
+**Contexte**: la barre `ws-multiview-bar` (et son équivalent lightbox
+`lb-multiview-bar`) ne proposait que FRONT/BACK alors que MV-Adapter
+génère 6 vues orthographiques (azim 0/90/180/270 + elev ±90). L'user
+ne pouvait ni voir ni éditer right/left/top/bottom.
+
+**Modif `src/renderer/index2.html`**:
+- Ajout des boutons RIGHT/LEFT/TOP/BOTTOM dans `ws-multiview-bar` et
+  `lb-multiview-bar`, avec icônes SVG (flèches directionnelles dans
+  un carré).
+
+**Modif `src/renderer/index2.js`**:
+- `_showMultiviewBar(multiviewDir)`: cache right/left/top/bottom si
+  `multiviewDir` est null (mode 2-view back-only, sans dossier
+  complet); affiche tout si `multiviewDir` pointe vers un
+  `<stem>_multiview/` valide (= 6 vues sur disque).
+- Pareil dans la lightbox `lb-multiview-bar` (handler ~ligne 2554).
+
+**Mapping `_mvViewMap`**: déjà correct (right→view_1, back→view_2,
+left→view_3, top→view_4, bottom→view_5) — aucune modif.
+
+**Test**: après Ctrl+R, sur une image avec `<stem>_multiview/`
+complet, la barre affiche 6 boutons. Cliquer chacun swap le preview
+sur la vue correspondante, et les outils image (Modify, Inpaint, etc.)
+opèrent sur la vue sélectionnée (via `_activeMultiview` qui pointe
+vers `view_N.png`).
+
+---
+
 ## 2026-05-16 — Hi3DGen MV: re-cabler sur le dossier standard `<stem>_multiview/`
 
 **Contexte**: l'étape MV-Adapter du pipeline Hi3DGen écrivait dans
