@@ -7939,6 +7939,7 @@ function setupGpuLimitDragging() {
     handle.dataset.bound = '1';
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
+      _draggingGpuLimit = true;
       // GPU/temp sliders are LIVE: drag them even during a running job
       // and the Python throttle will pick up the new limit within ~0.5s
       // via scripts/.gpu_limit.json. VRAM/RAM limits are still "next-job
@@ -7981,6 +7982,7 @@ function setupGpuLimitDragging() {
       function onUp() {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        _draggingGpuLimit = false;
         saveGpuLimits();
         // Keep tip visible briefly after release so the user can read the final value
         setTimeout(() => { tip.classList.remove('visible'); }, 800);
@@ -8250,7 +8252,11 @@ function renderQueueIndicator() {
   badge.textContent = `${queuedJobs.length} queued`;
 }
 
+// Set true while the user is dragging a limit handle so the 500ms
+// polling skips its DOM/IPC work and the drag stays smooth.
+let _draggingGpuLimit = false;
 async function refreshGpuStats() {
+  if (_draggingGpuLimit) return;
   try {
     refreshPythonStats();
     const gpu = await API.checkGPU();
