@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — Anti-doubling v3: weighted negatives élargi à tous les sujets
+
+**Symptôme**: après les fix v1 (template) + v2 (strict front view + negative
+prompt vehicle), un prompt "couteau" génère encore 2 couteaux côte à
+côte dans l'image source RealVis. Les 6 vues MV-Adapter reproduisent
+fidèlement le doubling de la source.
+
+**Cause**: le negative prompt anti-doubling était orienté véhicules
+(`two cars`, `second car`, `rear view inset`) et n'avait aucun effet
+sur les datasets de cuisine/produits où "kitchenware set", "matched
+pair" sont des patterns dominants.
+
+**Fix `scripts/local_juggernaut_bridge.py`**:
+- Negative prompt généralisé : `(two:1.6)`, `(pair:1.5)`, `(duplicate:1.5)`,
+  `(twin:1.5)`, `(set of two:1.5)`, `(two objects:1.5)`,
+  `(two subjects:1.5)`, `(two items:1.5)`, `(two knives:1.5)`,
+  `(two characters:1.5)`, `(two props:1.5)`, `(two weapons:1.5)`,
+  `(second instance:1.5)`, `(companion item:1.4)`, `(matched set:1.4)`,
+  `product comparison`, `kitchenware set`, `catalog grid`.
+- Poids global passé de 1.4 à 1.5 sur les tokens core.
+
+**Plus de tokens spécifiques objet** : two cars / two vehicles /
+two knives / etc. Couvre les categories communes.
+
+---
+
 ## 2026-05-16 — T-pose detection fire on every prop/vehicle prompt (BUG)
 
 **Symptôme**: user demande un couteau (Prop / Item), RealVis génère un
