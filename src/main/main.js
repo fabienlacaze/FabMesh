@@ -3782,11 +3782,17 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       log.info('main', '2-view env applied: AUGMENT mode (front=SF3D bake, back=additive blend)');
     }
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
+    // Hi3DGen needs torch 2.8 + flash_attn (sparse attention requires it),
+    // which only lives in external/TRELLIS2_win/.venv. Other engines use
+    // the system Python (torch 2.7.1). Pick the right interpreter per engine.
+    const _pythonExe = (engine === 'hi3dgen')
+      ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
+      : 'python';
     const result = await new Promise((resolve, reject) => {
       let stdoutBuf = '';
       let stderrBuf = '';
       let lastSent = 0;
-      const proc = execFile('python', fixedArgs, {
+      const proc = execFile(_pythonExe, fixedArgs, {
         timeout: 1800000,
         maxBuffer: 50 * 1024 * 1024,
         env,
