@@ -139,10 +139,38 @@
                 </div>
                 <div class="form-row check-row">
                   <label class="inline-check">
-                    <input type="checkbox" id="ws-auto-multiview" checked />
-                    Auto 2-view (RealVis+IPAdapter back view, photoreal, ~25s)
+                    <input type="checkbox" id="ws-mv-enable" checked />
+                    Multi-view
                   </label>
                 </div>
+                <!-- Mode selector (visible only when Multi-view is checked).
+                     Default = 2-view (back photo only). 6-views opens a
+                     further sub-panel with harmonize / upscale options. -->
+                <div id="ws-mv-mode-row" class="form-row" style="flex-direction:column; gap:6px; padding-left:22px;">
+                  <label class="inline-check">
+                    <input type="radio" name="ws-mv-mode" value="2view" checked />
+                    Auto 2-view (RealVis+IPAdapter back view, ~25s)
+                  </label>
+                  <label class="inline-check">
+                    <input type="radio" name="ws-mv-mode" value="6view" />
+                    6 views (MV-Adapter front/right/back/left/top/bottom, ~70s)
+                  </label>
+                  <!-- Sub-options for the 6-views mode -->
+                  <div id="ws-mv-6view-opts" class="hidden" style="display:flex; flex-direction:column; gap:4px; padding-left:22px; padding-top:4px;">
+                    <label class="inline-check">
+                      <input type="checkbox" id="ws-mv-6v-harmonize" checked />
+                      RealVis img2img harmonize (photoreal, +30s)
+                    </label>
+                    <label class="inline-check">
+                      <input type="checkbox" id="ws-mv-6v-upscale" />
+                      Real-ESRGAN upscale 768→1024 (+10s)
+                    </label>
+                  </div>
+                </div>
+                <!-- Legacy hidden flag for back-compat with existing handler.
+                     Kept in sync with ws-mv-enable + ws-mv-mode by JS so the
+                     generate-images backend path doesn't change. -->
+                <input type="checkbox" id="ws-auto-multiview" checked style="display:none;" />
                 <button id="ws-generate-image" class="primary-btn">Generate</button>
               </div>
             </details>

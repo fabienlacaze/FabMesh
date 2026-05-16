@@ -10,6 +10,66 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — CREATE NEW: case "Multi-view" hiérarchique (2-view / 6-view)
+
+**Contexte**: l'user voulait remplacer la checkbox "Auto 2-view" plate
+par une hiérarchie : Multi-view → (2-view auto OR 6-views) → (options
+6-view si sélectionné).
+
+**Modif `src/renderer/index2.html`**:
+- Checkbox parent `ws-mv-enable` (default ON).
+- Radio buttons `ws-mv-mode` : "2view" (default) / "6view".
+- Sous-panel `ws-mv-6view-opts` (visible si 6view) : harmonize +
+  upscale.
+- Conservé `ws-auto-multiview` caché pour back-compat avec le handler
+  existant (qui pilote la back-photo gen via flag boolean).
+
+**Modif `src/renderer/index2.js`**:
+- `_wsMvSync()` : show/hide les sous-panels + sync legacy boolean
+  `ws-auto-multiview` = (enable && mode='2view').
+- Handler `Generate` :
+  - lit `mvEnable`, `mvMode`, `mv6Harmonize`, `mv6Upscale`
+  - 2-view flow (back photo) inchangé, mais seulement actif si mode='2view'
+  - Nouveau bloc 6-view : après gen image, appelle `API.generateMultiview`
+    pour chaque image générée avec les options harmonize/upscale.
+    Progress bar 60→95% pendant les MV-Adapter runs.
+- Job info `'Multi-view'` affiche maintenant '6 views (MV-Adapter)',
+  '2 views (back)' ou 'no'.
+
+---
+
+## 2026-05-16 — Multi-Views button: popup options + duplicate to new version
+
+**Contexte**: l'user voulait que cliquer sur "Multi-Views" (panel EDIT
+SELECTED) ouvre une popup avec des checkbox d'options post-gen et crée
+une nouvelle version d'image (non-destructif).
+
+**Modif `src/main/main.js`**:
+- Nouveau handler `duplicate-image-version({imagePath, suffix})` :
+  copie l'image vers `<base>_<suffix>_<ts>.png`, exposé via preload
+  `meshyAPI.duplicateImageVersion`.
+- `generate-multiview` étendu : accepte `{ harmonize, upscale }` en
+  plus de `imagePath`. Passe `FABMESH_MV_IDENTITY_HARMONIZE` et
+  `FABMESH_MV_UPSCALE` au script Python.
+
+**Modif `src/renderer/index2.html`**:
+- Nouveau modal `modal-multiview-options` avec 2 checkbox (harmonize
+  ON par défaut, upscale OFF) + bouton "Start Multi-Views".
+
+**Modif `src/renderer/index2.js`**:
+- Le bouton `ws-multiview-btn` ouvre désormais la popup au lieu de
+  lancer directement.
+- `mv-opt-start` : duplique l'image (suffix `mv`) puis lance
+  `generateMultiview` sur le nouveau path. Reload project pour
+  rafraîchir la galerie.
+
+**Modif `scripts/multiview_mvadapter_gen.py`**:
+- Si `FABMESH_MV_UPSCALE=1` : passe les 6 vues dans Real-ESRGAN x4
+  puis downsample à 1024×1024 (parité avec image source). Fallback
+  silencieux si ESRGAN échoue (garde 768).
+
+---
+
 ## 2026-05-16 — Viewer toggle: 2 vues → 6 vues (front/right/back/left/top/bottom)
 
 **Contexte**: la barre `ws-multiview-bar` (et son équivalent lightbox
