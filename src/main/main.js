@@ -1376,12 +1376,25 @@ function installAllLimitsSafetyKill(proc, jobName) {
   const _os = require('os');
   const totalRamMB = _os.totalmem() / (1024 * 1024);
   const SAFETY_FRACTION = 0.99;
-  let _killed = false;
-  // Track consecutive breaches per metric (avoid killing on single
+  // Track consecutive breaches per metric (avoid suspending on single
   // transient spike).
   const _breaches = { ram: 0, vram: 0, gpu: 0, temp: 0 };
   const _interval = setInterval(() => {
-    if (_killed || proc.killed || proc.exitCode !== null) {
+    if (proc.killed || proc.exitCode !== null) {
+      // If we exit while suspended, the process would stay frozen forever.
+      // Try a best-effort resume on exit just in case.
+      if (proc._suspended) {
+        try {
+          require('child_process').execFileSync(
+            'powershell', ['-NoProfile', '-Command',
+              `$sig='[DllImport(\"ntdll.dll\")] public static extern int NtResumeProcess(IntPtr h);'; ` +
+              `Add-Type -MemberDefinition $sig -Name N -Namespace W -ErrorAction SilentlyContinue; ` +
+              `$p=Get-Process -Id ${proc.pid} -ErrorAction SilentlyContinue; ` +
+              `if ($p) { [W.N]::NtResumeProcess($p.Handle) | Out-Null }`
+            ], { stdio: 'ignore', timeout: 2000 }
+          );
+        } catch (e) {}
+      }
       clearInterval(_interval);
       return;
     }
@@ -1434,12 +1447,52 @@ function installAllLimitsSafetyKill(proc, jobName) {
       } catch (e) { /* nvidia-smi failed; skip GPU checks this tick */ }
     }
     if (_tripped) {
-      log.error('main', `[safety] PANIC ${_tripped.toUpperCase()}: ${_detail} — killing ${jobName} pid=${proc.pid}`);
-      try { safeSend('limit-panic-killed', { metric: _tripped, detail: _detail, job: jobName }); } catch (e) {}
-      _killed = true;
-      killProcTree(proc);
-      try { killOrphanPythonSubprocesses(); } catch (e) {}
-      clearInterval(_interval);
+      // SUSPEND instead of kill: freeze the Python process so it stops
+      // allocating. Windows can then swap its pages out, RAM falls,
+      // and we resume the process. The job slows down (stop/start) but
+      // stays alive and never crashes the PC.
+      if (!proc._suspended) {
+        log.warn('main', `[safety] SUSPEND ${_tripped.toUpperCase()}: ${_detail} — freezing pid=${proc.pid} (will resume when below 85% of limit)`);
+        try { safeSend('limit-suspend', { metric: _tripped, detail: _detail, job: jobName }); } catch (e) {}
+        try {
+          require('child_process').execFileSync(
+            'powershell', ['-NoProfile', '-Command',
+              `$sig='[DllImport(\"ntdll.dll\")] public static extern int NtSuspendProcess(IntPtr h);'; ` +
+              `Add-Type -MemberDefinition $sig -Name N -Namespace W -ErrorAction SilentlyContinue; ` +
+              `$p=Get-Process -Id ${proc.pid} -ErrorAction SilentlyContinue; ` +
+              `if ($p) { [W.N]::NtSuspendProcess($p.Handle) | Out-Null }`
+            ], { stdio: 'ignore', timeout: 3000 }
+          );
+          proc._suspended = true;
+        } catch (e) {
+          log.warn('main', `[safety] suspend failed for pid=${proc.pid}: ${e.message}`);
+        }
+      }
+    } else if (proc._suspended) {
+      // We're suspended AND no metric is tripped — check if we should resume.
+      // Resume hysteresis: only resume when usage falls below 85% of limit
+      // (avoid oscillating between suspend/resume).
+      let _stillHigh = false;
+      if (_ramLimitMB > 0 && _usedMB > _ramLimitMB * 0.85) _stillHigh = true;
+      // (VRAM hysteresis would need re-querying nvidia-smi — keep simple,
+      //  rely on RAM being the dominant trigger.)
+      if (!_stillHigh) {
+        log.info('main', `[safety] RESUME pid=${proc.pid} (RAM ${_usedMB.toFixed(0)} MB now under 85% of ${_ramLimitMB} MB)`);
+        try { safeSend('limit-resume', { job: jobName }); } catch (e) {}
+        try {
+          require('child_process').execFileSync(
+            'powershell', ['-NoProfile', '-Command',
+              `$sig='[DllImport(\"ntdll.dll\")] public static extern int NtResumeProcess(IntPtr h);'; ` +
+              `Add-Type -MemberDefinition $sig -Name N -Namespace W -ErrorAction SilentlyContinue; ` +
+              `$p=Get-Process -Id ${proc.pid} -ErrorAction SilentlyContinue; ` +
+              `if ($p) { [W.N]::NtResumeProcess($p.Handle) | Out-Null }`
+            ], { stdio: 'ignore', timeout: 3000 }
+          );
+          proc._suspended = false;
+        } catch (e) {
+          log.warn('main', `[safety] resume failed for pid=${proc.pid}: ${e.message}`);
+        }
+      }
     } else if (_detail) {
       log.warn('main', `[safety] ${_detail} (consecutive ${Math.max(_breaches.ram, _breaches.vram, _breaches.gpu, _breaches.temp)}/2)`);
     }
