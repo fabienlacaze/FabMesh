@@ -66,12 +66,31 @@ def step_unwrap(in_glb, out_glb):
         )
         m.apply_transform(R)
         log(f'  applied Ry({rot_deg}°) to align with viewer convention')
+    # DECIMATE first: a 92k-face Hi3DGen mesh produces 3000+ micro UV
+    # islands no matter how we tune xatlas — the normal variation across
+    # 92k tiny faces FORCES xatlas to break charts. Decimate to ~15k
+    # faces first so xatlas has a chance to produce coherent charts.
+    # Skip decimation when the mesh is already small (target preserved).
+    target_faces = int(os.environ.get('FABMESH_HI3DGEN_TARGET_FACES', '15000'))
+    if len(m.faces) > target_faces * 1.5:
+        log(f'  decimating {len(m.faces)}f -> ~{target_faces}f for clean UV atlas...')
+        t_dec = time.time()
+        m = m.simplify_quadric_decimation(face_count=target_faces)
+        log(f'  decimated to {len(m.faces)}f in {time.time()-t_dec:.1f}s')
     v = m.vertices.astype(np.float32)
     f = m.faces.astype(np.uint32)
     log(f'  unwrapping {len(v)}v / {len(f)}f...')
     atlas = xatlas.Atlas()
     atlas.add_mesh(v, f)
-    atlas.generate()
+    # Bias xatlas toward big, contiguous charts (more UV distortion OK
+    # since we project a photo, not a tileable material).
+    chart_opts = xatlas.ChartOptions()
+    chart_opts.max_cost = 32.0                # default 16 — accept bigger charts
+    chart_opts.max_iterations = 1             # less refinement = bigger initial charts
+    pack_opts = xatlas.PackOptions()
+    pack_opts.padding = 4
+    pack_opts.bilinear = True
+    atlas.generate(chart_options=chart_opts, pack_options=pack_opts)
     vmap, indices, uvs = atlas[0]
     new_mesh = trimesh.Trimesh(
         vertices=v[vmap],
@@ -178,7 +197,13 @@ def step_texture(mesh_glb, image_path, out_glb, tex_res, mv_dir=None):
     # Hi3DGen mesh has NO SF3D-style internal transforms, so skip the
     # undo step in texture_project (otherwise it double-rotates the
     # mesh and the front photo lands on the side/wings).
-    env = {**os.environ, 'FABMESH_TEXPROJ_SKIP_UNDO': '1'}
+    # Also disable texture_project's xatlas re-unwrap — step_unwrap()
+    # already produces a chart-merged atlas, so a second xatlas pass
+    # (with defaults) just re-atomizes it back into micro-islands and
+    # destroys the texture quality we just gained.
+    env = {**os.environ,
+           'FABMESH_TEXPROJ_SKIP_UNDO': '1',
+           'FABMESH_UV_REPACK': '0'}
     rc = subprocess.run(args, timeout=600, env=env).returncode
     if rc != 0:
         log(f'texture_project failed with rc={rc}')

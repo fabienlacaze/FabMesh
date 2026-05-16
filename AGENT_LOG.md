@@ -10,6 +10,42 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-17 — Mosaïque UV: décimation pre-xatlas + ChartOptions
+
+**Symptôme**: même après tous les fixes (blend stack, front p=1.0,
+mvadapter), la texture extraite restait une mosaïque chaotique de
+micro-îlots. Test isolé (1 vue front, pas de MV) confirme: c'est
+l'atlas UV qui est atomisé, pas un bug des multi-views.
+
+**Mesure**: comptage des charts UV via composantes connexes des faces:
+- Avant : **4029 charts** sur 92k faces (1 chart pour ~23 faces)
+- L'atlas 2048×2048 est rempli de milliers de petits îlots → chaque
+  îlot reçoit 1-2 pixels source → mosaïque visuelle inéluctable.
+
+**Cause root**: Hi3DGen produit naturellement ~92k faces (~46k verts)
+pour un objet simple. La variation de normales sur 92k tiny faces
+FORCE xatlas à splitter même avec ChartOptions agressives (max_cost=
+8/32 n'a rien changé).
+
+**Fix `scripts/hi3dgen_full_pipeline.py:step_unwrap`**:
+1. **Décimation pré-unwrap**: `m.simplify_quadric_decimation(15000)`
+   réduit le mesh de 92k → 15k faces (matche le target user ~13k).
+2. **ChartOptions**: `max_cost=32` (vs 16) et `max_iterations=1`
+   pour favoriser les charts initiaux gros.
+3. `FABMESH_HI3DGEN_TARGET_FACES` env var (default 15000) pour tune.
+4. Désactivé `FABMESH_UV_REPACK=0` dans le subprocess texture_project
+   (sinon xatlas re-unwrap par-dessus mon premier unwrap propre).
+
+**Résultat (couteau test)**:
+- Charts : 4029 → **231** (×17 moins fragmenté)
+- Util : 81.7%
+- Faces drawn : 99.7% (vs 96-97% avant)
+- Total pipeline : 35.9s (vs 230s — bypass d'un re-unwrap inutile)
+- Rendu 3D : couteau **clairement identifiable** (forme + manche
+  noir + lame blanche brillante), au lieu de mosaïque chaotique.
+
+---
+
 ## 2026-05-17 — Bug critique: front photo demoted to p=0.7 (was 1.0)
 
 **Symptôme**: même en mode stack avec priorité front=1.0 dans le dict
