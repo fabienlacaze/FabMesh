@@ -1308,10 +1308,15 @@ function setProcessHardMemoryLimit(proc, jobName) {
   const pid = proc.pid;
   const _os = require('os');
   const totalRam = _os.totalmem();
-  // Priority: explicit GB cap (FABMESH_RAM_LIMIT_GB) > percentage > default 90%
+  // Priority: MB cap from RAM slider (FABMESH_RAM_LIMIT_MB, populated by
+  // ipcMain.handle('set-ram-limit') when the user drags the Settings
+  // slider) > explicit GB cap > percentage > default 90%
   let capBytes;
+  const sliderMB = parseFloat(process.env.FABMESH_RAM_LIMIT_MB || '');
   const explicitGB = parseFloat(process.env.FABMESH_RAM_LIMIT_GB || '');
-  if (explicitGB > 0) {
+  if (sliderMB > 0) {
+    capBytes = Math.round(sliderMB * 1024 * 1024);
+  } else if (explicitGB > 0) {
     capBytes = Math.round(explicitGB * 1024 ** 3);
   } else {
     const pct = Math.min(99, Math.max(50, parseFloat(process.env.FABMESH_RAM_LIMIT_PCT || '90'))) / 100;
@@ -1350,55 +1355,100 @@ if ($p) {
   }, 300);
 }
 
-// SAFETY watchdog: monitors GLOBAL system RAM (not just this process).
-// Kills the job if total system RAM hits the panic threshold (default
-// 95 percent of total). This is the LAST LINE OF DEFENSE that prevents
-// the OS from crashing entirely — happens when multiple subprocesses
-// cumulate or when commit charge exceeds pagefile capacity, in
-// situations where the per-process working-set cap is not enough.
+// SAFETY watchdog: monitors ALL 4 user-configured limits (RAM, VRAM,
+// GPU utilization, GPU temperature) every 1s, and kills the job if
+// ANY metric exceeds 99% of its limit for 2 consecutive readings.
+// This is the LAST LINE OF DEFENSE: if a limit is hit, the user
+// explicitly said "stop the work" rather than let it crash the PC.
 //
-// Distinct from the working-set cap above:
-//   - cap (setProcessHardMemoryLimit) tells Windows to swap THIS
-//     process when it grows its working set above the per-process
-//     limit. Normal swap behavior, no kill.
-//   - safety (installSystemRamSafetyKill) is a global RAM guard.
-//     When system RAM is about to exhaust (and the OS would crash
-//     hard with black screen), we kill the job to save the PC.
+// User intent: "je veux que si on atteint 99% pour n'importe quelle
+// limite on arrete le travail en cours".
 //
-// Threshold from FABMESH_RAM_PANIC_PCT (default 95 percent).
-function installSystemRamSafetyKill(proc, jobName) {
+// Limits source (env vars set by Settings sliders):
+//   FABMESH_RAM_LIMIT_MB   : RAM cap in MB (user slider)
+//   FABMESH_VRAM_FRACTION  : VRAM cap as 0..1 fraction (e.g. 0.9 = 90%)
+//   FABMESH_GPU_LIMIT      : GPU utilization % cap
+//   FABMESH_TEMP_LIMIT     : GPU temp slider 0..100 -> maps to 30..100°C
+//
+// Trigger is at 99% of each limit. Kill via killProcTree + nuke orphans.
+function installAllLimitsSafetyKill(proc, jobName) {
   if (!proc || !proc.pid) return;
-  const panicPct = Math.min(99, Math.max(80,
-    parseFloat(process.env.FABMESH_RAM_PANIC_PCT || '95')
-  ));
+  const _os = require('os');
+  const totalRamMB = _os.totalmem() / (1024 * 1024);
+  const SAFETY_FRACTION = 0.99;
   let _killed = false;
-  let _consecutiveBreaches = 0;
+  // Track consecutive breaches per metric (avoid killing on single
+  // transient spike).
+  const _breaches = { ram: 0, vram: 0, gpu: 0, temp: 0 };
   const _interval = setInterval(() => {
     if (_killed || proc.killed || proc.exitCode !== null) {
       clearInterval(_interval);
       return;
     }
-    const _os = require('os');
-    const _total = _os.totalmem();
+    // --- RAM (system-wide, in MB) ---
     const _free = _os.freemem();
-    const _usedPct = ((_total - _free) / _total) * 100;
-    if (_usedPct > panicPct) {
-      _consecutiveBreaches += 1;
-      // Need 2 consecutive readings (2 seconds) to avoid killing on a
-      // single transient spike that the OS would have absorbed.
-      if (_consecutiveBreaches >= 2) {
-        log.error('main', `[ram-safety] PANIC: system RAM ${_usedPct.toFixed(1)}% > ${panicPct}% — killing ${jobName} pid=${proc.pid} to save the PC`);
-        try { safeSend('ram-panic-killed', { value: _usedPct, limit: panicPct, job: jobName }); } catch (e) {}
-        _killed = true;
-        killProcTree(proc);
-        // Also nuke orphans to free up whatever Python leaked.
-        try { killOrphanPythonSubprocesses(); } catch (e) {}
-        clearInterval(_interval);
-      } else {
-        log.warn('main', `[ram-safety] system RAM ${_usedPct.toFixed(1)}% > ${panicPct}% (1/2 — will kill if persists)`);
-      }
-    } else {
-      _consecutiveBreaches = 0;
+    const _usedMB = (_os.totalmem() - _free) / (1024 * 1024);
+    const _ramLimitMB = parseFloat(process.env.FABMESH_RAM_LIMIT_MB || '');
+    let _tripped = null;
+    let _detail = '';
+    if (_ramLimitMB > 0 && _usedMB > _ramLimitMB * SAFETY_FRACTION) {
+      _breaches.ram += 1;
+      _detail = `RAM ${_usedMB.toFixed(0)} MB > ${(_ramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (99% of ${_ramLimitMB} MB limit)`;
+      if (_breaches.ram >= 2) _tripped = 'ram';
+    } else _breaches.ram = 0;
+    // --- VRAM + GPU + TEMP via single nvidia-smi call ---
+    if (!_tripped) {
+      try {
+        const _gpuOut = require('child_process').execFileSync(
+          'nvidia-smi',
+          ['--query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu',
+            '--format=csv,noheader,nounits'],
+          { encoding: 'utf-8', timeout: 1500 }
+        );
+        const _cols = (_gpuOut.split('\n')[0] || '').split(',').map(s => parseFloat(s.trim()));
+        if (_cols.length >= 4) {
+          const [vramUsed, vramTotal, gpuUtil, tempC] = _cols;
+          const _vramFrac = parseFloat(process.env.FABMESH_VRAM_FRACTION || '');
+          const _gpuLimit = parseFloat(process.env.FABMESH_GPU_LIMIT || '');
+          const _tempLimitSlider = parseFloat(process.env.FABMESH_TEMP_LIMIT || '');
+          // VRAM
+          if (_vramFrac > 0 && vramTotal > 0) {
+            const _vramLimitMB = vramTotal * _vramFrac;
+            if (vramUsed > _vramLimitMB * SAFETY_FRACTION) {
+              _breaches.vram += 1;
+              _detail = `VRAM ${vramUsed.toFixed(0)} MB > ${(_vramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (99% of ${(_vramFrac * 100).toFixed(0)}% cap on ${vramTotal} MB)`;
+              if (_breaches.vram >= 2) _tripped = 'vram';
+            } else _breaches.vram = 0;
+          }
+          // GPU util %
+          if (!_tripped && _gpuLimit > 0) {
+            if (gpuUtil > _gpuLimit * SAFETY_FRACTION) {
+              _breaches.gpu += 1;
+              _detail = `GPU ${gpuUtil.toFixed(0)}% > ${(_gpuLimit * SAFETY_FRACTION).toFixed(0)}% (99% of ${_gpuLimit}% limit)`;
+              if (_breaches.gpu >= 2) _tripped = 'gpu';
+            } else _breaches.gpu = 0;
+          }
+          // TEMP (slider 0..100 -> 30..100 °C linearly)
+          if (!_tripped && _tempLimitSlider > 0) {
+            const _tempLimitC = 30 + (_tempLimitSlider / 100) * 70;
+            if (tempC > _tempLimitC * SAFETY_FRACTION) {
+              _breaches.temp += 1;
+              _detail = `TEMP ${tempC.toFixed(1)}°C > ${(_tempLimitC * SAFETY_FRACTION).toFixed(1)}°C (99% of ${_tempLimitC.toFixed(0)}°C limit)`;
+              if (_breaches.temp >= 2) _tripped = 'temp';
+            } else _breaches.temp = 0;
+          }
+        }
+      } catch (e) { /* nvidia-smi failed; skip GPU checks this tick */ }
+    }
+    if (_tripped) {
+      log.error('main', `[safety] PANIC ${_tripped.toUpperCase()}: ${_detail} — killing ${jobName} pid=${proc.pid}`);
+      try { safeSend('limit-panic-killed', { metric: _tripped, detail: _detail, job: jobName }); } catch (e) {}
+      _killed = true;
+      killProcTree(proc);
+      try { killOrphanPythonSubprocesses(); } catch (e) {}
+      clearInterval(_interval);
+    } else if (_detail) {
+      log.warn('main', `[safety] ${_detail} (consecutive ${Math.max(_breaches.ram, _breaches.vram, _breaches.gpu, _breaches.temp)}/2)`);
     }
   }, 1000);
   proc.on('exit', () => clearInterval(_interval));
@@ -1407,10 +1457,10 @@ function installSystemRamSafetyKill(proc, jobName) {
 
 // Back-compat alias: legacy spawn sites call installJobLimitsWatchdog.
 // Apply BOTH the working-set cap (preventive) AND the safety kill
-// (emergency last line of defense).
+// (emergency last line of defense for ALL 4 limits).
 function installJobLimitsWatchdog(proc, jobName) {
   setProcessHardMemoryLimit(proc, jobName);
-  installSystemRamSafetyKill(proc, jobName);
+  installAllLimitsSafetyKill(proc, jobName);
 }
 
 function killProcTree(proc) {
@@ -3709,13 +3759,14 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       if (jobId) activeProcs.set(jobId, proc);
       // Two-layer memory safety:
       //   1) Working-set cap: tell Windows to swap THIS process to disk
-      //      if it tries to grow beyond the per-process limit. Normal
-      //      slower behavior, no kill.
-      //   2) System RAM panic kill: if total system RAM hits 95% (despite
-      //      the cap, e.g. multiple subprocesses cumulating or commit
-      //      charge exhausting pagefile), kill the job to save the OS.
+      //      if it tries to grow beyond the per-process RAM limit.
+      //      Slower behavior, no kill (Windows pages naturally).
+      //   2) All-limits panic kill: kill the job if ANY of the 4 user
+      //      limits (RAM, VRAM, GPU%, TEMP) is reached at 99%. Saves
+      //      the PC when working-set cap is not enough (cumulative
+      //      subprocesses, commit charge, GPU overheat, etc).
       setProcessHardMemoryLimit(proc, `image-to-3d (${engine})`);
-      installSystemRamSafetyKill(proc, `image-to-3d (${engine})`);
+      installAllLimitsSafetyKill(proc, `image-to-3d (${engine})`);
       const flushStdout = () => {
         if (stdoutBuf) {
           safeSend('ai3d-progress', stdoutBuf);
