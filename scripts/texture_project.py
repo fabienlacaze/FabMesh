@@ -610,9 +610,9 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     #              everything it sees → face is preserved exactly as
     #              the front photo shows it. Default order:
     #              top/bot → lat → back → front.
-    _blend_mode = os.environ.get('FABMESH_TEXPROJ_BLEND', 'accum').lower()
+    _blend_mode = os.environ.get('FABMESH_TEXPROJ_BLEND', 'stack').lower()
     if _blend_mode not in ('winner', 'accum', 'stack'):
-        _blend_mode = 'accum'
+        _blend_mode = 'stack'
     log(f'blend mode: {_blend_mode}')
     proj_arr = np.zeros((tex_res, tex_res, 3), dtype=np.float64)
     weight_arr = np.zeros((tex_res, tex_res), dtype=np.float64)

@@ -4032,8 +4032,10 @@ ipcMain.handle('check-multiview-dir', async (_event, imagePath) => {
 //   sdxl           — SDXL + IPAdapter
 //   crm            — CRM (6 ortho views incl. TOP/BOTTOM)
 //   mvadapter      — MV-Adapter i2mv-sdxl (6 ortho views, 768px, Apache 2.0)
-function _mvScriptForEngine() {
-  const engine = (process.env.FABMESH_MV_ENGINE || 'z123').toLowerCase();
+function _mvScriptForEngine(engineOverride) {
+  const engine = (engineOverride
+                  || process.env.FABMESH_MV_ENGINE
+                  || 'z123').toLowerCase();
   const map = {
     z123:      'multiview_gen.py',
     sdxl:      'multiview_sdxl_gen.py',
@@ -4046,8 +4048,12 @@ function _mvScriptForEngine() {
 }
 
 ipcMain.handle('generate-multiview', async (_event, opts) => {
-  const { imagePath, harmonize, upscale } = (opts || {});
-  const script = _mvScriptForEngine();
+  const { imagePath, harmonize, upscale, engine: engineOverride } = (opts || {});
+  // Per-call engine override: the renderer's "6 views" radio in CREATE NEW
+  // explicitly wants MV-Adapter (true ortho azim 0/90/180/270 + same SDXL
+  // base as RealVis so colours match). Z123 stays the default for the
+  // standalone "Multi-Views" button so we don't break old workflows.
+  const script = _mvScriptForEngine(engineOverride);
   // Multi-views are tied to the EXACT image version. Output dir derived
   // from the image file path:
   //   images/dog/ref_0.png        → images/dog/ref_0_multiview/

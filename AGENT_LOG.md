@@ -10,6 +10,37 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-16 — 3 fixes texture pour props: mvadapter + stack + front view honored
+
+**Symptôme post-fix-précédent**: pipeline Hi3DGen tourne sans crash mais
+texture extraite = mosaïque bruyante noir/blanc/gris. Diagnostic :
+- Image source en vue 3/4 (RealVis a ignoré `strict front view`)
+- Texture_project assume `az=0/el=0` pour la source → mapping faussé
+- Zero123++ génère des angles approximatifs (az=30, az=150, etc.)
+- Blend mode `accum` moyenne tout → noir+blanc = gris
+
+**3 fix simultanés**:
+
+1. **`texture_project.py` default blend `accum` → `stack`** : la vue
+   source (front, priorité max) écrit en dernier sur l'atlas →
+   ses pixels dominent. Les 6 vues MV ne remplissent que les zones
+   invisibles depuis le front. Pas de moyenne destructrice.
+
+2. **`local_juggernaut_bridge.py` `_has_angle`**: ajout des keywords
+   `strict front view`, `front view`, `facing camera`, `frontal view`,
+   `front-facing`. Quand le template demande explicitement front,
+   le bridge n'ajoute plus `slight angle, one side visible` qui
+   forçait la 3/4 view (et expliquait pourquoi RealVis sortait
+   toujours en 3/4 malgré `strict front view` dans le prompt).
+
+3. **MV engine `mvadapter` quand "6 views" UI** : `_mvScriptForEngine`
+   accepte un engine override. Le handler `generate-multiview` lit
+   `opts.engine`. Le renderer passe `engine: 'mvadapter'` pour les
+   2 appels du mode 6-view (popup + CREATE NEW). Z123 reste default
+   pour les autres appels (bouton standalone "Multi-Views").
+
+---
+
 ## 2026-05-16 — Hi3DGen ignorait les 6 vues Zero123 existantes (mesh tout blanc)
 
 **Symptôme**: user fait Multi-Views (Zero123 default) sur image couteau,

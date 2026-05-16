@@ -1647,7 +1647,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
   showToast('Generating 6 multi-views...', 'info', 5000);
   try {
     const result = await API.generateMultiview({
-      imagePath: mvImagePath, harmonize, upscale,
+      imagePath: mvImagePath, harmonize, upscale, engine: 'mvadapter',
     });
     if (result && result.success) {
       showToast('Multi-views generated!', 'success');
@@ -3239,6 +3239,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 imagePath: imgPath,
                 harmonize: mv6Harmonize,
                 upscale: mv6Upscale,
+                engine: 'mvadapter',
               });
               if (mvRes?.success) {
                 if (!p._multiviews) p._multiviews = {};

@@ -217,6 +217,12 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         _has_angle = any(t in _lc for t in (
             'three-quarter', 'three quarter', '3/4', 'angled view',
             'angled side view', 'isometric', 'side profile', 'side view',
+            # Front-view variants count too — if the template already asks
+            # for "strict front view" we MUST NOT inject "slight angle, one
+            # side visible" or RealVis tilts the camera and texture
+            # projection (which assumes az=0/el=0 for the source) breaks.
+            'strict front view', 'front view', 'facing camera',
+            'frontal view', 'front-facing',
         ))
         _angle_token = '' if _has_angle else 'slight angle, one side visible, '
         optimized_prompt = (
