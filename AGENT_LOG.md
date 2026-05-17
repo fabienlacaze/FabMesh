@@ -6692,3 +6692,21 @@ Audit complet (24 IPC handlers + 15 scripts). Résultats:
 
 
 
+
+## 2026-05-17 (final) — Revert Taubin + atlas 4096 + ip 0.85
+
+User feedback sur orc: la version v2zoom (radius 1.5, chart-aware,
+atlas 2048, NO Taubin, ip 0.55, default canny 0.5) etait le meilleur
+rendu. Les fixes suivants ont degrade:
+
+- Taubin smoothing: exploded mesh look (vertex shifts entre charts)
+- Atlas 4096: viewer model-viewer fallback debug-UV-colors (neon)
+- IP-scale 0.85: tendance a saturer/aplatir au lieu de mieux suivre
+
+Revert: Taubin off par defaut (opt-in via FABMESH_HI3DGEN_DO_SMOOTH=1),
+atlas back to 2x tex_res, ip-scale back to 0.55.
+
+Etat final accepte: pipeline = mv_render radius 1.5 + sheet_render_v2
+dual CN ip 0.55 + bake_v3 chart-aware atlas 2048 + (orphan-chart
+fallback global NN ajoute apres - dans le commit suivant).
+
