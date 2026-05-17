@@ -55,7 +55,7 @@ def log(msg):
     print(f'[invuv_v3] {msg}', flush=True)
 
 
-def _camera_matrix(azim_deg, elev_deg, radius=2.5, target=(0, 0, 0)):
+def _camera_matrix(azim_deg, elev_deg, radius=1.5, target=(0, 0, 0)):
     """Right-handed view + perspective matrices, CRM convention.
     Hi3DGen mesh has its front face at -Z. CRM azim=0 means the camera
     is looking at the subject's front — so it is positioned at -Z,
@@ -110,7 +110,7 @@ def _normalize_mesh(verts):
 
 
 def _render_inv_uv(glctx, v_pos, v_uv, faces, faces_uv, v_normals,
-                   azim, elev, res, radius=2.5):
+                   azim, elev, res, radius=1.5):
     """Returns (inv_uv [H,W,2], mask [H,W], normal_view_dot [H,W]).
 
     inv_uv stores per-pixel (u, v) atlas coords from the rasterised mesh.
@@ -196,10 +196,27 @@ def _atlas_used_mask(glctx, v_uv, faces_uv, atlas_res):
     return used[::-1, :]
 
 
-def _fill_holes_nearest(atlas, written_mask, used_mask, gutter_px=8):
+def _atlas_chart_id_map(used_mask):
+    """Label each connected component of used texels with a unique chart id.
+    Used by chart-aware NN fill so holes are only filled from texels of the
+    SAME chart, not from arbitrary nearby charts whose colours come from
+    different mesh regions (= the snake-skin speckle artifact)."""
+    from scipy.ndimage import label
+    # 4-connectivity is enough; 8 would merge thin chart boundaries.
+    structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
+    chart_id, n_charts = label(used_mask, structure=structure)
+    log(f'atlas-used has {n_charts} connected chart components')
+    return chart_id  # int32 array, 0=background, 1..n_charts=charts
+
+
+def _fill_holes_nearest(atlas, written_mask, used_mask, gutter_px=8,
+                         chart_id=None):
     """Fill atlas in two passes:
-      1. Holes INSIDE charts (used_mask & ~written_mask) by nearest-neighbour
-         lookup of the closest written pixel.
+      1. Holes INSIDE charts (used_mask & ~written_mask). When chart_id is
+         given (CHART-AWARE), the NN is computed PER CHART so a hole gets
+         filled only from texels of the same chart — eliminates the
+         snake-skin / hatching speckle where NN traverses chart edges and
+         pulls colours from unrelated mesh regions.
       2. Gutter expansion: dilate the used region by `gutter_px` and fill
          those new texels with the nearest already-filled pixel. This
          provides sampling headroom at chart edges so bilinear texture
@@ -209,11 +226,32 @@ def _fill_holes_nearest(atlas, written_mask, used_mask, gutter_px=8):
 
     holes = used_mask & (~written_mask)
     if holes.any():
-        log(f'filling {int(holes.sum())} hole pixels inside charts (NN)')
-        _, indices = distance_transform_edt(~written_mask, return_indices=True)
-        fy = indices[0][holes]
-        fx = indices[1][holes]
-        filled[holes] = atlas[fy, fx]
+        if chart_id is not None:
+            log(f'filling {int(holes.sum())} hole pixels CHART-AWARE')
+            # For each chart id, compute NN within that chart only.
+            unique_ids = np.unique(chart_id[chart_id > 0])
+            for cid in unique_ids:
+                chart_mask = (chart_id == cid)
+                chart_written = chart_mask & written_mask
+                chart_holes = chart_mask & holes
+                if not chart_holes.any() or not chart_written.any():
+                    continue
+                # Compute NN within this chart only.
+                # distance_transform_edt source = ~chart_written → finds the
+                # nearest written texel; we constrain holes to chart_holes
+                # which guarantees we only assign INSIDE the chart.
+                _, indices = distance_transform_edt(
+                    ~chart_written, return_indices=True)
+                fy = indices[0][chart_holes]
+                fx = indices[1][chart_holes]
+                filled[chart_holes] = atlas[fy, fx]
+        else:
+            log(f'filling {int(holes.sum())} hole pixels (legacy NN, '
+                f'crosses chart boundaries)')
+            _, indices = distance_transform_edt(~written_mask, return_indices=True)
+            fy = indices[0][holes]
+            fx = indices[1][holes]
+            filled[holes] = atlas[fy, fx]
         written_mask = written_mask | holes
 
     if gutter_px > 0:
@@ -307,6 +345,7 @@ def bake(mesh_glb, source_image_path, out_glb, mv_dir,
     n_used = int(used_mask.sum())
     log(f'atlas-used texels: {n_used}/{atlas_res*atlas_res} '
         f'({100*n_used/(atlas_res*atlas_res):.1f}%)')
+    chart_id = _atlas_chart_id_map(used_mask)
 
     # Load views.
     views = _load_views(source_image_path, mv_dir)
@@ -355,7 +394,7 @@ def bake(mesh_glb, source_image_path, out_glb, mv_dir,
         os.path.join(workdir, 'atlas_raw.png'))
 
     # Fill holes INSIDE the used region only.
-    atlas = _fill_holes_nearest(atlas, written, used_mask)
+    atlas = _fill_holes_nearest(atlas, written, used_mask, chart_id=chart_id)
     Image.fromarray(atlas.clip(0, 255).astype(np.uint8)).save(
         os.path.join(workdir, 'atlas_filled.png'))
 

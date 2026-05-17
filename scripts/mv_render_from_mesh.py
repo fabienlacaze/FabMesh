@@ -52,7 +52,7 @@ def log(msg):
     print(f'[mv_render] {msg}', flush=True)
 
 
-def _camera_matrix(azim_deg, elev_deg, radius=2.5):
+def _camera_matrix(azim_deg, elev_deg, radius=1.5):
     az = math.radians(azim_deg)
     el = math.radians(elev_deg)
     cx = radius * math.cos(el) * math.sin(az)
@@ -94,11 +94,11 @@ def _normalize_mesh(verts):
 
 
 def _render_mesh(glctx, v_pos, faces, v_normals, azim, elev,
-                 res, light_dir, base_rgb):
+                 res, light_dir, base_rgb, radius=1.5):
     """Render the mesh with Lambertian + ambient shading at one angle.
     Returns (shaded RGBA, normal RGB, depth GS) — all 8-bit numpy arrays."""
     H = W = res
-    view, eye = _camera_matrix(azim, elev)
+    view, eye = _camera_matrix(azim, elev, radius=radius)
     proj = _proj_matrix(aspect=W/H)
     mvp = proj @ view
     mvp_t = torch.from_numpy(mvp).cuda()
