@@ -412,6 +412,22 @@ def bake(mesh_glb, source_image_path, out_glb, mv_dir,
     Image.fromarray(atlas.clip(0, 255).astype(np.uint8)).save(
         os.path.join(workdir, 'atlas_filled.png'))
 
+    # Post-process: brightness + saturation boost. The cos_nv-weighted blend
+    # plus model-viewer's PBR shader tends to under-light the result; a
+    # gentle brighten/saturate makes the SDXL-painted colours pop on the
+    # final mesh without changing the texture's intent.
+    # Disable with FABMESH_BAKE_SKIP_BRIGHTEN=1.
+    if os.environ.get('FABMESH_BAKE_SKIP_BRIGHTEN') != '1':
+        from PIL import ImageEnhance
+        pre = Image.fromarray(atlas.clip(0, 255).astype(np.uint8))
+        post = ImageEnhance.Brightness(pre).enhance(1.5)
+        post = ImageEnhance.Color(post).enhance(1.3)
+        post = ImageEnhance.Contrast(post).enhance(1.1)
+        atlas = np.asarray(post).astype(np.float32)
+        log(f'post-process: brightness x1.5, saturation x1.3, contrast x1.1')
+        Image.fromarray(atlas.clip(0, 255).astype(np.uint8)).save(
+            os.path.join(workdir, 'atlas_brightened.png'))
+
     # Export GLB with the new atlas (original vertices preserved).
     atlas_img = Image.fromarray(atlas.clip(0, 255).astype(np.uint8))
     m.visual = trimesh.visual.TextureVisuals(uv=m.visual.uv, image=atlas_img)
