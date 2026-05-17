@@ -230,21 +230,35 @@ def _fill_holes_nearest(atlas, written_mask, used_mask, gutter_px=8,
             log(f'filling {int(holes.sum())} hole pixels CHART-AWARE')
             # For each chart id, compute NN within that chart only.
             unique_ids = np.unique(chart_id[chart_id > 0])
+            orphan_charts = 0
+            orphan_holes_mask = np.zeros_like(holes)
             for cid in unique_ids:
                 chart_mask = (chart_id == cid)
                 chart_written = chart_mask & written_mask
                 chart_holes = chart_mask & holes
-                if not chart_holes.any() or not chart_written.any():
+                if not chart_holes.any():
                     continue
-                # Compute NN within this chart only.
-                # distance_transform_edt source = ~chart_written → finds the
-                # nearest written texel; we constrain holes to chart_holes
-                # which guarantees we only assign INSIDE the chart.
+                if not chart_written.any():
+                    # Orphan chart — no view ever saw it. Defer to global fill.
+                    orphan_charts += 1
+                    orphan_holes_mask |= chart_holes
+                    continue
                 _, indices = distance_transform_edt(
                     ~chart_written, return_indices=True)
                 fy = indices[0][chart_holes]
                 fx = indices[1][chart_holes]
                 filled[chart_holes] = atlas[fy, fx]
+            # 2nd pass — orphan charts get a global NN from ANY written texel
+            # (yes, this re-introduces speckle on those, but no holes is much
+            # better than holes for a final texture).
+            if orphan_holes_mask.any():
+                log(f'  {orphan_charts} orphan charts ({int(orphan_holes_mask.sum())} '
+                    f'pixels) — falling back to global NN')
+                _, indices = distance_transform_edt(
+                    ~written_mask, return_indices=True)
+                fy = indices[0][orphan_holes_mask]
+                fx = indices[1][orphan_holes_mask]
+                filled[orphan_holes_mask] = atlas[fy, fx]
         else:
             log(f'filling {int(holes.sum())} hole pixels (legacy NN, '
                 f'crosses chart boundaries)')

@@ -89,19 +89,14 @@ def step_unwrap(in_glb, out_glb):
         m = m.simplify_quadric_decimation(face_count=target_faces)
         log(f'  decimated to {len(m.faces)}f in {time.time()-t_dec:.1f}s')
 
-    # Taubin smoothing BEFORE xatlas. Hi3DGen meshes have high-frequency
-    # normal noise (sparse-voxel artifacts on organic surfaces) that
-    # FORCES xatlas to fragment into 500-1000 tiny charts. Taubin (lambda/mu
-    # alternation) preserves the overall shape — wide-band low-pass on
-    # normals — while collapsing micro-variation so xatlas sees a cleaner
-    # surface and merges into ~30-100 big charts. Disable with
-    # FABMESH_HI3DGEN_SKIP_SMOOTH=1.
-    if os.environ.get('FABMESH_HI3DGEN_SKIP_SMOOTH') != '1':
+    # Taubin smoothing pre-xatlas was tested but REGRESSED quality on the
+    # orc subject — it bumped chart utilization (43%→79%) but introduced
+    # vertex shifts that exploded the mesh visually post-bake. Off by
+    # default; opt-in via FABMESH_HI3DGEN_DO_SMOOTH=1.
+    if os.environ.get('FABMESH_HI3DGEN_DO_SMOOTH') == '1':
         iters = int(os.environ.get('FABMESH_HI3DGEN_SMOOTH_ITERS', '10'))
-        log(f'  Taubin smoothing {iters} iters (preserves shape, reduces normal noise)...')
-        t_sm = time.time()
+        log(f'  Taubin smoothing {iters} iters (opt-in)...')
         trimesh.smoothing.filter_taubin(m, lamb=0.5, nu=-0.53, iterations=iters)
-        log(f'  smoothing done in {time.time()-t_sm:.1f}s')
 
     v = m.vertices.astype(np.float32)
     f = m.faces.astype(np.uint32)
