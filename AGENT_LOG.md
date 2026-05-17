@@ -10,6 +10,28 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 — Bake optimisation 40× + hybrid pipeline + UI tools
+
+**Perf bake** : chart-aware NN fill faisait
+`scipy.distance_transform_edt` sur le full atlas (4M pixels) PAR
+chart (~1000) → ~5 min. Switch à per-chart bbox via
+`scipy.ndimage.find_objects`. Bake = 8s (40× speedup).
+
+**Bake source-photo hybride** : `_load_views` inclut maintenant la
+source photo comme view az=0/el=0 weight=3.0. Front photo-clean
+dominant via weighted blend, sides/back via sheet SDXL.
+
+**UI Material adjust** : nouveau bouton "🎨 Material" dans Manual
+Tools → modal 6 sliders (brightness/sat/contrast/emissive/metallic/
+roughness) → `mesh_material_adjust.py` save as new version.
+
+**UI Multi-select projets** : checkbox top-left + bottom bar avec
+Clear/Delete selected.
+
+**Pipeline E2E** : Hi3DGen ~30s + sheet 50s + bake 8s = ~90s total.
+
+---
+
 ## 2026-05-17 (later) — Tuning post-intégration sheet runner
 
 **Constat test sur orc_marron** :

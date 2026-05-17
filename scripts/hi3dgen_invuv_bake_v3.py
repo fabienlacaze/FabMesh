@@ -227,33 +227,48 @@ def _fill_holes_nearest(atlas, written_mask, used_mask, gutter_px=8,
     holes = used_mask & (~written_mask)
     if holes.any():
         if chart_id is not None:
-            log(f'filling {int(holes.sum())} hole pixels CHART-AWARE')
-            # For each chart id, compute NN within that chart only.
-            unique_ids = np.unique(chart_id[chart_id > 0])
+            log(f'filling {int(holes.sum())} hole pixels CHART-AWARE (bbox-optimised)')
+            from scipy.ndimage import find_objects
+            # find_objects returns the bounding box (slice tuple) for each
+            # labeled component, indexed by chart_id-1. O(num_charts) memory,
+            # O(atlas) time once. The previous implementation called
+            # distance_transform_edt on the FULL atlas per chart =
+            # O(num_charts × atlas²) which dominates the bake (~5 min on
+            # 1000 charts × 2048²). Switching to per-chart bbox cuts this
+            # to ~O(num_charts × avg_chart_area) ≈ ~50× faster.
+            slices = find_objects(chart_id)
             orphan_charts = 0
             orphan_holes_mask = np.zeros_like(holes)
-            for cid in unique_ids:
-                chart_mask = (chart_id == cid)
-                chart_written = chart_mask & written_mask
-                chart_holes = chart_mask & holes
-                if not chart_holes.any():
+            for cid_idx, sl in enumerate(slices):
+                if sl is None:
                     continue
-                if not chart_written.any():
-                    # Orphan chart — no view ever saw it. Defer to global fill.
+                cid = cid_idx + 1
+                # Crop to chart bbox.
+                local_chart = (chart_id[sl] == cid)
+                local_written = local_chart & written_mask[sl]
+                local_holes = local_chart & holes[sl]
+                if not local_holes.any():
+                    continue
+                if not local_written.any():
                     orphan_charts += 1
-                    orphan_holes_mask |= chart_holes
+                    full = np.zeros_like(holes)
+                    full[sl] = local_holes
+                    orphan_holes_mask |= full
                     continue
-                _, indices = distance_transform_edt(
-                    ~chart_written, return_indices=True)
-                fy = indices[0][chart_holes]
-                fx = indices[1][chart_holes]
-                filled[chart_holes] = atlas[fy, fx]
-            # 2nd pass — orphan charts get a global NN from ANY written texel
-            # (yes, this re-introduces speckle on those, but no holes is much
-            # better than holes for a final texture).
+                _, local_idx = distance_transform_edt(
+                    ~local_written, return_indices=True)
+                # local_idx are local to the bbox slice. Map back to atlas.
+                offset_y, offset_x = sl[0].start, sl[1].start
+                local_fy = local_idx[0][local_holes] + offset_y
+                local_fx = local_idx[1][local_holes] + offset_x
+                # Compose global mask for assignment.
+                full_holes = np.zeros_like(holes)
+                full_holes[sl] = local_holes
+                filled[full_holes] = atlas[local_fy, local_fx]
+            # Orphan charts: global NN fallback (no per-chart source).
             if orphan_holes_mask.any():
                 log(f'  {orphan_charts} orphan charts ({int(orphan_holes_mask.sum())} '
-                    f'pixels) — falling back to global NN')
+                    f'pixels) — global NN fallback')
                 _, indices = distance_transform_edt(
                     ~written_mask, return_indices=True)
                 fy = indices[0][orphan_holes_mask]
@@ -284,11 +299,28 @@ def _fill_holes_nearest(atlas, written_mask, used_mask, gutter_px=8,
     return filled
 
 
-def _load_views(source_img_path, mv_dir):
+def _load_views(source_img_path, mv_dir, source_weight=3.0):
     """Build the list of (rgba, azim, elev, weight) views.
-    Source photo is NOT used directly — the MV view_0 IS the front view
-    rendered from the same reference, so it's redundant and may misalign."""
+
+    Includes:
+      - the source reference photo at (az=0, el=0) with HIGH WEIGHT
+        (default 3.0). This makes the front of the mesh photo-clean
+        rather than SDXL-painted (which tends to hallucinate scale
+        patterns). The weighted blend by |normal·view| × weight makes
+        this dominate on front-facing texels naturally, while still
+        letting the sheet views cover the back/sides/top/bottom.
+      - the 6 MV views from mv_dir with their views.json weights.
+
+    Set source_weight=0 (or env FABMESH_BAKE_SKIP_SOURCE=1) to skip the
+    source photo and use only sheet views (the old behaviour)."""
     views = []
+    skip_source = os.environ.get('FABMESH_BAKE_SKIP_SOURCE') == '1'
+    if source_img_path and os.path.isfile(source_img_path) and not skip_source:
+        src_rgba = np.asarray(
+            Image.open(source_img_path).convert('RGBA')).astype(np.float32)
+        views.append((src_rgba, 0.0, 0.0, source_weight))
+        log(f'  source photo as view_0 az=0/el=0 weight={source_weight}')
+
     schema = [(az, el, 1.0) for az, el in DEFAULT_ANGLES]
     sj = os.path.join(mv_dir, 'views.json')
     if os.path.isfile(sj):
@@ -300,7 +332,7 @@ def _load_views(source_img_path, mv_dir):
                  float(v.get('weight', 1.0)))
                 for v in sd['views']
             ]
-            log(f'loaded views.json with {len(schema)} views')
+            log(f'loaded views.json with {len(schema)} sheet views')
         except Exception as e:
             log(f'views.json parse error: {e}; falling back to CRM defaults')
     for i, (az, el, w) in enumerate(schema):
@@ -361,10 +393,9 @@ def bake(mesh_glb, source_image_path, out_glb, mv_dir,
         f'({100*n_used/(atlas_res*atlas_res):.1f}%)')
     chart_id = _atlas_chart_id_map(used_mask)
 
-    # Load views.
+    # Load views (source photo + sheet MV views).
     views = _load_views(source_image_path, mv_dir)
-    log(f'loaded {len(views)} MV views (skipping source photo to avoid '
-        f'duplicate/misaligned front)')
+    log(f'loaded {len(views)} views (source photo + sheet)')
 
     # Accumulators (atlas_res, atlas_res, 3) float64.
     atlas_acc = torch.zeros((atlas_res, atlas_res, 3), dtype=torch.float64).cuda()

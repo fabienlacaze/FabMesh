@@ -457,6 +457,7 @@
                         <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
+                        <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material properties (brightness, saturation, emissive, roughness)">&#127912; Material</button>
                       </div>
                     </div>
                   </div>
@@ -869,6 +870,61 @@
         <div class="modal-actions">
           <button class="ghost-btn" id="mv-opt-cancel">Cancel</button>
           <button class="primary-btn" id="mv-opt-start">Start</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         MATERIAL ADJUST MODAL
+         Brightness / saturation / contrast / emissive / metallic / roughness
+         Live sliders, applies via scripts/mesh_material_adjust.py
+         ============================================================ -->
+    <div id="modal-material-adjust" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width:480px;">
+        <h2>Material Adjust</h2>
+        <p class="modal-subtitle" style="margin-bottom:14px;">Tune the baked texture and PBR factors. Save creates a new mesh version.</p>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+              <span>Brightness</span><span id="mat-brightness-val">1.20</span>
+            </div>
+            <input id="mat-brightness" type="range" min="0.3" max="3.0" step="0.05" value="1.2" style="width:100%;">
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+              <span>Saturation</span><span id="mat-saturation-val">1.00</span>
+            </div>
+            <input id="mat-saturation" type="range" min="0.0" max="3.0" step="0.05" value="1.0" style="width:100%;">
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+              <span>Contrast</span><span id="mat-contrast-val">1.00</span>
+            </div>
+            <input id="mat-contrast" type="range" min="0.3" max="3.0" step="0.05" value="1.0" style="width:100%;">
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+              <span>Emissive</span><span id="mat-emissive-val">0.50</span>
+            </div>
+            <input id="mat-emissive" type="range" min="0.0" max="2.0" step="0.05" value="0.5" style="width:100%;">
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+              <span>Metallic</span><span id="mat-metallic-val">0.00</span>
+            </div>
+            <input id="mat-metallic" type="range" min="0.0" max="1.0" step="0.05" value="0.0" style="width:100%;">
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+              <span>Roughness</span><span id="mat-roughness-val">0.70</span>
+            </div>
+            <input id="mat-roughness" type="range" min="0.0" max="1.0" step="0.05" value="0.7" style="width:100%;">
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:18px;">
+          <button id="mat-reset-btn" class="ghost-btn">Reset</button>
+          <button id="mat-cancel-btn" class="ghost-btn">Cancel</button>
+          <button id="mat-apply-btn" class="primary-btn">Save as new version</button>
         </div>
       </div>
     </div>
