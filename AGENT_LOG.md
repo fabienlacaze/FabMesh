@@ -10,6 +10,45 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-17 (later) — Tuning post-intégration sheet runner
+
+**Constat test sur orc_marron** :
+- Avant fixes : texture toute rouge (bug alias view_N.png oublié), puis
+  après alias fix → texture sombre + speckle "snake-skin" partout.
+- L'atlas montre des micro-fragments car xatlas explose Hi3DGen mesh
+  en 955-1014 charts à cause du bruit topologique.
+
+**Fixes appliqués** :
+
+1. **Bug alias** (commit 6007609) : forcer copy sheet_view_N.png →
+   view_N.png en overwrite (avant : skip si view_N déjà existe, mais
+   mv_render_from_mesh.py crée DÉJÀ view_N.png en rouge).
+
+2. **Zoom mesh radius 2.5 → 1.5** (commit f7bc524) : subject remplit
+   80% de cellule au lieu de 30%. Splatted pixels 234K → 620K (+165%).
+
+3. **Chart-aware NN fill** (commit f7bc524) : connected-component label
+   du used_mask, NN fill restreint à chaque chart_id. Élimine la
+   speckle où NN traversait des frontières de charts.
+
+4. **Taubin smoothing pre-xatlas** : lamb=0.5, nu=-0.53, 10 iters. NE
+   réduit PAS le chart count (955 → 1014, légère hausse) MAIS lift
+   l'utilisation atlas de 43% à 79%. Charts mieux packés.
+
+5. **IP-scale 0.55 → 0.65** : identity bias plus fort pour mieux
+   conserver la palette de la photo source.
+
+6. **Atlas 2x tex_res par défaut** (avant 4x) : chart-aware NN était
+   O(charts × atlas²) → 10 min sur 4096² avec ~2000 charts. 2x (2048²)
+   reste sous 90s.
+
+**Verdict** : meilleur que tout rouge, mais encore loin du résultat
+crabe. Le coupable principal reste la topologie Hi3DGen qui fragmente
+xatlas peu importe les tunings. Voie restante : tester avec une mesh
+SF3D ou mesh smoothing AGRESSIF (50+ iters Taubin) avant decimate.
+
+---
+
 ## 2026-05-17 (late) — Pipeline E2E sheet-runner + bake v3 intégré comme défaut
 
 **Contexte**: la texturation via texture_project + multiview hallucinés

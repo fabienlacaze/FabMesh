@@ -88,6 +88,21 @@ def step_unwrap(in_glb, out_glb):
         t_dec = time.time()
         m = m.simplify_quadric_decimation(face_count=target_faces)
         log(f'  decimated to {len(m.faces)}f in {time.time()-t_dec:.1f}s')
+
+    # Taubin smoothing BEFORE xatlas. Hi3DGen meshes have high-frequency
+    # normal noise (sparse-voxel artifacts on organic surfaces) that
+    # FORCES xatlas to fragment into 500-1000 tiny charts. Taubin (lambda/mu
+    # alternation) preserves the overall shape — wide-band low-pass on
+    # normals — while collapsing micro-variation so xatlas sees a cleaner
+    # surface and merges into ~30-100 big charts. Disable with
+    # FABMESH_HI3DGEN_SKIP_SMOOTH=1.
+    if os.environ.get('FABMESH_HI3DGEN_SKIP_SMOOTH') != '1':
+        iters = int(os.environ.get('FABMESH_HI3DGEN_SMOOTH_ITERS', '10'))
+        log(f'  Taubin smoothing {iters} iters (preserves shape, reduces normal noise)...')
+        t_sm = time.time()
+        trimesh.smoothing.filter_taubin(m, lamb=0.5, nu=-0.53, iterations=iters)
+        log(f'  smoothing done in {time.time()-t_sm:.1f}s')
+
     v = m.vertices.astype(np.float32)
     f = m.faces.astype(np.uint32)
     log(f'  unwrapping {len(v)}v / {len(f)}f...')
@@ -235,16 +250,20 @@ def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
 
 def step_bake_v3(mesh_glb, image_path, out_glb, sheet_dir, tex_res):
     """NEW default bake (since 2026-05-17): nvdiffrast inv-UV projection
-    with weighted blend by normal·view, chart-aware NN fill, 8px gutter."""
-    log(f'STEP 4 (bake-v3): inv-UV bake atlas={tex_res} -> {out_glb}')
+    with weighted blend by normal·view, chart-aware NN fill, 8px gutter.
+    Atlas is 2x of legacy tex_res (e.g. 1024→2048) — 4x produced
+    ~10 min bake on ~2000-chart Hi3DGen mesh (chart-aware NN is O(charts)
+    × O(distance_transform_edt) which scales poorly with atlas size)."""
+    atlas_res = tex_res * 2
+    log(f'STEP 4 (bake-v3): inv-UV bake atlas={atlas_res} -> {out_glb}')
     t0 = time.time()
     script = os.path.join(SCRIPTS, 'hi3dgen_invuv_bake_v3.py')
     rc = subprocess.run(
         [sys.executable, script, mesh_glb, image_path, out_glb,
          '--mv-dir', sheet_dir,
-         '--atlas-res', str(tex_res * 2),  # 2x of legacy tex_res for crispness
+         '--atlas-res', str(atlas_res),
          '--render-res', str(tex_res)],
-        timeout=600,
+        timeout=900,
     ).returncode
     if rc != 0:
         log(f'bake_v3 failed with rc={rc}')
