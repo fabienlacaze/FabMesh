@@ -171,7 +171,7 @@ def main():
     ap.add_argument('--guidance', type=float, default=7.0)
     ap.add_argument('--depth-scale', type=float, default=0.7)
     ap.add_argument('--canny-scale', type=float, default=0.5)
-    ap.add_argument('--ip-scale', type=float, default=0.55)
+    ap.add_argument('--ip-scale', type=float, default=0.65)
     ap.add_argument('--seed', type=int, default=42)
     args = ap.parse_args()
 
