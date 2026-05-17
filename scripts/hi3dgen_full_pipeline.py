@@ -219,12 +219,16 @@ def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
         log(f'sheet_render_v2 failed with rc={rc}')
         return False
     # Alias sheet_view_N.png -> view_N.png so bake_v3 finds them.
+    # OVERWRITE: mv_render_from_mesh.py (called inside sheet_render_v2)
+    # ALREADY creates view_N.png with the red-shaded mesh render. Without
+    # overwrite, bake_v3 would pick up those red renders → all-red texture.
     import shutil
     for i in range(6):
         src = os.path.join(out_sheet_dir, f'sheet_view_{i}.png')
         dst = os.path.join(out_sheet_dir, f'view_{i}.png')
-        if os.path.isfile(src) and not os.path.isfile(dst):
+        if os.path.isfile(src):
             shutil.copy(src, dst)
+            log(f'  aliased sheet_view_{i}.png -> view_{i}.png')
     log(f'STEP 3 done in {time.time()-t0:.1f}s')
     return True
 
