@@ -3,11 +3,22 @@
 Hi3DGen produces high-quality bare geometry (no UVs, no texture).
 This wrapper adds the missing steps so the output is a textured GLB.
 
-  1. local_hi3dgen_bridge.py    -> raw mesh (no UV, no texture)
+DEFAULT PATH (FabMesh sheet runner v2, since 2026-05-17):
+  1. local_hi3dgen_bridge.py        -> raw mesh
+  2. xatlas decimate + UV unwrap    -> mesh 15K + UV
+  3. sheet_render_v2.py             -> render 6 mesh depth maps
+                                       + SDXL ControlNet Depth+Canny
+                                       + IPAdapter ref photo
+                                       -> 6 strict orthographic views
+  4. hi3dgen_invuv_bake_v3.py       -> nvdiffrast inv-UV bake
+                                       (weighted blend, chart-aware NN fill,
+                                        8px gutter padding) -> textured GLB
+
+LEGACY PATH (FABMESH_HI3DGEN_USE_LEGACY=1):
+  1. local_hi3dgen_bridge.py
   2. xatlas UV unwrap
   2.5 multiview_mvadapter_gen.py -> 6 views into <image_stem>_multiview/
-      (reused if already present — e.g. from the "Multi-Views" UI button)
-  3. texture_project.py         -> back-project all 6 views to UV atlas
+  3. texture_project.py         -> back-project all 6 views
 
 Usage:
     python hi3dgen_full_pipeline.py <front_image> <out.glb> [tex_res=1024]
@@ -186,6 +197,57 @@ def step_mvadapter(image_path, mv_dir):
     return True
 
 
+def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
+    """NEW default texturing step (since 2026-05-17): SDXL turnaround sheet
+    on the Hi3DGen mesh depth maps. Generates 6 strict orthographic views
+    with photorealistic appearance, replacing the old multiview generators
+    (CRM/MV-Adapter/Z123) which hallucinate non-orthogonal angles."""
+    log(f'STEP 3 (sheet-v2): SDXL turnaround sheet -> {out_sheet_dir}')
+    t0 = time.time()
+    os.makedirs(out_sheet_dir, exist_ok=True)
+    script = os.path.join(SCRIPTS, 'sheet_render_v2.py')
+    cmd = [sys.executable, script, mesh_glb, image_path, out_sheet_dir]
+    if subject_hint:
+        cmd += ['--subject', subject_hint]
+    # Steps env override (default 30) — let UI set FABMESH_SHEET_STEPS=20
+    # for faster iteration.
+    steps = os.environ.get('FABMESH_SHEET_STEPS')
+    if steps:
+        cmd += ['--steps', steps]
+    rc = subprocess.run(cmd, timeout=900).returncode
+    if rc != 0:
+        log(f'sheet_render_v2 failed with rc={rc}')
+        return False
+    # Alias sheet_view_N.png -> view_N.png so bake_v3 finds them.
+    import shutil
+    for i in range(6):
+        src = os.path.join(out_sheet_dir, f'sheet_view_{i}.png')
+        dst = os.path.join(out_sheet_dir, f'view_{i}.png')
+        if os.path.isfile(src) and not os.path.isfile(dst):
+            shutil.copy(src, dst)
+    log(f'STEP 3 done in {time.time()-t0:.1f}s')
+    return True
+
+
+def step_bake_v3(mesh_glb, image_path, out_glb, sheet_dir, tex_res):
+    """NEW default bake (since 2026-05-17): nvdiffrast inv-UV projection
+    with weighted blend by normal·view, chart-aware NN fill, 8px gutter."""
+    log(f'STEP 4 (bake-v3): inv-UV bake atlas={tex_res} -> {out_glb}')
+    t0 = time.time()
+    script = os.path.join(SCRIPTS, 'hi3dgen_invuv_bake_v3.py')
+    rc = subprocess.run(
+        [sys.executable, script, mesh_glb, image_path, out_glb,
+         '--mv-dir', sheet_dir,
+         '--atlas-res', str(tex_res * 2),  # 2x of legacy tex_res for crispness
+         '--render-res', str(tex_res)],
+        timeout=600,
+    ).returncode
+    if rc != 0:
+        log(f'bake_v3 failed with rc={rc}')
+        sys.exit(3)
+    log(f'STEP 4 done in {time.time()-t0:.1f}s')
+
+
 def step_texture(mesh_glb, image_path, out_glb, tex_res, mv_dir=None):
     log(f'STEP 3: bake atlas via texture_project (res={tex_res}'
         f'{", multi-view" if mv_dir else ", single-view"})')
@@ -194,15 +256,15 @@ def step_texture(mesh_glb, image_path, out_glb, tex_res, mv_dir=None):
             mesh_glb, image_path, out_glb, str(tex_res)]
     if mv_dir:
         args += ['--multiview', mv_dir]
-    # Hi3DGen mesh has NO SF3D-style internal transforms, so skip the
-    # undo step in texture_project (otherwise it double-rotates the
-    # mesh and the front photo lands on the side/wings).
-    # Also disable texture_project's xatlas re-unwrap — step_unwrap()
-    # already produces a chart-merged atlas, so a second xatlas pass
-    # (with defaults) just re-atomizes it back into micro-islands and
-    # destroys the texture quality we just gained.
+    # Hi3DGen applies (x,y,z) -> (x,-z,y) in to_trimesh(transform_pose=True).
+    # texture_project's camera convention assumes the SF3D inverse (rot_x(90)
+    # @ rot_y(-90)) which doesn't match either. Tell texture_project to use
+    # the Hi3DGen-specific inverse transform so projections land on the
+    # correct faces.
+    # Also disable xatlas re-unwrap — step_unwrap() already produces a
+    # chart-merged atlas; a second xatlas pass would re-atomize it.
     env = {**os.environ,
-           'FABMESH_TEXPROJ_SKIP_UNDO': '1',
+           'FABMESH_TEXPROJ_HI3DGEN_UNDO': '1',
            'FABMESH_UV_REPACK': '0'}
     rc = subprocess.run(args, timeout=600, env=env).returncode
     if rc != 0:
@@ -237,13 +299,43 @@ def main():
     step_hi3dgen(image_path, raw_glb)
     print('LOCAL_HI3DGEN_PROGRESS: 55 step1_done', flush=True)
     step_unwrap(raw_glb, uv_glb)
-    print('LOCAL_HI3DGEN_PROGRESS: 65 unwrap_done', flush=True)
-    mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
-    print(f'LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_{"done" if mv_ok else "skipped"}',
-          flush=True)
-    step_texture(uv_glb, image_path, out_glb, tex_res,
-                 mv_dir=(mv_dir if mv_ok else None))
-    print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
+    print('LOCAL_HI3DGEN_PROGRESS: 60 unwrap_done', flush=True)
+
+    if os.environ.get('FABMESH_HI3DGEN_USE_LEGACY') == '1':
+        # Legacy path: multiview gen + texture_project.
+        mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
+        print(f'LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_{"done" if mv_ok else "skipped"}',
+              flush=True)
+        step_texture(uv_glb, image_path, out_glb, tex_res,
+                     mv_dir=(mv_dir if mv_ok else None))
+        print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
+    else:
+        # NEW default (2026-05-17): sheet runner v2 + bake v3 on Hi3DGen mesh.
+        sheet_dir = os.path.join(
+            os.path.dirname(image_path),
+            os.path.splitext(os.path.basename(image_path))[0] + '_sheet_v2')
+        # Subject hint helps SDXL — derive from a sibling prompt.txt if present.
+        subject_hint = ''
+        prompt_file = os.path.join(os.path.dirname(image_path), 'prompt.txt')
+        if os.path.isfile(prompt_file):
+            try:
+                with open(prompt_file, 'r', encoding='utf-8') as f:
+                    subject_hint = f.read().strip().split('\n')[0][:160]
+            except Exception:
+                pass
+        sheet_ok = step_sheet_v2(uv_glb, image_path, sheet_dir, subject_hint)
+        print(f'LOCAL_HI3DGEN_PROGRESS: 85 sheet_{"done" if sheet_ok else "failed"}',
+              flush=True)
+        if sheet_ok:
+            step_bake_v3(uv_glb, image_path, out_glb, sheet_dir, tex_res)
+            print('LOCAL_HI3DGEN_PROGRESS: 95 bake_done', flush=True)
+        else:
+            # Fallback to legacy path if sheet fails.
+            log('sheet-v2 failed, falling back to legacy texture_project')
+            mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
+            step_texture(uv_glb, image_path, out_glb, tex_res,
+                         mv_dir=(mv_dir if mv_ok else None))
+            print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done_fallback', flush=True)
     # Final 100% marker so Electron's progress mapper completes.
     print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')

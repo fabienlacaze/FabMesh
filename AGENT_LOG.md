@@ -10,6 +10,42 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-17 (late) — Pipeline E2E sheet-runner + bake v3 intégré comme défaut
+
+**Contexte**: la texturation via texture_project + multiview hallucinés
+(CRM/MV-Adapter/Z123) produisait des résultats patchy peu importe le
+sujet. MV-Adapter crash silencieux (cache_hidden_states filtré par
+diffusers 0.34), CRM hallucine le back, Z123 angles non-orthogonaux.
+
+**Solution adoptée**:
+1. **mv_render_from_mesh.py** (NOUVEAU) — render 6 depth maps STRICTEMENT
+   orthogonales depuis la mesh Hi3DGen via nvdiffrast inline. Angles
+   exactement contrôlés au degré près (azim 0/90/180/270, elev ±90).
+2. **sheet_render_v2.py** (NOUVEAU) — compose les 6 depth en sheet 3×2,
+   passe RealVisXL + dual ControlNet (Depth 0.7 + Canny 0.5) + IPAdapter
+   sur la photo source. Génère les 6 vues photoréalistes en UN appel SDXL
+   (cohérence native couleurs/style entre cellules). Steps 30, cfg 7.0,
+   ip_scale 0.55. Durée 100-180s selon GPU/RAM.
+3. **hi3dgen_invuv_bake_v3.py** (NOUVEAU) — bake nvdiffrast inv-UV
+   weighted-blend par |normal·view| + chart-aware NN fill (scipy
+   distance_transform_edt) + 8px gutter dilation. Runtime ~2s.
+
+**Test E2E sur voiture rouge**: ✅ Texture cohérente, identité
+préservée sous tous les angles, ~7 min total.
+
+**Test E2E sur crabe (sujet nouveau)**: ✅ Pinces, articulations,
+segments du céphalothorax, couleur rouge propre sous tous les angles.
+Démontre la généralisation à un sujet jamais vu auparavant.
+
+**Intégration**: `hi3dgen_full_pipeline.py` modifié — la nouvelle chaîne
+sheet-v2 + bake-v3 est le DÉFAUT. Le legacy (texture_project + MV gen)
+reste accessible via `FABMESH_HI3DGEN_USE_LEGACY=1`. Fallback automatique
+sur le legacy si sheet_render_v2 échoue.
+
+**Conclusion**: pipeline texture viable enfin pour Hi3DGen géométries.
+
+---
+
 ## 2026-05-17 — Mosaïque UV: décimation pre-xatlas + ChartOptions
 
 **Symptôme**: même après tous les fixes (blend stack, front p=1.0,
