@@ -595,13 +595,23 @@ async function renderProjectsGrid() {
   } else {
     empty.classList.add('hidden');
   }
+  // Multi-select state (persists across re-renders during this page view).
+  if (!state._selectedProjects) state._selectedProjects = new Set();
+  // Drop selections of projects that are no longer visible.
+  const visibleNames = new Set(visibleProjects.map(p => p.name));
+  for (const n of [...state._selectedProjects]) {
+    if (!visibleNames.has(n)) state._selectedProjects.delete(n);
+  }
+
   for (const p of visibleProjects) {
     const hasImage = p.images.length > 0;
     const hasMesh = p.meshes.length > 0;
     const hasRig = p.rigs.length > 0;
+    const isSelected = state._selectedProjects.has(p.name);
     const card = document.createElement('div');
-    card.className = 'project-card';
+    card.className = 'project-card' + (isSelected ? ' selected' : '');
     card.innerHTML = `
+      <button class="card-select-checkbox" title="Select project">&#10003;</button>
       <button class="card-delete-btn" title="Delete project">&#10005;</button>
       <div class="project-card-thumb">
         ${p.thumb
@@ -627,9 +637,29 @@ async function renderProjectsGrid() {
       if (r?.ok) await refreshProjectsPage();
       else alert('Delete failed: ' + (r?.error || 'unknown'));
     });
-    card.addEventListener('click', () => openProject(p));
+    card.querySelector('.card-select-checkbox').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state._selectedProjects.has(p.name)) state._selectedProjects.delete(p.name);
+      else state._selectedProjects.add(p.name);
+      renderProjectsBulkBar();
+      card.classList.toggle('selected');
+    });
+    card.addEventListener('click', () => {
+      // If any selection is active, clicks act as selection toggles instead
+      // of opening the project (lets the user select multiple without
+      // accidentally entering one).
+      if (state._selectedProjects.size > 0) {
+        if (state._selectedProjects.has(p.name)) state._selectedProjects.delete(p.name);
+        else state._selectedProjects.add(p.name);
+        renderProjectsBulkBar();
+        card.classList.toggle('selected');
+        return;
+      }
+      openProject(p);
+    });
     grid.appendChild(card);
   }
+  renderProjectsBulkBar();
   // Add the "+ New" card at the end
   const newCard = document.createElement('div');
   newCard.className = 'project-card new-card';
@@ -647,6 +677,49 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+function renderProjectsBulkBar() {
+  let bar = document.getElementById('projects-bulk-bar');
+  const selected = state._selectedProjects || new Set();
+  const count = selected.size;
+  if (count === 0) {
+    bar?.remove();
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'projects-bulk-bar';
+    bar.className = 'projects-bulk-bar';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = `
+    <span class="projects-bulk-bar-count">${count} project${count > 1 ? 's' : ''} selected</span>
+    <div class="projects-bulk-bar-actions">
+      <button id="bulk-clear">Clear</button>
+      <button id="bulk-delete" class="danger">Delete selected</button>
+    </div>
+  `;
+  bar.querySelector('#bulk-clear').addEventListener('click', () => {
+    state._selectedProjects.clear();
+    renderProjectsGrid();
+  });
+  bar.querySelector('#bulk-delete').addEventListener('click', async () => {
+    const names = [...state._selectedProjects];
+    if (!await customConfirm(
+        `Delete ${names.length} project${names.length > 1 ? 's' : ''} and all their files?\n\n${names.join('\n')}`,
+        'Delete selected projects')) return;
+    let ok = 0, fail = 0;
+    for (const name of names) {
+      try {
+        const r = await API.deleteProject({ projectName: name });
+        if (r?.ok) ok++; else fail++;
+      } catch (_) { fail++; }
+    }
+    state._selectedProjects.clear();
+    await refreshProjectsPage();
+    if (fail > 0) alert(`Deleted ${ok}, failed ${fail}`);
+  });
 }
 
 // ============================================================
@@ -6198,6 +6271,90 @@ function _atSetCameraView(view) {
   atState.controls.update();
 }
 document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openAlignTexture);
+
+// ============================================================
+// MATERIAL ADJUST MODAL
+// Sliders for brightness / saturation / contrast / emissive /
+// metallic / roughness on the selected mesh. Wraps
+// scripts/mesh_material_adjust.py via IPC.
+// ============================================================
+const MAT_DEFAULTS = {
+  brightness: 1.2, saturation: 1.0, contrast: 1.0,
+  emissive: 0.5,   metallic: 0.0,    roughness: 0.7,
+};
+
+function _matSetSliderLabel(id, value) {
+  const el = document.getElementById(`mat-${id}-val`);
+  if (el) el.textContent = Number(value).toFixed(2);
+}
+
+function _matBindSlider(id) {
+  const slider = document.getElementById(`mat-${id}`);
+  if (!slider) return;
+  slider.addEventListener('input', () => _matSetSliderLabel(id, slider.value));
+}
+
+function _matReadParams() {
+  return {
+    brightness: parseFloat(document.getElementById('mat-brightness').value),
+    saturation: parseFloat(document.getElementById('mat-saturation').value),
+    contrast:   parseFloat(document.getElementById('mat-contrast').value),
+    emissive:   parseFloat(document.getElementById('mat-emissive').value),
+    metallic:   parseFloat(document.getElementById('mat-metallic').value),
+    roughness:  parseFloat(document.getElementById('mat-roughness').value),
+  };
+}
+
+function _matWriteSliders(p) {
+  for (const k of Object.keys(p)) {
+    const s = document.getElementById(`mat-${k}`);
+    if (s) { s.value = p[k]; _matSetSliderLabel(k, p[k]); }
+  }
+}
+
+function openMaterialAdjust() {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) {
+    showToast('Pick a mesh first.', 'error'); return;
+  }
+  _matWriteSliders(MAT_DEFAULTS);
+  document.getElementById('modal-material-adjust').classList.remove('hidden');
+}
+
+function closeMaterialAdjust() {
+  document.getElementById('modal-material-adjust').classList.add('hidden');
+}
+
+// Bind sliders + buttons once.
+['brightness', 'saturation', 'contrast', 'emissive', 'metallic', 'roughness']
+  .forEach(_matBindSlider);
+document.getElementById('mat-reset-btn')?.addEventListener('click', () =>
+  _matWriteSliders(MAT_DEFAULTS));
+document.getElementById('mat-cancel-btn')?.addEventListener('click', closeMaterialAdjust);
+document.getElementById('mat-apply-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) {
+    showToast('Pick a mesh first.', 'error'); return;
+  }
+  const params = _matReadParams();
+  showToast('Applying material adjustments…', 'info', 2000);
+  try {
+    const r = await API.materialAdjust({
+      meshPath: p.selectedMeshPath,
+      ...params,
+    });
+    if (r?.success) {
+      showToast(`Material saved → ${r.filename}`, 'success');
+      closeMaterialAdjust();
+      populateWorkspace(p);
+    } else {
+      showToast('Material adjust failed: ' + (r?.error || 'unknown'), 'error', 5000);
+    }
+  } catch (e) {
+    showToast('Material adjust error: ' + e.message, 'error', 5000);
+  }
+});
+document.getElementById('ws-mesh-material-btn')?.addEventListener('click', openMaterialAdjust);
 document.getElementById('at-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-align-texture')?.classList.add('hidden');
 });

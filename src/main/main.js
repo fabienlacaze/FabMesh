@@ -4182,6 +4182,49 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   });
 });
 
+// Material adjust: wraps scripts/mesh_material_adjust.py for the
+// Manual Tools > Material slider modal in the renderer.
+ipcMain.handle('material-adjust', async (_event, {
+  meshPath, brightness, saturation, contrast,
+  emissive, metallic, roughness,
+}) => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_material_adjust.py');
+  const timestamp = Date.now();
+  const ext = path.extname(meshPath);
+  const base = path.basename(meshPath, ext);
+  const outPath = path.join(path.dirname(meshPath), `${base}_mat_${timestamp}${ext}`);
+  const args = [
+    script, meshPath, outPath,
+    '--brightness', String(brightness),
+    '--saturation', String(saturation),
+    '--contrast',   String(contrast),
+    '--emissive',   String(emissive),
+    '--metallic',   String(metallic),
+    '--roughness',  String(roughness),
+  ];
+  return new Promise((resolve) => {
+    execFile('python', args, {
+      timeout: 120000, maxBuffer: 10 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (stdout) log.info('material-adjust', stdout.trim());
+      if (error) {
+        log.error('material-adjust', error.message);
+        resolve({ success: false, error: error.message, stderr });
+      } else if (!fs.existsSync(outPath)) {
+        resolve({ success: false, error: 'Output file not created' });
+      } else {
+        const stats = fs.statSync(outPath);
+        resolve({
+          success: true,
+          newPath: outPath,
+          filename: path.basename(outPath),
+          size: stats.size,
+        });
+      }
+    });
+  });
+});
+
 // ============================================================
 // CAPTION IMAGE — BLIP describes the front photo (clothes, hair, etc.)
 // for back-view prompt enrichment. Output is added to the back-view
