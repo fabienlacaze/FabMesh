@@ -1413,17 +1413,17 @@ function showStep2BackImage(imgPath) {
 }
 
 // Multi-reference checkbox is only visible if a back photo has been
-// attached to the current project. Without it, multi-ref does nothing.
+// attached to the current project. Auto-checked when a back photo is
+// present (intent is clear — the user attached it precisely so TRELLIS-2
+// uses it). User can still uncheck manually before generation.
 function _ws3dMultiRefSync() {
   const row = document.getElementById('ws-trellis2-multiref-row');
   if (!row) return;
   const p = state.currentProject;
   const hasBack = !!(p && p.backImagePath);
   row.style.display = hasBack ? '' : 'none';
-  if (!hasBack) {
-    const cb = document.getElementById('ws-trellis2-multiref');
-    if (cb) cb.checked = false;
-  }
+  const cb = document.getElementById('ws-trellis2-multiref');
+  if (cb) cb.checked = hasBack;
 }
 document.getElementById('ws-3d-source-back-preview')?.addEventListener('click', async () => {
   const p = state.currentProject;
