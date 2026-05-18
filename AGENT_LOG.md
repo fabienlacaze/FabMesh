@@ -10,6 +10,56 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (breakthrough) — TRELLIS-2 Texturing MARCHE ⭐
+
+Après l'état des lieux + recherche SOTA, pivot de MVPaint vers TRELLIS-2
+Texturing (le user a rappelé qu'on avait fix kaolin sm_120 hier).
+
+**5 blockers résolus** pour faire marcher `Trellis2TexturingPipeline` :
+
+1. **transformers 4.46 sans `DINOv3ViTModel`** → upgrade `transformers>=4.55`
+   dans le venv TRELLIS2_win → 5.8.1 installé. Garde flash_attn 2.8.2
+   intact. Pas d'impact sur les autres venvs.
+
+2. **`briaai/RMBG-2.0` gated (license commerciale restreinte)** →
+   patch `~/.cache/huggingface/.../texturing_pipeline.json` :
+   `s|briaai/RMBG-2.0|ZhengPeng7/BiRefNet|g` (BiRefNet Apache 2.0 OK).
+
+3. **BiRefNet fp16/fp32 type mismatch** → bypass : pré-rembg via
+   `rembg` Apache, puis `pipeline.rembg_model = None`. Le bridge
+   pre-process l'image RGBA avant TRELLIS-2.
+
+4. **DINOv3ViTModel API change** (transformers 5.x : `model.layer` est
+   maintenant `model.model.layer`). Patch
+   `external/TRELLIS2_win/src/trellis2/modules/image_feature_extractor.py:86`
+   avec fallback `hasattr(self.model, 'model')`.
+
+5. **Triton DLL bloqué par Smart App Control Windows** → env vars :
+   - `TORCHDYNAMO_DISABLE=1`
+   - `TORCHINDUCTOR_USE_TRITON=0`
+   - `TRANSFORMERS_ATTN_IMPLEMENTATION=eager`
+   Pas d'impact qualité, juste plus lent que JIT-compilé.
+
+**Résultat king (15K faces Hi3DGen)** : TRELLIS-2 produit un mesh PBR
+texturé en **85.8s** total :
+- Load pipeline 4B params : 25s
+- Sampling 12 steps SLat : 7.7s
+- Texturing total : 55.7s
+- Export GLB : 5s
+
+**Qualité** : SOTA. License MIT (full commercial OK partout incl EU).
+Native 3D (pas d'UV seams). Compatible Blackwell sm_120 (kaolin compilé
+hier + ROPE Blackwell fix dans TRELLIS2_win).
+
+**Script bridge** : `scripts/trellis2_texturing_bridge.py` (CLI).
+Doit être invoqué avec le python du venv TRELLIS2_win.
+
+**Verdict** : remplace `bake_v3` comme moteur de texture par défaut
+pour Hi3DGen. Pipeline E2E devient : RealVis (image) → Hi3DGen (geom)
+→ TRELLIS-2 Texturing (PBR texture native).
+
+---
+
 ## 2026-05-18 (mid-morning) — État des lieux + recherche SOTA texturing
 
 Après 12+h de tuning du pipeline Hi3DGen + sheet runner + bake_v3, la
