@@ -1,24 +1,17 @@
-"""Hi3DGen full pipeline: image -> mesh + UV + multi-view textured atlas.
+"""Hi3DGen full pipeline: image -> mesh + native PBR texture.
 
-Hi3DGen produces high-quality bare geometry (no UVs, no texture).
-This wrapper adds the missing steps so the output is a textured GLB.
+DEFAULT PATH (TRELLIS-2 Texturing, since 2026-05-18):
+  1. local_hi3dgen_bridge.py            -> raw mesh
+  2. trellis2_texturing_bridge.py       -> microsoft/TRELLIS.2-4B native
+                                           3D PBR texture (MIT license,
+                                           EU-safe, Blackwell-compatible)
+                                           No UV unwrap needed — texture
+                                           is generated directly in the
+                                           mesh's 3D space.
 
-DEFAULT PATH (FabMesh sheet runner v2, since 2026-05-17):
-  1. local_hi3dgen_bridge.py        -> raw mesh
-  2. xatlas decimate + UV unwrap    -> mesh 15K + UV
-  3. sheet_render_v2.py             -> render 6 mesh depth maps
-                                       + SDXL ControlNet Depth+Canny
-                                       + IPAdapter ref photo
-                                       -> 6 strict orthographic views
-  4. hi3dgen_invuv_bake_v3.py       -> nvdiffrast inv-UV bake
-                                       (weighted blend, chart-aware NN fill,
-                                        8px gutter padding) -> textured GLB
-
-LEGACY PATH (FABMESH_HI3DGEN_USE_LEGACY=1):
-  1. local_hi3dgen_bridge.py
-  2. xatlas UV unwrap
-  2.5 multiview_mvadapter_gen.py -> 6 views into <image_stem>_multiview/
-  3. texture_project.py         -> back-project all 6 views
+ALT PATHS (set FABMESH_HI3DGEN_TEX_ENGINE):
+  - 'sheet_bake' (2026-05-17 chain): xatlas + sheet_render_v2 + bake_v3
+  - 'legacy'    : multiview_gen + texture_project
 
 Usage:
     python hi3dgen_full_pipeline.py <front_image> <out.glb> [tex_res=1024]
@@ -211,11 +204,17 @@ def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
     """NEW default texturing step (since 2026-05-17): SDXL turnaround sheet
     on the Hi3DGen mesh depth maps. Generates 6 strict orthographic views
     with photorealistic appearance, replacing the old multiview generators
-    (CRM/MV-Adapter/Z123) which hallucinate non-orthogonal angles."""
-    log(f'STEP 3 (sheet-v2): SDXL turnaround sheet -> {out_sheet_dir}')
+    (CRM/MV-Adapter/Z123) which hallucinate non-orthogonal angles.
+
+    Uses sheet_render_v3.py by default (single Depth ControlNet) — lighter
+    RAM (~50% vs dual Depth+Canny) and no Canny → no scale/hatching
+    artifacts. Set FABMESH_SHEET_VARIANT=v2 to revert to dual ControlNet."""
+    variant = os.environ.get('FABMESH_SHEET_VARIANT', 'v3')
+    sheet_script = f'sheet_render_{variant}.py'
+    log(f'STEP 3 (sheet-{variant}): SDXL turnaround sheet -> {out_sheet_dir}')
     t0 = time.time()
     os.makedirs(out_sheet_dir, exist_ok=True)
-    script = os.path.join(SCRIPTS, 'sheet_render_v2.py')
+    script = os.path.join(SCRIPTS, sheet_script)
     cmd = [sys.executable, script, mesh_glb, image_path, out_sheet_dir]
     if subject_hint:
         cmd += ['--subject', subject_hint]
@@ -243,12 +242,43 @@ def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
     return True
 
 
+def step_trellis2_texturing(mesh_glb, image_path, out_glb):
+    """NEW default texture engine (since 2026-05-18): TRELLIS-2-4B native
+    3D PBR texturing. Replaces the brittle Hi3DGen+xatlas+sheet+bake
+    chain (~1000 chart fragmentation) with microsoft/TRELLIS.2-4B —
+    SOTA native-3D texturing, MIT license, EU-safe, Blackwell OK.
+
+    No UV unwrap, no multi-view gen, no bake. Generates the texture
+    directly in the mesh's 3D space via sparse voxels + flow matching.
+
+    Must run with the TRELLIS2_win venv python (flash_attn + DINOv3).
+    """
+    log(f'STEP 3 (TRELLIS-2 Texturing): native 3D PBR -> {out_glb}')
+    t0 = time.time()
+    bridge = os.path.join(SCRIPTS, 'trellis2_texturing_bridge.py')
+    env = {**os.environ,
+           'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
+           # Triton DLL blocked by Smart App Control on Windows.
+           'TORCHDYNAMO_DISABLE': '1',
+           'TORCHINDUCTOR_USE_TRITON': '0',
+           'TRANSFORMERS_ATTN_IMPLEMENTATION': 'eager'}
+    rc = subprocess.run(
+        [TRELLIS2_VENV_PY, bridge, mesh_glb, image_path, out_glb],
+        timeout=900, env=env,
+    ).returncode
+    if rc != 0:
+        log(f'TRELLIS-2 texturing failed with rc={rc}')
+        return False
+    log(f'STEP 3 done in {time.time()-t0:.1f}s')
+    return True
+
+
 def step_bake_v3(mesh_glb, image_path, out_glb, sheet_dir, tex_res):
-    """NEW default bake (since 2026-05-17): nvdiffrast inv-UV projection
-    with weighted blend by normal·view, chart-aware NN fill, 8px gutter.
-    Atlas is 2x of legacy tex_res (e.g. 1024→2048) — 4x produced
-    ~10 min bake on ~2000-chart Hi3DGen mesh (chart-aware NN is O(charts)
-    × O(distance_transform_edt) which scales poorly with atlas size)."""
+    """LEGACY bake (still available via FABMESH_HI3DGEN_USE_LEGACY=1).
+    nvdiffrast inv-UV projection with weighted blend, chart-aware NN
+    fill, 8px gutter. Plafonne en qualité à cause xatlas fragmentation
+    sur Hi3DGen meshes. Remplacé par TRELLIS-2 Texturing depuis
+    2026-05-18."""
     atlas_res = tex_res * 2
     log(f'STEP 4 (bake-v3): inv-UV bake atlas={atlas_res} -> {out_glb}')
     t0 = time.time()
@@ -316,23 +346,33 @@ def main():
     t0 = time.time()
     step_hi3dgen(image_path, raw_glb)
     print('LOCAL_HI3DGEN_PROGRESS: 55 step1_done', flush=True)
-    step_unwrap(raw_glb, uv_glb)
-    print('LOCAL_HI3DGEN_PROGRESS: 60 unwrap_done', flush=True)
 
-    if os.environ.get('FABMESH_HI3DGEN_USE_LEGACY') == '1':
-        # Legacy path: multiview gen + texture_project.
-        mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
-        print(f'LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_{"done" if mv_ok else "skipped"}',
+    # Engine selector (default since 2026-05-18: TRELLIS-2-4B native PBR).
+    # Override with FABMESH_HI3DGEN_TEX_ENGINE=
+    #   - 'trellis2'  : native 3D PBR, MIT, no UV (default)
+    #   - 'sheet_bake': sheet_render_v2 + bake_v3 (2026-05-17 chain)
+    #   - 'legacy'    : multiview_gen + texture_project (pre-2026-05-17)
+    tex_engine = os.environ.get('FABMESH_HI3DGEN_TEX_ENGINE', 'trellis2')
+
+    if tex_engine == 'trellis2':
+        # NEW default (2026-05-18): TRELLIS-2-4B native 3D PBR. No UV
+        # unwrap needed — TRELLIS-2 generates the texture directly in
+        # the mesh's 3D space.
+        print('LOCAL_HI3DGEN_PROGRESS: 65 trellis2_start', flush=True)
+        ok = step_trellis2_texturing(raw_glb, image_path, out_glb)
+        print(f'LOCAL_HI3DGEN_PROGRESS: 95 trellis2_{"done" if ok else "failed"}',
               flush=True)
-        step_texture(uv_glb, image_path, out_glb, tex_res,
-                     mv_dir=(mv_dir if mv_ok else None))
-        print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
-    else:
-        # NEW default (2026-05-17): sheet runner v2 + bake v3 on Hi3DGen mesh.
+        if not ok:
+            log('TRELLIS-2 failed, falling back to sheet_bake')
+            tex_engine = 'sheet_bake'  # auto-fallback
+
+    if tex_engine == 'sheet_bake':
+        # 2026-05-17 chain: sheet runner v2 + bake v3 (works but plafonne).
+        step_unwrap(raw_glb, uv_glb)
+        print('LOCAL_HI3DGEN_PROGRESS: 60 unwrap_done', flush=True)
         sheet_dir = os.path.join(
             os.path.dirname(image_path),
             os.path.splitext(os.path.basename(image_path))[0] + '_sheet_v2')
-        # Subject hint helps SDXL — derive from a sibling prompt.txt if present.
         subject_hint = ''
         prompt_file = os.path.join(os.path.dirname(image_path), 'prompt.txt')
         if os.path.isfile(prompt_file):
@@ -348,12 +388,17 @@ def main():
             step_bake_v3(uv_glb, image_path, out_glb, sheet_dir, tex_res)
             print('LOCAL_HI3DGEN_PROGRESS: 95 bake_done', flush=True)
         else:
-            # Fallback to legacy path if sheet fails.
-            log('sheet-v2 failed, falling back to legacy texture_project')
-            mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
-            step_texture(uv_glb, image_path, out_glb, tex_res,
-                         mv_dir=(mv_dir if mv_ok else None))
-            print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done_fallback', flush=True)
+            tex_engine = 'legacy'  # fallback again
+
+    if tex_engine == 'legacy':
+        # Legacy: multiview + texture_project (pre-2026-05-17).
+        step_unwrap(raw_glb, uv_glb)
+        mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
+        print(f'LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_{"done" if mv_ok else "skipped"}',
+              flush=True)
+        step_texture(uv_glb, image_path, out_glb, tex_res,
+                     mv_dir=(mv_dir if mv_ok else None))
+        print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
     # Final 100% marker so Electron's progress mapper completes.
     print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')
