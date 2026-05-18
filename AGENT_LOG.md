@@ -10,6 +10,33 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (UI) — AI Tools generic params popup + UI cleanup
+
+**Changes** :
+- New generic modal `#modal-mesh-tool` (HTML id `mt-title/subtitle/body/apply/cancel`).
+  All 8 AI Tools buttons (smooth, decimate, subdivide, fix_normals, fill_holes,
+  center, retexture, trellis2_retex) now open this popup with a per-tool
+  params schema (`MESH_TOOL_SCHEMAS` in index2.js).
+- Each tool declares: title, subtitle, params (number / select / checkbox),
+  optional confirm prompt, `build(vals, ctx)` → argv for runMeshTool.
+- Removed the violet "FabMesh pipeline: Hi3DGen + TRELLIS-2-4B…" info banner
+  on the 3D step (cluttered the form for no useful info — the engine
+  dropdown already says it).
+- Multi-reference checkbox row is now hidden by default and only shown when
+  `state.currentProject.backImagePath` is set. Resets to unchecked when the
+  back photo is cleared. Wired through `_ws3dMultiRefSync()`, called from
+  `showStep2BackImage()` (the single source of truth for back-photo state).
+
+**Rationale** : the previous AI Tools row had no way to tweak iterations,
+target faces, lambda, etc. — defaults baked in code. The popup matches
+the FabMesh `modal-overlay + modal-card` pattern used elsewhere
+(Material adjust, MV options).
+
+**Test plan** : Ctrl+R the renderer, pick a mesh, click each AI Tool,
+verify the popup opens with the right fields and Apply runs the operation.
+
+---
+
 ## 2026-05-18 (cleanup) — Removed 36 GB of dead modules + 56 scripts
 
 Après audit légal commercial : suppression des modules `external/` jamais

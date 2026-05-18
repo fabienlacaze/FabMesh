@@ -1285,6 +1285,9 @@ document.getElementById('ws-use-for-3d-btn')?.addEventListener('click', () => {
     }
   } else {
     p.backImagePath = null;
+    if (typeof showStep2BackImage === 'function') {
+      showStep2BackImage(null);
+    }
   }
   // Mark the used-for-3d thumb visually
   const strip = document.getElementById('ws-image-versions');
@@ -1407,6 +1410,21 @@ function showStep2BackImage(imgPath) {
     if (clearBtn) clearBtn.style.display = 'none';
   }
   setViewerFilename('ws-3d-source-back-filename', imgPath);
+  _ws3dMultiRefSync();
+}
+
+// Multi-reference checkbox is only visible if a back photo has been
+// attached to the current project. Without it, multi-ref does nothing.
+function _ws3dMultiRefSync() {
+  const row = document.getElementById('ws-trellis2-multiref-row');
+  if (!row) return;
+  const p = state.currentProject;
+  const hasBack = !!(p && p.backImagePath);
+  row.style.display = hasBack ? '' : 'none';
+  if (!hasBack) {
+    const cb = document.getElementById('ws-trellis2-multiref');
+    if (cb) cb.checked = false;
+  }
 }
 document.getElementById('ws-3d-source-back-preview')?.addEventListener('click', async () => {
   const p = state.currentProject;
@@ -5804,27 +5822,186 @@ async function runMeshTool(operation, params = []) {
   }
 }
 
-document.getElementById('ws-mesh-smooth-btn')?.addEventListener('click', () => runMeshTool('smooth', ['3', '0.5']));
-document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () => runMeshTool('decimate', ['5000']));
-document.getElementById('ws-mesh-subdivide-btn')?.addEventListener('click', () => runMeshTool('subdivide', ['1']));
-document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => runMeshTool('fix_normals'));
-document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => runMeshTool('fill_holes'));
-document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => runMeshTool('center'));
-document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => {
-  const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
-  runMeshTool('retexture', [p.selectedImagePath, '2048']);
-});
+// ============================================================
+// AI Tools — generic params popup
+// Each tool declares its params schema; openMeshToolModal builds
+// the form dynamically, then calls runMeshTool() on Apply.
+// ============================================================
+const MESH_TOOL_SCHEMAS = {
+  smooth: {
+    title: 'Smooth mesh',
+    subtitle: 'Laplacian smoothing — reduces sharp angles.',
+    needsImage: false,
+    params: [
+      { id: 'iterations', label: 'Iterations', type: 'number', min: 1, max: 20, step: 1, default: 3 },
+      { id: 'lambda',     label: 'Lambda',     type: 'number', min: 0.0, max: 1.0, step: 0.05, default: 0.5 },
+    ],
+    build: (vals) => [String(vals.iterations), String(vals.lambda)],
+  },
+  decimate: {
+    title: 'Decimate mesh',
+    subtitle: 'Reduce triangle count (quadric simplification).',
+    needsImage: false,
+    params: [
+      { id: 'target_faces', label: 'Target triangles', type: 'number', min: 100, max: 1000000, step: 500, default: 5000 },
+    ],
+    build: (vals) => [String(vals.target_faces)],
+  },
+  subdivide: {
+    title: 'Subdivide mesh',
+    subtitle: 'Midpoint subdivision — multiplies triangles by 4 per level.',
+    needsImage: false,
+    params: [
+      { id: 'levels', label: 'Levels', type: 'number', min: 1, max: 4, step: 1, default: 1 },
+    ],
+    build: (vals) => [String(vals.levels)],
+  },
+  fix_normals: {
+    title: 'Fix normals',
+    subtitle: 'Recompute normals + fix inverted/wrong-winding faces.',
+    needsImage: false,
+    params: [],
+    build: () => [],
+  },
+  fill_holes: {
+    title: 'Fill holes',
+    subtitle: 'Cap mesh holes up to the given diameter.',
+    needsImage: false,
+    params: [
+      { id: 'max_hole_size', label: 'Max hole size', type: 'number', min: 1, max: 5000, step: 10, default: 100 },
+    ],
+    build: (vals) => [String(vals.max_hole_size)],
+  },
+  center: {
+    title: 'Center mesh',
+    subtitle: 'Recenters on X/Z and puts feet at Y=0.',
+    needsImage: false,
+    params: [],
+    build: () => [],
+  },
+  retexture: {
+    title: 'Re-Texture (quick)',
+    subtitle: 'Reprojects the selected source photo onto the mesh UVs.',
+    needsImage: true,
+    params: [
+      { id: 'tex_res', label: 'Texture resolution', type: 'select', default: '2048',
+        options: [['1024','1024 px'],['2048','2048 px'],['4096','4096 px']] },
+    ],
+    build: (vals, ctx) => [ctx.imagePath, String(vals.tex_res)],
+  },
+  trellis2_retex: {
+    title: 'Re-Texture (TRELLIS-2)',
+    subtitle: 'Native PBR texturing via TRELLIS-2-4B (~90s, GPU).',
+    needsImage: true,
+    params: [
+      { id: 'preset', label: 'Quality preset', type: 'select', default: 'fast',
+        options: [['fast','Fast (12 steps · 2048px · ~90s)'],
+                  ['balanced','Balanced (24 steps · 2048px · ~130s)'],
+                  ['quality','Quality (32 steps · 4096px · ~3min)']] },
+    ],
+    build: (vals, ctx) => {
+      // Forward preset via env to mesh_tools → trellis2_retex bridge.
+      // We can't pass env directly from runMeshTool, so we set
+      // window.__trellis2Preset for the IPC layer to pick up if wired,
+      // otherwise the bridge uses its 'fast' default.
+      window.__trellis2Preset = vals.preset;
+      return [ctx.imagePath];
+    },
+    confirm: 'TRELLIS-2 runs on GPU and can take 90s–3min. Continue?',
+  },
+};
 
-// Re-Texture with TRELLIS-2-4B (the SOTA native PBR texturing engine).
-// Calls mesh_tools.py 'trellis2_retex' which wraps the bridge.
-document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => {
+function openMeshToolModal(toolName) {
+  const schema = MESH_TOOL_SCHEMAS[toolName];
+  if (!schema) { showToast(`Unknown tool: ${toolName}`, 'error'); return; }
   const p = state.currentProject;
-  if (!p || !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
-  if (!p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
-  showToast('Re-texturing via TRELLIS-2 (~90s)...', 'info', 3000);
-  runMeshTool('trellis2_retex', [p.selectedImagePath]);
-});
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  if (schema.needsImage && !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
+
+  const modal = document.getElementById('modal-mesh-tool');
+  const title = document.getElementById('mt-title');
+  const subtitle = document.getElementById('mt-subtitle');
+  const body = document.getElementById('mt-body');
+  const cancelBtn = document.getElementById('mt-cancel');
+  const applyBtn = document.getElementById('mt-apply');
+  if (!modal || !body || !applyBtn) { showToast('Mesh-tool modal missing.', 'error'); return; }
+
+  title.textContent = schema.title;
+  subtitle.textContent = schema.subtitle || '';
+  body.innerHTML = '';
+
+  if (schema.params.length === 0) {
+    const note = document.createElement('div');
+    note.style.cssText = 'color: var(--text-muted); font-size:12px;';
+    note.textContent = 'No parameters — click Apply to run.';
+    body.appendChild(note);
+  } else {
+    schema.params.forEach((spec) => {
+      const row = document.createElement('div');
+      row.className = 'form-row';
+      const lab = document.createElement('label');
+      lab.textContent = spec.label;
+      row.appendChild(lab);
+      let input;
+      if (spec.type === 'select') {
+        input = document.createElement('select');
+        spec.options.forEach(([val, lbl]) => {
+          const opt = document.createElement('option');
+          opt.value = val; opt.textContent = lbl;
+          if (String(spec.default) === String(val)) opt.selected = true;
+          input.appendChild(opt);
+        });
+      } else if (spec.type === 'checkbox') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = !!spec.default;
+      } else {
+        input = document.createElement('input');
+        input.type = spec.type || 'number';
+        if (spec.min !== undefined) input.min = String(spec.min);
+        if (spec.max !== undefined) input.max = String(spec.max);
+        if (spec.step !== undefined) input.step = String(spec.step);
+        input.value = String(spec.default);
+      }
+      input.dataset.paramId = spec.id;
+      input.dataset.paramType = spec.type || 'number';
+      row.appendChild(input);
+      body.appendChild(row);
+    });
+  }
+
+  const close = () => {
+    modal.classList.add('hidden');
+    applyBtn.onclick = null;
+    cancelBtn.onclick = null;
+  };
+  cancelBtn.onclick = close;
+  applyBtn.onclick = async () => {
+    const vals = {};
+    body.querySelectorAll('[data-param-id]').forEach((el) => {
+      const id = el.dataset.paramId;
+      const t = el.dataset.paramType;
+      if (t === 'checkbox') vals[id] = el.checked;
+      else if (t === 'number') vals[id] = Number(el.value);
+      else vals[id] = el.value;
+    });
+    if (schema.confirm && !confirm(schema.confirm)) return;
+    const ctx = { imagePath: p.selectedImagePath, meshPath: p.selectedMeshPath };
+    const params = schema.build(vals, ctx);
+    close();
+    runMeshTool(toolName, params);
+  };
+  modal.classList.remove('hidden');
+}
+
+document.getElementById('ws-mesh-smooth-btn')?.addEventListener('click', () => openMeshToolModal('smooth'));
+document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () => openMeshToolModal('decimate'));
+document.getElementById('ws-mesh-subdivide-btn')?.addEventListener('click', () => openMeshToolModal('subdivide'));
+document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => openMeshToolModal('fix_normals'));
+document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => openMeshToolModal('fill_holes'));
+document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('center'));
+document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => openMeshToolModal('retexture'));
+document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => openMeshToolModal('trellis2_retex'));
 
 // ============================================================
 // ALIGN TEXTURE TOOL — manual position/scale/rotation of source

@@ -288,10 +288,6 @@
               </summary>
               <div class="stage-body stage-create-with-source">
                 <div class="stage-create-form">
-                  <!-- TRELLIS-2 pipeline info banner -->
-                  <div style="background: rgba(168,85,247,0.08); border:1px solid rgba(168,85,247,0.3); border-radius:5px; padding:8px 10px; margin-bottom:10px; font-size:11px; color:#cbb7e6;">
-                    ⚡ <strong>FabMesh pipeline</strong>: Hi3DGen (mesh) + TRELLIS-2-4B (native PBR texture). Tout local · MIT/Apache · commercialisable.
-                  </div>
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-3d-engine">
@@ -356,10 +352,10 @@
                         <option value="quality">Quality (32 steps · 4096px · ~3min)</option>
                       </select>
                     </div>
-                    <div class="form-row check-row" style="margin-top:6px;">
+                    <div class="form-row check-row" id="ws-trellis2-multiref-row" style="margin-top:6px; display:none;">
                       <label class="inline-check" style="font-size:11px;">
                         <input type="checkbox" id="ws-trellis2-multiref" />
-                        Multi-reference (use front + back photo if available)
+                        Multi-reference (use front + back photo)
                       </label>
                     </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
@@ -887,6 +883,23 @@
         <div class="modal-actions">
           <button class="ghost-btn" id="mv-opt-cancel">Cancel</button>
           <button class="primary-btn" id="mv-opt-start">Start</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         MESH TOOL PARAMS MODAL
+         Generic popup for all AI Tools buttons (Smooth, Decimate, etc.).
+         Title + dynamic params built by openMeshToolModal() in JS.
+         ============================================================ -->
+    <div id="modal-mesh-tool" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width:480px;">
+        <h2 id="mt-title">Mesh tool</h2>
+        <p id="mt-subtitle" class="modal-subtitle"></p>
+        <div id="mt-body" style="display:flex; flex-direction:column; gap:12px; margin:14px 0;"></div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="mt-cancel">Cancel</button>
+          <button class="primary-btn" id="mt-apply">Apply</button>
         </div>
       </div>
     </div>
