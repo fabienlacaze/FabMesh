@@ -10,6 +10,44 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (legal phase 4b) — Kaolin shim fix: o_voxel/postprocess.py
+
+**Bug** : après le commit be93a10 (phase 4 Kaolin), certains meshes
+(velociraptor, enfant_americain) sortaient avec une texture sombre /
+uniforme, alors que d'autres (rat, leopard, baleine, voiture_rouge)
+marchaient parfaitement.
+
+**Diagnostic** : un DEUXIÈME module dans la venv TRELLIS-2 importe
+nvdiffrast — `o_voxel/postprocess.py` (un wheel installé par TRELLIS-2,
+"All about voxel" par Jianfeng Xiang). Le `pip uninstall nvdiffrast`
+de la phase 4 a cassé son import top-level. Le subprocess plantait
+silencieusement, le pipeline tombait en fallback `texture_project`
+(single-view), d'où la texture sombre.
+
+**Pourquoi certains meshes ont marché** : les meshes "OK" avaient été
+texturés AVANT le commit be93a10. Les meshes générés APRÈS échouaient
+tous au texturing TRELLIS-2 et utilisaient le fallback.
+
+**Fix** : patcher aussi `o_voxel/postprocess.py` (3 lignes : remplacer
+`import nvdiffrast.torch as dr` par le même bloc conditionnel qui appelle
+le shim Kaolin). Le shim est importable depuis n'importe quel module
+puisque `trellis2/` est dans le sys.path de la venv.
+
+**Validation** : test manuel sur velociraptor — pipeline complet en
+**47.8s** (texturing 14.7s sur Kaolin). Plus de fallback, plus de
+plantage.
+
+**Patch propre, zéro plagiat** : `o_voxel/postprocess.py` est modifié
+**localement dans la venv** (pas redistribué dans le zip release puisque
+le packaging stratégie est "first-run installs"). Le code shim utilisé
+est 100% FabMesh + appel à `kaolin.render.mesh.rasterize` (Apache 2.0).
+
+**Mise à jour** : `scripts/install_kaolin_shim.py` étendu pour patcher
+les deux fichiers (trellis2_texturing.py + o_voxel/postprocess.py) avec
+backup + uninstall propres.
+
+---
+
 ## 2026-05-18 (legal phase 4) — nvdiffrast → Kaolin shim (commercial-safe)
 
 **LE BLOQUANT FINAL EST LEVÉ.** TRELLIS-2 ne dépend plus de nvdiffrast.
