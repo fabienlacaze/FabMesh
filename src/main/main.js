@@ -1750,85 +1750,16 @@ ipcMain.handle('calib-v3', async (event, opts = {}) => {
   });
 });
 
+// calib-tiered and calib-diagnose IPC handlers removed in 2026-05-18 legal
+// cleanup — their Python scripts (_calib_tiered.py, _calib_diagnose.py) were
+// never in the repo, so the handlers had no implementation. calib-v3 above
+// is the live calibration path.
 ipcMain.handle('calib-tiered', async () => {
-  const script = path.join(__dirname, '..', '..', 'scripts', '_calib_tiered.py');
-  return new Promise((resolve) => {
-    _calibCancelFlag = false;
-    const proc = execFile('python', [script], {
-      timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
-      cwd: path.join(__dirname, '..', '..'),
-    }, (error, stdout, stderr) => {
-      _calibDiagnoseProc = null;
-      if (error) {
-        const cancelled = _calibCancelFlag || error.killed ||
-          (error.code === null && error.signal) ||
-          /taskkill|STATUS_CONTROL_C_EXIT|terminated/i.test(error.message || '');
-        _calibCancelFlag = false;
-        resolve({ success: false, cancelled,
-                  error: cancelled ? 'cancelled by user' : error.message,
-                  stderr: (stderr || '').slice(-800) });
-        return;
-      }
-      const m = (stdout || '').match(/TIERED_RESULT:\s*(\{[^\n]+\})/);
-      if (!m) return resolve({ success: false, error: 'no TIERED_RESULT line' });
-      try { resolve({ success: true, result: JSON.parse(m[1]) }); }
-      catch (e) { resolve({ success: false, error: e.message }); }
-    });
-    _calibDiagnoseProc = proc;
-    proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
-    proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
-  });
+  return { success: false, error: 'calib-tiered removed — use calib-v3' };
 });
 
-ipcMain.handle('calib-diagnose', async (event, { engine = 'sf3d' } = {}) => {
-  const script = path.join(__dirname, '..', '..', 'scripts', '_calib_diagnose.py');
-  return new Promise((resolve) => {
-    _calibCancelFlag = false;
-    const proc = execFile('python', [script, '--engine', String(engine)], {
-      timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
-      cwd: path.join(__dirname, '..', '..'),
-    }, (error, stdout, stderr) => {
-      _calibDiagnoseProc = null;
-      if (error) {
-        const cancelled = _calibCancelFlag || error.killed ||
-                          (error.code === null && error.signal) ||
-                          /taskkill|STATUS_CONTROL_C_EXIT|terminated/i.test(error.message || '');
-        _calibCancelFlag = false;
-        resolve({
-          success: false,
-          cancelled,
-          error: cancelled ? 'cancelled by user' : error.message,
-          stderr: (stderr || '').slice(-500)
-        });
-        return;
-      }
-      // The Python script prints a DIAGNOSE_JSON: {...} line at the end
-      const m = (stdout || '').match(/DIAGNOSE_JSON:\s*(\{[^\n]+\})/);
-      if (!m) { resolve({ success: false, error: 'no DIAGNOSE_JSON line' }); return; }
-      try {
-        const summary = JSON.parse(m[1]);
-        // Also load each stage's details for in-app rendering
-        const reportDir = summary.report_dir;
-        const readOpt = (fn) => {
-          try { return JSON.parse(fs.readFileSync(path.join(reportDir, fn), 'utf-8')); }
-          catch (e) { return null; }
-        };
-        resolve({
-          success: true,
-          summary,
-          stage1: readOpt('stage1_sf3d.json'),
-          stage2: readOpt('stage2_mv.json'),
-          stage3: readOpt('stage3_projected.json'),
-          verdict: readOpt('verdict.json'),
-        });
-      } catch (e) { resolve({ success: false, error: e.message }); }
-    });
-    _calibDiagnoseProc = proc;
-    proc.stdout?.on('data', d => safeSend('calib-progress', d.toString()));
-    proc.stderr?.on('data', d => safeSend('calib-progress', '[stderr] ' + d.toString()));
-  });
+ipcMain.handle('calib-diagnose', async (_event, { engine = 'sf3d' } = {}) => {
+  return { success: false, error: 'calib-diagnose removed — use calib-v3' };
 });
 
 ipcMain.handle('calib-read-log', (event, { lines = 500 } = {}) => {

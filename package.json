@@ -1,8 +1,10 @@
 {
   "name": "fabmesh",
   "version": "1.0.0",
-  "description": "FabMesh - 3D mesh generator using Claude Code + Blender",
+  "description": "FabMesh — image-to-3D mesh generator with local AI (Hi3DGen + TRELLIS-2 + Stable Fast 3D).",
   "main": "src/main/main.js",
+  "author": "Fabien Lacaze",
+  "license": "SEE LICENSE IN LICENSE.txt",
   "scripts": {
     "start": "set ELECTRON_RUN_AS_NODE= && electron .",
     "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",
