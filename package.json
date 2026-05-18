@@ -9,6 +9,7 @@
     "launch": "start.bat"
   },
   "dependencies": {
+    "@google/model-viewer": "^4.2.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

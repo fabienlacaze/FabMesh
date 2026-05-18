@@ -184,6 +184,20 @@ def project_texture(mesh_path, source_image_path, output_path, tex_res=1024,
     if os.environ.get('FABMESH_TEXPROJ_SKIP_UNDO') == '1':
         R_undo = np.eye(3)
         log('FABMESH_TEXPROJ_SKIP_UNDO=1: skipping SF3D undo transform')
+    elif os.environ.get('FABMESH_TEXPROJ_HI3DGEN_UNDO') == '1':
+        # Hi3DGen's to_trimesh(transform_pose=True) applies (x,y,z) -> (x,-z,y).
+        # The inverse R_undo = [[1,0,0],[0,0,1],[0,-1,0]] which fixes front/back
+        # but left the Y axis flipped (head appeared at feet on humanoid meshes).
+        # Composing with an extra Y-flip aligns both head/feet AND front/back.
+        # Equivalent to Rx(180°): (x, y, z) → (x, -y, -z) on top of the undo.
+        R_inv = np.array([[1.0, 0.0, 0.0],
+                          [0.0, 0.0, 1.0],
+                          [0.0, -1.0, 0.0]], dtype=np.float64)
+        R_y180 = np.array([[1.0, 0.0, 0.0],
+                           [0.0, -1.0, 0.0],
+                           [0.0, 0.0, -1.0]], dtype=np.float64)
+        R_undo = R_y180 @ R_inv
+        log('FABMESH_TEXPROJ_HI3DGEN_UNDO=1: applying Hi3DGen inverse pose + Y-flip (head up)')
     else:
         R_undo = rot_x(90) @ rot_y(-90)
     verts_cam = (R_undo @ vertices.T).T  # (V, 3) in SF3D's internal coords

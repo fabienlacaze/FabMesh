@@ -200,48 +200,6 @@ def step_mvadapter(image_path, mv_dir):
     return True
 
 
-def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
-    """NEW default texturing step (since 2026-05-17): SDXL turnaround sheet
-    on the Hi3DGen mesh depth maps. Generates 6 strict orthographic views
-    with photorealistic appearance, replacing the old multiview generators
-    (CRM/MV-Adapter/Z123) which hallucinate non-orthogonal angles.
-
-    Uses sheet_render_v3.py by default (single Depth ControlNet) — lighter
-    RAM (~50% vs dual Depth+Canny) and no Canny → no scale/hatching
-    artifacts. Set FABMESH_SHEET_VARIANT=v2 to revert to dual ControlNet."""
-    variant = os.environ.get('FABMESH_SHEET_VARIANT', 'v3')
-    sheet_script = f'sheet_render_{variant}.py'
-    log(f'STEP 3 (sheet-{variant}): SDXL turnaround sheet -> {out_sheet_dir}')
-    t0 = time.time()
-    os.makedirs(out_sheet_dir, exist_ok=True)
-    script = os.path.join(SCRIPTS, sheet_script)
-    cmd = [sys.executable, script, mesh_glb, image_path, out_sheet_dir]
-    if subject_hint:
-        cmd += ['--subject', subject_hint]
-    # Steps env override (default 30) — let UI set FABMESH_SHEET_STEPS=20
-    # for faster iteration.
-    steps = os.environ.get('FABMESH_SHEET_STEPS')
-    if steps:
-        cmd += ['--steps', steps]
-    rc = subprocess.run(cmd, timeout=900).returncode
-    if rc != 0:
-        log(f'sheet_render_v2 failed with rc={rc}')
-        return False
-    # Alias sheet_view_N.png -> view_N.png so bake_v3 finds them.
-    # OVERWRITE: mv_render_from_mesh.py (called inside sheet_render_v2)
-    # ALREADY creates view_N.png with the red-shaded mesh render. Without
-    # overwrite, bake_v3 would pick up those red renders → all-red texture.
-    import shutil
-    for i in range(6):
-        src = os.path.join(out_sheet_dir, f'sheet_view_{i}.png')
-        dst = os.path.join(out_sheet_dir, f'view_{i}.png')
-        if os.path.isfile(src):
-            shutil.copy(src, dst)
-            log(f'  aliased sheet_view_{i}.png -> view_{i}.png')
-    log(f'STEP 3 done in {time.time()-t0:.1f}s')
-    return True
-
-
 def step_trellis2_texturing(mesh_glb, image_path, out_glb):
     """TRELLIS-2-4B native 3D PBR texturing.
 
@@ -282,29 +240,6 @@ def step_trellis2_texturing(mesh_glb, image_path, out_glb):
         return False
     log(f'STEP 3 done in {time.time()-t0:.1f}s')
     return True
-
-
-def step_bake_v3(mesh_glb, image_path, out_glb, sheet_dir, tex_res):
-    """LEGACY bake (still available via FABMESH_HI3DGEN_USE_LEGACY=1).
-    nvdiffrast inv-UV projection with weighted blend, chart-aware NN
-    fill, 8px gutter. Plafonne en qualité à cause xatlas fragmentation
-    sur Hi3DGen meshes. Remplacé par TRELLIS-2 Texturing depuis
-    2026-05-18."""
-    atlas_res = tex_res * 2
-    log(f'STEP 4 (bake-v3): inv-UV bake atlas={atlas_res} -> {out_glb}')
-    t0 = time.time()
-    script = os.path.join(SCRIPTS, 'hi3dgen_invuv_bake_v3.py')
-    rc = subprocess.run(
-        [sys.executable, script, mesh_glb, image_path, out_glb,
-         '--mv-dir', sheet_dir,
-         '--atlas-res', str(atlas_res),
-         '--render-res', str(tex_res)],
-        timeout=900,
-    ).returncode
-    if rc != 0:
-        log(f'bake_v3 failed with rc={rc}')
-        sys.exit(3)
-    log(f'STEP 4 done in {time.time()-t0:.1f}s')
 
 
 def step_texture(mesh_glb, image_path, out_glb, tex_res, mv_dir=None):
@@ -358,58 +293,17 @@ def main():
     step_hi3dgen(image_path, raw_glb)
     print('LOCAL_HI3DGEN_PROGRESS: 55 step1_done', flush=True)
 
-    # Engine selector (default since 2026-05-18: TRELLIS-2-4B native PBR).
-    # Override with FABMESH_HI3DGEN_TEX_ENGINE=
-    #   - 'trellis2'  : native 3D PBR, MIT, no UV (default)
-    #   - 'sheet_bake': sheet_render_v2 + bake_v3 (2026-05-17 chain)
-    #   - 'legacy'    : multiview_gen + texture_project (pre-2026-05-17)
-    tex_engine = os.environ.get('FABMESH_HI3DGEN_TEX_ENGINE', 'trellis2')
-
-    if tex_engine == 'trellis2':
-        # NEW default (2026-05-18): TRELLIS-2-4B native 3D PBR. No UV
-        # unwrap needed — TRELLIS-2 generates the texture directly in
-        # the mesh's 3D space.
-        print('LOCAL_HI3DGEN_PROGRESS: 65 trellis2_start', flush=True)
-        ok = step_trellis2_texturing(raw_glb, image_path, out_glb)
-        print(f'LOCAL_HI3DGEN_PROGRESS: 95 trellis2_{"done" if ok else "failed"}',
-              flush=True)
-        if not ok:
-            log('TRELLIS-2 failed, falling back to sheet_bake')
-            tex_engine = 'sheet_bake'  # auto-fallback
-
-    if tex_engine == 'sheet_bake':
-        # 2026-05-17 chain: sheet runner v2 + bake v3 (works but plafonne).
+    # TRELLIS-2-4B native PBR texturing (the only path now — sheet_bake
+    # and legacy fallbacks removed in 2026-05-18 cleanup).
+    print('LOCAL_HI3DGEN_PROGRESS: 65 trellis2_start', flush=True)
+    ok = step_trellis2_texturing(raw_glb, image_path, out_glb)
+    if not ok:
+        # Last-ditch fallback: legacy texture_project on decimated mesh.
+        # Not great quality but guaranteed to produce something.
+        log('TRELLIS-2 failed, falling back to texture_project (single-view)')
         step_unwrap(raw_glb, uv_glb)
-        print('LOCAL_HI3DGEN_PROGRESS: 60 unwrap_done', flush=True)
-        sheet_dir = os.path.join(
-            os.path.dirname(image_path),
-            os.path.splitext(os.path.basename(image_path))[0] + '_sheet_v2')
-        subject_hint = ''
-        prompt_file = os.path.join(os.path.dirname(image_path), 'prompt.txt')
-        if os.path.isfile(prompt_file):
-            try:
-                with open(prompt_file, 'r', encoding='utf-8') as f:
-                    subject_hint = f.read().strip().split('\n')[0][:160]
-            except Exception:
-                pass
-        sheet_ok = step_sheet_v2(uv_glb, image_path, sheet_dir, subject_hint)
-        print(f'LOCAL_HI3DGEN_PROGRESS: 85 sheet_{"done" if sheet_ok else "failed"}',
-              flush=True)
-        if sheet_ok:
-            step_bake_v3(uv_glb, image_path, out_glb, sheet_dir, tex_res)
-            print('LOCAL_HI3DGEN_PROGRESS: 95 bake_done', flush=True)
-        else:
-            tex_engine = 'legacy'  # fallback again
-
-    if tex_engine == 'legacy':
-        # Legacy: multiview + texture_project (pre-2026-05-17).
-        step_unwrap(raw_glb, uv_glb)
-        mv_ok = False if skip_mv else step_mvadapter(image_path, mv_dir)
-        print(f'LOCAL_HI3DGEN_PROGRESS: 85 mvadapter_{"done" if mv_ok else "skipped"}',
-              flush=True)
-        step_texture(uv_glb, image_path, out_glb, tex_res,
-                     mv_dir=(mv_dir if mv_ok else None))
-        print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
+        step_texture(uv_glb, image_path, out_glb, tex_res, mv_dir=None)
+    print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
     # Final 100% marker so Electron's progress mapper completes.
     print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')

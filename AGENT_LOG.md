@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (cleanup) — Removed 36 GB of dead modules + 56 scripts
+
+Après audit légal commercial : suppression des modules `external/` jamais
+opérationnels + scripts utilisant `nvdiffrast` (NVIDIA Source Code License-NC
+= **NO COMMERCIAL**).
+
+**external/ supprimés (~36 GB)** :
+- MVPaint, Paint3D, ComfyUI-3D-Pack, TEXTure, SyncMVD
+- MaterialAnything (23 GB), CRM (12 GB)
+- InstantMesh, MV-Adapter, TRELLIS, kaolin
+
+**scripts/ supprimés (56 fichiers)** :
+- Tous les scripts importing nvdiffrast (license NC bloquante)
+- Sheet runners (remplacés par TRELLIS-2)
+- Hi3DGen+SF3D hybrid experiments (4 fichiers half-finished)
+- 36 debug scripts `_*.py`
+
+**Pipeline simplifié** : `hi3dgen_full_pipeline.py` a maintenant un seul
+chemin de texture (TRELLIS-2). Last-ditch fallback = `texture_project`
+single-view si TRELLIS-2 échoue.
+
+**Bénéfice commercial** : aucun composant à license NC restant dans le
+binaire shippable. App distribuable commercialement.
+
+---
+
 ## 2026-05-18 (breakthrough) — TRELLIS-2 Texturing MARCHE ⭐
 
 Après l'état des lieux + recherche SOTA, pivot de MVPaint vers TRELLIS-2
