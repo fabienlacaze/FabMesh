@@ -1679,6 +1679,32 @@ document.getElementById('ws-mv-mode-select')?.addEventListener('change', _wsMvSy
 _wsMvSync();
 // ----------------------------------------------------------------
 
+// ----------------------------------------------------------------
+// 3D engine selector — toggles visibility of legacy-only fields.
+// Hi3DGen+TRELLIS-2 ignores texture-res and target-triangles (TRELLIS-2
+// generates its own native PBR resolution). Only show those fields when
+// the legacy SF3D/TripoSG engines are selected.
+// ----------------------------------------------------------------
+function _ws3dEngineSync() {
+  const eng = document.getElementById('ws-3d-engine')?.value || 'hi3dgen';
+  const qRow = document.getElementById('ws-3d-quality-row');
+  const tRow = document.getElementById('ws-3d-triangles-row');
+  const qHint = document.getElementById('ws-3d-quality-hint');
+  const sf3dHint = document.getElementById('ws-3d-sf3d-hint');
+  const hi3dgenHint = document.getElementById('ws-3d-hi3dgen-hint');
+  const trellis2Opts = document.getElementById('ws-3d-trellis2-opts');
+  const legacy = ['sf3d', 'triposg', 'meshy'].includes(eng);
+  if (qRow) qRow.style.display = legacy ? '' : 'none';
+  if (tRow) tRow.style.display = legacy ? '' : 'none';
+  if (qHint) qHint.style.display = legacy ? '' : 'none';
+  if (sf3dHint) sf3dHint.style.display = legacy ? '' : 'none';
+  if (hi3dgenHint) hi3dgenHint.style.display = (eng === 'hi3dgen') ? '' : 'none';
+  if (trellis2Opts) trellis2Opts.style.display = (eng === 'hi3dgen') ? '' : 'none';
+}
+document.getElementById('ws-3d-engine')?.addEventListener('change', _ws3dEngineSync);
+_ws3dEngineSync();
+// ----------------------------------------------------------------
+
 // Generate Multi-Views button — opens an options modal first.
 // User picks post-gen refinements (RealVis harmonize, ESRGAN upscale)
 // and clicks "Start". Then we (a) duplicate the source image into a
@@ -5788,6 +5814,16 @@ document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () =
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
   runMeshTool('retexture', [p.selectedImagePath, '2048']);
+});
+
+// Re-Texture with TRELLIS-2-4B (the SOTA native PBR texturing engine).
+// Calls mesh_tools.py 'trellis2_retex' which wraps the bridge.
+document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick a source image first.', 'error'); return; }
+  if (!p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  showToast('Re-texturing via TRELLIS-2 (~90s)...', 'info', 3000);
+  runMeshTool('trellis2_retex', [p.selectedImagePath]);
 });
 
 // ============================================================

@@ -137,36 +137,26 @@
                     Construction stages (3 progressive versions)
                   </label>
                 </div>
+                <!-- Multi-view: TRELLIS-2 generates its own texture from a
+                     single front photo, so a 6-view sheet is no longer
+                     needed. Optional: a single back photo can be added as a
+                     2nd reference to reduce TRELLIS-2's dorsal hallucinations. -->
                 <div class="form-row check-row">
-                  <label class="inline-check">
-                    <input type="checkbox" id="ws-mv-enable" checked />
-                    Multi-view
+                  <label class="inline-check" title="Optionnel — génère une vue dorsale via RealVis+IPAdapter (~25s) à utiliser comme 2e référence par TRELLIS-2 (multi-ref). Améliore le dos du mesh texturé.">
+                    <input type="checkbox" id="ws-mv-enable" />
+                    Generate back photo (optional, TRELLIS-2 multi-ref)
                   </label>
                 </div>
-                <!-- Mode selector (visible only when Multi-view is checked).
-                     Default = 2-view (back photo only). 6-views opens a
-                     further sub-panel with harmonize / upscale options. -->
-                <div id="ws-mv-mode-row" class="form-row" style="flex-direction:column; gap:6px; padding-left:22px;">
-                  <select id="ws-mv-mode-select" style="width:100%;">
-                    <option value="2view" selected>Auto 2-view (RealVis+IPAdapter back, ~25s)</option>
-                    <option value="6view">6 views (MV-Adapter front/right/back/left/top/bottom, ~70s)</option>
-                  </select>
-                  <!-- Sub-options for the 6-views mode -->
-                  <div id="ws-mv-6view-opts" class="hidden" style="display:flex; flex-direction:column; gap:4px; padding-left:22px; padding-top:4px;">
-                    <label class="inline-check">
-                      <input type="checkbox" id="ws-mv-6v-harmonize" checked />
-                      RealVis img2img harmonize (photoreal, +30s)
-                    </label>
-                    <label class="inline-check">
-                      <input type="checkbox" id="ws-mv-6v-upscale" />
-                      Real-ESRGAN upscale 768→1024 (+10s)
-                    </label>
+                <!-- Hidden compat: existing back-photo pipeline reuses these
+                     elements. We force 2view mode and hide the 6-view opts. -->
+                <div id="ws-mv-mode-row" class="form-row hidden" style="display:none;">
+                  <select id="ws-mv-mode-select"><option value="2view" selected>2view</option></select>
+                  <div id="ws-mv-6view-opts" class="hidden">
+                    <input type="checkbox" id="ws-mv-6v-harmonize" />
+                    <input type="checkbox" id="ws-mv-6v-upscale" />
                   </div>
                 </div>
-                <!-- Legacy hidden flag for back-compat with existing handler.
-                     Kept in sync with ws-mv-enable + ws-mv-mode by JS so the
-                     generate-images backend path doesn't change. -->
-                <input type="checkbox" id="ws-auto-multiview" checked style="display:none;" />
+                <input type="checkbox" id="ws-auto-multiview" style="display:none;" />
                 <button id="ws-generate-image" class="primary-btn">Generate</button>
               </div>
             </details>
@@ -298,16 +288,22 @@
               </summary>
               <div class="stage-body stage-create-with-source">
                 <div class="stage-create-form">
+                  <!-- TRELLIS-2 pipeline info banner -->
+                  <div style="background: rgba(168,85,247,0.08); border:1px solid rgba(168,85,247,0.3); border-radius:5px; padding:8px 10px; margin-bottom:10px; font-size:11px; color:#cbb7e6;">
+                    ⚡ <strong>FabMesh pipeline</strong>: Hi3DGen (mesh) + TRELLIS-2-4B (native PBR texture). Tout local · MIT/Apache · commercialisable.
+                  </div>
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-3d-engine">
-                      <option value="hi3dgen" selected>Hi3DGen (local, MIT, normal bridging)</option>
-                      <option value="triposg">TripoSG (local, MIT)</option>
-                      <option value="sf3d">Stable Fast 3D (local)</option>
-                      <option value="meshy">Meshy.ai (cloud, needs API key)</option>
+                      <option value="hi3dgen" selected>Hi3DGen + TRELLIS-2 (native PBR, recommended)</option>
+                      <option value="sf3d">Stable Fast 3D (fast fallback)</option>
+                      <option value="triposg">TripoSG (mesh-only, no texture)</option>
+                      <option value="meshy">Meshy.ai (cloud, license payante)</option>
                     </select>
                   </div>
-                  <div class="form-row">
+                  <!-- Texture resolution (UNUSED by Hi3DGen+TRELLIS-2, only relevant for legacy engines)
+                       Kept hidden by default; will be re-shown by JS when engine != hi3dgen. -->
+                  <div class="form-row" id="ws-3d-quality-row" style="display:none;">
                     <label>Texture</label>
                     <select id="ws-3d-quality">
                       <option value="draft">512 px</option>
@@ -316,7 +312,7 @@
                       <option value="ultra">4096 px</option>
                     </select>
                   </div>
-                  <div class="form-row">
+                  <div class="form-row" id="ws-3d-triangles-row" style="display:none;">
                     <label>Target triangles</label>
                     <select id="ws-3d-triangles">
                       <option value="500">500 (ultra low-poly)</option>
@@ -339,9 +335,10 @@
                       <option value="4">~3M (film / VFX)</option>
                     </select>
                   </div>
-                  <div id="ws-3d-quality-hint" class="form-hint">~200K triangles · 1024 px texture</div>
-                  <div class="form-hint" style="margin-top:2px;">Texture is baked by SF3D (GPU). Triangles are added via subdivision (CPU, no extra VRAM).</div>
+                  <div id="ws-3d-quality-hint" class="form-hint" style="display:none;">~200K triangles · 1024 px texture</div>
+                  <div id="ws-3d-sf3d-hint" class="form-hint" style="margin-top:2px; display:none;">Texture is baked by SF3D (GPU). Triangles are added via subdivision (CPU, no extra VRAM).</div>
                   <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (SF3D micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
+                  <div id="ws-3d-hi3dgen-hint" class="form-hint" style="margin-top:2px;">Hi3DGen génère la géom détaillée (92K faces), TRELLIS-2 paint la texture PBR native. Durée ~3 min.</div>
                   <div class="form-row check-row">
                     <label class="inline-check">
                       <input type="checkbox" id="ws-3d-buildstages" />
@@ -367,7 +364,7 @@
                     </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
                   </details>
-                  <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
+                  <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D (Hi3DGen + TRELLIS-2)</button>
                 </div>
                 <div class="stage-create-source">
                   <div class="stage-source-label">Source image for 3D (front)</div>
@@ -466,7 +463,8 @@
                         <button id="ws-mesh-fixnormals-btn" class="ghost-btn tool-btn">&#8634; Fix Normals</button>
                         <button id="ws-mesh-fillholes-btn" class="ghost-btn tool-btn">&#9673; Fill Holes</button>
                         <button id="ws-mesh-center-btn" class="ghost-btn tool-btn">&#9678; Center</button>
-                        <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn">&#127912; Re-Texture</button>
+                        <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn" title="Quick re-texture via texture_project — projection directe d'une photo, rapide mais limité au front">&#127912; Re-Texture (quick)</button>
+                        <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint via TRELLIS-2-4B native PBR — qualité SOTA, ~90s">&#11088; Re-Texture (TRELLIS-2)</button>
                       </div>
                     </div>
                     <div class="step-tools-group">

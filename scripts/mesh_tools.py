@@ -120,15 +120,57 @@ def center(input_path, output_path):
     log('centered (feet at Y=0)')
 
 
+def trellis2_retex(input_path, output_path, source_image):
+    """Re-texture mesh via TRELLIS-2-4B native PBR (SOTA quality).
+
+    Wraps scripts/trellis2_texturing_bridge.py — runs in the TRELLIS2_win
+    venv (flash_attn + DINOv3). ~90s on RTX 5080."""
+    import subprocess
+    bridge = os.path.join(os.path.dirname(__file__),
+                           'trellis2_texturing_bridge.py')
+    venv_py = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), '..', 'external', 'TRELLIS2_win',
+        '.venv', 'Scripts', 'python.exe'))
+    env = dict(os.environ)
+    env['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+    env['TORCHDYNAMO_DISABLE'] = '1'
+    env['TORCHINDUCTOR_USE_TRITON'] = '0'
+    env['TRANSFORMERS_ATTN_IMPLEMENTATION'] = 'eager'
+    r = subprocess.run(
+        [venv_py, bridge, input_path, source_image, output_path],
+        capture_output=True, text=True, timeout=600, env=env)
+    if r.stdout:
+        print(r.stdout, end='', flush=True)
+    if r.returncode != 0:
+        log(f'ERROR: trellis2_retex failed: {r.stderr[-500:] if r.stderr else ""}')
+    else:
+        log('trellis2 retextured')
+
+
 def retexture(input_path, output_path, source_image, tex_res=2048):
-    """Re-project source image texture onto mesh."""
+    """Re-project source image texture onto mesh.
+
+    Auto-detects Hi3DGen meshes via filename pattern and sets the
+    FABMESH_TEXPROJ_HI3DGEN_UNDO env var so texture_project applies the
+    correct axis transform (Hi3DGen exports "front=-Z" whereas
+    texture_project assumes "front=+Z"). Without this fix, the front
+    photo gets projected on the BACK of the mesh."""
     import subprocess
     script = os.path.join(os.path.dirname(__file__), 'texture_project.py')
     import shutil
     if os.path.abspath(input_path) != os.path.abspath(output_path):
         shutil.copy(input_path, output_path)
-    r = subprocess.run([sys.executable, script, output_path, source_image, output_path, str(tex_res)],
-                       capture_output=True, text=True, timeout=120)
+    # Auto-detect Hi3DGen by filename — same pattern as the meshProject
+    # regex in the renderer.
+    env = dict(os.environ)
+    if '_hi3dgen_' in os.path.basename(input_path).lower():
+        env['FABMESH_TEXPROJ_HI3DGEN_UNDO'] = '1'
+        env['FABMESH_UV_REPACK'] = '0'
+        log('Hi3DGen mesh detected — applying axis fix '
+            '(FABMESH_TEXPROJ_HI3DGEN_UNDO=1)')
+    r = subprocess.run(
+        [sys.executable, script, output_path, source_image, output_path, str(tex_res)],
+        capture_output=True, text=True, timeout=120, env=env)
     if r.stdout:
         print(r.stdout, end='', flush=True)
     if r.returncode != 0:
@@ -164,6 +206,7 @@ if __name__ == '__main__':
         'fill_holes': lambda: fill_holes(inp, out, *params),
         'center': lambda: center(inp, out),
         'retexture': lambda: retexture(inp, out, *params),
+        'trellis2_retex': lambda: trellis2_retex(inp, out, *params),
     }
 
     if op not in ops:
