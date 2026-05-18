@@ -243,29 +243,40 @@ def step_sheet_v2(mesh_glb, image_path, out_sheet_dir, subject_hint=''):
 
 
 def step_trellis2_texturing(mesh_glb, image_path, out_glb):
-    """NEW default texture engine (since 2026-05-18): TRELLIS-2-4B native
-    3D PBR texturing. Replaces the brittle Hi3DGen+xatlas+sheet+bake
-    chain (~1000 chart fragmentation) with microsoft/TRELLIS.2-4B —
-    SOTA native-3D texturing, MIT license, EU-safe, Blackwell OK.
+    """TRELLIS-2-4B native 3D PBR texturing.
 
-    No UV unwrap, no multi-view gen, no bake. Generates the texture
-    directly in the mesh's 3D space via sparse voxels + flow matching.
-
-    Must run with the TRELLIS2_win venv python (flash_attn + DINOv3).
+    Configurable via env vars (UI surface them as advanced options) :
+      FABMESH_TRELLIS2_STEPS         sampler steps (default 12)
+      FABMESH_TRELLIS2_TEX_SIZE      texture resolution (default 2048, max 4096)
+      FABMESH_TRELLIS2_RESOLUTION    voxel resolution (512 or 1024, default 1024)
+      FABMESH_TRELLIS2_IMG_RES       DINOv3 input resolution (default 1024)
+      FABMESH_TRELLIS2_BACK_IMAGE    optional second reference photo
+      FABMESH_TRELLIS2_GUIDANCE      guidance strength (default 1.0)
     """
     log(f'STEP 3 (TRELLIS-2 Texturing): native 3D PBR -> {out_glb}')
     t0 = time.time()
     bridge = os.path.join(SCRIPTS, 'trellis2_texturing_bridge.py')
+    cmd = [TRELLIS2_VENV_PY, bridge, mesh_glb, image_path, out_glb]
+    # Forward env-configured options as CLI flags.
+    if os.environ.get('FABMESH_TRELLIS2_STEPS'):
+        cmd += ['--steps', os.environ['FABMESH_TRELLIS2_STEPS']]
+    if os.environ.get('FABMESH_TRELLIS2_TEX_SIZE'):
+        cmd += ['--texture-size', os.environ['FABMESH_TRELLIS2_TEX_SIZE']]
+    if os.environ.get('FABMESH_TRELLIS2_RESOLUTION'):
+        cmd += ['--resolution', os.environ['FABMESH_TRELLIS2_RESOLUTION']]
+    if os.environ.get('FABMESH_TRELLIS2_IMG_RES'):
+        cmd += ['--image-resolution', os.environ['FABMESH_TRELLIS2_IMG_RES']]
+    if os.environ.get('FABMESH_TRELLIS2_BACK_IMAGE'):
+        cmd += ['--back-image', os.environ['FABMESH_TRELLIS2_BACK_IMAGE']]
+    if os.environ.get('FABMESH_TRELLIS2_GUIDANCE'):
+        cmd += ['--guidance', os.environ['FABMESH_TRELLIS2_GUIDANCE']]
     env = {**os.environ,
            'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
            # Triton DLL blocked by Smart App Control on Windows.
            'TORCHDYNAMO_DISABLE': '1',
            'TORCHINDUCTOR_USE_TRITON': '0',
            'TRANSFORMERS_ATTN_IMPLEMENTATION': 'eager'}
-    rc = subprocess.run(
-        [TRELLIS2_VENV_PY, bridge, mesh_glb, image_path, out_glb],
-        timeout=900, env=env,
-    ).returncode
+    rc = subprocess.run(cmd, timeout=900, env=env).returncode
     if rc != 0:
         log(f'TRELLIS-2 texturing failed with rc={rc}')
         return False

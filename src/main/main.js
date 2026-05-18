@@ -3655,7 +3655,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Preset }) => {
   let imagePath = _imagePath;
   let engine = _engine;
   // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
@@ -3811,9 +3811,23 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         FABMESH_AUTOFIT: '1',
         FABMESH_AUTOFIT_RATIO: '1.20',
       } : {}),
+      // TRELLIS-2 texturing options (Hi3DGen only) -- forwarded to
+      // hi3dgen_full_pipeline.py -> trellis2_texturing_bridge.py.
+      ...(engine === 'hi3dgen' && trellis2Steps ?
+        { FABMESH_TRELLIS2_STEPS: String(trellis2Steps) } : {}),
+      ...(engine === 'hi3dgen' && trellis2TexSize ?
+        { FABMESH_TRELLIS2_TEX_SIZE: String(trellis2TexSize) } : {}),
+      ...(engine === 'hi3dgen' && trellis2ImgRes ?
+        { FABMESH_TRELLIS2_IMG_RES: String(trellis2ImgRes) } : {}),
+      ...(engine === 'hi3dgen' && trellis2MultiRef && imagePathBack
+            && fs.existsSync(imagePathBack)
+        ? { FABMESH_TRELLIS2_BACK_IMAGE: imagePathBack } : {}),
     };
     if (mv2Dir) {
       log.info('main', '2-view env applied: AUGMENT mode (front=SF3D bake, back=additive blend)');
+    }
+    if (engine === 'hi3dgen') {
+      log.info('main', `TRELLIS-2 preset: ${trellis2Preset || 'fast'} (steps=${trellis2Steps}, tex=${trellis2TexSize}, multiref=${trellis2MultiRef ? 'yes' : 'no'})`);
     }
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
     // Hi3DGen needs torch 2.8 + flash_attn (sparse attention requires it),

@@ -5620,6 +5620,16 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     expectedMs = 60000;
   }
   if (buildStages) expectedMs *= 2.5;
+  // TRELLIS-2 texture options (Hi3DGen only).
+  const trellis2Preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
+  const trellis2MultiRef = document.getElementById('ws-trellis2-multiref')?.checked || false;
+  const TRELLIS2_PRESETS = {
+    fast:     { steps: 12, texSize: 2048, imgRes: 1024 },
+    balanced: { steps: 24, texSize: 2048, imgRes: 1024 },
+    quality:  { steps: 32, texSize: 4096, imgRes: 2048 },
+  };
+  const t2cfg = TRELLIS2_PRESETS[trellis2Preset] || TRELLIS2_PRESETS.fast;
+
   const params = {
     imagePath: p.selectedImagePath,
     imagePathBack: p.backImagePath || null,  // 2-view mode if set
@@ -5631,6 +5641,11 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     buildStages,
     subdivide: triPreset.subdivide,
     vramFraction: (gpuLimits?.vram || 90) / 100,
+    trellis2Steps: t2cfg.steps,
+    trellis2TexSize: t2cfg.texSize,
+    trellis2ImgRes: t2cfg.imgRes,
+    trellis2MultiRef,
+    trellis2Preset,
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
   const jobParams = {
@@ -6279,8 +6294,8 @@ document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openA
 // scripts/mesh_material_adjust.py via IPC.
 // ============================================================
 const MAT_DEFAULTS = {
-  brightness: 1.2, saturation: 1.0, contrast: 1.0,
-  emissive: 0.5,   metallic: 0.0,    roughness: 0.7,
+  brightness: 1.0, saturation: 1.0, contrast: 1.0,
+  emissive: 0.0,   metallic: 0.0,    roughness: 0.7,
 };
 
 function _matSetSliderLabel(id, value) {
@@ -6291,7 +6306,11 @@ function _matSetSliderLabel(id, value) {
 function _matBindSlider(id) {
   const slider = document.getElementById(`mat-${id}`);
   if (!slider) return;
-  slider.addEventListener('input', () => _matSetSliderLabel(id, slider.value));
+  slider.addEventListener('input', () => {
+    _matSetSliderLabel(id, slider.value);
+    // ALL 6 sliders update the preview live now.
+    _matApplyLivePBR();
+  });
 }
 
 function _matReadParams() {
@@ -6312,13 +6331,171 @@ function _matWriteSliders(p) {
   }
 }
 
-function openMaterialAdjust() {
+// Three.js viewer state for the Material Adjust modal.
+let _matViewer = null;
+let _matModel = null;
+
+async function openMaterialAdjust() {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) {
     showToast('Pick a mesh first.', 'error'); return;
   }
   _matWriteSliders(MAT_DEFAULTS);
   document.getElementById('modal-material-adjust').classList.remove('hidden');
+
+  // Lazy-init the Three.js viewer for the modal canvas.
+  const canvas = document.getElementById('mat-canvas');
+  if (!_matViewer && canvas) {
+    _matViewer = new Viewer3D({
+      canvas, fov: 45, bgColor: 0x1b1b1b, cameraPos: [2, 2, 3],
+      lighting: true,
+    });
+    _matViewer.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    _matViewer.renderer.toneMappingExposure = 1.0;
+    _matViewer.startTickLoop();
+  }
+  // Wait one frame so the canvas has a layout size, then resize.
+  await new Promise(r => requestAnimationFrame(r));
+  if (_matViewer) _matViewer.renderer.setSize(
+    canvas.clientWidth || 600, canvas.clientHeight || 520, false);
+
+  // Load the selected mesh into the viewer scene.
+  if (_matModel) { _matViewer.scene.remove(_matModel); _matModel = null; }
+  const buffer = await API.readMeshFile(p.selectedMeshPath);
+  if (!buffer) {
+    showToast('Failed to read mesh file', 'error');
+    return;
+  }
+  const loader = new GLTFLoader();
+  loader.parse(buffer, '', (gltf) => {
+    _matModel = gltf.scene;
+    _matViewer.scene.add(_matModel);
+    // Patch every material with brightness/sat/contrast shader uniforms.
+    // Also DETACH any pre-existing emissive map — otherwise the GLB's
+    // baked-in emissive setup (e.g. emissiveMap=baseColor from our
+    // hi3dgen pipeline) would double-apply on top of the slider, giving
+    // a clipped-white preview.
+    _matModel.traverse(obj => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        // Remove pre-existing emissive map so slider isn't additive.
+        if (mat.emissiveMap) mat.emissiveMap = null;
+        if (mat.emissive) mat.emissive.setRGB(0, 0, 0);
+        _matInjectShader(mat);
+        mat.needsUpdate = true;
+      }
+    });
+    // Fit camera to model bounding box.
+    const box = new THREE.Box3().setFromObject(_matModel);
+    const size = box.getSize(new THREE.Vector3()).length();
+    const center = box.getCenter(new THREE.Vector3());
+    _matModel.position.x -= center.x;
+    _matModel.position.y -= center.y;
+    _matModel.position.z -= center.z;
+    _matViewer.camera.near = size / 100;
+    _matViewer.camera.far = size * 100;
+    _matViewer.camera.updateProjectionMatrix();
+    _matViewer.camera.position.copy(new THREE.Vector3(size * 0.8, size * 0.5, size * 0.8));
+    _matViewer.controls?.target.set(0, 0, 0);
+    _matViewer.controls?.update();
+    // Apply initial PBR values from defaults.
+    _matApplyLivePBR();
+  }, (err) => {
+    console.error('Material modal: GLTF parse error', err);
+    showToast('Failed to load mesh in preview', 'error');
+  });
+}
+
+// Patches a Three.js material's shader to add brightness / saturation /
+// contrast uniforms. Uses onBeforeCompile which is the standard Three.js
+// way to inject GLSL without forking the material class.
+function _matInjectShader(mat) {
+  if (mat.userData._matShaderInjected) return;
+  mat.userData._matShaderInjected = true;
+  mat.userData._matUniforms = {
+    uBrightness: { value: 1.2 },
+    uSaturation: { value: 1.0 },
+    uContrast:   { value: 1.0 },
+  };
+  const prevOBC = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    if (prevOBC) prevOBC(shader, renderer);
+    shader.uniforms.uBrightness = mat.userData._matUniforms.uBrightness;
+    shader.uniforms.uSaturation = mat.userData._matUniforms.uSaturation;
+    shader.uniforms.uContrast   = mat.userData._matUniforms.uContrast;
+    // Inject uniforms into the fragment shader header.
+    shader.fragmentShader =
+      'uniform float uBrightness;\nuniform float uSaturation;\nuniform float uContrast;\n' +
+      shader.fragmentShader;
+    // Inject the post-process step before output_fragment include.
+    // The include name varies between three.js versions; we cover both
+    // 'output_fragment' (newer) and 'dithering_fragment' (older).
+    const inject = `
+      // FabMesh Material Adjust live shader
+      vec3 _matCol = gl_FragColor.rgb;
+      _matCol *= uBrightness;
+      float _matLuma = dot(_matCol, vec3(0.299, 0.587, 0.114));
+      _matCol = mix(vec3(_matLuma), _matCol, uSaturation);
+      _matCol = (_matCol - 0.5) * uContrast + 0.5;
+      gl_FragColor.rgb = clamp(_matCol, 0.0, 1.0);
+    `;
+    if (shader.fragmentShader.includes('#include <output_fragment>')) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <output_fragment>',
+        inject + '\n#include <output_fragment>'
+      );
+    } else if (shader.fragmentShader.includes('#include <dithering_fragment>')) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        inject + '\n#include <dithering_fragment>'
+      );
+    } else {
+      // Last resort: append at end of main() — close-enough for preview.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        /}\s*$/,
+        inject + '\n}'
+      );
+    }
+    mat.userData._matShaderRef = shader;
+  };
+  mat.needsUpdate = true;
+}
+
+// Live-update ALL 6 material params on the loaded preview's three.js
+// materials. PBR (emissive/metallic/roughness) via material properties;
+// brightness/saturation/contrast via injected shader uniforms (see
+// _matInjectShader).
+function _matApplyLivePBR() {
+  if (!_matModel) return;
+  const params = _matReadParams();
+  _matModel.traverse(obj => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if ('metalness' in mat) mat.metalness = params.metallic;
+      if ('roughness' in mat) mat.roughness = params.roughness;
+      if (mat.emissive) {
+        mat.emissive.setRGB(params.emissive, params.emissive, params.emissive);
+      }
+      // Slider > 0 → emissive uses the base color texture as map so the
+      // self-illumination preserves the colours of the painted texture.
+      // Slider = 0 → emissive off (already RGB(0,0,0)).
+      if (params.emissive > 0.001 && mat.map && mat.emissiveMap !== mat.map) {
+        mat.emissiveMap = mat.map;
+        mat.needsUpdate = true;
+      } else if (params.emissive <= 0.001 && mat.emissiveMap) {
+        mat.emissiveMap = null;
+        mat.needsUpdate = true;
+      }
+      // Update injected shader uniforms for brightness/sat/contrast.
+      if (mat.userData?._matUniforms) {
+        mat.userData._matUniforms.uBrightness.value = params.brightness;
+        mat.userData._matUniforms.uSaturation.value = params.saturation;
+        mat.userData._matUniforms.uContrast.value   = params.contrast;
+      }
+    }
+  });
 }
 
 function closeMaterialAdjust() {
