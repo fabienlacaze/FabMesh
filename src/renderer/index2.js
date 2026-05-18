@@ -5823,38 +5823,143 @@ async function runMeshTool(operation, params = []) {
 }
 
 // ============================================================
-// AI Tools — generic params popup
-// Each tool declares its params schema; openMeshToolModal builds
-// the form dynamically, then calls runMeshTool() on Apply.
+// AI Tools — generic params popup with live 3D preview
+// Each tool declares: params schema + optional `preview(origGeom, vals)`
+// → modified BufferGeometry (or null = use original).
+// Re-runs the preview on every slider tick (debounced).
 // ============================================================
+
+// Laplacian smoothing in JS (vertex one-ring averaging).
+// `iter` iterations of vertex ← vertex + lambda*(avgNeighbor - vertex).
+function _jsLaplacianSmooth(geom, iter, lambda) {
+  const result = geom.clone();
+  if (!result.index) return result; // need indexed geom
+  const pos = result.attributes.position;
+  const idx = result.index.array;
+  const n = pos.count;
+  // Build adjacency.
+  const neigh = Array.from({ length: n }, () => new Set());
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i], b = idx[i + 1], c = idx[i + 2];
+    neigh[a].add(b); neigh[a].add(c);
+    neigh[b].add(a); neigh[b].add(c);
+    neigh[c].add(a); neigh[c].add(b);
+  }
+  const arr = new Float32Array(pos.array);
+  for (let it = 0; it < iter; it++) {
+    const next = new Float32Array(arr);
+    for (let v = 0; v < n; v++) {
+      const ns = neigh[v];
+      if (ns.size === 0) continue;
+      let sx = 0, sy = 0, sz = 0;
+      ns.forEach(nb => {
+        sx += arr[nb * 3]; sy += arr[nb * 3 + 1]; sz += arr[nb * 3 + 2];
+      });
+      const k = 1 / ns.size;
+      const ax = sx * k, ay = sy * k, az = sz * k;
+      next[v * 3]     = arr[v * 3]     + lambda * (ax - arr[v * 3]);
+      next[v * 3 + 1] = arr[v * 3 + 1] + lambda * (ay - arr[v * 3 + 1]);
+      next[v * 3 + 2] = arr[v * 3 + 2] + lambda * (az - arr[v * 3 + 2]);
+    }
+    arr.set(next);
+  }
+  pos.array.set(arr);
+  pos.needsUpdate = true;
+  result.computeVertexNormals();
+  return result;
+}
+
+// Midpoint subdivision: 1 triangle → 4 triangles. Single-pass; recurse for levels.
+function _jsMidpointSubdivide(geom, levels) {
+  let g = geom.clone();
+  if (!g.index) {
+    g = g.toNonIndexed();
+    // build a trivial index
+    const n = g.attributes.position.count;
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array([...Array(n).keys()]), 1));
+  }
+  for (let lv = 0; lv < levels; lv++) {
+    const pos = g.attributes.position;
+    const idx = g.index.array;
+    const newPos = Array.from(pos.array);
+    const newIdx = [];
+    const midCache = new Map();
+    const getMid = (a, b) => {
+      const k = a < b ? `${a}_${b}` : `${b}_${a}`;
+      if (midCache.has(k)) return midCache.get(k);
+      const ax = pos.array[a * 3], ay = pos.array[a * 3 + 1], az = pos.array[a * 3 + 2];
+      const bx = pos.array[b * 3], by = pos.array[b * 3 + 1], bz = pos.array[b * 3 + 2];
+      const m = newPos.length / 3;
+      newPos.push((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      midCache.set(k, m);
+      return m;
+    };
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i], b = idx[i + 1], c = idx[i + 2];
+      const ab = getMid(a, b), bc = getMid(b, c), ca = getMid(c, a);
+      newIdx.push(a, ab, ca, b, bc, ab, c, ca, bc, ab, bc, ca);
+    }
+    const newGeom = new THREE.BufferGeometry();
+    newGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
+    newGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(newIdx), 1));
+    g = newGeom;
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+// Center: translate vertices so X/Z centroid = 0, min Y = 0.
+function _jsCenter(geom) {
+  const result = geom.clone();
+  const pos = result.attributes.position;
+  const arr = pos.array;
+  let cx = 0, cz = 0, minY = Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    cx += arr[i * 3];
+    cz += arr[i * 3 + 2];
+    if (arr[i * 3 + 1] < minY) minY = arr[i * 3 + 1];
+  }
+  cx /= pos.count; cz /= pos.count;
+  for (let i = 0; i < pos.count; i++) {
+    arr[i * 3]     -= cx;
+    arr[i * 3 + 1] -= minY;
+    arr[i * 3 + 2] -= cz;
+  }
+  pos.needsUpdate = true;
+  result.computeVertexNormals();
+  return result;
+}
+
 const MESH_TOOL_SCHEMAS = {
   smooth: {
     title: 'Smooth mesh',
-    subtitle: 'Laplacian smoothing — reduces sharp angles.',
+    subtitle: 'Laplacian smoothing — live preview.',
     needsImage: false,
     params: [
-      { id: 'iterations', label: 'Iterations', type: 'number', min: 1, max: 20, step: 1, default: 3 },
-      { id: 'lambda',     label: 'Lambda',     type: 'number', min: 0.0, max: 1.0, step: 0.05, default: 0.5 },
+      { id: 'iterations', label: 'Iterations', type: 'range', min: 1, max: 20, step: 1, default: 3 },
+      { id: 'lambda',     label: 'Lambda',     type: 'range', min: 0.0, max: 1.0, step: 0.05, default: 0.5 },
     ],
     build: (vals) => [String(vals.iterations), String(vals.lambda)],
+    preview: (geom, vals) => _jsLaplacianSmooth(geom, Math.max(1, vals.iterations | 0), vals.lambda),
   },
   decimate: {
     title: 'Decimate mesh',
-    subtitle: 'Reduce triangle count (quadric simplification).',
+    subtitle: 'Reduce triangle count (Python only — no live preview).',
     needsImage: false,
     params: [
-      { id: 'target_faces', label: 'Target triangles', type: 'number', min: 100, max: 1000000, step: 500, default: 5000 },
+      { id: 'target_faces', label: 'Target triangles', type: 'range', min: 100, max: 100000, step: 100, default: 5000 },
     ],
     build: (vals) => [String(vals.target_faces)],
   },
   subdivide: {
     title: 'Subdivide mesh',
-    subtitle: 'Midpoint subdivision — multiplies triangles by 4 per level.',
+    subtitle: 'Midpoint subdivision — live preview (×4 triangles per level).',
     needsImage: false,
     params: [
-      { id: 'levels', label: 'Levels', type: 'number', min: 1, max: 4, step: 1, default: 1 },
+      { id: 'levels', label: 'Levels', type: 'range', min: 1, max: 3, step: 1, default: 1 },
     ],
     build: (vals) => [String(vals.levels)],
+    preview: (geom, vals) => _jsMidpointSubdivide(geom, Math.max(1, vals.levels | 0)),
   },
   fix_normals: {
     title: 'Fix normals',
@@ -5862,22 +5967,24 @@ const MESH_TOOL_SCHEMAS = {
     needsImage: false,
     params: [],
     build: () => [],
+    preview: (geom) => { const g = geom.clone(); g.computeVertexNormals(); return g; },
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Cap mesh holes up to the given diameter.',
+    subtitle: 'Cap mesh holes (Python only — no live preview).',
     needsImage: false,
     params: [
-      { id: 'max_hole_size', label: 'Max hole size', type: 'number', min: 1, max: 5000, step: 10, default: 100 },
+      { id: 'max_hole_size', label: 'Max hole size', type: 'range', min: 1, max: 5000, step: 10, default: 100 },
     ],
     build: (vals) => [String(vals.max_hole_size)],
   },
   center: {
     title: 'Center mesh',
-    subtitle: 'Recenters on X/Z and puts feet at Y=0.',
+    subtitle: 'Recenters on X/Z and puts feet at Y=0 — live preview.',
     needsImage: false,
     params: [],
     build: () => [],
+    preview: (geom) => _jsCenter(geom),
   },
   retexture: {
     title: 'Re-Texture (quick)',
@@ -5911,6 +6018,135 @@ const MESH_TOOL_SCHEMAS = {
   },
 };
 
+// Persistent Three.js state for the mesh-tool modal viewer.
+const mtState = {
+  renderer: null, scene: null, camera: null, controls: null,
+  rafId: null,
+  origModel: null,        // the GLTF scene loaded — we mutate its geometries on preview
+  origGeoms: [],          // [{ mesh, originalGeom }] — to restore on params change
+  schema: null,
+  vals: {},
+  previewTimer: null,
+};
+
+function _mtCollectVals(body) {
+  const vals = {};
+  body.querySelectorAll('[data-param-id]').forEach((el) => {
+    const id = el.dataset.paramId;
+    const t = el.dataset.paramType;
+    if (t === 'checkbox') vals[id] = el.checked;
+    else if (t === 'number' || t === 'range') vals[id] = Number(el.value);
+    else vals[id] = el.value;
+  });
+  return vals;
+}
+
+function _mtSchedulePreview() {
+  if (mtState.previewTimer) clearTimeout(mtState.previewTimer);
+  mtState.previewTimer = setTimeout(_mtRunPreview, 80);
+}
+
+function _mtRunPreview() {
+  if (!mtState.schema || !mtState.origModel) return;
+  const body = document.getElementById('mt-body');
+  if (!body) return;
+  const vals = _mtCollectVals(body);
+  mtState.vals = vals;
+  const fn = mtState.schema.preview;
+  // Without preview fn, just restore originals (mesh stays static).
+  for (const e of mtState.origGeoms) {
+    if (!fn) { e.mesh.geometry = e.originalGeom; continue; }
+    try {
+      const out = fn(e.originalGeom, vals);
+      if (out && out.attributes && out.attributes.position) e.mesh.geometry = out;
+    } catch (err) {
+      console.warn('[mesh-tool] preview failed for', mtState.schema.title, err);
+      e.mesh.geometry = e.originalGeom;
+    }
+  }
+  const status = document.getElementById('mt-preview-status');
+  if (status) {
+    status.textContent = fn
+      ? `Live preview · ${Object.entries(vals).map(([k,v]) => `${k}=${v}`).join(' · ')}`
+      : 'No live preview for this op · click Apply to run.';
+  }
+}
+
+async function _mtInitViewport() {
+  if (mtState.renderer) return;
+  const container = document.getElementById('mt-viewport');
+  const canvas = document.getElementById('mt-canvas');
+  const w = container.clientWidth || 800;
+  const h = container.clientHeight || 600;
+  mtState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  mtState.renderer.setSize(w, h, false);
+  mtState.renderer.setPixelRatio(window.devicePixelRatio);
+  mtState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  mtState.renderer.toneMappingExposure = 1.0;
+  mtState.scene = new THREE.Scene();
+  mtState.scene.background = new THREE.Color(0x1a1a2e);
+  mtState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+  mtState.camera.position.set(0, 0.5, 2);
+  try {
+    mtState.controls = new OrbitControls(mtState.camera, canvas);
+    mtState.controls.enableDamping = true;
+  } catch (e) { console.error('[mesh-tool] OrbitControls error:', e); }
+  mtState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(5, 8, 5);
+  mtState.scene.add(dir);
+  mtState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  mtState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
+  const tick = () => {
+    if (!document.getElementById('modal-mesh-tool')?.classList.contains('hidden')) {
+      mtState.controls?.update();
+      mtState.renderer.render(mtState.scene, mtState.camera);
+    }
+    mtState.rafId = requestAnimationFrame(tick);
+  };
+  tick();
+  new ResizeObserver(() => {
+    const cw = container.clientWidth, ch = container.clientHeight;
+    if (cw > 0 && ch > 0) {
+      mtState.renderer.setSize(cw, ch, false);
+      mtState.camera.aspect = cw / ch;
+      mtState.camera.updateProjectionMatrix();
+    }
+  }).observe(container);
+}
+
+function _mtLoadMesh(meshPath) {
+  if (mtState.origModel && mtState.scene) {
+    mtState.scene.remove(mtState.origModel);
+  }
+  mtState.origModel = null;
+  mtState.origGeoms = [];
+  const url = 'file:///' + meshPath.replace(/\\/g, '/');
+  fetch(url).then(r => r.arrayBuffer()).then(buffer => {
+    const loader = new GLTFLoader();
+    loader.parse(buffer, '', (gltf) => {
+      mtState.origModel = gltf.scene;
+      mtState.scene.add(mtState.origModel);
+      const box = new THREE.Box3().setFromObject(mtState.origModel);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      mtState.origModel.position.sub(center);
+      mtState.origModel.position.y += size.y / 2;
+      mtState.camera.position.set(0, size.y * 0.5, maxDim * 2);
+      mtState.controls?.target.set(0, size.y * 0.5, 0);
+      mtState.controls?.update();
+      mtState.origModel.traverse(child => {
+        if (child.isMesh && child.geometry) {
+          mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
+        }
+      });
+      // Now that geoms are cached, run the initial preview.
+      _mtRunPreview();
+    });
+  });
+}
+
 function openMeshToolModal(toolName) {
   const schema = MESH_TOOL_SCHEMAS[toolName];
   if (!schema) { showToast(`Unknown tool: ${toolName}`, 'error'); return; }
@@ -5923,9 +6159,11 @@ function openMeshToolModal(toolName) {
   const subtitle = document.getElementById('mt-subtitle');
   const body = document.getElementById('mt-body');
   const cancelBtn = document.getElementById('mt-cancel');
+  const closeX = document.getElementById('mt-close-x');
   const applyBtn = document.getElementById('mt-apply');
   if (!modal || !body || !applyBtn) { showToast('Mesh-tool modal missing.', 'error'); return; }
 
+  mtState.schema = schema;
   title.textContent = schema.title;
   subtitle.textContent = schema.subtitle || '';
   body.innerHTML = '';
@@ -5937,11 +6175,19 @@ function openMeshToolModal(toolName) {
     body.appendChild(note);
   } else {
     schema.params.forEach((spec) => {
-      const row = document.createElement('div');
-      row.className = 'form-row';
-      const lab = document.createElement('label');
-      lab.textContent = spec.label;
-      row.appendChild(lab);
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+      const lab = document.createElement('div');
+      lab.style.cssText = 'display:flex; justify-content:space-between; font-size:11px;';
+      const labText = document.createElement('span');
+      labText.style.cssText = 'color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;';
+      labText.textContent = spec.label;
+      const labVal = document.createElement('span');
+      labVal.style.cssText = 'color:var(--text-1);';
+      labVal.textContent = String(spec.default);
+      lab.appendChild(labText); lab.appendChild(labVal);
+      wrap.appendChild(lab);
+
       let input;
       if (spec.type === 'select') {
         input = document.createElement('select');
@@ -5951,22 +6197,30 @@ function openMeshToolModal(toolName) {
           if (String(spec.default) === String(val)) opt.selected = true;
           input.appendChild(opt);
         });
+        labVal.style.display = 'none';
       } else if (spec.type === 'checkbox') {
         input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = !!spec.default;
+        labVal.style.display = 'none';
       } else {
         input = document.createElement('input');
-        input.type = spec.type || 'number';
+        input.type = spec.type === 'range' ? 'range' : 'number';
         if (spec.min !== undefined) input.min = String(spec.min);
         if (spec.max !== undefined) input.max = String(spec.max);
         if (spec.step !== undefined) input.step = String(spec.step);
         input.value = String(spec.default);
+        input.style.width = '100%';
       }
       input.dataset.paramId = spec.id;
       input.dataset.paramType = spec.type || 'number';
-      row.appendChild(input);
-      body.appendChild(row);
+      input.addEventListener('input', () => {
+        if (spec.type === 'range' || spec.type === 'number') labVal.textContent = String(input.value);
+        _mtSchedulePreview();
+      });
+      input.addEventListener('change', () => _mtSchedulePreview());
+      wrap.appendChild(input);
+      body.appendChild(wrap);
     });
   }
 
@@ -5974,17 +6228,14 @@ function openMeshToolModal(toolName) {
     modal.classList.add('hidden');
     applyBtn.onclick = null;
     cancelBtn.onclick = null;
+    if (closeX) closeX.onclick = null;
+    // Restore original geoms (memory hygiene).
+    for (const e of mtState.origGeoms) { e.mesh.geometry = e.originalGeom; }
   };
   cancelBtn.onclick = close;
+  if (closeX) closeX.onclick = close;
   applyBtn.onclick = async () => {
-    const vals = {};
-    body.querySelectorAll('[data-param-id]').forEach((el) => {
-      const id = el.dataset.paramId;
-      const t = el.dataset.paramType;
-      if (t === 'checkbox') vals[id] = el.checked;
-      else if (t === 'number') vals[id] = Number(el.value);
-      else vals[id] = el.value;
-    });
+    const vals = _mtCollectVals(body);
     if (schema.confirm && !confirm(schema.confirm)) return;
     const ctx = { imagePath: p.selectedImagePath, meshPath: p.selectedMeshPath };
     const params = schema.build(vals, ctx);
@@ -5992,6 +6243,12 @@ function openMeshToolModal(toolName) {
     runMeshTool(toolName, params);
   };
   modal.classList.remove('hidden');
+
+  // Init viewport then load mesh; preview kicks off once geoms are cached.
+  requestAnimationFrame(async () => {
+    await _mtInitViewport();
+    _mtLoadMesh(p.selectedMeshPath);
+  });
 }
 
 document.getElementById('ws-mesh-smooth-btn')?.addEventListener('click', () => openMeshToolModal('smooth'));

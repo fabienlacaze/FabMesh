@@ -10,6 +10,30 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (UI) — AI Tools popup gets 3D viewport + live JS preview
+
+Refactored `#modal-mesh-tool` to use the same layout as Vertex Paint
+(`#modal-mesh-edit`): `.modal` + `.modal-content`, 250px left params
+column, 1fr right canvas, Cancel/Apply footer.
+
+**Live preview** : each tool schema can declare a
+`preview(origGeom, vals) → BufferGeometry` function. Sliders are wired
+to debounced (`80ms`) `_mtRunPreview` that swaps each `child.geometry`
+to the modified version. Cancel restores originals from `mtState.origGeoms`.
+
+**JS implementations** (no Python round-trip) :
+- `smooth` : Laplacian one-ring averaging (`_jsLaplacianSmooth`)
+- `subdivide` : midpoint subdivision ×4 per level (`_jsMidpointSubdivide`)
+- `center` : centroid-X/Z + minY translate (`_jsCenter`)
+- `fix_normals` : `computeVertexNormals()` only — won't fix winding,
+  but shows the smooth-shaded result.
+
+**No live preview** : `decimate`, `fill_holes`, `retexture`, `trellis2_retex`
+— Python-only. The popup shows the static source mesh; Apply runs the
+real operation as before.
+
+---
+
 ## 2026-05-18 (UI) — AI Tools generic params popup + UI cleanup
 
 **Changes** :
