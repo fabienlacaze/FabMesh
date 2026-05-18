@@ -10,6 +10,71 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (mid-morning) — État des lieux + recherche SOTA texturing
+
+Après 12+h de tuning du pipeline Hi3DGen + sheet runner + bake_v3, la
+qualité plafonne à "mediocre". Lancé 2 agents en parallèle pour audit.
+
+### Bottlenecks identifiés (Agent 1 audit)
+
+1. **Hi3DGen + xatlas → ~1000 charts UV fragmentés** (vs ~20 sur SF3D).
+   xatlas n'arrive pas à merger les faces Hi3DGen même après décimation
+   (normales trop variées). chart-aware NN fill ne peut pas réparer
+   structurellement.
+2. **Multi-view source data 100% inventée** par SDXL+ControlNet Depth.
+   Aucune mesure réelle des côtés/dos. Causes les hallucinations type
+   "barbe-au-ventre".
+3. **MV-Adapter cassé** (cache_hidden_states=None deep in pipeline,
+   pas un bug diffusers — la passe ref ne traverse pas attn1).
+
+### Inventaire `external/` (14 modules, plupart pas wirés)
+
+CRM, ComfyUI-3D-Pack, Hi3DGen, InstantMesh, MV-Adapter (broken),
+MVPaint (jamais op), MaterialAnything (jamais op), Paint3D (KO),
+StableFast3D (active), SyncMVD (jamais op), TEXTure (jamais op),
+TRELLIS (KO Blackwell), TRELLIS2_win (KO), TripoSG, UniRig, kaolin
+(KO sm_120).
+
+### Recherche SOTA 2024-2025 (Agent 2 web research)
+
+| Modèle | License | Local OK | Quality | Hardware |
+|---|---|---|---|---|
+| Hunyuan3D-Paint 2.1 | Tencent (excl. EU/UK/KR) | ✅ | ⭐⭐⭐⭐⭐ | ✅ |
+| TRELLIS.2-4B | MIT | partiel | ⭐⭐⭐⭐⭐ | ❌ sm_120 |
+| MVPaint (CVPR 25) | Apache | ✅ | ⭐⭐⭐⭐ | ✅ |
+| MaterialAnything | Apache | ✅ | ⭐⭐⭐⭐ | ✅ |
+| MV-Adapter | Apache | cassé | ⭐⭐⭐ | ✅ |
+| Notre pipeline actuel | ✅ | ✅ | ⭐⭐ | ✅ |
+
+### Verdict commercial-EU FabMesh
+
+MVPaint = meilleur fit légal + technique. Apache 2.0, EU-safe, RTX 5080
+compatible, adresse exactement la problématique seam inpainting.
+
+### Tentatives déjà faites cette session
+
+- Hi3DGen + sheet_v2 dual ControlNet + bake_v3 chart-aware → patchy
+- Hi3DGen + sheet_v3 depth-only + bake_v3 → barbe-au-ventre hallu
+- Hi3DGen + CRM 6-views ortho + bake_v3 → mid quality
+- Hi3DGen + CRM + SDXL img2img refine + bake_v3 → sheet propre, bake patchy
+- Hi3DGen + sheet + texture_project winner blend → équivalent bake_v3
+- SF3D direct → texture nette ✅ mais perd la géom Hi3DGen
+- MV-Adapter → cassé silently (cache_hidden_states)
+- realvis_turnaround pur (no CN) → 4 vues 3/4, pas strict ortho
+
+### Voies restantes à tester
+
+1. **MVPaint stage_1_high_res standalone** (skip stage 1 low ckpt) :
+   SDXL+depth+tile dual CN + SyncMVD core (synchronized denoising
+   between views → no seams). ~4-6h dev.
+2. **hi3dgen_sf3d_v* finalisation** (raycast SF3D atlas → Hi3DGen geom).
+   4 scripts amorcés. ~2h dev.
+3. **MV-Adapter pipeline fix** (cache_hidden_states bug deep dive).
+   ~4-8h dev.
+4. **MaterialAnything** (PBR materials sur mesh). ~3h dev.
+
+---
+
 ## 2026-05-18 — Bake optimisation 40× + hybrid pipeline + UI tools
 
 **Perf bake** : chart-aware NN fill faisait
