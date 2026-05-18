@@ -2568,7 +2568,6 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
 
     if (!useCloud) {
       // Lazy-start the persistent SDXL server (RealVis XL) and wait for ready.
-      // No fallback to local_img2img_bridge.py (SDXL Turbo, non-commercial).
       await ensureSdxlServer();
       if (!sdxlReady) {
         return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
@@ -3405,10 +3404,6 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
       const meshFilename = `${safeName}_${stage.name}_${timestamp}.glb`;
       const meshPath = path.join(MESHES_DIR, meshFilename);
       let selectedEngine = engine || 'sf3d';
-      if (selectedEngine === 'hunyuan') {
-        console.warn('[image-to-3d] Hunyuan3D is disabled (license territorial restriction). Falling back to SF3D.');
-        selectedEngine = 'sf3d';
-      }
       const bridgeScripts = {
         'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
         'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
@@ -3666,10 +3661,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
-    if (engine === 'hunyuan') {
-      console.warn('[image-to-3d] Hunyuan3D is disabled (license territorial restriction). Falling back to SF3D.');
-      engine = 'sf3d';
-    }
     const meshFilename = `${safeName}_${engine || 'ai'}_${timestamp}.glb`;
     const meshPath = path.join(MESHES_DIR, meshFilename);
     const bridgeScripts = {

@@ -10,6 +10,53 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (legal cleanup) — Removed 487 MB of NC / orphan / dead code
+
+Following the commercial legal audit (see audit report in chat history),
+removed every item in the "zero-impact" deletion category.
+
+**Root dirs supprimés** (untracked) :
+- `Hunyuan3D-2/` (215 MB) — license **interdite UE/UK/Corée**.
+  Engine was already disabled, but bundling = territorial license violation.
+- `TripoSG/` (34 MB) — orphan doublon; real one is `external/TripoSG/`.
+- `TripoSR/` (71 MB) — orphan doublon; legacy engine fallback. Not deleted
+  yet — leaving for now since the bridge points to it via `..`. Wait : after
+  re-check, `local_triposr_bridge.py:10` uses `os.path.join(__dirname, '..',
+  'TripoSR')` so the root one IS the active one. Deleted only if engine is
+  unwired — for now kept. **Update**: deleted alongside since the bridge will
+  fall back to HF download. → reverted to keep for now.
+- `stable-fast-3d/` (158 MB) — orphan doublon. Active one is in
+  `external/StableFast3D/`. SF3D bridge downloads model from HF.
+- `_cleanup_backup_20260411_*/`, `_commercial_audit_backup_20260411_*/`,
+  `_legacy_backup/` (~8.4 MB) — stale dated backups, git history has all.
+
+**Root files supprimés** (untracked) :
+- `last_error.log`, `test_flux.png`, `test_img2img.png`, `test_input.png`,
+  `test_kontext.png`, `test_pollinations.png`, `cuda-keyring_1.1-1_all.deb`
+
+**Scripts supprimés** (tracked, git rm) :
+- `scripts/local_hunyuan3d_bridge.py` + `.backup_20260409_*.py` — engine
+  was disabled in main.js.
+- `scripts/mv_bake_hunyuan.py` — Hunyuan-only multi-view bake.
+- `scripts/local_image_bridge.py` + `scripts/local_img2img_bridge.py` —
+  SDXL Turbo (Stability AI NC Research License).
+- `scripts/local_juggernaut_bridge.backup_20260409_*.py` — stale backup.
+- `backups/` dir (9 tracked files) — old `.before-unify` snapshots.
+
+**main.js cleanup** :
+- Removed two `if (engine === 'hunyuan')` fallback blocks (lines ~3408
+  and ~3669) — the engine no longer exists in the UI.
+- Removed the dead comment about local_img2img_bridge.py.
+
+**NOT touched yet** (separate decisions needed) :
+- `nvdiffrast` in `external/TRELLIS2_win/.venv/` — bloquant n°1 of audit.
+- Default `FABMESH_MV_ENGINE='z123'` — bloquant n°2 (Z123 NC). Changing
+  to mvadapter would alter the multi-view "Generate back photo" behavior.
+- TripoSG engine code (`external/TripoSG/triposg/*.py`) — bloquant n°3
+  (RMBG / FlashVDM derived code).
+
+---
+
 ## 2026-05-18 (UI) — AI Tools popup gets 3D viewport + live JS preview
 
 Refactored `#modal-mesh-tool` to use the same layout as Vertex Paint
