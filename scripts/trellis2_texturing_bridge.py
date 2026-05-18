@@ -149,6 +149,37 @@ def main():
         output = pipeline.run(mesh, images[0], **run_kwargs)
     log(f'texturing done in {time.time()-t_run:.1f}s')
 
+    # Auto-brighten the baseColor texture before export. TRELLIS-2 PBR
+    # output tends to look under-lit in glTF viewers (model-viewer ACES
+    # tonemapping). Same boost as the SF3D bake path applied a few days
+    # back (commit bc475eb). Disable with FABMESH_TRELLIS2_SKIP_BRIGHTEN=1.
+    if os.environ.get('FABMESH_TRELLIS2_SKIP_BRIGHTEN') != '1':
+        try:
+            from PIL import ImageEnhance
+            geoms = (list(output.geometry.values())
+                     if hasattr(output, 'geometry') else [output])
+            n_boosted = 0
+            for m in geoms:
+                visual = getattr(m, 'visual', None)
+                if visual is None:
+                    continue
+                material = getattr(visual, 'material', None)
+                if material is None:
+                    continue
+                tex = getattr(material, 'baseColorTexture', None)
+                if tex is None:
+                    continue
+                new_tex = ImageEnhance.Brightness(tex).enhance(1.5)
+                new_tex = ImageEnhance.Color(new_tex).enhance(1.3)
+                new_tex = ImageEnhance.Contrast(new_tex).enhance(1.1)
+                material.baseColorTexture = new_tex
+                n_boosted += 1
+            if n_boosted:
+                log(f'post-process: brightness x1.5, sat x1.3, contrast x1.1'
+                    f' ({n_boosted} material(s))')
+        except Exception as e:
+            log(f'auto-brighten skipped: {type(e).__name__}: {e}')
+
     log(f'exporting to {args.out}')
     if hasattr(output, 'export'):
         output.export(args.out, extension_webp=True)
