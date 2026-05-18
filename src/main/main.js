@@ -3407,14 +3407,12 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
       const bridgeScripts = {
         'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
         'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
-        'triposg': path.join(__dirname, '..', '..', 'scripts', 'local_triposg_bridge.py'),
         'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
       };
       const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['sf3d'];
       const argsMap = {
         'local':   [bridgeScript, imgPath, meshPath, '512'],
         'sf3d':    [bridgeScript, imgPath, meshPath, '1024', '-1', 'none'],
-        'triposg': [bridgeScript, imgPath, meshPath, '30', '7.0'],
         'trellis': [bridgeScript, imgPath, meshPath, '0.95', '1024']
       };
       const args = argsMap[selectedEngine] || argsMap['sf3d'];
@@ -3666,10 +3664,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const bridgeScripts = {
       'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
       'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
-      // TripoSG: route via the full pipeline wrapper (raw → decim → UV unwrap
-      // → texture_project) so the output is a textured GLB usable downstream.
-      // The raw bridge alone produces geometry without UVs.
-      'triposg': path.join(__dirname, '..', '..', 'scripts', 'triposg_full_pipeline.py'),
       // Hi3DGen: direct image-to-3D via normal bridging (MIT, ByteDance+CUHK).
       // Routed through the full pipeline wrapper that adds xatlas UV unwrap
       // + texture_project.py so the output is a textured GLB (the bare
@@ -3686,13 +3680,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const sf3dRemesh = (targetFaces && Number(targetFaces) > 0) ? 'triangle' : 'none';
     const sf3dSubdivide = String(typeof subdivide === 'number' ? subdivide : 0);
 
-    // TripoSG full pipeline args: <front_image> <out.glb> [target_faces=0] [tex_res=1024]
-    // target_faces=0 means keep TripoSG's native ~1.4M faces (no decimation).
-    // We clamp to the same UI triangle slider as SF3D, defaulting to 50k for
-    // a sensible bake/web preview.
-    const triposgTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Number(targetFaces)) : '50000';
-    const triposgTexRes = String(textureSize || 1024);
-
     // Meshy needs its API key as argv[2] — fetched from config.json.
     const meshyApiKey = (loadConfig() || {}).meshyApiKey || '';
     const meshyTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Math.min(300000, Number(targetFaces))) : '50000';
@@ -3701,7 +3688,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const argsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
-      'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
       'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
@@ -3731,7 +3717,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const fixedArgsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
-      'triposg': [bridgeScript, imagePath, meshPath, triposgTargetFaces, triposgTexRes],
       'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
@@ -4033,31 +4018,28 @@ ipcMain.handle('check-multiview-dir', async (_event, imagePath) => {
 
 // Multi-view engine dispatch (shared with mv-inherit).
 // Selects the Python script based on FABMESH_MV_ENGINE:
-//   z123 (default) — Zero123++ (horizon ±20°)
-//   sdxl           — SDXL + IPAdapter
-//   crm            — CRM (6 ortho views incl. TOP/BOTTOM)
-//   mvadapter      — MV-Adapter i2mv-sdxl (6 ortho views, 768px, Apache 2.0)
+//   mvadapter (default) — MV-Adapter i2mv-sdxl (6 ortho views, 768px, Apache 2.0)
+//   sdxl                — SDXL + IPAdapter
+//   crm                 — CRM (6 ortho views incl. TOP/BOTTOM, MIT)
+// Zero123++ (CC-BY-NC 4.0 weights) removed for commercial distribution.
 function _mvScriptForEngine(engineOverride) {
   const engine = (engineOverride
                   || process.env.FABMESH_MV_ENGINE
-                  || 'z123').toLowerCase();
+                  || 'mvadapter').toLowerCase();
   const map = {
-    z123:      'multiview_gen.py',
     sdxl:      'multiview_sdxl_gen.py',
     crm:       'multiview_crm_gen.py',
     mvadapter: 'multiview_mvadapter_gen.py',
   };
-  const name = map[engine] || 'multiview_gen.py';
+  const name = map[engine] || 'multiview_mvadapter_gen.py';
   log.info('multiview', `engine=${engine} script=${name}`);
   return path.join(__dirname, '..', '..', 'scripts', name);
 }
 
 ipcMain.handle('generate-multiview', async (_event, opts) => {
   const { imagePath, harmonize, upscale, engine: engineOverride } = (opts || {});
-  // Per-call engine override: the renderer's "6 views" radio in CREATE NEW
-  // explicitly wants MV-Adapter (true ortho azim 0/90/180/270 + same SDXL
-  // base as RealVis so colours match). Z123 stays the default for the
-  // standalone "Multi-Views" button so we don't break old workflows.
+  // Per-call engine override: defaults to MV-Adapter (true ortho
+  // azim 0/90/180/270, same SDXL base as RealVis so colours match).
   const script = _mvScriptForEngine(engineOverride);
   // Multi-views are tied to the EXACT image version. Output dir derived
   // from the image file path:
@@ -4070,7 +4052,7 @@ ipcMain.handle('generate-multiview', async (_event, opts) => {
   return new Promise((resolve) => {
     // Options forwarded from the renderer's Multi-Views modal:
     // - harmonize (default true): RealVis img2img strength 0.3 to recover
-    //   photoreal style on top of MV-Adapter / Z123 output (+30s).
+    //   photoreal style on top of the MV-Adapter output (+30s).
     // - upscale (default false): Real-ESRGAN 768->1024 to match source
     //   resolution (+10s). Read by the Python multiview scripts.
     const harmonizeFlag = (harmonize === undefined ? true : !!harmonize) ? '1' : '0';

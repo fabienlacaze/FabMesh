@@ -10,6 +10,50 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (legal phase 2) — Removed Zero123++ and TripoSG engines
+
+Audit critical bloquants #2 (Zero123++ CC-BY-NC 4.0) and #3 (TripoSG
+incorporates RMBG-1.4 / FlashVDM / HunyuanDiT NC-territorial code).
+Neither is in the default working flow (Hi3DGen + TRELLIS-2), so we
+delete them entirely.
+
+**Scripts supprimés (tracked, git rm)** :
+- `scripts/multiview_gen.py` — Zero123++ bridge (CC-BY-NC weights).
+- `scripts/local_triposg_bridge.py`, `triposg_bridge.py`,
+  `triposg_full_pipeline.py`, `triposg_sf3d_raycast.py`,
+  `triposg_sf3d_uv_transfer.py`, `triposg_texture.py`.
+
+**External dir supprimé (untracked)** :
+- `external/TripoSG/` — **7.5 GB** (weights + source).
+
+**Patches** :
+- `src/main/main.js` :
+  - 2 dispatchs Image-to-3D : retiré la clef `triposg` du `bridgeScripts` /
+    `argsMap` / `fixedArgsMap` (3 endroits).
+  - `_mvScriptForEngine()` : default `z123` → `mvadapter`, retiré la clef
+    `z123: 'multiview_gen.py'` du map, fallback désormais `multiview_mvadapter_gen.py`.
+  - Commentaires sur Z123 mis à jour ou supprimés.
+- `src/renderer/index2.html` : retiré `<option value="triposg">` du
+  dropdown engine 3D (id `ws-3d-engine`).
+- `src/renderer/index2.js` :
+  - `ENGINE_LABELS` : retiré l'entrée `triposg`.
+  - `_ws3dEngineSync()` : retiré `triposg` de la liste `legacy`.
+  - Branche `engine === 'triposg'` du `expectedMs` retirée.
+  - Calls `API.generateMultiview({ ... engine: 'z123' })` (2 endroits)
+    → `engine: 'mvadapter'`.
+  - Bouton "Compare SF3D vs TripoSG" du panneau Calibration masqué via
+    `style.display='none'`. Toute la fonction `runCompare` et
+    `renderComparison` retirées (~80 lignes).
+- `scripts/local_sf3d_bridge.py` : `FABMESH_MV_ENGINE` default
+  `z123` → `mvadapter`, retiré la clef `z123` du map.
+- `scripts/calibrate.py` : path multi-view Z123 → MV-Adapter.
+
+**Restant** : seul le bloquant critique #1 (`nvdiffrast` dans la venv
+TRELLIS-2) n'est pas neutralisé. Sans lui, le flow par défaut Hi3DGen
++ TRELLIS-2 ne tourne plus.
+
+---
+
 ## 2026-05-18 (legal cleanup) — Removed 487 MB of NC / orphan / dead code
 
 Following the commercial legal audit (see audit report in chat history),
