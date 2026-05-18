@@ -10,6 +10,55 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (legal phase 4) — nvdiffrast → Kaolin shim (commercial-safe)
+
+**LE BLOQUANT FINAL EST LEVÉ.** TRELLIS-2 ne dépend plus de nvdiffrast.
+
+**Pourquoi** : nvdiffrast (NVIDIA Source Code License) = non-commercial. C'était
+le dernier composant qui empêchait la vente commerciale de FabMesh.
+
+**Comment** : on a remplacé les 3 appels nvdiffrast critiques de
+`postprocess_mesh()` (`trellis2_texturing.py` lignes 316-323) par un shim
+compatible API utilisant `kaolin.render.mesh.rasterize` (Apache 2.0). Le
+shim vit dans `external/TRELLIS2_win/src/trellis2/renderers/nvdiffrast_kaolin_compat.py`
+(~110 lignes). Le patch dans `trellis2_texturing.py` est minimal (5 lignes
+ajoutées, 1 import remplacé) avec un env var `TRELLIS2_USE_KAOLIN_RASTER`
+(default `1` = Kaolin) pour pouvoir basculer si besoin.
+
+**Validation pixel-par-pixel** (vs nvdiffrast natif, 3 meshes) :
+
+| Mesh    | V/F        | PSNR    | Mask IoU | SSIM   |
+|---------|------------|---------|----------|--------|
+| leopard | 573k/701k  | 82.85 dB| 0.9876   | 0.9967 |
+| king    | 12k/15k    | 82.39 dB| 0.9979   | 0.9998 |
+| fusil   | 61k/80k    | 92.00 dB| 0.9967   | 0.9991 |
+
+PSNR > 82 dB = textures quasi-identiques au pixel près. Les 0.6% de pixels
+qui diffèrent sont des frontières de charts UV (tie-breaking inter-rastérizer
+différent), gommés par l'inpaint cv2 downstream. Confirmé visuellement par
+le user sur une génération live (rat).
+
+**Performance** : Kaolin = +0.5s par génération sur leopard (1.2ms vs 500ms
+de rasterize), soit ~1% de pénalité sur un pipeline complet de 30-60s.
+Imperceptible en UX.
+
+**Activation par défaut** :
+- `scripts/hi3dgen_full_pipeline.py` step_trellis2_texturing : env
+  `TRELLIS2_USE_KAOLIN_RASTER=1` injecté dans le subprocess.
+- `scripts/mesh_tools.py` trellis2_retex : idem.
+- `trellis2_texturing.py` lui-même default à `1` si l'env var est absent.
+
+**Désinstallé** : `nvdiffrast` retiré de la venv TRELLIS-2 via
+`pip uninstall -y nvdiffrast` (vérifié : `import nvdiffrast` → ModuleNotFoundError).
+
+**Mis à jour** : `THIRD_PARTY_LICENSES.txt` entrée 25b ajoutée pour Kaolin
+(Apache 2.0, seul `kaolin.render.mesh` utilisé, jamais `kaolin.non_commercial`).
+
+Le projet est maintenant **commercial-safe pour la vente en UE/France**
+(Fab.com, itch.io, Gumroad) sous les conditions définies dans `LICENSE.txt`.
+
+---
+
 ## 2026-05-18 (legal phase 3) — LICENSE.txt + AI Act marking + cleanup
 
 Final pass to bring FabMesh to a commercially-vendable state, except for

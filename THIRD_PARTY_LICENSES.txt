@@ -242,6 +242,18 @@ FabMesh uses xatlas (via the xatlas-python binding) for UV atlas generation
 on Hi3DGen meshes prior to texture projection. MIT License.
 
 --------------------------------------------------------------------------------
+ 25b. Kaolin (kaolin.render.mesh.rasterize)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://github.com/NVIDIAGameWorks/kaolin
+FabMesh uses Kaolin's CUDA mesh rasterizer (`kaolin.render.mesh.rasterize`,
+backend='cuda') as the texture-baking rasterizer inside the TRELLIS-2
+pipeline, replacing nvdiffrast which is under the NVIDIA Source Code License
+(non-commercial). Only the Apache 2.0 portion of Kaolin is used; the
+`kaolin.non_commercial` namespace is NOT imported. Full license:
+https://github.com/NVIDIAGameWorks/kaolin/blob/master/LICENSE
+
+--------------------------------------------------------------------------------
  25. fast_simplification
 --------------------------------------------------------------------------------
 License: MIT

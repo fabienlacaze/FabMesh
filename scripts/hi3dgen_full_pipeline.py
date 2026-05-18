@@ -233,7 +233,11 @@ def step_trellis2_texturing(mesh_glb, image_path, out_glb):
            # Triton DLL blocked by Smart App Control on Windows.
            'TORCHDYNAMO_DISABLE': '1',
            'TORCHINDUCTOR_USE_TRITON': '0',
-           'TRANSFORMERS_ATTN_IMPLEMENTATION': 'eager'}
+           'TRANSFORMERS_ATTN_IMPLEMENTATION': 'eager',
+           # Use kaolin (Apache 2.0) instead of nvdiffrast (NVIDIA NC).
+           # +~0.5s per generation, mapping UV identique (PSNR > 82 dB).
+           # Can be disabled by setting TRELLIS2_USE_KAOLIN_RASTER=0.
+           'TRELLIS2_USE_KAOLIN_RASTER': os.environ.get('TRELLIS2_USE_KAOLIN_RASTER', '1')}
     rc = subprocess.run(cmd, timeout=900, env=env).returncode
     if rc != 0:
         log(f'TRELLIS-2 texturing failed with rc={rc}')

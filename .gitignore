@@ -44,7 +44,10 @@ logs/child_ip45_2view/
 logs/trellis2_sdpa_math_test/
 logs/test_mirror_back/
 
-# TRELLIS-2 native Windows install (third-party source + venv)
+# TRELLIS-2 native Windows install (third-party source + venv).
+# `src/` is itself a nested git repo (third-party clone) — not tracked.
+# Our Kaolin shim is in scripts/trellis2_kaolin_shim.py and is installed
+# into the TRELLIS-2 tree by scripts/install_kaolin_shim.py.
 external/TRELLIS/
 external/TRELLIS2_win/.venv/
 external/TRELLIS2_win/src/
