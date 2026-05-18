@@ -357,6 +357,12 @@
                         Multi-reference (use front + back photo)
                       </label>
                     </div>
+                    <div class="form-row check-row" style="margin-top:6px;">
+                      <label class="inline-check" style="font-size:11px;" title="Tile-by-tile SDXL refinement that adds micro-details (skin pores, fabric weave, scales, fur). Works best on objects/animals/creatures; less effective on human faces.">
+                        <input type="checkbox" id="ws-trellis2-refine" />
+                        SDXL refine (+~90s, sharper micro-details)
+                      </label>
+                    </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
                   </details>
                   <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D (Hi3DGen + TRELLIS-2)</button>

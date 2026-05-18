@@ -10,6 +10,39 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (texture quality) — Optional SDXL Tile Refine in pipeline
+
+Pipeline gained a 4th step (opt-in) : `scripts/texture_refine.py` runs
+on the GLB produced by TRELLIS-2 to add micro-details to the
+baseColorTexture. Triggered via a new checkbox "SDXL refine (+~90s,
+sharper micro-details)" in the Advanced TRELLIS-2 options. Default OFF
+to keep the standard ~3-min pipeline duration.
+
+Flow when ON :
+- Hi3DGen mesh (~30s)
+- TRELLIS-2 texturing (Kaolin shim, ~60-90s)
+- SDXL Tile Refine (~90s on 4096px atlas, 25 tiles)
+- AI Act marking + export
+
+UI : `src/renderer/index2.html` ws-trellis2-refine + `index2.js` flag
+forwarded to main.js as `trellis2Refine`. `main.js` injects
+`FABMESH_TRELLIS2_REFINE=1` env var into the pipeline subprocess.
+`hi3dgen_full_pipeline.py` reads it inside `main()`, calls the new
+`step_texture_refine(out_glb, refined_glb, image_path)` which shells
+out to `texture_refine.py` (uses the always-on SDXL server, fallback
+local diffusers).
+
+Auto-prompt : reads `prompts.json` next to the source image for a
+subject hint ("vélociraptor", "léopard", ...). Falls back to generic
+"photoreal, ultra-detailed, sharp focus, high quality, 8k" if absent.
+
+Caveat : the refine adds micro-details but doesn't fix wrong UV mapping
+(human face artefacts are a Hi3DGen geometry issue, not a texture
+finish issue). Best results on objects, animals, creatures. Mentioned
+in the checkbox tooltip.
+
+---
+
 ## 2026-05-18 (legal phase 4b) — Kaolin shim fix: o_voxel/postprocess.py
 
 **Bug** : après le commit be93a10 (phase 4 Kaolin), certains meshes

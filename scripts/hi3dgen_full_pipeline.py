@@ -271,6 +271,59 @@ def step_texture(mesh_glb, image_path, out_glb, tex_res, mv_dir=None):
     log(f'STEP 3 done in {time.time()-t0:.1f}s')
 
 
+def step_texture_refine(in_glb, out_glb, image_path=None):
+    """Optional SDXL Tile Refine post-TRELLIS-2.
+
+    Adds micro-details (skin pores, fabric weave, scales, fur tufts...)
+    via RealVisXL img2img + feathered tile blending. Talks to the
+    always-on SDXL server (port 5555) when available, falls back to
+    local diffusers otherwise (slower).
+
+    Triggered when FABMESH_TRELLIS2_REFINE=1. Defaults off (it adds
+    ~90-120s to the pipeline). Tunable via env :
+      FABMESH_TRELLIS2_REFINE_STRENGTH (default 0.3)
+      FABMESH_TRELLIS2_REFINE_TARGET   (default 4096)
+      FABMESH_TRELLIS2_REFINE_PROMPT   (default photoreal generic)
+    """
+    log('STEP 4 (SDXL Tile Refine): adding micro-details')
+    t0 = time.time()
+    refine_script = os.path.join(SCRIPTS, 'texture_refine.py')
+    strength = os.environ.get('FABMESH_TRELLIS2_REFINE_STRENGTH', '0.3')
+    target = os.environ.get('FABMESH_TRELLIS2_REFINE_TARGET', '4096')
+    prompt = os.environ.get('FABMESH_TRELLIS2_REFINE_PROMPT')
+    if not prompt and image_path:
+        # Try the prompts.json next to the source image for a contextual
+        # subject hint ("vélociraptor", "léopard", etc.).
+        prompts_path = os.path.join(
+            os.path.dirname(image_path), 'prompts.json')
+        if os.path.isfile(prompts_path):
+            try:
+                import json
+                with open(prompts_path, 'r', encoding='utf-8') as f:
+                    pj = json.load(f)
+                prompt = pj.get('subject') or pj.get('positive') or pj.get('prompt')
+            except Exception:
+                pass
+    if not prompt:
+        prompt = 'photoreal, ultra-detailed, sharp focus, high quality, 8k'
+    cmd = [
+        sys.executable, refine_script,
+        in_glb, out_glb,
+        '--strength', str(strength),
+        '--target', str(target),
+        '--prompt', prompt,
+    ]
+    rc = subprocess.run(cmd, timeout=900).returncode
+    if rc != 0:
+        log(f'refine failed (rc={rc}), keeping un-refined texture')
+        import shutil
+        if not os.path.isfile(out_glb):
+            shutil.copy(in_glb, out_glb)
+        return False
+    log(f'STEP 4 done in {time.time()-t0:.1f}s')
+    return True
+
+
 def main():
     if len(sys.argv) < 3:
         print('Usage: hi3dgen_full_pipeline.py <front_image> <out.glb> [tex_res=1024]')
@@ -307,6 +360,16 @@ def main():
         log('TRELLIS-2 failed, falling back to texture_project (single-view)')
         step_unwrap(raw_glb, uv_glb)
         step_texture(uv_glb, image_path, out_glb, tex_res, mv_dir=None)
+    print('LOCAL_HI3DGEN_PROGRESS: 92 trellis2_done', flush=True)
+
+    # Optional SDXL Tile Refine — adds micro-details to the texture.
+    # Enabled via UI checkbox forwarded as FABMESH_TRELLIS2_REFINE=1.
+    if os.environ.get('FABMESH_TRELLIS2_REFINE') == '1':
+        refined_glb = os.path.join(out_dir, '_hi3dgen_refined.glb')
+        if step_texture_refine(out_glb, refined_glb, image_path):
+            import shutil
+            shutil.move(refined_glb, out_glb)
+
     print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
     # EU AI Act art. 50 — mark GLB as AI-generated (machine-readable).
     try:
