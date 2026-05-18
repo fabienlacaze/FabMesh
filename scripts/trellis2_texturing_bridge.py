@@ -78,6 +78,10 @@ def main():
     from PIL import Image
     from trellis2.pipelines import Trellis2TexturingPipeline
 
+    # Progress markers consumed by hi3dgen_full_pipeline's stderr parser
+    # so the Electron UI's progress bar moves linearly between
+    # trellis2_start (65%) and texture_done (95%).
+    print('LOCAL_HI3DGEN_PROGRESS: 67 trellis2_loading', flush=True)
     log('loading Trellis2TexturingPipeline from microsoft/TRELLIS.2-4B...')
     t_load = time.time()
     pipeline = Trellis2TexturingPipeline.from_pretrained(
@@ -85,6 +89,7 @@ def main():
     pipeline.rembg_model = None  # rembg pre-process upstream
     pipeline.cuda()
     log(f'pipeline loaded in {time.time()-t_load:.1f}s')
+    print('LOCAL_HI3DGEN_PROGRESS: 72 trellis2_ready', flush=True)
 
     mesh = trimesh.load(args.mesh, force='mesh', process=False)
     if isinstance(mesh, trimesh.Scene):
@@ -120,6 +125,7 @@ def main():
         pipeline.image_cond_model.image_size = args.image_resolution
         log(f'  DINOv3 image_size = {args.image_resolution}')
 
+    print('LOCAL_HI3DGEN_PROGRESS: 75 sampling_start', flush=True)
     log(f'running texturing (run_kwargs={run_kwargs})...')
     t_run = time.time()
     import torch
@@ -138,16 +144,22 @@ def main():
                          if (args.resolution or 1024) == 1024
                          else 'tex_slat_flow_model_512')
         tex_model = pipeline.models[tex_model_key]
+        print('LOCAL_HI3DGEN_PROGRESS: 80 sampling_diffusion', flush=True)
         tex_slat = pipeline.sample_tex_slat(
             cond, tex_model, shape_slat, sampler_params)
+        print('LOCAL_HI3DGEN_PROGRESS: 86 sampling_done', flush=True)
         pbr_voxel = pipeline.decode_tex_slat(tex_slat)
+        print('LOCAL_HI3DGEN_PROGRESS: 88 postprocess_start', flush=True)
         output = pipeline.postprocess_mesh(
             mesh, pbr_voxel,
             args.resolution or 1024,
             args.texture_size or 2048)
     else:
+        print('LOCAL_HI3DGEN_PROGRESS: 80 sampling_diffusion', flush=True)
         output = pipeline.run(mesh, images[0], **run_kwargs)
+        print('LOCAL_HI3DGEN_PROGRESS: 88 postprocess_done', flush=True)
     log(f'texturing done in {time.time()-t_run:.1f}s')
+    print('LOCAL_HI3DGEN_PROGRESS: 91 brightening', flush=True)
 
     # Auto-brighten the baseColor texture before export. TRELLIS-2 PBR
     # output tends to look under-lit in glTF viewers (model-viewer ACES
