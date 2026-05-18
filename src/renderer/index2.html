@@ -892,14 +892,25 @@
          Generic popup for all AI Tools buttons (Smooth, Decimate, etc.).
          Title + dynamic params built by openMeshToolModal() in JS.
          ============================================================ -->
-    <div id="modal-mesh-tool" class="modal-overlay hidden">
-      <div class="modal-card" style="max-width:480px;">
-        <h2 id="mt-title">Mesh tool</h2>
-        <p id="mt-subtitle" class="modal-subtitle"></p>
-        <div id="mt-body" style="display:flex; flex-direction:column; gap:12px; margin:14px 0;"></div>
-        <div class="modal-actions">
-          <button class="ghost-btn" id="mt-cancel">Cancel</button>
-          <button class="primary-btn" id="mt-apply">Apply</button>
+    <div id="modal-mesh-tool" class="modal hidden">
+      <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+          <h3 style="margin:0;" id="mt-title">Mesh tool</h3>
+          <button id="mt-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
+        </div>
+        <p id="mt-subtitle" style="margin:0; font-size:12px; color:var(--text-muted);"></p>
+        <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
+          <!-- Left: dynamic params -->
+          <div id="mt-body" style="display:flex; flex-direction:column; gap:12px; width:250px; flex-shrink:0; padding:8px 0; overflow-y:auto;"></div>
+          <!-- Right: 3D viewport -->
+          <div id="mt-viewport" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
+            <canvas id="mt-canvas" style="width:100%; height:100%; display:block;"></canvas>
+            <div id="mt-preview-status" style="position:absolute; bottom:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc;">Drag to rotate · wheel to zoom</div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button id="mt-cancel" class="secondary-btn">Cancel</button>
+          <button id="mt-apply" class="refine-btn" style="margin:0; padding:8px 24px; width:auto;">Apply</button>
         </div>
       </div>
     </div>
