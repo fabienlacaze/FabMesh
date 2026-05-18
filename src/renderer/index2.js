@@ -598,6 +598,9 @@ async function renderProjectsGrid() {
   if (!state._selectedProjects) state._selectedProjects = new Set();
   // Drop selections of projects that are no longer visible.
   const visibleNames = new Set(visibleProjects.map(p => p.name));
+  // Expose visible names so the "Select all" header button can pick them up
+  // without recomputing the NSFW / search filters.
+  state._visibleProjectNames = visibleNames;
   for (const n of [...state._selectedProjects]) {
     if (!visibleNames.has(n)) state._selectedProjects.delete(n);
   }
@@ -659,6 +662,7 @@ async function renderProjectsGrid() {
     grid.appendChild(card);
   }
   renderProjectsBulkBar();
+  _syncSelectAllBtn();
   // Add the "+ New" card at the end
   const newCard = document.createElement('div');
   newCard.className = 'project-card new-card';
@@ -678,7 +682,43 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// Update the "Select all / Deselect all" header button label + state
+// based on whether every visible project is currently selected.
+function _syncSelectAllBtn() {
+  const btn = document.getElementById('btn-select-all');
+  if (!btn) return;
+  const visible = state._visibleProjectNames || new Set();
+  const selected = state._selectedProjects || new Set();
+  if (visible.size === 0) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+  const allSelected = visible.size > 0
+    && [...visible].every(n => selected.has(n));
+  btn.innerHTML = allSelected ? '&#9745; Deselect all' : '&#9744; Select all';
+  btn.title = allSelected
+    ? 'Deselect all visible projects'
+    : 'Select all visible projects';
+}
+
+// Wire the header "Select all / Deselect all" toggle. Acts on visible
+// projects only (respects the search + NSFW filters).
+document.getElementById('btn-select-all')?.addEventListener('click', () => {
+  if (!state._selectedProjects) state._selectedProjects = new Set();
+  const visible = state._visibleProjectNames || new Set();
+  if (visible.size === 0) return;
+  const allSelected = [...visible].every(n => state._selectedProjects.has(n));
+  if (allSelected) {
+    for (const n of visible) state._selectedProjects.delete(n);
+  } else {
+    for (const n of visible) state._selectedProjects.add(n);
+  }
+  renderProjectsGrid();
+});
+
 function renderProjectsBulkBar() {
+  _syncSelectAllBtn();
   let bar = document.getElementById('projects-bulk-bar');
   const selected = state._selectedProjects || new Set();
   const count = selected.size;
