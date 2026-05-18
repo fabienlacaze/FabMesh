@@ -131,7 +131,6 @@ const ENGINE_LABELS = {
   // 3D engines
   'sf3d':           'Stable Fast 3D (PBR, Stability Community License)',
   'local':          'TripoSR (CC0)',
-  'triposg':        'TripoSG (MIT)',
   'hi3dgen':        'Hi3DGen (MIT, ByteDance+CUHK)',
   'trellis':        'Trellis 2 (MIT)',
   'meshy':          'Meshy.ai (cloud, CC-BY 4.0)',
@@ -1701,7 +1700,7 @@ _wsMvSync();
 // 3D engine selector — toggles visibility of legacy-only fields.
 // Hi3DGen+TRELLIS-2 ignores texture-res and target-triangles (TRELLIS-2
 // generates its own native PBR resolution). Only show those fields when
-// the legacy SF3D/TripoSG engines are selected.
+// the legacy SF3D engine is selected.
 // ----------------------------------------------------------------
 function _ws3dEngineSync() {
   const eng = document.getElementById('ws-3d-engine')?.value || 'hi3dgen';
@@ -1711,7 +1710,7 @@ function _ws3dEngineSync() {
   const sf3dHint = document.getElementById('ws-3d-sf3d-hint');
   const hi3dgenHint = document.getElementById('ws-3d-hi3dgen-hint');
   const trellis2Opts = document.getElementById('ws-3d-trellis2-opts');
-  const legacy = ['sf3d', 'triposg', 'meshy'].includes(eng);
+  const legacy = ['sf3d', 'meshy'].includes(eng);
   if (qRow) qRow.style.display = legacy ? '' : 'none';
   if (tRow) tRow.style.display = legacy ? '' : 'none';
   if (qHint) qHint.style.display = legacy ? '' : 'none';
@@ -1819,7 +1818,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
   showToast('Generating 6 multi-views...', 'info', 5000);
   try {
     const result = await API.generateMultiview({
-      imagePath: mvImagePath, harmonize, upscale, engine: 'z123',  // MV-Adapter cassé avec diffusers 0.32 (output halluciné) — Z123 par défaut
+      imagePath: mvImagePath, harmonize, upscale, engine: 'mvadapter',  // Zero123++ retired (CC-BY-NC 4.0 weights — non-commercial). MV-Adapter is Apache 2.0.
     });
     if (result && result.success) {
       showToast('Multi-views generated!', 'success');
@@ -3409,7 +3408,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 imagePath: imgPath,
                 harmonize: mv6Harmonize,
                 upscale: mv6Upscale,
-                engine: 'z123',  // MV-Adapter cassé avec diffusers 0.32 (output halluciné) — Z123 par défaut
+                engine: 'mvadapter',  // Zero123++ retired (CC-BY-NC 4.0 weights — non-commercial). MV-Adapter is Apache 2.0.
               });
               if (mvRes?.success) {
                 if (!p._multiviews) p._multiviews = {};
@@ -5647,9 +5646,6 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   let expectedMs;
   if (engine === 'sf3d') {
     expectedMs = preset.expectedMs + triPreset.extraMs;
-  } else if (engine === 'triposg') {
-    // TripoSG full pipeline: geo ~30s + decim + xatlas + texture_project ~90s
-    expectedMs = 150000;
   } else if (engine === 'hi3dgen') {
     // Hi3DGen full pipeline (with MV-Adapter 6 views):
     //   - Hi3DGen inference: ~30s
@@ -9712,89 +9708,10 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
     if (btnCompare) btnCompare.disabled = false;
   }
 
-  // Side-by-side comparison: run SF3D then TripoSG, show both verdicts.
-  async function runCompare() {
-    diagModal.classList.remove('hidden');
-    diagBody.innerHTML = '<p style="color:#aaa">Running both engines sequentially — ~8-10 min total...</p>';
-    btnDiagnose.disabled = true;
-    if (btnCompare) btnCompare.disabled = true;
-    if (btnCancel) {
-      btnCancel.style.display = ''; btnCancel.disabled = false;
-      btnCancel.innerHTML = '&#9209;&#65039; Cancel';
-    }
-    const t0 = Date.now();
-    const fmt = (ms) => { const s = Math.floor(ms/1000); const m = Math.floor(s/60); return m>0 ? `${m}m${String(s%60).padStart(2,'0')}s` : `${s}s`; };
-    const progressEl = document.createElement('p');
-    progressEl.style.cssText = 'color:#9cf; font-family:monospace; font-size:12px;';
-    diagBody.appendChild(progressEl);
-    let phase = 'SF3D';
-    const timer = setInterval(() => { progressEl.textContent = `[${fmt(Date.now()-t0)}] ${phase} ${lastLine||'...'}`; }, 1000);
-    let lastLine = '';
-    const unsub = API.onCalibProgress ? API.onCalibProgress((d) => {
-      lastLine = (String(d).split('\n').filter(l => l.trim()).pop() || '').slice(0, 120);
-    }) : null;
-    try {
-      const resSf3d = await API.calibDiagnose({ engine: 'sf3d' });
-      phase = 'TripoSG';
-      const resTriposg = await API.calibDiagnose({ engine: 'triposg' });
-      clearInterval(timer);
-      diagBody.innerHTML = renderComparison(resSf3d, resTriposg);
-    } catch (e) {
-      clearInterval(timer);
-      diagBody.innerHTML = `<p style="color:#f66">Error: ${e.message}</p>`;
-    }
-    if (btnCancel) btnCancel.style.display = 'none';
-    btnDiagnose.disabled = false;
-    if (btnCompare) btnCompare.disabled = false;
-  }
-
-  function renderComparison(resA, resB) {
-    function miniCard(label, res) {
-      if (!res || !res.success) {
-        return `<div style="flex:1; background:#1a0e0e; border:2px solid #633; border-radius:8px; padding:14px;">
-          <h3 style="margin:0 0 8px; color:#f88;">${label}</h3>
-          <p style="color:#f66; font-size:12px;">Failed: ${(res && res.error) || 'unknown'}</p></div>`;
-      }
-      const v = res.verdict || {};
-      const s1 = v.stage1_sf3d_score || '?';
-      const s2 = v.stage2_mv_similarity || '?';
-      const s3 = v.stage3_final_score || '?';
-      return `<div style="flex:1; background:#161616; border:2px solid #333; border-radius:8px; padding:14px;">
-        <h3 style="margin:0 0 10px; color:#9cf;">${label}</h3>
-        <table style="width:100%; font-family:monospace; font-size:13px;">
-          <tr><td>Mesh (stage 1)</td><td style="text-align:right;"><b>${s1}</b></td></tr>
-          <tr><td>Multi-views (stage 2)</td><td style="text-align:right;"><b>${s2}</b></td></tr>
-          <tr><td>Final projected (stage 3)</td><td style="text-align:right;"><b>${s3}</b></td></tr>
-        </table>
-        <p style="font-size:11px; color:#aaa; margin-top:10px;">Primary cause: <b>${v.primary_cause || 'unknown'}</b></p>
-      </div>`;
-    }
-    // Winner: highest stage3 score
-    function parseScore(res) {
-      const s = res?.verdict?.stage3_final_score;
-      if (!s) return -1;
-      const m = String(s).match(/^(\d+)/);
-      return m ? parseInt(m[1], 10) : -1;
-    }
-    const sfScore = parseScore(resA);
-    const tpScore = parseScore(resB);
-    let winner = '';
-    if (sfScore > tpScore) winner = '<div style="padding:14px; margin-top:14px; background:#1a5c1a; border-radius:8px;"><b>WINNER: SF3D</b> (' + sfScore + ' vs ' + tpScore + ')</div>';
-    else if (tpScore > sfScore) winner = '<div style="padding:14px; margin-top:14px; background:#1a5c1a; border-radius:8px;"><b>WINNER: TripoSG</b> (' + tpScore + ' vs ' + sfScore + ')</div>';
-    else winner = '<div style="padding:14px; margin-top:14px; background:#555; border-radius:8px;"><b>TIE</b> (' + sfScore + '/6 each)</div>';
-    return `
-      <h3 style="margin-top:0;">Engine comparison on the same calibration input</h3>
-      <p style="color:#aaa;">Both engines ran the full pipeline (mesh → multi-views → projection → scoring).</p>
-      <div style="display:flex; gap:14px;">
-        ${miniCard('SF3D', resA)}
-        ${miniCard('TripoSG', resB)}
-      </div>
-      ${winner}
-    `;
-  }
-
+  // SF3D vs TripoSG side-by-side comparison removed — TripoSG engine
+  // is no longer shipped (RMBG / FlashVDM derived code, non-commercial).
   const btnCompare = document.getElementById('set-calib-compare');
-  btnCompare?.addEventListener('click', runCompare);
+  if (btnCompare) btnCompare.style.display = 'none';
 
   // ---- NEW: Tiered calibration (test -> analyze -> auto-tune) ---------
   function tierRow(num, name, state = 'pending') {

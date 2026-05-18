@@ -260,17 +260,17 @@ def run_pipeline(mesh_out, env_overrides=None, skip_sf3d=False):
         if r.returncode != 0 or not os.path.exists(sf3d_path):
             raise RuntimeError(f'SF3D failed: {r.stderr[-500:]}')
 
-    # Generate multi-views via the normal Zero123++ pipeline if they
-    # don't already exist — this is the real "out of the factory" flow.
+    # Generate multi-views via MV-Adapter (Apache 2.0) if they don't
+    # already exist — replaces the legacy Zero123++ path (CC-BY-NC).
     if not os.path.exists(os.path.join(MV_DIR_ACTIVE, 'view_0.png')):
-        print('[calib] running Zero123++ multi-view gen...')
+        print('[calib] running MV-Adapter multi-view gen...')
         os.makedirs(MV_DIR_ACTIVE, exist_ok=True)
-        mv_script = os.path.join(ROOT, 'scripts', 'multiview_gen.py')
+        mv_script = os.path.join(ROOT, 'scripts', 'multiview_mvadapter_gen.py')
         r = subprocess.run(
             [sys.executable, mv_script, REF_IMG, MV_DIR_ACTIVE],
             env=env, capture_output=True, text=True, timeout=600)
         if r.returncode != 0 or not os.path.exists(os.path.join(MV_DIR_ACTIVE, 'view_0.png')):
-            raise RuntimeError(f'multiview_gen failed: {r.stderr[-500:]}')
+            raise RuntimeError(f'multiview gen failed: {r.stderr[-500:]}')
 
     print('[calib] running texture_project...')
     proj_script = os.path.join(ROOT, 'scripts', 'texture_project.py')
