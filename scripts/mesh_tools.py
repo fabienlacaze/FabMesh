@@ -136,6 +136,8 @@ def trellis2_retex(input_path, output_path, source_image):
     env['TORCHDYNAMO_DISABLE'] = '1'
     env['TORCHINDUCTOR_USE_TRITON'] = '0'
     env['TRANSFORMERS_ATTN_IMPLEMENTATION'] = 'eager'
+    # Use kaolin (Apache 2.0) rasterizer instead of nvdiffrast (NVIDIA NC).
+    env.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
     r = subprocess.run(
         [venv_py, bridge, input_path, source_image, output_path],
         capture_output=True, text=True, timeout=600, env=env)
