@@ -5911,11 +5911,7 @@ const MESH_TOOL_SCHEMAS = {
   },
 };
 
-// Three.js viewer state for the generic mesh-tool modal.
-let _mtViewer = null;
-let _mtModel = null;
-
-async function openMeshToolModal(toolName) {
+function openMeshToolModal(toolName) {
   const schema = MESH_TOOL_SCHEMAS[toolName];
   if (!schema) { showToast(`Unknown tool: ${toolName}`, 'error'); return; }
   const p = state.currentProject;
@@ -5933,54 +5929,6 @@ async function openMeshToolModal(toolName) {
   title.textContent = schema.title;
   subtitle.textContent = schema.subtitle || '';
   body.innerHTML = '';
-
-  // Show the modal first so the canvas has a layout size.
-  modal.classList.remove('hidden');
-
-  // Lazy-init the Three.js viewer for the modal canvas.
-  const canvas = document.getElementById('mt-canvas');
-  if (!_mtViewer && canvas) {
-    _mtViewer = new Viewer3D({
-      canvas, fov: 45, bgColor: 0x1b1b1b, cameraPos: [2, 2, 3],
-      lighting: true,
-    });
-    _mtViewer.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    _mtViewer.renderer.toneMappingExposure = 1.0;
-    _mtViewer.startTickLoop();
-  }
-  // Wait one frame so the canvas has a layout size, then resize.
-  await new Promise(r => requestAnimationFrame(r));
-  if (_mtViewer) _mtViewer.renderer.setSize(
-    canvas.clientWidth || 600, canvas.clientHeight || 520, false);
-
-  // Load the selected mesh into the viewer scene (replaces previous).
-  if (_mtModel && _mtViewer) { _mtViewer.scene.remove(_mtModel); _mtModel = null; }
-  try {
-    const buffer = await API.readMeshFile(p.selectedMeshPath);
-    if (buffer && _mtViewer) {
-      const loader = new GLTFLoader();
-      loader.parse(buffer, '', (gltf) => {
-        _mtModel = gltf.scene;
-        _mtViewer.scene.add(_mtModel);
-        const box = new THREE.Box3().setFromObject(_mtModel);
-        const size = box.getSize(new THREE.Vector3()).length();
-        const center = box.getCenter(new THREE.Vector3());
-        _mtModel.position.x -= center.x;
-        _mtModel.position.y -= center.y;
-        _mtModel.position.z -= center.z;
-        _mtViewer.camera.near = size / 100;
-        _mtViewer.camera.far = size * 100;
-        _mtViewer.camera.updateProjectionMatrix();
-        _mtViewer.camera.position.copy(new THREE.Vector3(size * 0.8, size * 0.5, size * 0.8));
-        _mtViewer.controls?.target.set(0, 0, 0);
-        _mtViewer.controls?.update();
-      }, (err) => {
-        console.error('Mesh-tool modal: GLTF parse error', err);
-      });
-    }
-  } catch (e) {
-    console.error('Mesh-tool modal: failed to load mesh', e);
-  }
 
   if (schema.params.length === 0) {
     const note = document.createElement('div');
@@ -6043,6 +5991,7 @@ async function openMeshToolModal(toolName) {
     close();
     runMeshTool(toolName, params);
   };
+  modal.classList.remove('hidden');
 }
 
 document.getElementById('ws-mesh-smooth-btn')?.addEventListener('click', () => openMeshToolModal('smooth'));

@@ -893,25 +893,13 @@
          Title + dynamic params built by openMeshToolModal() in JS.
          ============================================================ -->
     <div id="modal-mesh-tool" class="modal-overlay hidden">
-      <div class="modal-card modal-card-wide" style="max-width:1100px; width:92vw;">
+      <div class="modal-card" style="max-width:480px;">
         <h2 id="mt-title">Mesh tool</h2>
-        <p id="mt-subtitle" class="modal-subtitle" style="margin-bottom:10px;"></p>
-        <div style="display:flex; gap:14px;">
-          <!-- Left: Three.js preview of the selected mesh -->
-          <div style="flex:1; min-width:0;">
-            <div style="width:100%; height:520px; background:#1b1b1b; border-radius:6px; position:relative;">
-              <canvas id="mt-canvas" style="width:100%; height:100%; display:block; border-radius:6px;"></canvas>
-              <div style="position:absolute; bottom:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc;">Source mesh preview · drag to rotate · wheel to zoom</div>
-            </div>
-          </div>
-          <!-- Right: params + actions -->
-          <div style="width:330px; display:flex; flex-direction:column; gap:12px;">
-            <div id="mt-body" style="display:flex; flex-direction:column; gap:12px;"></div>
-            <div class="modal-actions" style="margin-top:auto;">
-              <button class="ghost-btn" id="mt-cancel">Cancel</button>
-              <button class="primary-btn" id="mt-apply">Apply</button>
-            </div>
-          </div>
+        <p id="mt-subtitle" class="modal-subtitle"></p>
+        <div id="mt-body" style="display:flex; flex-direction:column; gap:12px; margin:14px 0;"></div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="mt-cancel">Cancel</button>
+          <button class="primary-btn" id="mt-apply">Apply</button>
         </div>
       </div>
     </div>
