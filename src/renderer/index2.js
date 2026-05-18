@@ -1412,19 +1412,33 @@ function showStep2BackImage(imgPath) {
   _ws3dMultiRefSync();
 }
 
-// Multi-reference checkbox is only visible if a back photo has been
-// attached to the current project. Auto-checked when a back photo is
-// present (intent is clear — the user attached it precisely so TRELLIS-2
-// uses it). User can still uncheck manually before generation.
-function _ws3dMultiRefSync() {
+// Multi-reference sync : couples the checkbox state, the checkbox row
+// visibility, and the back-photo preview block on the right.
+//   - No back photo attached     → checkbox row hidden, back block shows
+//                                   the "+ Add back photo" placeholder.
+//   - Back photo + checkbox ON   → checkbox row shown checked, back
+//                                   preview visible, back image fed to
+//                                   TRELLIS-2 at generation.
+//   - Back photo + checkbox OFF  → checkbox row shown unchecked, back
+//                                   preview HIDDEN, back image NOT fed
+//                                   to TRELLIS-2 (user opted out).
+function _ws3dMultiRefSync(opts = {}) {
   const row = document.getElementById('ws-trellis2-multiref-row');
+  const backBlock = document.getElementById('ws-3d-source-back-block');
   if (!row) return;
   const p = state.currentProject;
   const hasBack = !!(p && p.backImagePath);
-  row.style.display = hasBack ? '' : 'none';
   const cb = document.getElementById('ws-trellis2-multiref');
-  if (cb) cb.checked = hasBack;
+  row.style.display = hasBack ? '' : 'none';
+  // Auto-check on first attach unless the user just toggled the box.
+  if (cb && !opts.fromCheckbox) cb.checked = hasBack;
+  if (backBlock) {
+    const showBack = !hasBack || (cb && cb.checked);
+    backBlock.style.display = showBack ? '' : 'none';
+  }
 }
+document.getElementById('ws-trellis2-multiref')?.addEventListener('change',
+  () => _ws3dMultiRefSync({ fromCheckbox: true }));
 document.getElementById('ws-3d-source-back-preview')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p) { showToast('Open a project first', 'error'); return; }
@@ -5672,7 +5686,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
 
   const params = {
     imagePath: p.selectedImagePath,
-    imagePathBack: p.backImagePath || null,  // 2-view mode if set
+    // 2-view mode only when the user actually wants multi-ref. Unticking
+    // the checkbox tells TRELLIS-2 to ignore the back photo entirely.
+    imagePathBack: (trellis2MultiRef && p.backImagePath) ? p.backImagePath : null,
     outputName: p.name,
     engine,
     textureSize: preset.tex,
