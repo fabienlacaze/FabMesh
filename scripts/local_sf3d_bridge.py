@@ -1309,6 +1309,13 @@ def generate_3d(
                 shutil.rmtree(_multiview_dir, ignore_errors=True)
             except: pass
 
+    # EU AI Act art. 50 — mark GLB as AI-generated (machine-readable).
+    try:
+        from add_ai_metadata import patch_glb as _patch_ai
+        _patch_ai(output_path)
+    except Exception as _ai_e:
+        print(f"LOCAL_SF3D: add_ai_metadata skipped: {_ai_e}", flush=True)
+
     # Re-read final file size
     size = os.path.getsize(output_path)
     print(f"LOCAL_SF3D_SUCCESS: {output_path} ({size} bytes)", flush=True)

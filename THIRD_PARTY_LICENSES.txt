@@ -118,17 +118,139 @@ restrictions in the license. Full license text:
 https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md
 
 --------------------------------------------------------------------------------
- 12. Hunyuan3D
+ 12. Hi3DGen
 --------------------------------------------------------------------------------
-License: Tencent Hunyuan Community License
-URL:     https://huggingface.co/tencent/Hunyuan3D-2
-Hunyuan3D weights (if enabled) are downloaded at runtime from Hugging Face and
-governed by the Tencent Hunyuan Community License. FabMesh does not
-redistribute these weights. Full license text:
-https://huggingface.co/tencent/Hunyuan3D-2/blob/main/LICENSE
+License: MIT
+URL:     https://github.com/Stable-X/Hi3DGen
+FabMesh's default image-to-3D pipeline uses Hi3DGen for normal-bridged mesh
+generation. Copyright (c) ByteDance Inc. and CUHK. MIT License. Full text:
+https://github.com/Stable-X/Hi3DGen/blob/main/LICENSE
+Companion model weights (Stable-X/trellis-normal-v0-1, Stable-X/yoso-normal-v1-8-1)
+are downloaded at runtime under their respective MIT / Apache-2.0 licenses.
 
 --------------------------------------------------------------------------------
- 13. NumPy
+ 13. TRELLIS-2-4B
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://huggingface.co/microsoft/TRELLIS.2-4B
+FabMesh uses Microsoft TRELLIS-2-4B for native 3D PBR texture generation
+(default texturing pipeline). Copyright (c) Microsoft Corporation. MIT
+License. Full text: https://github.com/microsoft/TRELLIS/blob/main/LICENSE
+The pipeline internally depends on the DINOv3 feature extractor (see entry
+18 below).
+
+--------------------------------------------------------------------------------
+ 14. Stable Fast 3D (SF3D)
+--------------------------------------------------------------------------------
+License: Stability AI Community License
+URL:     https://huggingface.co/stabilityai/stable-fast-3d
+FabMesh's fast fallback image-to-3D engine uses Stable Fast 3D. Commercial use
+is permitted free of charge up to USD 1,000,000 of total annual revenue; above
+that threshold an Enterprise License from Stability AI is required. Full
+license text: https://huggingface.co/stabilityai/stable-fast-3d/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 15. BiRefNet
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://huggingface.co/ZhengPeng7/BiRefNet
+FabMesh's background-removal stage in the Hi3DGen pipeline uses BiRefNet
+(downloaded at runtime). Copyright (c) Zheng Peng. MIT License. Full text:
+https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE.md
+
+--------------------------------------------------------------------------------
+ 16. MV-Adapter (i2mv-sdxl)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://huggingface.co/huanngzh/mv-adapter
+FabMesh's default multi-view generation uses MV-Adapter (replaces Zero123++).
+Copyright (c) Huanngzh / Beijing Academy of Artificial Intelligence. Apache
+License 2.0. Full text:
+https://github.com/huanngzh/MV-Adapter/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 17. CRM (Convolutional Reconstruction Model)
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://huggingface.co/Zhengyi/CRM
+FabMesh's alternative multi-view engine (6 ortho views incl. TOP/BOTTOM).
+Copyright (c) Zhengyi Wang / THU-ML. MIT License. Full text:
+https://github.com/thu-ml/CRM/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 18. DINOv3
+--------------------------------------------------------------------------------
+License: DINOv3 License (Meta Platforms)
+URL:     https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m
+TRELLIS-2-4B uses Meta DINOv3 as its image-feature backbone. Commercial use
+is permitted under the DINOv3 License. The license requires prominent
+attribution "Built with DINOv3" on any product that uses the model. FabMesh
+satisfies this requirement via this entry and via the "Built with DINOv3"
+notice in the application's About screen and on the product page.
+Full license: https://ai.meta.com/resources/models-and-libraries/dinov3-license/
+
+--------------------------------------------------------------------------------
+ 19. IP-Adapter
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://huggingface.co/h94/IP-Adapter
+FabMesh uses IP-Adapter for image conditioning in some auxiliary pipelines.
+Copyright (c) Tencent ARC Lab. Apache-2.0. Full license:
+https://github.com/tencent-ailab/IP-Adapter/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 20. ControlNet (OpenPose & Tile variants by xinsir)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URLs:    https://huggingface.co/xinsir/controlnet-openpose-sdxl-1.0
+         https://huggingface.co/xinsir/controlnet-tile-sdxl-1.0
+FabMesh uses ControlNet conditioning models for pose-guided image generation
+and tile refinement. Apache 2.0 license.
+
+--------------------------------------------------------------------------------
+ 21. flash_attn
+--------------------------------------------------------------------------------
+License: BSD-3-Clause
+URL:     https://github.com/Dao-AILab/flash-attention
+FabMesh bundles the flash_attn extension inside the TRELLIS-2 Python
+environment for fast attention kernels. Copyright (c) Tri Dao. BSD-3-Clause.
+Full text: https://github.com/Dao-AILab/flash-attention/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 22. kornia
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://github.com/kornia/kornia
+FabMesh uses kornia for differentiable geometric operations in TRELLIS-2's
+texturing pipeline. Apache-2.0. Full text:
+https://github.com/kornia/kornia/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 23. spconv (sparse convolution)
+--------------------------------------------------------------------------------
+License: Apache-2.0
+URL:     https://github.com/traveller59/spconv
+FabMesh uses spconv as a transitive dependency of TRELLIS-2. Apache-2.0.
+Full text: https://github.com/traveller59/spconv/blob/master/LICENSE
+
+--------------------------------------------------------------------------------
+ 24. xatlas
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/jpcy/xatlas
+FabMesh uses xatlas (via the xatlas-python binding) for UV atlas generation
+on Hi3DGen meshes prior to texture projection. MIT License.
+
+--------------------------------------------------------------------------------
+ 25. fast_simplification
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://github.com/pyvista/fast-simplification
+FabMesh uses fast_simplification for quadric edge-collapse decimation of
+high-poly meshes. Copyright (c) PyVista. MIT License.
+
+--------------------------------------------------------------------------------
+ 26. NumPy
 --------------------------------------------------------------------------------
 License: BSD-3-Clause
 URL:     https://github.com/numpy/numpy
@@ -137,7 +259,7 @@ bridges. Copyright (c) 2005-present NumPy Developers. BSD-3-Clause. Full
 license text: https://github.com/numpy/numpy/blob/main/LICENSE.txt
 
 --------------------------------------------------------------------------------
- 14. SciPy
+ 27. SciPy
 --------------------------------------------------------------------------------
 License: BSD-3-Clause
 URL:     https://github.com/scipy/scipy
@@ -146,7 +268,7 @@ FabMesh uses SciPy for geometry and optimization helpers. Copyright (c)
 https://github.com/scipy/scipy/blob/main/LICENSE.txt
 
 --------------------------------------------------------------------------------
- 15. Pillow (PIL)
+ 28. Pillow (PIL)
 --------------------------------------------------------------------------------
 License: HPND (Historical Permission Notice and Disclaimer)
 URL:     https://github.com/python-pillow/Pillow
@@ -156,16 +278,16 @@ Secret Labs AB; Copyright (c) 1995-2011 by Fredrik Lundh. HPND license. Full
 license text: https://github.com/python-pillow/Pillow/blob/main/LICENSE
 
 --------------------------------------------------------------------------------
- 16. rembg
+ 29. rembg
 --------------------------------------------------------------------------------
 License: MIT
 URL:     https://github.com/danielgatis/rembg
-FabMesh uses rembg for background removal on generated reference images before
-TripoSR/Hunyuan3D reconstruction. Copyright (c) Daniel Gatis. MIT License.
-Full license text: https://github.com/danielgatis/rembg/blob/main/LICENSE.txt
+FabMesh uses rembg for background removal on input images before mesh
+generation (Hi3DGen / SF3D pipelines). Copyright (c) Daniel Gatis. MIT
+License. Full text: https://github.com/danielgatis/rembg/blob/main/LICENSE.txt
 
 --------------------------------------------------------------------------------
- 17. Blender (external dependency — not bundled)
+ 30. Blender (external dependency — not bundled)
 --------------------------------------------------------------------------------
 License: GNU General Public License v3 (GPL-3.0)
 URL:     https://www.blender.org/about/license/

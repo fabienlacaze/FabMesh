@@ -304,6 +304,12 @@ def main():
         step_unwrap(raw_glb, uv_glb)
         step_texture(uv_glb, image_path, out_glb, tex_res, mv_dir=None)
     print('LOCAL_HI3DGEN_PROGRESS: 95 texture_done', flush=True)
+    # EU AI Act art. 50 — mark GLB as AI-generated (machine-readable).
+    try:
+        from add_ai_metadata import patch_glb as _patch_ai
+        _patch_ai(out_glb)
+    except Exception as _ai_e:
+        log(f'add_ai_metadata skipped: {_ai_e}')
     # Final 100% marker so Electron's progress mapper completes.
     print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
     log(f'TOTAL: {time.time()-t0:.1f}s -> {out_glb}')

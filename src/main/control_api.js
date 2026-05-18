@@ -690,48 +690,12 @@ function startControlApi(mainWindow, opts = {}) {
     // Lets scripts (Claude Code, CI, batch sweeps) run calibration
     // without the UI. Uses the same Python script as the Settings UI.
     // ============================================================
-    'POST /calib/run': async (req, res) => {
-      // Tiered calibration: image sanity -> multi-view tuning ->
-      // mesh/projection tuning. Each tier is locked before the next;
-      // an upstream failure short-circuits downstream tiers.
-      const { execFile } = require('child_process');
-      const rootDir = path.join(__dirname, '..', '..');
-      const script = path.join(rootDir, 'scripts', '_calib_tiered.py');
-      return new Promise((resolve) => {
-        const proc = execFile('python', [script], {
-          timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
-          env: { ...process.env, PYTHONUNBUFFERED: '1' },
-          cwd: rootDir,
-        }, (error, stdout, stderr) => {
-          if (error) return sendErr(res, error.message, 500) || resolve();
-          const m = (stdout || '').match(/TIERED_RESULT:\s*(\{[^\n]+\})/);
-          if (!m) return sendErr(res, 'no TIERED_RESULT line', 500) || resolve();
-          try { sendOk(res, JSON.parse(m[1])); resolve(); }
-          catch (e) { sendErr(res, e.message, 500); resolve(); }
-        });
-      });
-    },
-
-    'POST /calib/run-legacy': async (req, res) => {
-      // Old single-pass diagnose (no tiering, no tuning loop).
-      const { execFile } = require('child_process');
-      const rootDir = path.join(__dirname, '..', '..');
-      const script = path.join(rootDir, 'scripts', '_calib_diagnose.py');
-      const body = await readBody(req);
-      const engine = (body && body.engine === 'triposg') ? 'triposg' : 'sf3d';
-      return new Promise((resolve) => {
-        const proc = execFile('python', [script, '--engine', engine], {
-          timeout: 3600000, maxBuffer: 50 * 1024 * 1024,
-          env: { ...process.env, PYTHONUNBUFFERED: '1' },
-          cwd: rootDir,
-        }, (error, stdout, stderr) => {
-          if (error) return sendErr(res, error.message, 500) || resolve();
-          const m = (stdout || '').match(/DIAGNOSE_JSON:\s*(\{[^\n]+\})/);
-          if (!m) return sendErr(res, 'no DIAGNOSE_JSON line', 500) || resolve();
-          try { sendOk(res, JSON.parse(m[1])); resolve(); }
-          catch (e) { sendErr(res, e.message, 500); resolve(); }
-        });
-      });
+    // /calib/run and /calib/run-legacy removed in 2026-05-18 legal cleanup
+    // — their backing scripts (_calib_tiered.py, _calib_diagnose.py) never
+    // existed in the repo. Use /calib/run-v3 instead (calls
+    // run_calibration_v3.py which is present).
+    'POST /calib/run': async (_req, res) => {
+      sendErr(res, 'endpoint removed; use POST /calib/run-v3', 410);
     },
 
     'GET /calib/list-reports': async (req, res) => {

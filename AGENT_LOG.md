@@ -10,6 +10,56 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-18 (legal phase 3) — LICENSE.txt + AI Act marking + cleanup
+
+Final pass to bring FabMesh to a commercially-vendable state, except for
+the nvdiffrast blocker (separate decision).
+
+**New files** :
+- `LICENSE.txt` (root) — proprietary FabMesh Commercial Software License.
+  Sections : grant of license (per-machine, non-transferable), ownership of
+  output (Licensee owns mesh output subject to third-party model terms +
+  EU AI Act art. 50), restrictions (no resale/sublicense), disclaimer,
+  AI-generated content disclosure (forbids removal of `aiGenerated`
+  metadata), governing law (France).
+- `scripts/add_ai_metadata.py` — patches a .glb file in place to add
+  `asset.generator = "FabMesh 1.0.0 (AI-generated)"` and
+  `asset.extras.aiGenerated = true` (+ `aiSystem` and `aiActArticle50`).
+  Pure-stdlib GLB parser, no trimesh dep, so it runs from any Python env.
+
+**Modified** :
+- `package.json` : added `license: "SEE LICENSE IN LICENSE.txt"`,
+  `author: "Fabien Lacaze"`, updated description.
+- `THIRD_PARTY_LICENSES.txt` : removed entry #12 Hunyuan3D (no longer
+  shipped), added entries #12-25 covering all the active HF model weights
+  and bundled libraries that were missing — Hi3DGen MIT, TRELLIS-2-4B MIT,
+  SF3D Stability Community (≤$1M), BiRefNet MIT, MV-Adapter Apache,
+  CRM MIT, DINOv3 (with the mandatory "Built with DINOv3" attribution),
+  IP-Adapter Apache, ControlNet (xinsir) Apache, flash_attn BSD-3, kornia
+  Apache, spconv Apache, xatlas MIT, fast_simplification MIT. Renumbered
+  the trailing entries (NumPy/SciPy/Pillow/rembg/Blender). Fixed the rembg
+  entry that mentioned Hunyuan3D.
+- `scripts/hi3dgen_full_pipeline.py` : calls `add_ai_metadata.patch_glb()`
+  on the final .glb just before printing PROGRESS 100.
+- `scripts/local_sf3d_bridge.py` : same hook just before the SUCCESS line.
+- `src/main/main.js` : `calib-tiered` and `calib-diagnose` IPC handlers
+  replaced with stubs that return an error pointing to `calib-v3`. Their
+  backing Python scripts (`_calib_tiered.py`, `_calib_diagnose.py`) never
+  existed in the repo so calling them was a guaranteed plant.
+- `src/main/control_api.js` : same for the `/calib/run` and
+  `/calib/run-legacy` REST endpoints (replaced with 410 Gone responses).
+
+**Remaining blocker for commercial release** : `nvdiffrast` (NVIDIA
+Source Code License — non-commercial) inside `external/TRELLIS2_win/.venv/`,
+imported by TRELLIS-2's `mesh_renderer.py` / `pbr_mesh_renderer.py` /
+`trellis2_texturing.py`. The whole TRELLIS-2 texturing path depends on it.
+Three resolution options remain — A) patch TRELLIS-2 to use a permissive
+rasterizer (pytorch3d BSD-3, soft renderer), B) drop TRELLIS-2 default
+back to SF3D-only, C) negotiate NVIDIA commercial license. Decision
+pending with the user.
+
+---
+
 ## 2026-05-18 (legal phase 2) — Removed Zero123++ and TripoSG engines
 
 Audit critical bloquants #2 (Zero123++ CC-BY-NC 4.0) and #3 (TripoSG
