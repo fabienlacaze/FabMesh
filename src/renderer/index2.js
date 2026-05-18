@@ -5677,6 +5677,8 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   // TRELLIS-2 texture options (Hi3DGen only).
   const trellis2Preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
   const trellis2MultiRef = document.getElementById('ws-trellis2-multiref')?.checked || false;
+  const trellis2Refine = document.getElementById('ws-trellis2-refine')?.checked || false;
+  if (trellis2Refine) expectedMs += 90000;  // ~90s for SDXL Tile Refine
   const TRELLIS2_PRESETS = {
     fast:     { steps: 12, texSize: 2048, imgRes: 1024 },
     balanced: { steps: 24, texSize: 2048, imgRes: 1024 },
@@ -5701,6 +5703,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2TexSize: t2cfg.texSize,
     trellis2ImgRes: t2cfg.imgRes,
     trellis2MultiRef,
+    trellis2Refine,
     trellis2Preset,
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
