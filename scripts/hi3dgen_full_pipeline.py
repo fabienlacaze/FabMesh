@@ -228,6 +228,18 @@ def step_trellis2_texturing(mesh_glb, image_path, out_glb):
         cmd += ['--back-image', os.environ['FABMESH_TRELLIS2_BACK_IMAGE']]
     if os.environ.get('FABMESH_TRELLIS2_GUIDANCE'):
         cmd += ['--guidance', os.environ['FABMESH_TRELLIS2_GUIDANCE']]
+    # If the source image has a <stem>_multiview/ dir (user picked
+    # "Front + back + sides + bottom"), feed views 2..5 (right/left/top/
+    # bottom) as additional TRELLIS-2 conditioning references. view_0
+    # is the front (already passed via positional arg) and view_1 is
+    # the back (already passed via --back-image when multi-ref is on).
+    mv_dir = os.environ.get('FABMESH_TRELLIS2_MULTIVIEW_DIR')
+    if mv_dir and os.path.isdir(mv_dir):
+        for i, label in [(2, 'right'), (3, 'left'), (4, 'top'), (5, 'bottom')]:
+            p = os.path.join(mv_dir, f'view_{i}.png')
+            if os.path.isfile(p):
+                cmd += ['--extra-image', p]
+        log(f'multi-view conditioning: forwarded extras from {mv_dir}')
     env = {**os.environ,
            'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
            # Triton DLL blocked by Smart App Control on Windows.
