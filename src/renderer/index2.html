@@ -138,15 +138,18 @@
                     Construction stages (3 progressive versions)
                   </label>
                 </div>
-                <!-- Multi-view: TRELLIS-2 generates its own texture from a
-                     single front photo, so a 6-view sheet is no longer
-                     needed. Optional: a single back photo can be added as a
-                     2nd reference to reduce TRELLIS-2's dorsal hallucinations. -->
-                <div class="form-row check-row">
-                  <label class="inline-check" title="Optionnel — génère une vue dorsale via RealVis+IPAdapter (~25s) à utiliser comme 2e référence par TRELLIS-2 (multi-ref). Améliore le dos du mesh texturé.">
-                    <input type="checkbox" id="ws-mv-enable" />
-                    Generate back photo (optional, TRELLIS-2 multi-ref)
-                  </label>
+                <!-- Multi-view scope: TRELLIS-2 already textures from 1
+                     front photo, but additional reference views (back, sides,
+                     top, bottom) reduce dorsal/lateral hallucinations during
+                     texturing. MV-Adapter generates the 6 views in a single
+                     pass so "back" and "back + sides + bottom" cost the same. -->
+                <div class="form-row">
+                  <label>Extra views</label>
+                  <select id="ws-mv-scope" title="Generates additional reference photos used by TRELLIS-2 multi-ref texturing.">
+                    <option value="front_only" selected>Front only (+0s)</option>
+                    <option value="front_back">Front + back (+~60s)</option>
+                    <option value="front_full">Front + back + sides + bottom (+~90s)</option>
+                  </select>
                 </div>
                 <!-- Hidden compat: existing back-photo pipeline reuses these
                      elements. We force 2view mode and hide the 6-view opts. -->

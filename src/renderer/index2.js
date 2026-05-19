@@ -1733,24 +1733,17 @@ document.getElementById('ws-img-next')?.addEventListener('click', (e) => { e.sto
 
 // ----------------------------------------------------------------
 // CREATE NEW form: Multi-view checkbox + 2-view/6-view radio + 6-view sub-options.
-// Visibility rules:
-//   - mv-mode-row visible iff ws-mv-enable is checked
-//   - mv-6view-opts visible iff ws-mv-enable is checked AND mode = '6view'
-// The legacy hidden checkbox ws-auto-multiview is kept in sync so the
-// existing generate-images backend path (which expects a single boolean)
-// keeps working: it triggers iff enable && mode='2view'.
+// The "Extra views" dropdown (ws-mv-scope) drives 3 mutually-exclusive
+// modes: front_only / front_back / front_full. The legacy hidden checkbox
+// ws-auto-multiview is kept in sync so the existing generate-images
+// backend path (which expects a single boolean) keeps working — it
+// triggers iff the user picked anything other than 'front_only'.
 function _wsMvSync() {
-  const enable = document.getElementById('ws-mv-enable')?.checked ?? true;
-  const mode = document.getElementById('ws-mv-mode-select')?.value || '2view';
-  const modeRow = document.getElementById('ws-mv-mode-row');
-  const sixOpts = document.getElementById('ws-mv-6view-opts');
+  const scope = document.getElementById('ws-mv-scope')?.value || 'front_only';
   const legacy = document.getElementById('ws-auto-multiview');
-  if (modeRow) modeRow.style.display = enable ? '' : 'none';
-  if (sixOpts) sixOpts.classList.toggle('hidden', !(enable && mode === '6view'));
-  if (legacy) legacy.checked = enable && mode === '2view';
+  if (legacy) legacy.checked = (scope !== 'front_only');
 }
-document.getElementById('ws-mv-enable')?.addEventListener('change', _wsMvSync);
-document.getElementById('ws-mv-mode-select')?.addEventListener('change', _wsMvSync);
+document.getElementById('ws-mv-scope')?.addEventListener('change', _wsMvSync);
 _wsMvSync();
 // ----------------------------------------------------------------
 
@@ -3330,15 +3323,18 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
   const steps = parseInt(document.getElementById('ws-quality').value) || 30;
-  const multiView = document.getElementById('ws-auto-multiview')?.checked || false;
-  // 6-view mode flags (CREATE NEW form). When user picks "6 views" radio,
-  // multiView (= 2-view legacy) is false and we trigger MV-Adapter post-gen
-  // instead of the RealVis+IPAdapter back photo.
-  const mvEnable = document.getElementById('ws-mv-enable')?.checked ?? false;
-  const mvMode = document.getElementById('ws-mv-mode-select')?.value || '2view';
-  const mv6view = mvEnable && mvMode === '6view';
-  const mv6Harmonize = document.getElementById('ws-mv-6v-harmonize')?.checked ?? true;
-  const mv6Upscale   = document.getElementById('ws-mv-6v-upscale')?.checked ?? false;
+  // ws-mv-scope is the user-facing dropdown (front_only / front_back /
+  // front_full). For backend compat we keep `multiView` (boolean) which
+  // triggers the back-photo flow iff scope != 'front_only'.
+  const mvScope = document.getElementById('ws-mv-scope')?.value || 'front_only';
+  const multiView = (mvScope !== 'front_only');
+  // 'front_full' forces MV-Adapter so we get the 5 side/top/bottom views
+  // even on a character (which would otherwise use RealVis+OpenPose and
+  // only produce a back). Passed to generate-back-view IPC as an override.
+  const mvForceFull = (mvScope === 'front_full');
+  const mv6view = false; // 6-view sheet flow is replaced by mvScope
+  const mv6Harmonize = true;
+  const mv6Upscale = false;
   const buildStages = document.getElementById('ws-img-buildstages')?.checked || false;
   // Estimate: Juggernaut ~0.5s/step on RTX 5080, plus model load ~10s on first call.
   // SDXL Turbo ~0.2s/step. Pollinations ~5s/image.
@@ -3440,6 +3436,9 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 promptHint: enrichedHint,
                 numImages: 1,
                 assetType: document.getElementById('ws-asset-type')?.value || 'character',
+                // When user picked "Front + back + sides + bottom", force
+                // MV-Adapter even on a character so we get all 6 views.
+                mode: mvForceFull ? 'mvadapter' : undefined,
               });
               if (bvResult?.success && bvResult.paths?.length) {
                 if (!p._backPhotos) p._backPhotos = {};
