@@ -10,6 +10,55 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (engine) — TRELLIS-2 native becomes the default engine
+
+After a successful POC (mesh quality NETTEMENT meilleure, only ~2.9 GB
+VRAM peak with low_vram=True, ~100s on RTX 5080), TRELLIS-2 native
+single-shot pipeline (microsoft/TRELLIS.2-4B's `Trellis2ImageTo3DPipeline`)
+replaces Hi3DGen + TRELLIS-2 texturing as the default engine in FabMesh.
+
+**New files** :
+- `scripts/trellis2_native_full_pipeline.py` (~200 lines) — runs the
+  native pipeline end-to-end. Steps:
+  1. Auto-patch HF cache pipeline.json (briaai/RMBG-2.0 [gated] ->
+     ZhengPeng7/BiRefNet [Apache], idempotent).
+  2. rembg u2net upstream + `pipeline.rembg_model = None` to bypass
+     TRELLIS-2's internal gated rembg.
+  3. `Trellis2ImageTo3DPipeline.from_pretrained('microsoft/TRELLIS.2-4B')`
+     -> `pipeline.run(img, pipeline_type='1024', preprocess_image=False)`.
+  4. `o_voxel.postprocess.to_glb` (Kaolin shim) for the final GLB bake.
+  5. Auto-brighten baseColor (+50% bright, +30% sat, +10% contrast)
+     compensating for ACES tonemapping in glTF viewers.
+  6. EU AI Act art. 50 metadata via `add_ai_metadata.patch_glb`.
+
+**Modified** :
+- `src/main/main.js` : added `'trellis2_native'` to both `bridgeScripts`
+  and `argsMap` (+ `fixedArgsMap`), routed to the TRELLIS-2 venv Python.
+- `src/renderer/index2.html` : new dropdown option **selected** by
+  default ("TRELLIS-2 native (mesh + PBR in one shot, ~100s, recommended)"),
+  Hi3DGen demoted to "legacy 2-stage", button label simplified to
+  "Generate 3D".
+- `src/renderer/index2.js` : ENGINE_LABELS entry, regex de parsing
+  étendu, `_ws3dEngineSync` default fallback updated, `expectedMs`
+  branch (110 s pour trellis2_native), `_ws3dEngineSync` shows the
+  Advanced TRELLIS-2 options for both `hi3dgen` and `trellis2_native`.
+
+**Tunable via env** :
+- `FABMESH_TRELLIS2_NATIVE_MODE` : `512` / `1024` / `1024_cascade`
+  (default `1024`, `cascade` would gain shape fidelity at ~14 GB VRAM
+  peak instead of ~3).
+- `FABMESH_TRELLIS2_NATIVE_SEED` : int (default 42).
+- `FABMESH_TRELLIS2_NATIVE_DECIM` : decimation target (default 500000).
+- `FABMESH_TRELLIS2_SKIP_BRIGHTEN=1` : disable auto-brighten.
+
+**Caveat connu** : les options "Advanced TRELLIS-2" (Quality preset,
+Multi-reference, SDXL refine) sont **visibles** mais **inactives** pour
+trellis2_native pour cette V1 — la qualité par défaut est excellente,
+on cablera ces toggles plus tard si besoin. Pour le pipeline Hi3DGen
+legacy, ces options continuent à fonctionner comme avant.
+
+---
+
 ## 2026-05-18 (texture quality) — Optional SDXL Tile Refine in pipeline
 
 Pipeline gained a 4th step (opt-in) : `scripts/texture_refine.py` runs
