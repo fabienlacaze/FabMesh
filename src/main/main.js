@@ -4244,21 +4244,20 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   //                         for creatures/animals/objects/vehicles)
   //   - default          -> auto: 'realvis' for assetType='character',
   //                         'mvadapter' otherwise.
-  // MV-Adapter is currently disabled (diffusers >= 0.33 incompat).
-  // Dispatch by assetType to the best remaining option :
-  //   - character     -> realvis  (RealVis + OpenPose humanoid skeleton)
-  //   - everything else -> flip   (pure horizontal mirror, no AI inpaint)
-  // The 'mirror' mode (flip + AI inpaint of head/torso) was too
-  // hallucinatory on creatures — SDXL invents white spandex suits, etc.
-  // The 'flip' mode just mirrors the front: silhouette + colors are
-  // pixel-identical, face still visible on the back side, which is fine
-  // for TRELLIS-2 multi-ref (it uses the back mainly to anchor colors).
+  // Back-view dispatch :
+  //   - character       -> realvis (RealVis + OpenPose humanoid)
+  //                        Real back, works on humans (OpenPose).
+  //   - everything else -> sheet (RealVisXL 4-view model-sheet)
+  //                        Single SDXL pass produces a 2x2 grid
+  //                        (front/back/right/left) consistently styled.
+  //                        Lower per-view resolution but real
+  //                        multi-view info instead of hallucinations.
   let resolvedMode = mode;
   if (!resolvedMode || resolvedMode === 'mvadapter') {
-    resolvedMode = (assetType === 'character') ? 'realvis' : 'flip';
+    resolvedMode = (assetType === 'character') ? 'realvis' : 'sheet';
   }
   const SCRIPT_BY_MODE = {
-    flip:      'generate_back_view_flip.py',
+    sheet:     'generate_back_view_sheet.py',
     mirror:    'generate_back_view_mirror.py',
     realvis:   'generate_back_view.py',
     mvadapter: 'generate_back_view_mvadapter.py',
