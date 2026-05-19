@@ -3595,6 +3595,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const bridgeScripts = {
       'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
       'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
+      // TRELLIS-2 native: single-shot mesh + PBR texture via
+      // microsoft/TRELLIS.2-4B's Trellis2ImageTo3DPipeline. Default engine
+      // since 2026-05-19 (replaces Hi3DGen + TRELLIS-2 separated).
+      'trellis2_native': path.join(__dirname, '..', '..', 'scripts', 'trellis2_native_full_pipeline.py'),
       // Hi3DGen: direct image-to-3D via normal bridging (MIT, ByteDance+CUHK).
       // Routed through the full pipeline wrapper that adds xatlas UV unwrap
       // + texture_project.py so the output is a textured GLB (the bare
@@ -3619,6 +3623,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const argsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
+      'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
       'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
@@ -3648,6 +3653,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const fixedArgsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
+      'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
       'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
@@ -3739,10 +3745,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       log.info('main', `TRELLIS-2 preset: ${trellis2Preset || 'fast'} (steps=${trellis2Steps}, tex=${trellis2TexSize}, multiref=${trellis2MultiRef ? 'yes' : 'no'}, refine=${trellis2Refine ? 'yes' : 'no'})`);
     }
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
-    // Hi3DGen needs torch 2.8 + flash_attn (sparse attention requires it),
-    // which only lives in external/TRELLIS2_win/.venv. Other engines use
+    // Hi3DGen and TRELLIS-2 native need torch 2.8 + flash_attn + kaolin,
+    // which only live in external/TRELLIS2_win/.venv. Other engines use
     // the system Python (torch 2.7.1). Pick the right interpreter per engine.
-    const _pythonExe = (engine === 'hi3dgen')
+    const _pythonExe = (engine === 'hi3dgen' || engine === 'trellis2_native')
       ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
       : 'python';
     const result = await new Promise((resolve, reject) => {

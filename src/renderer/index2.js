@@ -131,6 +131,7 @@ const ENGINE_LABELS = {
   // 3D engines
   'sf3d':           'Stable Fast 3D (PBR, Stability Community License)',
   'local':          'TripoSR (CC0)',
+  'trellis2_native':'TRELLIS-2 native (MIT, Microsoft)',
   'hi3dgen':        'Hi3DGen (MIT, ByteDance+CUHK)',
   'trellis':        'Trellis 2 (MIT)',
   'meshy':          'Meshy.ai (cloud, CC-BY 4.0)',
@@ -445,13 +446,13 @@ async function refreshProjectsPage() {
       // Remove trailing timestamp (_<10+ digits>)
       base = base.replace(/_\d{10,}$/, '');
     } while (base !== prev);
-    // Remove trailing engine suffix added by main.js: _sf3d / _meshy / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai
+    // Remove trailing engine suffix added by main.js: _sf3d / _meshy / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _trellis2_native
     // Optionally followed by arbitrary short tags like _apilive, _test, _v2,
     // each possibly followed by its own timestamp. This handles ad-hoc CLI
     // names like test_e2e_sf3d_apilive_1776274212 that would otherwise form
     // their own phantom projects.
     base = base.replace(
-      /_(sf3d|meshy|hunyuan|local|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
+      /_(sf3d|meshy|hunyuan|local|trellis2_native|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
       ''
     );
     // Remove a trailing _<number> if any (legacy index naming)
@@ -1757,7 +1758,7 @@ _wsMvSync();
 // the legacy SF3D engine is selected.
 // ----------------------------------------------------------------
 function _ws3dEngineSync() {
-  const eng = document.getElementById('ws-3d-engine')?.value || 'hi3dgen';
+  const eng = document.getElementById('ws-3d-engine')?.value || 'trellis2_native';
   const qRow = document.getElementById('ws-3d-quality-row');
   const tRow = document.getElementById('ws-3d-triangles-row');
   const qHint = document.getElementById('ws-3d-quality-hint');
@@ -1765,12 +1766,16 @@ function _ws3dEngineSync() {
   const hi3dgenHint = document.getElementById('ws-3d-hi3dgen-hint');
   const trellis2Opts = document.getElementById('ws-3d-trellis2-opts');
   const legacy = ['sf3d', 'meshy'].includes(eng);
+  // Hide texture-res / triangles when using TRELLIS-2 native or Hi3DGen
+  // (both have their own internal quality settings).
   if (qRow) qRow.style.display = legacy ? '' : 'none';
   if (tRow) tRow.style.display = legacy ? '' : 'none';
   if (qHint) qHint.style.display = legacy ? '' : 'none';
   if (sf3dHint) sf3dHint.style.display = legacy ? '' : 'none';
   if (hi3dgenHint) hi3dgenHint.style.display = (eng === 'hi3dgen') ? '' : 'none';
-  if (trellis2Opts) trellis2Opts.style.display = (eng === 'hi3dgen') ? '' : 'none';
+  // Advanced TRELLIS-2 options apply to both hi3dgen (legacy) and trellis2_native.
+  if (trellis2Opts) trellis2Opts.style.display =
+    (eng === 'hi3dgen' || eng === 'trellis2_native') ? '' : 'none';
 }
 document.getElementById('ws-3d-engine')?.addEventListener('change', _ws3dEngineSync);
 _ws3dEngineSync();
@@ -5700,6 +5705,13 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   let expectedMs;
   if (engine === 'sf3d') {
     expectedMs = preset.expectedMs + triPreset.extraMs;
+  } else if (engine === 'trellis2_native') {
+    // TRELLIS-2 native pipeline (single-shot mesh + PBR):
+    //   - pipeline load: ~60s (cached after 1st run -> ~5s)
+    //   - inference: ~15s on 1024 mode
+    //   - export GLB (bake Kaolin): ~25s
+    // Total ~100s (~10-20s with warm cache).
+    expectedMs = 110000;
   } else if (engine === 'hi3dgen') {
     // Hi3DGen full pipeline (with MV-Adapter 6 views):
     //   - Hi3DGen inference: ~30s
