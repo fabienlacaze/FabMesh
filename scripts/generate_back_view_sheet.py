@@ -50,12 +50,19 @@ def main():
     log(f'front={front_image}')
     log(f'mv_persist_dir={mv_persist_dir}')
 
+    # Number of views in the sheet — comes from the UI's Extra views
+    # dropdown via FABMESH_SHEET_VIEWS env (2 / 4 / 6). Default to 4
+    # (front/back/right/left, 2x2 grid).
+    n_views = os.environ.get('FABMESH_SHEET_VIEWS', '4')
+
     t0 = time.time()
     sheet_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  'multiview_sheet_gen.py')
     cmd = [sys.executable, sheet_script, front_image, mv_persist_dir]
     if prompt_hint:
         cmd.append(prompt_hint)
+    cmd += ['--views', n_views]
+    log(f'sheet config: views={n_views}')
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     # Forward sheet stdout for diagnosability.
     if result.stdout:

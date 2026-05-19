@@ -4223,7 +4223,7 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
 // 2-view texturing pipeline. Produces a photoreal back view of the
 // same subject, conditioned on the front photo.
 // ============================================================
-ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages, mode, assetType }) => {
+ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages, mode, assetType, sheetViews }) => {
   if (!frontImage || !fs.existsSync(frontImage)) {
     return { success: false, error: `front image not found: ${frontImage}` };
   }
@@ -4270,6 +4270,11 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   const args = [script, frontImage, outDir, promptHint || '', String(numImages || 1), frontStem];
   return new Promise((resolve) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    // Forward the requested view count to the sheet generator. Valid:
+    // 2 (front+back), 4 (front+right+back+left), 6 (+top+bottom).
+    if (sheetViews && [2, 4, 6].includes(Number(sheetViews))) {
+      env.FABMESH_SHEET_VIEWS = String(sheetViews);
+    }
     execFile('python', args, {
       env, timeout: 600000, maxBuffer: 50 * 1024 * 1024,
     }, (error, stdout, stderr) => {
