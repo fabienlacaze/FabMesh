@@ -1105,6 +1105,9 @@ function populateWorkspace(p) {
   if (rawPrompt && savedLocal && savedLocal !== rawPrompt) {
     try { localStorage.setItem('fabmesh-prompt-' + p.name, rawPrompt); } catch (e) {}
   }
+  // Restore Asset type + Style from the project's first generation so a
+  // creature-project doesn't default back to character on follow-up gens.
+  _restoreProjectMeta(p);
 
   // Reset image / mesh paths — they belonged to the previous project.
   // The renderXxxVersions() functions will then auto-select the latest item
@@ -3319,6 +3322,10 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const userPrompt = stripKnownPromptSuffixes(rawTextarea);
   const assetType = document.getElementById('ws-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
+  // Persist per-project so the next visit to this project pre-fills the
+  // form with the asset type/style used here (avoid Creature project
+  // silently falling back to Character on a follow-up gen).
+  _saveProjectMeta(p.name, { assetType, assetStyle });
   const prompt = buildFullPrompt(userPrompt, assetType, assetStyle);
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
@@ -4467,6 +4474,46 @@ document.getElementById('crop-apply')?.addEventListener('click', async () => {
 });
 
 // Per-image style memory (stored in localStorage as a JSON map path→styleValue)
+// Per-project metadata (asset type + style) saved in localStorage so the
+// next visit to the project pre-fills the dropdowns with the values used
+// during the project's first generation. Without this the form falls
+// back to default 'character / realistic' even when the project is
+// clearly a creature/animal.
+function _saveProjectMeta(projName, meta) {
+  if (!projName || !meta) return;
+  try {
+    const key = 'fabmesh-project-meta';
+    const map = JSON.parse(localStorage.getItem(key) || '{}');
+    map[projName] = { ...(map[projName] || {}), ...meta };
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch (_) {}
+}
+
+function _getProjectMeta(projName) {
+  if (!projName) return null;
+  try {
+    const key = 'fabmesh-project-meta';
+    const map = JSON.parse(localStorage.getItem(key) || '{}');
+    return map[projName] || null;
+  } catch (_) { return null; }
+}
+
+function _restoreProjectMeta(p) {
+  if (!p?.name) return;
+  const meta = _getProjectMeta(p.name);
+  if (!meta) return;
+  const atSel = document.getElementById('ws-asset-type');
+  if (atSel && meta.assetType) {
+    atSel.value = meta.assetType;
+    atSel.dispatchEvent(new Event('change'));
+  }
+  const styleSel = document.getElementById('ws-asset-style');
+  if (styleSel && meta.assetStyle) {
+    styleSel.value = meta.assetStyle;
+    styleSel.dispatchEvent(new Event('change'));
+  }
+}
+
 function _saveImageStyle(imgPath, styleValue) {
   if (!imgPath || !styleValue) return;
   try {
