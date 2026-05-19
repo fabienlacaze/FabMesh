@@ -1847,6 +1847,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
                         || document.getElementById('ws-prompt')?.value || '';
       const bv = await window.meshyAPI.generateBackView({
         frontImage: mvImagePath, promptHint: rawPrompt, numImages: 1,
+        assetType: document.getElementById('ws-asset-type')?.value || 'character',
       });
       if (bv?.success && bv.paths?.length) {
         showToast('Back photo ready', 'success');
@@ -3431,6 +3432,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 frontImage: imgPath,
                 promptHint: enrichedHint,
                 numImages: 1,
+                assetType: document.getElementById('ws-asset-type')?.value || 'character',
               });
               if (bvResult?.success && bvResult.paths?.length) {
                 if (!p._backPhotos) p._backPhotos = {};
@@ -3590,6 +3592,7 @@ function _offerMultiviewRegenerate() {
         frontImage: frontImg,
         promptHint: enrichedHint,
         numImages: 1,
+        assetType: document.getElementById('ws-asset-type')?.value || 'character',
       });
       if (r?.success && r.paths?.length) {
         if (!p._backPhotos) p._backPhotos = {};
