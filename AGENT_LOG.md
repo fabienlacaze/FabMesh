@@ -10,6 +10,48 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (multi-view 3D) — 6 views used by mesh + texture pipelines
+
+Wired the 6 MV-Adapter views (front/right/back/left/top/bottom) into both
+3D engines so they are actually exploited instead of just sitting on disk.
+
+**main.js** auto-detects `<image_stem>_multiview/` next to the selected
+source image and forwards its path via `FABMESH_TRELLIS2_MULTIVIEW_DIR`
+env to both `trellis2_native` and `hi3dgen` subprocesses.
+
+**trellis2_native_full_pipeline.py** : if multi-view dir is present,
+bypass `pipeline.run()` and call the internal stages with multi-image
+conditioning :
+- `get_cond([img_front, view_2, view_3, view_4, view_5], 1024)` (skip
+  view_0/view_1 because the user's untouched front photo is cleaner than
+  MV-Adapter's front re-render, and back is already conditioned via the
+  multi-image cond)
+- `sample_sparse_structure` → `sample_shape_slat` → `sample_tex_slat` →
+  `decode_latent` (same flow as the original `run()`, just with multi-cond)
+- Cascade modes ('1024_cascade', '1536_cascade') still fall back to
+  single-view; they'd need `sample_shape_slat_cascade` threaded through.
+
+**hi3dgen_full_pipeline.py / step_trellis2_texturing** : forwards
+views 2..5 (right/left/top/bottom) as `--extra-image` CLI flags to
+`trellis2_texturing_bridge.py`. The bridge already supports
+`--back-image` + `--extra-image PATH...` for multi-ref conditioning.
+
+**UI** : was already wired — `ws-3d-source-mv-grid` auto-shows a 3x2
+thumbnail strip of the 6 views in the step 3D Mesh source pane when
+the multiview dir exists (replaces the "+ Add back photo" slot).
+
+**Bug rencontré + fix** : MV-Adapter (huanngzh/MV-Adapter) plante avec
+`KeyError: 'down_blocks.1.attentions.0.transformer_blocks.0.attn1.processor'`
+sur diffusers 0.34 — naming des attention processors a changé. Patch
+appliqué via `scripts/patch_mvadapter.py` (idempotent, exécuté au load
+de `generate_back_view_mvadapter.py`) :
+`attention_processor.py:326,692` : `ref_hidden_states[self.name]` →
+`ref_hidden_states.get(self.name)` + skip ref-attention si None. La
+plupart des blocks ont toujours leur ref-attention, quelques uns la
+perdent (qualité MV légèrement moindre mais reste exploitable).
+
+---
+
 ## 2026-05-19 (back-view) — Dispatch by asset type (character / creature / ...)
 
 **Problem reported by the user** : the "Generate back photo" step on a
