@@ -174,14 +174,26 @@ def main():
     # Copy untouched front for downstream pipelines.
     shutil.copy2(front_image, os.path.join(output_dir, 'input.png'))
 
-    log('loading SG161222/RealVisXL_V4.0 ...')
+    log('loading SG161222/RealVisXL_V4.0 + IPAdapter Plus ...')
     import torch
     from diffusers import StableDiffusionXLPipeline
+    from transformers import CLIPVisionModelWithProjection
+
+    # IPAdapter Plus is essential here: without identity anchoring, SDXL
+    # prompt-only invents a generic "creature model sheet" character
+    # totally unrelated to the user's front image. With IPAdapter, the
+    # sheet's character matches the input identity / color / clothing.
+    image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+        'h94/IP-Adapter',
+        subfolder='models/image_encoder',
+        torch_dtype=torch.float16,
+    )
     pipe = StableDiffusionXLPipeline.from_pretrained(
         'SG161222/RealVisXL_V4.0',
         torch_dtype=torch.float16,
         variant='fp16',
         use_safetensors=True,
+        image_encoder=image_encoder,
     )
     # Force every sub-module to fp16 — text_projection inside CLIP stays
     # fp32 by default and breaks at runtime with dtype mismatch.
@@ -189,7 +201,19 @@ def main():
     pipe.vae.to(torch.float16)
     pipe.text_encoder.to(torch.float16)
     pipe.text_encoder_2.to(torch.float16)
+    pipe.load_ip_adapter(
+        'h94/IP-Adapter',
+        subfolder='sdxl_models',
+        weight_name='ip-adapter-plus_sdxl_vit-h.safetensors',
+    )
+    # 0.6 = decent identity + still lets the grid layout breathe
+    ip_scale = float(os.environ.get('FABMESH_SHEET_IP_SCALE', '0.6'))
+    pipe.set_ip_adapter_scale(ip_scale)
     pipe.enable_model_cpu_offload()
+    log(f'IPAdapter loaded, scale={ip_scale}')
+
+    # Load the user's front image as the identity reference.
+    front_img_pil = Image.open(front_image).convert('RGB')
 
     prompt = build_prompt(prompt_hint, layout)
     log(f'prompt: {prompt[:300]}...')
@@ -198,6 +222,7 @@ def main():
     image = pipe(
         prompt=prompt,
         negative_prompt=NEG_PROMPT,
+        ip_adapter_image=front_img_pil,
         width=sheet_w,
         height=sheet_h,
         num_inference_steps=30,
