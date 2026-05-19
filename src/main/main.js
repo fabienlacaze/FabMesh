@@ -3737,6 +3737,23 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         ? { FABMESH_TRELLIS2_BACK_IMAGE: imagePathBack } : {}),
       ...(engine === 'hi3dgen' && trellis2Refine
         ? { FABMESH_TRELLIS2_REFINE: '1' } : {}),
+      // TRELLIS-2 native + Hi3DGen : auto-feed the 6 MV-Adapter views
+      // when the user generated them (Extra views = "Front + back + sides
+      // + bottom"). The views live in <stem>_multiview/ next to the source
+      // image and are picked up automatically by the pipelines.
+      ...(((engine === 'trellis2_native' || engine === 'hi3dgen')
+            && imagePath
+            && fs.existsSync(path.join(
+                  path.dirname(imagePath),
+                  path.basename(imagePath, path.extname(imagePath))
+                    + '_multiview')))
+        ? {
+            FABMESH_TRELLIS2_MULTIVIEW_DIR: path.join(
+              path.dirname(imagePath),
+              path.basename(imagePath, path.extname(imagePath))
+                + '_multiview'),
+          }
+        : {}),
     };
     if (mv2Dir) {
       log.info('main', '2-view env applied: AUGMENT mode (front=SF3D bake, back=additive blend)');

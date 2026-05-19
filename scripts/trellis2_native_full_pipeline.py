@@ -153,6 +153,45 @@ def main():
     img = _prep_image(image_path)
     log(f'image prepared: {img.size}')
 
+    # Collect optional multi-view reference images. The user can opt in
+    # via the "Extra views" dropdown which calls the back-view generator
+    # in MV-Adapter mode; it persists view_0..view_5 in <stem>_multiview/.
+    # If that dir exists for the current source image, we feed the full
+    # view set into TRELLIS-2's conditioning for both mesh shape and
+    # texture (via get_cond([list]) + internal stages instead of run()).
+    mv_dir = os.environ.get('FABMESH_TRELLIS2_MULTIVIEW_DIR')
+    if not mv_dir:
+        # Auto-detect: <image_stem>_multiview/ next to the source image
+        from PIL import Image as _PILImage
+        guess = os.path.join(
+            os.path.dirname(image_path),
+            os.path.splitext(os.path.basename(image_path))[0] + '_multiview')
+        if os.path.isdir(guess):
+            mv_dir = guess
+            log(f'multi-view auto-detected: {mv_dir}')
+    mv_images = [img]
+    if mv_dir and os.path.isdir(mv_dir):
+        from PIL import Image as _PILImage
+        # view_0 is the front re-render by MV-Adapter; the original `img` is
+        # the user's untouched front photo, which is cleaner. Skip view_0.
+        for i in range(1, 6):
+            p = os.path.join(mv_dir, f'view_{i}.png')
+            if os.path.isfile(p):
+                # Run through rembg if no alpha (consistent with `img`).
+                view_img = _PILImage.open(p).convert('RGBA')
+                import numpy as np
+                if (np.asarray(view_img)[:, :, 3] == 255).all():
+                    try:
+                        import rembg
+                        view_img = rembg.remove(
+                            view_img,
+                            session=rembg.new_session('u2net'))
+                    except Exception as _e:
+                        log(f'rembg view_{i} skipped: {_e}')
+                mv_images.append(view_img)
+        log(f'multi-view conditioning: {len(mv_images)} images '
+            f'(front + {len(mv_images)-1} extras)')
+
     print('LOCAL_HI3DGEN_PROGRESS: 12 loading_pipeline', flush=True)
     log('loading Trellis2ImageTo3DPipeline from microsoft/TRELLIS.2-4B...')
     t_load = time.time()
@@ -165,17 +204,62 @@ def main():
         f'VRAM peak {torch.cuda.max_memory_allocated()/1e9:.1f} GB')
     print('LOCAL_HI3DGEN_PROGRESS: 35 pipeline_ready', flush=True)
 
-    log(f'inference (pipeline_type={mode})...')
+    log(f'inference (pipeline_type={mode}, n_views={len(mv_images)})...')
     t_inf = time.time()
     print('LOCAL_HI3DGEN_PROGRESS: 40 sparse_struct', flush=True)
     try:
-        outputs = pipeline.run(
-            img,
-            num_samples=1,
-            seed=seed,
-            pipeline_type=mode,
-            preprocess_image=False,  # we did rembg upstream
-        )
+        if len(mv_images) > 1:
+            # Multi-view path: replicate pipeline.run() internals with a
+            # multi-image cond. Same code as trellis2_image_to_3d.py:540-595
+            # except `[image]` -> `mv_images`.
+            torch.manual_seed(seed)
+            cond_512 = pipeline.get_cond(mv_images, 512)
+            cond_1024 = (pipeline.get_cond(mv_images, 1024)
+                         if mode != '512' else None)
+            ss_res = {'512': 32, '1024': 64,
+                      '1024_cascade': 32, '1536_cascade': 32}[mode]
+            coords = pipeline.sample_sparse_structure(
+                cond_512, ss_res, 1, {})
+            if mode == '512':
+                shape_slat = pipeline.sample_shape_slat(
+                    cond_512,
+                    pipeline.models['shape_slat_flow_model_512'],
+                    coords, {})
+                tex_slat = pipeline.sample_tex_slat(
+                    cond_512,
+                    pipeline.models['tex_slat_flow_model_512'],
+                    shape_slat, {})
+                res = 512
+            elif mode == '1024':
+                shape_slat = pipeline.sample_shape_slat(
+                    cond_1024,
+                    pipeline.models['shape_slat_flow_model_1024'],
+                    coords, {})
+                tex_slat = pipeline.sample_tex_slat(
+                    cond_1024,
+                    pipeline.models['tex_slat_flow_model_1024'],
+                    shape_slat, {})
+                res = 1024
+            else:
+                # Cascade modes: fall back to single-image run() for now
+                # (cascade needs both sample_shape_slat_cascade which has
+                # extra constraints we'd need to thread through).
+                log(f'cascade mode not yet multi-view; falling back to single view')
+                outputs = pipeline.run(img, num_samples=1, seed=seed,
+                                       pipeline_type=mode,
+                                       preprocess_image=False)
+                shape_slat = None  # marker for the branch below
+            if shape_slat is not None:
+                torch.cuda.empty_cache()
+                outputs = [pipeline.decode_latent(shape_slat, tex_slat, res)]
+        else:
+            outputs = pipeline.run(
+                img,
+                num_samples=1,
+                seed=seed,
+                pipeline_type=mode,
+                preprocess_image=False,  # we did rembg upstream
+            )
     except torch.cuda.OutOfMemoryError as e:
         log(f'OOM in mode={mode}: {e}')
         log(f'VRAM peak: {torch.cuda.max_memory_allocated()/1e9:.1f} GB')
