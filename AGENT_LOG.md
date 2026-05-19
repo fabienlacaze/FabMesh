@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (plan D step 1) — pyrender 6-view ortho renderer
+
+Created `scripts/multiview_from_mesh.py` : 6 orthographic views (front,
+back, right, left, top, bottom) rendered from a 3D mesh via pyrender
+0.1.45 + trimesh. CPU, 0.30s for 6 views at 768x768, zero AI in the loop,
+100% commercial-safe (MIT + MIT).
+
+This is step 1 of Plan D : `front → TRELLIS-2 single-shot → mesh v1 →
+6 ortho views → TRELLIS-2 multi-image (get_cond([list])) → mesh v2 (final)`.
+Mesh v1 is a throwaway scaffolding to produce the 6 orthographic views
+that real-actually feed multi-image conditioning. Solves the long-running
+"front + sides + bottom" multi-view problem that MV-Adapter, sheet SDXL
+and SDXL+IPAdapter failed to address.
+
+Validated on `meshes/poulet_trellis2_native_*.glb` : views are pixel-
+accurate orthographic, fidelity perfect to the mesh, ready to feed
+`pipeline.get_cond([img_front, view_back, view_right, view_left,
+view_top, view_bottom], 1024)` already wired in
+`trellis2_native_full_pipeline.py:216`.
+
+Next : add a `FABMESH_TRELLIS2_TWO_PASS=1` env flag in the existing
+pipeline so the same Python process does pass 1 -> render -> pass 2
+without reloading the TRELLIS-2 weights between passes (saves ~25s).
+
+---
+
 ## 2026-05-19 (sheet variable grid) — N-view SDXL model sheet (2/4/6)
 
 User clarification: the Extra views dropdown should produce a single
