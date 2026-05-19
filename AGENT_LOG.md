@@ -10,6 +10,44 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (MV-Adapter rollback) — patched fallback produced pure noise
+
+**Bug** : the previous patch_mvadapter.py (graceful skip of ref-attention
+for blocks where `ref_hidden_states[self.name]` was a KeyError under
+diffusers >= 0.33) didn't just degrade quality — it made the entire
+MV-Adapter output **pure RGB noise**. Confirmed visually: every view
+of every test mesh (singe ref_2, poulet ref_5, etc.) came out as glitch
+art (high-entropy magenta/green blocks).
+
+**Cause** : the graceful skip apparently disables ref-attention on so
+many blocks that the reference image conditioning collapses entirely;
+the model has nothing to anchor on and generates white noise.
+
+**Action** :
+- Restored `external/MV-Adapter/mvadapter/models/attention_processor.py`
+  to the original (re-introduces the KeyError, but at least no noise).
+- `patch_mvadapter.py` made a no-op so any leftover invocation can't
+  reintroduce the broken patch.
+- `src/main/main.js` `generate-back-view` IPC : every back-view request
+  is now forced to `mode='realvis'` (generate_back_view.py, RealVis +
+  ControlNet OpenPose). MV-Adapter dispatch is shorted out at the IPC
+  level. The humanoid T-pose skeleton is still irrelevant for
+  creatures so the result on non-character assets remains mediocre,
+  but visibly mediocre is strictly better than pure noise.
+- Removed all corrupted `<stem>_multiview/` dirs from `images/poulet/`,
+  `images/singe/`, `images/enfant_orc/` so the 3D pipelines don't pick
+  up noisy inputs.
+- The "Front + back + sides + bottom" dropdown option still exists in
+  the UI but currently degrades to "Front + back" because MV-Adapter
+  is off — the missing sides + top + bottom will return once we have a
+  working MV-Adapter / alternative multi-view generator.
+
+**Next** : either downgrade diffusers to 0.31/0.32 (risky for the rest
+of the stack), maintain a fork of MV-Adapter compatible with 0.34, or
+swap to another open multi-view model (CRM/InstantMesh/etc.).
+
+---
+
 ## 2026-05-19 (multi-view 3D) — 6 views used by mesh + texture pipelines
 
 Wired the 6 MV-Adapter views (front/right/back/left/top/bottom) into both
