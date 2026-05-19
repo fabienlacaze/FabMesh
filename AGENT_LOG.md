@@ -10,6 +10,54 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (front-strict + MV-Adapter on cars) — strict-front helps baseline, MV-Adapter still can't draw cars
+
+**Hypothesis tested** : the MV-Adapter views on `images/voiture_rouge/ref_0.png`
+were producing "all the same rotated 3/4 angle" because the source was
+already a 3/4 shot, not a strict orthographic front. So we added
+`scripts/generate_front_strict.py` (RealVisXL + 3-seed sampler +
+horizontal-symmetry IoU score) to rectify any source image to a strict
+front view. On the singe (humanoid creature) MV-Adapter worked fine,
+but the car test was supposed to reveal whether the source-angle was
+the bottleneck for objects too.
+
+**Strict-front rectifier — WORKS** :
+- Auto-picked seed=1274 (symmetry 0.978 / 1.0 IoU on flipped silhouette)
+  from 3 seeds in ~36s. Output is genuinely orthographic.
+- Cascading benefit for the single-shot TRELLIS-2 path : 6.23M vertices
+  vs 3.48M from the 3/4 source (+79%). Because the strict-front is
+  in-distribution of Objaverse-XL training renders.
+
+**MV-Adapter on cars — STILL DOESN'T WORK** :
+- Even with the strict-front input, MV-Adapter's RIGHT/LEFT outputs
+  are not profile views — they show the car from a back-3/4 angle
+  with weird mechanical bits visible.
+- BACK shows a double calandre (front grill appearing on the back).
+- TOP/BOTTOM (at ±60°) are stretched cars with 4 wheel-pairs side by side.
+- The TRELLIS-2 multi-view mesh inherits these distortions: protrusion
+  on the back ("manta ray tail"), asymmetric body.
+
+**Root cause hypothesis** : Objaverse-XL is heavily humanoid/animal/prop;
+cars are a small minority. MV-Adapter learned axis-conventions and
+silhouette priors that apply to characters but not to vehicles —
+it has no idea where car headlights "should" be on a profile view.
+
+**Conclusion** :
+- `generate_front_strict.py` ships — it's a universal pre-processor
+  useful for any subject type, regardless of multi-view ambitions.
+- The multi-view path in `trellis2_native_full_pipeline.py` stays
+  reverted (the `_merge_multi_image_cond` workaround is gone).
+  The `<stem>_multiview/` auto-detect still exists from older commits
+  but currently produces worse meshes for everything except
+  humanoid-shaped subjects.
+
+**Net useful outputs from this session** :
+- 9df9900 — MV-Adapter accelerate cpu_offload fix (per-processor attr)
+- b63f959 — MV-Adapter elev=±60° instead of ±90° (avoids 3/4 grotesqueries)
+- (this commit) — `generate_front_strict.py` symmetry-scored front rectifier
+
+---
+
 ## 2026-05-19 (MV-Adapter unblocked) — cpu_offload kwarg-copy bug fixed
 
 **Context** : MV-Adapter (huanngzh/MV-Adapter, Apache 2.0) was blocked
