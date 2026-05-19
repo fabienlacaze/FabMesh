@@ -61,37 +61,48 @@ def main():
     log(f'out_dir={output_dir}  stem={front_stem}')
 
     t0 = time.time()
-    # Run MV-Adapter into a tempdir so we don't pollute output_dir with
-    # the 5 other views we won't use here.
-    with tempfile.TemporaryDirectory(prefix='fabmesh_mva_back_') as mv_dir:
-        log(f'running MV-Adapter into {mv_dir}...')
-        mva_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   'multiview_mvadapter_gen.py')
-        result = subprocess.run(
-            [sys.executable, mva_script, front_image, mv_dir],
-            capture_output=True, text=True, timeout=600,
-        )
-        if result.returncode != 0:
-            log(f'MV-Adapter failed (rc={result.returncode}):')
-            log(result.stderr[-2000:] if result.stderr else '')
-            sys.exit(3)
-        log(f'MV-Adapter done in {time.time()-t0:.1f}s')
+    # Persist all 6 views in <front_dir>/<stem>_multiview/ (FabMesh
+    # convention — texture_project / hi3dgen_full_pipeline / texture_augment
+    # all look here). This gives downstream pipelines free multi-view
+    # data without re-running MV-Adapter.
+    front_dir = os.path.dirname(front_image)
+    mv_persist_dir = os.path.join(front_dir, f'{front_stem}_multiview')
+    log(f'persisting all 6 views to {mv_persist_dir}')
 
-        # MV-Adapter's view order (per its CLI contract) :
-        #   view_0 = front, view_1 = back, view_2 = right,
-        #   view_3 = back? (varies), view_4 = top, view_5 = bottom
-        # The script's docstring + multiview_crm_gen contract states
-        # view_1 is the back (azim=180). Verify via views.json if present.
-        back_view = os.path.join(mv_dir, 'view_1.png')
-        if not os.path.isfile(back_view):
-            log(f'ERROR: view_1.png not found in MV-Adapter output ({mv_dir})')
-            sys.exit(4)
+    log(f'running MV-Adapter into {mv_persist_dir}...')
+    mva_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'multiview_mvadapter_gen.py')
+    result = subprocess.run(
+        [sys.executable, mva_script, front_image, mv_persist_dir],
+        capture_output=True, text=True, timeout=600,
+    )
+    if result.returncode != 0:
+        log(f'MV-Adapter failed (rc={result.returncode}):')
+        log(result.stderr[-2000:] if result.stderr else '')
+        sys.exit(3)
+    log(f'MV-Adapter done in {time.time()-t0:.1f}s')
 
-        # Copy as back_<stem>_0.png
-        dest = os.path.join(output_dir, f'back_{front_stem}_0.png')
-        shutil.copy2(back_view, dest)
-        log(f'wrote {dest}')
-        print(f'BACK_VIEW_PATH: {dest}', flush=True)
+    # MV-Adapter writes view_0..view_5 into mv_persist_dir.
+    # Convention (per multiview_mvadapter_gen.py contract) :
+    #   view_0 = front, view_1 = back, view_2 = right,
+    #   view_3 = left, view_4 = top, view_5 = bottom
+    back_view = os.path.join(mv_persist_dir, 'view_1.png')
+    if not os.path.isfile(back_view):
+        log(f'ERROR: view_1.png not found in MV-Adapter output ({mv_persist_dir})')
+        sys.exit(4)
+
+    # Copy the back into _backphotos/ as back_<stem>_0.png (legacy contract
+    # — main.js + the 3D pipeline read back photos from there).
+    dest = os.path.join(output_dir, f'back_{front_stem}_0.png')
+    shutil.copy2(back_view, dest)
+    log(f'wrote {dest}')
+    print(f'BACK_VIEW_PATH: {dest}', flush=True)
+
+    # Log the other persisted views so callers can pick them up if useful.
+    for i, label in enumerate(['front', 'back', 'right', 'left', 'top', 'bottom']):
+        p = os.path.join(mv_persist_dir, f'view_{i}.png')
+        if os.path.isfile(p):
+            print(f'MULTIVIEW_PATH: {label}={p}', flush=True)
 
     log(f'TOTAL: {time.time()-t0:.1f}s')
 
