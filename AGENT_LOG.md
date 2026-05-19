@@ -10,6 +10,40 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (back-view) — Dispatch by asset type (character / creature / ...)
+
+**Problem reported by the user** : the "Generate back photo" step on a
+rooster (creature) produced what looked like another front view, not
+a real back. Cause : `generate_back_view.py` is hard-wired to a
+ControlNet OpenPose **humanoid T-pose back skeleton**. For a chicken,
+a dog, a building, etc., the skeleton is meaningless → the model
+ignores ControlNet conditioning and regenerates a front-ish variation.
+
+**Fix** : dispatch the back-view script by `ws-asset-type` selected
+in the UI :
+- `character` → `generate_back_view.py` (RealVis + IPAdapter +
+  ControlNet OpenPose humanoid T-pose) — unchanged, works on humans.
+- everything else (creature, building, vehicle, weapon, prop,
+  environment, custom) → **NEW** `generate_back_view_mvadapter.py`
+  which calls MV-Adapter (Apache 2.0) via `multiview_mvadapter_gen.py`
+  on a tempdir and extracts `view_1.png` (back) as the back photo.
+
+**Wiring** :
+- `src/main/main.js` (IPC `generate-back-view`) : accepts `assetType`
+  param, auto-resolves `mode='realvis'` for character / `mode='mvadapter'`
+  otherwise. Explicit `mode` override still works (e.g. `'mirror'`).
+- `src/renderer/index2.js` : 3 callers now pass
+  `assetType: document.getElementById('ws-asset-type')?.value || 'character'`.
+
+**Files** :
+- NEW `scripts/generate_back_view_mvadapter.py` (~85 lines) : wrapper
+  that runs MV-Adapter on a tempdir + copies view_1.png as
+  `back_<stem>_0.png` in the standard output dir. Same CLI contract as
+  `generate_back_view.py` so the IPC handler doesn't care which one
+  produced the file.
+
+---
+
 ## 2026-05-19 (engine) — TRELLIS-2 native becomes the default engine
 
 After a successful POC (mesh quality NETTEMENT meilleure, only ~2.9 GB

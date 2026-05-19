@@ -4185,7 +4185,7 @@ ipcMain.handle('caption-image', async (_event, { imagePath }) => {
 // 2-view texturing pipeline. Produces a photoreal back view of the
 // same subject, conditioned on the front photo.
 // ============================================================
-ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages, mode }) => {
+ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, numImages, mode, assetType }) => {
   if (!frontImage || !fs.existsSync(frontImage)) {
     return { success: false, error: `front image not found: ${frontImage}` };
   }
@@ -4196,15 +4196,28 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   // Per-front-image suffix so different fronts don't overwrite each other
   const frontStem = path.basename(frontImage, path.extname(frontImage));
-  // mode='mirror' uses generate_back_view_mirror.py (mirror+inpaint =
-  // pixel-identical lower body, only head+torso regenerated).
-  // mode='realvis' (default) uses generate_back_view.py (RealVis +
-  // IPAdapter + ControlNet OpenPose, full regenerated).
-  const useMirror = mode === 'mirror';
-  const script = path.join(__dirname, '..', '..', 'scripts',
-                            useMirror ? 'generate_back_view_mirror.py'
-                                       : 'generate_back_view.py');
-  log.info('generate-back-view', `mode=${useMirror ? 'mirror' : 'realvis'}`);
+  // Mode selection:
+  //   - mode='mirror'    -> generate_back_view_mirror.py (mirror+inpaint)
+  //   - mode='realvis'   -> generate_back_view.py (RealVis + ControlNet
+  //                         OpenPose humanoid T-pose; ONLY for human/character
+  //                         assets — irrelevant skeleton for animals/objects)
+  //   - mode='mvadapter' -> generate_back_view_mvadapter.py (MV-Adapter
+  //                         multi-view consistent; universal, recommended
+  //                         for creatures/animals/objects/vehicles)
+  //   - default          -> auto: 'realvis' for assetType='character',
+  //                         'mvadapter' otherwise.
+  let resolvedMode = mode;
+  if (!resolvedMode) {
+    resolvedMode = (assetType === 'character') ? 'realvis' : 'mvadapter';
+  }
+  const SCRIPT_BY_MODE = {
+    mirror:    'generate_back_view_mirror.py',
+    realvis:   'generate_back_view.py',
+    mvadapter: 'generate_back_view_mvadapter.py',
+  };
+  const scriptName = SCRIPT_BY_MODE[resolvedMode] || 'generate_back_view_mvadapter.py';
+  const script = path.join(__dirname, '..', '..', 'scripts', scriptName);
+  log.info('generate-back-view', `mode=${resolvedMode} assetType=${assetType || '(none)'} -> ${scriptName}`);
   // Pass the front stem as a 5th arg so the python script names files
   // back_<stem>_0.png (avoids collision when multiple fronts in same project).
   const args = [script, frontImage, outDir, promptHint || '', String(numImages || 1), frontStem];
