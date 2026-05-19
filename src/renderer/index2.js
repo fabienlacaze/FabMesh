@@ -6111,7 +6111,6 @@ const MESH_TOOL_SCHEMAS = {
       window.__trellis2Preset = vals.preset;
       return [ctx.imagePath];
     },
-    confirm: 'TRELLIS-2 runs on GPU and can take 90s–3min. Continue?',
   },
 };
 
