@@ -5873,22 +5873,49 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
 // ============================================================
 // MESH TOOLS — automated operations
 // ============================================================
+// Expected duration per AI tool (ms) for the progress popup ETA.
+const MESH_TOOL_EXPECTED_MS = {
+  smooth:         5000,
+  decimate:       12000,
+  subdivide:      15000,
+  fix_normals:    2000,
+  fill_holes:     8000,
+  center:         1000,
+  retexture:      45000,
+  trellis2_retex: 110000,
+};
+
 async function runMeshTool(operation, params = []) {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
   const meshPath = p.selectedMeshPath;
-  showToast(`Running ${operation}...`, 'info', 2000);
+  const meshName = meshPath.split(/[\\/]/).pop();
+  const expectedMs = MESH_TOOL_EXPECTED_MS[operation] || 10000;
+  // Show the full "Running task" popup (same component as 3D generation,
+  // image ops, etc.) so the user sees ETA + cancel button + progress bar
+  // instead of just a toast.
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`${operation}: ${p.name}`, null, {
+        Tool: operation,
+        Mesh: meshName,
+        Params: params.length ? params.join(', ') : '(none)',
+      }, expectedMs)
+    : null;
   try {
     const result = await API.meshTool({ operation, meshPath, params });
     if (result && result.success) {
       showToast(`${operation} done!`, 'success');
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
       // Refresh mesh list
       populateWorkspace(p);
     } else {
-      showToast(`${operation} failed: ${(result && result.error) || 'unknown'}`, 'error', 5000);
+      const msg = (result && result.error) || 'unknown';
+      showToast(`${operation} failed: ${msg}`, 'error', 5000);
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
     }
   } catch (e) {
     showToast(`${operation} error: ${e.message}`, 'error', 5000);
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
   }
 }
 
