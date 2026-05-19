@@ -38,6 +38,14 @@ def log(msg):
     print(f'[back-mva] {msg}', flush=True)
 
 
+# Auto-apply the diffusers >= 0.33 compat patch to MV-Adapter (idempotent).
+try:
+    import patch_mvadapter
+    patch_mvadapter.patch()
+except Exception as _e:
+    print(f'[back-mva] patch_mvadapter import failed: {_e}', flush=True)
+
+
 def main():
     if len(sys.argv) < 3:
         print('Usage: generate_back_view_mvadapter.py <front_image> '
