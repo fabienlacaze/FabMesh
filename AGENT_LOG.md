@@ -10,6 +10,63 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (MV-Adapter unblocked) — cpu_offload kwarg-copy bug fixed
+
+**Context** : MV-Adapter (huanngzh/MV-Adapter, Apache 2.0) was blocked
+since ~2026-05-17 with `KeyError: 'down_blocks.1.attentions.0.transformer_blocks.0.attn1.processor'`.
+The previous AGENT_LOG entry attributed it to "diffusers >= 0.33 renamed
+attention processors". That hypothesis was **wrong**.
+
+**Real root cause** : `accelerate.enable_model_cpu_offload()` wraps
+`unet.forward` with a hook that, combined with diffusers'
+`Attention.forward` filtering of `cross_attention_kwargs` via
+`inspect.signature`, ends up **copying** every kwarg dict at the
+UNet boundary. The processor therefore receives a *different* dict
+object than the one the pipeline populated during the ref pass —
+verified empirically with `id()` logging: ref pass writes 140 entries
+into dict @ id=X, MV pass reads from dict @ id=Y (always len=0) →
+KeyError.
+
+**Fix** (in `scripts/patch_mvadapter.py`, applied idempotently at
+load by `multiview_mvadapter_gen.py`) :
+1. `attention_processor.py` (write site, both decoupled classes) —
+   in addition to the existing `cache_hidden_states[self.name]`,
+   stash the tensor as `self._mva_ref_state` on the processor
+   instance. Attributes survive accelerate's kwarg-copy boundary.
+2. `attention_processor.py` (read site) — read from
+   `getattr(self, '_mva_ref_state', None)` in priority; fall back
+   to the kwarg dict for non-accelerate code paths.
+3. `pipeline_mvadapter_i2mv_sdxl.py` — apply the same
+   `repeat_interleave(num_views)` + CFG `torch.cat([zeros, v])`
+   that the kwarg dict gets to the per-processor attributes.
+   Without this the MV pass reads batch=1 tensors against a
+   batch=12 model and produces glitch art (organic blobs).
+
+**Validated** : 6 views on the singe (cfg=4.5, ref_scale=1.3, 50
+steps) in 60s total, VRAM peak 0.2 GB (cpu_offload ON). Identity
+of the front photo preserved across front/back/sides. Top/bottom
+remain "3/4 views" — MV-Adapter wasn't trained on extreme elevations,
+that's a model limit, not a config.
+
+**Side fixes** :
+- Installed in `external/TRELLIS2_win/.venv` (where the pipeline
+  runs) : `matplotlib`, `jaxtyping`, `typeguard`, `omegaconf`,
+  `einops`, `opencv-python`, `controlnet_aux`, `peft`, `timm`,
+  `scikit-image`, `sentencepiece`, `spandrel`. These are MV-Adapter
+  transitive deps that were never installed when the venv was
+  created.
+- Tuned defaults : `cfg=4.5` (was 3.0), `reference_conditioning_scale=1.3`
+  (was 1.0) — sharper identity, stricter pose obedience.
+
+**Next** : re-wire `main.js generate-back-view` IPC so creatures
+(non-character asset types) dispatch to `multiview_mvadapter_gen.py`
+again instead of the RealVis+ControlNet fallback (which only works
+on humanoid T-pose skeletons). The pipeline integration
+(`FABMESH_TRELLIS2_MULTIVIEW_DIR` env path into TRELLIS-2) is
+already wired and just waited on MV-Adapter being usable again.
+
+---
+
 ## 2026-05-19 (plan D step 1) — pyrender 6-view ortho renderer
 
 Created `scripts/multiview_from_mesh.py` : 6 orthographic views (front,

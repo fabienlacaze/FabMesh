@@ -74,6 +74,15 @@ def _patch_mvadapter_nvdiffrast():
 
 _patch_mvadapter_nvdiffrast()
 
+# Patch MV-Adapter for accelerate cpu_offload compatibility (idempotent).
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import patch_mvadapter as _patch_mva
+    _patch_mva.patch()
+except Exception as _e:
+    print(f'[multiview_mvadapter] WARN: patch_mvadapter failed: {_e}',
+          flush=True)
+
 # FabMesh logger
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -110,7 +119,7 @@ VIEW_SLOTS = [
 
 
 def generate(input_image_path, output_dir, num_steps=50,
-             guidance_scale=3.0, size=768, seed=1234):
+             guidance_scale=4.5, size=768, seed=1234):
     """Run MV-Adapter i2mv-sdxl and produce 6 views + input.png + views.json."""
     import numpy as np
     import torch
@@ -244,7 +253,7 @@ def generate(input_image_path, output_dir, num_steps=50,
         control_image=control_images,
         control_conditioning_scale=1.0,
         reference_image=ref_rgb,
-        reference_conditioning_scale=1.0,
+        reference_conditioning_scale=1.3,
         negative_prompt=neg,
         cross_attention_kwargs={'scale': 1.0},
         **pipe_kwargs,
@@ -329,7 +338,7 @@ if __name__ == '__main__':
     ap.add_argument('--size', type=int, default=768,
                     help='Output resolution per view (MV-Adapter SDXL native: 768)')
     ap.add_argument('--steps', type=int, default=50)
-    ap.add_argument('--guidance', type=float, default=3.0)
+    ap.add_argument('--guidance', type=float, default=4.5)
     ap.add_argument('--seed', type=int, default=1234)
     args = ap.parse_args()
 
