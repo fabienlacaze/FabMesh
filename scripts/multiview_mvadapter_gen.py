@@ -113,8 +113,8 @@ VIEW_SLOTS = [
     ( 90.0,   0.0),   # view_1 right
     (180.0,   0.0),   # view_2 back
     (270.0,   0.0),   # view_3 left
-    (  0.0,  90.0),   # view_4 TOP
-    (  0.0, -90.0),   # view_5 BOTTOM
+    (  0.0,  60.0),   # view_4 TOP (3/4 high — MV-Adapter doesn't do true ±90°)
+    (  0.0, -60.0),   # view_5 BOTTOM (3/4 low)
 ]
 
 
