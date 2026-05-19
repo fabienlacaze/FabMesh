@@ -4244,16 +4244,26 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   //                         for creatures/animals/objects/vehicles)
   //   - default          -> auto: 'realvis' for assetType='character',
   //                         'mvadapter' otherwise.
+  // MV-Adapter (huanngzh/MV-Adapter) is currently incompatible with
+  // diffusers >= 0.33 — its attention_processor.py crashes with
+  // KeyError on a few processor names that the new diffusers doesn't
+  // populate. Our graceful fallback (skip ref-attention for missing
+  // blocks) made the model produce pure noise. Until we either downgrade
+  // diffusers or get a proper upstream fix, force every back-view request
+  // onto generate_back_view.py (RealVis + OpenPose). The humanoid T-pose
+  // skeleton is irrelevant for creatures so the result on non-characters
+  // is mediocre, but that's strictly better than the noise MV-Adapter
+  // produces.
   let resolvedMode = mode;
-  if (!resolvedMode) {
-    resolvedMode = (assetType === 'character') ? 'realvis' : 'mvadapter';
+  if (!resolvedMode || resolvedMode === 'mvadapter') {
+    resolvedMode = 'realvis';
   }
   const SCRIPT_BY_MODE = {
     mirror:    'generate_back_view_mirror.py',
     realvis:   'generate_back_view.py',
     mvadapter: 'generate_back_view_mvadapter.py',
   };
-  const scriptName = SCRIPT_BY_MODE[resolvedMode] || 'generate_back_view_mvadapter.py';
+  const scriptName = SCRIPT_BY_MODE[resolvedMode] || 'generate_back_view.py';
   const script = path.join(__dirname, '..', '..', 'scripts', scriptName);
   log.info('generate-back-view', `mode=${resolvedMode} assetType=${assetType || '(none)'} -> ${scriptName}`);
   // Pass the front stem as a 5th arg so the python script names files

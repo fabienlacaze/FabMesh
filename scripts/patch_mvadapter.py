@@ -36,27 +36,11 @@ PATCHED = '''        if use_ref:
 
 
 def patch():
-    if not os.path.isfile(TARGET):
-        print(f'[patch_mvadapter] target missing: {TARGET}')
-        return False
-    with open(TARGET, 'r', encoding='utf-8') as f:
-        content = f.read()
-    if PATCHED in content:
-        return True  # already patched (idempotent silent return)
-    if ORIGINAL not in content:
-        print(f'[patch_mvadapter] WARNING: original snippet not found in '
-              f'{TARGET} (file may have been updated upstream).')
-        return False
-    # Backup first patch only
-    backup = TARGET + '.bak_fabmesh'
-    if not os.path.isfile(backup):
-        with open(backup, 'w', encoding='utf-8') as f:
-            f.write(content)
-    # Replace BOTH occurrences (lines 326 and 692 in the original file)
-    new_content = content.replace(ORIGINAL, PATCHED)
-    with open(TARGET, 'w', encoding='utf-8') as f:
-        f.write(new_content)
-    print(f'[patch_mvadapter] patched {TARGET}')
+    # DISABLED 2026-05-19: the previous graceful-fallback patch (skip
+    # ref-attention for missing blocks) made MV-Adapter produce pure
+    # noise on every output, not just dropped quality. Until a proper
+    # fix (or diffusers downgrade) is found, this is a no-op so any
+    # leftover invocation can't reintroduce the broken patch.
     return True
 
 
