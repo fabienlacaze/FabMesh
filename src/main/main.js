@@ -4244,19 +4244,16 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   //                         for creatures/animals/objects/vehicles)
   //   - default          -> auto: 'realvis' for assetType='character',
   //                         'mvadapter' otherwise.
-  // MV-Adapter (huanngzh/MV-Adapter) is currently incompatible with
-  // diffusers >= 0.33 — its attention_processor.py crashes with
-  // KeyError on a few processor names that the new diffusers doesn't
-  // populate. Our graceful fallback (skip ref-attention for missing
-  // blocks) made the model produce pure noise. Until we either downgrade
-  // diffusers or get a proper upstream fix, force every back-view request
-  // onto generate_back_view.py (RealVis + OpenPose). The humanoid T-pose
-  // skeleton is irrelevant for creatures so the result on non-characters
-  // is mediocre, but that's strictly better than the noise MV-Adapter
-  // produces.
+  // MV-Adapter is currently disabled (diffusers >= 0.33 incompat).
+  // Dispatch by assetType to the best remaining option :
+  //   - character           -> realvis  (RealVis + OpenPose humanoid)
+  //   - everything else     -> mirror   (flip + inpaint head only)
+  //                            mirror keeps the silhouette pixel-identical
+  //                            to the front so creatures / objects don't
+  //                            silently produce a front-variation again.
   let resolvedMode = mode;
   if (!resolvedMode || resolvedMode === 'mvadapter') {
-    resolvedMode = 'realvis';
+    resolvedMode = (assetType === 'character') ? 'realvis' : 'mirror';
   }
   const SCRIPT_BY_MODE = {
     mirror:    'generate_back_view_mirror.py',
