@@ -10,6 +10,36 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (front-strict --mode iso) — ISO 3/4 source produces better mesh proportions than strict-front on vehicles
+
+**Finding** : on the red car single-shot mesh from a strict-front source,
+TRELLIS-2 produced a trapu/compact body — proportions of a Goggomobil /
+Honda S600 instead of the sleek coupé in the source image. The cause :
+a strict orthographic front has *zero* depth cue, so the model has no
+way to know how long the car actually is. It defaults to the
+training-set "average compact" silhouette.
+
+**Fix** : `generate_front_strict.py` now has a `--mode iso` variant.
+Generates a 3/4 ISO angle (azim ~35°, elev ~25°) where the depth axis
+is visible, so the model can infer length. The seed selector flips
+to scoring *asymmetry* (1 - symmetry IoU, capped at 0.85 so we
+don't pick a full profile by accident).
+
+Validated visually on `images/voiture_rouge/ref_0.png` :
+- Strict-front mesh (cascade) : 6.86M v but trapu silhouette.
+- ISO mesh (cascade) : 3.94M v, sleek coupé proportions — user
+  reaction "c'est bien bien mieux".
+
+**Rule of thumb to apply** :
+- Humanoid / T-pose character → `--mode front` (orthographic-front
+  is compatible with MV-Adapter, ControlNet OpenPose, and the
+  symmetry of human anatomy is genuine information for the model).
+- Vehicle / object / non-bipedal creature → `--mode iso`
+  (depth cues fix mesh proportions; MV-Adapter is broken on
+  these subjects anyway so we don't care about its compatibility).
+
+---
+
 ## 2026-05-19 (front-strict + MV-Adapter on cars) — strict-front helps baseline, MV-Adapter still can't draw cars
 
 **Hypothesis tested** : the MV-Adapter views on `images/voiture_rouge/ref_0.png`

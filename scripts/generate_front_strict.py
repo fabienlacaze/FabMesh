@@ -1,29 +1,31 @@
-"""Generate a strict ORTHOGRAPHIC FRONT view from a text prompt OR an
-existing image — works on any subject type, not just humanoids.
+"""Generate a strict ORTHOGRAPHIC FRONT or 3/4 ISO view from a text
+prompt OR an existing image — works on any subject type.
 
 Companion to `generate_front_tpose.py` which uses ControlNet OpenPose
-(humanoid skeleton, irrelevant for cars/creatures/objects). This script
-takes the cheap-but-effective path:
-  1. Augment the prompt with strict-front orthographic cues.
-  2. Sample N seeds (default 3).
-  3. Score each candidate by horizontal symmetry of the rembg-masked
-     subject. An orthographic front is highly left-right symmetric
-     (mirror equality of foreground pixels around the vertical axis).
-  4. Keep the best candidate, run it through `remove_bg_and_center`
-     so it cascades cleanly into the rest of the pipeline.
+(humanoid skeleton, irrelevant for cars/creatures/objects).
+
+Two modes :
+  --mode front (default) — strict orthographic front, scored by
+    horizontal symmetry IoU of the rembg-masked silhouette. Best for
+    humanoids (compatible with MV-Adapter, ControlNet OpenPose).
+  --mode iso — 3/4 ISO angle (azim ~35°, elev ~25°), scored by
+    *asymmetry* (orthographic-3/4 views are intentionally NOT mirror
+    symmetric). Best for vehicles / objects / non-bipedal creatures
+    where TRELLIS-2 single-shot needs depth cues to fix mesh
+    proportions (a strict front yields trapu/compact meshes because
+    the model has no length info).
 
 When `--from-image <ref>` is given, the reference is used as IPAdapter
-identity anchor (preserves the user's intended subject color/silhouette
-while moving toward strict front).
+identity anchor (preserves color/silhouette while reorienting).
 
 Licensing: RealVis XL (RAIL++-M), IPAdapter (Apache), rembg (MIT).
 All commercial-safe.
 
 Usage:
     python generate_front_strict.py <prompt> <output.png>
-        [--seeds 3] [--steps 30] [--guidance 7.0]
+        [--mode front|iso] [--seeds 3] [--steps 30] [--guidance 7.0]
     python generate_front_strict.py --from-image <ref.png> <output.png>
-        [--seeds 3]
+        [--mode front|iso] [--seeds 3]
 """
 import argparse
 import os
@@ -55,9 +57,24 @@ STRICT_FRONT_TAIL = (
     'background, even studio lighting, sharp focus, 8k, masterpiece'
 )
 
-NEG = (
+ISO_TAIL = (
+    ', 3/4 isometric view, three-quarter angle, slight rotation '
+    'showing both front and side, slight elevation showing the top, '
+    'classic Objaverse render angle, full subject visible with '
+    'depth cues, plain white background, even studio lighting, '
+    'sharp focus, 8k, masterpiece'
+)
+
+NEG_FRONT = (
     'side view, profile view, three quarter view, back view, '
     '3/4 angle, rotated, perspective view, tilted, asymmetric, '
+    'cropped, blurry, deformed, multiple subjects, watermark, '
+    'low quality, frame, border, signature'
+)
+
+NEG_ISO = (
+    'strict front view, flat front view, head-on, profile view, '
+    'back view, top-down view, perspective distortion, fish-eye, '
     'cropped, blurry, deformed, multiple subjects, watermark, '
     'low quality, frame, border, signature'
 )
@@ -120,8 +137,14 @@ def load_pipeline(use_ipadapter_image_ref=None):
 
 
 def generate(prompt, out_path, ref_image=None, seeds=3, steps=30,
-             guidance=7.0, size=1024):
-    full_prompt = prompt.strip().rstrip('.,') + STRICT_FRONT_TAIL
+             guidance=7.0, size=1024, mode='front'):
+    if mode == 'iso':
+        full_prompt = prompt.strip().rstrip('.,') + ISO_TAIL
+        neg = NEG_ISO
+    else:
+        full_prompt = prompt.strip().rstrip('.,') + STRICT_FRONT_TAIL
+        neg = NEG_FRONT
+    log(f'mode={mode}')
     log(f'prompt: "{full_prompt[:200]}..."')
     log(f'seeds={seeds} steps={steps} guidance={guidance}')
 
@@ -138,20 +161,29 @@ def generate(prompt, out_path, ref_image=None, seeds=3, steps=30,
         seed = 1000 + base_seed * 137  # spread seeds reproducibly
         gen = torch.Generator('cuda').manual_seed(seed)
         call_kwargs = dict(
-            prompt=full_prompt, negative_prompt=NEG,
+            prompt=full_prompt, negative_prompt=neg,
             num_inference_steps=steps, guidance_scale=guidance,
             height=size, width=size, generator=gen,
         )
         if ipadapter_ref is not None:
             call_kwargs['ip_adapter_image'] = ipadapter_ref
         img = pipe(**call_kwargs).images[0]
-        score = symmetry_score(img)
-        log(f'  candidate {i+1}/{seeds} seed={seed} symmetry={score:.3f}')
+        sym = symmetry_score(img)
+        # Front: maximize symmetry. ISO: maximize asymmetry, but cap at
+        # 0.6 so we don't reward extreme back/side views (those are
+        # too asymmetric and not what we want either).
+        if mode == 'iso':
+            score = (1.0 - sym) if sym < 0.85 else 0.0
+            log(f'  candidate {i+1}/{seeds} seed={seed} '
+                f'sym={sym:.3f} iso_score={score:.3f}')
+        else:
+            score = sym
+            log(f'  candidate {i+1}/{seeds} seed={seed} symmetry={score:.3f}')
         candidates.append((score, img, seed))
 
     candidates.sort(key=lambda t: -t[0])
     best_score, best_img, best_seed = candidates[0]
-    log(f'best: seed={best_seed} symmetry={best_score:.3f} '
+    log(f'best: seed={best_seed} score={best_score:.3f} '
         f'(after {time.time()-t0:.1f}s)')
 
     log('post-processing: rembg + center')
@@ -165,6 +197,7 @@ def main():
     ap.add_argument('prompt_or_first', nargs='?')
     ap.add_argument('output')
     ap.add_argument('--from-image', dest='from_image', default=None)
+    ap.add_argument('--mode', choices=['front', 'iso'], default='front')
     ap.add_argument('--seeds', type=int, default=3)
     ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=7.0)
@@ -174,17 +207,17 @@ def main():
         if not os.path.isfile(args.from_image):
             log(f'ERROR: --from-image not found: {args.from_image}')
             sys.exit(2)
-        # When refining an existing image, use a generic prompt — the
-        # IPAdapter carries the identity.
         prompt = args.prompt_or_first or 'subject'
         generate(prompt, args.output, ref_image=args.from_image,
-                 seeds=args.seeds, steps=args.steps, guidance=args.guidance)
+                 seeds=args.seeds, steps=args.steps, guidance=args.guidance,
+                 mode=args.mode)
     else:
         if not args.prompt_or_first:
             log('ERROR: prompt required (or use --from-image)')
             sys.exit(2)
         generate(args.prompt_or_first, args.output, ref_image=None,
-                 seeds=args.seeds, steps=args.steps, guidance=args.guidance)
+                 seeds=args.seeds, steps=args.steps, guidance=args.guidance,
+                 mode=args.mode)
 
 
 if __name__ == '__main__':
