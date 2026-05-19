@@ -10,6 +10,33 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-19 (sheet variable grid) — N-view SDXL model sheet (2/4/6)
+
+User clarification: the Extra views dropdown should produce a single
+SDXL sheet image with the requested number of orthographic views in
+a grid, then extract each cell. Spec :
+  - Front only -> 1 image (normal SDXL gen, no sheet)
+  - Front + back -> 1 SDXL image, 1x2 grid (2 cells)
+  - Front + back + sides + bottom -> 1 SDXL image, 3x2 grid (6 cells)
+All cells must be ORTHOGRAPHIC (no perspective, no foreshortening).
+
+`scripts/multiview_sheet_gen.py` extended to support `--views 2|4|6`
+with the right layout per N. Cell size 1024² for 2/4 views, 768²
+for 6 views (keeps the total sheet within SDXL-friendly dimensions).
+
+The 3D pipelines (TRELLIS-2 native + hi3dgen) already auto-detect
+`<stem>_multiview/` and feed the views into their conditioning, so
+the extra views immediately reach the mesh + texture stages with
+no further wiring on that side.
+
+Wiring :
+  - `index2.js` : passes `sheetViews: 2|6` to the IPC.
+  - `main.js` : forwards as `FABMESH_SHEET_VIEWS` env.
+  - `generate_back_view_sheet.py` : reads env, passes `--views` to
+    `multiview_sheet_gen.py`.
+
+---
+
 ## 2026-05-19 (MV-Adapter rollback) — patched fallback produced pure noise
 
 **Bug** : the previous patch_mvadapter.py (graceful skip of ref-attention

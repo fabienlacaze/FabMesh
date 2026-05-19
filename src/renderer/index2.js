@@ -3436,9 +3436,10 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
                 promptHint: enrichedHint,
                 numImages: 1,
                 assetType: document.getElementById('ws-asset-type')?.value || 'character',
-                // When user picked "Front + back + sides + bottom", force
-                // MV-Adapter even on a character so we get all 6 views.
-                mode: mvForceFull ? 'mvadapter' : undefined,
+                // sheetViews: 2 for "front + back", 6 for "front + back +
+                // sides + bottom". Forwarded to multiview_sheet_gen.py
+                // via env so the SDXL prompt asks for the right grid.
+                sheetViews: mvForceFull ? 6 : 2,
               });
               if (bvResult?.success && bvResult.paths?.length) {
                 if (!p._backPhotos) p._backPhotos = {};

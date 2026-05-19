@@ -1,112 +1,140 @@
-"""Multi-view sheet generator — single SDXL call produces a 4-view grid.
+"""Multi-view sheet generator — single SDXL call produces N orthographic views.
 
-Idea (user request 2026-05-19): instead of running MV-Adapter (broken
-on diffusers >= 0.33) or 4 separate SDXL+IPAdapter calls, ask the base
-model (RealVisXL) to draw a single "character model sheet" image with
-4 views in a 2x2 grid (front / right / back / left). Then crop the
-4 cells into view_0..view_3.png that the rest of the pipeline can
-feed into TRELLIS-2 multi-ref.
+Layouts (--views N) :
+  - --views 2 : 1x2 grid  (front | back)             total 2048x1024
+  - --views 4 : 2x2 grid  (front, right; back, left) total 2048x2048
+  - --views 6 : 3x2 grid  (front, back, right;       total 2304x1536
+                           left, top, bottom)
 
-Pros:
-  - 1 SDXL call (~25-30s) instead of 4 (~100s) — 4x speedup
-  - All 4 views share a single style/lighting/colors (consistent
-    because they were sampled in the same noise pass)
-  - No MV-Adapter dependency, no IPAdapter, no ControlNet
-  - 100% commercial-safe (RealVisXL OpenRAIL++-M, Apache 2.0 deps)
+All views are prompted as STRICT ORTHOGRAPHIC (no perspective, no
+foreshortening), each cell is square.
 
-Cons:
-  - Each cell is half the resolution of a normal SDXL output
-    (~1024 if the sheet is 2048, ~768 if 1536)
-  - SDXL doesn't always honor "4-view grid" perfectly; if a cell ends
-    up wrong, we still ship the imperfect result instead of an AI
-    hallucination of a fake back.
+Single SDXL call -> all views share the same style/lighting/colors
+(consistent because they were sampled in the same noise pass). No
+IPAdapter, no ControlNet, no MV-Adapter. 100% commercial-safe.
 
 CLI :
-    python multiview_sheet_gen.py <front_image> <output_dir> [prompt_hint]
-
+    python multiview_sheet_gen.py <front_image> <output_dir>
+                                   [prompt_hint] [--views 2|4|6]
 Outputs:
-    <output_dir>/view_0.png   front (top-left cell)
-    <output_dir>/view_1.png   back  (bottom-left cell)
-    <output_dir>/view_2.png   right (top-right cell)
-    <output_dir>/view_3.png   left  (bottom-right cell)
-    <output_dir>/sheet.png    raw 2x2 grid for debugging
-    <output_dir>/views.json   slot -> angle mapping
+    <output_dir>/view_0..view_{N-1}.png
+    <output_dir>/sheet.png        raw grid for debug
+    <output_dir>/views.json       slot -> orientation mapping
+    <output_dir>/input.png        copy of the user front
 """
 import os
 import sys
 import json
 import time
+import argparse
+import shutil
 from PIL import Image
-
-
-SHEET_SIZE = 2048   # cells will be 1024x1024
-CELL_SIZE = SHEET_SIZE // 2
 
 
 def log(msg):
     print(f'[sheet] {msg}', flush=True)
 
 
-def build_prompt(subject_hint: str = '') -> str:
-    """Force a clean 2x2 model-sheet layout with a strict orientation
-    convention. SDXL needs explicit cell positions to be reliable."""
+# Layout : N -> (cols, rows, cell_size, slot_specs)
+# slot_specs is the ordered list of (label, prompt-orientation)
+# matching FabMesh's MV-Adapter convention :
+#   view_0=front, view_1=back, view_2=right, view_3=left, view_4=top, view_5=bottom
+LAYOUTS = {
+    2: (2, 1, 1024, [
+        ('front', 'strict front view, facing camera directly'),
+        ('back',  'strict back view, 180 degrees, no face visible'),
+    ]),
+    4: (2, 2, 1024, [
+        ('front', 'strict front view, facing camera directly'),
+        ('right', 'strict right side profile, 90 degrees'),
+        ('back',  'strict back view, 180 degrees, no face visible'),
+        ('left',  'strict left side profile, 270 degrees'),
+    ]),
+    6: (3, 2, 768, [
+        ('front',  'strict front view, facing camera directly'),
+        ('back',   'strict back view, 180 degrees, no face visible'),
+        ('right',  'strict right side profile, 90 degrees'),
+        ('left',   'strict left side profile, 270 degrees'),
+        ('top',    'strict top-down view from directly above'),
+        ('bottom', 'strict bottom-up view from directly below'),
+    ]),
+}
+
+
+ORIENT_AZIM_ELEV = {
+    'front':  (0,   0),
+    'back':   (180, 0),
+    'right':  (90,  0),
+    'left':   (270, 0),
+    'top':    (0,   90),
+    'bottom': (0,   -90),
+}
+
+
+def build_prompt(subject_hint: str, layout):
+    cols, rows, _, slots = layout
     base = subject_hint.strip() if subject_hint else 'character'
+    grid_label = f'{cols}x{rows}' if rows > 1 else f'{cols} views'
     parts = [
-        f'4-view character model sheet of {base}',
-        'orthographic views',
-        '2 by 2 grid layout, four equal quadrants',
-        'TOP-LEFT cell: strict front view, facing camera directly',
-        'TOP-RIGHT cell: strict right side profile view, 90 degrees',
-        'BOTTOM-LEFT cell: strict back view, 180 degrees',
-        'BOTTOM-RIGHT cell: strict left side profile view, 270 degrees',
-        'T-pose neutral stance, arms extended, full body visible',
-        'consistent character identical across all four views',
+        f'{len(slots)}-view orthographic character model sheet of {base}',
+        f'{grid_label} grid layout, equal cells',
+        'STRICT ORTHOGRAPHIC projection, no perspective, no foreshortening',
+        'T-pose neutral stance, arms extended, full body visible in each cell',
+        'consistent character identical across all cells, same lighting',
         'plain white background, even studio lighting, no shadows',
+        'symmetric grid, perfectly aligned, centered subject in each cell',
         'ultra detailed, sharp focus, 8k, photorealistic',
-        'symmetric layout, perfectly aligned grid, centered subject in each cell',
     ]
+    # Add an ordered description of cell contents (row by row).
+    cell_lines = []
+    for i, (label, orient) in enumerate(slots):
+        col = i % cols
+        row = i // cols
+        # Position labels in plain English
+        pos_v = 'top' if row == 0 else ('middle' if row < rows-1 else 'bottom')
+        if rows == 1:
+            pos_v = 'middle'
+        pos_h = 'left' if col == 0 else ('right' if col == cols-1 else 'middle')
+        cell_lines.append(f'{pos_v}-{pos_h} cell: {orient}')
+    parts += cell_lines
     return ', '.join(parts)
 
 
 NEG_PROMPT = (
-    'perspective, foreshortening, three-quarter view, asymmetric grid, '
-    'cropped, missing limbs, deformed, blurry, low quality, multiple '
-    'characters per cell, text, watermark, signature'
+    'perspective, foreshortening, three-quarter view, asymmetric, '
+    'cropped, missing limbs, deformed, blurry, low quality, '
+    'multiple characters per cell, different characters, text, '
+    'watermark, signature, frame, border'
 )
 
 
-def split_sheet_to_views(sheet_img: Image.Image, output_dir: str):
-    """Crop the 2x2 grid into 4 cells, named after the orientation
-    convention enforced in the prompt :
-        view_0 = top-left  (front)
-        view_1 = bottom-left (back)
-        view_2 = top-right  (right)
-        view_3 = bottom-right (left)
-    Same view_N <-> orientation mapping as MV-Adapter's contract so
-    downstream code (3D pipeline, multiview thumb grid) keeps working.
-    """
-    w, h = sheet_img.size
-    half_w, half_h = w // 2, h // 2
-    crops = {
-        0: sheet_img.crop((0, 0, half_w, half_h)),         # front
-        1: sheet_img.crop((0, half_h, half_w, h)),         # back
-        2: sheet_img.crop((half_w, 0, w, half_h)),         # right
-        3: sheet_img.crop((half_w, half_h, w, h)),         # left
-    }
+def split_sheet(sheet_img: Image.Image, output_dir: str, layout):
+    cols, rows, cell_size, slots = layout
+    sheet_w, sheet_h = sheet_img.size
+    cell_w = sheet_w // cols
+    cell_h = sheet_h // rows
+    log(f'splitting {sheet_w}x{sheet_h} into {cols}x{rows} cells '
+        f'of {cell_w}x{cell_h}')
     paths = {}
-    for idx, img in crops.items():
-        p = os.path.join(output_dir, f'view_{idx}.png')
-        img.save(p)
-        paths[idx] = p
-        log(f'wrote view_{idx} -> {p}')
-    # views.json (compat with multiview_mvadapter / multiview_crm contracts)
+    for i, (label, _) in enumerate(slots):
+        col = i % cols
+        row = i // cols
+        box = (col * cell_w, row * cell_h,
+               (col + 1) * cell_w, (row + 1) * cell_h)
+        cell = sheet_img.crop(box)
+        out_p = os.path.join(output_dir, f'view_{i}.png')
+        cell.save(out_p)
+        paths[i] = out_p
+        log(f'wrote view_{i} ({label}) -> {out_p}')
+    # views.json
     views_meta = {
         'engine': 'sdxl_sheet',
+        'layout': f'{cols}x{rows}',
         'views': [
-            {'azim': 0,   'elev': 0, 'label': 'front'},
-            {'azim': 180, 'elev': 0, 'label': 'back'},
-            {'azim': 90,  'elev': 0, 'label': 'right'},
-            {'azim': 270, 'elev': 0, 'label': 'left'},
+            {'azim': ORIENT_AZIM_ELEV[lbl][0],
+             'elev': ORIENT_AZIM_ELEV[lbl][1],
+             'label': lbl}
+            for lbl, _ in slots
         ],
     }
     with open(os.path.join(output_dir, 'views.json'), 'w', encoding='utf-8') as f:
@@ -115,13 +143,17 @@ def split_sheet_to_views(sheet_img: Image.Image, output_dir: str):
 
 
 def main():
-    if len(sys.argv) < 3:
-        print('Usage: multiview_sheet_gen.py <front_image> <output_dir> '
-              '[prompt_hint]')
-        sys.exit(1)
-    front_image = os.path.abspath(sys.argv[1])
-    output_dir = os.path.abspath(sys.argv[2])
-    prompt_hint = sys.argv[3] if len(sys.argv) > 3 else ''
+    ap = argparse.ArgumentParser()
+    ap.add_argument('front_image')
+    ap.add_argument('output_dir')
+    ap.add_argument('prompt_hint', nargs='?', default='')
+    ap.add_argument('--views', type=int, default=4, choices=[2, 4, 6])
+    args = ap.parse_args()
+
+    front_image = os.path.abspath(args.front_image)
+    output_dir = os.path.abspath(args.output_dir)
+    prompt_hint = args.prompt_hint or ''
+    n_views = args.views
 
     if not os.path.isfile(front_image):
         log(f'ERROR: front image not found: {front_image}')
@@ -129,15 +161,19 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     log(f'front={front_image}')
     log(f'out_dir={output_dir}')
+    log(f'views={n_views}')
     log(f'subject={prompt_hint or "(none)"}')
 
-    # Copy the user's untouched front as view_0 reference (for the
-    # downstream pipelines that expect input.png + view_0.png).
-    import shutil
+    layout = LAYOUTS[n_views]
+    cols, rows, cell_size, _ = layout
+    sheet_w = cols * cell_size
+    sheet_h = rows * cell_size
+    log(f'sheet target size: {sheet_w}x{sheet_h} ({cols}x{rows} cells '
+        f'of {cell_size}x{cell_size})')
+
+    # Copy untouched front for downstream pipelines.
     shutil.copy2(front_image, os.path.join(output_dir, 'input.png'))
 
-    # Load RealVisXL once. Same model used by the front-image gen, so
-    # the cell style/lighting matches the original front aesthetic.
     log('loading SG161222/RealVisXL_V4.0 ...')
     import torch
     from diffusers import StableDiffusionXLPipeline
@@ -147,39 +183,35 @@ def main():
         variant='fp16',
         use_safetensors=True,
     )
-    # Force every sub-module to fp16 (not just unet+vae): text_projection
-    # inside CLIPTextModelWithProjection is loaded in fp32 by default and
-    # mismatches the fp16 hidden_states downstream, raising
-    # `expected mat1 and mat2 to have the same dtype, but got float != Half`.
+    # Force every sub-module to fp16 — text_projection inside CLIP stays
+    # fp32 by default and breaks at runtime with dtype mismatch.
     pipe.unet.to(torch.float16)
     pipe.vae.to(torch.float16)
     pipe.text_encoder.to(torch.float16)
     pipe.text_encoder_2.to(torch.float16)
     pipe.enable_model_cpu_offload()
 
-    prompt = build_prompt(prompt_hint)
-    log(f'prompt: {prompt[:240]}...')
+    prompt = build_prompt(prompt_hint, layout)
+    log(f'prompt: {prompt[:300]}...')
 
     t0 = time.time()
     image = pipe(
         prompt=prompt,
         negative_prompt=NEG_PROMPT,
-        width=SHEET_SIZE,
-        height=SHEET_SIZE,
+        width=sheet_w,
+        height=sheet_h,
         num_inference_steps=30,
         guidance_scale=7.0,
         num_images_per_prompt=1,
     ).images[0]
     log(f'SDXL done in {time.time()-t0:.1f}s')
 
-    # Save the raw sheet for debugging / preview
     sheet_path = os.path.join(output_dir, 'sheet.png')
     image.save(sheet_path)
     log(f'sheet saved -> {sheet_path}')
 
-    # Split into 4 view_N.png
-    paths = split_sheet_to_views(image, output_dir)
-    log(f'TOTAL: {time.time()-t0:.1f}s, {len(paths)} views written')
+    paths = split_sheet(image, output_dir, layout)
+    log(f'TOTAL: {time.time()-t0:.1f}s, {len(paths)} view(s) written')
 
 
 if __name__ == '__main__':
