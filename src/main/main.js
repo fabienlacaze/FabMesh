@@ -613,6 +613,15 @@ async function handleGenerateImages(params) {
     const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
     const count = String(params.numImages || params.count || 1);
     const steps = String(params.steps || 30);
+    // Snapshot the directory BEFORE generation so we can compute the diff
+    // (= only the images produced by this call). Without this, the caller
+    // would iterate over every image already in the project and re-run
+    // expensive follow-up steps (MV-Adapter back-view, etc.) on each.
+    const filesBefore = new Set(
+      fs.existsSync(imagesDir)
+        ? fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f) && !f.startsWith('.'))
+        : []
+    );
     const proc = execFile('python', [bridgeScript, params.prompt, imagesDir, count, steps], {
       timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1', FABMESH_VRAM_FRACTION: process.env.FABMESH_VRAM_FRACTION || '0.95' },
@@ -622,7 +631,10 @@ async function handleGenerateImages(params) {
         resolve({ success: false, error: error.message });
         return;
       }
-      const imgs = fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f) && !f.startsWith('.')).map(f => path.join(imagesDir, f));
+      const imgs = fs.readdirSync(imagesDir)
+        .filter(f => /\.png$/i.test(f) && !f.startsWith('.'))
+        .filter(f => !filesBefore.has(f))  // only NEW files
+        .map(f => path.join(imagesDir, f));
       safeSend('mcp-job-end', { type: 'image', success: true, count: imgs.length });
       resolve({ success: true, images: imgs, count: imgs.length, project: safeName });
     });
@@ -3430,13 +3442,22 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     if (engine === 'local-flux') {
       const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
       const stepsClamped = Math.max(4, Math.min(60, parseInt(steps) || 30));
+      // Snapshot the dir BEFORE the run so we only return the new images.
+      const filesBefore = new Set(
+        fs.existsSync(imagesDir)
+          ? fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f))
+          : []
+      );
       const result = await new Promise((resolve, reject) => {
         const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
           timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
           env: childEnv,
         }, (error, stdout, stderr) => {
           if (error) { reject({ error: error.message, stdout, stderr }); return; }
-          const imgs = fs.readdirSync(imagesDir).filter(f => /\.png$/i.test(f)).map(f => path.join(imagesDir, f));
+          const imgs = fs.readdirSync(imagesDir)
+            .filter(f => /\.png$/i.test(f))
+            .filter(f => !filesBefore.has(f))  // NEW files only
+            .map(f => path.join(imagesDir, f));
           resolve({ images: imgs, stdout });
         });
         proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
