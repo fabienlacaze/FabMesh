@@ -147,8 +147,14 @@ def main():
         variant='fp16',
         use_safetensors=True,
     )
+    # Force every sub-module to fp16 (not just unet+vae): text_projection
+    # inside CLIPTextModelWithProjection is loaded in fp32 by default and
+    # mismatches the fp16 hidden_states downstream, raising
+    # `expected mat1 and mat2 to have the same dtype, but got float != Half`.
     pipe.unet.to(torch.float16)
     pipe.vae.to(torch.float16)
+    pipe.text_encoder.to(torch.float16)
+    pipe.text_encoder_2.to(torch.float16)
     pipe.enable_model_cpu_offload()
 
     prompt = build_prompt(prompt_hint)
