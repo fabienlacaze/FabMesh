@@ -10,6 +10,46 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-20 (dispatch rewiring) — back-view + auto-rectify source by assetType
+
+**Back-view IPC** (`generate-back-view` in `src/main/main.js`) :
+- Old dispatch (since MV-Adapter was broken) : everything except
+  `character` fell through to `sheet` mode (RealVisXL 2x2 grid).
+- New dispatch (now that MV-Adapter is fixed via commit 9df9900) :
+  - `character` → `realvis` (RealVis + ControlNet OpenPose humanoid skeleton)
+  - `creature` / `animal` → `mvadapter` (Apache 2.0 multi-view model,
+    works great on organic non-humans)
+  - everything else (vehicle, building, weapon, prop...) → `sheet`
+    (MV-Adapter has documented training-set bias against vehicles,
+    sheet stays the safe fallback for hard-surface assets)
+- Explicit `mode='mvadapter'` requests on non-organic asset types
+  auto-downgrade to `sheet` with a log warning.
+
+**Image-to-3D pre-process** (`image-to-3d` IPC) :
+- New checkbox "Auto-rectify source view" (checked by default) calls
+  `scripts/generate_front_strict.py` on the user's source image
+  *before* the mesh pipeline. Dispatch by `assetType`:
+  - `character` → `--mode front` (strict orthographic, symmetric T-pose)
+  - everything else → `--mode iso` (3/4 with depth axis visible,
+    proven to yield much better mesh proportions on vehicles —
+    see commit 2bbdc5a).
+- Saves the rectified image next to the source as `<stem>_rectified.png`.
+- Falls back silently to the original source if rectify fails.
+- Only runs for TRELLIS-2-based engines (`trellis2_native`, `hi3dgen`)
+  — other engines have their own source-view assumptions.
+
+**UI** : the new checkbox sits above "Texture smooth" in the Advanced
+TRELLIS-2 panel. All four checkboxes (rectify + smooth + quality+
++ ultra HD) are checked by default for users who just want the best
+preset.
+
+**Pipeline now fully wired end-to-end** :
+  source image → [auto-rectify by assetType] → TRELLIS-2 cascade +
+  decim 1M + tex 4096 → bilateral smooth → Real-ESRGAN 8K.
+Default total ~12-13 min on RTX 5080 for the highest quality preset.
+
+---
+
 ## 2026-05-20 (texture post-process) — smooth + upscale + quality+ wired in UI
 
 **Context** : after the strict-front + iso modes shipped the previous

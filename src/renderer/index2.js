@@ -5781,6 +5781,8 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   const trellis2MultiRef = document.getElementById('ws-trellis2-multiref')?.checked || false;
   const trellis2Refine = document.getElementById('ws-trellis2-refine')?.checked || false;
   if (trellis2Refine) expectedMs += 90000;  // ~90s for SDXL Tile Refine
+  const trellis2RectifySource = document.getElementById('ws-trellis2-rectify')?.checked || false;
+  if (trellis2RectifySource) expectedMs += 36000;  // ~36s for front-strict rectify
   const trellis2Smooth = document.getElementById('ws-trellis2-smooth')?.checked || false;
   if (trellis2Smooth) expectedMs += 12000;  // ~12s for bilateral smooth
   const trellis2QualityPlus = document.getElementById('ws-trellis2-quality-plus')?.checked || false;
@@ -5812,10 +5814,12 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2ImgRes: t2cfg.imgRes,
     trellis2MultiRef,
     trellis2Refine,
+    trellis2RectifySource,
     trellis2Smooth,
     trellis2QualityPlus,
     trellis2UltraHD,
     trellis2Preset,
+    assetType: document.getElementById('ws-asset-type')?.value || 'character',
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
   const jobParams = {

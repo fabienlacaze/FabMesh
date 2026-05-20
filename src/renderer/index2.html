@@ -369,6 +369,12 @@
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
+                      <label class="inline-check" style="font-size:11px;" title="Pre-process: rectify source image to a canonical view (strict front for characters, 3/4 ISO for vehicles / objects / creatures). Dramatically improves mesh proportions. Sampled over 3 seeds with auto-scoring. Adds ~36s.">
+                        <input type="checkbox" id="ws-trellis2-rectify" checked />
+                        Auto-rectify source view (+~36s, better mesh proportions)
+                      </label>
+                    </div>
+                    <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Edge-preserving bilateral filter on the baseColor atlas. Cleans speckled grain on smooth surfaces (paint, chrome, glass) while keeping panel-gap edges sharp. No AI, no hallucination. Best for vehicles / objects / hard surfaces.">
                         <input type="checkbox" id="ws-trellis2-smooth" checked />
                         Texture smooth (+~12s, cleaner smooth surfaces, no AI)
