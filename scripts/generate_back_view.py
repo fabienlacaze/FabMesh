@@ -23,7 +23,7 @@ from PIL import Image
 
 
 def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
-                  ip_scale=0.55, steps=30, seed=424242, name_suffix='',
+                  ip_scale=0.75, steps=30, seed=424242, name_suffix='',
                   cn_scale=0.85):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
@@ -111,7 +111,11 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     )
     neg = (
         'blurry, deformed, extra limbs, bad anatomy, different person, '
-        'different clothes, watermark, text, duplicate, multiple people, '
+        'different clothes, different outfit, different garment, '
+        'bare back, exposed back, halter top, backless top, tank top, '
+        'sleeveless when source has sleeves, missing sleeves, '
+        'open back, low back, cropped top when source is full top, '
+        'watermark, text, duplicate, multiple people, '
         'cropped, low quality, zoomed in, close-up, half body, feet out of frame'
     )
 
