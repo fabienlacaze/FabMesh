@@ -23,8 +23,8 @@ from PIL import Image
 
 
 def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
-                  ip_scale=0.75, steps=30, seed=424242, name_suffix='',
-                  cn_scale=0.85):
+                  ip_scale=0.65, steps=30, seed=424242, name_suffix='',
+                  cn_scale=1.0):
     os.makedirs(out_dir, exist_ok=True)
     print(f'[back-view] front={front_image} out={out_dir} hint="{prompt_hint}" '
           f'n={num_images} ip_scale={ip_scale} cn_scale={cn_scale}', flush=True)
@@ -111,10 +111,17 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     )
     neg = (
         'blurry, deformed, extra limbs, bad anatomy, different person, '
+        # ANTI-FRONT: stop the model from regenerating a front view (the
+        # IPAdapter on the front photo strongly pulls in this direction).
+        'front view, facing camera, face visible, frontal view, '
+        'eyes visible, looking at camera, mouth visible, ears in front, '
+        'nose visible, breast visible, buttons visible, shirt buttons, '
+        # ANTI-OUTFIT-DRIFT: the back must wear the same garments.
         'different clothes, different outfit, different garment, '
         'bare back, exposed back, halter top, backless top, tank top, '
         'sleeveless when source has sleeves, missing sleeves, '
         'open back, low back, cropped top when source is full top, '
+        # NOISE: usual stuff
         'watermark, text, duplicate, multiple people, '
         'cropped, low quality, zoomed in, close-up, half body, feet out of frame'
     )
