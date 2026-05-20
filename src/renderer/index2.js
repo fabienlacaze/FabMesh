@@ -3323,14 +3323,27 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
   const steps = parseInt(document.getElementById('ws-quality').value) || 30;
-  // ws-mv-scope is the user-facing dropdown (front_only / front_back /
-  // front_full). For backend compat we keep `multiView` (boolean) which
-  // triggers the back-photo flow iff scope != 'front_only'.
-  const mvScope = document.getElementById('ws-mv-scope')?.value || 'front_only';
+  // Extra views: auto-determined from the active asset type. The old
+  // user-facing dropdown was removed 2026-05-20 — instead we pick the
+  // right scope automatically since:
+  //   - hard-surface assets (vehicle/building/weapon/prop/env) get
+  //     unreliable back-photos from the sheet generator, so we skip the
+  //     back-gen entirely (front_only).
+  //   - humanoids/creatures benefit from a back photo for texturing,
+  //     so we run the back-gen IPC (front_back).
+  //   - front_full (6-view sheet) is no longer auto-selected since
+  //     TRELLIS-2 multi-image cond is gated behind FABMESH_USE_EXTRA_VIEWS
+  //     and produces siamese meshes when on.
+  let mvScope = document.getElementById('ws-mv-scope')?.value || 'auto';
+  if (mvScope === 'auto') {
+    const at = document.getElementById('ws-asset-type')?.value || 'character';
+    if (at === 'character' || at === 'creature' || at === 'animal') {
+      mvScope = 'front_back';
+    } else {
+      mvScope = 'front_only';
+    }
+  }
   const multiView = (mvScope !== 'front_only');
-  // 'front_full' forces MV-Adapter so we get the 5 side/top/bottom views
-  // even on a character (which would otherwise use RealVis+OpenPose and
-  // only produce a back). Passed to generate-back-view IPC as an override.
   const mvForceFull = (mvScope === 'front_full');
   const mv6view = false; // 6-view sheet flow is replaced by mvScope
   const mv6Harmonize = true;
