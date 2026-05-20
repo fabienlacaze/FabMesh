@@ -98,13 +98,46 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     hint_clean = _re.sub(r'\s+', ' ', hint_clean).strip(' ,')
     print(f'[back-view] cleaned hint: "{hint_clean[:200]}"', flush=True)
 
-    # PURE _scale_sweep recipe: keep prompt simple, no T-pose tokens
-    # (they over-constrain pose at high ip_scale). User-validated:
-    # PURE ip=0.75 produced the best result on fille_afghanne sweep
-    # (correct outfit, ceinture, sandales, vest decorations matching).
+    # BLIP-1 captioning of the front photo to extract the outfit
+    # description. Without this, IPAdapter alone soft-anchors style but
+    # SDXL invents random garments when re-drawing the back view.
+    # NOTE: we use BLIP-1 (Salesforce/blip-image-captioning-large) which
+    # is pure BSD 3-Clause — NOT BLIP-2, whose default backbone is OPT
+    # (Meta OPT license = NON-commercial, would break FabMesh's
+    # commercial-safe rule).
+    outfit_desc = ''
+    try:
+        from transformers import BlipProcessor, BlipForConditionalGeneration
+        print('[back-view] BLIP-1 captioning the front for outfit anchor...', flush=True)
+        _t_blip = time.time()
+        proc = BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-large')
+        bmodel = BlipForConditionalGeneration.from_pretrained(
+            'Salesforce/blip-image-captioning-large', torch_dtype=torch.float16,
+        ).to('cuda')
+        # Conditional caption: prefix the prompt so BLIP focuses on
+        # clothing rather than the scene at large.
+        inputs = proc(ref_img, 'a person wearing', return_tensors='pt').to('cuda', torch.float16)
+        with torch.no_grad():
+            out = bmodel.generate(**inputs, max_new_tokens=40, num_beams=4)
+        outfit_desc = proc.decode(out[0], skip_special_tokens=True).strip()
+        # BLIP-1 typically echoes the conditional prefix back in the
+        # output. Strip it so we don't get "a person wearing a person
+        # wearing ..." downstream.
+        for prefix in ['a person wearing', 'arafed', 'arafy']:
+            if outfit_desc.lower().startswith(prefix.lower()):
+                outfit_desc = outfit_desc[len(prefix):].strip(' .,')
+        print(f'[back-view] BLIP outfit ({time.time()-_t_blip:.1f}s): "{outfit_desc}"', flush=True)
+        # Free VRAM before SDXL loads
+        del bmodel, proc
+        torch.cuda.empty_cache()
+    except Exception as _be:
+        print(f'[back-view] BLIP captioning skipped ({_be}); falling back to hint only',
+              flush=True)
+
     base = hint_clean if hint_clean else 'a character'
+    outfit_phrase = (f', wearing {outfit_desc}, same outfit, same garments' if outfit_desc else '')
     prompt = (
-        f'{base}, back view, from behind, back of head visible, '
+        f'{base}{outfit_phrase}, back view, from behind, back of head visible, '
         f'turned away from camera, full body centered, plain grey '
         f'background, studio lighting, sharp focus, ultra detailed, '
         f'8k, masterpiece'

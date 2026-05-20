@@ -4355,15 +4355,18 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   //                         for creatures/animals/objects/vehicles)
   //   - default          -> auto: 'realvis' for assetType='character',
   //                         'mvadapter' otherwise.
-  // Back-view dispatch (updated 2026-05-20 — mirror is now the default
-  // for characters because user reported persistent outfit drift on the
-  // realvis-OpenPose path: front had a long T-shirt dress, back came
-  // out with a separate top + shorts even at ip_scale=0.65):
-  //   - character           -> mirror (mirror-flip the front + inpaint
-  //                            only the head/upper-torso region for the
-  //                            back of head. Lower body / outfit are
-  //                            pixel-identical to the front => same
-  //                            garment guaranteed).
+  // Back-view dispatch (mirror was reverted 2026-05-20 evening —
+  // mirror-flip is fundamentally just a horizontal flip with the head
+  // inpainted as "back of head". The torso, arms, asymmetric garments
+  // (open jacket, etc) still read as a FRONT view, which is anatomically
+  // impossible and looks wrong. Back-view of a humanoid needs a real
+  // pose rotation, which only the ControlNet OpenPose back-skeleton
+  // path provides.):
+  //   - character           -> realvis (RealVis + ControlNet OpenPose
+  //                            humanoid back skeleton). Real back pose.
+  //                            Outfit drift mitigated by BLIP captioning
+  //                            the source image and injecting the
+  //                            garment description into the prompt.
   //   - creature / animal   -> mvadapter (huanngzh/MV-Adapter, Apache 2.0).
   //                            Trained on Objaverse-XL — works great on
   //                            organic shapes (animals, monsters, biped
@@ -4374,7 +4377,7 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   //                            fallback for hard-surface assets.
   let resolvedMode = mode;
   if (!resolvedMode) {
-    if (assetType === 'character') resolvedMode = 'mirror';
+    if (assetType === 'character') resolvedMode = 'realvis';
     else if (assetType === 'creature' || assetType === 'animal') resolvedMode = 'mvadapter';
     else resolvedMode = 'sheet';
   } else if (resolvedMode === 'mvadapter' && assetType
