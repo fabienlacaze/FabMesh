@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-20 (back-view outfit drift) — BLIP-1 single caption best
+
+Tested two BLIP captioning strategies to anchor the outfit description
+in the back-view prompt and stop the front/back garment drift:
+
+- **Single caption** with prefix `"a person wearing"` → BLIP returned
+  e.g. `"white pants and a denim shirt"`. Injected into the prompt:
+  `"a woman, wearing white pants and a denim shirt, same outfit, back view, from behind, …"`.
+  Result: back-view kept the denim jacket + light cargo pants intact,
+  real back pose, hairstyle drifted a bit (loose → ponytail).
+- **Multi-aspect** (3 conditional captions: top / bottom / hair) →
+  BLIP-1 prefixes don't isolate aspects well, `"hair is"` gave nonsense
+  `"on the woman's head"`. Worse: concatenating the 3 strings dominated
+  the prompt and the model regressed to a FRONT view (ControlNet OpenPose
+  + "back view" cues drowned). Reverted.
+
+**Conclusion**: BLIP-1 single caption is the sweet spot. Multi-aspect
+needs a stronger VQA model (Florence-2 MIT would be a candidate but
+adds a new dep). Shelving multi-aspect for now.
+
+**License note**: stayed on BLIP-1 (BSD 3-Clause, commercial-safe).
+BLIP-2 was started initially but its default OPT backbone is Meta
+OPT (non-commercial), incompatible with FabMesh's commercial rule.
+
+---
+
 ## 2026-05-20 (dispatch rewiring) — back-view + auto-rectify source by assetType
 
 **Back-view IPC** (`generate-back-view` in `src/main/main.js`) :
