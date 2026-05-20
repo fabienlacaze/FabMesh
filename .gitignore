@@ -37,6 +37,8 @@ cuda-keyring_1.1-1_all.deb
 scripts/_*.py
 scripts/export_*.py
 scripts/_prompt_*.txt
+scripts/_*.json
+scripts/_*.npy
 
 # Debug dump dirs (per-experiment artifacts, too noisy to track)
 logs/ip_sweep/
