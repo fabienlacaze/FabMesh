@@ -143,14 +143,12 @@
                      top, bottom) reduce dorsal/lateral hallucinations during
                      texturing. MV-Adapter generates the 6 views in a single
                      pass so "back" and "back + sides + bottom" cost the same. -->
-                <div class="form-row">
-                  <label>Extra views</label>
-                  <select id="ws-mv-scope" title="Generates additional reference photos used by TRELLIS-2 multi-ref texturing.">
-                    <option value="front_only" selected>Front only (+0s)</option>
-                    <option value="front_back">Front + back (+~60s)</option>
-                    <option value="front_full">Front + back + sides + bottom (+~90s)</option>
-                  </select>
-                </div>
+                <!-- Extra views: auto-determined from asset type.
+                     - character / creature / animal -> back photo (helps texturing)
+                     - vehicle / building / weapon / prop / env -> front only
+                     The old <select id="ws-mv-scope"> was removed 2026-05-20;
+                     a hidden input keeps backend compat. -->
+                <input type="hidden" id="ws-mv-scope" value="auto" />
                 <!-- Hidden compat: existing back-photo pipeline reuses these
                      elements. We force 2view mode and hide the 6-view opts. -->
                 <div id="ws-mv-mode-row" class="form-row hidden" style="display:none;">
