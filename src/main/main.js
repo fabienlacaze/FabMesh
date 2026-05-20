@@ -3600,7 +3600,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2Preset }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2Smooth, trellis2QualityPlus, trellis2UltraHD, trellis2Preset }) => {
   let imagePath = _imagePath;
   let engine = _engine;
   // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
@@ -3758,6 +3758,13 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         ? { FABMESH_TRELLIS2_BACK_IMAGE: imagePathBack } : {}),
       ...(engine === 'hi3dgen' && trellis2Refine
         ? { FABMESH_TRELLIS2_REFINE: '1' } : {}),
+      // Quality+ : cascade mode + decim 1M for sharper geometry.
+      // Applies to both trellis2_native and hi3dgen (which forwards to t2_native).
+      ...((engine === 'trellis2_native' || engine === 'hi3dgen') && trellis2QualityPlus
+        ? {
+            FABMESH_TRELLIS2_NATIVE_MODE: '1024_cascade',
+            FABMESH_TRELLIS2_NATIVE_DECIM: '1000000',
+          } : {}),
       // TRELLIS-2 native + Hi3DGen : auto-feed the 6 MV-Adapter views
       // when the user generated them (Extra views = "Front + back + sides
       // + bottom"). The views live in <stem>_multiview/ next to the source
@@ -3829,16 +3836,73 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         if (!fs.existsSync(meshPath)) return;
         resolvedEarly = true;
         if (jobId) activeProcs.delete(jobId);
-        const stats = fs.statSync(meshPath);
-        try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
-        let meshVerts = null, meshFaces = null;
-        const statsMatch = stdoutBuf.match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
-        if (statsMatch) {
-          meshVerts = parseInt(statsMatch[1]);
-          meshFaces = parseInt(statsMatch[2]);
-        }
-        log.info('main', `image-to-3d EARLY-RESOLVE: marker 100 done + GLB ready (${(stats.size/1024).toFixed(0)} KB)`);
-        resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout: stdoutBuf, meshVerts, meshFaces });
+
+        const finishAndResolve = () => {
+          const stats = fs.statSync(meshPath);
+          try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
+          let meshVerts = null, meshFaces = null;
+          const statsMatch = stdoutBuf.match(/STATS:\s*verts=(\d+)\s*faces=(\d+)/);
+          if (statsMatch) {
+            meshVerts = parseInt(statsMatch[1]);
+            meshFaces = parseInt(statsMatch[2]);
+          }
+          log.info('main', `image-to-3d EARLY-RESOLVE: marker 100 done + GLB ready (${(stats.size/1024).toFixed(0)} KB)`);
+          resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout: stdoutBuf, meshVerts, meshFaces });
+        };
+
+        // Chain of optional post-processes: smooth → upscale.
+        // Each step runs only if its checkbox is on, otherwise we skip it.
+        const runSmooth = (next) => {
+          if (!trellis2Smooth) return next();
+          const smoothScript = path.join(__dirname, '..', '..', 'scripts', 'texture_smooth.py');
+          const tempOut = meshPath + '.smooth.tmp.glb';
+          log.info('main', 'image-to-3d: running texture_smooth post-process...');
+          safeSend('ai3d-progress', '[main] texture_smooth: cleaning baseColor atlas...\n');
+          const proc = execFile(_pythonExe, [smoothScript, meshPath, tempOut], {
+            timeout: 120000, maxBuffer: 10 * 1024 * 1024,
+            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          }, (err) => {
+            if (!err && fs.existsSync(tempOut)) {
+              try { fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath); } catch (e) {
+                log.warn('main', `texture_smooth rename failed: ${e.message}`);
+              }
+              log.info('main', 'texture_smooth done');
+            } else {
+              log.warn('main', `texture_smooth failed: ${err?.message || 'unknown'}, keeping original`);
+              try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e) {}
+            }
+            next();
+          });
+          proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
+          proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+        };
+
+        const runUpscale = (next) => {
+          if (!trellis2UltraHD) return next();
+          const upscaleScript = path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
+          const tempOut = meshPath + '.8k.tmp.glb';
+          log.info('main', 'image-to-3d: running texture_upscale (Real-ESRGAN x2) post-process...');
+          safeSend('ai3d-progress', '[main] texture_upscale: 4k → 8k via Real-ESRGAN...\n');
+          const proc = execFile(_pythonExe, [upscaleScript, meshPath, tempOut, '--scale', '2', '--tile', '512'], {
+            timeout: 600000, maxBuffer: 10 * 1024 * 1024,
+            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          }, (err) => {
+            if (!err && fs.existsSync(tempOut)) {
+              try { fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath); } catch (e) {
+                log.warn('main', `texture_upscale rename failed: ${e.message}`);
+              }
+              log.info('main', 'texture_upscale done');
+            } else {
+              log.warn('main', `texture_upscale failed: ${err?.message || 'unknown'}, keeping original`);
+              try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e) {}
+            }
+            next();
+          });
+          proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
+          proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+        };
+
+        runSmooth(() => runUpscale(finishAndResolve));
       };
       if (jobId) activeProcs.set(jobId, proc);
       // Two-layer memory safety:
