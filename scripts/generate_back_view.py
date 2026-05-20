@@ -122,6 +122,31 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
         for prefix in ['a person wearing', 'arafed', 'arafy']:
             if outfit_desc.lower().startswith(prefix.lower()):
                 outfit_desc = outfit_desc[len(prefix):].strip(' .,')
+        # BLIP-1 often appends scene-context noise ("is posing for a
+        # picture", "stands in a studio", "with arms out", etc) that
+        # dilutes the garment signal in the SDXL prompt. Strip the most
+        # common patterns and cut everything after the first verb of
+        # being / posing.
+        import re as _re_blip
+        for noise in [
+            r'\s+is posing for a picture\b.*$',
+            r'\s+is posing\b.*$',
+            r'\s+stands?\b.*$',
+            r'\s+standing\b.*$',
+            r'\s+poses?\b.*$',
+            r'\s+posing\b.*$',
+            r'\s+with (her|his|their) arms?\b.*$',
+            r'\s+with arms?\b.*$',
+            r'\s+with hands?\b.*$',
+            r'\s+holds?\b.*$',
+            r'\s+holding\b.*$',
+            r'\s+sits?\b.*$',
+            r'\s+sitting\b.*$',
+            r'\s+walks?\b.*$',
+            r'\s+walking\b.*$',
+        ]:
+            outfit_desc = _re_blip.sub(noise, '', outfit_desc,
+                                       flags=_re_blip.IGNORECASE).strip(' ,.')
         print(f'[back-view] BLIP outfit ({time.time()-_t_blip:.1f}s): "{outfit_desc}"', flush=True)
         del bmodel, proc
         torch.cuda.empty_cache()
@@ -175,34 +200,70 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     print(f'[back-view] starting at back{suffix}_{_start_idx} '
           f'(existing highest={max(_existing_idx)})', flush=True)
 
+    # MULTI-SEED with auto-pick. Generate N_CANDIDATES back-views with
+    # different seeds, then score each by COLOR HISTOGRAM SIMILARITY
+    # with the mirrored front in the lower-body region (where the
+    # garment is most directly visible from behind). Keep the best,
+    # discard the rest. This dramatically reduces seed-roulette without
+    # asking the user to A/B-pick.
+    import numpy as _np
+    n_candidates = int(os.environ.get('FABMESH_BACK_N_CANDIDATES', '4'))
+
+    def _outfit_color_score(back_img, front_mirror):
+        """Color-histogram similarity between back and mirrored front,
+        restricted to the lower body (40%-90% of the canvas height).
+        Returns a [0,1] score, higher = closer color match."""
+        a = _np.asarray(back_img.convert('RGB')).astype(_np.float32)
+        b = _np.asarray(front_mirror.convert('RGB')).astype(_np.float32)
+        h = a.shape[0]
+        y0 = int(h * 0.40); y1 = int(h * 0.90)
+        a_crop = a[y0:y1].reshape(-1, 3)
+        b_crop = b[y0:y1].reshape(-1, 3)
+        # Histograms in 16 bins per channel
+        a_hist = _np.stack([_np.histogram(a_crop[:, c], 16, (0, 256))[0]
+                             for c in range(3)]).astype(_np.float32)
+        b_hist = _np.stack([_np.histogram(b_crop[:, c], 16, (0, 256))[0]
+                             for c in range(3)]).astype(_np.float32)
+        a_hist /= (a_hist.sum(1, keepdims=True) + 1e-6)
+        b_hist /= (b_hist.sum(1, keepdims=True) + 1e-6)
+        return float((_np.minimum(a_hist, b_hist).sum() / 3.0))
+
+    front_mirror = ref_img.transpose(Image.FLIP_LEFT_RIGHT)
+
     out_paths = []
     for i in range(num_images):
-        gen = torch.Generator('cuda').manual_seed(
-            seed if num_images == 1 else seed + i)
-        t0 = time.time()
-        img = pipe(
-            prompt=prompt, negative_prompt=neg,
-            image=skel_img,                # ControlNet conditioning
-            controlnet_conditioning_scale=cn_scale,
-            ip_adapter_image=ref_img,
-            num_inference_steps=steps, guidance_scale=7.0,
-            height=1024, width=1024,
-            generator=gen,
-        ).images[0]
-        print(f'[back-view] gen {i}: {time.time()-t0:.1f}s', flush=True)
-        # Post-process : remove_bg + center on a 1024² canvas so the
-        # back ends up at the same proportions as the front-tpose
-        # output. Without this, the ControlNet back-skeleton produces a
-        # subject that's noticeably zoomed compared to the original front
-        # photo (user-reported on humanoid char with T-pose 2026-05-20).
+        candidates = []
+        for k in range(n_candidates):
+            cand_seed = seed + i * 1000 + k * 137
+            gen = torch.Generator('cuda').manual_seed(cand_seed)
+            t0 = time.time()
+            img = pipe(
+                prompt=prompt, negative_prompt=neg,
+                image=skel_img,                # ControlNet conditioning
+                controlnet_conditioning_scale=cn_scale,
+                ip_adapter_image=ref_img,
+                num_inference_steps=steps, guidance_scale=7.0,
+                height=1024, width=1024,
+                generator=gen,
+            ).images[0]
+            score = _outfit_color_score(img, front_mirror)
+            print(f'[back-view] candidate {k+1}/{n_candidates} seed={cand_seed} '
+                  f'color_match={score:.3f} ({time.time()-t0:.1f}s)', flush=True)
+            candidates.append((score, img, cand_seed))
+
+        candidates.sort(key=lambda t: -t[0])
+        best_score, best_img, best_seed = candidates[0]
+        print(f'[back-view] keeping best: seed={best_seed} '
+              f'color_match={best_score:.3f}', flush=True)
+
         try:
             from generate_front_tpose import remove_bg_and_center
-            img = remove_bg_and_center(img, size=1024, target_height_frac=0.92)
+            best_img = remove_bg_and_center(best_img, size=1024, target_height_frac=0.92)
             print(f'[back-view] post-processed: remove_bg + center @ 92%', flush=True)
         except Exception as _ppe:
             print(f'[back-view] post-process skipped: {_ppe}', flush=True)
         out_path = os.path.join(out_dir, f'back{suffix}_{_start_idx + i}.png')
-        img.save(out_path)
+        best_img.save(out_path)
         out_paths.append(out_path)
         print(f'[back-view] saved {out_path}', flush=True)
 
