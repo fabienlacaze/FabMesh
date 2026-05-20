@@ -3600,7 +3600,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2Smooth, trellis2QualityPlus, trellis2UltraHD, trellis2Preset }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraHD, trellis2Preset, assetType }) => {
   let imagePath = _imagePath;
   let engine = _engine;
   // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
@@ -3608,6 +3608,47 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   // with FRAME_FIX, AUTOFIT, weld_uv) instead of single-view SF3D + Z123.
   const useTwoView = engine === 'sf3d' && imagePathBack
                      && fs.existsSync(imagePathBack);
+
+  // PRE-PROCESS: auto-rectify the source image to a canonical view.
+  // - assetType='character' -> strict orthographic front (good for MV-Adapter
+  //   and ControlNet OpenPose paths, T-pose symmetric).
+  // - everything else        -> 3/4 ISO (depth axis visible, better mesh
+  //   proportions for vehicles / objects / non-bipedal creatures).
+  // Pre-process gates: only run for TRELLIS-2-based engines (trellis2_native,
+  // hi3dgen) — other engines have their own opinions about the source view.
+  if (trellis2RectifySource && imagePath && fs.existsSync(imagePath)
+      && (engine === 'trellis2_native' || engine === 'hi3dgen')) {
+    const rectifyScript = path.join(__dirname, '..', '..', 'scripts', 'generate_front_strict.py');
+    const rectifiedPath = imagePath.replace(/\.(png|jpg|jpeg|webp)$/i, '_rectified.png');
+    const rectifyMode = (assetType === 'character') ? 'front' : 'iso';
+    log.info('main', `auto-rectify source: ${path.basename(imagePath)} `
+      + `-> ${path.basename(rectifiedPath)} (mode=${rectifyMode}, assetType=${assetType})`);
+    safeSend('ai3d-progress', `[main] auto-rectify source view (mode=${rectifyMode})...\n`);
+    const pythonExeForRectify = (engine === 'hi3dgen' || engine === 'trellis2_native')
+      ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
+      : 'python';
+    try {
+      await new Promise((resolve, reject) => {
+        const proc = execFile(pythonExeForRectify, [
+          rectifyScript, 'auto', rectifiedPath,
+          '--from-image', imagePath,
+          '--mode', rectifyMode,
+          '--seeds', '3',
+        ], { timeout: 180000, maxBuffer: 10 * 1024 * 1024,
+             env: { ...process.env, PYTHONUNBUFFERED: '1' } },
+        (err) => err ? reject(err) : resolve());
+        proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
+        proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+      });
+      if (fs.existsSync(rectifiedPath)) {
+        log.info('main', 'auto-rectify done, using rectified image for mesh');
+        imagePath = rectifiedPath;
+      }
+    } catch (e) {
+      log.warn('main', `auto-rectify failed: ${e.message}, falling back to original source`);
+    }
+  }
+
   try {
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
@@ -4308,17 +4349,30 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   //                         for creatures/animals/objects/vehicles)
   //   - default          -> auto: 'realvis' for assetType='character',
   //                         'mvadapter' otherwise.
-  // Back-view dispatch :
-  //   - character       -> realvis (RealVis + OpenPose humanoid)
-  //                        Real back, works on humans (OpenPose).
-  //   - everything else -> sheet (RealVisXL 4-view model-sheet)
-  //                        Single SDXL pass produces a 2x2 grid
-  //                        (front/back/right/left) consistently styled.
-  //                        Lower per-view resolution but real
-  //                        multi-view info instead of hallucinations.
+  // Back-view dispatch (updated 2026-05-20 after MV-Adapter fix 9df9900):
+  //   - character           -> realvis (RealVis + OpenPose humanoid skeleton).
+  //                            Real back, works on humans.
+  //   - creature / animal   -> mvadapter (huanngzh/MV-Adapter, Apache 2.0).
+  //                            Trained on Objaverse-XL — works great on
+  //                            organic shapes (animals, monsters, biped
+  //                            non-human characters).
+  //   - vehicle/building/   -> sheet (RealVisXL 4-view model-sheet).
+  //     weapon/prop/...        MV-Adapter fails on vehicles (training set
+  //                            bias toward humanoids). Sheet is the safe
+  //                            fallback for hard-surface assets.
   let resolvedMode = mode;
-  if (!resolvedMode || resolvedMode === 'mvadapter') {
-    resolvedMode = (assetType === 'character') ? 'realvis' : 'sheet';
+  if (!resolvedMode) {
+    if (assetType === 'character') resolvedMode = 'realvis';
+    else if (assetType === 'creature' || assetType === 'animal') resolvedMode = 'mvadapter';
+    else resolvedMode = 'sheet';
+  } else if (resolvedMode === 'mvadapter' && assetType
+             && assetType !== 'character' && assetType !== 'creature'
+             && assetType !== 'animal') {
+    // Explicit mvadapter request on a non-organic asset — fall back to
+    // sheet to avoid the documented car/object distortions.
+    log.info('generate-back-view',
+      `mvadapter requested on assetType=${assetType}, falling back to sheet`);
+    resolvedMode = 'sheet';
   }
   const SCRIPT_BY_MODE = {
     sheet:     'generate_back_view_sheet.py',
