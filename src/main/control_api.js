@@ -772,14 +772,13 @@ function startControlApi(mainWindow, opts = {}) {
     },
 
     'POST /calib/build-rubiks': async (req, res) => {
-      // Rebuilds the Rubik's calibration reference (idempotent, ~2 sec)
-      const { execFile } = require('child_process');
-      const script = path.join(__dirname, '..', '..', 'scripts', '_calib_build_rubiks.py');
-      execFile('python', [script], { cwd: path.join(__dirname, '..', '..') },
-        (error, stdout, stderr) => {
-          if (error) return sendErr(res, error.message, 500);
-          sendOk(res, { stdout: (stdout || '').slice(-1000) });
-        });
+      // Was : rebuild the Rubik's calibration reference. Backing script
+      // (_calib_build_rubiks.py) was never present in the repo (see the
+      // similar removal of _calib_tiered/_calib_diagnose in the 2026-05-18
+      // legal cleanup). Endpoint left as 410 Gone for any external caller
+      // that still depends on it.
+      sendErr(res, 'calib/build-rubiks: removed (backing script missing). '
+        + 'Use /calib/run-v3 for the active calibration flow.', 410);
     },
 
     'GET /jobs': async (req, res) => {

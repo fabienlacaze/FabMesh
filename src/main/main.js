@@ -3806,11 +3806,17 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
             FABMESH_TRELLIS2_NATIVE_MODE: '1024_cascade',
             FABMESH_TRELLIS2_NATIVE_DECIM: '1000000',
           } : {}),
-      // TRELLIS-2 native + Hi3DGen : auto-feed the 6 MV-Adapter views
-      // when the user generated them (Extra views = "Front + back + sides
-      // + bottom"). The views live in <stem>_multiview/ next to the source
-      // image and are picked up automatically by the pipelines.
+      // TRELLIS-2 native + Hi3DGen : auto-feed extra views to the mesh
+      // pipeline when the user generated them. DISABLED BY DEFAULT since
+      // 2026-05-20 — confirmed via the singe / red car tests that
+      // TRELLIS-2 4B was not trained on multi-image cond and produces
+      // siamese / fragmented meshes when fed N>1 cond images (see
+      // AGENT_LOG.md 2026-05-19 entry "MV-Adapter on cars"). The
+      // multi-view dir is still useful for UI preview, just not as
+      // mesh conditioning. Set FABMESH_USE_EXTRA_VIEWS=1 to re-enable
+      // for experimentation.
       ...(((engine === 'trellis2_native' || engine === 'hi3dgen')
+            && process.env.FABMESH_USE_EXTRA_VIEWS === '1'
             && imagePath
             && fs.existsSync(path.join(
                   path.dirname(imagePath),
