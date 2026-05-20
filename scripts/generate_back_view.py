@@ -162,6 +162,17 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
             generator=gen,
         ).images[0]
         print(f'[back-view] gen {i}: {time.time()-t0:.1f}s', flush=True)
+        # Post-process : remove_bg + center on a 1024² canvas so the
+        # back ends up at the same proportions as the front-tpose
+        # output. Without this, the ControlNet back-skeleton produces a
+        # subject that's noticeably zoomed compared to the original front
+        # photo (user-reported on humanoid char with T-pose 2026-05-20).
+        try:
+            from generate_front_tpose import remove_bg_and_center
+            img = remove_bg_and_center(img, size=1024, target_height_frac=0.92)
+            print(f'[back-view] post-processed: remove_bg + center @ 92%', flush=True)
+        except Exception as _ppe:
+            print(f'[back-view] post-process skipped: {_ppe}', flush=True)
         out_path = os.path.join(out_dir, f'back{suffix}_{_start_idx + i}.png')
         img.save(out_path)
         out_paths.append(out_path)
