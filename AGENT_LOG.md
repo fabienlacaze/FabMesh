@@ -10,6 +10,43 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-20 (back-view multi-seed) — BLIP clean + 4 candidates auto-pick
+
+Iteration 2 on the back-view consistency, on top of the BLIP-1 single
+caption (commit bc9f1a7):
+
+1. **BLIP output cleanup** : strip BLIP's scene-context noise
+   ("is posing for a picture", "stands in a studio", "with arms out",
+   etc) via a regex pass. The dominant garment words at the start
+   of the caption become the entire prompt addition.
+   Example: BLIP-1 returned `"white pants and a denim shirt is posing
+   for a picture"` → cleaned to `"white pants and a denim shirt"`.
+
+2. **Multi-seed with auto-pick** : generate 4 candidate back-views with
+   different seeds, score each by HSV color-histogram intersection in
+   the lower-body region (40-90% Y) vs the mirrored front, keep the
+   highest score. Tuned via `FABMESH_BACK_N_CANDIDATES` env var
+   (default 4).
+   Validated on the woman test: best-of-4 eliminated the triangular
+   jacket cutout artifact that single-seed kept producing, and the
+   ponytail came out more natural.
+
+Cost: ~80s extra per back-view (4 inferences instead of 1) but no
+user intervention required to pick the good one.
+
+Failed sub-experiments same day (not shipped):
+- Side view (90°) test : without a side OpenPose skeleton, ControlNet
+  back-skeleton + "side view" prompt + low ip_scale produced near-front
+  views. Building a side skeleton is too much work for the limited
+  prod use.
+- Hybrid back (mirror + img2img + ControlNet) : strength=0.55 was
+  dominated by the mirrored base, returned essentially a front. Would
+  need strength≥0.75 which negates the texture-preservation benefit.
+  Script stays in repo (`generate_back_view_hybrid.py`) for future
+  experiments but not wired.
+
+---
+
 ## 2026-05-20 (back-view outfit drift) — BLIP-1 single caption best
 
 Tested two BLIP captioning strategies to anchor the outfit description
