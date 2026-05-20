@@ -4999,7 +4999,22 @@ ipcMain.handle('delete-file', (event, filePath) => {
     log.warn('delete-file', `blocked path outside allowed dirs: ${filePath}`);
     return false;
   }
+  // Always also drop the .nsfw sidecar (parental control tag) if it
+  // exists — it's bound to the PNG, not data on its own.
+  const sidecar = filePath + '.nsfw';
+  let sidecarDeleted = false;
+  if (fs.existsSync(sidecar)) {
+    try { fs.unlinkSync(sidecar); sidecarDeleted = true; } catch (_) {}
+  }
   if (!fs.existsSync(filePath)) {
+    // The PNG itself doesn't exist (typical case: NSFW filter blocked
+    // the generation and only the .nsfw sidecar was written). If we
+    // managed to clean the sidecar, count that as a successful delete
+    // so the UI removes the dead version from the strip.
+    if (sidecarDeleted) {
+      log.info('delete-file', `PNG missing but cleaned orphan sidecar: ${sidecar}`);
+      return true;
+    }
     log.warn('delete-file', `file does not exist: ${filePath}`);
     return false;
   }
