@@ -10,6 +10,70 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-20 (texture post-process) — smooth + upscale + quality+ wired in UI
+
+**Context** : after the strict-front + iso modes shipped the previous
+day, the user asked how Meshy achieves their "HD" texture quality. Web
+research confirmed Meshy HD = **4096² baseColor + 2048² normal/roughness/
+metallic** (docs.meshy.ai). Our TRELLIS-2 with `tex_res=4096` already
+matches that natively; the goal of this session was to expose the
+post-process levers in the UI so any project can opt-in without env vars.
+
+**New scripts** :
+- `scripts/texture_smooth.py` — OpenCV bilateral filter on the
+  baseColor atlas. Edge-preserving, ~12s for 4096². Zero AI, zero
+  hallucination. Best for smooth surfaces (paint, chrome, glass).
+- `scripts/texture_upscale.py` — Real-ESRGAN x2 on the atlas
+  (Apache 2.0). 2048→4096 in ~15s, 4096→8192 in ~275s (RTX 5080).
+  Conservative upscaler, no invented content. Auto-downloads
+  RealESRGAN_x4plus weights to `~/.cache/realesrgan_weights/`.
+
+**Tested on `voiture_rouge/ref_0.png` (strict-front + iso modes)** :
+- Bilateral smooth on the 4096² hires atlas : cleaner uniform paint,
+  panel-gap edges preserved, GLB 72 MB → 62 MB.
+- Real-ESRGAN x2 on the 4096² hires atlas → 8192² : sharper
+  highlights and chrome detail, GLB 72 MB → 116 MB.
+
+**UI integration** (`src/renderer/index2.html` + `index2.js` +
+`src/main/main.js`) :
+- 3 checkboxes in the "Advanced TRELLIS-2" details block, *all
+  checked by default* :
+  - "Texture smooth (+~12s, cleaner smooth surfaces, no AI)"
+    → forwards `trellis2Smooth` → `main.js` chains
+    `texture_smooth.py` after the mesh.
+  - "Quality+ (cascade mode, decim 1M, +~30s)"
+    → sets `FABMESH_TRELLIS2_NATIVE_MODE=1024_cascade` +
+    `FABMESH_TRELLIS2_NATIVE_DECIM=1000000` in the subprocess env.
+  - "Ultra HD 8K texture (+~5min, Real-ESRGAN)"
+    → chains `texture_upscale.py --scale 2 --tile 512` after
+    `texture_smooth` (so the 8k atlas is built from the cleaned
+    4k atlas, not the noisy one).
+- Post-processes run sequentially via callback chain in `main.js`
+  `checkEarlyResolve`. Each step temp-writes a `.tmp.glb`, renames
+  in place on success, falls through to "keep original" on failure
+  so a crashed post-process never kills the user's mesh.
+
+**Meshy parity comparison** (red car test) :
+| Map | Meshy HD | Ours default | Ours Ultra HD |
+|---|---|---|---|
+| baseColor | 4096² | 4096² | **8192²** |
+| Normal | 2048² | TRELLIS-2 native | TRELLIS-2 native |
+| Roughness | 2048² | TRELLIS-2 native | TRELLIS-2 native |
+| Metallic | 2048² | TRELLIS-2 native | TRELLIS-2 native |
+
+→ We match Meshy HD by default and exceed it with Ultra HD on.
+
+**Known limitation** :
+- SDXL Tile Refine (`texture_refine.py`, separate checkbox) still
+  hallucinates wear on smooth surfaces. The new `texture_smooth` is
+  the safer choice for vehicles. See
+  [feedback_texture_refine_scope] memory note.
+- `generate_front_strict.py --mode iso` is NOT yet auto-dispatched
+  by `assetType` in the image generation flow. User must call it
+  manually for now. Deferred to a separate session.
+
+---
+
 ## 2026-05-19 (front-strict --mode iso) — ISO 3/4 source produces better mesh proportions than strict-front on vehicles
 
 **Finding** : on the red car single-shot mesh from a strict-front source,

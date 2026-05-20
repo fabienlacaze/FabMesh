@@ -5781,6 +5781,12 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   const trellis2MultiRef = document.getElementById('ws-trellis2-multiref')?.checked || false;
   const trellis2Refine = document.getElementById('ws-trellis2-refine')?.checked || false;
   if (trellis2Refine) expectedMs += 90000;  // ~90s for SDXL Tile Refine
+  const trellis2Smooth = document.getElementById('ws-trellis2-smooth')?.checked || false;
+  if (trellis2Smooth) expectedMs += 12000;  // ~12s for bilateral smooth
+  const trellis2QualityPlus = document.getElementById('ws-trellis2-quality-plus')?.checked || false;
+  if (trellis2QualityPlus) expectedMs += 30000;  // ~30s extra for cascade mode
+  const trellis2UltraHD = document.getElementById('ws-trellis2-ultra-hd')?.checked || false;
+  if (trellis2UltraHD) expectedMs += 280000;  // ~280s for Real-ESRGAN x2 atlas 4k→8k
   const TRELLIS2_PRESETS = {
     fast:     { steps: 12, texSize: 2048, imgRes: 1024 },
     balanced: { steps: 24, texSize: 2048, imgRes: 1024 },
@@ -5806,6 +5812,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2ImgRes: t2cfg.imgRes,
     trellis2MultiRef,
     trellis2Refine,
+    trellis2Smooth,
+    trellis2QualityPlus,
+    trellis2UltraHD,
     trellis2Preset,
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };

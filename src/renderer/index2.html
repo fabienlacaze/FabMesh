@@ -368,6 +368,24 @@
                         SDXL refine (+~90s, sharper micro-details)
                       </label>
                     </div>
+                    <div class="form-row check-row" style="margin-top:4px;">
+                      <label class="inline-check" style="font-size:11px;" title="Edge-preserving bilateral filter on the baseColor atlas. Cleans speckled grain on smooth surfaces (paint, chrome, glass) while keeping panel-gap edges sharp. No AI, no hallucination. Best for vehicles / objects / hard surfaces.">
+                        <input type="checkbox" id="ws-trellis2-smooth" checked />
+                        Texture smooth (+~12s, cleaner smooth surfaces, no AI)
+                      </label>
+                    </div>
+                    <div class="form-row check-row" style="margin-top:4px;">
+                      <label class="inline-check" style="font-size:11px;" title="TRELLIS-2 cascade mode (2-stage generation) + decim 1M faces. Sharper geometry on edges (panel gaps, calandre). Adds ~30s.">
+                        <input type="checkbox" id="ws-trellis2-quality-plus" checked />
+                        Quality+ (cascade mode, decim 1M, +~30s)
+                      </label>
+                    </div>
+                    <div class="form-row check-row" style="margin-top:4px;">
+                      <label class="inline-check" style="font-size:11px;" title="Upscale the baseColor atlas to 8192² via Real-ESRGAN (Apache 2.0, no hallucination). Final GLB ~120 MB. Above Meshy HD parity.">
+                        <input type="checkbox" id="ws-trellis2-ultra-hd" checked />
+                        Ultra HD 8K texture (+~5min, Real-ESRGAN)
+                      </label>
+                    </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
                   </details>
                   <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
