@@ -8513,6 +8513,22 @@ async function reloadCurrentProject() {
     || state.projects.find(p => p.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedName);
   if (refreshed) console.log('[reload] matched project:', refreshed.name, 'for requested:', name);
   else console.log('[reload] NO MATCH for project:', name, '(sanitized:', sanitizedName, ') in:', state.projects.map(p => p.name).slice(0, 10));
+  if (!refreshed) {
+    // The project no longer matches anything in the projects scan — most
+    // likely the user just deleted its last image. Don't leave the UI
+    // frozen on the stale data: present an empty shell so they can
+    // regenerate from scratch via the "Create new" stage (which
+    // setStageOpenState auto-expands when images.length === 0).
+    console.log('[reload] empty shell for', name);
+    const emptyShell = {
+      name: state.currentProject.name,
+      images: [], meshes: [], rigs: [],
+      _reloadTs: Date.now(),
+    };
+    state.currentProject = emptyShell;
+    populateWorkspace(emptyShell);
+    return;
+  }
   if (refreshed) {
     refreshed._reloadTs = Date.now();
     // Carry over multiview data + 2-view back photos (not on disk in
