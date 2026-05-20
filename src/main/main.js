@@ -4996,14 +4996,32 @@ ipcMain.handle('delete-project', (event, { projectName }) => {
 
 ipcMain.handle('delete-file', (event, filePath) => {
   if (!isPathAllowed(filePath)) {
-    console.warn('delete-file: blocked path outside allowed dirs:', filePath);
+    log.warn('delete-file', `blocked path outside allowed dirs: ${filePath}`);
     return false;
   }
-  if (fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath)) {
+    log.warn('delete-file', `file does not exist: ${filePath}`);
+    return false;
+  }
+  try {
     fs.unlinkSync(filePath);
     return true;
+  } catch (e) {
+    // Windows often holds a file lock when the image is displayed in the
+    // renderer's <img> element. Best-effort: rename it to .pending_delete
+    // so the UI loses its reference, then delete on next launch via
+    // garbage collection.
+    log.warn('delete-file', `unlink failed (${e.code || e.name}): ${e.message}`);
+    try {
+      const stash = filePath + '.pending_delete_' + Date.now();
+      fs.renameSync(filePath, stash);
+      log.info('delete-file', `renamed for deferred delete: ${stash}`);
+      return true;
+    } catch (e2) {
+      log.error('delete-file', `rename fallback also failed: ${e2.message}`);
+      return false;
+    }
   }
-  return false;
 });
 
 ipcMain.handle('delete-image-folder', (event, folderPath) => {
