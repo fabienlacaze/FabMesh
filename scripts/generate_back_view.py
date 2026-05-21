@@ -113,14 +113,24 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
         from transformers import AutoProcessor, AutoModelForCausalLM
         print('[back-view] Florence-2 detailed caption (outfit + hair)...', flush=True)
         _t_blip = time.time()
+        # Pin the exact HuggingFace revision we audited. `trust_remote_code`
+        # executes Python hosted on HF at load time — without a pinned
+        # revision, a hijacked microsoft/Florence-2-large repo could push
+        # malicious code to every user on next load. This SHA is the
+        # commit we tested against (see comment block below).
+        FLORENCE2_REVISION = '21a599d414c4d928c9032694c424fb94458e3594'
         proc = AutoProcessor.from_pretrained(
-            'microsoft/Florence-2-large', trust_remote_code=True)
+            'microsoft/Florence-2-large',
+            revision=FLORENCE2_REVISION,
+            trust_remote_code=True)
         # attn_implementation='eager' is REQUIRED on transformers >= 4.41
         # because Florence-2's custom modeling code never declared
         # _supports_sdpa, so the default 'sdpa' path raises AttributeError
         # at load time. Eager avoids the missing attribute path.
         bmodel = AutoModelForCausalLM.from_pretrained(
-            'microsoft/Florence-2-large', torch_dtype=torch.float16,
+            'microsoft/Florence-2-large',
+            revision=FLORENCE2_REVISION,
+            torch_dtype=torch.float16,
             trust_remote_code=True,
             attn_implementation='eager',
         ).to('cuda')

@@ -123,14 +123,16 @@ try {
 // CUSTOM CONFIRM MODAL (replaces window.confirm)
 // ============================================================
 // Map engine value (from <select>) to a human-readable label showing the
-// real underlying model. Used in job-details so the user sees
-// "TripoSR (CC0)" instead of the internal "local" identifier.
+// real underlying model. Legacy IDs (sf3d, local) are rerouted by
+// main.js to trellis2_native — labels kept for backward display on old
+// saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
   'local-flux':     'RealVis XL (local)',
-  // 3D engines
-  'sf3d':           'Stable Fast 3D (PBR, Stability Community License)',
-  'local':          'TripoSR (CC0)',
+  // 3D engines — sf3d / local are non-commercial, hidden from the
+  // selector and silently rerouted to trellis2_native at dispatch.
+  'sf3d':           'TRELLIS-2 native (rerouted from SF3D, NC license)',
+  'local':          'TRELLIS-2 native (rerouted from TripoSR, NC license)',
   'trellis2_native':'TRELLIS-2 native (MIT, Microsoft)',
   'hi3dgen':        'Hi3DGen (MIT, ByteDance+CUHK)',
   'trellis':        'Trellis 2 (MIT)',

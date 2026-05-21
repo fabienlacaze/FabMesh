@@ -60,7 +60,32 @@ def send_notification(method, params=None):
 # =====================================================================
 
 ELECTRON_BRIDGE_URL = "http://127.0.0.1:7555"
+MCP_TOKEN_FILE = os.path.join(PROJECT_ROOT, '.mcp_bridge_token')
 _headless_proc = None
+
+
+def _read_mcp_bridge_token():
+    """Read the loopback Bearer token written by Electron main.js.
+
+    The token is regenerated on each Electron startup that didn't find an
+    existing file. Returns '' if the file is missing — caller should
+    handle this by failing the request (no token = bridge not ready).
+    """
+    try:
+        with open(MCP_TOKEN_FILE, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return ''
+
+
+def _auth_headers(extra=None):
+    h = {'Content-Type': 'application/json'}
+    tok = _read_mcp_bridge_token()
+    if tok:
+        h['Authorization'] = f'Bearer {tok}'
+    if extra:
+        h.update(extra)
+    return h
 
 
 def _is_fabmesh_running():
@@ -68,7 +93,7 @@ def _is_fabmesh_running():
     import urllib.request
     try:
         req = urllib.request.Request(f"{ELECTRON_BRIDGE_URL}/list-projects", method='POST',
-                                     data=b'{}', headers={'Content-Type': 'application/json'})
+                                     data=b'{}', headers=_auth_headers())
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status == 200
     except Exception:
@@ -136,7 +161,7 @@ def _call_electron(action, params, timeout=600, visible=False):
     url = f"{ELECTRON_BRIDGE_URL}/{action}"
     data = json.dumps(params).encode('utf-8')
     req = urllib.request.Request(url, data=data, method='POST',
-                                 headers={'Content-Type': 'application/json'})
+                                 headers=_auth_headers())
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode('utf-8')

@@ -56,9 +56,11 @@ external/TRELLIS2_win/src/
 external/TRELLIS2_win/_dbg_*.npy
 external/TRELLIS2_win/test_*.py
 # Vendored externals (clone-on-first-run pattern, not committed).
-# Matches how Hi3DGen / UniRig / StableFast3D / TRELLIS2_win are
-# handled — local checkout, no git submodule.
+# All these are local checkouts; the install script clones them.
 external/MV-Adapter/
+external/Hi3DGen/
+external/StableFast3D/
+external/UniRig/
 
 # Isolated venv for MV-Adapter (diffusers 0.30 + torch cu128, ~5 GB)
 .venv-mvadapter/
@@ -68,6 +70,7 @@ external/MV-Adapter/
 
 # Secrets / tokens
 .test_api_token
+.mcp_bridge_token
 
 # Claude Code session data
 .claude/

@@ -10,6 +10,70 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-21 (later 2) — Audit-2 fixes
+
+Re-audit du logiciel a remonté 3 nouveaux CRITIQUE + 3 HAUT + 2 MOYEN,
+tous fixés. Backup branch `backup-pre-audit2-fixes-20260521-225748`.
+
+**CRITIQUE 1 — `caption_image.py` BLIP-2 OPT supprimé**
+Le fallback chargeait `Salesforce/blip2-opt-2.7b` (embarque Meta OPT-2.7B,
+licence NC research-only). Réécrit pour utiliser uniquement BLIP-1
+(BSD-3) + cleanup VRAM (`del model, proc; empty_cache()`). Docstring
+corrigée pour refléter la stack réelle.
+
+**CRITIQUE 2 — TripoSR `engine='local'` rerouté**
+`stabilityai/TripoSR` = Stability AI Community License (NC > $1M, même
+clause que SF3D). Ajouté un guard dans `main.js:3656` qui détecte
+`engine='local'` et reroute vers `trellis2_native` + warn. Labels de
+l'UI mis à jour pour refléter le reroute ("rerouted from TripoSR, NC
+license") au lieu du faux "TripoSR (CC0)".
+
+**CRITIQUE 3 — Florence-2 `revision` pin**
+`trust_remote_code=True` exécutait du Python hébergé sur HF à chaque
+chargement. Si compte microsoft/Florence-2-large compromis ou
+DNS-spoofed → RCE chez tous les users. Pin revision
+`21a599d414c4d928c9032694c424fb94458e3594` (SHA exact de la version
+locale auditée, lu depuis `~/.cache/huggingface/...`).
+
+**HAUT 1 — Python `-c` interpolation → `sys.argv`**
+`handleRemoveBackground` (`main.js:910`) et `check-image-nsfw`
+(`main.js:1214`) interpolaient `r"${imagePath}"` dans du code Python.
+Un filename contenant `"` cassait out du string literal → exécution
+arbitraire. Passé par `sys.argv` (le pattern déjà utilisé par
+`_silhouetteHash`).
+
+**HAUT 2 — MCP bridge HTTP gated par Bearer token**
+Le bridge `127.0.0.1:7555` acceptait n'importe quel POST localement →
+n'importe quel malware ou onglet browser pouvait dispatcher generation
+/ OOM / écriture sur disque. Ajouté `.mcp_bridge_token` (32 bytes
+hex, mode 0600, gitignored) lu par `mcp_server.py` qui l'envoie en
+`Authorization: Bearer <token>` à chaque requête. Token régénéré au
+démarrage Electron si absent.
+
+**HAUT 3 — Gitlinks fantômes nettoyés**
+`external/Hi3DGen`, `StableFast3D`, `UniRig` étaient committés en mode
+`160000` (gitlink) sans `.gitmodules` entry → `git status` les voyait
+en "modified content" pour l'éternité. `git rm --cached` les trois +
+ajout au `.gitignore`. Plus de pollution status.
+
+**MOYEN — Post-process chain error propagation**
+La chaîne `runSmooth → runFaceFix → runUpscale` log un warn en cas
+d'échec mais résolvait `success: true` au renderer. Refactor en
+`runStep(label, script, args, timeout, next)` générique qui accumule
+les failures dans `postProcessErrors[]`, surface dans la résolution
+finale + envoyé en `ai3d-progress` au renderer pour affichage.
+
+**INFO — Commentaires stale SF3D/TripoSR**
+`main.js:3390` ("default: Stable Fast 3D") et `main.js:3645` ("supports
+TripoSR, Stable Fast 3D, TripoSG, TRELLIS") corrigés pour refléter
+l'état post-retire.
+
+Non bloquant restant : IPC handlers orphelins (`imageToTrellis`,
+`generateFromImage`, `generateFromPrompt`) — pas un risque, juste du
+code mort. À nettoyer un jour.
+
+---
+
 ## 2026-05-21 (later) — Audit fixes
 
 Audit complet du logiciel a remonté 3 prio + 4 mineurs. Tous fixés

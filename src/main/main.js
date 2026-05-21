@@ -526,13 +526,48 @@ function createWindow() {
 // ========== MCP BRIDGE HTTP SERVER ==========
 // Allows the MCP server (scripts/mcp_server.py) to dispatch generation
 // commands through Electron so jobs appear in the UI and VRAM is gated.
+// Loopback-only (127.0.0.1), but other local processes (any user-mode
+// software, browser tabs hitting localhost) could still issue commands.
+// Gate every request behind a Bearer token written to a 0600 file at
+// repo root; only processes that can read that file are allowed.
 const MCP_BRIDGE_PORT = 7555;
+const MCP_TOKEN_FILE = path.join(__dirname, '..', '..', '.mcp_bridge_token');
+
+function _loadOrCreateMcpToken() {
+  try {
+    if (fs.existsSync(MCP_TOKEN_FILE)) {
+      const t = fs.readFileSync(MCP_TOKEN_FILE, 'utf-8').trim();
+      if (t && t.length >= 32) return t;
+    }
+  } catch (_) {}
+  const t = require('crypto').randomBytes(32).toString('hex');
+  try {
+    fs.writeFileSync(MCP_TOKEN_FILE, t, { mode: 0o600 });
+  } catch (e) {
+    log.warn('mcp-bridge', `could not persist token: ${e.message}`);
+  }
+  return t;
+}
+
+let MCP_BRIDGE_TOKEN = '';
 
 function startMcpBridge() {
+  MCP_BRIDGE_TOKEN = _loadOrCreateMcpToken();
   const http = require('http');
   const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST') {
       res.writeHead(405); res.end('POST only'); return;
+    }
+    // Auth check: every request must carry the bridge token. Refuse
+    // immediately on missing / wrong token, before parsing the body
+    // (avoids burning CPU on hostile callers).
+    const auth = req.headers['authorization'] || '';
+    const provided = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!provided || provided !== MCP_BRIDGE_TOKEN) {
+      log.warn('mcp-bridge', `unauthorized request from ${req.socket.remoteAddress}`);
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'unauthorized' }));
+      return;
     }
     // Read JSON body
     const chunks = [];
@@ -905,16 +940,21 @@ async function handleRemoveBackground(params) {
   const base = safeBase(path.basename(imagePath, ext));
   const outPath = path.join(dir, `${base}_nobg_${Date.now()}${ext}`);
   const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
-  // Fallback: use rembg directly
-  return new Promise((resolve) => {
-    execFile('python', ['-c', `
+  // Fallback: use rembg directly. Paths go through sys.argv (not string
+  // interpolation) — a filename containing a double-quote would break
+  // out of the `r"..."` literal and let an attacker run arbitrary
+  // Python.
+  const pyCode = `
 import rembg, sys
 from PIL import Image
-img = Image.open(r"${imagePath}")
+img = Image.open(sys.argv[1])
 out = rembg.remove(img)
-out.save(r"${outPath}")
+out.save(sys.argv[2])
 print("OK")
-`], { timeout: 120000 }, (error, stdout, stderr) => {
+`;
+  return new Promise((resolve) => {
+    execFile('python', ['-c', pyCode, imagePath, outPath],
+        { timeout: 120000 }, (error, stdout, stderr) => {
       if (error || !fs.existsSync(outPath)) {
         resolve({ success: false, error: error?.message || 'rembg failed' });
       } else {
@@ -1205,27 +1245,31 @@ ipcMain.handle('get-nsfw-keywords', () => {
 ipcMain.handle('check-image-nsfw', async (_event, { imagePath }) => {
   if (isUnrestrictedMode()) return { nsfw: false, score: 0 };
   if (!imagePath || !fs.existsSync(imagePath)) return { nsfw: false, score: 0 };
-  return new Promise((resolve) => {
-    execFile('python', ['-c', `
+  // Image path passed via sys.argv to avoid `r"${imagePath}"` injection.
+  const pyCode = `
 import sys, json
+img_path = sys.argv[1]
 try:
     from transformers import pipeline
     from PIL import Image
     clf = pipeline('image-classification', model='Falconsai/nsfw_image_detection', device='cpu')
-    r = clf(Image.open(r"${imagePath}"))
+    r = clf(Image.open(img_path))
     nsfw_score = next((x['score'] for x in r if x['label'] == 'nsfw'), 0)
     print(json.dumps({"nsfw": nsfw_score > 0.5, "score": round(nsfw_score, 3)}))
 except Exception as e:
     # Fallback: skin ratio heuristic
     import numpy as np
     from PIL import Image
-    img = Image.open(r"${imagePath}").convert('RGB').resize((256,256))
+    img = Image.open(img_path).convert('RGB').resize((256,256))
     arr = np.array(img).astype(float)
     r,g,b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
     skin = ((r>95)&(g>40)&(b>20)&(r>g)&(r>b)&((r-g)>15)&(arr.max(2)-arr.min(2)>15))
     ratio = float(skin.sum()) / (256*256)
     print(json.dumps({"nsfw": ratio > 0.35, "score": round(ratio, 3)}))
-`], { timeout: 30000 }, (error, stdout) => {
+`;
+  return new Promise((resolve) => {
+    execFile('python', ['-c', pyCode, imagePath],
+        { timeout: 30000 }, (error, stdout) => {
       if (error) { resolve({ nsfw: false, score: 0 }); return; }
       try {
         resolve(JSON.parse(stdout.trim()));
@@ -3343,7 +3387,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
         continue;
       }
 
-      // Step 2: Convert image to 3D (default: Stable Fast 3D — native PBR textures)
+      // Step 2: Convert image to 3D (default: Trellis — SF3D/TripoSR retired for NC license)
       const meshFilename = `${safeName}_${stage.name}_${timestamp}.glb`;
       const meshPath = path.join(MESHES_DIR, meshFilename);
       let selectedEngine = engine || 'trellis';
@@ -3598,15 +3642,22 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
   }
 });
 
-// --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
+// --- Image-to-3D: TRELLIS-2 native (default), Hi3DGen, Meshy. SF3D and
+// TripoSR have been retired for non-commercial license; legacy requests
+// for those engines are silently rerouted to trellis2_native. ---
 ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2FaceFix, trellis2UltraHD, trellis2Preset, assetType }) => {
   let imagePath = _imagePath;
   let engine = _engine;
-  // SF3D engine disabled at the UI level — Stability AI Community license
-  // is non-commercial above $1M rev. Any legacy project still requesting
-  // sf3d is silently rerouted to trellis2_native (commercial-safe default).
+  // SF3D and TripoSR both disabled at the UI level — Stability AI
+  // Community license is non-commercial above $1M rev. Any legacy
+  // project still requesting them is silently rerouted to
+  // trellis2_native (commercial-safe default).
   if (engine === 'sf3d') {
     log.warn('main', 'engine=sf3d requested but disabled (NC license); rerouting to trellis2_native');
+    engine = 'trellis2_native';
+  }
+  if (engine === 'local') {
+    log.warn('main', 'engine=local (TripoSR) requested but disabled (Stability NC license); rerouting to trellis2_native');
     engine = 'trellis2_native';
   }
   const useTwoView = false;
@@ -3891,6 +3942,11 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         resolvedEarly = true;
         if (jobId) activeProcs.delete(jobId);
 
+        // Accumulator: post-process steps that failed (still recoverable
+        // — we kept the original mesh — but the user should know which
+        // option silently no-op'd so they can retry or report.
+        const postProcessErrors = [];
+
         const finishAndResolve = () => {
           const stats = fs.statSync(meshPath);
           try { fs.writeFileSync(meshPath + '.source', imagePath, 'utf-8'); } catch(e) {}
@@ -3900,29 +3956,39 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
             meshVerts = parseInt(statsMatch[1]);
             meshFaces = parseInt(statsMatch[2]);
           }
+          if (postProcessErrors.length) {
+            log.warn('main', `image-to-3d post-process partial failures: ${postProcessErrors.join(' | ')}`);
+            safeSend('ai3d-progress', `[main] WARN post-process step(s) failed (kept original mesh): ${postProcessErrors.join(', ')}\n`);
+          }
           log.info('main', `image-to-3d EARLY-RESOLVE: marker 100 done + GLB ready (${(stats.size/1024).toFixed(0)} KB)`);
-          resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout: stdoutBuf, meshVerts, meshFaces });
+          resolve({ meshPath, meshFilename, format: 'glb', size: stats.size, sourceImage: imagePath, stdout: stdoutBuf, meshVerts, meshFaces, postProcessErrors });
         };
 
-        // Chain of optional post-processes: smooth → upscale.
-        // Each step runs only if its checkbox is on, otherwise we skip it.
-        const runSmooth = (next) => {
-          if (!trellis2Smooth) return next();
-          const smoothScript = path.join(__dirname, '..', '..', 'scripts', 'texture_smooth.py');
-          const tempOut = meshPath + '.smooth.tmp.glb';
-          log.info('main', 'image-to-3d: running texture_smooth post-process...');
-          safeSend('ai3d-progress', '[main] texture_smooth: cleaning baseColor atlas...\n');
-          const proc = execFile(_pythonExe, [smoothScript, meshPath, tempOut], {
-            timeout: 120000, maxBuffer: 10 * 1024 * 1024,
+        // Generic post-process runner — replaces the three near-duplicate
+        // closures. Each step takes a name + script + extra args + timeout.
+        // On success: swap meshPath atomically (delete + rename tempOut).
+        // On failure: log + record in postProcessErrors so finishAndResolve
+        // can surface it, then keep the previous meshPath untouched.
+        const runStep = (label, script, extraArgs, timeout, next) => {
+          const tempOut = meshPath + `.${label}.tmp.glb`;
+          log.info('main', `image-to-3d: running ${label} post-process...`);
+          safeSend('ai3d-progress', `[main] ${label}: starting...\n`);
+          const proc = execFile(_pythonExe, [script, meshPath, tempOut, ...extraArgs], {
+            timeout, maxBuffer: 10 * 1024 * 1024,
             env: { ...process.env, PYTHONUNBUFFERED: '1' },
           }, (err) => {
             if (!err && fs.existsSync(tempOut)) {
-              try { fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath); } catch (e) {
-                log.warn('main', `texture_smooth rename failed: ${e.message}`);
+              try {
+                fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath);
+                log.info('main', `${label} done`);
+              } catch (e) {
+                postProcessErrors.push(`${label}: rename failed (${e.message})`);
+                log.warn('main', `${label} rename failed: ${e.message}`);
               }
-              log.info('main', 'texture_smooth done');
             } else {
-              log.warn('main', `texture_smooth failed: ${err?.message || 'unknown'}, keeping original`);
+              const reason = err?.killed ? 'timeout/killed' : (err?.message || 'no output written');
+              postProcessErrors.push(`${label}: ${reason}`);
+              log.warn('main', `${label} failed: ${reason}, keeping original`);
               try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e) {}
             }
             next();
@@ -3931,55 +3997,13 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
         };
 
-        const runFaceFix = (next) => {
-          if (!trellis2FaceFix) return next();
-          const faceScript = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
-          const tempOut = meshPath + '.face.tmp.glb';
-          log.info('main', 'image-to-3d: running face_inpaint_atlas post-process...');
-          safeSend('ai3d-progress', '[main] face_inpaint_atlas: SDXL inpaint on face zone...\n');
-          const proc = execFile(_pythonExe, [faceScript, meshPath, tempOut, '--strength', '0.45'], {
-            timeout: 240000, maxBuffer: 10 * 1024 * 1024,
-            env: { ...process.env, PYTHONUNBUFFERED: '1' },
-          }, (err) => {
-            if (!err && fs.existsSync(tempOut)) {
-              try { fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath); } catch (e) {
-                log.warn('main', `face_inpaint_atlas rename failed: ${e.message}`);
-              }
-              log.info('main', 'face_inpaint_atlas done');
-            } else {
-              log.warn('main', `face_inpaint_atlas failed: ${err?.message || 'unknown'}, keeping original`);
-              try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e) {}
-            }
-            next();
-          });
-          proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
-          proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
-        };
+        const SMOOTH_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_smooth.py');
+        const FACE_SCRIPT   = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+        const UPSCALE_SCRIPT= path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
 
-        const runUpscale = (next) => {
-          if (!trellis2UltraHD) return next();
-          const upscaleScript = path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
-          const tempOut = meshPath + '.8k.tmp.glb';
-          log.info('main', 'image-to-3d: running texture_upscale (Real-ESRGAN x2) post-process...');
-          safeSend('ai3d-progress', '[main] texture_upscale: 4k → 8k via Real-ESRGAN...\n');
-          const proc = execFile(_pythonExe, [upscaleScript, meshPath, tempOut, '--scale', '2', '--tile', '512'], {
-            timeout: 600000, maxBuffer: 10 * 1024 * 1024,
-            env: { ...process.env, PYTHONUNBUFFERED: '1' },
-          }, (err) => {
-            if (!err && fs.existsSync(tempOut)) {
-              try { fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath); } catch (e) {
-                log.warn('main', `texture_upscale rename failed: ${e.message}`);
-              }
-              log.info('main', 'texture_upscale done');
-            } else {
-              log.warn('main', `texture_upscale failed: ${err?.message || 'unknown'}, keeping original`);
-              try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e) {}
-            }
-            next();
-          });
-          proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
-          proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
-        };
+        const runSmooth  = (next) => trellis2Smooth   ? runStep('smooth',  SMOOTH_SCRIPT,  [],                                    120000, next) : next();
+        const runFaceFix = (next) => trellis2FaceFix  ? runStep('face',    FACE_SCRIPT,    ['--strength', '0.45'],                240000, next) : next();
+        const runUpscale = (next) => trellis2UltraHD  ? runStep('8k',      UPSCALE_SCRIPT, ['--scale', '2', '--tile', '512'],     600000, next) : next();
 
         runSmooth(() => runFaceFix(() => runUpscale(finishAndResolve)));
       };
