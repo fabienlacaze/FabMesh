@@ -10,6 +10,80 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (wizard v2 + packaging skeleton)
+
+Suite du wizard d'installation. Plusieurs corrections + tout l'échafaudage
+de packaging Windows pour que l'app marche sur un PC vierge (pas juste
+sur la machine dev).
+
+**Wizard v2 corrections** (commits multiples sur master 50f79af + suivants):
+- Bouton "Cancel" en haut à droite. Labellé "Quit" en first-run
+  (quitte l'app) ou "Cancel" en mode Reconfigure (restore le state via
+  un backup `setup_state.json.backup`).
+- "Reconfigure FabMesh" dans Settings (index2 → `set-reconfigure`) qui
+  reload le wizard avec backup pour cancel-safe.
+- "Uninstall FabMesh" dans Settings — lance le NSIS uninstaller en
+  build packagé, affiche warning en dev mode.
+- Anonymisation des noms de modèles dans l'UI (FabMesh 3D Core,
+  Texture engine, Face refiner, Vision analyzer, Upscale engine au
+  lieu de TRELLIS-2 / RealVisXL / BLIP-1 / Florence-2 / Real-ESRGAN).
+- Smoke test stdout filtré (seules les lignes `[smoke]` visibles, le
+  stderr est bufferisé et n'apparaît qu'en cas d'échec).
+- Bandwidth retiré du System check (test peu fiable + pas utile à ce
+  stade, le vrai débit se mesure pendant le Download).
+- Couleurs vert/orange/rouge sur les valeurs détectées (bug fix:
+  `el.className = 'val '` au lieu de `'wiz-val '`).
+- Pas de border vert sur "Recommended" — un badge accent gradient à
+  la place pour rester dans le design system.
+- Fenêtre maximisée au démarrage (`mainWindow.maximize()`).
+- "Cloud only" retiré de la page Mode — si pas de GPU NVIDIA, le
+  wizard saute la page Mode et affiche un écran dédié "No compatible
+  GPU" qui redirige vers fabmesh.com/cloud.
+- Seuil Full descendu de 16384 à 15360 MB pour les "16 GB cards"
+  (RTX 4080/5080) qui reportent ~16300 MB après driver overhead.
+- Heartbeat download (`scripts/wizard_download.py`) : un thread parallèle
+  scanne le cache HF disque toutes les 1s pendant que
+  `snapshot_download` bloque, calcule pct + speed + ETA réels.
+- UI download : timer écoulé en violet + animation pulse sur la bar
+  in-progress + state `done` static vert.
+- Fenêtre du wizard fermable même pendant download (avant le close
+  handler bloquait sur l'IPC du renderer, qui n'existe pas côté wizard).
+
+**Packaging skeleton (NEW)** :
+- `package.json` configuré pour electron-builder NSIS : per-user
+  install, raccourcis Bureau + menu Démarrer, uninstaller propre,
+  artifactName `FabMesh-Setup-${version}.exe`.
+- `build/uninstaller.nsh` : hook NSIS qui propose de supprimer le
+  cache HF (~17 GB) et les settings AppData pendant la désinstall
+  (cases décochées par défaut — l'user peut réinstaller sans re-DL).
+- `build/fetch_python_embed.py` : télécharge Python 3.11.9 embeddable
+  (~30 MB) avec SHA-256 pinné + active site-packages. À lancer une
+  fois sur la machine dev avant le packaging.
+- `build/fetch_vc_redist.py` : télécharge VC++ 2022 Redistributable
+  (~25 MB) à bundler dans l'installer.
+- `build/build_wheels.md` : doc pour compiler les wheels custom
+  (torch+cu128, flash_attn, kaolin, xformers) sur GitHub Actions
+  Windows + CUDA et les pousser sur Cloudflare R2.
+- `scripts/wizard_install_deps.py` : nouveau script appelé par le
+  wizard pour bootstrap pip dans le Python embarqué + installer les
+  wheels depuis `wheels.fabmesh.com` (CDN) + diffusers/transformers
+  depuis PyPI. JSONL progress sur stdout.
+- `scripts/cleanup_assets.py` : CLI utilitaire pour effacer le cache
+  HF / settings AppData / logs sans désinstaller (gain disque).
+- `.gitignore` mis à jour : `build/python-embed/`, `vc_redist.x64.exe`,
+  `dist/` ne sont jamais committés (re-téléchargeables avec SHA pinné).
+
+**Pour shipper un installer fonctionnel** il reste à :
+1. Lancer `python build/fetch_python_embed.py` une fois
+2. Lancer `python build/fetch_vc_redist.py` une fois (et pinner le sha)
+3. Compiler les wheels custom sur GH Actions (voir build_wheels.md) et
+   les pousser sur Cloudflare R2 + setup `wheels.fabmesh.com`
+4. Acheter un code signing certificate Sectigo (~200€/an)
+5. `npm install electron-builder` puis `npm run build:installer`
+6. Tester sur 8 machines variées
+
+---
+
 ## 2026-05-21 (wizard v1) — First-run setup wizard
 
 Première brique de la stratégie "installer bulletproof" : un wizard

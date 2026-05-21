@@ -28,7 +28,7 @@
       // subsequent runs ~5-15s. We give 180s so the progress bar fills
       // smoothly for the cold path and just caps at 90% for the warm one.
       var params = {
-        Engine: 'RealVis XL (local, SDXL Inpaint)',
+        Engine: 'FabMesh Inpaint Engine (local)',
         'Source image': imgPath ? imgPath.split(/[/\\]/).pop() : '--',
       };
       return window.fabmeshJobs.push(label, null, params, 180000);

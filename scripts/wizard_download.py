@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
 
@@ -61,23 +62,79 @@ def _eta_str(remaining_mb, speed_mbps):
     return f'{secs // 3600}h {(secs % 3600) // 60}m'
 
 
+def _hf_cache_size_mb(repo):
+    """Walk the HF cache for a given repo and return total size in MB.
+    Used by the heartbeat to compute live progress without waiting for
+    snapshot_download to return."""
+    cache_dir = os.path.expanduser('~/.cache/huggingface/hub')
+    repo_dir = os.path.join(cache_dir, 'models--' + repo.replace('/', '--'))
+    if not os.path.isdir(repo_dir):
+        return 0
+    total = 0
+    for root, _dirs, files in os.walk(repo_dir):
+        for fn in files:
+            try:
+                total += os.path.getsize(os.path.join(root, fn))
+            except OSError:
+                pass
+    return total // (1024 * 1024)
+
+
+def _heartbeat(item_id, repo, expected_mb, total_done_mb_ref, stop, t0):
+    """Emit a progress event every second while snapshot_download blocks.
+    pct is derived from the actual HF cache growth on disk — accurate
+    even though huggingface_hub doesn't expose a download callback."""
+    start_size = _hf_cache_size_mb(repo)
+    last_size = start_size
+    last_t = time.time()
+    while not stop.wait(1.0):
+        cur_size = _hf_cache_size_mb(repo)
+        elapsed = time.time() - t0
+        delta_mb = max(0, cur_size - start_size)
+        # Speed: bytes/s over the last tick
+        now = time.time()
+        speed_mbps = max(0, (cur_size - last_size) / max(now - last_t, 0.001))
+        last_size = cur_size; last_t = now
+        pct = min(99.0, round(delta_mb * 100.0 / max(expected_mb, 1), 1))
+        emit({
+            'id': item_id,
+            'pct': pct,
+            'done': False,
+            'in_progress': True,
+            'elapsed_s': round(elapsed, 1),
+            'speed_mbps': round(speed_mbps, 2),
+            'eta': _eta_str(max(0, expected_mb - delta_mb), speed_mbps),
+            'total_done_mb': total_done_mb_ref[0] + delta_mb,
+        })
+
+
 def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
-    """Use huggingface_hub.snapshot_download for HF repos. Emits coarse
-    progress because HF doesn't expose per-byte hooks across all files
-    without monkey-patching."""
+    """Use huggingface_hub.snapshot_download. A background thread emits
+    progress events every second based on actual cache growth, so the
+    UI never looks frozen even on multi-GB repos."""
     from huggingface_hub import snapshot_download
-    # We emit start
     emit({'id': item_id, 'pct': 0, 'done': False,
+          'in_progress': True, 'elapsed_s': 0,
           'total_done_mb': total_done_mb_ref[0]})
     t0 = time.time()
-    # snapshot_download handles resume + parallel files + cache reuse
-    snapshot_download(repo_id=repo, resume_download=True,
-                      max_workers=4)
+    stop = threading.Event()
+    hb = threading.Thread(
+        target=_heartbeat,
+        args=(item_id, repo, expected_mb, total_done_mb_ref, stop, t0),
+        daemon=True)
+    hb.start()
+    try:
+        snapshot_download(repo_id=repo, resume_download=True,
+                          max_workers=4)
+    finally:
+        stop.set()
+        hb.join(timeout=2.0)
     dt = max(time.time() - t0, 0.001)
     speed = expected_mb / dt
     total_done_mb_ref[0] += expected_mb
     emit({'id': item_id, 'pct': 100, 'done': True,
-          'speed_mbps': speed, 'eta': '–',
+          'speed_mbps': round(speed, 2), 'eta': '–',
+          'elapsed_s': round(dt, 1),
           'total_done_mb': total_done_mb_ref[0]})
 
 

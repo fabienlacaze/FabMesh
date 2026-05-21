@@ -11,7 +11,9 @@ config.json
 *.stl
 *.pyc
 __pycache__/
-build/
+# build/ holds installer-support scripts (committed) + heavy artefacts
+# (gitignored further down). We need to commit the scripts so we don't
+# blanket-ignore the dir.
 dist/
 *.egg-info/
 *.egg
@@ -71,6 +73,11 @@ external/UniRig/
 # Secrets / tokens
 .test_api_token
 .mcp_bridge_token
+
+# Build artefacts (fetched by build/fetch_*.py scripts, not committed)
+build/python-embed/
+build/vc_redist.x64.exe
+dist/
 
 # Claude Code session data
 .claude/

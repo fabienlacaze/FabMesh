@@ -494,14 +494,27 @@ function createWindow() {
   const startPage = isSetupComplete() ? 'index2.html' : 'wizard.html';
   log.info('main', `loading ${startPage} (setup ${isSetupComplete() ? 'done' : 'pending'})`);
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', startPage));
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    // Start maximized so the wizard / main app gets the full screen
+    // real estate. Users can still un-maximize manually.
+    mainWindow.maximize();
+    mainWindow.show();
+  });
   mainWindow.setMenuBarVisibility(false);
 
   // Intercept close: ask the renderer if there are running jobs.
   // The renderer shows its own styled modal and replies via IPC.
+  // Exception: on the wizard, close immediately — there's no risk of
+  // losing user work, and a stuck wizard with no exit is a soft-lock.
   let closeConfirmed = false;
   mainWindow.on('close', (event) => {
-    if (closeConfirmed || _isQuitting) return; // already confirmed or quitting via app.quit
+    if (closeConfirmed || _isQuitting) return;
+    const currentUrl = mainWindow.webContents.getURL() || '';
+    if (currentUrl.endsWith('wizard.html')) {
+      // Wizard window: always allow close. Background downloads (if any)
+      // are interrupted; HuggingFace snapshot_download resumes on next run.
+      return;
+    }
     event.preventDefault();
     mainWindow.webContents.send('app-close-requested');
   });
@@ -4700,28 +4713,30 @@ ipcMain.handle('wizard:detect-hardware', async () => {
 
 // Manifest of models per mode — keep in sync with what each script actually
 // needs. Sizes are HF download approximations (MB).
+// Generic UI labels (no model brand visible). Internal IDs stay so the
+// download/test scripts know what they're pulling.
 const WIZARD_MODELS = {
   lite:     [
-    { id: 'trellis2',  label: 'TRELLIS-2 4B',                            repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
-    { id: 'blip1',     label: 'BLIP-1 captioning',                       repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990 },
+    { id: 'trellis2',  label: 'FabMesh 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'blip1',     label: 'Vision analyzer',                          repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990 },
   ],
   standard: [
-    { id: 'trellis2',  label: 'TRELLIS-2 4B',                            repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
-    { id: 'realvis',   label: 'RealVisXL V4.0 (texture refine)',         repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
-    { id: 'cn_pose',   label: 'ControlNet OpenPose (back-view)',         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
-    { id: 'ipadapter', label: 'IP-Adapter Plus',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
-    { id: 'blip1',     label: 'BLIP-1 captioning',                       repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
-    { id: 'esrgan',    label: 'Real-ESRGAN x4 (Ultra HD)',               repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
+    { id: 'trellis2',  label: 'FabMesh 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'realvis',   label: 'Texture engine',                           repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
+    { id: 'cn_pose',   label: 'Back-view module',                         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
+    { id: 'ipadapter', label: 'Reference module',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
+    { id: 'blip1',     label: 'Vision analyzer',                          repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
+    { id: 'esrgan',    label: 'Upscale engine',                           repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
   ],
   full:     [
-    { id: 'trellis2',  label: 'TRELLIS-2 4B (1536_cascade)',             repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
-    { id: 'realvis',   label: 'RealVisXL V4.0 + Inpaint',                repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
-    { id: 'sdxl_inp',  label: 'SDXL Inpaint (face fix)',                 repo: 'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', size_mb: 6500 },
-    { id: 'cn_pose',   label: 'ControlNet OpenPose',                     repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
-    { id: 'ipadapter', label: 'IP-Adapter Plus',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
-    { id: 'florence2', label: 'Florence-2 large (caption)',              repo: 'microsoft/Florence-2-large',                     size_mb: 1700 },
-    { id: 'blip1',     label: 'BLIP-1 captioning (fallback)',            repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
-    { id: 'esrgan',    label: 'Real-ESRGAN x4 (Ultra HD)',               repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
+    { id: 'trellis2',  label: 'FabMesh 3D Core (Ultra)',                  repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'realvis',   label: 'Texture engine',                           repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
+    { id: 'sdxl_inp',  label: 'Face refiner',                             repo: 'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', size_mb: 6500 },
+    { id: 'cn_pose',   label: 'Back-view module',                         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
+    { id: 'ipadapter', label: 'Reference module',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
+    { id: 'florence2', label: 'Advanced vision analyzer',                 repo: 'microsoft/Florence-2-large',                     size_mb: 1700 },
+    { id: 'blip1',     label: 'Basic vision analyzer',                    repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
+    { id: 'esrgan',    label: 'Upscale engine',                           repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
   ],
 };
 
@@ -4766,17 +4781,175 @@ ipcMain.handle('wizard:final-test', async (event, mode) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_smoke_test.py');
   const t0 = Date.now();
   return new Promise((resolve) => {
+    // Buffer stderr (PyTorch warnings, CUDA path traces) instead of
+    // streaming it live to the wizard — those leak internal model
+    // identifiers and confuse the user. Only flush on failure.
+    let stderrBuf = '';
     const proc = execFile('python', [script, '--mode', mode], {
       timeout: 180000, maxBuffer: 5 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     }, (err) => {
       const duration_s = Math.round((Date.now() - t0) / 1000);
-      if (err) return resolve({ success: false, duration_s, error: err.message });
+      if (err) {
+        // Only on failure: surface the buffered stderr so the user can
+        // copy/paste it into a support ticket.
+        if (stderrBuf) {
+          event.sender.send('wizard:test-log', '\n--- diagnostics ---\n' + stderrBuf);
+        }
+        return resolve({ success: false, duration_s, error: err.message });
+      }
       resolve({ success: true, duration_s });
     });
-    proc.stdout?.on('data', d => event.sender.send('wizard:test-log', d.toString()));
-    proc.stderr?.on('data', d => event.sender.send('wizard:test-log', '[stderr] ' + d.toString()));
+    proc.stdout?.on('data', d => {
+      // Stream stdout only — and only lines that come from our smoke
+      // test (prefixed [smoke]). Anything else is a leaked framework
+      // log line.
+      const text = d.toString();
+      const filtered = text.split(/\r?\n/)
+        .filter(l => !l || l.startsWith('[smoke]'))
+        .join('\n');
+      if (filtered.trim()) event.sender.send('wizard:test-log', filtered);
+    });
+    proc.stderr?.on('data', d => { stderrBuf += d.toString(); });
   });
+});
+
+ipcMain.handle('wizard:get-version', () => app.getVersion());
+
+// Returns the path to the embedded Python interpreter shipped with
+// FabMesh. In a packaged build, electron-builder copies build/python-embed/
+// to <install>/resources/python-embed/. In dev mode, falls back to the
+// system 'python' on PATH (we assume the dev has one).
+function _embeddedPython() {
+  const packagedPath = path.join(
+    process.resourcesPath || '', 'python-embed', 'python.exe');
+  if (fs.existsSync(packagedPath)) return packagedPath;
+  const devPath = path.join(__dirname, '..', '..', 'build',
+                             'python-embed', 'python.exe');
+  if (fs.existsSync(devPath)) return devPath;
+  return 'python';  // dev fallback
+}
+ipcMain.handle('wizard:get-python-exe', () => _embeddedPython());
+
+// Runs scripts/wizard_install_deps.py — pulls torch/flash_attn/kaolin
+// wheels from our CDN + diffusers/transformers/etc. from PyPI into the
+// embedded Python. Streams JSONL progress via wizard:install-progress.
+ipcMain.handle('wizard:install-deps', async (event) => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_install_deps.py');
+  const py = _embeddedPython();
+  return new Promise((resolve, reject) => {
+    const proc = execFile(py, [script, '--python', py], {
+      timeout: 0, maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
+    let buf = '';
+    proc.stdout?.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const p = JSON.parse(line);
+          event.sender.send('wizard:install-progress', p);
+        } catch (_) {}
+      }
+    });
+  });
+});
+
+// Reconfigure FabMesh: wipe setup_state.json and reload the wizard.
+// Models cached on disk + user projects are kept (only the "setup
+// done" flag is reset), so the wizard reopens but the heavy assets
+// are still there if the user only wants to change install mode.
+// Launch the NSIS uninstaller. In a packaged build, electron-builder
+// places `Uninstall FabMesh.exe` next to the app executable. In dev
+// mode we just open the AI assets cleanup script as a fallback so the
+// user has SOMETHING to click that does the right thing.
+ipcMain.handle('app:uninstall', async () => {
+  const appDir = path.dirname(app.getPath('exe'));
+  const uninstaller = path.join(appDir, 'Uninstall FabMesh.exe');
+  if (fs.existsSync(uninstaller)) {
+    const { spawn } = require('child_process');
+    spawn(uninstaller, [], { detached: true, stdio: 'ignore' }).unref();
+    // Quit the app so the uninstaller can clean files without lock.
+    setTimeout(() => app.quit(), 500);
+    return { ok: true, mode: 'nsis' };
+  }
+  return {
+    ok: false,
+    mode: 'dev',
+    error: 'Uninstaller not found. In a packaged build, this button '
+         + 'launches the official Windows uninstaller. In dev mode, '
+         + 'remove the project folder manually.',
+  };
+});
+
+// Stash the current setup_state.json before reloading the wizard. The
+// backup lets the user cancel mid-reconfigure and end up exactly where
+// they were. Wiped on wizard:complete; restored on wizard:cancel.
+const SETUP_BACKUP_FILE = SETUP_STATE_FILE + '.backup';
+
+ipcMain.handle('wizard:reset-setup', () => {
+  try {
+    if (fs.existsSync(SETUP_STATE_FILE)) {
+      fs.copyFileSync(SETUP_STATE_FILE, SETUP_BACKUP_FILE);
+      fs.unlinkSync(SETUP_STATE_FILE);
+    }
+    log.info('wizard', 'setup_state stashed — reloading wizard');
+  } catch (e) {
+    log.warn('wizard', `cannot stash setup_state: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+  if (mainWindow) {
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'wizard.html'));
+  }
+  return { ok: true };
+});
+
+// First-run = no backup (user never installed before). Reconfigure =
+// backup present (the wizard is being relaunched from Settings). The
+// wizard uses this to decide between "Quit" and "Cancel" labels.
+ipcMain.handle('wizard:get-mode', () => {
+  return { mode: fs.existsSync(SETUP_BACKUP_FILE) ? 'reconfigure' : 'first-run' };
+});
+
+ipcMain.handle('wizard:cancel', () => {
+  if (fs.existsSync(SETUP_BACKUP_FILE)) {
+    try {
+      fs.copyFileSync(SETUP_BACKUP_FILE, SETUP_STATE_FILE);
+      fs.unlinkSync(SETUP_BACKUP_FILE);
+      log.info('wizard', 'reconfigure cancelled, prior state restored');
+    } catch (e) {
+      log.warn('wizard', `restore failed: ${e.message}`);
+    }
+    if (mainWindow) {
+      mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
+    }
+    return { ok: true, mode: 'reconfigure' };
+  }
+  // First-run cancel: nothing to restore, just quit the app.
+  log.info('wizard', 'first-run cancelled — quitting');
+  setTimeout(() => app.quit(), 100);
+  return { ok: true, mode: 'first-run' };
+});
+
+ipcMain.handle('wizard:open-external', async (_e, url) => {
+  // Only allow https URLs and our own fabmesh.com domain for the wizard
+  // redirect — defense in depth against the renderer trying to launch
+  // arbitrary protocols.
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || !u.hostname.endsWith('fabmesh.com')) {
+      return { ok: false, error: 'url not allowed' };
+    }
+    const { shell } = require('electron');
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 ipcMain.handle('wizard:complete', (_e, state) => {
@@ -4787,11 +4960,15 @@ ipcMain.handle('wizard:complete', (_e, state) => {
       mode: state?.mode || null,
       hw: state?.hw || null,
     }, null, 2));
+    // Setup successfully finished: drop the backup. Any future cancel
+    // would just quit (no rollback target).
+    if (fs.existsSync(SETUP_BACKUP_FILE)) {
+      try { fs.unlinkSync(SETUP_BACKUP_FILE); } catch (_) {}
+    }
     log.info('wizard', `setup completed (mode=${state?.mode})`);
   } catch (e) {
     log.warn('wizard', `cannot persist setup_state: ${e.message}`);
   }
-  // Swap to the main app
   if (mainWindow) {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
   }
