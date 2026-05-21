@@ -10,6 +10,36 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-21 — Option D: SDXL face inpaint on baseColor atlas
+
+User asked for option D after option A (1536_cascade): SDXL face inpaint
+on the baseColor atlas to fix "creepy" / blurry faces that TRELLIS-2
+produces on children, even at 1536 voxel res.
+
+**Script**: `scripts/face_inpaint_atlas.py`
+1. Render the mesh from a front orthographic camera via pyrender (MIT).
+2. Detect face bbox in the render — OpenCV Haar Cascade (BSD, bundled
+   with opencv-python) — chosen over MediaPipe because mediapipe 0.10.33
+   removed the `mp.solutions` API (now `mp.tasks` requires a .tflite
+   asset download, not commercial-safe out of the box).
+3. Project face bbox screen-space → UV atlas via per-triangle painting.
+4. Downscale atlas to SDXL native 1024² for inpaint, then upscale back
+   to source res and **composite using the mask** so non-face pixels
+   stay byte-identical to the input atlas. Avoids the
+   `tensor a (4096) vs b (512)` error that hits if we naively pass a
+   4K atlas with `height=4096, width=4096` to SDXL inpaint.
+5. RealVisXL_V4.0 inpaint (RAIL++-M) with negatives
+   `deformed, asymmetric, creepy, blurry, extra eyes, doll face,
+   uncanny valley`. Strength 0.45 default.
+
+**Wired** into the TRELLIS-2 advanced panel as
+`Face fix (SDXL inpaint on face zone, +~60s)` checkbox, between
+`Ultra HD 8K` and `Ultra Quality`. Chain order:
+`runSmooth → runFaceFix → runUpscale` (face fix runs on the source-res
+atlas BEFORE Real-ESRGAN, so the inpaint stays on 4K not 8K — cheaper).
+
+---
+
 ## 2026-05-20 (back-view v3) — Florence-2 + face cleanup + face mask = real back
 
 Iteration 3 (final) on the back-view, on top of multi-seed auto-pick (83d6a88):

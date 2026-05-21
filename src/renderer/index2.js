@@ -5802,6 +5802,8 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   if (trellis2QualityPlus) expectedMs += 30000;  // ~30s extra for cascade mode
   const trellis2UltraQ = document.getElementById('ws-trellis2-ultra-q')?.checked || false;
   if (trellis2UltraQ) expectedMs += 50000;  // ~50s extra for 1536_cascade
+  const trellis2FaceFix = document.getElementById('ws-trellis2-face-fix')?.checked || false;
+  if (trellis2FaceFix) expectedMs += 60000;  // ~60s for SDXL face inpaint
   const trellis2UltraHD = document.getElementById('ws-trellis2-ultra-hd')?.checked || false;
   if (trellis2UltraHD) expectedMs += 280000;  // ~280s for Real-ESRGAN x2 atlas 4k→8k
   const TRELLIS2_PRESETS = {
@@ -5833,6 +5835,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2Smooth,
     trellis2QualityPlus,
     trellis2UltraQ,
+    trellis2FaceFix,
     trellis2UltraHD,
     trellis2Preset,
     assetType: document.getElementById('ws-asset-type')?.value || 'character',

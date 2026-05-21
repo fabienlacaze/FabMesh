@@ -3600,7 +3600,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2UltraHD, trellis2Preset, assetType }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2FaceFix, trellis2UltraHD, trellis2Preset, assetType }) => {
   let imagePath = _imagePath;
   let engine = _engine;
   // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
@@ -3929,6 +3929,31 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
         };
 
+        const runFaceFix = (next) => {
+          if (!trellis2FaceFix) return next();
+          const faceScript = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
+          const tempOut = meshPath + '.face.tmp.glb';
+          log.info('main', 'image-to-3d: running face_inpaint_atlas post-process...');
+          safeSend('ai3d-progress', '[main] face_inpaint_atlas: SDXL inpaint on face zone...\n');
+          const proc = execFile(_pythonExe, [faceScript, meshPath, tempOut, '--strength', '0.45'], {
+            timeout: 240000, maxBuffer: 10 * 1024 * 1024,
+            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+          }, (err) => {
+            if (!err && fs.existsSync(tempOut)) {
+              try { fs.unlinkSync(meshPath); fs.renameSync(tempOut, meshPath); } catch (e) {
+                log.warn('main', `face_inpaint_atlas rename failed: ${e.message}`);
+              }
+              log.info('main', 'face_inpaint_atlas done');
+            } else {
+              log.warn('main', `face_inpaint_atlas failed: ${err?.message || 'unknown'}, keeping original`);
+              try { fs.existsSync(tempOut) && fs.unlinkSync(tempOut); } catch (e) {}
+            }
+            next();
+          });
+          proc.stdout?.on('data', d => safeSend('ai3d-progress', d.toString()));
+          proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
+        };
+
         const runUpscale = (next) => {
           if (!trellis2UltraHD) return next();
           const upscaleScript = path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
@@ -3954,7 +3979,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
         };
 
-        runSmooth(() => runUpscale(finishAndResolve));
+        runSmooth(() => runFaceFix(() => runUpscale(finishAndResolve)));
       };
       if (jobId) activeProcs.set(jobId, proc);
       // Two-layer memory safety:

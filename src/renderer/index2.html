@@ -396,6 +396,12 @@
                         Ultra HD 8K texture (+~5min, Real-ESRGAN)
                       </label>
                     </div>
+                    <div class="form-row check-row" style="margin-top:4px;">
+                      <label class="inline-check" style="font-size:11px;" title="Post-process the baseColor atlas with SDXL Inpaint on the face zone only. Fixes creepy / blurry faces from TRELLIS-2 on characters. Uses OpenCV face detection + RealVisXL Inpaint (commercial-safe). Strength 0.45.">
+                        <input type="checkbox" id="ws-trellis2-face-fix" />
+                        Face fix (SDXL inpaint on face zone, +~60s)
+                      </label>
+                    </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
                   </details>
                   <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D</button>
