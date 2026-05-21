@@ -8,21 +8,23 @@ atlas level.
 
 Workflow :
   1. Render the mesh from the front camera (same as TRELLIS-2 input).
-  2. Auto-detect the face bounding box via MediaPipe Face Detection
-     (Apache 2.0, local). Fallback to top-25% of the silhouette if
-     MediaPipe fails.
+  2. Auto-detect the face bounding box via OpenCV Haar Cascade
+     (BSD, bundled with opencv-python). Fallback to top-25% of the
+     silhouette if no face is detected.
   3. Project the face bbox onto the atlas via UV unwrap → atlas-space
      mask.
-  4. SDXL inpaint on the atlas with mask + prompt
-     "detailed realistic face, sharp eyes, natural skin, photorealistic".
+  4. SDXL inpaint on the atlas at native 1024² with mask + prompt
+     "detailed realistic face, sharp eyes, natural skin, photorealistic",
+     then composite back into the source-res atlas through the mask
+     so non-face pixels stay byte-identical.
   5. Pack the new atlas back into the GLB.
 
-Models : RealVisXL inpaint (RAIL++-M), MediaPipe Face Detection
-(Apache 2.0), trimesh+pygltflib (MIT). All commercial-safe.
+Models : RealVisXL inpaint (RAIL++-M), OpenCV Haar Cascade (BSD),
+trimesh+pygltflib (MIT), pyrender (MIT). All commercial-safe.
 
 Usage :
     python face_inpaint_atlas.py <input.glb> <output.glb>
-        [--strength 0.4] [--prompt "..."] [--mask_grow 8]
+        [--strength 0.4] [--prompt "..."] [--render_size 1024]
 """
 import argparse
 import os
@@ -124,7 +126,6 @@ def make_atlas_mask_from_bbox(scene, bbox, render_size, atlas_size):
     every triangle whose vertices project inside the bbox in screen
     space gets its UV triangle painted on the mask.
     """
-    import trimesh
     geoms = (list(scene.geometry.values())
              if hasattr(scene, 'geometry') else [scene])
     if not geoms:
@@ -132,8 +133,14 @@ def make_atlas_mask_from_bbox(scene, bbox, render_size, atlas_size):
     mesh = geoms[0]
     if not hasattr(mesh, 'vertices') or not hasattr(mesh, 'faces'):
         return None
-    # Project vertices to screen space using same camera as render_mesh_front
-    verts = mesh.vertices  # already normalized [-0.5, 0.5] typically
+    # Normalize mesh to [-0.5, 0.5] in its largest axis BEFORE projecting,
+    # so the same projection works regardless of the GLB unit scale.
+    verts = np.asarray(mesh.vertices, dtype=np.float32)
+    bb_min = verts.min(axis=0)
+    bb_max = verts.max(axis=0)
+    center = (bb_min + bb_max) * 0.5
+    scale = max(bb_max - bb_min) or 1.0
+    verts = (verts - center) / scale  # now roughly in [-0.5, 0.5]
     # Ortho camera xmag=0.6 ymag=0.6 -> screen x = (v.x + 0.6) / 1.2 * size
     sx = ((verts[:, 0] + 0.6) / 1.2 * render_size).astype(int)
     sy = (((-verts[:, 1]) + 0.6) / 1.2 * render_size).astype(int)
@@ -203,6 +210,14 @@ def inpaint_atlas(atlas_img, mask, prompt, strength=0.4,
         height=sdxl_size, width=sdxl_size,
     ).images[0]
 
+    # Free VRAM before the next post-process step (Real-ESRGAN, etc.)
+    # — pipe holds ~6 GB of UNet/VAE/text-encoder on GPU when offloaded.
+    try:
+        del pipe
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
     # Upscale inpainted back to atlas res
     out_hi = out_lo.resize((aw, ah), Image.LANCZOS)
     # Composite: keep original outside mask, use inpainted inside mask
@@ -228,6 +243,15 @@ def main():
         'ultra detailed, 8k, masterpiece'))
     ap.add_argument('--render_size', type=int, default=1024)
     args = ap.parse_args()
+
+    # Guard against in-place overwrite: trimesh.export() would corrupt
+    # the texture stream we're still reading from `tex`. main.js always
+    # passes input != output, but a manual CLI call could foot-gun.
+    in_abs = os.path.abspath(args.input)
+    out_abs = os.path.abspath(args.output)
+    if in_abs == out_abs:
+        log(f'ERROR: input and output paths are identical ({in_abs}); aborting')
+        sys.exit(2)
 
     import trimesh
     log(f'load {args.input}')

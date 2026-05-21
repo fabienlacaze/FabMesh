@@ -1,6 +1,4 @@
-[submodule "external/CRM"]
-	path = external/CRM
-	url = https://github.com/thu-ml/CRM
-[submodule "external/MV-Adapter"]
-	path = external/MV-Adapter
-	url = https://github.com/huanngzh/MV-Adapter
+; No git submodules: all external dependencies (Hi3DGen, UniRig,
+; StableFast3D, TRELLIS2_win, MV-Adapter) are cloned locally on first
+; run by the install script, not committed. Keeping this file empty
+; rather than removing it so `git submodule status` stays quiet.

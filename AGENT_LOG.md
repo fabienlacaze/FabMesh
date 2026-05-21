@@ -10,6 +10,50 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-21 (later) — Audit fixes
+
+Audit complet du logiciel a remonté 3 prio + 4 mineurs. Tous fixés
+sur backup branch `backup-pre-audit-fixes-20260521-224130`.
+
+**P1 — SF3D retiré** (licence Stability AI Community = NC > $1M, pas
+commercial-safe pour Steam/Fab). Retiré du selector `index2.html:298`,
+fallback dans `main.js` rerouté vers `trellis2_native`. SF3D=='engine'
+explicit dans une request legacy logge un warn et reroute.
+
+**P2 — VRAM cleanup** dans `face_inpaint_atlas.py` (del pipe +
+empty_cache après SDXL inpaint, ~6 GB libérés) et `texture_upscale.py`
+(del upsampler, model, ~2 GB libérés). Évite l'OOM RTX 5080 quand on
+enchaine Face Fix + Ultra HD.
+
+**P3 — Submodules** : `.gitmodules` listait `external/CRM` (n'existe
+plus) et `external/MV-Adapter` (jamais `git add`). Aligné sur le
+pattern des autres externals (clone-on-first-run, non-committé) —
+fichier vidé + `external/MV-Adapter/` ajouté au `.gitignore`.
+
+**Bugs mineurs** :
+- `face_inpaint_atlas.py:projection`: bbox vertex→screen suppose mesh
+  dans `[-0.5, 0.5]`. Remplacé par normalisation explicite via mesh
+  bounding-box → fonctionne quelle que soit l'échelle du GLB.
+- `face_inpaint_atlas.py:main`: ajouté `assert input_abs != output_abs`
+  (sortie code 2) pour éviter le foot-gun d'un overwrite en place.
+- `face_inpaint_atlas.py:docstring`: doc disait MediaPipe, le code
+  utilise OpenCV Haar — corrigé.
+- `texture_upscale.py:weights`: ajouté SHA-256 pin pour
+  `RealESRGAN_x4plus.pth` (hash réel calculé sur la copie locale,
+  vérifié 4fa0d389...). Refuse de charger un .pth altéré (.pth = pickle
+  Python = RCE potentielle). `x2plus` hash TODO (skip + WARN si jamais
+  téléchargé).
+- `generate_back_view.py:45`: import `_make_back_skeleton` cassait si
+  CWD ≠ `scripts/`. Ajouté `sys.path.insert(0, _script_dir)` avant
+  l'import.
+
+Non-bloquant restant : 45 branches `backup-*` locales à nettoyer un
+jour, et les submodules-non-vrais (Hi3DGen/UniRig/StableFast3D) qui
+sortent en "modified content" sur `git status` à cause de venvs locaux
+— pas committable, pas un soucis fonctionnel.
+
+---
+
 ## 2026-05-21 — Option D: SDXL face inpaint on baseColor atlas
 
 User asked for option D after option A (1536_cascade): SDXL face inpaint
