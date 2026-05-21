@@ -38,10 +38,13 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
 
     # Load OpenPose skeleton (T-pose back) — generated once by
     # scripts/_make_back_skeleton.py.
-    skel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              '_back_tpose_skeleton.png')
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    skel_path = os.path.join(_script_dir, '_back_tpose_skeleton.png')
     if not os.path.exists(skel_path):
-        # Fallback: regenerate
+        # Fallback: regenerate. Must ensure scripts/ is on sys.path
+        # because main.js can launch us from any CWD.
+        if _script_dir not in sys.path:
+            sys.path.insert(0, _script_dir)
         from _make_back_skeleton import make_tpose_back
         make_tpose_back().save(skel_path)
     skel_img = Image.open(skel_path).convert('RGB')

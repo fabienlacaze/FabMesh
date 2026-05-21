@@ -20,6 +20,7 @@ Usage:
         [--scale 2] [--model x4plus] [--tile 512]
 """
 import argparse
+import hashlib
 import os
 import sys
 import time
@@ -30,6 +31,31 @@ from PIL import Image
 
 def log(msg):
     print(f'[tex-upscale] {msg}', flush=True)
+
+
+# SHA-256 of the official Real-ESRGAN release weights (verified against
+# the xinntao/Real-ESRGAN GitHub release page). Pinning these prevents
+# a MITM on the unsigned HTTPS download from swapping in a poisoned
+# .pth (PyTorch checkpoint = arbitrary pickle code = RCE).
+WEIGHTS_SHA256 = {
+    # Verified against the live release weight on 2026-05-21.
+    'RealESRGAN_x4plus':
+        '4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1',
+    # x2plus hash not yet captured — first download will skip the
+    # check and log a WARN. Once verified, add the digest here.
+}
+
+
+def _verify_weight_sha256(path, expected):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    got = h.hexdigest()
+    if got != expected:
+        raise RuntimeError(
+            f'weight sha256 mismatch on {path}: got {got}, '
+            f'expected {expected} (possible MITM on download)')
 
 
 def upscale_atlas(img: Image.Image, scale=2, model_name='RealESRGAN_x4plus',
@@ -56,6 +82,19 @@ def upscale_atlas(img: Image.Image, scale=2, model_name='RealESRGAN_x4plus',
         }
         urlretrieve(urls[model_name], weight_path)
         log(f'  downloaded {os.path.getsize(weight_path)} bytes')
+    # Verify SHA-256 every load (cheap on a 70 MB file vs. shipping
+    # a poisoned pickle to every user).
+    expected = WEIGHTS_SHA256.get(model_name)
+    if expected:
+        try:
+            _verify_weight_sha256(weight_path, expected)
+        except RuntimeError as e:
+            log(f'WARN: {e}')
+            log('  removing tampered weight, please rerun to redownload')
+            os.remove(weight_path)
+            sys.exit(3)
+    else:
+        log(f'WARN: no pinned sha256 for {model_name}; integrity check skipped')
 
     if 'x4plus' in model_name:
         net_scale = 4
@@ -79,6 +118,14 @@ def upscale_atlas(img: Image.Image, scale=2, model_name='RealESRGAN_x4plus',
     arr_bgr = arr[..., ::-1].copy()
     out_bgr, _ = upsampler.enhance(arr_bgr, outscale=scale)
     out_rgb = out_bgr[..., ::-1]
+
+    # Free VRAM — Real-ESRGAN keeps ~2 GB of RRDB blocks resident.
+    try:
+        del upsampler, model
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
     return Image.fromarray(out_rgb)
 
 

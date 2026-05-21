@@ -55,6 +55,10 @@ external/TRELLIS2_win/.venv/
 external/TRELLIS2_win/src/
 external/TRELLIS2_win/_dbg_*.npy
 external/TRELLIS2_win/test_*.py
+# Vendored externals (clone-on-first-run pattern, not committed).
+# Matches how Hi3DGen / UniRig / StableFast3D / TRELLIS2_win are
+# handled — local checkout, no git submodule.
+external/MV-Adapter/
 
 # Isolated venv for MV-Adapter (diffusers 0.30 + torch cu128, ~5 GB)
 .venv-mvadapter/

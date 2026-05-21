@@ -3346,19 +3346,18 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
       // Step 2: Convert image to 3D (default: Stable Fast 3D — native PBR textures)
       const meshFilename = `${safeName}_${stage.name}_${timestamp}.glb`;
       const meshPath = path.join(MESHES_DIR, meshFilename);
-      let selectedEngine = engine || 'sf3d';
+      let selectedEngine = engine || 'trellis';
+      if (selectedEngine === 'sf3d') selectedEngine = 'trellis';
       const bridgeScripts = {
         'local':   path.join(__dirname, '..', '..', 'scripts', 'local_triposr_bridge.py'),
-        'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
         'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
       };
-      const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['sf3d'];
+      const bridgeScript = bridgeScripts[selectedEngine] || bridgeScripts['trellis'];
       const argsMap = {
         'local':   [bridgeScript, imgPath, meshPath, '512'],
-        'sf3d':    [bridgeScript, imgPath, meshPath, '1024', '-1', 'none'],
         'trellis': [bridgeScript, imgPath, meshPath, '0.95', '1024']
       };
-      const args = argsMap[selectedEngine] || argsMap['sf3d'];
+      const args = argsMap[selectedEngine] || argsMap['trellis'];
 
       try {
         await new Promise((resolve, reject) => {
@@ -3603,11 +3602,14 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2FaceFix, trellis2UltraHD, trellis2Preset, assetType }) => {
   let imagePath = _imagePath;
   let engine = _engine;
-  // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
-  // child_ip45_2view-style pipeline (front+back projected via texture_project,
-  // with FRAME_FIX, AUTOFIT, weld_uv) instead of single-view SF3D + Z123.
-  const useTwoView = engine === 'sf3d' && imagePathBack
-                     && fs.existsSync(imagePathBack);
+  // SF3D engine disabled at the UI level — Stability AI Community license
+  // is non-commercial above $1M rev. Any legacy project still requesting
+  // sf3d is silently rerouted to trellis2_native (commercial-safe default).
+  if (engine === 'sf3d') {
+    log.warn('main', 'engine=sf3d requested but disabled (NC license); rerouting to trellis2_native');
+    engine = 'trellis2_native';
+  }
+  const useTwoView = false;
 
   // PRE-PROCESS: auto-rectify the source image to a canonical view.
   // - assetType='character' -> strict orthographic front (good for MV-Adapter
@@ -3669,7 +3671,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py'),
       'meshy':   path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py')
     };
-    const bridgeScript = bridgeScripts[engine] || bridgeScripts['sf3d'];
+    const bridgeScript = bridgeScripts[engine] || bridgeScripts['trellis2_native'];
 
     // SF3D args: <img> <out> <tex_res> <vertex_count> <remesh> <subdivide_levels>
     const sf3dTexRes = String(textureSize || 1024);
@@ -3690,7 +3692,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
-    const args = argsMap[engine] || argsMap['sf3d'];
+    const args = argsMap[engine] || argsMap['trellis2_native'];
 
     // Meshy requires an API key — fail fast with a clear message rather than
     // waiting for the Python bridge to explode on an empty argv.
@@ -3720,7 +3722,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
       'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
-    const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['sf3d'];
+    const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['trellis2_native'];
 
     console.log('IMAGE-TO-3D fixedArgs:', JSON.stringify(fixedArgs));
     fs.writeFileSync(path.join(__dirname, '..', '..', 'last_error.log'), `imagePath: ${imagePath}\nfixedArgs: ${JSON.stringify(fixedArgs)}\n`);
