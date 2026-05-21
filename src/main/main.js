@@ -461,6 +461,18 @@ function sdxlServerCall(endpoint, payload) {
   });
 }
 
+// First-run state: the wizard writes setup_state.json into the user-data
+// folder when setup completes. Until that file exists, every launch goes
+// through the wizard. Easy to inspect/reset manually for debugging.
+const SETUP_STATE_FILE = path.join(app.getPath('userData'), 'setup_state.json');
+function isSetupComplete() {
+  try {
+    if (!fs.existsSync(SETUP_STATE_FILE)) return false;
+    const s = JSON.parse(fs.readFileSync(SETUP_STATE_FILE, 'utf-8'));
+    return !!(s && s.completed_at);
+  } catch (_) { return false; }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -478,7 +490,10 @@ function createWindow() {
     show: false
   });
 
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
+  // Route to the wizard on first launch, to the main app afterwards.
+  const startPage = isSetupComplete() ? 'index2.html' : 'wizard.html';
+  log.info('main', `loading ${startPage} (setup ${isSetupComplete() ? 'done' : 'pending'})`);
+  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', startPage));
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.setMenuBarVisibility(false);
 
@@ -4665,6 +4680,122 @@ ipcMain.handle('create-project-from-mesh', (event, { projectName, meshPath, mesh
   data.currentVersion = 0;
   saveVersions(projectName, data);
   return data;
+});
+
+// =====================================================================
+// First-run wizard IPC handlers
+// =====================================================================
+// All wizard:* IPC calls live here. Keep the surface minimal — every
+// extra channel is one more thing to validate.
+ipcMain.handle('wizard:detect-hardware', async () => {
+  const script = path.join(__dirname, '..', '..', 'scripts', 'hw_detect.py');
+  return new Promise((resolve, reject) => {
+    execFile('python', [script], { timeout: 30000 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(stderr || err.message));
+      try { resolve(JSON.parse(stdout.trim().split(/\r?\n/).pop())); }
+      catch (e) { reject(new Error('cannot parse hw_detect output: ' + e.message)); }
+    });
+  });
+});
+
+// Manifest of models per mode — keep in sync with what each script actually
+// needs. Sizes are HF download approximations (MB).
+const WIZARD_MODELS = {
+  lite:     [
+    { id: 'trellis2',  label: 'TRELLIS-2 4B',                            repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'blip1',     label: 'BLIP-1 captioning',                       repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990 },
+  ],
+  standard: [
+    { id: 'trellis2',  label: 'TRELLIS-2 4B',                            repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'realvis',   label: 'RealVisXL V4.0 (texture refine)',         repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
+    { id: 'cn_pose',   label: 'ControlNet OpenPose (back-view)',         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
+    { id: 'ipadapter', label: 'IP-Adapter Plus',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
+    { id: 'blip1',     label: 'BLIP-1 captioning',                       repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
+    { id: 'esrgan',    label: 'Real-ESRGAN x4 (Ultra HD)',               repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
+  ],
+  full:     [
+    { id: 'trellis2',  label: 'TRELLIS-2 4B (1536_cascade)',             repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'realvis',   label: 'RealVisXL V4.0 + Inpaint',                repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
+    { id: 'sdxl_inp',  label: 'SDXL Inpaint (face fix)',                 repo: 'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', size_mb: 6500 },
+    { id: 'cn_pose',   label: 'ControlNet OpenPose',                     repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
+    { id: 'ipadapter', label: 'IP-Adapter Plus',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
+    { id: 'florence2', label: 'Florence-2 large (caption)',              repo: 'microsoft/Florence-2-large',                     size_mb: 1700 },
+    { id: 'blip1',     label: 'BLIP-1 captioning (fallback)',            repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990  },
+    { id: 'esrgan',    label: 'Real-ESRGAN x4 (Ultra HD)',               repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
+  ],
+};
+
+ipcMain.handle('wizard:download-plan', (_e, mode) => {
+  const items = WIZARD_MODELS[mode] || [];
+  const total_mb = items.reduce((s, x) => s + x.size_mb, 0);
+  return { mode, items, total_mb };
+});
+
+ipcMain.handle('wizard:start-download', async (event, mode) => {
+  const items = WIZARD_MODELS[mode] || [];
+  if (!items.length) return { skipped: true };
+  // We delegate the actual snapshot_download() to a small Python helper
+  // that knows about HuggingFace's resume + cache, and streams JSONL
+  // progress lines to our stdout listener.
+  const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_download.py');
+  return new Promise((resolve, reject) => {
+    const proc = execFile('python', [script, '--mode', mode], {
+      timeout: 0, maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    }, (err) => err ? reject(new Error(err.message)) : resolve({ ok: true }));
+    let buf = '';
+    proc.stdout?.on('data', (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const p = JSON.parse(line);
+          event.sender.send('wizard:download-progress', p);
+        } catch (_) {}
+      }
+    });
+  });
+});
+
+ipcMain.handle('wizard:final-test', async (event, mode) => {
+  // Cloud mode has nothing to test locally — succeed immediately.
+  if (mode === 'cloud') return { success: true, duration_s: 0 };
+  const script = path.join(__dirname, '..', '..', 'scripts', 'wizard_smoke_test.py');
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const proc = execFile('python', [script, '--mode', mode], {
+      timeout: 180000, maxBuffer: 5 * 1024 * 1024,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    }, (err) => {
+      const duration_s = Math.round((Date.now() - t0) / 1000);
+      if (err) return resolve({ success: false, duration_s, error: err.message });
+      resolve({ success: true, duration_s });
+    });
+    proc.stdout?.on('data', d => event.sender.send('wizard:test-log', d.toString()));
+    proc.stderr?.on('data', d => event.sender.send('wizard:test-log', '[stderr] ' + d.toString()));
+  });
+});
+
+ipcMain.handle('wizard:complete', (_e, state) => {
+  try {
+    fs.mkdirSync(path.dirname(SETUP_STATE_FILE), { recursive: true });
+    fs.writeFileSync(SETUP_STATE_FILE, JSON.stringify({
+      completed_at: new Date().toISOString(),
+      mode: state?.mode || null,
+      hw: state?.hw || null,
+    }, null, 2));
+    log.info('wizard', `setup completed (mode=${state?.mode})`);
+  } catch (e) {
+    log.warn('wizard', `cannot persist setup_state: ${e.message}`);
+  }
+  // Swap to the main app
+  if (mainWindow) {
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
+  }
+  return { ok: true };
 });
 
 ipcMain.handle('get-config', () => loadConfig());

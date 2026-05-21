@@ -10,6 +10,46 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-21 (wizard v1) — First-run setup wizard
+
+Première brique de la stratégie "installer bulletproof" : un wizard
+5 étapes qui démarre au tout premier lancement et garantit que
+l'app fonctionne avant de la passer à l'user.
+
+**Étapes** : Welcome → Detect (hw scan) → Mode (full/standard/lite/cloud)
+→ Download (modèles via HF + Real-ESRGAN) → Test (smoke test CUDA).
+
+**Files ajoutés** :
+- `src/renderer/wizard.html` + `wizard.css` + `wizard.js` — UI 5 steps.
+- `scripts/hw_detect.py` — détection GPU (nvidia-smi + wmic AMD/Intel),
+  VRAM, driver NVIDIA, RAM, disk, bandwidth HuggingFace.
+- `scripts/wizard_download.py` — snapshot_download HF avec resume +
+  cache partagé, streaming JSONL progress.
+- `scripts/wizard_smoke_test.py` — checks CUDA / diffusers / BLIP cache
+  en ~5s sans charger les gros pipes.
+
+**Files modifiés** :
+- `src/main/main.js` — `isSetupComplete()` + route entre `wizard.html`
+  et `index2.html` selon `userData/setup_state.json`. 5 IPC handlers
+  `wizard:*` (detect-hardware / download-plan / start-download /
+  final-test / complete).
+- `src/main/preload.js` — `window.wizardAPI` exposé au renderer wizard.
+
+**Test sur RTX 5080** : detection ~10s (warning bandwidth 0 — l'URL
+HF de test ne répond pas tout le temps, non-bloquant). Smoke test
+réussit en 4.9s. Mode auto-recommandé "standard" pour VRAM 16303 MB
+(juste sous le seuil 16384 du mode full — comportement attendu, marge
+de sécurité).
+
+**Reste à faire** (prochaines étapes wizard) :
+- electron-builder NSIS config pour packager l'installer `.exe`
+- VC++ 2022 redist bundled
+- Sentry crash reporting
+- Tests sur 8 machines variées
+- Code signing certificate Sectigo (~200€/an)
+
+---
+
 ## 2026-05-21 (later 2) — Audit-2 fixes
 
 Re-audit du logiciel a remonté 3 nouveaux CRITIQUE + 3 HAUT + 2 MOYEN,

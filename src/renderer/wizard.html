@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FabMesh — First-Run Setup</title>
+<link rel="stylesheet" href="wizard.css">
+</head>
+<body>
+<div class="wiz-shell">
+  <header class="wiz-header">
+    <div class="wiz-logo">FabMesh</div>
+    <div class="wiz-steps">
+      <span class="wiz-step active" data-step="welcome">1. Welcome</span>
+      <span class="wiz-step" data-step="detect">2. System</span>
+      <span class="wiz-step" data-step="mode">3. Mode</span>
+      <span class="wiz-step" data-step="download">4. Download</span>
+      <span class="wiz-step" data-step="test">5. Test</span>
+    </div>
+  </header>
+
+  <main class="wiz-main">
+    <!-- STEP 1: WELCOME -->
+    <section class="wiz-page active" id="page-welcome">
+      <h1>Welcome to FabMesh</h1>
+      <p class="lead">Generate 3D meshes from a single image, locally on your GPU.</p>
+      <p>The setup wizard will:</p>
+      <ul>
+        <li>Check your hardware for compatibility</li>
+        <li>Pick the right install mode for your machine</li>
+        <li>Download the AI models (7 to 22 GB depending on mode)</li>
+        <li>Run a quick test to confirm everything works</li>
+      </ul>
+      <p class="small">All models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).</p>
+      <div class="wiz-actions">
+        <button class="btn-primary" data-next="detect">Get started</button>
+      </div>
+    </section>
+
+    <!-- STEP 2: DETECT -->
+    <section class="wiz-page" id="page-detect">
+      <h1>Checking your system</h1>
+      <div id="detect-status" class="status">Detecting hardware...</div>
+      <div id="detect-results" class="results hidden">
+        <div class="result-row"><span class="lbl">GPU</span><span class="val" id="r-gpu">–</span></div>
+        <div class="result-row"><span class="lbl">VRAM</span><span class="val" id="r-vram">–</span></div>
+        <div class="result-row"><span class="lbl">Driver</span><span class="val" id="r-driver">–</span></div>
+        <div class="result-row"><span class="lbl">RAM</span><span class="val" id="r-ram">–</span></div>
+        <div class="result-row"><span class="lbl">Disk free</span><span class="val" id="r-disk">–</span></div>
+        <div class="result-row"><span class="lbl">Bandwidth</span><span class="val" id="r-bw">–</span></div>
+      </div>
+      <div id="detect-warnings" class="warnings hidden"></div>
+      <div class="wiz-actions">
+        <button class="btn-secondary" data-back="welcome">Back</button>
+        <button class="btn-primary" data-next="mode" id="btn-detect-next" disabled>Continue</button>
+      </div>
+    </section>
+
+    <!-- STEP 3: MODE -->
+    <section class="wiz-page" id="page-mode">
+      <h1>Choose install mode</h1>
+      <p>Based on your hardware, we recommend the highlighted option.</p>
+      <div class="mode-grid">
+        <label class="mode-card" data-mode="full">
+          <input type="radio" name="mode" value="full">
+          <div class="mode-title">Full <span class="mode-size">~22 GB</span></div>
+          <div class="mode-desc">All features: face fix, multi-view, ultra HD. Needs 16+ GB VRAM.</div>
+        </label>
+        <label class="mode-card" data-mode="standard">
+          <input type="radio" name="mode" value="standard">
+          <div class="mode-title">Standard <span class="mode-size">~15 GB</span></div>
+          <div class="mode-desc">Full local generation + back-view + texture refine. Needs 12+ GB VRAM.</div>
+        </label>
+        <label class="mode-card" data-mode="lite">
+          <input type="radio" name="mode" value="lite">
+          <div class="mode-title">Lite <span class="mode-size">~7 GB</span></div>
+          <div class="mode-desc">Basic mesh generation only. Needs 6+ GB VRAM.</div>
+        </label>
+        <label class="mode-card" data-mode="cloud">
+          <input type="radio" name="mode" value="cloud">
+          <div class="mode-title">Cloud only <span class="mode-size">0 GB local</span></div>
+          <div class="mode-desc">No download. Pay-as-you-go (€0.20 / mesh). Works on any PC.</div>
+        </label>
+      </div>
+      <div class="wiz-actions">
+        <button class="btn-secondary" data-back="detect">Back</button>
+        <button class="btn-primary" data-next="download" id="btn-mode-next" disabled>Continue</button>
+      </div>
+    </section>
+
+    <!-- STEP 4: DOWNLOAD -->
+    <section class="wiz-page" id="page-download">
+      <h1>Downloading models</h1>
+      <p>You can use FabMesh as soon as the first model is ready. The rest continues in the background.</p>
+      <div id="dl-list" class="dl-list"></div>
+      <div class="dl-summary">
+        <div><span id="dl-done">0</span> / <span id="dl-total">0</span> MB</div>
+        <div><span id="dl-speed">0</span> MB/s &middot; ETA <span id="dl-eta">–</span></div>
+      </div>
+      <div class="wiz-actions">
+        <button class="btn-secondary" data-back="mode" id="btn-dl-back">Back</button>
+        <button class="btn-primary" data-next="test" id="btn-dl-next" disabled>Continue</button>
+      </div>
+    </section>
+
+    <!-- STEP 5: TEST -->
+    <section class="wiz-page" id="page-test">
+      <h1>Final test</h1>
+      <p>Running a tiny generation to confirm everything works.</p>
+      <div id="test-status" class="status">Preparing…</div>
+      <pre id="test-log" class="test-log"></pre>
+      <div class="wiz-actions">
+        <button class="btn-primary" id="btn-launch" disabled>Launch FabMesh</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="wizard.js"></script>
+</body>
+</html>
