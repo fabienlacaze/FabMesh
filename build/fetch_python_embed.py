@@ -31,7 +31,7 @@ ZIP_URL = (
 # Pinned sha256 for python-3.11.9-embed-amd64.zip (python.org official).
 # Update both URL + hash together when bumping versions.
 EXPECTED_SHA256 = (
-    'fbc73a0b0eee3a3afb049f5d3d196cf311b4d8e7d63c8eba6925a657ddedf21d'
+    '009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400bf83cfd3b'
 )
 GETPIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
 

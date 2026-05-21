@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "electron": "^31.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "com.fabmesh.app",
@@ -48,12 +48,16 @@
       {
         "from": "scripts",
         "to": "scripts",
-        "filter": ["**/*.py"]
+        "filter": [
+          "**/*.py"
+        ]
       },
       {
         "from": "build/python-embed",
         "to": "python-embed",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "build/vc_redist.x64.exe",
@@ -64,7 +68,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "icon.ico",
