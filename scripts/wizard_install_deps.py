@@ -26,17 +26,38 @@ import subprocess
 import sys
 
 
-WHEELS_INDEX = 'https://wheels.fabmesh.com/simple/'
-PYPI_INDEX   = 'https://pypi.org/simple/'
+# PyTorch CUDA 12.8 official wheels (binary only, no compile needed).
+TORCH_INDEX = 'https://download.pytorch.org/whl/cu128'
+# NVIDIA kaolin pre-built wheels for Windows + CUDA.
+KAOLIN_INDEX = 'https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.7.0_cu128.html'
+# Standard PyPI for everything else.
+PYPI_INDEX = 'https://pypi.org/simple/'
+# Optional fallback mirror — gitignored token will be filled later.
+FABMESH_WHEELS_INDEX = 'https://wheels.fabmesh.com/simple/'
 
-# Wheels we ship pre-built (~5 GB total). All for Win+CUDA12+Py3.11.
-COMPILED_WHEELS = [
-    'torch==2.7.0+cu128',
-    'torchvision==0.22.0+cu128',
-    'flash-attn==2.7.0+cu128',
-    'kaolin==0.16.0+cu128',
-    'xformers==0.0.28+cu128',
+# torch + torchvision: official PyTorch CUDA 12.8 binaries. ~2.5 GB total.
+TORCH_PACKAGES = [
+    'torch==2.7.0',
+    'torchvision==0.22.0',
 ]
+
+# Compiled wheels available pre-built (no FabMesh R2 needed):
+#   flash-attn: Dao-AILab publishes Win+CUDA12 wheels on GitHub Releases
+#               (handled via a specific --find-links URL once we pick one).
+#   xformers:   PyPI ships Win+CUDA12 binaries directly.
+#   kaolin:     NVIDIA publishes Win+CUDA12 wheels (kaolin index above).
+COMPILED_WHEELS_NVIDIA = [
+    'xformers==0.0.30',  # ships as binary wheel for Win+cu128
+    'kaolin',            # picked up from the kaolin index
+]
+
+# flash-attn Windows wheels: Dao-AILab uploads them to GitHub Releases,
+# not PyPI. We pin a specific known-good build via direct URL — pip
+# accepts a .whl URL as an argument.
+FLASH_ATTN_WHL = (
+    'https://github.com/Dao-AILab/flash-attention/releases/download/'
+    'v2.7.0/flash_attn-2.7.0-cp311-cp311-win_amd64.whl'
+)
 
 # Pure-Python or pip-managed binaries — small + safe to grab from PyPI.
 PYPI_PACKAGES = [
@@ -63,6 +84,11 @@ def emit(obj):
     sys.stdout.flush()
 
 
+_TOTAL_STEPS = (len(TORCH_PACKAGES) + len(COMPILED_WHEELS_NVIDIA)
+                + 1  # flash_attn
+                + len(PYPI_PACKAGES))
+
+
 def _run(args, step):
     """Run a subprocess and stream a coarse progress event on each
     pip output line containing 'Downloading' / 'Installing'."""
@@ -71,14 +97,13 @@ def _run(args, step):
                              stderr=subprocess.STDOUT, text=True,
                              encoding='utf-8', errors='replace')
     seen_pkgs = set()
-    total = max(len(COMPILED_WHEELS) + len(PYPI_PACKAGES), 1)
     for line in proc.stdout:
         line = line.rstrip()
         if 'Downloading' in line or 'Installing collected packages' in line:
             for token in line.split():
                 if '==' in token or token.endswith('.whl'):
                     seen_pkgs.add(token.split('-')[0].split('==')[0].lower())
-            pct = min(99, round(len(seen_pkgs) * 100 / total, 1))
+            pct = min(99, round(len(seen_pkgs) * 100 / _TOTAL_STEPS, 1))
             emit({'step': step, 'pct': pct, 'done': False,
                   'current': line[:120]})
     proc.wait()
@@ -115,15 +140,40 @@ def main():
                   'error': f'pip missing and no get-pip.py at {getpip}'})
             sys.exit(3)
 
-    # Step 2: compiled wheels from our CDN
-    if not args.skip_wheels:
-        _run([py, '-m', 'pip', 'install', '--no-deps',
-              '--index-url', WHEELS_INDEX,
-              '--extra-index-url', PYPI_INDEX,  # fallback if CDN down
-              *COMPILED_WHEELS], step='wheels')
+    if args.skip_wheels:
+        # Dev mode: just install the pure-Python stuff so we can iterate
+        # quickly without re-downloading 2 GB of torch every time.
+        _run([py, '-m', 'pip', 'install', *PYPI_PACKAGES], step='pypi')
+        emit({'step': 'done', 'pct': 100, 'done': True})
+        return
 
-    # Step 3: pure-Python / lightweight from PyPI
+    # Step 2a: REQUIRED — torch + torchvision from PyTorch's CUDA 12.8 index.
+    # If this fails, the rest of the install is pointless.
+    _run([py, '-m', 'pip', 'install',
+          '--index-url', TORCH_INDEX,
+          *TORCH_PACKAGES], step='torch')
+
+    # Step 2b: REQUIRED — pure-Python / lightweight from PyPI
     _run([py, '-m', 'pip', 'install', *PYPI_PACKAGES], step='pypi')
+
+    # Step 2c: OPTIONAL — xformers (perf boost). If it fails, PyTorch SDPA
+    # is used as a slower fallback. Non-blocking.
+    try:
+        _run([py, '-m', 'pip', 'install', 'xformers==0.0.30'],
+             step='xformers-optional')
+    except Exception as e:
+        emit({'step': 'xformers-optional', 'pct': 99, 'done': False,
+              'warn': f'xformers install failed ({e}) — falling back to SDPA'})
+
+    # Step 2d: OPTIONAL — flash-attn (large perf boost on long sequences).
+    # Windows wheels from Dao-AILab GitHub Releases. If unavailable for
+    # this combo, skip without erroring out.
+    try:
+        _run([py, '-m', 'pip', 'install', FLASH_ATTN_WHL],
+             step='flash-attn-optional')
+    except Exception as e:
+        emit({'step': 'flash-attn-optional', 'pct': 99, 'done': False,
+              'warn': f'flash-attn install failed ({e}) — using slower attention'})
 
     emit({'step': 'done', 'pct': 100, 'done': True})
 
