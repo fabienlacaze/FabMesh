@@ -1,6 +1,19 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // ----------------------------------------------------------
+// Wizard API (first-run setup only)
+// ----------------------------------------------------------
+contextBridge.exposeInMainWorld('wizardAPI', {
+  detectHardware: () => ipcRenderer.invoke('wizard:detect-hardware'),
+  getDownloadPlan: (mode) => ipcRenderer.invoke('wizard:download-plan', mode),
+  startDownload: (mode) => ipcRenderer.invoke('wizard:start-download', mode),
+  onDownloadProgress: (cb) => ipcRenderer.on('wizard:download-progress', (_e, p) => cb(p)),
+  runFinalTest: (mode) => ipcRenderer.invoke('wizard:final-test', mode),
+  onTestLog: (cb) => ipcRenderer.on('wizard:test-log', (_e, line) => cb(line)),
+  completeSetup: (state) => ipcRenderer.invoke('wizard:complete', state),
+});
+
+// ----------------------------------------------------------
 // Test/Control API bridge
 // ----------------------------------------------------------
 // Minimal ipc bridge used by src/renderer/test_api_client.js so
