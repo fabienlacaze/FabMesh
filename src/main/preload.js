@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('wizardAPI', {
   runFinalTest: (mode) => ipcRenderer.invoke('wizard:final-test', mode),
   onTestLog: (cb) => ipcRenderer.on('wizard:test-log', (_e, line) => cb(line)),
   completeSetup: (state) => ipcRenderer.invoke('wizard:complete', state),
+  openExternal: (url) => ipcRenderer.invoke('wizard:open-external', url),
+  getVersion: () => ipcRenderer.invoke('wizard:get-version'),
+  resetSetup: () => ipcRenderer.invoke('wizard:reset-setup'),
+  getMode: () => ipcRenderer.invoke('wizard:get-mode'),
+  cancel: () => ipcRenderer.invoke('wizard:cancel'),
+  installDeps: () => ipcRenderer.invoke('wizard:install-deps'),
+  onInstallProgress: (cb) => ipcRenderer.on('wizard:install-progress', (_e, p) => cb(p)),
 });
 
 // ----------------------------------------------------------
@@ -35,6 +42,8 @@ contextBridge.exposeInMainWorld('__fabmeshTest', {
 });
 
 contextBridge.exposeInMainWorld('meshyAPI', {
+  reconfigureFabmesh: () => ipcRenderer.invoke('wizard:reset-setup'),
+  uninstallFabmesh: () => ipcRenderer.invoke('app:uninstall'),
   generateFromPrompt: (opts) => ipcRenderer.invoke('generate-from-prompt', opts),
   generateFromImage: (opts) => ipcRenderer.invoke('generate-from-image', opts),
   generateImages: (opts) => ipcRenderer.invoke('generate-images', opts),

@@ -128,15 +128,15 @@ try {
 // saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
-  'local-flux':     'RealVis XL (local)',
-  // 3D engines — sf3d / local are non-commercial, hidden from the
-  // selector and silently rerouted to trellis2_native at dispatch.
-  'sf3d':           'TRELLIS-2 native (rerouted from SF3D, NC license)',
-  'local':          'TRELLIS-2 native (rerouted from TripoSR, NC license)',
-  'trellis2_native':'TRELLIS-2 native (MIT, Microsoft)',
-  'hi3dgen':        'Hi3DGen (MIT, ByteDance+CUHK)',
-  'trellis':        'Trellis 2 (MIT)',
-  'meshy':          'Meshy.ai (cloud, CC-BY 4.0)',
+  'local-flux':     'FabMesh Image Engine (local)',
+  // 3D engines — sf3d / local legacy IDs are silently rerouted to
+  // the native engine at dispatch.
+  'sf3d':           'FabMesh 3D Native (rerouted)',
+  'local':          'FabMesh 3D Native (rerouted)',
+  'trellis2_native':'FabMesh 3D Native',
+  'hi3dgen':        'FabMesh Legacy (2-stage)',
+  'trellis':        'FabMesh 3D Engine',
+  'meshy':          'Cloud provider (Meshy.ai)',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
@@ -1839,7 +1839,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
       Image: (mvImagePath || '').split(/[\\/]/).pop(),
       Mode: '2-view (back photo)',
     }, expectedMs);
-    showToast('Generating back photo (RealVis + IPAdapter)...', 'info', 5000);
+    showToast('Generating back photo...', 'info', 5000);
     try {
       const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
                         || document.getElementById('ws-prompt')?.value || '';
@@ -1869,7 +1869,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
   const expectedMs = 70000 + (harmonize ? 30000 : 0) + (upscale ? 10000 : 0);
   const job = pushJob(`Multi-views: ${p.name}`, null, {
     Image: (mvImagePath || '').split(/[\\/]/).pop(),
-    Mode: '6 views (MV-Adapter)',
+    Mode: '6 views',
     Harmonize: harmonize ? 'yes' : 'no',
     Upscale: upscale ? 'yes' : 'no',
   }, expectedMs);
@@ -3377,7 +3377,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       Engine: engineLabel(engine),
       Count: count,
       Steps: steps,
-      'Multi-view': mv6view ? '6 views (MV-Adapter)' : (multiView ? '2 views (back)' : 'no'),
+      'Multi-view': mv6view ? '6 views' : (multiView ? '2 views (back)' : 'no'),
       'Construction stages': buildStages ? 'yes' : 'no',
       Prompt: userPrompt,
     }, expectedMs);
@@ -3421,7 +3421,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
             }
           }, 500);
           try {
-            showToast('Generating back photos (RealVis + IPAdapter)...', 'info', 10000);
+            showToast('Generating back photos...', 'info', 10000);
             // Use the RAW user prompt (subject only, no asset-style template)
             // for the back view. The enhanced prompt's 'RTS unit, T-pose
             // neutral stance, plain white background' tokens hurt IPAdapter
@@ -3485,7 +3485,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
             if (_np > job.progress) { job.progress = _np; renderJobs(); }
           }, 500);
           try {
-            showToast('Generating 6 views (MV-Adapter)...', 'info', 8000);
+            showToast('Generating 6 views...', 'info', 8000);
             for (const imgPath of r.images) {
               const mvRes = await API.generateMultiview({
                 imagePath: imgPath,
@@ -9642,6 +9642,44 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   if (API.openLogsFolder) await API.openLogsFolder();
 });
 
+// Reconfigure FabMesh: relaunch the first-time setup wizard. Models on
+// disk and generated meshes are kept; only the "setup done" flag is
+// cleared so the wizard reopens at next launch.
+document.getElementById('set-reconfigure')?.addEventListener('click', async () => {
+  const ok = await customConfirm(
+    'This will reopen the setup wizard so you can change install mode '
+    + 'or re-download a missing model. Your projects and generated meshes '
+    + 'are kept. Continue?',
+    'Reconfigure FabMesh', 'Reconfigure');
+  if (!ok) return;
+  try {
+    await window.meshyAPI.reconfigureFabmesh();
+  } catch (e) {
+    showToast('Reconfigure failed: ' + e.message, 'error');
+  }
+});
+
+// Uninstall FabMesh: launches the Windows NSIS uninstaller. The
+// uninstaller itself asks the user whether to also delete models and
+// settings — we don't ask twice here, just confirm intent and quit.
+document.getElementById('set-uninstall')?.addEventListener('click', async () => {
+  const ok = await customConfirm(
+    'This will launch the Windows uninstaller. You can choose to also '
+    + 'delete the AI models (~17 GB) and your settings in the next '
+    + 'step. Generated meshes in your projects folder are never '
+    + 'touched. Continue?',
+    'Uninstall FabMesh', 'Uninstall');
+  if (!ok) return;
+  try {
+    const r = await window.meshyAPI.uninstallFabmesh();
+    if (!r.ok && r.mode === 'dev') {
+      showToast(r.error, 'warning', 8000);
+    }
+  } catch (e) {
+    showToast('Uninstall failed: ' + e.message, 'error');
+  }
+});
+
 // ============================================================
 // CALIBRATION panel wiring
 // ============================================================
@@ -10732,10 +10770,10 @@ document.getElementById('btn-parental-lock')?.addEventListener('click', togglePa
 document.getElementById('set-kill-sdxl')?.addEventListener('click', async () => {
   try {
     if (API.stopSdxlServer) await API.stopSdxlServer();
-    showToast('SDXL server killed. VRAM freed.', 'success');
+    showToast('AI engine killed. VRAM freed.', 'success');
     setTimeout(refreshPythonStats, 1000);
   } catch(e) {
-    showToast('Kill SDXL failed: ' + e.message, 'error');
+    showToast('Kill AI engine failed: ' + e.message, 'error');
   }
 });
 
@@ -10746,7 +10784,7 @@ document.getElementById('set-kill-python')?.addEventListener('click', async () =
   } catch(_) {}
   state.jobs = state.jobs.filter(j => j.status !== 'running');
   renderJobs();
-  showToast('Processes killed. SDXL preserved.', 'success');
+  showToast('Processes killed. AI engine preserved.', 'success');
   setTimeout(refreshPythonStats, 1000);
 });
 
@@ -10756,7 +10794,7 @@ document.getElementById('set-kill-all')?.addEventListener('click', async () => {
   try { if (API.cancelJob) await API.cancelJob(0); } catch(_) {}
   state.jobs = state.jobs.filter(j => j.status !== 'running');
   renderJobs();
-  showToast('All processes + SDXL killed. VRAM freed.', 'success');
+  showToast('All processes + AI engine killed. VRAM freed.', 'success');
   setTimeout(refreshPythonStats, 1000);
 });
 

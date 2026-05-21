@@ -1,20 +1,90 @@
 {
   "name": "fabmesh",
   "version": "1.0.0",
-  "description": "FabMesh — image-to-3D mesh generator with local AI (Hi3DGen + TRELLIS-2 + Stable Fast 3D).",
+  "description": "FabMesh — image-to-3D mesh generator with local AI.",
   "main": "src/main/main.js",
-  "author": "Fabien Lacaze",
+  "author": {
+    "name": "Fabien Lacaze",
+    "email": "fabien65400@hotmail.fr"
+  },
   "license": "SEE LICENSE IN LICENSE.txt",
   "scripts": {
     "start": "set ELECTRON_RUN_AS_NODE= && electron .",
     "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",
-    "launch": "start.bat"
+    "launch": "start.bat",
+    "build:installer": "electron-builder --win nsis",
+    "build:installer:dir": "electron-builder --win nsis --dir"
   },
   "dependencies": {
     "@google/model-viewer": "^4.2.0",
     "three": "^0.170.0"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.fabmesh.app",
+    "productName": "FabMesh",
+    "copyright": "Copyright © 2026 Fabien Lacaze",
+    "directories": {
+      "output": "dist/installer",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "scripts/**/*.py",
+      "scripts/**/*.png",
+      "icon.png",
+      "icon.ico",
+      "!**/__pycache__",
+      "!**/.venv",
+      "!**/*.pyc",
+      "!**/*.log",
+      "!**/_dbg_*.*",
+      "!**/test_*.py"
+    ],
+    "extraResources": [
+      {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": ["**/*.py"]
+      },
+      {
+        "from": "build/python-embed",
+        "to": "python-embed",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "build/vc_redist.x64.exe",
+        "to": "vc_redist.x64.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "icon.ico",
+      "publisherName": "Fabien Lacaze",
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FabMesh",
+      "uninstallDisplayName": "FabMesh ${version}",
+      "deleteAppDataOnUninstall": false,
+      "include": "build/uninstaller.nsh",
+      "license": "LICENSE.txt",
+      "artifactName": "FabMesh-Setup-${version}.${ext}",
+      "differentialPackage": true
+    }
   }
 }

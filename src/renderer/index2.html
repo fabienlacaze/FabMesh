@@ -78,7 +78,7 @@
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
-                    <option value="local-flux" selected>RealVis XL (local)</option>
+                    <option value="local-flux" selected>FabMesh Image Engine (local)</option>
                     <option value="meshy">Meshy.ai (cloud, needs API key)</option>
                   </select>
                 </div>
@@ -293,8 +293,8 @@
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-3d-engine">
-                      <option value="trellis2_native" selected>TRELLIS-2 native (mesh + PBR in one shot, ~100s, recommended)</option>
-                      <option value="hi3dgen">Hi3DGen + TRELLIS-2 (legacy, 2-stage)</option>
+                      <option value="trellis2_native" selected>FabMesh 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
+                      <option value="hi3dgen">FabMesh Legacy (2-stage geometry + texture)</option>
                       <option value="meshy">Meshy.ai (cloud, license payante)</option>
                     </select>
                   </div>
@@ -316,7 +316,7 @@
                       <option value="1000">1K (low-poly stylized)</option>
                       <option value="3000">3K (mobile game)</option>
                       <option value="5000">5K (mobile HD)</option>
-                      <option value="0" selected>~23K (SF3D native, best texture)</option>
+                      <option value="0" selected>~23K (native, best texture)</option>
                       <option value="20k">~20K</option>
                       <option value="30k">~30K</option>
                       <option value="1">~50K (indie game)</option>
@@ -333,9 +333,9 @@
                     </select>
                   </div>
                   <div id="ws-3d-quality-hint" class="form-hint" style="display:none;">~200K triangles · 1024 px texture</div>
-                  <div id="ws-3d-sf3d-hint" class="form-hint" style="margin-top:2px; display:none;">Texture is baked by SF3D (GPU). Triangles are added via subdivision (CPU, no extra VRAM).</div>
-                  <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (SF3D micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
-                  <div id="ws-3d-hi3dgen-hint" class="form-hint" style="margin-top:2px;">Hi3DGen génère la géom détaillée (92K faces), TRELLIS-2 paint la texture PBR native. Durée ~3 min.</div>
+                  <div id="ws-3d-sf3d-hint" class="form-hint" style="margin-top:2px; display:none;">Texture is baked on the GPU. Triangles are added via subdivision (CPU, no extra VRAM).</div>
+                  <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
+                  <div id="ws-3d-hi3dgen-hint" class="form-hint" style="margin-top:2px;">Legacy mode génère la géom détaillée (92K faces) + texture PBR native. Durée ~3 min.</div>
                   <div class="form-row check-row">
                     <label class="inline-check">
                       <input type="checkbox" id="ws-3d-buildstages" />
@@ -344,7 +344,7 @@
                   </div>
                   <!-- TRELLIS-2 Texturing options (only relevant for Hi3DGen engine) -->
                   <details id="ws-3d-trellis2-opts" style="margin-top:8px; font-size:12px;">
-                    <summary style="cursor:pointer; color:var(--text-muted);">&#9881;&#65039; Advanced texture options (TRELLIS-2)</summary>
+                    <summary style="cursor:pointer; color:var(--text-muted);">&#9881;&#65039; Advanced texture options</summary>
                     <div class="form-row" style="margin-top:6px;">
                       <label style="font-size:11px;">Quality preset</label>
                       <select id="ws-trellis2-preset">
@@ -360,9 +360,9 @@
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:6px;">
-                      <label class="inline-check" style="font-size:11px;" title="Tile-by-tile SDXL refinement that adds micro-details (skin pores, fabric weave, scales, fur). Works best on objects/animals/creatures; less effective on human faces.">
+                      <label class="inline-check" style="font-size:11px;" title="Tile-by-tile detail refinement that adds micro-details (skin pores, fabric weave, scales, fur). Works best on objects/animals/creatures; less effective on human faces.">
                         <input type="checkbox" id="ws-trellis2-refine" />
-                        SDXL refine (+~90s, sharper micro-details)
+                        Detail refine (+~90s, sharper micro-details)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
@@ -378,7 +378,7 @@
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
-                      <label class="inline-check" style="font-size:11px;" title="TRELLIS-2 cascade mode (2-stage generation) + decim 1M faces. Sharper geometry on edges (panel gaps, calandre). Adds ~30s.">
+                      <label class="inline-check" style="font-size:11px;" title="Cascade mode (2-stage generation) + decim 1M faces. Sharper geometry on edges (panel gaps, grilles). Adds ~30s.">
                         <input type="checkbox" id="ws-trellis2-quality-plus" checked />
                         Quality+ (cascade mode, decim 1M, +~30s)
                       </label>
@@ -390,15 +390,15 @@
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
-                      <label class="inline-check" style="font-size:11px;" title="Upscale the baseColor atlas to 8192² via Real-ESRGAN (Apache 2.0, no hallucination). Final GLB ~120 MB. Above Meshy HD parity.">
+                      <label class="inline-check" style="font-size:11px;" title="Upscale the baseColor atlas to 8192² (no hallucination, lossless detail recovery). Final GLB ~120 MB.">
                         <input type="checkbox" id="ws-trellis2-ultra-hd" checked />
-                        Ultra HD 8K texture (+~5min, Real-ESRGAN)
+                        Ultra HD 8K texture (+~5min)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
-                      <label class="inline-check" style="font-size:11px;" title="Post-process the baseColor atlas with SDXL Inpaint on the face zone only. Fixes creepy / blurry faces from TRELLIS-2 on characters. Uses OpenCV face detection + RealVisXL Inpaint (commercial-safe). Strength 0.45.">
+                      <label class="inline-check" style="font-size:11px;" title="Post-process the baseColor atlas to refine the face zone. Fixes blurry or distorted faces on characters. Strength 0.45.">
                         <input type="checkbox" id="ws-trellis2-face-fix" />
-                        Face fix (SDXL inpaint on face zone, +~60s)
+                        Face fix (+~60s)
                       </label>
                     </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
@@ -503,7 +503,7 @@
                         <button id="ws-mesh-fillholes-btn" class="ghost-btn tool-btn">&#9673; Fill Holes</button>
                         <button id="ws-mesh-center-btn" class="ghost-btn tool-btn">&#9678; Center</button>
                         <button id="ws-mesh-retexture-btn" class="ghost-btn tool-btn" title="Quick re-texture via texture_project — projection directe d'une photo, rapide mais limité au front">&#127912; Re-Texture (quick)</button>
-                        <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint via TRELLIS-2-4B native PBR — qualité SOTA, ~90s">&#11088; Re-Texture (TRELLIS-2)</button>
+                        <button id="ws-mesh-trellis2-btn" class="ghost-btn tool-btn" title="Re-paint with native PBR engine — qualité SOTA, ~90s">&#11088; Re-Texture</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -836,7 +836,7 @@
            _activeMultiview which stays in sync with the lightbox). -->
       <div id="lb-toolbox" class="lb-toolbox">
         <div class="lb-toolbox-group-label">AI TOOLS</div>
-        <button class="lb-tool-btn" data-lb-tool="modify" title="Modify with SDXL">&#128736;&#65039; Modify</button>
+        <button class="lb-tool-btn" data-lb-tool="modify" title="Modify with AI">&#128736;&#65039; Modify</button>
         <button class="lb-tool-btn" data-lb-tool="autoinpaint" title="Auto Inpaint">&#129668; Auto Inpaint</button>
         <button class="lb-tool-btn" data-lb-tool="removebg" title="Remove background">&#9986;&#65039; Remove BG</button>
         <button class="lb-tool-btn" data-lb-tool="resolution" title="Change resolution">&#127906; Resolution</button>
@@ -902,22 +902,22 @@
         <div style="display:flex; flex-direction:column; gap:10px; margin:14px 0;">
           <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-2); font-weight:600;">Mode</label>
           <select id="mv-opt-mode" style="width:100%;">
-            <option value="2view">Auto 2-view (RealVis+IPAdapter back photo, ~25s)</option>
-            <option value="6view" selected>6 views (MV-Adapter front/right/back/left/top/bottom, ~70s)</option>
+            <option value="2view">Auto 2-view (back photo, ~25s)</option>
+            <option value="6view" selected>6 views (front/right/back/left/top/bottom, ~70s)</option>
           </select>
           <!-- Sub-options visible only for 6-view mode -->
           <div id="mv-opt-6view-block" style="display:flex; flex-direction:column; gap:10px; padding-left:8px; border-left:2px solid var(--accent);">
             <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
               <input type="checkbox" id="mv-opt-harmonize" checked style="margin-top:3px;" />
               <span>
-                <strong>RealVis img2img harmonize</strong><br/>
-                <span style="color:var(--text-3); font-size:12px;">Passe les 6 vues dans RealVis img2img (strength 0.3) pour récupérer le style photoréaliste. Recommandé. +30s.</span>
+                <strong>AI harmonize</strong><br/>
+                <span style="color:var(--text-3); font-size:12px;">Passe les 6 vues dans l'harmoniseur AI (strength 0.3) pour récupérer le style photoréaliste. Recommandé. +30s.</span>
               </span>
             </label>
             <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
               <input type="checkbox" id="mv-opt-upscale" style="margin-top:3px;" />
               <span>
-                <strong>Upscale Real-ESRGAN 768→1024</strong><br/>
+                <strong>Upscale 768→1024</strong><br/>
                 <span style="color:var(--text-3); font-size:12px;">Augmente la résolution des 6 vues pour matcher l'image source. Rapide. +10s.</span>
               </span>
             </label>
@@ -1234,10 +1234,10 @@
         <div class="settings-box">
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
             <span class="settings-field-label">Processes</span>
-            <span style="font-size:11px; color:var(--text-2);"><span id="set-python-count">0</span> active &middot; SDXL <span id="set-python-sdxl">stopped</span></span>
+            <span style="font-size:11px; color:var(--text-2);"><span id="set-python-count">0</span> active &middot; AI engine <span id="set-python-sdxl">stopped</span></span>
           </div>
           <div style="display:flex; gap:6px;">
-            <button id="set-kill-sdxl" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill SDXL</button>
+            <button id="set-kill-sdxl" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill AI engine</button>
             <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill Processes</button>
             <button id="set-kill-all" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill All</button>
           </div>
@@ -1245,6 +1245,23 @@
 
         <button id="set-open-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:8px;">&#128193; Open logs folder</button>
         <button id="set-live-logs" class="ghost-btn" style="width:100%; padding:6px 8px; font-size:11px; margin-top:6px;">&#128269; Live logs viewer</button>
+
+        <!-- ═══ INSTALLATION ═══ -->
+        <div class="settings-section-header">Installation</div>
+        <div class="settings-box">
+          <div class="settings-box-title">Reconfigure FabMesh</div>
+          <div class="settings-box-desc">Re-run the first-time setup wizard to change install mode (Lite / Standard / Full) or re-download a missing model. Your projects and generated meshes are kept.</div>
+          <div style="margin-top:8px;">
+            <button id="set-reconfigure" class="ghost-btn" style="width:100%; padding:6px 12px; font-size:12px;">&#9881;&#65039; Reconfigure FabMesh</button>
+          </div>
+        </div>
+        <div class="settings-box" style="margin-top:8px;">
+          <div class="settings-box-title">Uninstall FabMesh</div>
+          <div class="settings-box-desc">Remove FabMesh from your computer. You'll be asked whether to also delete the AI models (~17 GB) and your settings. Your generated meshes folder is never touched.</div>
+          <div style="margin-top:8px;">
+            <button id="set-uninstall" class="ghost-btn danger" style="width:100%; padding:6px 12px; font-size:12px;">&#128465;&#65039; Uninstall FabMesh</button>
+          </div>
+        </div>
 
         <!-- ═══ CALIBRATION ═══ -->
         <div class="settings-section-header">Calibration</div>
@@ -1560,7 +1577,7 @@
             <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
             <label>Engine</label>
             <select id="mod-engine">
-              <option value="local-sdxl" selected>RealVis XL (local)</option>
+              <option value="local-sdxl" selected>FabMesh Image Engine (local)</option>
               <option value="meshy">Meshy.ai (cloud, needs API key)</option>
             </select>
             <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>

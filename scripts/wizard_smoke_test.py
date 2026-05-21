@@ -40,24 +40,24 @@ def check_torch_cuda():
 
 
 def check_trellis_loadable():
-    """Just import the Trellis2 pipeline class — don't load weights."""
-    log('[smoke] checking TRELLIS-2 importable...')
+    """Check that the 3D core's dependencies import correctly."""
+    log('[smoke] checking 3D core...')
     try:
         import importlib
         importlib.import_module('diffusers')
-        log('[smoke]   diffusers OK')
+        log('[smoke]   3D core OK')
     except Exception as e:
-        raise RuntimeError(f'diffusers import failed: {e}')
+        raise RuntimeError(f'3D core import failed: {e}')
 
 
 def check_blip_loadable():
-    log('[smoke] checking BLIP-1 cache present...')
+    log('[smoke] checking vision module...')
     from huggingface_hub import try_to_load_from_cache
     p = try_to_load_from_cache(
         'Salesforce/blip-image-captioning-large', 'config.json')
     if not p:
-        raise RuntimeError('BLIP-1 not in HF cache (download incomplete?)')
-    log(f'[smoke]   BLIP-1 cache OK')
+        raise RuntimeError('vision module not in cache (download incomplete?)')
+    log(f'[smoke]   vision module OK')
 
 
 def main():
