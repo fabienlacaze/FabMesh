@@ -1,4 +1,4 @@
-"""Caption an image with BLIP-2 to describe the subject (clothes, hair,
+"""Caption an image with BLIP-1 to describe the subject (clothes, hair,
 features) for back-view generation prompt enrichment.
 
 Usage:
@@ -6,25 +6,21 @@ Usage:
 
 Output: prints "CAPTION: <text>" on stdout. Caller parses that line.
 
-Model: Salesforce/blip2-opt-2.7b (BSD-3-Clause, commercial OK).
-Smaller alternative: Salesforce/blip-image-captioning-large (~990 MB).
+Model: Salesforce/blip-image-captioning-large (BSD-3-Clause, commercial
+OK). ~990 MB, ~1s inference on RTX 5080.
 
-Why BLIP not CLIP-Interrogator:
-- CLIP-Interrogator is non-commercial (uses BLIP+CLIP+LLaMA chain)
-- BLIP-2 raw is BSD-3 only.
-- ~3 GB model, ~3s inference on RTX 5080.
+We do NOT use BLIP-2 here: Salesforce/blip2-opt-2.7b embeds Meta's
+OPT-2.7B which is licensed for non-commercial research use only and
+incompatible with a paid Steam / Fab.com / itch.io distribution.
+
+Why BLIP-1 not CLIP-Interrogator:
+- CLIP-Interrogator chain uses BLIP+CLIP+LLaMA (LLaMA is NC).
+- BLIP-1 raw is BSD-3-Clause and stand-alone.
 """
 import sys
 import os
 import torch
 from PIL import Image
-
-
-PROMPT_QUERY = (
-    "Question: Describe in detail the clothing and physical features of "
-    "this character (hair color and style, shirt, pants, shoes, accessories, "
-    "colors). Answer in a single sentence."
-)
 
 
 def _sanitize_caption(text):
@@ -62,44 +58,32 @@ def _sanitize_caption(text):
 
 
 def caption(image_path):
-    print(f'[caption] loading BLIP captioner...', flush=True)
-    from transformers import Blip2Processor, Blip2ForConditionalGeneration
+    print(f'[caption] loading BLIP-1 captioner...', flush=True)
+    from transformers import BlipProcessor, BlipForConditionalGeneration
+    model_id = 'Salesforce/blip-image-captioning-large'
+    proc = BlipProcessor.from_pretrained(model_id)
+    model = BlipForConditionalGeneration.from_pretrained(
+        model_id, torch_dtype=torch.float16,
+    ).to('cuda')
+    img = Image.open(image_path).convert('RGB')
+    # Conditional caption: prefix steers the description.
+    prompt = 'a character wearing'
+    inputs = proc(img, prompt, return_tensors='pt').to('cuda', torch.float16)
+    with torch.no_grad():
+        out = model.generate(**inputs, max_new_tokens=80, num_beams=5)
+    text_raw = proc.decode(out[0], skip_special_tokens=True)
+    text = _sanitize_caption(text_raw)
+    print(f'[caption] raw: {text_raw}', flush=True)
+    print(f'CAPTION: {text}', flush=True)
 
-    # Use the smaller BLIP captioning model first (~1 GB) — faster and
-    # also BSD-3. Falls back to BLIP-2 OPT 2.7B if needed.
+    # Free VRAM — BLIP-1 large keeps ~1.5 GB resident.
     try:
-        from transformers import BlipProcessor, BlipForConditionalGeneration
-        model_id = 'Salesforce/blip-image-captioning-large'
-        proc = BlipProcessor.from_pretrained(model_id)
-        model = BlipForConditionalGeneration.from_pretrained(
-            model_id, torch_dtype=torch.float16,
-        ).to('cuda')
-        img = Image.open(image_path).convert('RGB')
-        # Conditional caption: prefix steers the description.
-        prompt = (
-            'a character wearing'
-        )
-        inputs = proc(img, prompt, return_tensors='pt').to('cuda', torch.float16)
-        with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=80, num_beams=5)
-        text_raw = proc.decode(out[0], skip_special_tokens=True)
-        text = _sanitize_caption(text_raw)
-        print(f'[caption] raw: {text_raw}', flush=True)
-        print(f'CAPTION: {text}', flush=True)
-        return text
-    except Exception as e:
-        print(f'[caption] BLIP small failed: {e}; trying BLIP-2 OPT...', flush=True)
-        proc = Blip2Processor.from_pretrained('Salesforce/blip2-opt-2.7b')
-        model = Blip2ForConditionalGeneration.from_pretrained(
-            'Salesforce/blip2-opt-2.7b', torch_dtype=torch.float16,
-        ).to('cuda')
-        img = Image.open(image_path).convert('RGB')
-        inputs = proc(img, PROMPT_QUERY, return_tensors='pt').to('cuda', torch.float16)
-        with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=100)
-        text = proc.decode(out[0], skip_special_tokens=True).strip()
-        print(f'CAPTION: {text}', flush=True)
-        return text
+        del model, proc
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    return text
 
 
 if __name__ == '__main__':
