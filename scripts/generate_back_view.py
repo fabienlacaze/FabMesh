@@ -98,61 +98,114 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
     hint_clean = _re.sub(r'\s+', ' ', hint_clean).strip(' ,')
     print(f'[back-view] cleaned hint: "{hint_clean[:200]}"', flush=True)
 
-    # BLIP-1 single-caption mode. Multi-aspect (3 questions) was tested
-    # 2026-05-20 and produced WORSE results — the longer "wearing X on
-    # top, Y on bottom, Z hair" suffix drowned the "back view" cue and
-    # ControlNet OpenPose, and the model regressed to a front pose.
-    # Single caption stays the sweet spot: short, dominant garment
-    # words ("denim jacket", "white pants") are enough to anchor SDXL.
-    # BLIP-1 (Salesforce/blip-image-captioning-large) is pure BSD 3-Clause
-    # — commercial-safe (NOT BLIP-2 which uses OPT, non-commercial).
+    # Florence-2 (Microsoft, MIT license — commercial-safe) replaces
+    # BLIP-1 here. Florence-2 supports structured prompts like
+    # <MORE_DETAILED_CAPTION> that yield ~5x more precise output than
+    # BLIP-1's free-form prefix-completion. In particular it picks up
+    # hairstyle / hair length / accessory details that BLIP-1 misses
+    # (and that we need to stop the front=loose-hair / back=ponytail
+    # drift). Fallback to BLIP-1 if Florence-2 fails to load.
     outfit_desc = ''
     try:
-        from transformers import BlipProcessor, BlipForConditionalGeneration
-        print('[back-view] BLIP-1 single-caption (outfit anchor)...', flush=True)
+        from transformers import AutoProcessor, AutoModelForCausalLM
+        print('[back-view] Florence-2 detailed caption (outfit + hair)...', flush=True)
         _t_blip = time.time()
-        proc = BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-large')
-        bmodel = BlipForConditionalGeneration.from_pretrained(
-            'Salesforce/blip-image-captioning-large', torch_dtype=torch.float16,
+        proc = AutoProcessor.from_pretrained(
+            'microsoft/Florence-2-large', trust_remote_code=True)
+        # attn_implementation='eager' is REQUIRED on transformers >= 4.41
+        # because Florence-2's custom modeling code never declared
+        # _supports_sdpa, so the default 'sdpa' path raises AttributeError
+        # at load time. Eager avoids the missing attribute path.
+        bmodel = AutoModelForCausalLM.from_pretrained(
+            'microsoft/Florence-2-large', torch_dtype=torch.float16,
+            trust_remote_code=True,
+            attn_implementation='eager',
         ).to('cuda')
-        inputs = proc(ref_img, 'a person wearing', return_tensors='pt').to('cuda', torch.float16)
+        # Florence-2's custom modeling code (commit 21a599d4) was written
+        # before transformers' DynamicCache refactor (4.56+). Its
+        # prepare_inputs_for_generation does `past_key_values[0][0].shape`
+        # which crashes on the new Cache object. Disabling the cache
+        # avoids the codepath entirely (slightly slower generate, but
+        # we only do 1 caption ~5s).
+        bmodel.config.use_cache = False
+        task = '<MORE_DETAILED_CAPTION>'
+        inputs = proc(text=task, images=ref_img, return_tensors='pt')
+        # input_ids must stay int64 — moving to float16 turns them into
+        # NaN. Move device-only here, then cast pixel_values separately.
+        inputs = {k: v.to('cuda') for k, v in inputs.items()}
+        inputs['pixel_values'] = inputs['pixel_values'].to(torch.float16)
         with torch.no_grad():
-            out = bmodel.generate(**inputs, max_new_tokens=40, num_beams=4)
-        outfit_desc = proc.decode(out[0], skip_special_tokens=True).strip()
-        for prefix in ['a person wearing', 'arafed', 'arafy']:
-            if outfit_desc.lower().startswith(prefix.lower()):
-                outfit_desc = outfit_desc[len(prefix):].strip(' .,')
-        # BLIP-1 often appends scene-context noise ("is posing for a
-        # picture", "stands in a studio", "with arms out", etc) that
-        # dilutes the garment signal in the SDXL prompt. Strip the most
-        # common patterns and cut everything after the first verb of
-        # being / posing.
-        import re as _re_blip
+            out = bmodel.generate(
+                input_ids=inputs['input_ids'],
+                pixel_values=inputs['pixel_values'],
+                max_new_tokens=200, num_beams=3,
+                use_cache=False,
+            )
+        generated = proc.batch_decode(out, skip_special_tokens=False)[0]
+        parsed = proc.post_process_generation(
+            generated, task=task, image_size=(ref_img.width, ref_img.height))
+        full_caption = (parsed.get(task) or '').strip()
+        print(f'[back-view] Florence-2 caption: "{full_caption}"', flush=True)
+        # Extract garment + hair description. CRITICAL: strip every
+        # face-related phrase. Florence-2 likes to write "she has a
+        # serious expression on her face" / "looking at the camera"
+        # which SDXL then interprets as "front view, face visible" and
+        # the ControlNet back skeleton loses the fight.
+        # Also strip framing/scene noise.
+        import re as _re_fl
+        outfit_desc = full_caption
         for noise in [
-            r'\s+is posing for a picture\b.*$',
-            r'\s+is posing\b.*$',
-            r'\s+stands?\b.*$',
-            r'\s+standing\b.*$',
-            r'\s+poses?\b.*$',
-            r'\s+posing\b.*$',
-            r'\s+with (her|his|their) arms?\b.*$',
-            r'\s+with arms?\b.*$',
-            r'\s+with hands?\b.*$',
-            r'\s+holds?\b.*$',
-            r'\s+holding\b.*$',
-            r'\s+sits?\b.*$',
-            r'\s+sitting\b.*$',
-            r'\s+walks?\b.*$',
-            r'\s+walking\b.*$',
+            # SENTENCE-LEVEL noise (whole sentences to delete)
+            r'\b(she|he|they) (is|are) (standing|posing|holding|sitting|walking)[^.]*\.',
+            r'\b(she|he|they) has? a [^.]*expression[^.]*\.',
+            r'\b(she|he|they) is looking [^.]*\.',
+            r'\b(the )?background (is|appears)[^.]*\.',
+            r'\b(the )?image (shows|depicts|is)[^.]*\.',
+            r'\bthe (overall )?(color|light(ing)?|composition|atmosphere|mood)[^.]*\.',
+            r'\bin the (background|foreground)[^.]*\.',
+            r'\bstudio lighting[^.]*\.',
+            r'\bplain (white|grey|gray) background[^.]*\.',
+            # PHRASE-LEVEL noise (remove fragments that pull toward front)
+            r'\bexpression on (her|his|their) face\b',
+            r'\b(serious|happy|sad|smiling|calm|neutral) expression\b',
+            r'\blooking at the camera\b',
+            r'\bfacing the camera\b',
+            r'\bdirectly at the (camera|viewer)\b',
+            r'\bon (her|his|their) face\b',
+            r'\b(her|his|their) face\b',
+            r'\b(her|his|their) (mouth|eyes|nose)\b',
         ]:
-            outfit_desc = _re_blip.sub(noise, '', outfit_desc,
-                                       flags=_re_blip.IGNORECASE).strip(' ,.')
-        print(f'[back-view] BLIP outfit ({time.time()-_t_blip:.1f}s): "{outfit_desc}"', flush=True)
+            outfit_desc = _re_fl.sub(noise, '', outfit_desc,
+                                      flags=_re_fl.IGNORECASE)
+        outfit_desc = _re_fl.sub(r'\s+', ' ', outfit_desc).strip(' .,;')
+        # Keep at most ~200 chars to avoid drowning the back-view cue
+        if len(outfit_desc) > 200:
+            outfit_desc = outfit_desc[:200].rsplit(' ', 1)[0] + '...'
+        print(f'[back-view] outfit anchor ({time.time()-_t_blip:.1f}s): "{outfit_desc}"',
+              flush=True)
         del bmodel, proc
         torch.cuda.empty_cache()
     except Exception as _be:
-        print(f'[back-view] BLIP captioning skipped ({_be}); falling back to hint only',
-              flush=True)
+        print(f'[back-view] Florence-2 skipped ({_be}); trying BLIP-1 fallback', flush=True)
+        # Fallback to BLIP-1 (BSD 3-Clause, commercial-safe, NOT BLIP-2/OPT).
+        try:
+            from transformers import BlipProcessor, BlipForConditionalGeneration
+            proc = BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-large')
+            bmodel = BlipForConditionalGeneration.from_pretrained(
+                'Salesforce/blip-image-captioning-large', torch_dtype=torch.float16,
+            ).to('cuda')
+            inputs = proc(ref_img, 'a person wearing', return_tensors='pt').to('cuda', torch.float16)
+            with torch.no_grad():
+                out = bmodel.generate(**inputs, max_new_tokens=40, num_beams=4)
+            outfit_desc = proc.decode(out[0], skip_special_tokens=True).strip()
+            for prefix in ['a person wearing', 'arafed']:
+                if outfit_desc.lower().startswith(prefix.lower()):
+                    outfit_desc = outfit_desc[len(prefix):].strip(' .,')
+            print(f'[back-view] BLIP-1 fallback: "{outfit_desc}"', flush=True)
+            del bmodel, proc
+            torch.cuda.empty_cache()
+        except Exception as _be2:
+            print(f'[back-view] BLIP fallback also failed ({_be2})', flush=True)
 
     base = hint_clean if hint_clean else 'a character'
     outfit_phrase = (f', wearing {outfit_desc}, same outfit, same garments' if outfit_desc else '')
@@ -168,7 +221,15 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
         # IPAdapter on the front photo strongly pulls in this direction).
         'front view, facing camera, face visible, frontal view, '
         'eyes visible, looking at camera, mouth visible, ears in front, '
-        'nose visible, breast visible, buttons visible, shirt buttons, '
+        'nose visible, breast visible, '
+        # ANTI-FRONT-DETAILS-ON-BACK: when SDXL copies the front garment
+        # silhouette, it sometimes copies the chest pockets / buttons /
+        # zippers literally onto the back of the garment, which is
+        # impossible in real clothing.
+        'chest pockets visible from behind, buttons on the back, '
+        'shirt buttons visible from behind, button placket on the back, '
+        'front zipper on the back, breast pocket on the back, '
+        'front decorations on the back, logo on the back, label on the back, '
         # ANTI-OUTFIT-DRIFT: the back must wear the same garments.
         'different clothes, different outfit, different garment, '
         'bare back, exposed back, halter top, backless top, tank top, '
@@ -230,6 +291,34 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
 
     front_mirror = ref_img.transpose(Image.FLIP_LEFT_RIGHT)
 
+    # IPAdapter reference image with the FACE REGION MASKED OUT (top
+    # ~28% of the subject in Y). The original front shows the face from
+    # the front; if we keep it in the IPAdapter reference, the adapter
+    # propagates "front-facing face features" into the back generation
+    # and the model resolves the conflict by reconstructing a logical
+    # hairstyle visible from the back (typically a ponytail), even when
+    # the real front had loose flowing hair. Masking the face frees
+    # SDXL to generate a back-of-head guided by the Florence-2 caption.
+    from PIL import ImageDraw as _ImageDraw
+    ref_img_no_face = ref_img.copy()
+    _d = _ImageDraw.Draw(ref_img_no_face)
+    _h = ref_img_no_face.size[1]
+    # Soft gradient mask: full black on top 18%, fade to original by 30%
+    _mask_top_full = int(_h * 0.18)
+    _mask_top_fade = int(_h * 0.30)
+    _d.rectangle([0, 0, ref_img_no_face.size[0], _mask_top_full],
+                 fill=(0, 0, 0))
+    # Linear fade from full black to original between 18% and 30%
+    import numpy as _np_ip
+    arr_ref = _np_ip.array(ref_img.convert('RGB')).astype(_np_ip.float32)
+    arr_masked = _np_ip.array(ref_img_no_face.convert('RGB')).astype(_np_ip.float32)
+    for _y in range(_mask_top_full, _mask_top_fade):
+        _t_fade = (_y - _mask_top_full) / max(1, _mask_top_fade - _mask_top_full)
+        arr_masked[_y] = arr_ref[_y] * _t_fade + 0.0 * (1 - _t_fade)
+    ref_img_no_face = Image.fromarray(arr_masked.astype(_np_ip.uint8))
+    print(f'[back-view] IPAdapter ref: face region masked '
+          f'(top 18% black, fade to 30%)', flush=True)
+
     out_paths = []
     for i in range(num_images):
         candidates = []
@@ -241,7 +330,7 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
                 prompt=prompt, negative_prompt=neg,
                 image=skel_img,                # ControlNet conditioning
                 controlnet_conditioning_scale=cn_scale,
-                ip_adapter_image=ref_img,
+                ip_adapter_image=ref_img_no_face,  # face-masked ref
                 num_inference_steps=steps, guidance_scale=7.0,
                 height=1024, width=1024,
                 generator=gen,

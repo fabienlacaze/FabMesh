@@ -89,8 +89,11 @@ def generate_back_mirror(front_image, out_dir, prompt_hint='', num_images=1,
     # 1. Mirror horizontally
     mirrored = front.transpose(Image.FLIP_LEFT_RIGHT)
 
-    # 2. Upper-body mask (head + ~70% torso so face is fully covered)
-    mask = detect_upper_body_mask(mirrored, height_frac=0.70, soft_px=32)
+    # 2. Mask ONLY head + neck (~28% of body height). Anything larger
+    # erases the outfit (jacket, top, hair-do) which we explicitly want
+    # to keep pixel-identical from the mirror. The inpaint only needs
+    # to flip face → back-of-head + hair-from-behind, nothing else.
+    mask = detect_upper_body_mask(mirrored, height_frac=0.28, soft_px=24)
 
     # 3. SDXL Inpaint pipeline (NO ControlNet — Tile would preserve the
     # front face structure we're TRYING to remove). Pure inpaint with a

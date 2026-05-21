@@ -10,6 +10,61 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-20 (back-view v3) — Florence-2 + face cleanup + face mask = real back
+
+Iteration 3 (final) on the back-view, on top of multi-seed auto-pick (83d6a88):
+
+**1. Florence-2 replaces BLIP-1 for outfit/hair captioning**
+- `microsoft/Florence-2-large` — MIT license, fully commercial-safe
+  (not BLIP-2 which uses OPT/Meta-NC).
+- Returns dense detailed captions including **hairstyle** which BLIP-1
+  missed. Example: "She is wearing a light blue denim jacket over a
+  white sports bra and light grey jeans. **Her hair is styled in loose
+  waves**..." — that "loose waves" was the missing token that finally
+  killed the persistent ponytail drift on back-view generations.
+
+**Two transformers-4.56-era bugs fixed**:
+- `'Florence2ForConditionalGeneration' object has no attribute '_supports_sdpa'`
+  → loaded with `attn_implementation='eager'`.
+- `'NoneType' object has no attribute 'shape'` (in `prepare_inputs_for_generation`,
+  Florence-2 custom code expects pre-DynamicCache tuple format) →
+  `model.config.use_cache = False` + `generate(use_cache=False)`.
+
+**2. Aggressive caption cleanup**
+- Florence-2 returns dense captions that include "she has a serious
+  expression on her face" / "looking at the camera" which then push
+  SDXL toward a frontal pose, defeating the ControlNet back skeleton.
+- New regex sweep strips: face-phrases (`her face`, `expression`,
+  `looking at the camera`), scene noise (`background is`, `studio
+  lighting`), and posture verbs.
+- Cap output at 200 chars so the "back view" cue at the end of the
+  prompt stays dominant.
+
+**3. Face-region mask on IPAdapter reference**
+- IPAdapter Plus propagates the front face into the back generation,
+  forcing SDXL to imagine a "back of head logically compatible with
+  this front face" — typically resolving as a ponytail even when the
+  front shows loose hair.
+- Mask top 18% of the ref image as solid black with a soft fade to
+  30% Y, before passing to `ip_adapter_image=`. IPAdapter then only
+  anchors the outfit (chest+lower body), and SDXL is free to use
+  Florence-2's "loose waves" caption for the nuque.
+
+**Visual validation on the woman test** (woman/ref_0.png — denim jacket,
+white sports bra, light grey cargo jeans, loose wavy hair):
+- v1 multi-seed only (83d6a88) : triangular jacket cutout, ponytail.
+- v2 + face mask : cutout gone, still ponytail.
+- v3 + Florence-2 (first try) : back regressed to a front because
+  "expression on her face" was in the caption.
+- v3 + Florence-2 + cleanup (face stripped) : **real back, denim
+  jacket clean, cargo pockets visible from behind, loose wavy hair**.
+  User confirmed visually.
+
+Stages 1+2+3 are the new default in `generate_back_view.py`. BLIP-1
+remains as a fallback if Florence-2 fails to load.
+
+---
+
 ## 2026-05-20 (back-view multi-seed) — BLIP clean + 4 candidates auto-pick
 
 Iteration 2 on the back-view consistency, on top of the BLIP-1 single
