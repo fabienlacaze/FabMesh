@@ -108,11 +108,41 @@ def _heartbeat(item_id, repo, expected_mb, total_done_mb_ref, stop, t0):
         })
 
 
+def _hf_token():
+    """Return a HuggingFace token if available. Priority:
+      1. HF_TOKEN env var (set by main.js or user)
+      2. ~/.cache/huggingface/token (default HF CLI location)
+      3. Embedded read-only fallback (only kicks in on rate-limit retry)
+    Read-only token = no write/secret access, safe to ship in the binary.
+    """
+    t = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
+    if t:
+        return t
+    user_token = os.path.expanduser('~/.cache/huggingface/token')
+    if os.path.isfile(user_token):
+        try:
+            with open(user_token, 'r', encoding='utf-8') as f:
+                return f.read().strip() or None
+        except Exception:
+            pass
+    return None  # caller decides whether to retry with a fallback
+
+
+# Embedded read-only fallback token. Leave empty until you generate one:
+#   1. Create a free HF account
+#   2. Settings -> Access Tokens -> New token (READ only, never write)
+#   3. Paste it here. It only buys you a higher rate-limit for anonymous
+#      downloads — it does NOT grant access to private/gated content.
+HF_FALLBACK_TOKEN = ''
+
+
 def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
     """Use huggingface_hub.snapshot_download. A background thread emits
     progress events every second based on actual cache growth, so the
-    UI never looks frozen even on multi-GB repos."""
+    UI never looks frozen even on multi-GB repos. Retries once with
+    the embedded read-only token if anonymous hits a rate-limit."""
     from huggingface_hub import snapshot_download
+    from huggingface_hub.utils import HfHubHTTPError
     emit({'id': item_id, 'pct': 0, 'done': False,
           'in_progress': True, 'elapsed_s': 0,
           'total_done_mb': total_done_mb_ref[0]})
@@ -124,8 +154,22 @@ def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
         daemon=True)
     hb.start()
     try:
-        snapshot_download(repo_id=repo, resume_download=True,
-                          max_workers=4)
+        token = _hf_token()
+        try:
+            snapshot_download(repo_id=repo, resume_download=True,
+                              max_workers=4, token=token)
+        except HfHubHTTPError as e:
+            # Rate-limit (429) or auth (401/403) — try once with the
+            # embedded fallback token if we have one and weren't already
+            # using a token.
+            if not token and HF_FALLBACK_TOKEN:
+                emit({'id': item_id, 'pct': 0, 'done': False,
+                      'in_progress': True, 'msg': 'retrying with fallback token',
+                      'total_done_mb': total_done_mb_ref[0]})
+                snapshot_download(repo_id=repo, resume_download=True,
+                                  max_workers=4, token=HF_FALLBACK_TOKEN)
+            else:
+                raise
     finally:
         stop.set()
         hb.join(timeout=2.0)
