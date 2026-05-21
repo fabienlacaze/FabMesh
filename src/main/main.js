@@ -3600,7 +3600,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
 });
 
 // --- Image-to-3D: supports TripoSR, Stable Fast 3D, TripoSG, TRELLIS ---
-ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraHD, trellis2Preset, assetType }) => {
+ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2UltraHD, trellis2Preset, assetType }) => {
   let imagePath = _imagePath;
   let engine = _engine;
   // 2-view mode: when a back photo is supplied AND engine=sf3d, we run the
@@ -3799,13 +3799,18 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         ? { FABMESH_TRELLIS2_BACK_IMAGE: imagePathBack } : {}),
       ...(engine === 'hi3dgen' && trellis2Refine
         ? { FABMESH_TRELLIS2_REFINE: '1' } : {}),
-      // Quality+ : cascade mode + decim 1M for sharper geometry.
-      // Applies to both trellis2_native and hi3dgen (which forwards to t2_native).
-      ...((engine === 'trellis2_native' || engine === 'hi3dgen') && trellis2QualityPlus
+      // Quality presets: Ultra Quality (1536_cascade) > Quality+ (1024_cascade)
+      // > default (1024). Ultra wins if both checked.
+      ...((engine === 'trellis2_native' || engine === 'hi3dgen') && trellis2UltraQ
         ? {
-            FABMESH_TRELLIS2_NATIVE_MODE: '1024_cascade',
-            FABMESH_TRELLIS2_NATIVE_DECIM: '1000000',
-          } : {}),
+            FABMESH_TRELLIS2_NATIVE_MODE: '1536_cascade',
+            FABMESH_TRELLIS2_NATIVE_DECIM: '1500000',
+          }
+        : ((engine === 'trellis2_native' || engine === 'hi3dgen') && trellis2QualityPlus
+            ? {
+                FABMESH_TRELLIS2_NATIVE_MODE: '1024_cascade',
+                FABMESH_TRELLIS2_NATIVE_DECIM: '1000000',
+              } : {})),
       // TRELLIS-2 native + Hi3DGen : auto-feed extra views to the mesh
       // pipeline when the user generated them. DISABLED BY DEFAULT since
       // 2026-05-20 — confirmed via the singe / red car tests that
