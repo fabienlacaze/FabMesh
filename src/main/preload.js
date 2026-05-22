@@ -1,6 +1,19 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // ----------------------------------------------------------
+// Sentry — renderer-side error capture
+// ----------------------------------------------------------
+// The main process initializes Sentry. The renderer SDK auto-attaches
+// to that and forwards uncaught errors / unhandled promise rejections
+// from index2 and wizard. No DSN is read here; the renderer SDK
+// inherits configuration from the main process via IPC.
+try {
+  require('@sentry/electron/renderer').init({});
+} catch (_) {
+  // Module not installed (dev box) — quietly skip.
+}
+
+// ----------------------------------------------------------
 // Wizard API (first-run setup only)
 // ----------------------------------------------------------
 contextBridge.exposeInMainWorld('wizardAPI', {

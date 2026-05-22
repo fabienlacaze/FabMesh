@@ -10,6 +10,23 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (Sentry + ship readiness doc)
+
+- Installed `@sentry/electron` 7.13.0.
+- Main process: `_initSentry()` reads DSN from
+  `build/sentry-dsn.txt` (gitignored) or `$SENTRY_DSN`. Silent
+  no-op when missing — dev box works without it.
+- Preload: `@sentry/electron/renderer` attached so uncaught errors
+  + unhandled promise rejections from both `wizard.html` and
+  `index2.html` flow to Sentry automatically.
+- Privacy: `beforeSend` strips Windows username + machine name
+  from breadcrumbs.
+- `build/READY_TO_SHIP.md` written with the 3 zero-cost beta blockers:
+  HF read-only token → `wizard_download.py:32`, Sentry DSN → `build/sentry-dsn.txt`,
+  test matrix on a clean Win 11 VM / friend's PC.
+
+---
+
 ## 2026-05-22 (landing polish + dev section refactor)
 
 - Landing page : alignement strict des cards Desktop / Cloud après

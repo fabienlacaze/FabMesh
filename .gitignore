@@ -77,6 +77,7 @@ external/UniRig/
 # Build artefacts (fetched by build/fetch_*.py scripts, not committed)
 build/python-embed/
 build/vc_redist.x64.exe
+build/sentry-dsn.txt
 dist/
 
 # Claude Code session data
