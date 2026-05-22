@@ -5052,15 +5052,44 @@ ipcMain.handle('wizard:cancel', () => {
   return { ok: true, mode: 'first-run' };
 });
 
+// Whitelisted external destinations the renderer is allowed to open
+// via the default browser. Anything else is rejected — the renderer
+// (which could be exploited by a hostile asset) cannot launch
+// arbitrary protocols or sketchy domains.
+const _EXTERNAL_HOST_ALLOWLIST = [
+  'myfabmesh.ai',           // future custom domain
+  'fabmesh.com',            // legacy redirect domain
+  'fabienlacaze.github.io', // current GitHub Pages URL
+  'github.com',             // for /MyFabmesh repo links
+];
+
+function _isAllowedExternal(u) {
+  try {
+    if (u.protocol !== 'https:') return false;
+    return _EXTERNAL_HOST_ALLOWLIST.some(
+      h => u.hostname === h || u.hostname.endsWith('.' + h));
+  } catch (_) { return false; }
+}
+
 ipcMain.handle('wizard:open-external', async (_e, url) => {
-  // Only allow https URLs and our own fabmesh.com domain for the wizard
-  // redirect — defense in depth against the renderer trying to launch
-  // arbitrary protocols.
   try {
     const u = new URL(url);
-    if (u.protocol !== 'https:' || !u.hostname.endsWith('fabmesh.com')) {
+    if (!_isAllowedExternal(u)) {
       return { ok: false, error: 'url not allowed' };
     }
+    const { shell } = require('electron');
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// Opens the MyFabmesh.AI website in the user's default browser.
+// Called when the user clicks the brand in the main app header.
+ipcMain.handle('app:open-website', async () => {
+  const url = 'https://fabienlacaze.github.io/MyFabmesh/';
+  try {
     const { shell } = require('electron');
     await shell.openExternal(url);
     return { ok: true };

@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('__fabmeshTest', {
 contextBridge.exposeInMainWorld('meshyAPI', {
   reconfigureFabmesh: () => ipcRenderer.invoke('wizard:reset-setup'),
   uninstallFabmesh: () => ipcRenderer.invoke('app:uninstall'),
+  openWebsite: () => ipcRenderer.invoke('app:open-website'),
   generateFromPrompt: (opts) => ipcRenderer.invoke('generate-from-prompt', opts),
   generateFromImage: (opts) => ipcRenderer.invoke('generate-from-image', opts),
   generateImages: (opts) => ipcRenderer.invoke('generate-images', opts),
