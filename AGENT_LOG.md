@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (landing polish + dev section refactor)
+
+- Landing page : alignement strict des cards Desktop / Cloud après
+  l'ajout de la 6e feature "Scriptable from Claude Code / VS Code (MCP)".
+  Solution : `min-height: 240px` sur `.card-features` (vs flex-grow
+  qui poussait les requirements de Cloud trop bas). Buttons des 2
+  cards alignés au pixel près désormais.
+- "For developers" section refactorisée en 3 cards chaînées
+  (💬 Claude Code → 🪞 MyFabmesh.AI → 🎮 Unreal Engine) avec card
+  centrale en accent gradient. Plus simple, plus design que les
+  2 mock chat blocks précédents.
+- Hero : retiré le bouton "Check my PC compatibility" redondant
+  (déjà accessible depuis Desktop card et footer de la section
+  Products). 1 seul CTA "Choose your plan".
+- Smooth scroll natif (`scroll-behavior: smooth` sur `<html>`) +
+  `scroll-margin-top: 90px` pour que les H2 atterrissent sous le
+  sticky header au lieu d'être cachés.
+- Cache-buster `styles.css?v=3` pour éviter le pinning Cloudflare/CDN
+  des anciennes versions du CSS.
+- MCP / Claude Code / VS Code mis en avant comme différenciateur
+  principal du produit (3 emplacements : feature list, section
+  dédiée, FAQ). Workflow Unreal + Claude + MyFabmesh.AI démontré
+  comme chaîne MCP end-to-end.
+
+---
+
 ## 2026-05-22 (rebrand audit + filter-repo cleanup)
 
 - **History rewrite** : repo entier devait être push sur GitHub. Bloqué
