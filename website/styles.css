@@ -1,0 +1,431 @@
+/* ============================================================
+   MyFabmesh.AI — public website
+   Single CSS file, no framework, no build. Just open index.html.
+   Color system mirrors the desktop app so the brand feels coherent
+   when a user lands on the site after installing.
+   ============================================================ */
+
+:root {
+  --bg-0: #0b0b14;
+  --bg-1: #15151f;
+  --bg-2: #1d1d2c;
+  --bg-3: #24243a;
+  --border: #2c2c44;
+  --border-strong: #3c3c5a;
+  --text-0: #f5f5fa;
+  --text-1: #c2c2d4;
+  --text-2: #7c7c95;
+  --accent: #a855f7;
+  --accent-2: #e94560;
+  --accent-grad: linear-gradient(135deg, #e94560, #a855f7);
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --radius: 12px;
+  --radius-sm: 6px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--text-0); }
+
+/* ============================================================
+   Header
+   ============================================================ */
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 32px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(11, 11, 20, 0.9);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--text-0);
+}
+.brand-ai {
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 800;
+}
+.nav { display: flex; gap: 28px; align-items: center; font-size: 14px; }
+.nav a { color: var(--text-1); }
+.nav a:hover { color: var(--text-0); }
+.nav-cta {
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+.nav-cta:hover {
+  background: var(--accent);
+  color: white !important;
+}
+
+/* ============================================================
+   Hero
+   ============================================================ */
+.hero {
+  text-align: center;
+  padding: 80px 24px 60px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.hero h1 {
+  font-size: clamp(36px, 6vw, 56px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  margin-bottom: 24px;
+}
+.gradient {
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.hero .lead {
+  font-size: 18px;
+  color: var(--text-1);
+  max-width: 640px;
+  margin: 0 auto 36px;
+}
+.hero-cta {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.hero-trust {
+  font-size: 13px;
+  color: var(--text-2);
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn-primary, .btn-ghost,
+.btn-primary-full, .btn-ghost-full {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 26px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none !important;
+}
+.btn-primary, .btn-primary-full {
+  background: var(--accent-grad);
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.25);
+}
+.btn-primary:hover, .btn-primary-full:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(168, 85, 247, 0.4);
+  color: white !important;
+}
+.btn-ghost, .btn-ghost-full {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-1) !important;
+}
+.btn-ghost:hover, .btn-ghost-full:hover {
+  border-color: var(--accent);
+  color: var(--text-0) !important;
+}
+.btn-primary-full, .btn-ghost-full {
+  width: 100%;
+  margin-top: 8px;
+}
+
+/* ============================================================
+   Products section — the 2 cards
+   ============================================================ */
+.products {
+  max-width: 1100px;
+  margin: 40px auto 80px;
+  padding: 0 24px;
+}
+.products h2 {
+  text-align: center;
+  font-size: 32px;
+  margin-bottom: 40px;
+  font-weight: 700;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 24px;
+}
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s;
+}
+.card:hover { border-color: var(--border-strong); }
+.card-tag {
+  align-self: flex-start;
+  padding: 4px 10px;
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--accent);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.card-tag-cloud {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--success);
+}
+.card h3 {
+  font-size: 22px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+.card-edition { color: var(--text-2); font-weight: 500; }
+.card-price {
+  margin-bottom: 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.price {
+  font-size: 32px;
+  font-weight: 800;
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.price-unit { font-size: 18px; }
+.price-note {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 4px;
+  font-weight: 400;
+}
+.card-features {
+  list-style: none;
+  margin-bottom: 24px;
+}
+.card-features li {
+  padding: 6px 0;
+  color: var(--text-1);
+  font-size: 14px;
+}
+.card-reqs {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.reqs-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.card-reqs ul { list-style: none; }
+.card-reqs li {
+  font-size: 12px;
+  color: var(--text-1);
+  padding: 3px 0;
+}
+.products-note {
+  text-align: center;
+  margin-top: 28px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* ============================================================
+   How it works
+   ============================================================ */
+.how {
+  max-width: 1000px;
+  margin: 80px auto;
+  padding: 0 24px;
+}
+.how h2 {
+  text-align: center;
+  font-size: 32px;
+  margin-bottom: 48px;
+  font-weight: 700;
+}
+.how-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+}
+.how-steps li {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.how-num {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.how-steps h4 { font-size: 17px; margin-bottom: 8px; font-weight: 700; }
+.how-steps p { color: var(--text-1); font-size: 14px; }
+
+/* ============================================================
+   FAQ
+   ============================================================ */
+.faq {
+  max-width: 800px;
+  margin: 80px auto;
+  padding: 0 24px;
+}
+.faq h2 {
+  text-align: center;
+  font-size: 32px;
+  margin-bottom: 32px;
+  font-weight: 700;
+}
+.faq details {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  padding: 14px 20px;
+  transition: border-color 0.2s;
+}
+.faq details[open] { border-color: var(--accent); }
+.faq summary {
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-0);
+  list-style: none;
+  padding: 4px 0;
+}
+.faq summary::after {
+  content: "+";
+  float: right;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 20px;
+}
+.faq details[open] summary::after { content: "−"; }
+.faq p {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 14px;
+}
+
+/* ============================================================
+   Final CTA
+   ============================================================ */
+.cta-bottom {
+  text-align: center;
+  padding: 60px 24px 80px;
+  border-top: 1px solid var(--border);
+  margin-top: 40px;
+}
+.cta-bottom h2 {
+  font-size: 32px;
+  margin-bottom: 24px;
+  font-weight: 700;
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+.site-footer {
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  padding: 40px 24px 24px;
+}
+.footer-cols {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 32px;
+}
+.footer-brand {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--text-0);
+}
+.site-footer p { color: var(--text-2); font-size: 13px; }
+.site-footer h5 {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.site-footer a {
+  display: block;
+  color: var(--text-1);
+  font-size: 13px;
+  padding: 4px 0;
+}
+.site-footer a:hover { color: var(--accent); }
+.footer-bottom {
+  text-align: center;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 700px) {
+  .site-header { padding: 14px 18px; flex-wrap: wrap; gap: 12px; }
+  .nav { gap: 14px; font-size: 13px; }
+  .hero { padding: 50px 18px 40px; }
+  .footer-cols { grid-template-columns: 1fr 1fr; }
+}

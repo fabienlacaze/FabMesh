@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyFabmesh.AI — image to 3D mesh in seconds</title>
+<meta name="description" content="MyFabmesh.AI — turn any reference image into a textured 3D mesh ready for Unreal, Blender, Unity. Desktop (local NVIDIA) or Cloud (any device).">
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="site-header">
+  <a href="/" class="brand">MyFabmesh<span class="brand-ai">.AI</span></a>
+  <nav class="nav">
+    <a href="#products">Products</a>
+    <a href="#how">How it works</a>
+    <a href="#faq">FAQ</a>
+    <a href="check.html" class="nav-cta">Check my PC</a>
+  </nav>
+</header>
+
+<main>
+
+  <section class="hero">
+    <h1>Turn a photo into a 3D mesh.<br><span class="gradient">In seconds.</span></h1>
+    <p class="lead">
+      Generate game-ready, textured 3D models from any reference image —
+      locally on your NVIDIA GPU, or in the cloud from any device.
+    </p>
+    <div class="hero-cta">
+      <a href="#products" class="btn-primary">Choose your plan</a>
+      <a href="check.html" class="btn-ghost">Check my PC compatibility</a>
+    </div>
+    <p class="hero-trust">
+      All AI models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).
+      Your generated meshes are 100% yours to sell.
+    </p>
+  </section>
+
+  <section id="products" class="products">
+    <h2>One product, two flavors.</h2>
+    <div class="cards">
+
+      <!-- DESKTOP CARD -->
+      <article class="card">
+        <div class="card-tag">Desktop</div>
+        <h3>MyFabmesh.AI <span class="card-edition">Desktop</span></h3>
+        <div class="card-price">
+          <span class="price">24,99 €</span>
+          <span class="price-note">one-time payment</span>
+        </div>
+        <ul class="card-features">
+          <li>✓ Run locally on your NVIDIA GPU</li>
+          <li>✓ Unlimited generations forever</li>
+          <li>✓ Works offline after install</li>
+          <li>✓ Fastest: ~60-120s per mesh</li>
+          <li>✓ Free lifetime updates</li>
+        </ul>
+        <div class="card-reqs">
+          <div class="reqs-title">Requirements</div>
+          <ul>
+            <li>NVIDIA GPU with <b>8 GB VRAM</b> or more</li>
+            <li>Windows 10 / 11 (64-bit)</li>
+            <li>16 GB RAM, 30 GB free disk</li>
+            <li>Internet (first run only, ~15 GB models)</li>
+          </ul>
+        </div>
+        <a href="check.html" class="btn-ghost-full">Check my PC first</a>
+        <a href="#buy-desktop" class="btn-primary-full">Buy Desktop — 24,99 €</a>
+      </article>
+
+      <!-- CLOUD CARD -->
+      <article class="card">
+        <div class="card-tag card-tag-cloud">Cloud</div>
+        <h3>MyFabmesh.AI <span class="card-edition">Cloud</span></h3>
+        <div class="card-price">
+          <span class="price">0,20 € <span class="price-unit">/ mesh</span></span>
+          <span class="price-note">pay as you go · no subscription</span>
+        </div>
+        <ul class="card-features">
+          <li>✓ Runs in your browser</li>
+          <li>✓ Works on any PC, Mac, tablet, phone</li>
+          <li>✓ No install, no GPU required</li>
+          <li>✓ Same quality as Desktop</li>
+          <li>✓ 5 free credits to start</li>
+        </ul>
+        <div class="card-reqs">
+          <div class="reqs-title">Requirements</div>
+          <ul>
+            <li>A web browser (Chrome / Edge / Firefox / Safari)</li>
+            <li>Internet connection</li>
+            <li>Nothing else</li>
+          </ul>
+        </div>
+        <a href="#cloud-soon" class="btn-ghost-full">Try free (5 credits)</a>
+        <a href="#cloud-soon" class="btn-primary-full">Open Cloud</a>
+      </article>
+
+    </div>
+
+    <p class="products-note">
+      Not sure which one? <a href="check.html">Run the 5-second compatibility check</a>
+      — we'll tell you which one matches your machine.
+    </p>
+  </section>
+
+  <section id="how" class="how">
+    <h2>How it works</h2>
+    <ol class="how-steps">
+      <li>
+        <div class="how-num">1</div>
+        <h4>Drop a reference image</h4>
+        <p>A photo, a sketch, a screenshot — any single image of what you want to model.</p>
+      </li>
+      <li>
+        <div class="how-num">2</div>
+        <h4>AI engine does the work</h4>
+        <p>Our pipeline generates the geometry, unwraps UVs, and paints PBR textures in one shot.</p>
+      </li>
+      <li>
+        <div class="how-num">3</div>
+        <h4>Download a ready-to-use GLB</h4>
+        <p>Import directly into Unreal, Blender, Unity, Godot. Yours to use, sell, or remix.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section id="faq" class="faq">
+    <h2>FAQ</h2>
+
+    <details>
+      <summary>Can I use AMD or Intel GPU for Desktop?</summary>
+      <p>No, Desktop requires NVIDIA. AMD Radeon, Intel Arc, and integrated graphics are not supported locally. <b>Use Cloud instead</b> — it runs from any browser and works on any GPU.</p>
+    </details>
+
+    <details>
+      <summary>Will it work on my MacBook?</summary>
+      <p>The Desktop app is Windows only. On Mac, use the <b>Cloud</b> version directly from Safari.</p>
+    </details>
+
+    <details>
+      <summary>Why 8 GB of VRAM?</summary>
+      <p>The AI engine needs to load several large neural networks at once (mesh generation + texture synthesis + back-view + face refinement). Below 8 GB the app would crash. With 12 GB or more, you unlock the "Full" mode with face refinement and 8K textures.</p>
+    </details>
+
+    <details>
+      <summary>Are the generated meshes mine to sell?</summary>
+      <p>Yes, 100%. We use only AI models with commercial-safe licenses (MIT, Apache 2.0, BSD, OpenRAIL++-M). You own your output and can sell it on Fab, Sketchfab, Unity Asset Store, or anywhere.</p>
+    </details>
+
+    <details>
+      <summary>Why does Windows say "Unknown publisher" when installing?</summary>
+      <p>We're a young indie studio — we're saving up for the (expensive) Microsoft code signing certificate. Until then, click <b>"More info → Run anyway"</b> on the SmartScreen warning. The installer is safe and open about what it does.</p>
+    </details>
+
+    <details>
+      <summary>Can I refund?</summary>
+      <p>Yes. If you ran the compatibility checker and your PC was marked compatible but the app doesn't work, we refund 100%. If you skipped the check and bought anyway, we still try to help case by case.</p>
+    </details>
+  </section>
+
+  <section class="cta-bottom">
+    <h2>Ready to start?</h2>
+    <a href="check.html" class="btn-primary">Check my PC (5 sec)</a>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="footer-cols">
+    <div>
+      <div class="footer-brand">MyFabmesh<span class="brand-ai">.AI</span></div>
+      <p>Image to 3D mesh, in seconds.</p>
+    </div>
+    <div>
+      <h5>Product</h5>
+      <a href="#products">Desktop</a>
+      <a href="#cloud-soon">Cloud</a>
+      <a href="check.html">Compatibility</a>
+    </div>
+    <div>
+      <h5>Resources</h5>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/fabienlacaze/FabMesh">GitHub</a>
+    </div>
+    <div>
+      <h5>Legal</h5>
+      <a href="#legal-terms">Terms</a>
+      <a href="#legal-privacy">Privacy</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    © 2026 MyFabmesh.AI — Built by Fabien Lacaze
+  </div>
+</footer>
+
+</body>
+</html>

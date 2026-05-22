@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compatibility check — MyFabmesh.AI</title>
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .check-shell {
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 24px;
+  }
+  .check-card {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+  }
+  .check-rows { margin: 24px 0; }
+  .check-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .check-row:last-child { border-bottom: none; }
+  .check-lbl { color: var(--text-2); }
+  .check-val { color: var(--text-0); font-weight: 600; }
+  .check-val.ok { color: var(--success); }
+  .check-val.warn { color: var(--warning); }
+  .check-val.bad { color: var(--accent-2); }
+  .check-verdict {
+    text-align: center;
+    padding: 24px;
+    border-radius: var(--radius-sm);
+    margin: 20px 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .verdict-full { background: rgba(74, 222, 128, 0.15); color: var(--success); }
+  .verdict-std { background: rgba(168, 85, 247, 0.15); color: var(--accent); }
+  .verdict-lite { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+  .verdict-cloud { background: rgba(233, 69, 96, 0.12); color: var(--accent-2); }
+  .check-cta {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 24px;
+  }
+  .check-note {
+    font-size: 12px;
+    color: var(--text-2);
+    text-align: center;
+    margin-top: 18px;
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="brand">MyFabmesh<span class="brand-ai">.AI</span></a>
+  <nav class="nav">
+    <a href="index.html">Home</a>
+    <a href="index.html#products">Products</a>
+    <a href="index.html#faq">FAQ</a>
+  </nav>
+</header>
+
+<main class="check-shell">
+
+  <h1 style="text-align:center; margin-bottom: 10px; font-size: 32px;">Will MyFabmesh.AI Desktop work on my PC?</h1>
+  <p style="text-align:center; color: var(--text-1); margin-bottom: 30px;">
+    Quick browser-based check. No download, no install — takes 5 seconds.
+  </p>
+
+  <div class="check-card">
+    <div class="check-rows">
+      <div class="check-row">
+        <span class="check-lbl">Operating system</span>
+        <span class="check-val" id="r-os">checking…</span>
+      </div>
+      <div class="check-row">
+        <span class="check-lbl">Graphics chip</span>
+        <span class="check-val" id="r-gpu">checking…</span>
+      </div>
+      <div class="check-row">
+        <span class="check-lbl">Estimated VRAM</span>
+        <span class="check-val" id="r-vram">checking…</span>
+      </div>
+      <div class="check-row">
+        <span class="check-lbl">CPU cores</span>
+        <span class="check-val" id="r-cores">checking…</span>
+      </div>
+      <div class="check-row">
+        <span class="check-lbl">WebGPU support</span>
+        <span class="check-val" id="r-webgpu">checking…</span>
+      </div>
+    </div>
+
+    <div id="verdict" class="check-verdict verdict-std">Analyzing your machine…</div>
+
+    <div id="check-cta-row" class="check-cta"></div>
+
+    <p class="check-note">
+      This browser check uses what the browser exposes (~95% accurate). For a 100% verification, the optional full diagnostic .exe will be available soon — runs 30 s, reads real GPU info, sends the result back to this page.
+    </p>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="footer-bottom" style="margin: 0;">
+    © 2026 MyFabmesh.AI
+  </div>
+</footer>
+
+<script src="gpu-database.js"></script>
+<script src="check.js"></script>
+</body>
+</html>
