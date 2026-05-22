@@ -257,6 +257,19 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   await window.wizardAPI.completeSetup({ mode: chosenMode, hw: hwReport });
 });
 
+// Brand in the topbar = link to the public website.
+(() => {
+  const brand = document.querySelector('#topbar .brand');
+  if (!brand) return;
+  brand.style.cursor = 'pointer';
+  brand.title = 'Open myfabmesh.ai';
+  brand.addEventListener('click', () => {
+    if (window.wizardAPI?.openExternal) {
+      window.wizardAPI.openExternal('https://fabienlacaze.github.io/MyFabmesh/');
+    }
+  });
+})();
+
 // Show app version in the bottom-right corner.
 (async () => {
   try {

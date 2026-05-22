@@ -9624,6 +9624,19 @@ async function openSettings() {
   _gpuPollTimer = setInterval(refreshGpuStats, 500);
 }
 document.getElementById('btn-settings')?.addEventListener('click', openSettings);
+
+// Brand in the topbar = link to the public website. Opens in the
+// user's default browser (not inside Electron) via the whitelisted
+// app:open-website IPC.
+(() => {
+  const brand = document.querySelector('#topbar .brand');
+  if (!brand) return;
+  brand.style.cursor = 'pointer';
+  brand.title = 'Open myfabmesh.ai';
+  brand.addEventListener('click', async () => {
+    try { await window.meshyAPI.openWebsite(); } catch (_) {}
+  });
+})();
 // Clicking the in-modal GPU monitor overlay also opens Settings so the
 // user can adjust limits directly from the job-details panel. We close
 // job-details first so Settings isn't rendered behind it (same z-index).
