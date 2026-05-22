@@ -23,33 +23,18 @@
 <main>
 
   <section class="hero">
-    <div class="hero-grid">
-      <div class="hero-text">
-        <h1>From a photo to a 3D mesh.<br><span class="gradient">Edit every step.</span></h1>
-        <p class="lead">
-          Generate textured, game-ready 3D meshes from any reference image —
-          then refine <b>the photo, the mesh, and the textures</b> directly
-          inside the app.
-        </p>
-        <p class="lead">
-          Paint, mask, inpaint, retouch geometry.
-          End-to-end, no round-trips to other software.
-        </p>
-        <div class="hero-cta">
-          <a href="#products" class="btn-primary">Choose your plan</a>
-          <a href="check.html" class="btn-ghost">Check my PC compatibility</a>
-        </div>
-        <p class="hero-trust">
-          All AI models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).
-          Your generated meshes are 100% yours to sell.
-        </p>
-      </div>
+    <h1>From a photo to a 3D mesh.<br><span class="gradient">Edit every step.</span></h1>
+    <p class="lead">
+      Generate textured, game-ready 3D meshes from any reference image —
+      then refine <b>the photo, the mesh, and the textures</b> directly
+      inside the app.
+    </p>
 
-      <!-- Auto-playing screenshot slideshow.
-           Drop real PNGs into docs/screenshots/01..05.png to replace
-           the placeholder mockups (see the data-img attribute below). -->
-      <div class="hero-viewer">
-        <div class="ss-frame">
+    <!-- Auto-playing screenshot slideshow (centered, between the two
+         lead paragraphs). Drop real PNGs into docs/screenshots/01..05.png
+         to replace the placeholder mockups. -->
+    <div class="hero-viewer">
+      <div class="ss-frame">
           <div class="ss-track" id="ss-track">
             <figure class="ss-slide active" data-caption="Setup wizard — auto-detect your PC, pick install mode" data-img="screenshots/01-wizard.png">
               <div class="ss-mock ss-mock-wizard">
@@ -102,15 +87,27 @@
           </div>
           <div class="ss-caption" id="ss-caption">Setup wizard — auto-detect your PC, pick install mode</div>
         </div>
-        <div class="ss-dots" id="ss-dots">
-          <button class="ss-dot active" data-i="0" aria-label="slide 1"></button>
-          <button class="ss-dot" data-i="1" aria-label="slide 2"></button>
-          <button class="ss-dot" data-i="2" aria-label="slide 3"></button>
-          <button class="ss-dot" data-i="3" aria-label="slide 4"></button>
-          <button class="ss-dot" data-i="4" aria-label="slide 5"></button>
-        </div>
+      <div class="ss-dots" id="ss-dots">
+        <button class="ss-dot active" data-i="0" aria-label="slide 1"></button>
+        <button class="ss-dot" data-i="1" aria-label="slide 2"></button>
+        <button class="ss-dot" data-i="2" aria-label="slide 3"></button>
+        <button class="ss-dot" data-i="3" aria-label="slide 4"></button>
+        <button class="ss-dot" data-i="4" aria-label="slide 5"></button>
       </div>
     </div>
+
+    <p class="lead">
+      Paint, mask, inpaint, retouch geometry.
+      End-to-end, no round-trips to other software.
+    </p>
+    <div class="hero-cta">
+      <a href="#products" class="btn-primary">Choose your plan</a>
+      <a href="check.html" class="btn-ghost">Check my PC compatibility</a>
+    </div>
+    <p class="hero-trust">
+      All AI models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).
+      Your generated meshes are 100% yours to sell.
+    </p>
   </section>
 
   <section id="products" class="products">

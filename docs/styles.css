@@ -85,21 +85,11 @@ a:hover { color: var(--text-0); }
    Hero
    ============================================================ */
 .hero {
+  text-align: center;
   padding: 60px 24px 60px;
-  max-width: 1200px;
+  max-width: 900px;
   margin: 0 auto;
 }
-.hero-grid {
-  display: grid;
-  grid-template-columns: 1.05fr 1fr;
-  gap: 48px;
-  align-items: center;
-}
-.hero-text { text-align: left; }
-.hero-text h1 { line-height: 1.1; }
-.hero-text .lead { margin-left: 0; max-width: 580px; }
-.hero-text .hero-cta { justify-content: flex-start; }
-.hero-text .hero-trust { margin: 0; max-width: 540px; }
 .hero h1 {
   font-size: clamp(36px, 6vw, 56px);
   font-weight: 800;
@@ -139,7 +129,11 @@ a:hover { color: var(--text-0); }
    or, if missing, a CSS mockup that fakes the app's chrome. The
    JS swaps in real images automatically when they're found.
    ============================================================ */
-.hero-viewer { width: 100%; }
+.hero-viewer {
+  width: 100%;
+  max-width: 720px;
+  margin: 28px auto;
+}
 .ss-frame {
   position: relative;
   width: 100%;
@@ -638,19 +632,6 @@ a:hover { color: var(--text-0); }
 /* ============================================================
    Responsive
    ============================================================ */
-@media (max-width: 900px) {
-  .hero-grid {
-    grid-template-columns: 1fr;
-    gap: 32px;
-  }
-  .hero-text { text-align: center; }
-  .hero-text .lead, .hero-text .hero-trust {
-    max-width: 640px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .hero-text .hero-cta { justify-content: center; }
-}
 @media (max-width: 700px) {
   .site-header { padding: 14px 18px; flex-wrap: wrap; gap: 12px; }
   .nav { gap: 14px; font-size: 13px; }
