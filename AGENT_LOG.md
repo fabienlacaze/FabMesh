@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (public website skeleton)
+
+Site statique zéro-budget pour MyFabmesh.AI prêt à pousser sur
+GitHub Pages :
+
+- `website/index.html` — landing avec 2 cards (Desktop / Cloud) côte à
+  côte, section "How it works" en 3 étapes, FAQ 6 questions, footer.
+- `website/check.html` + `check.js` + `gpu-database.js` —
+  compatibility checker browser-based. Détecte OS, GPU vendor + modèle
+  via WebGL UNMASKED_RENDERER_WEBGL, lookup VRAM dans la DB locale
+  (~100 GPU NVIDIA/AMD/Intel les plus communs sur Steam HW Survey).
+  Verdict en 1 sec : Full / Standard / Lite / Cloud + CTA approprié.
+- `website/styles.css` — réutilise le design system de l'app desktop
+  (bg-0/bg-1, accent-grad rouge→violet, mêmes radii). Le user qui
+  arrive du site reconnaît visuellement le produit dans l'app.
+- `website/favicon.png` — placeholder (M en accent rouge).
+- `website/README.md` — procédure exacte pour activer GitHub Pages
+  en 3 clics (Settings → Pages → Branch=master + Folder=/website).
+  Live à `https://fabienlacaze.github.io/FabMesh/`.
+
+Coût : 0 €. Stack : HTML + CSS + JS pur, zéro build, zéro framework.
+Plus tard, le custom domain `myfabmesh.ai` (~70€/an) se branche via
+CNAME + fichier `website/CNAME`.
+
+---
+
 ## 2026-05-22 (branding + zero-budget plan)
 
 Renommage et stratégie financière :
