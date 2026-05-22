@@ -83,14 +83,16 @@ def _config_targets():
 
 
 def _logs_targets():
-    # We don't know where the dev launched FabMesh from at uninstall
-    # time. Best effort: scan a few common locations. Skipped if not
-    # found, never errors out.
-    home = os.path.expanduser('~')
+    # Default: relative to this script's directory. The packaged
+    # installer places scripts inside <install>/resources/scripts/, so
+    # logs/ next to it is the right target. Never hard-code the dev's
+    # workstation path — that leaks the dev's username + repo name.
+    here = os.path.dirname(os.path.abspath(__file__))
     candidates = [
-        os.path.join(home, 'Desktop', 'FabWare', 'MeshyMyself', 'logs'),
+        os.path.normpath(os.path.join(here, '..', 'logs')),
+        os.path.normpath(os.path.join(here, '..', '..', 'logs')),
     ]
-    return [(p, 'FabMesh logs') for p in candidates if os.path.isdir(p)]
+    return [(p, 'MyFabmesh.AI logs') for p in candidates if os.path.isdir(p)]
 
 
 def main():

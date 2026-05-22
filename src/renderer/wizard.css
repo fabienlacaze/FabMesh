@@ -6,6 +6,16 @@
    the main app, so the wizard feels native.
    ============================================================ */
 
+/* Brand styling: the .AI part gets the accent gradient so the full
+   wordmark "MyFabmesh.AI" reads as a single brand. */
+.brand-ai {
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 800;
+}
+
 /* Topbar step tags ------------------------------------------------ */
 .wiz-step-tag {
   font-size: 11px;

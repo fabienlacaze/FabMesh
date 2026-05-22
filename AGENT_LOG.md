@@ -10,6 +10,57 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (rebrand audit + filter-repo cleanup)
+
+- **History rewrite** : repo entier devait être push sur GitHub. Bloqué
+  par 3 fichiers > 100 MB committés dans l'historique (`logs/fabmesh.log.1`
+  727 MB, `.log.2` 556 MB, `.log.3` 556 MB) + 5 autres > 50 MB
+  (PLY voxels, JSON debug). Solution : `git filter-repo
+  --strip-blobs-bigger-than 50M --force`. 2597 blobs scannés, repo
+  passé de ~1.5 GB à ~200 MB en historique. Force-push réussi avec
+  `http.postBuffer=524288000`.
+- **GitHub Pages** activé via `gh api -X POST repos/.../pages` avec
+  `source[path]=/docs`. Le `/website` n'est PAS supporté par GitHub
+  Pages (seulement `/` ou `/docs`) → renommé `website/` → `docs/`,
+  fusionné avec les .md techniques existants.
+- **Site live** : https://fabienlacaze.github.io/FabMesh/ .
+- **Audit visibilité** : agent dédié a remonté ~50 strings user-visible
+  contenant "FabMesh" ou "MeshyMyself" + leaks Python (`print('[SDXL]')`,
+  `print('[back-view] ControlNet OpenPose + RealVisXL + IPAdapter')`,
+  etc.) forwardés au renderer via `ai3d-progress`.
+
+**Patches appliqués** (toutes les strings user-visible → MyFabmesh.AI) :
+- `src/renderer/wizard.html` + `wizard.js` + `wizard.css` (ajout .brand-ai)
+- `src/renderer/index2.html` + `index2.js` + `styles/index2.css` (ajout .brand-ai)
+- `src/main/main.js` : title, Notification default, WIZARD_MODELS labels
+- `src/main/main.js:safeSend()` : **filtre _filterSensitive()** appliqué
+  sur les channels user-visible (ai3d-progress, calib-progress,
+  wizard:test-log, wizard:install-progress, log:line, mcp-stderr).
+  ~30 regex remplacent les model IDs HF (`microsoft/TRELLIS.2-4B`,
+  `SG161222/RealVisXL_V4.0`, etc.) + noms produits (TRELLIS, RealVis,
+  SDXL, ControlNet, IPAdapter, Florence, BLIP, Real-ESRGAN, MV-Adapter,
+  Hi3DGen, SF3D, TripoSR, Stable Fast 3D) → labels brandés (MyFabmesh.AI
+  3D Core, Texture engine, Face refiner, etc.).
+- `package.json` : `name=myfabmesh-ai`, `appId=ai.myfabmesh.desktop`,
+  `productName=MyFabmesh.AI`, `shortcutName/uninstallDisplayName/artifactName`.
+- `build/uninstaller.nsh` : 3 strings NSIS uninstaller.
+- `LICENSE.txt` + `EULA.txt` : ~18 occurrences, retiré mention
+  `"MeshyMyself"` au passage.
+- `src/renderer/index2.js:9828` : path absolu hardcodé
+  `c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/...` retiré, remplacé
+  par chemin relatif via `window.fabmeshConfig.calibBase` (fallback).
+- `scripts/cleanup_assets.py` : path dev `Desktop/FabWare/MeshyMyself`
+  retiré, scan relatif au script à la place.
+
+Non corrigé (Niveau 2, à faire avant push public propre) :
+- Repo GitHub `fabienlacaze/FabMesh` → renommer `fabienlacaze/MyFabmesh`
+  (gh repo rename) puis update URL dans `docs/index.html:185`
+- Branches `backup-*` (45+) à pruner (cosmétique)
+- Commit messages historiques contiennent "FabMesh" (laissé tel quel)
+- Commentaires Python (Niveau 3, jamais affichés au user)
+
+---
+
 ## 2026-05-22 (public website skeleton)
 
 Site statique zéro-budget pour MyFabmesh.AI prêt à pousser sur

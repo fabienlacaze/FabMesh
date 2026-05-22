@@ -1,5 +1,5 @@
 // ============================================================
-// FabMesh — Renderer 2 (refonte)
+// MyFabmesh.AI — Renderer 2 (refonte)
 // ============================================================
 // Architecture:
 //   - Page "projects": grid of project cards
@@ -15,7 +15,7 @@ import { Viewer3D } from './lib/Viewer3D.js';
 
 const API = window.meshyAPI;
 
-// FabMesh-styled confirm dialog (replaces the OS-native window.confirm
+// MyFabmesh.AI-styled confirm dialog (replaces the OS-native window.confirm
 // popup, which looks out of place against the dark UI).
 function fabConfirm({ title = 'Confirm', message = '', okLabel = 'Confirm',
                      cancelLabel = 'Cancel', icon = '\u26A0\uFE0F',
@@ -128,14 +128,14 @@ try {
 // saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
-  'local-flux':     'FabMesh Image Engine (local)',
+  'local-flux':     'MyFabmesh.AI Image Engine (local)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
-  'sf3d':           'FabMesh 3D Native (rerouted)',
-  'local':          'FabMesh 3D Native (rerouted)',
-  'trellis2_native':'FabMesh 3D Native',
-  'hi3dgen':        'FabMesh Legacy (2-stage)',
-  'trellis':        'FabMesh 3D Engine',
+  'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
+  'local':          'MyFabmesh.AI 3D Native (rerouted)',
+  'trellis2_native':'MyFabmesh.AI 3D Native',
+  'hi3dgen':        'MyFabmesh.AI Legacy (2-stage)',
+  'trellis':        'MyFabmesh.AI 3D Engine',
   'meshy':          'Cloud provider (Meshy.ai)',
 };
 function engineLabel(v) {
@@ -7079,7 +7079,7 @@ function _matInjectShader(mat) {
     // The include name varies between three.js versions; we cover both
     // 'output_fragment' (newer) and 'dithering_fragment' (older).
     const inject = `
-      // FabMesh Material Adjust live shader
+      // MyFabmesh.AI Material Adjust live shader
       vec3 _matCol = gl_FragColor.rgb;
       _matCol *= uBrightness;
       float _matLuma = dot(_matCol, vec3(0.299, 0.587, 0.114));
@@ -9162,7 +9162,7 @@ const gpuLimits = (() => {
       if (parsed && typeof parsed === 'object') v = { ...v, ...parsed };
     }
   } catch (e) {}
-  // Clamp to functional ranges so FabMesh stays usable. Minimums match
+  // Clamp to functional ranges so MyFabmesh.AI stays usable. Minimums match
   // the per-stat MIN_BY_STAT table used while dragging (setupGpuLimitDragging):
   //   RAM   ≥ 50% : SF3D needs ~8 GB at tex_res=1024 → 50% of 32 GB
   //   VRAM  ≥ 60% : SDXL + SF3D need ~9 GB → 60% of 16 GB
@@ -9642,7 +9642,7 @@ document.getElementById('set-open-logs')?.addEventListener('click', async () => 
   if (API.openLogsFolder) await API.openLogsFolder();
 });
 
-// Reconfigure FabMesh: relaunch the first-time setup wizard. Models on
+// Reconfigure MyFabmesh.AI: relaunch the first-time setup wizard. Models on
 // disk and generated meshes are kept; only the "setup done" flag is
 // cleared so the wizard reopens at next launch.
 document.getElementById('set-reconfigure')?.addEventListener('click', async () => {
@@ -9650,7 +9650,7 @@ document.getElementById('set-reconfigure')?.addEventListener('click', async () =
     'This will reopen the setup wizard so you can change install mode '
     + 'or re-download a missing model. Your projects and generated meshes '
     + 'are kept. Continue?',
-    'Reconfigure FabMesh', 'Reconfigure');
+    'Reconfigure MyFabmesh.AI', 'Reconfigure');
   if (!ok) return;
   try {
     await window.meshyAPI.reconfigureFabmesh();
@@ -9659,7 +9659,7 @@ document.getElementById('set-reconfigure')?.addEventListener('click', async () =
   }
 });
 
-// Uninstall FabMesh: launches the Windows NSIS uninstaller. The
+// Uninstall MyFabmesh.AI: launches the Windows NSIS uninstaller. The
 // uninstaller itself asks the user whether to also delete models and
 // settings — we don't ask twice here, just confirm intent and quit.
 document.getElementById('set-uninstall')?.addEventListener('click', async () => {
@@ -9668,7 +9668,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     + 'delete the AI models (~17 GB) and your settings in the next '
     + 'step. Generated meshes in your projects folder are never '
     + 'touched. Continue?',
-    'Uninstall FabMesh', 'Uninstall');
+    'Uninstall MyFabmesh.AI', 'Uninstall');
   if (!ok) return;
   try {
     const r = await window.meshyAPI.uninstallFabmesh();
@@ -9824,10 +9824,10 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
       if (kind === 'views') {
         // Show view_0..5 from the active multiview dir
         const views = stageData.views || [];
-        const mvBase = 'file:///' + encodeURI(
-          'c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/images/_calibration/ref_rubiks_multiview/'
-            .replace(/\\/g, '/')
-        );
+        // Path used in calibration debug view. Falls back to a relative
+        // file URI so the dev path never leaks in the packaged build.
+        const mvBase = (window.fabmeshConfig && window.fabmeshConfig.calibBase)
+          || 'images/_calibration/ref_rubiks_multiview/';
         const cells = views.map(v => {
           const border = v.ok ? '#3a3' : '#c33';
           return `<div style="position:relative; outline:2px solid ${border}; border-radius:3px; overflow:hidden;">
@@ -10522,7 +10522,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     if (!t) {
       dot.style.background = '#666';
       stat.textContent = 'Disabled (no token)';
-      if (det) det.textContent = 'Set FABMESH_CONTROL_API=1 (or just relaunch FabMesh) to enable.';
+      if (det) det.textContent = 'Set FABMESH_CONTROL_API=1 (or just relaunch MyFabmesh.AI) to enable.';
       return;
     }
     try {
@@ -10685,7 +10685,7 @@ function _showNsfwWarning() {
           Content depicting violence, terrorism, or hate speech may also violate local laws. <strong>You are solely responsible</strong> for ensuring that your use of this software complies with all applicable laws in your jurisdiction.
         </p>
         <p style="color:#fbbf24; font-size:11px; font-weight:600;">
-          FabMesh and its developers assume NO liability for content generated by users in unrestricted mode.
+          MyFabmesh.AI and its developers assume NO liability for content generated by users in unrestricted mode.
         </p>
       </div>
     `;
@@ -12239,7 +12239,7 @@ if (API.onAppCloseRequested) {
     }
     const ok = await customConfirm(
       `${runningCount} task${runningCount > 1 ? 's are' : ' is'} running. They will be cancelled if you quit now. Continue?`,
-      'Quit FabMesh',
+      'Quit MyFabmesh.AI',
       'Quit and cancel'
     );
     if (ok) {

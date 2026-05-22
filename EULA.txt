@@ -1,9 +1,9 @@
 ================================================================================
- FabMesh / MeshyMyself — End User License Agreement (EULA)
+ MyFabmesh.AI — End User License Agreement (EULA)
  Version 1.0
 ================================================================================
 
-IMPORTANT — READ CAREFULLY. By installing, copying, or otherwise using FabMesh
+IMPORTANT — READ CAREFULLY. By installing, copying, or otherwise using MyFabmesh.AI
 (the "Software"), you agree to be bound by the terms of this End User License
 Agreement ("Agreement"). If you do not agree, do not install or use the
 Software.
@@ -11,7 +11,7 @@ Software.
 --------------------------------------------------------------------------------
  1. Definitions
 --------------------------------------------------------------------------------
-"Software" means the FabMesh application and its accompanying scripts, assets,
+"Software" means the MyFabmesh.AI application and its accompanying scripts, assets,
 and documentation.
 "Generated Content" means any image, 3D mesh, rig, skeleton, animation,
 texture, or other output produced by running the Software on your own inputs.
@@ -31,7 +31,7 @@ THIRD_PARTY_LICENSES.txt, which You agree to respect.
 Subject to this Agreement and the underlying model licenses (in particular the
 CreativeML Open RAIL++-M License governing Stable Diffusion XL and RealVis XL
 V4.0), YOU OWN the Generated Content produced from Your own text prompts or
-input images. FabMesh and its authors claim no ownership over Your Generated
+input images. MyFabmesh.AI and its authors claim no ownership over Your Generated
 Content.
 
 You are solely responsible for ensuring that Your inputs (prompts, reference
@@ -49,14 +49,14 @@ The Software invokes, but DOES NOT BUNDLE, the following external programs:
 
   • AI model weights — Model weights for Stable Diffusion XL, RealVis XL V4.0,
     TripoSR, Hunyuan3D, and related components are downloaded on first use
-    from Hugging Face and cached on Your machine. FabMesh does not
+    from Hugging Face and cached on Your machine. MyFabmesh.AI does not
     redistribute these weights; Your use of them is governed by their
     respective model licenses.
 
 --------------------------------------------------------------------------------
  5. Use restrictions (CreativeML Open RAIL++-M conditions)
 --------------------------------------------------------------------------------
-Because FabMesh relies on SDXL-family diffusion models, Your use of the
+Because MyFabmesh.AI relies on SDXL-family diffusion models, Your use of the
 Software and its Generated Content is subject to the use-based restrictions of
 the CreativeML Open RAIL++-M License. In particular, You agree NOT to use the
 Software or its Generated Content:
@@ -114,7 +114,7 @@ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  8. Indemnification
 --------------------------------------------------------------------------------
 You agree to indemnify, defend, and hold harmless the authors and copyright
-holders of FabMesh from and against any claims, damages, losses, and expenses
+holders of MyFabmesh.AI from and against any claims, damages, losses, and expenses
 (including reasonable attorneys' fees) arising out of or related to (a) Your
 use of the Software, (b) Your Generated Content, or (c) Your breach of this
 Agreement.
@@ -131,7 +131,7 @@ destroy all copies in Your possession.
  10. Miscellaneous
 --------------------------------------------------------------------------------
 This Agreement constitutes the entire agreement between You and the authors of
-FabMesh regarding the Software and supersedes all prior or contemporaneous
+MyFabmesh.AI regarding the Software and supersedes all prior or contemporaneous
 understandings. If any provision of this Agreement is held unenforceable, the
 remaining provisions shall remain in full force and effect.
 

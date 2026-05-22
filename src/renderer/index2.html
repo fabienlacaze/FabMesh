@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: blob:; script-src 'self' 'unsafe-inline' file: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: http://127.0.0.1:* https:; connect-src 'self' file: blob: http://127.0.0.1:*">
-  <title>FabMesh</title>
+  <title>MyFabmesh.AI</title>
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/index2.css">
 </head>
@@ -19,7 +19,7 @@
     <header id="topbar">
       <div class="topbar-left">
         <button id="back-to-projects" class="icon-btn" title="Back to projects">&#8592;</button>
-        <h1 class="brand">FabMesh</h1>
+        <h1 class="brand">MyFabmesh<span class="brand-ai">.AI</span></h1>
         <span id="breadcrumb"></span>
       </div>
       <div class="topbar-right">
@@ -78,7 +78,7 @@
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
-                    <option value="local-flux" selected>FabMesh Image Engine (local)</option>
+                    <option value="local-flux" selected>MyFabmesh.AI Image Engine (local)</option>
                     <option value="meshy">Meshy.ai (cloud, needs API key)</option>
                   </select>
                 </div>
@@ -293,8 +293,8 @@
                   <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-3d-engine">
-                      <option value="trellis2_native" selected>FabMesh 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
-                      <option value="hi3dgen">FabMesh Legacy (2-stage geometry + texture)</option>
+                      <option value="trellis2_native" selected>MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
+                      <option value="hi3dgen">MyFabmesh.AI Legacy (2-stage geometry + texture)</option>
                       <option value="meshy">Meshy.ai (cloud, license payante)</option>
                     </select>
                   </div>
@@ -1149,7 +1149,7 @@
             <span id="set-api-status">Control API · checking...</span>
           </div>
           <div class="settings-box-desc" id="set-api-detail" style="font-size:11px; color:var(--text-2);">
-            Local HTTP control plane on 127.0.0.1:7331. Drive FabMesh from scripts (Claude Code, batch generators, CI...).
+            Local HTTP control plane on 127.0.0.1:7331. Drive MyFabmesh.AI from scripts (Claude Code, batch generators, CI...).
           </div>
           <div style="display:flex; gap:6px; align-items:center; margin-top:6px; font-size:11px;">
             <span class="settings-field-label" style="min-width:50px;">Token</span>
@@ -1249,17 +1249,17 @@
         <!-- ═══ INSTALLATION ═══ -->
         <div class="settings-section-header">Installation</div>
         <div class="settings-box">
-          <div class="settings-box-title">Reconfigure FabMesh</div>
+          <div class="settings-box-title">Reconfigure MyFabmesh.AI</div>
           <div class="settings-box-desc">Re-run the first-time setup wizard to change install mode (Lite / Standard / Full) or re-download a missing model. Your projects and generated meshes are kept.</div>
           <div style="margin-top:8px;">
-            <button id="set-reconfigure" class="ghost-btn" style="width:100%; padding:6px 12px; font-size:12px;">&#9881;&#65039; Reconfigure FabMesh</button>
+            <button id="set-reconfigure" class="ghost-btn" style="width:100%; padding:6px 12px; font-size:12px;">&#9881;&#65039; Reconfigure MyFabmesh.AI</button>
           </div>
         </div>
         <div class="settings-box" style="margin-top:8px;">
-          <div class="settings-box-title">Uninstall FabMesh</div>
-          <div class="settings-box-desc">Remove FabMesh from your computer. You'll be asked whether to also delete the AI models (~17 GB) and your settings. Your generated meshes folder is never touched.</div>
+          <div class="settings-box-title">Uninstall MyFabmesh.AI</div>
+          <div class="settings-box-desc">Remove MyFabmesh.AI from your computer. You'll be asked whether to also delete the AI models (~17 GB) and your settings. Your generated meshes folder is never touched.</div>
           <div style="margin-top:8px;">
-            <button id="set-uninstall" class="ghost-btn danger" style="width:100%; padding:6px 12px; font-size:12px;">&#128465;&#65039; Uninstall FabMesh</button>
+            <button id="set-uninstall" class="ghost-btn danger" style="width:100%; padding:6px 12px; font-size:12px;">&#128465;&#65039; Uninstall MyFabmesh.AI</button>
           </div>
         </div>
 
@@ -1577,7 +1577,7 @@
             <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
             <label>Engine</label>
             <select id="mod-engine">
-              <option value="local-sdxl" selected>FabMesh Image Engine (local)</option>
+              <option value="local-sdxl" selected>MyFabmesh.AI Image Engine (local)</option>
               <option value="meshy">Meshy.ai (cloud, needs API key)</option>
             </select>
             <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
