@@ -269,7 +269,57 @@
   padding: 0 4px;
 }
 
-/* Version stamp (bottom-right) ----------------------------------- */
+/* Custom confirm modal (replaces native window.confirm) ---------- */
+.wiz-modal {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wiz-modal.hidden { display: none; }
+.wiz-modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+.wiz-modal-card {
+  position: relative;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 26px 28px 22px;
+  max-width: 460px;
+  width: calc(100% - 48px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+              0 0 0 1px rgba(168, 85, 247, 0.15);
+}
+.wiz-modal-title {
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 19px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.wiz-modal-body {
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+.wiz-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.primary-btn--danger {
+  background: linear-gradient(135deg, #f87171, #dc2626) !important;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.25) !important;
+}
+
+
 .wiz-version {
   position: fixed;
   bottom: 10px;
