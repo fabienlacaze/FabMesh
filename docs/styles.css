@@ -39,11 +39,15 @@ html {
      → #products). Mobile-safe — supported on all modern browsers. */
   scroll-behavior: smooth;
 }
-/* Push anchored sections below the sticky header so the H2 isn't
-   hidden when we land on it. */
+/* Push anchored sections below the sticky header (~65px) with a
+   comfortable gap so the H2 is fully visible after scroll. */
 section[id] {
-  scroll-margin-top: 70px;
+  scroll-margin-top: 90px;
 }
+/* Make sure the products section has a bit of vertical breathing
+   room at the top — defensive layer in case scroll-margin doesn't
+   apply (some older browsers / cache edge cases). */
+#products { padding-top: 24px; }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--text-0); }
