@@ -2,6 +2,51 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+// ===========================================================
+// Sentry crash reporting
+// ===========================================================
+// Captures unhandled exceptions, native crashes and renderer-side
+// errors and ships them to https://sentry.io so we can debug user
+// bug reports without asking them to paste a stack trace.
+//
+// DSN lives in build/sentry-dsn.txt (gitignored) so contributors
+// without access don't accidentally send their own crashes. Falls
+// back to a no-op transport in dev when the file is missing.
+(function _initSentry() {
+  let dsn = process.env.SENTRY_DSN || '';
+  if (!dsn) {
+    try {
+      const dsnFile = path.join(__dirname, '..', '..', 'build', 'sentry-dsn.txt');
+      if (fs.existsSync(dsnFile)) {
+        dsn = fs.readFileSync(dsnFile, 'utf-8').trim();
+      }
+    } catch (_) {}
+  }
+  if (!dsn) {
+    // No DSN configured — silently skip. Dev machines work without it.
+    return;
+  }
+  try {
+    const Sentry = require('@sentry/electron/main');
+    Sentry.init({
+      dsn,
+      release: 'myfabmesh-ai@' + (app.getVersion() || '0.0.0'),
+      environment: app.isPackaged ? 'production' : 'development',
+      // Drop high-volume noise; we only care about real errors.
+      tracesSampleRate: 0.0,
+      // Strip the user's machine name + Windows username from breadcrumbs.
+      beforeSend(event) {
+        if (event.user) delete event.user.username;
+        if (event.server_name) delete event.server_name;
+        return event;
+      },
+    });
+  } catch (e) {
+    console.warn('[sentry] init failed:', e.message);
+  }
+})();
+
 // NOTE: do NOT destructure execFile/spawn here — we monkey-patch them below for
 // auto-tracking, and a destructured local would bypass the wrapper. Use the
 // child_process module directly via wrappers further down.
