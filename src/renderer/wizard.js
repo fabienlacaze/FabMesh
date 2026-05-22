@@ -243,7 +243,7 @@ async function runFinalTest() {
   try {
     const result = await window.wizardAPI.runFinalTest(chosenMode);
     status.textContent = result.success
-      ? '✓ Test passed in ' + result.duration_s + 's. FabMesh is ready.'
+      ? '✓ Test passed in ' + result.duration_s + 's. MyFabmesh.AI is ready.'
       : '⚠ Test failed: ' + result.error;
     status.classList.toggle('error', !result.success);
     document.getElementById('btn-launch').disabled = !result.success;
@@ -262,12 +262,12 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   try {
     const v = await window.wizardAPI.getVersion();
     const el = document.getElementById('wiz-version');
-    if (el && v) el.textContent = 'FabMesh v' + v;
+    if (el && v) el.textContent = 'MyFabmesh.AI v' + v;
   } catch (_) {}
 })();
 
 // Cancel button: label depends on whether this is a first-run or a
-// reconfigure (user clicked "Reconfigure FabMesh" from Settings).
+// reconfigure (user clicked "Reconfigure MyFabmesh.AI" from Settings).
 // First-run cancel quits the app; reconfigure cancel restores the
 // prior setup_state and goes back to the main app.
 (async () => {
@@ -281,10 +281,10 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   btn.textContent = (wizMode === 'reconfigure') ? 'Cancel' : 'Quit';
   btn.addEventListener('click', async () => {
     const msg = (wizMode === 'reconfigure')
-      ? 'Cancel reconfiguration and go back to FabMesh? Your previous '
+      ? 'Cancel reconfiguration and go back to MyFabmesh.AI? Your previous '
         + 'install mode is restored.'
-      : 'Quit the setup wizard? FabMesh will close. You can re-run the '
-        + 'wizard by launching FabMesh again.';
+      : 'Quit the setup wizard? MyFabmesh.AI will close. You can re-run the '
+        + 'wizard by launching MyFabmesh.AI again.';
     if (!window.confirm(msg)) return;
     try { await window.wizardAPI.cancel(); } catch (_) {}
   });

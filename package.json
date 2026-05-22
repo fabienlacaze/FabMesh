@@ -1,7 +1,7 @@
 {
-  "name": "fabmesh",
+  "name": "myfabmesh-ai",
   "version": "1.0.0",
-  "description": "FabMesh — image-to-3D mesh generator with local AI.",
+  "description": "MyFabmesh.AI — image-to-3D mesh generator with local AI.",
   "main": "src/main/main.js",
   "author": {
     "name": "Fabien Lacaze",
@@ -24,8 +24,8 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.fabmesh.app",
-    "productName": "FabMesh",
+    "appId": "ai.myfabmesh.desktop",
+    "productName": "MyFabmesh.AI",
     "copyright": "Copyright © 2026 Fabien Lacaze",
     "directories": {
       "output": "dist/installer",
@@ -84,12 +84,12 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "FabMesh",
-      "uninstallDisplayName": "FabMesh ${version}",
+      "shortcutName": "MyFabmesh.AI",
+      "uninstallDisplayName": "MyFabmesh.AI ${version}",
       "deleteAppDataOnUninstall": false,
       "include": "build/uninstaller.nsh",
       "license": "LICENSE.txt",
-      "artifactName": "FabMesh-Setup-${version}.${ext}",
+      "artifactName": "MyFabmesh.AI-Setup-${version}.${ext}",
       "differentialPackage": true
     }
   }

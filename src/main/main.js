@@ -178,10 +178,62 @@ function safeBase(base, maxLen = 80) {
   return base.slice(0, maxLen);
 }
 
+// Channels whose payload eventually reaches the user (progress logs,
+// live log viewer). Strings going through these channels are filtered
+// to replace internal model/library names with branded equivalents.
+// Channels NOT in this set (e.g. internal IPC for window state) are
+// sent untouched.
+const _USER_VISIBLE_CHANNELS = new Set([
+  'ai3d-progress', 'calib-progress', 'wizard:test-log',
+  'wizard:install-progress', 'log:line', 'mcp-stderr',
+]);
+
+// One regex pass per call site is fine — these strings are usually
+// under a few KB. Order matters: full repo paths before short names.
+const _BRAND_FILTERS = [
+  [/\bmicrosoft\/TRELLIS\.?2?[\w.\-]*/gi, 'MyFabmesh.AI 3D Core'],
+  [/\bSG161222\/RealVisXL[\w.\-]*/gi,     'Texture engine'],
+  [/\bdiffusers\/stable-diffusion-xl-1\.0-inpainting[\w.\-]*/gi, 'Face refiner'],
+  [/\bxinsir\/controlnet-openpose-sdxl[\w.\-]*/gi, 'Back-view module'],
+  [/\bxinsir\/controlnet-tile-sdxl[\w.\-]*/gi,     'Tile refiner'],
+  [/\bh94\/IP-Adapter[\w.\-/]*/gi,                  'Reference module'],
+  [/\bmicrosoft\/Florence-2-large/gi,               'Advanced vision analyzer'],
+  [/\bSalesforce\/blip-image-captioning-large/gi,   'Vision analyzer'],
+  [/\bRealESRGAN_x4plus[\w.\-]*/gi,                 'Upscale engine'],
+  [/\bhuanngzh\/mv-adapter[\w.\-/]*/gi,             'Multi-view module'],
+  [/\bstabilityai\/[\w.\-]+/gi,                     'AI engine'],
+  [/\bTRELLIS\.?2?[\w.\-]*/gi,                      '3D Core'],
+  [/\bRealVisXL\s*V?\d?\.?\d?/gi,                   'Texture engine'],
+  [/\bRealVis(?!Mesh)\w*/gi,                        'Image engine'],
+  [/\bSDXL\s*(?:Turbo|Inpaint(?:ing)?|Lightning)?/gi,'AI engine'],
+  [/\bControlNet(?:\s+OpenPose)?/gi,                'pose module'],
+  [/\bIP-?Adapter(?:\s+Plus)?/gi,                   'reference module'],
+  [/\bFlorence-?2?\b/gi,                            'vision analyzer'],
+  [/\bBLIP-?\d?\b/gi,                               'vision analyzer'],
+  [/\bReal-?ESRGAN\b/gi,                            'upscale engine'],
+  [/\bHi3DGen\b/gi,                                 'legacy mesh engine'],
+  [/\bMV-?Adapter\b/gi,                             'multi-view module'],
+  [/\bStable\s*Fast\s*3D\b/gi,                      'mesh engine'],
+  [/\bTripoSR\b/gi,                                 'mesh engine'],
+  [/\bSF3D\b/gi,                                    'mesh engine'],
+  [/\bMeshyMyself\b/g,                              'MyFabmesh.AI'],
+  [/\bFabMesh\b/g,                                  'MyFabmesh.AI'],
+];
+
+function _filterSensitive(text) {
+  let out = String(text);
+  for (const [re, sub] of _BRAND_FILTERS) out = out.replace(re, sub);
+  return out;
+}
+
 function safeSend(channel, data) {
   try {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send(channel, data);
+      let payload = data;
+      if (_USER_VISIBLE_CHANNELS.has(channel) && typeof data === 'string') {
+        payload = _filterSensitive(data);
+      }
+      mainWindow.webContents.send(channel, payload);
     }
   } catch (e) {
     // Window destroyed mid-send - ignore silently
@@ -479,7 +531,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'FabMesh',
+    title: 'MyFabmesh.AI',
     icon: path.join(__dirname, '..', '..', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -2359,7 +2411,7 @@ const { Notification } = require('electron');
 ipcMain.handle('show-notification', (event, { title, body }) => {
   try {
     if (Notification.isSupported()) {
-      const n = new Notification({ title: title || 'FabMesh', body: body || '', silent: false });
+      const n = new Notification({ title: title || 'MyFabmesh.AI', body: body || '', silent: false });
       n.show();
       return true;
     }
@@ -4717,11 +4769,11 @@ ipcMain.handle('wizard:detect-hardware', async () => {
 // download/test scripts know what they're pulling.
 const WIZARD_MODELS = {
   lite:     [
-    { id: 'trellis2',  label: 'FabMesh 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'trellis2',  label: 'MyFabmesh.AI 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
     { id: 'blip1',     label: 'Vision analyzer',                          repo: 'Salesforce/blip-image-captioning-large',         size_mb: 990 },
   ],
   standard: [
-    { id: 'trellis2',  label: 'FabMesh 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'trellis2',  label: 'MyFabmesh.AI 3D Core',                          repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
     { id: 'realvis',   label: 'Texture engine',                           repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
     { id: 'cn_pose',   label: 'Back-view module',                         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },
     { id: 'ipadapter', label: 'Reference module',                         repo: 'h94/IP-Adapter',                                 size_mb: 700  },
@@ -4729,7 +4781,7 @@ const WIZARD_MODELS = {
     { id: 'esrgan',    label: 'Upscale engine',                           repo: 'github://RealESRGAN_x4plus',                      size_mb: 70   },
   ],
   full:     [
-    { id: 'trellis2',  label: 'FabMesh 3D Core (Ultra)',                  repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
+    { id: 'trellis2',  label: 'MyFabmesh.AI 3D Core (Ultra)',                  repo: 'microsoft/TRELLIS.2-4B',                         size_mb: 4100 },
     { id: 'realvis',   label: 'Texture engine',                           repo: 'SG161222/RealVisXL_V4.0',                        size_mb: 6500 },
     { id: 'sdxl_inp',  label: 'Face refiner',                             repo: 'diffusers/stable-diffusion-xl-1.0-inpainting-0.1', size_mb: 6500 },
     { id: 'cn_pose',   label: 'Back-view module',                         repo: 'xinsir/controlnet-openpose-sdxl-1.0',            size_mb: 2400 },

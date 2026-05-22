@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: blob:; script-src 'self' 'unsafe-inline' file: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: http://127.0.0.1:* https:; connect-src 'self' file: blob: http://127.0.0.1:*">
-<title>FabMesh — Setup</title>
+<title>MyFabmesh.AI — Setup</title>
 <link rel="stylesheet" href="styles/main.css">
 <link rel="stylesheet" href="styles/index2.css">
 <link rel="stylesheet" href="wizard.css">
@@ -14,7 +14,7 @@
 
   <header id="topbar">
     <div class="topbar-left">
-      <h1 class="brand">FabMesh</h1>
+      <h1 class="brand">MyFabmesh<span class="brand-ai">.AI</span></h1>
       <span id="breadcrumb">Setup wizard</span>
     </div>
     <div class="topbar-right">
@@ -32,7 +32,7 @@
     <!-- STEP 1: WELCOME -->
     <section class="wiz-page" id="page-welcome">
       <div class="wiz-card">
-        <h1 class="wiz-h1">Welcome to FabMesh</h1>
+        <h1 class="wiz-h1">Welcome to MyFabmesh.AI</h1>
         <p class="wiz-lead">Generate 3D meshes from a single image, locally on your GPU.</p>
         <p class="wiz-text">The setup wizard will:</p>
         <ul class="wiz-list">
@@ -101,7 +101,7 @@
     <section class="wiz-page" id="page-download">
       <div class="wiz-card">
         <h1 class="wiz-h1">Downloading models</h1>
-        <p class="wiz-lead">You can use FabMesh as soon as the first model is ready. The rest continues in the background.</p>
+        <p class="wiz-lead">You can use MyFabmesh.AI as soon as the first model is ready. The rest continues in the background.</p>
         <div id="dl-list" class="wiz-dl-list"></div>
         <div class="wiz-dl-summary">
           <div><span id="dl-done">0</span> / <span id="dl-total">0</span> MB</div>
@@ -119,11 +119,11 @@
       <div class="wiz-card">
         <h1 class="wiz-h1">No compatible GPU detected</h1>
         <p class="wiz-lead">
-          FabMesh Desktop needs an NVIDIA GPU with at least 6 GB of VRAM to
+          MyFabmesh.AI Desktop needs an NVIDIA GPU with at least 6 GB of VRAM to
           generate meshes locally.
         </p>
         <p class="wiz-text">
-          Good news: you can still use FabMesh through our <b>Cloud</b> service —
+          Good news: you can still use MyFabmesh.AI through our <b>Cloud</b> service —
           no install, no GPU required, pay per generation.
         </p>
         <ul class="wiz-list">
@@ -134,7 +134,7 @@
         </ul>
         <div class="wiz-actions">
           <button class="ghost-btn" data-back="detect">Back</button>
-          <button class="primary-btn" id="btn-open-cloud">Open FabMesh Cloud</button>
+          <button class="primary-btn" id="btn-open-cloud">Open MyFabmesh.AI Cloud</button>
         </div>
       </div>
     </section>
@@ -147,7 +147,7 @@
         <div id="test-status" class="wiz-status">Preparing…</div>
         <pre id="test-log" class="wiz-test-log"></pre>
         <div class="wiz-actions">
-          <button class="primary-btn" id="btn-launch" disabled>Launch FabMesh</button>
+          <button class="primary-btn" id="btn-launch" disabled>Launch MyFabmesh.AI</button>
         </div>
       </div>
     </section>
