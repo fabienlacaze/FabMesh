@@ -1,6 +1,6 @@
 # MyFabmesh.AI — site web
 
-Site statique zéro-budget pour [MyFabmesh.AI](https://fabienlacaze.github.io/FabMesh/).
+Site statique zéro-budget pour [MyFabmesh.AI](https://fabienlacaze.github.io/MyFabmesh/).
 
 Composé de :
 - `index.html` — landing avec 2 cards (Desktop / Cloud) + How it works + FAQ
@@ -26,7 +26,7 @@ git push origin master
 
 ### Étape 2 — Activer GitHub Pages
 
-Sur https://github.com/fabienlacaze/FabMesh/settings/pages :
+Sur https://github.com/fabienlacaze/MyFabmesh/settings/pages :
 
 1. **Source** : "Deploy from a branch"
 2. **Branch** : `master`
@@ -34,7 +34,7 @@ Sur https://github.com/fabienlacaze/FabMesh/settings/pages :
 4. Save
 
 Après ~30 sec, le site est live à :
-**`https://fabienlacaze.github.io/FabMesh/`**
+**`https://fabienlacaze.github.io/MyFabmesh/`**
 
 ### Étape 3 — Tester
 
