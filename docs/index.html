@@ -259,9 +259,33 @@
         <div style="color: var(--success); margin-top: 6px;">✓ New texture applied — exported projects/dragon/mesh_v2.glb (47 MB)</div>
       </div>
     </div>
-    <p style="text-align:center; font-size: 13px; color: var(--text-2); margin-top: 20px;">
+
+    <!-- Unreal + Claude + MyFabmesh.AI chained workflow -->
+    <div style="max-width: 760px; margin: 32px auto 0;">
+      <h3 style="text-align: center; font-size: 20px; margin-bottom: 10px;">
+        Pair it with Unreal: <span class="gradient">end-to-end asset pipeline.</span>
+      </h3>
+      <p style="text-align: center; color: var(--text-1); font-size: 14px; margin-bottom: 18px;">
+        With Claude connected to <b>MyFabmesh.AI</b> AND <b>Unreal Engine</b>
+        (via its own MCP plugin), one prompt turns a reference image into
+        a mesh, then drops it into your level — no manual export / import,
+        no folder hopping.
+      </p>
+      <div style="background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px;">
+        <div style="font-family: 'Consolas','Monaco',monospace; font-size: 13px; color: var(--text-1); line-height: 1.7;">
+          <div style="color: var(--text-2);"># Claude talking to BOTH MyFabmesh.AI and Unreal at the same time</div>
+          <div><span style="color: var(--accent);">&gt;</span> Generate a viking longship from <span style="color: var(--accent-2);">ref.png</span> and spawn it at (0, 0, 0) in my Unreal scene.</div>
+          <div style="color: var(--text-2); margin-top: 6px;">  → MyFabmesh.AI: building mesh… (84 s)</div>
+          <div style="color: var(--text-2);">  → Unreal: importing GLB → /Game/Assets/Generated/longship</div>
+          <div style="color: var(--text-2);">  → Unreal: spawning actor at world origin</div>
+          <div style="color: var(--success); margin-top: 6px;">✓ Done. Longship visible in viewport.</div>
+        </div>
+      </div>
+    </div>
+
+    <p style="text-align:center; font-size: 13px; color: var(--text-2); margin-top: 24px;">
       Works with any MCP-compatible client (Claude Desktop, Claude Code, VS Code Continue, etc.).
-      Same dark theme, no API keys, no subscriptions.
+      Pair with the Unreal Engine MCP plugin to chain generation and engine integration in one prompt.
     </p>
   </section>
 
@@ -291,6 +315,11 @@
     <details>
       <summary>Can I drive the app from VS Code or Claude Code?</summary>
       <p>Yes. The desktop app exposes an MCP (Model Context Protocol) server on first launch. Any MCP-compatible client — Claude Desktop, Claude Code in VS Code, Continue, etc. — can connect locally and issue commands: generate from an image, batch-process a folder, edit a texture, export a GLB. No API keys, no subscription, no cloud round-trip — everything runs on your machine through the same engine the GUI uses.</p>
+    </details>
+
+    <details>
+      <summary>Can it pipe assets directly into Unreal Engine?</summary>
+      <p>Yes — if you also install the Unreal Engine MCP plugin (community-maintained, free). Then a single Claude prompt can: (1) ask MyFabmesh.AI to generate or refine a mesh, (2) ask Unreal to import the resulting GLB at a chosen path, (3) spawn it as an actor in your level. The whole loop — image → mesh → engine → in-scene — runs without leaving the chat. Same trick works for Blender, Unity (if you wire their MCP bridges) or any tool with an MCP server.</p>
     </details>
 
     <details>
