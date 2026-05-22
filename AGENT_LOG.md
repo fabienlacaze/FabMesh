@@ -10,6 +10,29 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (ship-ready UX + launch kit)
+
+Trois lots successifs ce soir :
+
+1. electron-updater wired vers GitHub Releases (auto-check 30s post-launch,
+   delta download, toast UI). `publish` config dans package.json.
+2. Site web : badge BETA dans le header, section "Latest release" qui
+   pull la GitHub API au load. Updater toast top-right dans l'app +
+   modal "About" avec version live, check-update bouton, liens
+   externes whitelisted.
+3. Launch kit : `build/LAUNCH_KIT.md` (textes Reddit / Twitter /
+   Show HN / Product Hunt / Discord / email YouTuber prêts à
+   copier-coller, timeline T-3 → T+7). `docs/og-image.png` 1200×630
+   généré (PIL) + meta og:/twitter: dans `docs/index.html` pour les
+   previews automatiques sur réseaux sociaux.
+
+L'installer v1.0.0-beta sur la GitHub Release contient déjà tous
+ces fix. Reste les 3 actions utilisateur : test machine vierge,
+listings Gumroad + itch.io (guide dans `build/LISTINGS_GUIDE.md`),
+posts launch (textes dans `build/LAUNCH_KIT.md`).
+
+---
+
 ## 2026-05-22 (Sentry + ship readiness doc)
 
 - Installed `@sentry/electron` 7.13.0.
