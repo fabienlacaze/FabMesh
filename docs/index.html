@@ -23,24 +23,94 @@
 <main>
 
   <section class="hero">
-    <h1>From a photo to a 3D mesh.<br><span class="gradient">Edit every step.</span></h1>
-    <p class="lead">
-      Generate textured, game-ready 3D meshes from any reference image —
-      then refine <b>the photo, the mesh, and the textures</b> directly
-      inside the app.
-    </p>
-    <p class="lead">
-      Paint, mask, inpaint, retouch geometry.
-      End-to-end, no round-trips to other software.
-    </p>
-    <div class="hero-cta">
-      <a href="#products" class="btn-primary">Choose your plan</a>
-      <a href="check.html" class="btn-ghost">Check my PC compatibility</a>
+    <div class="hero-grid">
+      <div class="hero-text">
+        <h1>From a photo to a 3D mesh.<br><span class="gradient">Edit every step.</span></h1>
+        <p class="lead">
+          Generate textured, game-ready 3D meshes from any reference image —
+          then refine <b>the photo, the mesh, and the textures</b> directly
+          inside the app.
+        </p>
+        <p class="lead">
+          Paint, mask, inpaint, retouch geometry.
+          End-to-end, no round-trips to other software.
+        </p>
+        <div class="hero-cta">
+          <a href="#products" class="btn-primary">Choose your plan</a>
+          <a href="check.html" class="btn-ghost">Check my PC compatibility</a>
+        </div>
+        <p class="hero-trust">
+          All AI models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).
+          Your generated meshes are 100% yours to sell.
+        </p>
+      </div>
+
+      <!-- Auto-playing screenshot slideshow.
+           Drop real PNGs into docs/screenshots/01..05.png to replace
+           the placeholder mockups (see the data-img attribute below). -->
+      <div class="hero-viewer">
+        <div class="ss-frame">
+          <div class="ss-track" id="ss-track">
+            <figure class="ss-slide active" data-caption="Setup wizard — auto-detect your PC, pick install mode" data-img="screenshots/01-wizard.png">
+              <div class="ss-mock ss-mock-wizard">
+                <div class="ss-mock-bar"></div>
+                <div class="ss-mock-body">
+                  <div class="ss-mock-card"></div>
+                  <div class="ss-mock-row"></div>
+                  <div class="ss-mock-row"></div>
+                </div>
+              </div>
+            </figure>
+            <figure class="ss-slide" data-caption="Drop a photo. Generate a textured mesh." data-img="screenshots/02-generate.png">
+              <div class="ss-mock ss-mock-generate">
+                <div class="ss-mock-bar"></div>
+                <div class="ss-mock-body ss-mock-split">
+                  <div class="ss-mock-image"></div>
+                  <div class="ss-mock-3d"></div>
+                </div>
+              </div>
+            </figure>
+            <figure class="ss-slide" data-caption="Edit the photo: mask, inpaint, clone, blur." data-img="screenshots/03-edit-photo.png">
+              <div class="ss-mock ss-mock-photo">
+                <div class="ss-mock-bar"></div>
+                <div class="ss-mock-body ss-mock-toolbar">
+                  <div class="ss-mock-tools"></div>
+                  <div class="ss-mock-image"></div>
+                </div>
+              </div>
+            </figure>
+            <figure class="ss-slide" data-caption="Polish the mesh: paint directly on the 3D model." data-img="screenshots/04-edit-mesh.png">
+              <div class="ss-mock ss-mock-mesh">
+                <div class="ss-mock-bar"></div>
+                <div class="ss-mock-body ss-mock-toolbar">
+                  <div class="ss-mock-tools"></div>
+                  <div class="ss-mock-3d"></div>
+                </div>
+              </div>
+            </figure>
+            <figure class="ss-slide" data-caption="Export GLB — ready for Unreal, Blender, Unity, Godot." data-img="screenshots/05-export.png">
+              <div class="ss-mock ss-mock-export">
+                <div class="ss-mock-bar"></div>
+                <div class="ss-mock-body ss-mock-grid">
+                  <div class="ss-mock-thumb"></div>
+                  <div class="ss-mock-thumb"></div>
+                  <div class="ss-mock-thumb"></div>
+                  <div class="ss-mock-thumb"></div>
+                </div>
+              </div>
+            </figure>
+          </div>
+          <div class="ss-caption" id="ss-caption">Setup wizard — auto-detect your PC, pick install mode</div>
+        </div>
+        <div class="ss-dots" id="ss-dots">
+          <button class="ss-dot active" data-i="0" aria-label="slide 1"></button>
+          <button class="ss-dot" data-i="1" aria-label="slide 2"></button>
+          <button class="ss-dot" data-i="2" aria-label="slide 3"></button>
+          <button class="ss-dot" data-i="3" aria-label="slide 4"></button>
+          <button class="ss-dot" data-i="4" aria-label="slide 5"></button>
+        </div>
+      </div>
     </div>
-    <p class="hero-trust">
-      All AI models are commercial-safe (MIT / Apache / BSD / OpenRAIL++-M).
-      Your generated meshes are 100% yours to sell.
-    </p>
   </section>
 
   <section id="products" class="products">
@@ -234,5 +304,6 @@
   </div>
 </footer>
 
+<script src="slideshow.js"></script>
 </body>
 </html>
