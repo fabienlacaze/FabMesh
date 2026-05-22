@@ -86,6 +86,144 @@ input, textarea, select, [contenteditable] {
   color: var(--text-2);
   font-size: 13px;
 }
+
+/* ============================================================
+   Auto-update toast (top-right, slides in from the side)
+   ============================================================ */
+.update-toast {
+  position: fixed;
+  top: 70px;
+  right: 20px;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px 14px 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(168, 85, 247, 0.25),
+              0 0 0 1px rgba(168, 85, 247, 0.15);
+  max-width: 420px;
+  animation: update-toast-in 0.4s ease-out;
+}
+.update-toast.hidden { display: none; }
+@keyframes update-toast-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.update-toast-icon {
+  font-size: 22px;
+  background: var(--accent-grad);
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  color: white;
+  font-weight: 700;
+}
+.update-toast-body { flex: 1; min-width: 0; }
+.update-toast-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-0);
+  margin-bottom: 2px;
+}
+.update-toast-text {
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+.update-toast-btn {
+  background: var(--accent-grad);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.update-toast-btn:hover { transform: translateY(-1px); }
+.update-toast-close {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 20px;
+  width: 24px; height: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+.update-toast-close:hover { color: var(--text-0); }
+
+/* ============================================================
+   About / Help modal
+   ============================================================ */
+.about-modal {
+  position: fixed; inset: 0;
+  z-index: 1600;
+  display: flex; align-items: center; justify-content: center;
+}
+.about-modal.hidden { display: none; }
+.about-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+}
+.about-card {
+  position: relative;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 36px 26px;
+  width: calc(100% - 48px);
+  max-width: 460px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6),
+              0 0 0 1px rgba(168, 85, 247, 0.15);
+}
+.about-close {
+  position: absolute; top: 14px; right: 14px;
+  background: transparent; border: none;
+  color: var(--text-2); font-size: 22px;
+  width: 28px; height: 28px; cursor: pointer;
+  padding: 0; line-height: 1;
+}
+.about-close:hover { color: var(--text-0); }
+.about-title {
+  font-size: 24px; font-weight: 800;
+  margin-bottom: 4px;
+}
+.about-version {
+  color: var(--text-2);
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+.about-section { margin-bottom: 18px; }
+.about-section p {
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.about-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.about-links { display: flex; gap: 18px; }
+.about-links a {
+  color: var(--accent);
+  font-size: 13px;
+  text-decoration: none;
+  font-weight: 600;
+}
+.about-links a:hover { text-decoration: underline; }
+.about-credits p { font-size: 12px; color: var(--text-2); }
 #breadcrumb::before { content: " / "; color: var(--text-3); margin-right: 4px; }
 #breadcrumb:empty { display: none; }
 #back-to-projects {
