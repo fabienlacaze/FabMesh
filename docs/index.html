@@ -127,6 +127,7 @@
           <li>✓ Works offline after install</li>
           <li>✓ Fastest: ~60-120s per mesh</li>
           <li>✓ Free lifetime updates</li>
+          <li>✓ <b>Scriptable from Claude Code / VS Code</b> (MCP)</li>
         </ul>
         <div class="card-reqs">
           <div class="reqs-title">Requirements</div>
@@ -238,6 +239,32 @@
     </div>
   </section>
 
+  <!-- Developer differentiator — scriptable via Claude Code / MCP -->
+  <section id="for-devs" class="how" style="padding: 60px 24px; max-width: 1000px; margin: 0 auto;">
+    <h2 style="text-align:center; font-size: 30px; margin-bottom: 14px;">
+      For developers: <span class="gradient">drive everything from Claude Code.</span>
+    </h2>
+    <p style="text-align:center; color: var(--text-1); max-width: 720px; margin: 0 auto 32px;">
+      The desktop app ships with a built-in MCP server (Model Context
+      Protocol). Open MyFabmesh.AI alongside VS Code + Claude Code, and
+      tell Claude to generate, edit, batch-process, or render meshes.
+      No glue code, no API keys — Claude controls the app directly.
+    </p>
+    <div style="background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; max-width: 760px; margin: 0 auto;">
+      <div style="font-family: 'Consolas','Monaco',monospace; font-size: 13px; color: var(--text-1); line-height: 1.7;">
+        <div style="color: var(--text-2);"># in Claude Code, talking to your MyFabmesh.AI instance</div>
+        <div><span style="color: var(--accent);">&gt;</span> Generate a 3D mesh from <span style="color: var(--accent-2);">photo_dragon.png</span>, then upscale the texture to 8K.</div>
+        <div style="color: var(--success); margin-top: 6px;">✓ Mesh ready in 92 s — saved to projects/dragon/mesh_v1.glb</div>
+        <div style="margin-top: 8px;"><span style="color: var(--accent);">&gt;</span> Now retexture it with a "stone, mossy" look and export GLB.</div>
+        <div style="color: var(--success); margin-top: 6px;">✓ New texture applied — exported projects/dragon/mesh_v2.glb (47 MB)</div>
+      </div>
+    </div>
+    <p style="text-align:center; font-size: 13px; color: var(--text-2); margin-top: 20px;">
+      Works with any MCP-compatible client (Claude Desktop, Claude Code, VS Code Continue, etc.).
+      Same dark theme, no API keys, no subscriptions.
+    </p>
+  </section>
+
   <section id="faq" class="faq">
     <h2>FAQ</h2>
 
@@ -259,6 +286,11 @@
     <details>
       <summary>Are the generated meshes mine to sell?</summary>
       <p>Yes, 100%. We use only AI models with commercial-safe licenses (MIT, Apache 2.0, BSD, OpenRAIL++-M). You own your output and can sell it on Fab, Sketchfab, Unity Asset Store, or anywhere.</p>
+    </details>
+
+    <details>
+      <summary>Can I drive the app from VS Code or Claude Code?</summary>
+      <p>Yes. The desktop app exposes an MCP (Model Context Protocol) server on first launch. Any MCP-compatible client — Claude Desktop, Claude Code in VS Code, Continue, etc. — can connect locally and issue commands: generate from an image, batch-process a folder, edit a texture, export a GLB. No API keys, no subscription, no cloud round-trip — everything runs on your machine through the same engine the GUI uses.</p>
     </details>
 
     <details>
