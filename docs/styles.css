@@ -34,6 +34,16 @@ html, body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
+html {
+  /* Smooth scroll for in-page anchor clicks (e.g. Choose your plan
+     → #products). Mobile-safe — supported on all modern browsers. */
+  scroll-behavior: smooth;
+}
+/* Push anchored sections below the sticky header so the H2 isn't
+   hidden when we land on it. */
+section[id] {
+  scroll-margin-top: 70px;
+}
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--text-0); }
