@@ -15,13 +15,22 @@ const os = require('os');
 // back to a no-op transport in dev when the file is missing.
 (function _initSentry() {
   let dsn = process.env.SENTRY_DSN || '';
+  // Look in two places: the packaged location (resources/sentry-dsn.txt
+  // copied by electron-builder's extraResources) and the dev box
+  // (build/sentry-dsn.txt, gitignored).
   if (!dsn) {
-    try {
-      const dsnFile = path.join(__dirname, '..', '..', 'build', 'sentry-dsn.txt');
-      if (fs.existsSync(dsnFile)) {
-        dsn = fs.readFileSync(dsnFile, 'utf-8').trim();
-      }
-    } catch (_) {}
+    const candidates = [
+      path.join(process.resourcesPath || '', 'sentry-dsn.txt'),
+      path.join(__dirname, '..', '..', 'build', 'sentry-dsn.txt'),
+    ];
+    for (const p of candidates) {
+      try {
+        if (p && fs.existsSync(p)) {
+          dsn = fs.readFileSync(p, 'utf-8').trim();
+          if (dsn) break;
+        }
+      } catch (_) {}
+    }
   }
   if (!dsn) {
     // No DSN configured — silently skip. Dev machines work without it.
