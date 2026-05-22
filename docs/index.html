@@ -310,7 +310,12 @@
 
     <details>
       <summary>Why does Windows say "Unknown publisher" when installing?</summary>
-      <p>We're a young indie studio — we're saving up for the (expensive) Microsoft code signing certificate. Until then, click <b>"More info → Run anyway"</b> on the SmartScreen warning. The installer is safe and open about what it does.</p>
+      <p>We're a young indie studio and the beta is unsigned. The installer is safe — you can verify the source on our GitHub. Click <b>"More info → Run anyway"</b> on the SmartScreen warning. The signed v1.1 (Azure Trusted Signing) ships as soon as we hit the milestone for the certificate.</p>
+    </details>
+
+    <details>
+      <summary>I get a DLL load error blocked by "Application Control"</summary>
+      <p>Windows 11's <b>Smart App Control</b> (a stricter policy than SmartScreen) blocks unsigned native libraries on first launch. This will be fixed for everyone in v1.1 once we sign every binary with <a href="https://learn.microsoft.com/azure/trusted-signing/overview">Azure Trusted Signing</a>. In the meantime: <b>v1.1 is the right fix</b>, we don't recommend disabling Smart App Control (it's permanent and weakens your PC). If you can't wait for v1.1, your safest option is to use the <b>Cloud version</b> instead — no install, no DLL, no policy issue.</p>
     </details>
 
     <details>
