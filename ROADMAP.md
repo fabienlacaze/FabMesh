@@ -135,7 +135,8 @@ _Last updated: 2026-05-22_
 | Marketing Reddit / Twitter / YouTube | 0 € | jamais | Build in public |
 | `myfabmesh.com` (backup) | 12 €/an | 5 ventes (~110 €) | Sécurise le `.com` (et redirige vers `.ai`) |
 | `myfabmesh.app` (backup) | 14 €/an | 10 ventes (~220 €) | Sécurise le `.app` |
-| Code signing Sectigo OV | 200 €/an | 15 ventes (~330 €) | Supprime warning Windows Defender |
+| **Azure Trusted Signing** (recommandé) | ~110 €/an | 15 ventes (~330 €) | Signature acceptée nativement par Windows Smart App Control + SmartScreen. La seule voie légitime sans bypass user pour Win11 récent. |
+| Sectigo EV (alternative) | ~330 €/an | 25 ventes (~550 €) | Token USB physique, accepté Smart App Control après réputation building |
 | **`myfabmesh.ai` (domain principal)** | 70 €/an | 30 ventes (~660 €) | Brand officielle : "MyFabmesh.AI" |
 | Dépôt INPI marque "MyFabmesh.AI" | 190 € (one-shot) | 50 ventes (~1100 €) | Protège juridiquement |
 | Cloud GPU (Replicate setup) | ~30 €/mois fixe | 100 ventes (~2200 €) | Lance le produit P2 |

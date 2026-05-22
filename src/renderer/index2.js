@@ -834,6 +834,125 @@ document.getElementById('np-create').addEventListener('click', async () => {
   if (asSel) asSel.value = assetStyle;
 });
 
+// ===========================================================
+// Asset-type-driven option visibility
+// ===========================================================
+// Each TRELLIS-2 advanced option (Detail refine, Auto-rectify,
+// Texture smooth, Quality+, Ultra Quality 1536, Ultra HD 8K, Face fix)
+// is relevant for some asset types and not others. This profile tells
+// the UI:
+//   true  -> visible + checked by default
+//   false -> visible + unchecked by default
+//   null  -> hidden (forced off, no UI noise)
+//
+// 'custom' shows everything (user picks).
+const ASSET_OPTIONS_PROFILE = {
+  character: {
+    'ws-trellis2-rectify':      true,   // strict front T-pose
+    'ws-trellis2-smooth':       false,  // skin grain is fine
+    'ws-trellis2-refine':       true,   // skin pores, hair detail
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      true,   // face detail matters
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     true,
+  },
+  creature: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       false,  // fur, scales
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      true,   // creature faces too
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     true,
+  },
+  vehicle: {
+    'ws-trellis2-rectify':      true,   // 3/4 iso
+    'ws-trellis2-smooth':       true,   // paint, chrome
+    'ws-trellis2-refine':       null,   // hallucinates wear on smooth surfaces
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,   // no face to gain from 1536
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  building: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  weapon: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  prop: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  environment: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  icon: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,   // icons are glossy / clean
+    'ws-trellis2-refine':       null,   // no pores/fur on a flat icon
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,   // overkill for a small icon
+    'ws-trellis2-ultra-hd':     null,   // overkill — icons stay small
+    'ws-trellis2-face-fix':     null,
+  },
+  custom: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       false,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      false,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     false,
+  },
+};
+
+function _applyAssetOptionsProfile(assetType) {
+  const profile = ASSET_OPTIONS_PROFILE[assetType] || ASSET_OPTIONS_PROFILE.custom;
+  for (const [id, state] of Object.entries(profile)) {
+    const cb = document.getElementById(id);
+    if (!cb) continue;
+    const row = cb.closest('.form-row');
+    if (state === null) {
+      if (row) row.style.display = 'none';
+      cb.checked = false;
+    } else {
+      if (row) row.style.display = '';
+      cb.checked = !!state;
+    }
+  }
+}
+(function _wireAssetOptionsProfile() {
+  const sel = document.getElementById('ws-asset-type');
+  if (!sel) return;
+  sel.addEventListener('change', () => _applyAssetOptionsProfile(sel.value));
+  // Apply once on initial render so the default character profile takes effect.
+  _applyAssetOptionsProfile(sel.value || 'character');
+})();
+
 // Show/hide "Construction stages" checkbox based on asset type —
 // hidden for living subjects (character, creature) where 3-stage
 // progressive build doesn't make sense. Visible for buildings,
