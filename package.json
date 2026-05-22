@@ -18,6 +18,7 @@
   "dependencies": {
     "@google/model-viewer": "^4.2.0",
     "@sentry/electron": "^7.13.0",
+    "electron-updater": "^6.8.3",
     "three": "^0.170.0"
   },
   "devDependencies": {
@@ -86,6 +87,14 @@
       "publisherName": "Fabien Lacaze",
       "verifyUpdateCodeSignature": false
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "fabienlacaze",
+        "repo": "MyFabmesh",
+        "releaseType": "release"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

@@ -56,6 +56,55 @@ const os = require('os');
   }
 })();
 
+// ===========================================================
+// Auto-update via electron-updater
+// ===========================================================
+// On every launch, check GitHub Releases for a newer version. If
+// found, download it in the background and prompt the user before
+// installing. Works because we already publish installers to
+// fabienlacaze/MyFabmesh releases (the URL pattern electron-builder
+// expects).
+//
+// Manual control: the renderer can call meshyAPI.checkForUpdate()
+// to force a check (useful for "About > Check for updates" button).
+let _updater = null;
+let _updateDownloaded = false;
+(function _initAutoUpdate() {
+  try {
+    const { autoUpdater } = require('electron-updater');
+    _updater = autoUpdater;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = false;  // we ask the user first
+    autoUpdater.logger = null;  // keep Electron's console clean
+    autoUpdater.on('update-available', (info) => {
+      const v = info?.version || 'unknown';
+      // Tell the renderer so it can show a toast / banner.
+      if (mainWindow && mainWindow.webContents) {
+        try { mainWindow.webContents.send('update-available', { version: v }); } catch (_) {}
+      }
+    });
+    autoUpdater.on('update-downloaded', (info) => {
+      _updateDownloaded = true;
+      if (mainWindow && mainWindow.webContents) {
+        try { mainWindow.webContents.send('update-downloaded', { version: info?.version || '' }); } catch (_) {}
+      }
+    });
+    autoUpdater.on('error', (err) => {
+      // Network blip, no release published yet, GitHub rate-limit, etc.
+      // Don't spam the user — log to Sentry if it's there, otherwise console.
+      try {
+        const Sentry = require('@sentry/electron/main');
+        Sentry.captureException(err);
+      } catch (_) {
+        console.warn('[updater] error:', err?.message || err);
+      }
+    });
+  } catch (e) {
+    // Module not installed (dev box without npm install) — fine, no-op.
+    _updater = null;
+  }
+})();
+
 // NOTE: do NOT destructure execFile/spawn here — we monkey-patch them below for
 // auto-tracking, and a destructured local would bypass the wrapper. Use the
 // child_process module directly via wrappers further down.
@@ -1190,6 +1239,15 @@ app.whenReady().then(() => {
   // MCP Bridge HTTP server — always started (headless or not) so Claude
   // can dispatch commands whether FabMesh is visible or hidden.
   startMcpBridge();
+
+  // Trigger an update check 30 seconds after launch so we don't compete
+  // with the heavy first-paint of the main app. Silent if already
+  // up-to-date or if GitHub is unreachable.
+  if (_updater && app.isPackaged) {
+    setTimeout(() => {
+      try { _updater.checkForUpdatesAndNotify(); } catch (_) {}
+    }, 30 * 1000);
+  }
 
   if (HEADLESS) {
     log.info('main', `Headless mode ready. MCP bridge on http://127.0.0.1:${MCP_BRIDGE_PORT}`);
@@ -4991,6 +5049,26 @@ ipcMain.handle('wizard:final-test', async (event, mode) => {
 });
 
 ipcMain.handle('wizard:get-version', () => app.getVersion());
+
+// Auto-update IPC for the renderer.
+ipcMain.handle('app:check-for-update', async () => {
+  if (!_updater) return { ok: false, error: 'updater not available' };
+  if (!app.isPackaged) return { ok: false, error: 'dev build, skipping' };
+  try {
+    const result = await _updater.checkForUpdates();
+    return { ok: true, hasUpdate: !!result?.updateInfo, version: result?.updateInfo?.version || null };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('app:install-update-now', () => {
+  if (!_updater || !_updateDownloaded) {
+    return { ok: false, error: 'no update downloaded yet' };
+  }
+  // quitAndInstall closes the app, runs the installer, relaunches.
+  setImmediate(() => _updater.quitAndInstall(false, true));
+  return { ok: true };
+});
 
 // Returns the path to the embedded Python interpreter shipped with
 // FabMesh. In a packaged build, electron-builder copies build/python-embed/
