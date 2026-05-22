@@ -239,6 +239,9 @@ a:hover { color: var(--text-0); }
 .card-features {
   list-style: none;
   margin-bottom: 24px;
+  /* Push the requirements + buttons to the bottom so the two cards
+     end up perfectly aligned even when one feature list is longer. */
+  flex-grow: 1;
 }
 .card-features li {
   padding: 6px 0;
@@ -251,6 +254,10 @@ a:hover { color: var(--text-0); }
   border-radius: var(--radius-sm);
   padding: 14px 16px;
   margin-bottom: 18px;
+  /* Equal height across both cards. Tuned to fit the longest list
+     (Desktop = 4 lines) so Cloud's shorter list (3 lines) doesn't
+     shrink and misalign the buttons. */
+  min-height: 150px;
 }
 .reqs-title {
   font-size: 11px;
