@@ -266,10 +266,42 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   } catch (_) {}
 })();
 
+// Branded confirm modal. Replaces window.confirm (native dialog is
+// styled by the OS — ugly title bar showing the package name).
+function wizConfirm({ title, body, okLabel = 'Confirm', cancelLabel = 'Cancel' }) {
+  return new Promise((resolve) => {
+    const modal  = document.getElementById('wiz-confirm');
+    const titleE = document.getElementById('wiz-confirm-title');
+    const bodyE  = document.getElementById('wiz-confirm-body');
+    const okE    = document.getElementById('wiz-confirm-ok');
+    const cancE  = document.getElementById('wiz-confirm-cancel');
+    if (!modal) return resolve(window.confirm(body));
+    titleE.textContent = title || 'Are you sure?';
+    bodyE.textContent  = body;
+    okE.textContent    = okLabel;
+    cancE.textContent  = cancelLabel;
+    modal.classList.remove('hidden');
+    let cleanup = null;
+    const close = (val) => {
+      modal.classList.add('hidden');
+      okE.onclick = cancE.onclick = null;
+      modal.querySelector('.wiz-modal-backdrop').onclick = null;
+      if (cleanup) document.removeEventListener('keydown', cleanup);
+      resolve(val);
+    };
+    okE.onclick   = () => close(true);
+    cancE.onclick = () => close(false);
+    modal.querySelector('.wiz-modal-backdrop').onclick = () => close(false);
+    cleanup = (e) => {
+      if (e.key === 'Escape') close(false);
+      if (e.key === 'Enter')  close(true);
+    };
+    document.addEventListener('keydown', cleanup);
+  });
+}
+
 // Cancel button: label depends on whether this is a first-run or a
 // reconfigure (user clicked "Reconfigure MyFabmesh.AI" from Settings).
-// First-run cancel quits the app; reconfigure cancel restores the
-// prior setup_state and goes back to the main app.
 (async () => {
   const btn = document.getElementById('wiz-cancel-btn');
   if (!btn) return;
@@ -280,12 +312,16 @@ document.getElementById('btn-launch').addEventListener('click', async () => {
   } catch (_) {}
   btn.textContent = (wizMode === 'reconfigure') ? 'Cancel' : 'Quit';
   btn.addEventListener('click', async () => {
-    const msg = (wizMode === 'reconfigure')
-      ? 'Cancel reconfiguration and go back to MyFabmesh.AI? Your previous '
-        + 'install mode is restored.'
-      : 'Quit the setup wizard? MyFabmesh.AI will close. You can re-run the '
-        + 'wizard by launching MyFabmesh.AI again.';
-    if (!window.confirm(msg)) return;
+    const isReco = wizMode === 'reconfigure';
+    const ok = await wizConfirm({
+      title: isReco ? 'Cancel reconfiguration?' : 'Quit setup?',
+      body: isReco
+        ? 'Your previous install mode will be restored and you will return to MyFabmesh.AI.'
+        : 'MyFabmesh.AI will close. You can re-run the setup wizard at any time by launching MyFabmesh.AI again.',
+      okLabel: isReco ? 'Cancel reconfiguration' : 'Quit MyFabmesh.AI',
+      cancelLabel: 'Keep setting up',
+    });
+    if (!ok) return;
     try { await window.wizardAPI.cancel(); } catch (_) {}
   });
 })();

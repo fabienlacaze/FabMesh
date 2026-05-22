@@ -155,6 +155,19 @@
   </main>
 
   <div class="wiz-version" id="wiz-version"></div>
+
+  <!-- In-app confirm modal (replaces the ugly native window.confirm). -->
+  <div class="wiz-modal hidden" id="wiz-confirm">
+    <div class="wiz-modal-backdrop"></div>
+    <div class="wiz-modal-card">
+      <h2 class="wiz-modal-title" id="wiz-confirm-title">Are you sure?</h2>
+      <p class="wiz-modal-body" id="wiz-confirm-body"></p>
+      <div class="wiz-modal-actions">
+        <button class="ghost-btn" id="wiz-confirm-cancel">Cancel</button>
+        <button class="primary-btn primary-btn--danger" id="wiz-confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
 </div>
 <script src="wizard.js"></script>
 </body>
