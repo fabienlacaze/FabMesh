@@ -23,10 +23,12 @@
 <main>
 
   <section class="hero">
-    <h1>Turn a photo into a 3D mesh.<br><span class="gradient">In seconds.</span></h1>
+    <h1>From a photo to a 3D mesh.<br><span class="gradient">Edit every step.</span></h1>
     <p class="lead">
-      Generate game-ready, textured 3D models from any reference image —
-      locally on your NVIDIA GPU, or in the cloud from any device.
+      Generate textured, game-ready 3D meshes from any reference image —
+      then refine <b>the photo, the mesh, and the textures</b> directly
+      inside the app. Paint, mask, inpaint, retouch geometry.
+      End-to-end, no round-trips to other software.
     </p>
     <div class="hero-cta">
       <a href="#products" class="btn-primary">Choose your plan</a>
@@ -115,15 +117,49 @@
       </li>
       <li>
         <div class="how-num">2</div>
-        <h4>AI engine does the work</h4>
-        <p>Our pipeline generates the geometry, unwraps UVs, and paints PBR textures in one shot.</p>
+        <h4>Refine the photo if needed</h4>
+        <p>Built-in editor: remove background, inpaint a missing part, paint over an unwanted element, clone-stamp a detail. Get a clean reference before generation.</p>
       </li>
       <li>
         <div class="how-num">3</div>
-        <h4>Download a ready-to-use GLB</h4>
-        <p>Import directly into Unreal, Blender, Unity, Godot. Yours to use, sell, or remix.</p>
+        <h4>AI engine generates the mesh</h4>
+        <p>The pipeline produces geometry, unwraps UVs and paints PBR textures in one pass. A few minutes of GPU time.</p>
+      </li>
+      <li>
+        <div class="how-num">4</div>
+        <h4>Polish the mesh</h4>
+        <p>Retouch the texture directly on the 3D model, fix face artefacts, re-paint zones, regenerate parts. All in the same app — no Blender round-trip required.</p>
+      </li>
+      <li>
+        <div class="how-num">5</div>
+        <h4>Export ready-to-use GLB</h4>
+        <p>Import straight into Unreal, Blender, Unity, Godot. Yours to use, sell, or remix.</p>
       </li>
     </ol>
+  </section>
+
+  <!-- DIFFERENTIATOR — the editing flow is the core value prop -->
+  <section id="edit" class="how" style="background: var(--bg-1); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 60px 24px; margin-top: 40px;">
+    <h2 style="text-align:center; font-size:32px; margin-bottom:14px;">Generation is half the work. <span class="gradient">Editing is the other half.</span></h2>
+    <p style="text-align:center; color: var(--text-1); max-width: 720px; margin: 0 auto 36px;">
+      Most tools stop at generation and leave you to fix things in
+      another app. MyFabmesh.AI puts the editor inside — for both the
+      photo you start from and the mesh you end up with.
+    </p>
+    <div style="max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px;">
+      <div style="background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px;">
+        <h4 style="font-size: 16px; margin-bottom: 10px;">📷 Photo editor</h4>
+        <p style="color: var(--text-1); font-size: 14px;">Remove background · paint over · inpaint missing parts · clone stamp · mask zones · blur · crop. Get a clean front-view before you generate.</p>
+      </div>
+      <div style="background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px;">
+        <h4 style="font-size: 16px; margin-bottom: 10px;">🪞 Mesh editor</h4>
+        <p style="color: var(--text-1); font-size: 14px;">Paint textures directly on the 3D model · regenerate broken zones · fix face artefacts · refine UV islands · 4K then 8K upscale · re-texture from a new reference.</p>
+      </div>
+      <div style="background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px;">
+        <h4 style="font-size: 16px; margin-bottom: 10px;">🔁 Iterative loop</h4>
+        <p style="color: var(--text-1); font-size: 14px;">Generate · spot the issue · fix it · regenerate just that part. No round-trips to Photoshop and Blender between every iteration.</p>
+      </div>
+    </div>
   </section>
 
   <section id="faq" class="faq">
