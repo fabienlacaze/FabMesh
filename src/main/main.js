@@ -517,9 +517,74 @@ function sdxlServerCall(endpoint, payload) {
 // folder when setup completes. Until that file exists, every launch goes
 // through the wizard. Easy to inspect/reset manually for debugging.
 const SETUP_STATE_FILE = path.join(app.getPath('userData'), 'setup_state.json');
+
+// Bootstrap migration: when we renamed package.json `name` from "fabmesh"
+// to "myfabmesh-ai", Electron's userData path moved from
+// %APPDATA%/fabmesh/ to %APPDATA%/myfabmesh-ai/. Existing users would
+// otherwise face the wizard again on the first launch after upgrade.
+// Migrate the old state file once if the new one is missing.
+function _migrateLegacySetupState() {
+  try {
+    if (fs.existsSync(SETUP_STATE_FILE)) return;
+    const legacy = path.join(path.dirname(path.dirname(SETUP_STATE_FILE)), 'fabmesh', 'setup_state.json');
+    if (fs.existsSync(legacy)) {
+      fs.mkdirSync(path.dirname(SETUP_STATE_FILE), { recursive: true });
+      fs.copyFileSync(legacy, SETUP_STATE_FILE);
+      log.info('main', `migrated legacy setup_state.json from ${legacy}`);
+    }
+  } catch (e) {
+    log.warn('main', `legacy state migration failed: ${e.message}`);
+  }
+}
+
+// Detect that the install is "already done" even without setup_state.json:
+// if the heavy AI models are present in the HuggingFace cache, the user
+// has clearly run the app before. Don't make them sit through the wizard
+// again — auto-mark the setup as completed and remember the choice.
+function _detectAlreadyInstalled() {
+  try {
+    const hub = path.join(require('os').homedir(), '.cache', 'huggingface', 'hub');
+    // TRELLIS-2 is the largest required model; if it's there, we're set.
+    const trellisDir = path.join(hub, 'models--microsoft--TRELLIS.2-4B');
+    if (!fs.existsSync(trellisDir)) return false;
+    // Size sanity: > 1 GB on disk = real cache, not an empty placeholder.
+    let total = 0;
+    const walk = (d) => {
+      let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of entries) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else { try { total += fs.statSync(p).size; } catch (_) {} }
+        if (total > 1024 * 1024 * 1024) return; // 1 GB early-exit
+      }
+    };
+    walk(trellisDir);
+    return total > 1024 * 1024 * 1024;
+  } catch (_) { return false; }
+}
+
 function isSetupComplete() {
   try {
-    if (!fs.existsSync(SETUP_STATE_FILE)) return false;
+    _migrateLegacySetupState();
+    if (!fs.existsSync(SETUP_STATE_FILE)) {
+      // No state file, but maybe the user already has the models.
+      // Auto-complete in that case so the wizard never re-appears.
+      if (_detectAlreadyInstalled()) {
+        try {
+          fs.mkdirSync(path.dirname(SETUP_STATE_FILE), { recursive: true });
+          fs.writeFileSync(SETUP_STATE_FILE, JSON.stringify({
+            completed_at: new Date().toISOString(),
+            mode: 'auto-detected',
+            note: 'Models already present in HF cache — skipped wizard',
+          }, null, 2));
+          log.info('main', 'setup auto-completed (models already in HF cache)');
+          return true;
+        } catch (e) {
+          log.warn('main', `auto-complete write failed: ${e.message}`);
+        }
+      }
+      return false;
+    }
     const s = JSON.parse(fs.readFileSync(SETUP_STATE_FILE, 'utf-8'));
     return !!(s && s.completed_at);
   } catch (_) { return false; }
