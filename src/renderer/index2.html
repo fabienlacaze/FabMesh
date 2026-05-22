@@ -9,6 +9,18 @@
   <link rel="stylesheet" href="styles/index2.css">
 </head>
 <body class="advanced-mode">
+  <!-- Auto-update toast: hidden by default. Appears when the main
+       process reports an update has finished downloading. -->
+  <div id="update-toast" class="update-toast hidden">
+    <div class="update-toast-icon">⬆</div>
+    <div class="update-toast-body">
+      <div class="update-toast-title">Update ready</div>
+      <div class="update-toast-text" id="update-toast-version">A new version is downloaded and ready to install.</div>
+    </div>
+    <button class="update-toast-btn" id="update-toast-install">Restart &amp; install</button>
+    <button class="update-toast-close" id="update-toast-close" aria-label="Dismiss">&times;</button>
+  </div>
+
   <div id="drop-overlay" class="hidden">
     <div class="drop-overlay-msg">
       <div class="drop-overlay-icon">&#11015;</div>
@@ -25,6 +37,7 @@
       <div class="topbar-right">
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
         <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
+        <button id="btn-about" class="icon-btn" title="About MyFabmesh.AI">?</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
       </div>
     </header>
@@ -2069,6 +2082,41 @@
   <!-- Global loupe magnifier (shared by Clone Stamp + Draw Mask) -->
   <div id="clone-loupe" style="position:fixed; pointer-events:none; display:none; z-index:99999; width:120px; height:120px; border:3px solid #f59e0b; border-radius:50%; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.6);">
     <canvas id="clone-loupe-canvas" width="120" height="120" style="width:120px; height:120px;"></canvas>
+  </div>
+
+  <!-- About / Help modal -->
+  <div id="about-modal" class="about-modal hidden">
+    <div class="about-backdrop" id="about-backdrop"></div>
+    <div class="about-card">
+      <button class="about-close" id="about-close" aria-label="Close">&times;</button>
+      <h2 class="about-title">MyFabmesh<span class="brand-ai">.AI</span></h2>
+      <div class="about-version">Version <span id="about-version-num">…</span> · public beta</div>
+
+      <div class="about-section">
+        <div class="about-label">What's this?</div>
+        <p>Image to 3D mesh generator. Generate, edit photo and mesh, export GLB to Unreal / Blender / Unity / Godot.</p>
+      </div>
+
+      <div class="about-section">
+        <div class="about-label">Updates</div>
+        <p id="about-update-status">Click below to check the latest release on GitHub.</p>
+        <button id="about-check-update" class="ghost-btn" style="margin-top:8px;">Check for updates</button>
+      </div>
+
+      <div class="about-section">
+        <div class="about-label">Resources</div>
+        <div class="about-links">
+          <a href="#" id="about-link-site">Website</a>
+          <a href="#" id="about-link-github">GitHub</a>
+          <a href="#" id="about-link-faq">FAQ</a>
+        </div>
+      </div>
+
+      <div class="about-section about-credits">
+        <div class="about-label">Crafted by</div>
+        <p>Fabien Lacaze · MIT / Apache / BSD / OpenRAIL++-M models bundled · Crash reports sent anonymously via Sentry.</p>
+      </div>
+    </div>
   </div>
 </body>
 </html>

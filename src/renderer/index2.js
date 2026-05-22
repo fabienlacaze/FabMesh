@@ -9746,6 +9746,96 @@ async function openSettings() {
 }
 document.getElementById('btn-settings')?.addEventListener('click', openSettings);
 
+// About / Help modal — show version, links, update check.
+(() => {
+  const btn       = document.getElementById('btn-about');
+  const modal     = document.getElementById('about-modal');
+  const closeBtn  = document.getElementById('about-close');
+  const backdrop  = document.getElementById('about-backdrop');
+  const versEl    = document.getElementById('about-version-num');
+  const checkBtn  = document.getElementById('about-check-update');
+  const statusEl  = document.getElementById('about-update-status');
+  const linkSite  = document.getElementById('about-link-site');
+  const linkGH    = document.getElementById('about-link-github');
+  const linkFAQ   = document.getElementById('about-link-faq');
+  if (!btn || !modal) return;
+
+  // Wire the "Website" / "GitHub" / "FAQ" links to open externally
+  // (use the IPC because the allowed-host list lives there).
+  const open = (url) => {
+    if (window.wizardAPI?.openExternal) window.wizardAPI.openExternal(url);
+    else window.open(url, '_blank');
+  };
+  linkSite?.addEventListener('click', (e) => { e.preventDefault(); open('https://fabienlacaze.github.io/MyFabmesh/'); });
+  linkGH?.addEventListener('click',   (e) => { e.preventDefault(); open('https://github.com/fabienlacaze/MyFabmesh'); });
+  linkFAQ?.addEventListener('click',  (e) => { e.preventDefault(); open('https://fabienlacaze.github.io/MyFabmesh/#faq'); });
+
+  const show = async () => {
+    modal.classList.remove('hidden');
+    // Populate version from app at open time so it stays in sync
+    // with the running build.
+    try {
+      const v = await (window.wizardAPI?.getVersion?.() ?? Promise.resolve(null));
+      versEl.textContent = v || '—';
+    } catch (_) { versEl.textContent = '—'; }
+  };
+  const hide = () => modal.classList.add('hidden');
+  btn.addEventListener('click', show);
+  closeBtn?.addEventListener('click', hide);
+  backdrop?.addEventListener('click', hide);
+  document.addEventListener('keydown', (e) => {
+    if (!modal.classList.contains('hidden') && e.key === 'Escape') hide();
+  });
+
+  checkBtn?.addEventListener('click', async () => {
+    if (!window.meshyAPI?.checkForUpdate) {
+      statusEl.textContent = 'Update check not available in this build.';
+      return;
+    }
+    checkBtn.disabled = true;
+    statusEl.textContent = 'Checking GitHub for updates…';
+    try {
+      const r = await window.meshyAPI.checkForUpdate();
+      if (!r.ok) {
+        statusEl.textContent = r.error === 'dev build, skipping'
+          ? 'Running a development build — no updates available.'
+          : 'Update check failed: ' + (r.error || 'unknown');
+      } else if (r.hasUpdate) {
+        statusEl.textContent = `Version ${r.version} is downloading. We'll show a toast when it's ready.`;
+      } else {
+        statusEl.textContent = 'You are running the latest version.';
+      }
+    } catch (e) {
+      statusEl.textContent = 'Update check failed: ' + e.message;
+    } finally {
+      checkBtn.disabled = false;
+    }
+  });
+})();
+
+// Auto-update toast. Listens for events from the main process (sent
+// by electron-updater once a new release is downloaded) and shows a
+// non-blocking toast in the top-right. User clicks "Restart & install"
+// to apply.
+(() => {
+  if (!window.meshyAPI?.onUpdateDownloaded) return;
+  const toast   = document.getElementById('update-toast');
+  const versEl  = document.getElementById('update-toast-version');
+  const btnGo   = document.getElementById('update-toast-install');
+  const btnX    = document.getElementById('update-toast-close');
+  if (!toast || !btnGo) return;
+  window.meshyAPI.onUpdateDownloaded(({ version }) => {
+    if (version) versEl.textContent = `MyFabmesh.AI ${version} is downloaded and ready to install.`;
+    toast.classList.remove('hidden');
+  });
+  btnGo.addEventListener('click', async () => {
+    btnGo.disabled = true;
+    btnGo.textContent = 'Restarting…';
+    try { await window.meshyAPI.installUpdateNow(); } catch (_) {}
+  });
+  btnX.addEventListener('click', () => toast.classList.add('hidden'));
+})();
+
 // Brand in the topbar = link to the public website. Opens in the
 // user's default browser (not inside Electron) via the whitelisted
 // app:open-website IPC.

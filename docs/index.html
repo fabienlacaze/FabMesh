@@ -11,7 +11,7 @@
 <body>
 
 <header class="site-header">
-  <a href="/" class="brand">MyFabmesh<span class="brand-ai">.AI</span></a>
+  <a href="/" class="brand">MyFabmesh<span class="brand-ai">.AI</span><span class="beta-badge" id="version-badge">BETA</span></a>
   <nav class="nav">
     <a href="#products">Products</a>
     <a href="#how">How it works</a>
@@ -324,6 +324,21 @@
     </details>
   </section>
 
+  <!-- Latest release block, populated from the GitHub API at page load.
+       Hidden gracefully if the network call fails. -->
+  <section id="latest-release" class="latest-release hidden">
+    <div class="latest-release-inner">
+      <div class="latest-release-tag" id="latest-tag">Latest release</div>
+      <h3 id="latest-title">—</h3>
+      <p id="latest-date" class="latest-date">—</p>
+      <pre id="latest-notes" class="latest-notes">—</pre>
+      <div class="latest-actions">
+        <a id="latest-download" href="https://github.com/fabienlacaze/MyFabmesh/releases/latest/download/MyFabmesh.AI-Setup-1.0.0.exe" class="btn-primary">Download installer</a>
+        <a id="latest-release-link" href="https://github.com/fabienlacaze/MyFabmesh/releases" class="btn-ghost">All releases</a>
+      </div>
+    </div>
+  </section>
+
   <section class="cta-bottom">
     <h2>Ready to start?</h2>
     <a href="check.html" class="btn-primary">Check my PC (5 sec)</a>
@@ -360,5 +375,40 @@
 </footer>
 
 <script src="slideshow.js"></script>
+<script>
+// Pull the latest release info from GitHub on page load. Falls back
+// silently if rate-limited or offline — the static download link in
+// the cards still points to /releases/latest/download/, which always
+// resolves.
+(function () {
+  fetch('https://api.github.com/repos/fabienlacaze/MyFabmesh/releases/latest', {
+    headers: { 'Accept': 'application/vnd.github+json' }
+  })
+    .then(r => r.ok ? r.json() : null)
+    .then(rel => {
+      if (!rel) return;
+      var tag = (rel.tag_name || '').replace(/^v/, '');
+      var badge = document.getElementById('version-badge');
+      if (badge && tag) badge.textContent = 'BETA ' + tag;
+
+      var box = document.getElementById('latest-release');
+      if (!box) return;
+      document.getElementById('latest-title').textContent = rel.name || rel.tag_name || 'Latest';
+      var d = rel.published_at ? new Date(rel.published_at) : null;
+      document.getElementById('latest-date').textContent = d
+        ? 'Published ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '';
+      // Truncate the release notes to ~6 lines so we don't overrun.
+      var notes = (rel.body || '').split('\n').slice(0, 8).join('\n');
+      document.getElementById('latest-notes').textContent = notes || 'No notes for this release.';
+      document.getElementById('latest-release-link').href = rel.html_url;
+      // Find the .exe asset and point Download at it.
+      var exeAsset = (rel.assets || []).find(a => /\.exe$/i.test(a.name));
+      if (exeAsset) document.getElementById('latest-download').href = exeAsset.browser_download_url;
+      box.classList.remove('hidden');
+    })
+    .catch(function () { /* silent */ });
+})();
+</script>
 </body>
 </html>
