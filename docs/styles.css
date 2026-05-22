@@ -85,11 +85,21 @@ a:hover { color: var(--text-0); }
    Hero
    ============================================================ */
 .hero {
-  text-align: center;
-  padding: 80px 24px 60px;
-  max-width: 900px;
+  padding: 60px 24px 60px;
+  max-width: 1200px;
   margin: 0 auto;
 }
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 48px;
+  align-items: center;
+}
+.hero-text { text-align: left; }
+.hero-text h1 { line-height: 1.1; }
+.hero-text .lead { margin-left: 0; max-width: 580px; }
+.hero-text .hero-cta { justify-content: flex-start; }
+.hero-text .hero-trust { margin: 0; max-width: 540px; }
 .hero h1 {
   font-size: clamp(36px, 6vw, 56px);
   font-weight: 800;
@@ -121,6 +131,204 @@ a:hover { color: var(--text-0); }
   color: var(--text-2);
   max-width: 540px;
   margin: 0 auto;
+}
+
+/* ============================================================
+   Hero screenshot slideshow (right column)
+   Each slide is either a real PNG (drop into docs/screenshots/)
+   or, if missing, a CSS mockup that fakes the app's chrome. The
+   JS swaps in real images automatically when they're found.
+   ============================================================ */
+.hero-viewer { width: 100%; }
+.ss-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(168, 85, 247, 0.15),
+              0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.ss-track { position: absolute; inset: 0; }
+.ss-slide {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  display: flex; align-items: stretch; justify-content: stretch;
+}
+.ss-slide.active { opacity: 1; }
+.ss-slide img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ss-caption {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px 18px;
+  background: linear-gradient(to top,
+    rgba(11, 11, 20, 0.95), rgba(11, 11, 20, 0));
+  color: var(--text-0);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  pointer-events: none;
+}
+.ss-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ss-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+.ss-dot:hover { border-color: var(--accent); }
+.ss-dot.active {
+  background: var(--accent-grad);
+  border-color: transparent;
+  transform: scale(1.2);
+}
+
+/* CSS mockup (no real PNG yet). Recreates the app's chrome in pure
+   CSS so the slideshow looks alive on day one. */
+.ss-mock {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  background: var(--bg-0);
+}
+.ss-mock-bar {
+  height: 36px;
+  background: linear-gradient(to bottom, var(--bg-2), var(--bg-1));
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: relative;
+}
+.ss-mock-bar::before {
+  content: "";
+  position: absolute;
+  left: 14px; top: 50%;
+  transform: translateY(-50%);
+  width: 80px; height: 14px;
+  background: var(--accent-grad);
+  border-radius: 3px;
+  opacity: 0.75;
+}
+.ss-mock-bar::after {
+  content: "";
+  position: absolute;
+  right: 14px; top: 50%;
+  transform: translateY(-50%);
+  width: 60px; height: 8px;
+  background: var(--bg-3);
+  border-radius: 3px;
+}
+.ss-mock-body { flex: 1; padding: 16px; gap: 12px; }
+.ss-mock-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  height: 80px;
+  margin-bottom: 12px;
+  position: relative;
+}
+.ss-mock-card::before {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  background: linear-gradient(135deg,
+    rgba(168, 85, 247, 0.2), rgba(233, 69, 96, 0.15));
+  border-radius: 4px;
+}
+.ss-mock-row {
+  height: 12px;
+  background: var(--bg-2);
+  border-radius: 3px;
+  margin: 8px 0;
+}
+.ss-mock-row:nth-child(odd) { width: 80%; }
+.ss-mock-row:nth-child(even) { width: 60%; }
+.ss-mock-split { display: grid; grid-template-columns: 1fr 1fr; }
+.ss-mock-toolbar { display: grid; grid-template-columns: 60px 1fr; }
+.ss-mock-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.ss-mock-image {
+  background: linear-gradient(135deg, #2a3a5a, #4a6a8a);
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+.ss-mock-image::after {
+  content: "";
+  position: absolute;
+  inset: 30%;
+  background: radial-gradient(circle, #d4a574 30%, transparent 60%);
+  border-radius: 50%;
+}
+.ss-mock-3d {
+  background: var(--bg-1);
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+.ss-mock-3d::before {
+  content: "";
+  position: absolute;
+  inset: 15%;
+  background: conic-gradient(from 45deg,
+    rgba(168, 85, 247, 0.4),
+    rgba(233, 69, 96, 0.3),
+    rgba(168, 85, 247, 0.4));
+  border-radius: 50%;
+  filter: blur(12px);
+}
+.ss-mock-3d::after {
+  content: "";
+  position: absolute;
+  inset: 25%;
+  background: linear-gradient(135deg, #4a5a7a, #6a8aaa);
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+.ss-mock-tools {
+  background: var(--bg-1);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+.ss-mock-tools::before, .ss-mock-tools::after {
+  content: "";
+  display: block;
+  height: 24px;
+  background: var(--bg-2);
+  border-radius: 3px;
+}
+.ss-mock-thumb {
+  background: linear-gradient(135deg, var(--bg-2), var(--bg-3));
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+.ss-mock-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 20%;
+  background: var(--accent-grad);
+  opacity: 0.3;
+  border-radius: 50%;
+  filter: blur(8px);
 }
 
 /* ============================================================
@@ -430,9 +638,22 @@ a:hover { color: var(--text-0); }
 /* ============================================================
    Responsive
    ============================================================ */
+@media (max-width: 900px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .hero-text { text-align: center; }
+  .hero-text .lead, .hero-text .hero-trust {
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .hero-text .hero-cta { justify-content: center; }
+}
 @media (max-width: 700px) {
   .site-header { padding: 14px 18px; flex-wrap: wrap; gap: 12px; }
   .nav { gap: 14px; font-size: 13px; }
-  .hero { padding: 50px 18px 40px; }
+  .hero { padding: 40px 18px 40px; }
   .footer-cols { grid-template-columns: 1fr 1fr; }
 }
