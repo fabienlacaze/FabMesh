@@ -286,39 +286,87 @@ Hypothèses médianes. Pessimiste ÷ 3, optimiste × 3.
 
 ---
 
-## État actuel (2026-05-22)
+## État actuel (2026-05-22 — fin de soirée)
 
 ### ✅ Livré
 
-- Wizard 5 étapes fonctionnel
+**Beta v1.0.0 prête techniquement** :
+- Wizard 5 étapes fonctionnel + auto-detect installation existante
 - Hardware detection auto + couleurs vert/orange/rouge
-- 3 modes : Full / Standard / Lite (Cloud-only retiré, redirige myfabmesh.ai/cloud)
+- 3 modes : Full / Standard / Lite
 - Bouton Cancel cancel-safe (backup `setup_state.json`)
 - Reconfigure + Uninstall dans Settings
-- UI complètement anonymisée (FabMesh 3D Core, Texture engine, etc.)
+- Branding MyFabmesh.AI complet (UI anonymisée des noms HF/modèles)
 - Heartbeat download avec timer + pulse
-- HF token fallback
-- Installer NSIS prototype généré (`dist/installer/FabMesh-Setup-1.0.0.exe`, 142 MB)
+- HF token fallback via sidecar gitignored bundlé en `extraResources`
+- Installer NSIS `MyFabmesh.AI-Setup-1.0.0.exe` (146 MB) live sur GitHub Release v1.0.0-beta
 - Python 3.11.9 portable + VC++ 2022 redist bundled
-- Workflow GitHub Actions pour les wheels custom
+- Sentry crash reporting wired (DSN sidecar bundlé, projet `myfabmesh-ai-desktop` dans org `fabienlacaze`)
+- electron-updater wired → GitHub Releases (`publish` provider configuré, `latest.yml` généré au build)
+- Toast update + modal About / Help dans l'app
+- Site web live https://fabienlacaze.github.io/MyFabmesh/ (badge BETA, slideshow, Latest release section auto-pull GitHub API, OG cards)
+- Logo cliquable → ouvre site dans navigateur (URLs whitelistées)
+- Asset type "UI Icon" + profil intelligent (options visibles selon asset type)
+- MCP / Claude Code / Unreal mis en avant (3 emplacements landing)
 - 2 audits sécurité passés
+- GitHub repo `fabienlacaze/MyFabmesh` propre (filter-repo cleanup 1.5 GB → 200 MB)
 
-### 🚧 À faire avant release
+### 🚧 Bloquant utilisateur (à toi)
 
-| # | Item | Effort | Priorité |
+| # | Item | Effort | Doc |
 |---|---|---|---|
-| 1 | Compiler wheels custom sur GH Actions + R2 hosting | 3-4 jours | Bloquant |
-| 2 | Générer token HF read-only | 5 min | Important |
-| 3 | Code signing cert Sectigo | 2 jours + 200€/an | Bloquant |
-| 4 | Landing myfabmesh.ai (ou itch.io Phase 0) 2 produits | 2 jours | Bloquant |
-| 5 | Compatibility checker web | 1 semaine | Bloquant |
-| 6 | Icon final | 1 jour | Cosmétique |
-| 7 | Tests sur 8 machines variées | 1 semaine | Bloquant |
-| 8 | Page produit Desktop + FAQ | 2 jours | Bloquant |
-| 9 | Trailer YouTube 90s | 2 jours | Important |
-| 10 | Beta privée Gumroad unlisted | 1 jour | Important |
+| 1 | Test wizard sur machine vierge (VM Win11 / PC ami) | 1 jour | `build/READY_TO_SHIP.md` étape 3 |
+| 2 | Listings Gumroad + itch.io | 50 min | `build/LISTINGS_GUIDE.md` |
+| 3 | Annoncer launch (Twitter / Reddit / HN / Discord) | 1 jour | `build/LAUNCH_KIT.md` |
+| 4 | Code signing (Azure Trusted Signing) | 30 min + 110€/an | À débloquer post-15 ventes |
+| 5 | Domain `myfabmesh.ai` | 5 min + 70€/an | Optionnel Phase 0 (GitHub Pages OK) |
 
-**Total avant public release** : ~4-5 semaines solo.
+### 🚧 Backlog autonome (peut tourner sans toi)
+
+Tout ce que Claude (moi) peut faire seul. Priorité décroissante par catégorie :
+
+**A — Site web / marketing** :
+- [ ] GIF animé de génération pour Twitter (1h) ⭐⭐⭐
+- [ ] Page Use Cases (gamedev / 3D print / indie / VFX) (2h) ⭐⭐⭐
+- [ ] Page Roadmap publique avec votes (GitHub Discussions API) (2h) ⭐⭐⭐
+- [ ] Honest comparison page vs concurrents (sans nommer) (2h) ⭐⭐⭐
+- [ ] Quickstart guide / tutorial (1h) ⭐⭐⭐
+- [ ] Page Changelog auto-pull GitHub Releases (1h) ⭐⭐
+- [ ] Press kit (logos, screenshots HD, descriptions) (1h) ⭐⭐
+- [ ] Sitemap.xml + robots.txt + SEO (30 min) ⭐⭐
+- [ ] Page Cloud "Coming Soon" + waitlist email (1h) ⭐⭐
+
+**B — App desktop (UX et robustesse)** :
+- [ ] Mode démo : projet pré-rempli au first-launch (2h) ⭐⭐⭐
+- [ ] Tutorial interactif overlay first-run (3h) ⭐⭐⭐
+- [ ] Feedback widget → GitHub Issues (1h) ⭐⭐
+- [ ] Telemetry opt-in anonyme (2h) ⭐⭐
+- [ ] Backup auto des projets locaux (1h) ⭐⭐
+- [ ] License key system code-prêt pour Phase 1 (3h) ⭐⭐
+- [ ] Stripe webhook code-prêt (3h) ⭐⭐
+
+**C — Documentation dev** :
+- [ ] MCP API docs (2h) ⭐⭐
+- [ ] Plugin development guide (3h) ⭐
+
+**D — Infra & CI** :
+- [ ] GitHub Actions auto-build installer à chaque tag git (2h) ⭐⭐⭐
+- [ ] Smoke tests étendus (matrix variée) (2h) ⭐⭐
+- [ ] Lint + pre-commit hooks (30 min) ⭐
+
+**E — Cloud product P2 (gros morceau)** :
+- [ ] Replicate deploy de TRELLIS-2 (2-3 jours) ⭐⭐⭐
+- [ ] Web app squelette Next.js (auth + dashboard + Stripe crédits) (1 semaine) ⭐⭐⭐
+
+### Plan d'attaque par défaut suggéré (~8h cumulé)
+
+1. GIF animé Twitter (1h) — sans ça les tweets sont moins viraux
+2. Mode démo first-launch (2h) — UX new user x10
+3. GitHub Actions auto-build (2h) — toi tu push juste un tag, build auto
+4. Page Roadmap publique (2h) — engagement community
+5. Quickstart guide (1h) — réduit support load
+
+**Total avant public release polish** : ~4-5 jours solo Claude, en parallèle de tes actions utilisateur.
 
 ---
 
