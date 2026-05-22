@@ -63,6 +63,10 @@
       {
         "from": "build/vc_redist.x64.exe",
         "to": "vc_redist.x64.exe"
+      },
+      {
+        "from": "build/hf_fallback_token.txt",
+        "to": "hf_fallback_token.txt"
       }
     ],
     "win": {

@@ -78,6 +78,7 @@ external/UniRig/
 build/python-embed/
 build/vc_redist.x64.exe
 build/sentry-dsn.txt
+build/hf_fallback_token.txt
 dist/
 
 # Claude Code session data

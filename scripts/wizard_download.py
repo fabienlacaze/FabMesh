@@ -133,7 +133,29 @@ def _hf_token():
 #   2. Settings -> Access Tokens -> New token (READ only, never write)
 #   3. Paste it here. It only buys you a higher rate-limit for anonymous
 #      downloads — it does NOT grant access to private/gated content.
-HF_FALLBACK_TOKEN = ''
+# Read from a sibling file (bundled into the installer via electron-builder
+# extraResources), or empty if missing. The literal token is NEVER stored
+# in git — GitHub's secret scanner rejects pushes that contain hf_*
+# tokens, even for read-only public ones. The file lives at
+# `build/hf_fallback_token.txt` on the dev box (gitignored) and at
+# `resources/hf_fallback_token.txt` once installed.
+def _load_hf_fallback_token():
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, '..', 'hf_fallback_token.txt'),       # packaged: resources/
+        os.path.join(here, '..', 'build', 'hf_fallback_token.txt'),  # dev box
+    ]
+    for p in candidates:
+        try:
+            if os.path.isfile(p):
+                with open(p, 'r', encoding='utf-8') as f:
+                    t = f.read().strip()
+                    if t.startswith('hf_'):
+                        return t
+        except Exception:
+            pass
+    return ''
+HF_FALLBACK_TOKEN = _load_hf_fallback_token()
 
 
 def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
