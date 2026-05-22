@@ -1,6 +1,12 @@
-# FabMesh — Roadmap
+# MyFabmesh.AI — Roadmap
 
 _Last updated: 2026-05-22_
+
+> **Nom produit / brand marketing** : **MyFabmesh.AI** (le `.AI` fait partie du nom et signale immédiatement "AI product").
+> **Nom court / technique** : MyFabmesh (utilisé dans le code, packagename, exe).
+> **Domain primary** : `myfabmesh.ai` (~70€/an, à acheter dès qu'on a 50 ventes ~1100€).
+> **Domain Phase 0 (zéro budget)** : `myfabmesh.itch.io` ou `myfabmesh.github.io` (gratuit).
+> Tous les TLDs `myfabmesh.*` sont libres aujourd'hui : `.com .io .app .ai .fr`. Le `.com` sans préfixe (`fabmesh.com`) était squatté à 9985$ — on l'ignore.
 
 ## Vision produit (4 produits, 1 site)
 
@@ -45,7 +51,7 @@ _Last updated: 2026-05-22_
 
 ---
 
-## Site fabmesh.com — structure
+## Site myfabmesh.ai — structure
 
 ### Landing : 2 produits côte-à-côte
 
@@ -110,10 +116,59 @@ _Last updated: 2026-05-22_
 - **Electron** 31.7.7 + scripts Python embarqués
 - **Python 3.11.9 portable** bundled (~30 MB, python.org)
 - **VC++ 2022 Redistributable** bundled (~25 MB, silent install)
-- **Wheels custom** Win+CUDA12+Py3.11 (torch, flash_attn, kaolin, xformers) hébergés sur `wheels.fabmesh.com` (Cloudflare R2)
+- **Wheels custom** (Phase 2+) Win+CUDA12+Py3.11 hébergés sur `wheels.myfabmesh.ai` (Cloudflare R2). Phase 1 = utilise les wheels officiels PyTorch/PyPI/GitHub direct, pas de R2 nécessaire.
 - **PyPI direct** pour le reste (diffusers, transformers, hf_hub, etc.)
 - **Modèles AI** téléchargés au premier lancement depuis HuggingFace (~15-22 GB)
 - **Installer NSIS** ~150 MB → 22 GB après first-run setup
+
+---
+
+## Plan 0 € (Phase 0 : avant la 1ère vente)
+
+**Principe** : zéro dépense jusqu'à la 1ère vente. Chaque dépense est débloquée par un palier de revenus.
+
+| Dépense | Coût | Débloqué quand | Justification |
+|---|---|---|---|
+| Hosting site | 0 € | jamais | Vercel / GitHub Pages gratuit |
+| Subdomain initial | 0 € | jamais | `myfabmesh.itch.io` ou `myfabmesh.github.io` gratuit |
+| Distribution itch.io / Gumroad | 0 € | jamais | 10% pris seulement sur ventes |
+| Marketing Reddit / Twitter / YouTube | 0 € | jamais | Build in public |
+| `myfabmesh.com` (backup) | 12 €/an | 5 ventes (~110 €) | Sécurise le `.com` (et redirige vers `.ai`) |
+| `myfabmesh.app` (backup) | 14 €/an | 10 ventes (~220 €) | Sécurise le `.app` |
+| Code signing Sectigo OV | 200 €/an | 15 ventes (~330 €) | Supprime warning Windows Defender |
+| **`myfabmesh.ai` (domain principal)** | 70 €/an | 30 ventes (~660 €) | Brand officielle : "MyFabmesh.AI" |
+| Dépôt INPI marque "MyFabmesh.AI" | 190 € (one-shot) | 50 ventes (~1100 €) | Protège juridiquement |
+| Cloud GPU (Replicate setup) | ~30 €/mois fixe | 100 ventes (~2200 €) | Lance le produit P2 |
+
+### Le problème Windows Defender sans code signing
+
+Tant que le cert n'est pas acheté, au double-clic de `MyFabmesh-Setup-1.0.0.exe` Windows affiche :
+
+```
+Windows protected your PC
+Microsoft Defender SmartScreen prevented an unrecognized app
+from starting.
+[ More info ]  [ Don't run ]
+```
+
+→ ~30% des users abandonnent ici. Les 70% qui cliquent "More info → Run anyway" passent.
+
+**Mitigation gratuite** :
+1. FAQ avec screenshot expliquant l'étape
+2. Vidéo YouTube "Comment installer MyFabmesh" qui montre l'étape
+3. SmartScreen apprend automatiquement après ~3 000 downloads — la warning disparaît d'elle-même
+
+**Achète le cert quand 200 € de revenus** = ROI quasi immédiat (+30% de conversion sur les ventes futures).
+
+### Distribution gratuite jour 1
+
+| Channel | Cut | Setup | Audience |
+|---|---|---|---|
+| **itch.io** | 10% (ajustable 0-30%) | live en 1h | Indés / expérimentateurs |
+| **Gumroad** | 10% + 0,30 € / sale | live en 30 min | Audience Twitter / YouTube |
+| **Fab.com** (Epic) | 12% | review 7-14 jours | Devs Unreal (gros marché) |
+
+→ Les 3 en parallèle dès jour 1. itch.io + Gumroad servent de "pop-up store" pendant que la review Fab.com s'écrit.
 
 ---
 
@@ -121,7 +176,9 @@ _Last updated: 2026-05-22_
 
 ### MOIS 0 — Préparation diffusion (semaines 1-2)
 
-- [ ] Acheter `fabmesh.com`
+- [ ] (Phase 0 zéro budget) Subdomain `myfabmesh.itch.io` ou `myfabmesh.github.io` gratuit
+- [ ] (À débloquer dès 30 ventes) Acheter `myfabmesh.ai` (70€/an, domain principal)
+- [ ] (À débloquer dès 5 ventes) Acheter `myfabmesh.com` en backup (12€/an, redirige vers `.ai`)
 - [ ] Landing "Coming soon" + capture email
 - [ ] Comptes Twitter/X, Bluesky, YouTube, Discord
 - [ ] Logo + brand colors + identité Figma
@@ -137,13 +194,13 @@ _Last updated: 2026-05-22_
 - [x] electron-builder NSIS + installer prototype généré
 - [x] Packaging skeleton (Python embed, VC redist, scripts)
 - [ ] Compiler wheels custom sur GitHub Actions Windows + CUDA 12.8
-- [ ] Pousser wheels sur Cloudflare R2 (`wheels.fabmesh.com`)
+- [ ] Pousser wheels sur Cloudflare R2 (`wheels.myfabmesh.com`)
 - [ ] Générer token HF read-only + coller dans `HF_FALLBACK_TOKEN`
 - [ ] Code signing certificate Sectigo (~200€/an)
 - [ ] Tests sur 8 machines variées
 - [ ] Icon final (remplacer placeholder)
 
-**Site fabmesh.com** :
+**Site myfabmesh.ai** (ou subdomain itch/github en Phase 0) :
 - [ ] Landing 2 produits côte-à-côte
 - [ ] Page `/desktop` avec specs visibles
 - [ ] Compatibility checker web `/check`
@@ -168,7 +225,7 @@ _Last updated: 2026-05-22_
 
 ### MOIS 3 — Public launch Desktop + dev Cloud
 
-- [ ] Listings live Fab/itch/Gumroad/fabmesh.com (24,99€)
+- [ ] Listings live Fab/itch/Gumroad/myfabmesh.ai (24,99€)
 - [ ] electron-updater
 - [ ] Product Hunt + HN + Reddit blast coordonné
 - [ ] Cloud P2 : déploiement TRELLIS-2 + SDXL sur Replicate
@@ -234,7 +291,7 @@ Hypothèses médianes. Pessimiste ÷ 3, optimiste × 3.
 
 - Wizard 5 étapes fonctionnel
 - Hardware detection auto + couleurs vert/orange/rouge
-- 3 modes : Full / Standard / Lite (Cloud-only retiré, redirige fabmesh.com/cloud)
+- 3 modes : Full / Standard / Lite (Cloud-only retiré, redirige myfabmesh.ai/cloud)
 - Bouton Cancel cancel-safe (backup `setup_state.json`)
 - Reconfigure + Uninstall dans Settings
 - UI complètement anonymisée (FabMesh 3D Core, Texture engine, etc.)
@@ -252,7 +309,7 @@ Hypothèses médianes. Pessimiste ÷ 3, optimiste × 3.
 | 1 | Compiler wheels custom sur GH Actions + R2 hosting | 3-4 jours | Bloquant |
 | 2 | Générer token HF read-only | 5 min | Important |
 | 3 | Code signing cert Sectigo | 2 jours + 200€/an | Bloquant |
-| 4 | Landing fabmesh.com 2 produits | 2 jours | Bloquant |
+| 4 | Landing myfabmesh.ai (ou itch.io Phase 0) 2 produits | 2 jours | Bloquant |
 | 5 | Compatibility checker web | 1 semaine | Bloquant |
 | 6 | Icon final | 1 jour | Cosmétique |
 | 7 | Tests sur 8 machines variées | 1 semaine | Bloquant |

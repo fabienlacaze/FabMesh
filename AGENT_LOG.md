@@ -10,6 +10,29 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-22 (branding + zero-budget plan)
+
+Renommage et stratégie financière :
+
+- **Brand** = `MyFabmesh.AI` (le `.AI` fait partie du nom marketing).
+  `fabmesh.com` était squatté à 9985$ — ignoré. Tous les `myfabmesh.*`
+  TLDs sont libres (.com .io .app .ai .fr).
+- **Plan 0 €** ajouté dans `ROADMAP.md` : chaque dépense est gated
+  par un palier de ventes. Avant 1ère vente = 0 €.
+  - Hosting Vercel/itch/GitHub : gratuit
+  - Distribution itch.io + Gumroad + Fab.com : 0 € setup, 10-12% sur ventes
+  - Domain `myfabmesh.ai` (70€) : dès 30 ventes (~660 € revenu)
+  - Code signing (200€/an) : dès 15 ventes (~330 € revenu)
+  - INPI (190€) : dès 50 ventes (~1100 € revenu)
+- Workaround Windows Defender sans signature : FAQ + vidéo + "Run anyway".
+  SmartScreen apprend après ~3000 DLs et la warning disparaît seule.
+- **Wheels custom** déplacés en Phase 2 : Phase 1 utilise les wheels
+  officiels (PyTorch CUDA 12.8, PyPI, Dao-AILab GitHub Releases). Pas
+  besoin de Cloudflare R2 ni de build sur GH Actions au démarrage.
+- `SHIPPING_CHECKLIST.md` mis à jour avec ces changements.
+
+---
+
 ## 2026-05-22 (wizard v2 + packaging skeleton)
 
 Suite du wizard d'installation. Plusieurs corrections + tout l'échafaudage

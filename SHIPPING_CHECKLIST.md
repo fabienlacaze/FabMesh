@@ -1,6 +1,8 @@
-# FabMesh — Shipping Checklist
+# MyFabmesh.AI — Shipping Checklist
 
 Étapes ordonnées pour passer de "installer prototype" à "installer commercialisable".
+
+> **Naming** : produit = **MyFabmesh.AI**, nom court technique = `MyFabmesh`, domain principal = `myfabmesh.ai` (acheté Phase 1 quand budget OK).
 
 ---
 
@@ -74,7 +76,7 @@ Le token sera embedded dans le binaire. Risque sécurité : nul, c'est read-only
 
 ### Étape 3 — Achat domain + landing page (1 jour)
 
-1. **Acheter `fabmesh.com`** chez Namecheap (~12€/an) ou OVH
+1. **Acheter `myfabmesh.ai`** chez Namecheap (~70€/an) ou OVH — c'est le domain principal car le `.AI` fait partie de la brand
 2. **Setup Cloudflare** (gratuit) :
    - Ajouter le domain
    - Activer SSL automatique
@@ -144,7 +146,7 @@ Si les 8 passent → tu peux release. Sinon documenter les fix.
 1. **Fab.com** (Epic) : compte créateur + soumission (review ~7-14 jours)
 2. **itch.io** : live immédiat
 3. **Gumroad** : live immédiat
-4. **fabmesh.com** : Stripe Checkout intégré
+4. **myfabmesh.ai** : Stripe Checkout intégré (ou subdomain itch.io en Phase 0 zéro budget)
 
 ---
 
@@ -188,7 +190,8 @@ Si les 8 passent → tu peux release. Sinon documenter les fix.
 
 | Poste | Montant |
 |---|---|
-| Domain fabmesh.com | 12 € |
+| Domain myfabmesh.ai (principal) | 70 € |
+| Domain myfabmesh.com (backup, redirige) | 12 € |
 | Code signing cert Sectigo (1 an) | 200 € |
 | Steamworks (optionnel) | N/A (on ne va pas sur Steam) |
 | Vercel/Netlify hosting | 0 € |
