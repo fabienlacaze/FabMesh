@@ -1,9 +1,19 @@
 # MyFabmesh.AI — slideshow screenshots
 
-Drop your real app screenshots here. The hero slideshow on
-`docs/index.html` auto-detects them and swaps the CSS mockups for the
-real images on page load. If a file is missing, the mockup stays — so
-you can ship the page progressively as you produce captures.
+## Status
+
+| Slide | File | Status |
+|---|---|---|
+| 1 | `01-wizard.png` | ✅ live capture (Welcome page) |
+| 2 | `02-generate.png` | ✅ live capture (Projects gallery) |
+| 3 | `03-edit-photo.png` | ⏳ CSS mockup — capture the photo editor manually |
+| 4 | `04-edit-mesh.png` | ⏳ CSS mockup — capture the mesh polish view manually |
+| 5 | `05-export.png` | ⏳ CSS mockup — capture the export step manually |
+
+The hero slideshow on `docs/index.html` auto-detects PNGs here and
+swaps the CSS mockups for real images on page load. If a file is
+missing, the mockup stays — ship the page progressively as you
+produce captures.
 
 ## Expected files
 
