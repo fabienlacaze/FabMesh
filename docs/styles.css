@@ -455,9 +455,11 @@ a:hover { color: var(--text-0); }
 .card-features {
   list-style: none;
   margin-bottom: 24px;
-  /* Push the requirements + buttons to the bottom so the two cards
-     end up perfectly aligned even when one feature list is longer. */
-  flex-grow: 1;
+  /* Reserve a fixed minimum height tuned to the longest list
+     (Desktop has 6 lines). The shorter Cloud list gets padded
+     vertically so both feature blocks end at the same Y, which in
+     turn aligns the Requirements box + buttons below. */
+  min-height: 240px;
 }
 .card-features li {
   padding: 6px 0;
@@ -470,9 +472,8 @@ a:hover { color: var(--text-0); }
   border-radius: var(--radius-sm);
   padding: 14px 16px;
   margin-bottom: 18px;
-  /* Equal height across both cards. Tuned to fit the longest list
-     (Desktop = 4 lines) so Cloud's shorter list (3 lines) doesn't
-     shrink and misalign the buttons. */
+  /* Cloud has 3 lines, Desktop has 4. Force the box to fit the
+     taller one so the buttons below stay aligned. */
   min-height: 150px;
 }
 .reqs-title {
@@ -535,6 +536,93 @@ a:hover { color: var(--text-0); }
 }
 .how-steps h4 { font-size: 17px; margin-bottom: 8px; font-weight: 700; }
 .how-steps p { color: var(--text-1); font-size: 14px; }
+
+/* ============================================================
+   For developers — chained MCP workflow (Claude → MyFabmesh → Unreal)
+   ============================================================ */
+.devs-section {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 70px 24px;
+}
+.devs-h2 {
+  text-align: center;
+  font-size: 30px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.devs-lead {
+  text-align: center;
+  color: var(--text-1);
+  max-width: 640px;
+  margin: 0 auto 40px;
+  font-size: 15px;
+}
+.devs-chain {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.devs-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 20px;
+  text-align: center;
+  flex: 1;
+  min-width: 200px;
+  max-width: 260px;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.devs-card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.devs-card-accent {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.15),
+              0 6px 24px rgba(168, 85, 247, 0.12);
+}
+.devs-icon {
+  font-size: 30px;
+  margin-bottom: 10px;
+}
+.devs-card-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+  color: var(--text-0);
+}
+.devs-card-accent .devs-card-title {
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.devs-card-text {
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.45;
+}
+.devs-arrow {
+  align-self: center;
+  font-size: 24px;
+  color: var(--text-2);
+  font-weight: 300;
+  flex-shrink: 0;
+}
+.devs-note {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-2);
+  margin-top: 32px;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (max-width: 700px) {
+  .devs-arrow { transform: rotate(90deg); padding: 4px 0; }
+  .devs-card { max-width: 100%; }
+}
 
 /* ============================================================
    FAQ
