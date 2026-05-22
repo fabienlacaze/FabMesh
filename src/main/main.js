@@ -3818,7 +3818,12 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       && (engine === 'trellis2_native' || engine === 'hi3dgen')) {
     const rectifyScript = path.join(__dirname, '..', '..', 'scripts', 'generate_front_strict.py');
     const rectifiedPath = imagePath.replace(/\.(png|jpg|jpeg|webp)$/i, '_rectified.png');
-    const rectifyMode = (assetType === 'character') ? 'front' : 'iso';
+    // assetType drives the canonical source view we want for mesh
+    // generation. Icons want a slight 3/4 ISO so the depth axis is
+    // visible in the final mesh — same as vehicles and props.
+    const rectifyMode = (assetType === 'character') ? 'front'
+                      : (assetType === 'icon')       ? 'iso'
+                      : 'iso';
     log.info('main', `auto-rectify source: ${path.basename(imagePath)} `
       + `-> ${path.basename(rectifiedPath)} (mode=${rectifyMode}, assetType=${assetType})`);
     safeSend('ai3d-progress', `[main] auto-rectify source view (mode=${rectifyMode})...\n`);
