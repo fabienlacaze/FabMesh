@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — MyFabmesh.AI</title>
+<meta name="description" content="MyFabmesh.AI privacy policy — what data we collect, what we don't, your rights.">
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="styles.css?v=3">
+<style>
+  .legal { max-width: 800px; margin: 60px auto 80px; padding: 0 24px; }
+  .legal h1 { font-size: 34px; margin-bottom: 8px; }
+  .legal .meta { color: var(--text-2); font-size: 13px; margin-bottom: 32px; }
+  .legal h2 { font-size: 20px; margin: 32px 0 10px; color: var(--text-0); }
+  .legal h3 { font-size: 16px; margin: 22px 0 8px; color: var(--text-1); }
+  .legal p, .legal li { font-size: 15px; color: var(--text-1); line-height: 1.7; }
+  .legal ul { margin: 0 0 18px 24px; }
+  .legal code { background: var(--bg-2); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  .legal .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
+  .pill-good { background: rgba(74,222,128,0.15); color: var(--success); }
+  .pill-info { background: rgba(168,85,247,0.15); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="brand">MyFabmesh<span class="brand-ai">.AI</span></a>
+  <nav class="nav">
+    <a href="index.html#products">Products</a>
+    <a href="index.html#faq">FAQ</a>
+    <a href="index.html" class="nav-cta">← Back to site</a>
+  </nav>
+</header>
+
+<main class="legal">
+
+  <h1>Privacy Policy</h1>
+  <div class="meta">Last updated: 2026-05-24 · MyFabmesh.AI Desktop &amp; Cloud · Published by Ayros Studio (Fabien Lacaze, France)</div>
+
+  <h2>TL;DR <span class="pill pill-good">user-friendly</span></h2>
+  <ul>
+    <li><strong>No account, no personal data collection on our servers</strong> — the Desktop app runs 100% on your machine.</li>
+    <li>Generated meshes and images are <strong>stored locally only</strong>, never uploaded.</li>
+    <li>We collect <strong>anonymous crash reports</strong> via Sentry to fix bugs (no IP, no username, no machine name).</li>
+    <li>The first launch downloads ~15 GB of AI models from Hugging Face — that's a direct connection between your machine and Hugging Face, we don't proxy it.</li>
+    <li>The <strong>Cloud version</strong> (when available) requires a Microsoft / email login and stores your project history server-side — explained in detail below.</li>
+  </ul>
+
+  <h2>1. Who we are</h2>
+  <p>
+    MyFabmesh.AI is published by <strong>Ayros Studio</strong>, a French sole proprietorship operated by Fabien Lacaze.
+    Contact: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
+  </p>
+
+  <h2>2. Desktop application <span class="pill pill-info">local-first</span></h2>
+
+  <h3>2.1 What we don't collect</h3>
+  <ul>
+    <li>No account creation, no login.</li>
+    <li>No tracking of how you use the app (no analytics SDK, no Google Analytics, no telemetry beyond crash reports).</li>
+    <li>No upload of your reference images, prompts, masks, or generated meshes — all generation runs locally on your NVIDIA GPU.</li>
+    <li>No collection of your machine's MAC address, hardware IDs, or any persistent identifier.</li>
+  </ul>
+
+  <h3>2.2 What we do collect (and why)</h3>
+  <ul>
+    <li>
+      <strong>Anonymous crash reports via Sentry.</strong>
+      When the app crashes or hits an unexpected error, a report is sent to our Sentry account containing:
+      the error stack trace, the app version, the OS version (e.g. "Windows 11 26200"), and a randomly generated
+      installation ID (UUID). <strong>We explicitly strip your Windows username and machine name</strong> before sending
+      (see <code>main.js / beforeSend</code> in the open source code). Sentry stores reports for 90 days.
+      You can disable crash reporting in Settings → Privacy.
+    </li>
+    <li>
+      <strong>Update check.</strong>
+      The app checks GitHub Releases on launch to see if a newer version is available. The request is a standard
+      HTTPS GET to <code>api.github.com</code>. GitHub may log the request IP per their privacy policy — we don't see it.
+    </li>
+  </ul>
+
+  <h3>2.3 Third-party services the app talks to</h3>
+  <ul>
+    <li><strong>Hugging Face Hub</strong> (huggingface.co): downloads ~15 GB of AI models on first run. Subject to <a href="https://huggingface.co/privacy">Hugging Face's own privacy policy</a>. We bundle a read-only public token so no personal account is needed on your side.</li>
+    <li><strong>Sentry</strong> (sentry.io): receives the anonymous crash reports described above. Subject to <a href="https://sentry.io/privacy/">Sentry's privacy policy</a>.</li>
+    <li><strong>GitHub Releases</strong> (api.github.com): version check + installer download. Subject to <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy policy</a>.</li>
+  </ul>
+
+  <h3>2.4 What's stored on your computer</h3>
+  <ul>
+    <li>App files in <code>%LOCALAPPDATA%\Programs\MyFabmesh.AI\</code> (about 200 MB).</li>
+    <li>AI models cache in <code>%USERPROFILE%\.cache\huggingface\hub\</code> (about 15-22 GB depending on install mode).</li>
+    <li>Your projects, meshes, and image versions in <code>%USERPROFILE%\Documents\MyFabmesh.AI\</code> (controlled by you).</li>
+    <li>App settings in <code>%APPDATA%\fabmesh\</code> (preferences, logs, setup state).</li>
+  </ul>
+
+  <h2>3. Cloud application (when launched)</h2>
+  <p>
+    The Cloud version (planned, separate sign-up) requires an email-based login. When you use Cloud:
+  </p>
+  <ul>
+    <li>We store your email, hashed password (handled by Supabase Auth), credit balance, payment history, and generation job history in a Supabase Postgres database hosted in the EU (Frankfurt).</li>
+    <li>Reference images you upload are sent to Replicate (GPU provider) for processing and to Cloudflare R2 for the resulting GLB storage. We never use them for training.</li>
+    <li>Payments are processed by Stripe; we never see your full card number.</li>
+    <li>You can request deletion of your Cloud account at any time by emailing the address below — we delete everything within 30 days.</li>
+  </ul>
+
+  <h2>4. Your rights (GDPR / RGPD)</h2>
+  <p>You can, at any time, by emailing <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>:</p>
+  <ul>
+    <li>Ask what personal data we hold about you (typically: nothing for Desktop, account + history for Cloud).</li>
+    <li>Request correction or deletion of that data.</li>
+    <li>Request that we stop sending crash reports from your installation.</li>
+    <li>File a complaint with the CNIL (French data protection authority) if you believe we've mishandled your data.</li>
+  </ul>
+
+  <h2>5. Children</h2>
+  <p>
+    MyFabmesh.AI is not directed at children under 13. We don't knowingly collect data from children. If you believe a
+    child has provided us with personal information, contact us and we'll delete it.
+  </p>
+
+  <h2>6. Changes to this policy</h2>
+  <p>
+    We'll update this page when the app's data practices change (new feature, new service, etc.). The "Last updated"
+    date at the top reflects the current revision. Significant changes will be announced on the app's update notes.
+  </p>
+
+  <h2>7. Contact</h2>
+  <p>
+    For any question: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a><br>
+    Ayros Studio · Fabien Lacaze · 18 Chemin du Lavoir, 65400 France
+  </p>
+
+</main>
+
+<footer class="site-footer">
+  <div style="text-align:center; padding: 32px 24px; color: var(--text-3); font-size: 13px;">
+    © 2026 MyFabmesh.AI · An Ayros Studio production · <a href="index.html">myfabmesh.ai</a>
+  </div>
+</footer>
+
+</body>
+</html>
