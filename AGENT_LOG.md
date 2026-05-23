@@ -10,7 +10,90 @@ what happened, conclusion.
 
 ---
 
-## 2026-05-23 (cloud P2 kickoff + scaffold complet)
+## 2026-05-23 (cloud P2 kickoff + scaffold complet + redesign + auto-provisioning)
+
+### Soir 3 (2026-05-24) — Pivot stratégique : Cloud = port du renderer desktop
+
+- **Pivot architectural** : ma première approche cloud (Next.js avec composants
+  React custom qui réimplémentaient l'UI desktop) était bonne visuellement
+  mais pas une "copie conforme". User feedback : "il faut que ce soit la même
+  mise en page et la même logique [que desktop]".
+- **Nouvelle stratégie** : copier les fichiers source du renderer Electron
+  (`src/renderer/index2.html` + `index2.js` + `styles/*` + `lib/*`) dans
+  `cloud/public/app/` et remplacer seulement `window.meshyAPI` (le bridge IPC
+  Electron) par un shim qui appelle des routes HTTP `/api/*`.
+- **Avantages** : 1 source de vérité UI. Cohérence parfaite Desktop ↔ Cloud.
+  Quand l'utilisateur modifie l'UI desktop, `npm run sync-app` re-copie
+  + re-patche le cloud → zéro divergence.
+- **Implémentation** :
+  - `cloud/public/app/index.html` (copié), `index2.js` (12k lignes copiées),
+    `styles/main.css + index2.css`, `lib/Viewer3D.js`, `lib/three.module.js`
+  - `cloud/public/app/meshyAPI-cloud.js` : shim qui mappe les 115 IPC desktop.
+    15 implémentés (imageTo3D, listProjects, getConfig, importImage,
+    saveBuffer, etc.), 100 stubs gracieux (`NOT_AVAIL` retourne un objet
+    avec `cloudUnavailable: true`).
+  - `cloud/scripts/sync-app.mjs` : re-copie depuis `src/renderer/` +
+    réapplique les patches (CSP relax, importmap → CDN unpkg three@0.170.0,
+    inject shim, skip test_api_client).
+  - `cloud/next.config.mjs` : rewrites `/app` et `/app/` → `/app/index.html`.
+  - `cloud/src/app/page.tsx` : root route → redirect `/app/` si logué,
+    sinon page de login + lien vers site officiel.
+  - Routes API ajoutées : `/api/me`, `/api/projects`, `/api/projects/delete`.
+  - Suppression du scaffold React custom (`/generate`, `/project`).
+- **NE MODIFIE PAS** `src/renderer/`. La version desktop reste 100 % intacte
+  (fichiers cloud sont des COPIES dans `cloud/public/app/`).
+- Build OK : 16 routes, 0 erreur TS. Dev server `next dev -p 3030` tourne,
+  `/app/` répond 200 et sert le HTML du renderer.
+
+### Soir 2 (2026-05-23) — Redesign + mode MOCK + Supabase CLI auto
+
+- **Mode MOCK opérationnel** : `cloud/src/lib/mock-store.ts` (in-memory store
+  persistent via `globalThis`), routes `/api/mock-login`, `/api/mock-logout`,
+  `/api/mock-checkout`, fallback dans `lib/auth.ts` + UI flags
+  `NEXT_PUBLIC_MOCK=1`. Sample GLB (POC voiture, 5.3 MB) copié dans
+  `cloud/public/mock/sample.glb` pour servir de mesh fake en mode dev.
+  Permet de tester tout le flow user (signin → upload image → "génération"
+  → viewer 3D → historique → "achat" crédits) sans Supabase ni Stripe.
+
+- **REDESIGN COMPLET** pour matcher le design system du Desktop (`src/renderer/styles/index2.css`) :
+  - Tokens : `--bg-0..3` (nuances de navy), `--accent` violet `#a855f7`,
+    `--accent-2` rouge framboise `#e94560`, gradient combiné.
+  - Topbar identique : brand "MyFabmesh<span>.AI</span>" + badge CLOUD +
+    credits-pill arrondi, links nav avec hover bg-3.
+  - `.primary-btn` (gradient + shadow violet), `.ghost-btn` (transparent
+    border-strong), `.icon-btn` (32x32) — mêmes styles que desktop.
+  - **Home logged-in = projects grid** (cards 220×240 avec thumb model-viewer
+    auto-rotate, name, meta, progress bar 3-steps colorée), reprenant
+    structure `<article class="project-card">` du desktop.
+  - **Home logged-out = landing** avec hero + features + pricing cards.
+  - **/generate = workspace 3-steps verticaux** : step-card avec header
+    (badge numéroté + titre + status), step 1 = drop-zone image,
+    step 2 = asset config (mode-picker tabs lite/standard/full + options),
+    step 3 = result viewer. Désactivation visuelle (`opacity: .55`) des
+    steps non encore accessibles.
+  - **/project/[id]** : vue détail d'une génération existante (config +
+    mesh viewer + download), 3 step-cards récap.
+
+- **Auto-provisioning Supabase via CLI** : `cloud/scripts/supabase-setup.mjs`.
+  L'user crée 1 PAT sur https://supabase.com/dashboard/account/tokens et
+  le colle. Le script fait :
+  `supabase login --token …` → `orgs list` → `projects create
+  myfabmesh-cloud --org-id … --region eu-west-3 --db-password <gen>` →
+  attend 2 min provisioning → `projects api-keys` → init `supabase/`
+  dir avec migration depuis `cloud/sql/schema.sql` → `supabase link` →
+  `supabase db push` → réécrit `.env.local` avec MOCK=0 + vraies clés
+  Supabase + token Replicate auto-importé depuis `build/replicate-token.txt`.
+
+- `cloud/scripts/setup-prod.ps1` : wizard PowerShell pour les services
+  qui n'ont pas d'API publique de provisioning (Stripe + R2 + Cloudflare).
+
+- `cloud/GOING_LIVE.md` : checklist des 5 actions humaines obligatoires
+  (créer comptes Supabase/Stripe/Cloudflare, KYC, Docker pour cog push).
+
+- `cloud/build` : 15 routes (12 pages + 3 mock-*  routes), build production
+  OK, 0 erreur TS.
+
+### Soir 1 (plus haut dans ce log) — POC + scaffold initial
 
 - POC Replicate via `scripts/cloud_poc.py` : appel `fishwowater/trellis2`
   (TRELLIS.2-4B vanilla) avec une image test pour valider le SDK

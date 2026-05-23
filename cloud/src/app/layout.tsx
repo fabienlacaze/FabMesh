@@ -18,16 +18,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Nav />
         <main>{children}</main>
-        <footer style={{ borderTop: '1px solid var(--line)', padding: '40px 0', marginTop: 80 }}>
-          <div className="container" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-            <div className="muted" style={{ fontSize: 13 }}>
-              © 2026 FabWare · MyFabmesh.AI <span className="beta-badge">BETA</span>
-            </div>
-            <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-              <a href="/legal/terms" className="muted">Conditions</a>
-              <a href="/legal/privacy" className="muted">Confidentialité</a>
-              <a href="https://fabienlacaze.github.io/MyFabmesh" target="_blank" className="muted">Desktop app</a>
-            </div>
+        <footer className="site-footer">
+          <div>
+            © 2026 FabWare · MyFabmesh.AI <span className="pill" style={{ marginLeft: 6 }}>BETA</span>
+          </div>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <a href="/legal/terms">Terms</a>
+            <a href="/legal/privacy">Privacy</a>
+            <a href="https://fabienlacaze.github.io/MyFabmesh" target="_blank">Desktop app</a>
           </div>
         </footer>
       </body>

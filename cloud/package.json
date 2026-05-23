@@ -9,7 +9,10 @@
     "start": "next start -p 3030",
     "lint": "next lint",
     "pages:build": "npx @cloudflare/next-on-pages",
-    "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=myfabmesh-cloud"
+    "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=myfabmesh-cloud",
+    "setup:supabase": "node scripts/supabase-setup.mjs",
+    "setup:prod": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-prod.ps1",
+    "sync-app": "node scripts/sync-app.mjs"
   },
   "dependencies": {
     "next": "15.0.4",

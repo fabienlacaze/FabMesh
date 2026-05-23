@@ -1,31 +1,39 @@
 import Link from 'next/link';
 import { getSessionUser } from '@/lib/auth';
+import { MOCK } from '@/lib/mock-store';
 
 export async function Nav() {
   const user = await getSessionUser();
   return (
-    <nav style={{ borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
-      <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60 }}>
-        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text)', fontWeight: 600 }}>
-          <span style={{ width: 28, height: 28, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', borderRadius: 6 }} />
-          MyFabmesh.AI
-          <span className="beta-badge">CLOUD</span>
+    <header className="topbar">
+      <div className="topbar-left">
+        <Link href="/" className="brand">
+          MyFabmesh<span className="brand-ai">.AI</span>
+          <span className="brand-cloud">CLOUD</span>
         </Link>
-        <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontSize: 14 }}>
-          <Link href="/generate" className="muted">Générer</Link>
-          <Link href="/buy" className="muted">Crédits</Link>
-          {user ? (
-            <>
-              <Link href="/account" className="muted">{user.email?.split('@')[0]}</Link>
-              <span className="pill">{user.credits} crédits</span>
-            </>
-          ) : (
-            <Link href="/login">
-              <button className="ghost" style={{ padding: '6px 14px', fontSize: 13 }}>Se connecter</button>
-            </Link>
-          )}
-        </div>
+        {MOCK && <span className="pill warn" style={{ marginLeft: 6 }}>DEV MODE</span>}
       </div>
-    </nav>
+      <div className="topbar-right">
+        {user ? (
+          <>
+            <Link href="/generate" className="nav-link">New mesh</Link>
+            <Link href="/" className="nav-link">My projects</Link>
+            <Link href="/buy" className="nav-link">Credits</Link>
+            <Link href="/account" className="nav-link" title={user.email ?? ''}>
+              {user.email?.split('@')[0]}
+            </Link>
+            <span className="credits-pill">{user.credits}</span>
+          </>
+        ) : (
+          <>
+            <Link href="/buy" className="nav-link">Pricing</Link>
+            <Link href="https://fabienlacaze.github.io/MyFabmesh" target="_blank" className="nav-link">Desktop</Link>
+            <Link href="/login" className="primary-btn" style={{ height: 32, padding: '6px 16px', fontSize: 12 }}>
+              Sign in
+            </Link>
+          </>
+        )}
+      </div>
+    </header>
   );
 }
