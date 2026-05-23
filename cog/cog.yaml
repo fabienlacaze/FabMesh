@@ -8,6 +8,15 @@
 # Build + push:
 #   cd cog/
 #   cog push r8.im/fabienlacaze/myfabmesh-cloud
+#
+# GPU SELECTION (cost control):
+# Replicate picks the GPU at *deploy time* in the model dashboard,
+# not via cog.yaml. After `cog push`, go to:
+#   https://replicate.com/fabienlacaze/myfabmesh-cloud/settings
+# and set the hardware tier to **Nvidia L40S** ($0.000725/s) instead
+# of the default A100 80GB ($0.0014/s) — that's a 48% saving per gen.
+# A100 80GB is only needed if a model needs >40 GB VRAM, which TRELLIS-2
+# does not (peaks at ~14 GB in 1024 mode, ~22 GB in 1536 cascade).
 build:
   gpu: true
   cuda: "12.8"

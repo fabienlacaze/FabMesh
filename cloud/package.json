@@ -1,0 +1,33 @@
+{
+  "name": "myfabmesh-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MyFabmesh.AI Cloud frontend — Next.js + Cloudflare Pages",
+  "scripts": {
+    "dev": "next dev -p 3030",
+    "build": "next build",
+    "start": "next start -p 3030",
+    "lint": "next lint",
+    "pages:build": "npx @cloudflare/next-on-pages",
+    "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=myfabmesh-cloud"
+  },
+  "dependencies": {
+    "next": "15.0.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "@supabase/ssr": "^0.5.0",
+    "replicate": "^1.0.1",
+    "stripe": "^17.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5.6",
+    "eslint": "^9",
+    "eslint-config-next": "15.0.4",
+    "@cloudflare/next-on-pages": "^1.13.5",
+    "wrangler": "^3.86.0"
+  }
+}
