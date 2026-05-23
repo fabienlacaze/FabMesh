@@ -1,7 +1,83 @@
+// ===========================================================
+// EARLY STARTUP LOGGER — runs BEFORE any other require()
+// ===========================================================
+// Critical: when the app crashes silently at boot (DLL missing,
+// require() throw, unhandled rejection in module init), Sentry
+// hasn't had time to attach yet and stderr is invisible to a
+// double-click user. This logger writes to a file we can ask the
+// user to send us. It exists even if everything else fails.
+//
+// File: %APPDATA%\fabmesh\startup.log  (Windows)
+//       ~/.config/fabmesh/startup.log  (Linux)
+//       ~/Library/Application Support/fabmesh/startup.log (macOS)
+//
+// One file is kept per process; rotated to startup.prev.log on each
+// launch so we always have the last 2 runs.
+(function _earlyLog() {
+  const _path = require('path');
+  const _fs = require('fs');
+  const _os = require('os');
+  let dir;
+  try {
+    // Use APPDATA on Windows, XDG on Linux, Application Support on Mac.
+    if (process.platform === 'win32') {
+      dir = _path.join(process.env.APPDATA || _path.join(_os.homedir(), 'AppData', 'Roaming'), 'fabmesh');
+    } else if (process.platform === 'darwin') {
+      dir = _path.join(_os.homedir(), 'Library', 'Application Support', 'fabmesh');
+    } else {
+      dir = _path.join(process.env.XDG_CONFIG_HOME || _path.join(_os.homedir(), '.config'), 'fabmesh');
+    }
+    if (!_fs.existsSync(dir)) _fs.mkdirSync(dir, { recursive: true });
+    const log = _path.join(dir, 'startup.log');
+    const prev = _path.join(dir, 'startup.prev.log');
+    // Rotate previous run
+    try { if (_fs.existsSync(log)) _fs.renameSync(log, prev); } catch (_) {}
+
+    const stream = _fs.createWriteStream(log, { flags: 'w' });
+    const write = (level, ...args) => {
+      const line = `[${new Date().toISOString()}] [${level}] ` +
+        args.map((a) => (typeof a === 'string' ? a : (() => { try { return JSON.stringify(a); } catch (_) { return String(a); } })())).join(' ') + '\n';
+      try { stream.write(line); } catch (_) {}
+      // Also print to stderr so dev sees it in dev mode (silent in prod).
+      if (process.stderr && process.stderr.write) {
+        try { process.stderr.write(line); } catch (_) {}
+      }
+    };
+    // Expose globally so other modules can use without import gymnastics.
+    global.__startupLog = write;
+    write('boot', 'startup.log opened', { pid: process.pid, cwd: process.cwd(), exec: process.execPath });
+    write('boot', 'platform=' + process.platform, 'arch=' + process.arch, 'node=' + process.version);
+    write('boot', 'argv=' + JSON.stringify(process.argv));
+    write('boot', 'ELECTRON_RUN_AS_NODE=' + (process.env.ELECTRON_RUN_AS_NODE || '(unset)'));
+
+    // Catch fatal errors that would otherwise crash silently.
+    process.on('uncaughtException', (err) => {
+      write('fatal', 'uncaughtException:', err && err.message, err && err.stack);
+      try { stream.end(); } catch (_) {}
+    });
+    process.on('unhandledRejection', (reason) => {
+      write('fatal', 'unhandledRejection:', reason && reason.message ? reason.message : String(reason),
+        reason && reason.stack ? reason.stack : '');
+    });
+    process.on('exit', (code) => {
+      write('boot', 'process exit code=' + code);
+      try { stream.end(); } catch (_) {}
+    });
+  } catch (e) {
+    // We tried — if even this fails, we're out of luck. At least don't crash.
+    try { process.stderr.write('[startup] earlyLog failed: ' + e.message + '\n'); } catch (_) {}
+  }
+})();
+
+const _log = (lvl, ...args) => { try { if (global.__startupLog) global.__startupLog(lvl, ...args); } catch (_) {} };
+_log('boot', 'requiring electron…');
+
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+_log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion ? app.getVersion() : '?'));
 
 // ===========================================================
 // Sentry crash reporting

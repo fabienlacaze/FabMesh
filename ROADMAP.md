@@ -455,6 +455,13 @@ Tout ce que Claude (moi) peut faire seul. Priorité décroissante par catégorie
 12. **Cloud = port du renderer desktop**, pas un nouveau frontend custom. Mêmes fichiers HTML/CSS/JS sources copiés depuis `src/renderer/` vers `cloud/public/app/`, seul `meshyAPI-cloud.js` diffère (shim IPC→HTTP). Garantit cohérence UX/UI parfaite Desktop ↔ Cloud sans double maintenance.
 13. **Mode MOCK in-memory en dev** : permet de tester tout le flow UI avant d'avoir créé un seul compte externe (Supabase, Stripe, Cloudflare). Flag `MOCK=1` dans `.env.local`.
 14. **Provisioning Supabase scripté** via `supabase-setup.mjs` (PAT + Supabase CLI). Évite "click ops" répétitif sur le dashboard.
+15. **Observability obligatoire dès maintenant — logs + Sentry partout** : impossible de débugger les problèmes utilisateur après distribution sans télémétrie. Plan :
+    - **Desktop main process** : `startup.log` early-logger qui écrit dans `%APPDATA%\fabmesh\` AVANT tout import (capture les crashes bootstrap), puis Sentry pour le runtime. Rotation `startup.prev.log`.
+    - **Desktop renderer** : `renderer.log` (existant) + Sentry renderer via `@sentry/electron/renderer` (déjà wiré dans preload.js).
+    - **Wizard** : `wizard.log` dédié (les bugs first-run sont les pires car le user n'a pas encore accepté la télémétrie).
+    - **Cloud (Next.js)** : `@sentry/nextjs` côté server + client, plus structured logs dans Cloudflare Pages (déjà collectés par défaut, accessibles dans le dashboard).
+    - **Sentry projets séparés** : `myfabmesh-ai-desktop`, `myfabmesh-ai-wizard`, `myfabmesh-ai-cloud` pour pouvoir trier les bugs par produit.
+    - **Anti-pattern à éviter** : avoir Sentry sans early-log file. Si l'app crashe AVANT que Sentry init, le crash est invisible. La double couverture (file + Sentry) est non négociable.
 
 ---
 
