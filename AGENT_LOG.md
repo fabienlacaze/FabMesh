@@ -10,6 +10,28 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-23 (cloud P2 kickoff)
+
+- POC Replicate via `scripts/cloud_poc.py` : appel `fishwowater/trellis2`
+  (TRELLIS.2-4B vanilla) avec une image test pour valider le SDK
+  Python + le token + le crédit. Confirmé que TRELLIS-2 EST déployé
+  sur Replicate par un tiers — bon signe pour la stratégie.
+- Scaffold `cog/` pour le déploiement de NOTRE Cog (Phase B) :
+  `cog.yaml` + `predict.py` + README. Le predict.py reprend la liste
+  des post-process du Desktop (rectify / back-view / smooth / face_fix
+  / ultra_hd) avec les mêmes options. Implémentation predict() via
+  subprocess (les scripts Desktop sont CLI, pas importables — on évite
+  le refactoring pour Phase B v1).
+- Token Replicate sauvé dans `build/replicate-token.txt` (gitignored,
+  comme HF token et Sentry DSN — pattern push-safe). $5 de credit
+  ajouté sur le compte Replicate avec auto-reload OFF.
+- Architecture Cloud détaillée dans `build/CLOUD_ARCHITECTURE.md` :
+  stack Cloudflare Pages + Workers + R2 + Supabase + Stripe + Replicate.
+  Politique cash-positive (5 free credits désactivés ou 1 démo max
+  par signup) pour garantir 0€ de coût fixe tant que pas de revenu.
+
+---
+
 ## 2026-05-22 (ship-ready UX + launch kit)
 
 Trois lots successifs ce soir :

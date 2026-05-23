@@ -1,0 +1,49 @@
+# MyFabmesh.AI Cloud — Cog config for Replicate deployment.
+#
+# Builds a Docker image that runs our full image-to-3D pipeline:
+# auto-rectify, TRELLIS-2 generation, back-view, face inpaint, smooth,
+# upscale. Same pipeline as the desktop app, so cloud output matches
+# desktop output 1:1.
+#
+# Build + push:
+#   cd cog/
+#   cog push r8.im/fabienlacaze/myfabmesh-cloud
+build:
+  gpu: true
+  cuda: "12.8"
+  python_version: "3.11"
+  python_packages:
+    # CUDA-friendly torch from PyTorch's index
+    - "torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128"
+    - "torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128"
+    # Core diffusion / 3D libs
+    - "diffusers>=0.30"
+    - "transformers>=4.41"
+    - "huggingface_hub>=0.24"
+    - "accelerate>=0.30"
+    - "safetensors>=0.4"
+    - "xformers"
+    # 3D processing
+    - "trimesh>=4.4"
+    - "pygltflib>=1.16"
+    - "pyrender>=0.1.45"
+    # Image processing
+    - "pillow>=10"
+    - "opencv-python>=4.9"
+    - "numpy>=1.26,<2.0"
+    - "scipy>=1.13"
+    # Background removal, captioning, upscaling
+    - "rembg>=2.0"
+    - "realesrgan>=0.3.0"
+    - "basicsr>=1.4"
+    # Misc
+    - "requests"
+    - "tqdm"
+  system_packages:
+    - "libgl1"
+    - "libglib2.0-0"
+    - "libsm6"
+    - "libxext6"
+    - "libxrender-dev"
+
+predict: "predict.py:Predictor"
