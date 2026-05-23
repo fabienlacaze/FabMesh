@@ -13,7 +13,9 @@
     "dev": "set ELECTRON_RUN_AS_NODE= && electron . --dev",
     "launch": "start.bat",
     "build:installer": "electron-builder --win nsis",
-    "build:installer:dir": "electron-builder --win nsis --dir"
+    "build:installer:dir": "electron-builder --win nsis --dir",
+    "build:msix": "electron-builder --win appx",
+    "build:all": "electron-builder --win nsis appx"
   },
   "dependencies": {
     "@google/model-viewer": "^4.2.0",
@@ -81,6 +83,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "appx",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "icon.ico",
@@ -88,6 +96,20 @@
       "signtoolOptions": {
         "publisherName": "Ayros Studio"
       }
+    },
+    "appx": {
+      "identityName": "AyrosStudio.MyFabmesh.AI",
+      "publisher": "CN=3767FC33-F877-4481-9639-BC9CFF9D1371",
+      "publisherDisplayName": "Ayros Studio",
+      "applicationId": "MyFabmeshAI",
+      "displayName": "MyFabmesh.AI",
+      "languages": [
+        "en-US",
+        "fr-FR"
+      ],
+      "showNameOnTiles": true,
+      "addAutoLaunchExtension": false,
+      "backgroundColor": "#0b0b14"
     },
     "publish": [
       {
