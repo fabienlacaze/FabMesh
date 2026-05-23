@@ -17,6 +17,9 @@ try {
 // Wizard API (first-run setup only)
 // ----------------------------------------------------------
 contextBridge.exposeInMainWorld('wizardAPI', {
+  // Forward all wizard console logs to %APPDATA%\fabmesh\wizard.log
+  // for post-mortem debugging of first-run issues.
+  log: (payload) => ipcRenderer.send('wizard-log', payload),
   detectHardware: () => ipcRenderer.invoke('wizard:detect-hardware'),
   getDownloadPlan: (mode) => ipcRenderer.invoke('wizard:download-plan', mode),
   startDownload: (mode) => ipcRenderer.invoke('wizard:start-download', mode),

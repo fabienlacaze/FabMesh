@@ -363,11 +363,32 @@ Zéro divergence UX/UI entre les 2 versions. Cohérence de marque parfaite.
 
 | # | Item | Effort | Doc |
 |---|---|---|---|
-| 1 | Test wizard sur machine vierge (VM Win11 / PC ami) | 1 jour | `build/READY_TO_SHIP.md` étape 3 |
-| 2 | Listings Gumroad + itch.io | 50 min | `build/LISTINGS_GUIDE.md` |
-| 3 | Annoncer launch (Twitter / Reddit / HN / Discord) | 1 jour | `build/LAUNCH_KIT.md` |
-| 4 | Code signing (Azure Trusted Signing) | 30 min + 110€/an | À débloquer post-15 ventes |
-| 5 | Domain `myfabmesh.ai` | 5 min + 70€/an | Optionnel Phase 0 (GitHub Pages OK) |
+| 1 | **Code-signing : MS Store Windows dev program (19 $ unique)** ⏳ **en cours d'achat 2026-05-24** | 10 min signup + 1-3 j validation identité | partner.microsoft.com → Programmes → Windows → Prise en main · Individual · Publisher display name = "MyFabmesh.AI" |
+| 2 | Test wizard sur machine vierge (VM Win11 / PC ami) | 1 jour | `build/READY_TO_SHIP.md` étape 3 |
+| 3 | Listings Gumroad + itch.io | 50 min | `build/LISTINGS_GUIDE.md` |
+| 4 | Annoncer launch (Twitter / Reddit / HN / Discord) | 1 jour | `build/LAUNCH_KIT.md` |
+| 5 | Code-signing direct (Azure Trusted Signing ~10 €/mois) | 30 min + 120€/an | Complément MS Store si on distribue AUSSI en direct (Gumroad/itch.io) |
+| 6 | Domain `myfabmesh.ai` | 5 min + 70€/an | Optionnel Phase 0 (GitHub Pages OK) |
+
+**⚠ Priorité absolue : item 1.** Sans code-signing, Windows Smart App Control
+(activé par défaut sur Win 11 livré ≥ 2023) bloque silencieusement notre
+installer — pas de message d'erreur, juste "rien ne se passe au double-clic".
+Confirmé par diag sur la machine de Fabien (2026-05-24) : SAC enforce =
+unsigned exe = crash silencieux 0xC0000005 dans System.dll plugin NSIS.
+
+**Stratégie code-signing recommandée** (à exécuter dans cet ordre) :
+
+1. **MS Store Windows dev (19 $ unique)** = priorité #1. Signature gratuite par MS,
+   0 % commission jusqu'à 1M $ revenu, distribution incluse via le Store.
+   `partner.microsoft.com/dashboard/v2/account-settings/settings/programs`
+2. **Azure Trusted Signing (120 €/an)** = priorité #2, en parallèle. Pour signer
+   notre `.exe` direct (téléchargement Gumroad / itch.io / GitHub Releases).
+   Sans ça, les users hors MS Store sont bloqués par SAC.
+3. **SignPath.io (gratuit OSS)** = alternative si on rend le repo public —
+   couvre les mêmes besoins qu'Azure mais nécessite open-source.
+
+**Coût total recommandé** : ~135 €/an (19 $ MS Store unique + 120 €/an Azure Signing).
+Amorti dès la 6ème vente.
 
 ### 🚧 Backlog autonome (peut tourner sans toi)
 

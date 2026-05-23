@@ -4599,10 +4599,40 @@ ipcMain.handle('generate-multiview', async (_event, opts) => {
 });
 
 // --- Renderer log forwarding (for Claude Code debugging) ---
-const RENDERER_LOG = path.join(__dirname, '..', '..', 'logs', 'renderer.log');
+// In dev: writes to <repo>/logs/renderer.log so we can tail it.
+// In prod (packaged): writes to %APPDATA%\fabmesh\renderer.log (writable).
+const _userDataDir = (() => {
+  try { return app.getPath('userData'); } catch (_) { return path.join(os.homedir(), '.fabmesh'); }
+})();
+try { if (!fs.existsSync(_userDataDir)) fs.mkdirSync(_userDataDir, { recursive: true }); } catch (_) {}
+const _devLogDir = path.join(__dirname, '..', '..', 'logs');
+const RENDERER_LOG = app.isPackaged
+  ? path.join(_userDataDir, 'renderer.log')
+  : path.join(_devLogDir, 'renderer.log');
 ipcMain.on('renderer-log', (_event, line) => {
   try {
     fs.appendFileSync(RENDERER_LOG, `[${new Date().toISOString()}] ${line}\n`);
+  } catch (_) {}
+});
+
+// --- Wizard log (separate file for first-run issues — most painful bugs) ---
+// Lives in %APPDATA%\fabmesh\wizard.log so we can ask the user to send it
+// even if they got blocked before the main app could log anywhere else.
+const WIZARD_LOG = path.join(_userDataDir, 'wizard.log');
+const WIZARD_LOG_PREV = path.join(_userDataDir, 'wizard.prev.log');
+// Rotate at every main-process start, so each wizard run has its own log
+// without losing the previous one.
+try {
+  if (fs.existsSync(WIZARD_LOG)) {
+    try { fs.renameSync(WIZARD_LOG, WIZARD_LOG_PREV); } catch (_) {}
+  }
+  fs.writeFileSync(WIZARD_LOG, `[${new Date().toISOString()}] [boot] wizard.log opened (main pid=${process.pid})\n`);
+} catch (_) {}
+ipcMain.on('wizard-log', (_event, payload) => {
+  try {
+    const { level = 'log', msg = '' } = (payload && typeof payload === 'object') ? payload : { msg: String(payload) };
+    fs.appendFileSync(WIZARD_LOG, `[${new Date().toISOString()}] [${level}] ${msg}\n`);
+    if (global.__startupLog) global.__startupLog('wizard', `[${level}] ${msg}`);
   } catch (_) {}
 });
 

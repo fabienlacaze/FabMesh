@@ -1,5 +1,43 @@
 'use strict';
 
+// ============================================================
+// Wizard log forwarder — ships all console output to the main
+// process so we get a single wizard.log file in %APPDATA%\fabmesh\.
+// Critical because the wizard is the first-run experience: if it
+// breaks for a user, this is where Sentry has not had time to
+// attach yet, and the user has no app window to read logs from.
+// ============================================================
+(function _wizardLogShim() {
+  const api = (typeof window !== 'undefined') ? window : {};
+  const send = (level, args) => {
+    try {
+      const msg = Array.from(args).map((a) => {
+        if (a instanceof Error) return `${a.message}\n${a.stack || ''}`;
+        if (typeof a === 'string') return a;
+        try { return JSON.stringify(a); } catch (_) { return String(a); }
+      }).join(' ');
+      if (api.electronAPI && api.electronAPI.send) {
+        api.electronAPI.send('wizard-log', { level, msg });
+      } else if (api.wizardAPI && api.wizardAPI.log) {
+        api.wizardAPI.log({ level, msg });
+      } else if (window.require) {
+        try {
+          window.require('electron').ipcRenderer.send('wizard-log', { level, msg });
+        } catch (_) {}
+      }
+    } catch (_) {}
+  };
+  const wrap = (level, fn) => function (...args) { send(level, args); try { return fn.apply(console, args); } catch (_) {} };
+  console.log   = wrap('log',   console.log);
+  console.info  = wrap('info',  console.info);
+  console.warn  = wrap('warn',  console.warn);
+  console.error = wrap('error', console.error);
+  console.debug = wrap('debug', console.debug);
+  window.addEventListener('error', (e) => send('error', [`window.onerror: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`, e.error && e.error.stack]));
+  window.addEventListener('unhandledrejection', (e) => send('error', ['unhandledrejection:', e.reason && e.reason.stack ? e.reason.stack : String(e.reason)]));
+  send('boot', ['wizard.js loaded at ' + new Date().toISOString() + ' — UA: ' + navigator.userAgent]);
+})();
+
 const STEPS = ['welcome', 'detect', 'mode', 'download', 'test', 'no-gpu'];
 let currentStep = 'welcome';
 let hwReport = null;
