@@ -10,6 +10,27 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (rebrand publisher → "Ayros Studio")
+
+- **Contexte** : enregistrement MS Store dev account (Individual, 19 $) en
+  cours ; publisher display name validé = **Ayros Studio** (marque ombrelle
+  qui chapeautera MyFabmesh.AI + Apovivor + futurs projets).
+- **Remplacements** (texte public uniquement, nom légal "Fabien Lacaze"
+  conservé dans `package.json author.email` + commits git) :
+  - `package.json` : `build.copyright` + `build.win.signtoolOptions.publisherName`
+    (author.name déjà modifié en amont par user).
+  - `LICENSE.txt` : copyright holder.
+  - `docs/index.html` + `docs/cloud.html` : footer site officiel.
+  - `cloud/src/app/layout.tsx` : footer Next.js cloud (était "FabWare").
+  - `src/renderer/index2.html` + `cloud/public/app/index.html` :
+    "Crafted by" → "An Ayros Studio production".
+- **Non touché** : ROADMAP.md (user gère séparément l'entrée décision),
+  AGENT_LOG.md historique, chemins `C:\...\FabWare\...` (dev box), Sentry
+  org `fabienlacaze` (GitHub handle non affiché), produit `MyFabmesh.AI`
+  inchangé.
+
+---
+
 ## 2026-05-23 (cloud P2 kickoff + scaffold complet + redesign + auto-provisioning)
 
 ### Soir 3 (2026-05-24) — Pivot stratégique : Cloud = port du renderer desktop

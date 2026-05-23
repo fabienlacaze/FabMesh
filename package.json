@@ -4,7 +4,7 @@
   "description": "MyFabmesh.AI — image-to-3D mesh generator with local AI.",
   "main": "src/main/main.js",
   "author": {
-    "name": "Fabien Lacaze",
+    "name": "Ayros Studio",
     "email": "fabien65400@hotmail.fr"
   },
   "license": "SEE LICENSE IN LICENSE.txt",
@@ -28,7 +28,7 @@
   "build": {
     "appId": "ai.myfabmesh.desktop",
     "productName": "MyFabmesh.AI",
-    "copyright": "Copyright © 2026 Fabien Lacaze",
+    "copyright": "Copyright © 2026 Ayros Studio",
     "directories": {
       "output": "dist/installer",
       "buildResources": "build"
@@ -86,7 +86,7 @@
       "icon": "icon.ico",
       "verifyUpdateCodeSignature": false,
       "signtoolOptions": {
-        "publisherName": "Fabien Lacaze"
+        "publisherName": "Ayros Studio"
       }
     },
     "publish": [
