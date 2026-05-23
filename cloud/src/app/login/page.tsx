@@ -1,17 +1,17 @@
 import { LoginForm } from './LoginForm';
 
-export default function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+export default function LoginPage() {
   return (
-    <div className="container" style={{ padding: '60px 0', maxWidth: 460 }}>
-      <h1 style={{ textAlign: 'center' }}>Connexion</h1>
-      <p className="muted" style={{ textAlign: 'center', marginBottom: 24 }}>
-        On t'envoie un lien magique par e-mail. Pas de mot de passe à retenir.
+    <div className="page" style={{ maxWidth: 460 }}>
+      <h2 style={{ textAlign: 'center', marginBottom: 8 }}>Sign in</h2>
+      <p style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: 13, marginBottom: 24 }}>
+        We send a magic link to your inbox — no password required.
       </p>
       <div className="card">
         <LoginForm />
       </div>
-      <p className="dim" style={{ textAlign: 'center', fontSize: 13, marginTop: 16 }}>
-        Inscription = même formulaire. Le compte est créé automatiquement.
+      <p style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: 12, marginTop: 16 }}>
+        Signup uses the same form — your account is created automatically.
       </p>
     </div>
   );

@@ -1,6 +1,6 @@
 # MyFabmesh.AI — Roadmap
 
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-24_
 
 > **Nom produit / brand marketing** : **MyFabmesh.AI** (le `.AI` fait partie du nom et signale immédiatement "AI product").
 > **Nom court / technique** : MyFabmesh (utilisé dans le code, packagename, exe).
@@ -286,11 +286,59 @@ Hypothèses médianes. Pessimiste ÷ 3, optimiste × 3.
 
 ---
 
-## État actuel (2026-05-22 — fin de soirée)
+## État actuel (2026-05-24)
 
-### ✅ Livré
+### ✅ Cloud P2 — scaffold complet + stratégie "renderer port" (2026-05-23 → 24)
 
-**Beta v1.0.0 prête techniquement** :
+**Décision architecture** : le Cloud N'est PAS un site séparé avec sa propre UI.
+C'est **une copie conforme du renderer Electron desktop** (HTML/CSS/JS exactement
+les mêmes fichiers source), où les IPC Electron sont remplacés par fetch HTTP.
+
+```
+┌────────────────────────────────────┐    ┌────────────────────────────────────┐
+│ DESKTOP (Electron)                 │    │ CLOUD (Next.js + Cloudflare Pages) │
+│ src/renderer/index2.html ──┐      │    │ cloud/public/app/index.html        │
+│ src/renderer/index2.js      │      │    │   ← copie identique                │
+│ src/renderer/styles/*.css   │      │    │                                    │
+│                              │      │    │ cloud/public/app/meshyAPI-cloud.js │
+│ window.meshyAPI = IPC bridge ┘      │    │   ← remplace IPC par fetch HTTP    │
+│   ↓                                 │    │   ↓                                │
+│ ipcRenderer.invoke('image-to-3d')   │    │ fetch('/api/generate')             │
+│   ↓                                 │    │   ↓                                │
+│ Python local (TRELLIS-2)            │    │ Replicate Cog (GPU L40S/H100)      │
+└────────────────────────────────────┘    └────────────────────────────────────┘
+```
+
+**Pourquoi** : 1 source de vérité UI. Quand l'utilisateur modifie une option dans
+l'app desktop, le cloud suit automatiquement (script `npm run sync-app`).
+Zéro divergence UX/UI entre les 2 versions. Cohérence de marque parfaite.
+
+**Livré** :
+- POC Replicate via `fishwowater/trellis2` : 481 s pour $0.33 (A100 80GB). Mesh
+  voiture reconnaissable mais qualité moyenne → confirme valeur ajoutée
+  de notre pipeline complet (rectify + back-view + smooth).
+- `cog/predict.py` refactorisé subprocess pour notre Cog Replicate
+  `r8.im/fabienlacaze/myfabmesh-cloud` (push WSL+Docker à faire).
+- `cog/cog.yaml` documente choix L40S (au lieu d'A100 default = -48% coût).
+- `build/CLOUD_PRICING.md` : stratégie GPU L40S économique / H100 "Fast mode" premium.
+- `cloud/` Next.js 15 scaffold complet (3 services externes wirés + R2 + Stripe).
+- `cloud/sql/schema.sql` : profiles + jobs + payments + RPCs atomiques credits + RLS.
+- `cloud/scripts/supabase-setup.mjs` : auto-provisioning (PAT → create project →
+  push schema → wire .env).
+- `cloud/scripts/setup-prod.ps1` : wizard PowerShell pour Stripe + R2 + Cloudflare.
+- `cloud/GOING_LIVE.md` : checklist 5 actions humaines (créer comptes Supabase,
+  Stripe, Cloudflare, KYC Stripe live, Docker Desktop pour cog push).
+- **Mode MOCK** : in-memory store + 50 crédits offerts + sample GLB fake →
+  permet de tester tout le flow user **sans aucun signup externe**.
+
+### 🚧 Cloud P2 — en cours (2026-05-24)
+
+- Portage du renderer desktop dans `cloud/public/app/` (in progress)
+- Shim `meshyAPI-cloud.js` : 115 IPC mappés (15 implémentés, 100 stubs gracieux)
+- Routes API server : `/api/generate`, `/api/jobs/[id]`, `/api/me`, `/api/projects`
+- Persistance projets : Supabase table `projects` (en plus de `jobs`)
+
+### ✅ Desktop Beta v1.0.0 — prête techniquement :
 - Wizard 5 étapes fonctionnel + auto-detect installation existante
 - Hardware detection auto + couleurs vert/orange/rouge
 - 3 modes : Full / Standard / Lite
@@ -354,9 +402,25 @@ Tout ce que Claude (moi) peut faire seul. Priorité décroissante par catégorie
 - [ ] Smoke tests étendus (matrix variée) (2h) ⭐⭐
 - [ ] Lint + pre-commit hooks (30 min) ⭐
 
-**E — Cloud product P2 (gros morceau)** :
-- [ ] Replicate deploy de TRELLIS-2 (2-3 jours) ⭐⭐⭐
-- [ ] Web app squelette Next.js (auth + dashboard + Stripe crédits) (1 semaine) ⭐⭐⭐
+**E — Cloud product P2 (Phase B/C en cours)** :
+- [x] ~~POC Replicate `fishwowater/trellis2`~~ ✅ 2026-05-23
+- [x] ~~Stratégie pricing GPU L40S/H100~~ ✅ 2026-05-23 (`build/CLOUD_PRICING.md`)
+- [x] ~~Scaffold Next.js cloud/ (15 routes, build OK)~~ ✅ 2026-05-23
+- [x] ~~Mode MOCK pour test local sans signups~~ ✅ 2026-05-24
+- [x] ~~Auto-provisioning Supabase via CLI~~ ✅ 2026-05-24
+- [x] ~~Doc GOING_LIVE.md (5 actions humaines)~~ ✅ 2026-05-24
+- [ ] **Port renderer desktop → cloud/public/app/** (2026-05-24, in progress)
+- [ ] Routes API : generate, jobs, projects, me (1 jour)
+- [ ] Push notre Cog `r8.im/fabienlacaze/myfabmesh-cloud` (WSL + Docker, 1 jour)
+- [ ] Deploy Cloudflare Pages + custom domain (`cloud.myfabmesh.ai`) (2h)
+- [ ] Activer Stripe live mode (post KYC, J+1-2)
+- [ ] Test end-to-end : login → upload image → generate → download GLB
+
+**Stratégie Cloud finale** :
+- Cloud = port du renderer desktop (mêmes fichiers HTML/CSS/JS sources)
+- Différences = `meshyAPI-cloud.js` shim qui remplace IPC Electron par fetch HTTP
+- Auth + Stripe + Replicate = backend Next.js, transparent pour l'UI
+- Sync : `npm run sync-app` re-copie `src/renderer/*` → `cloud/public/app/*` à chaque évolution UI desktop
 
 ### Plan d'attaque par défaut suggéré (~8h cumulé)
 
@@ -370,14 +434,27 @@ Tout ce que Claude (moi) peut faire seul. Priorité décroissante par catégorie
 
 ---
 
-## Décisions clés (NEW 2026-05-22)
+## Décisions clés
 
+### 2026-05-22
 1. **Pas de port DirectML/AMD pour Desktop.** Le Cloud couvre les non-NVIDIA. Économise 2-3 mois.
 2. **Pas de mode Ultra-Lite avec quantization int8.** Trop d'effort, qualité dégradée, le Cloud fait mieux.
 3. **Communiquer franchement les requirements sur le site.** "Built for serious creators with NVIDIA GPUs" → positionnement premium.
 4. **Compatibility checker obligatoire avant achat Desktop.** Refunds ÷ 5, tickets support ÷ 10.
 5. **Pas de Steam.** Cible = devs Unreal/Blender via Fab.com (12% cut), itch.io (10%), Gumroad (10%).
 6. **Build in public.** 3-5 posts/semaine, 60 jours d'audience avant launch.
+
+### 2026-05-23 (Cloud kickoff)
+7. **Replicate, pas fal.ai/Modal/RunPod** pour la Phase 0. Simple, sans infra à gérer. Bascule vers Modal si volume > 50 gen/h soutenu.
+8. **Notre propre Cog `fabienlacaze/myfabmesh-cloud`**, pas `fishwowater/trellis2`. Le POC a montré que TRELLIS-2 vanilla ≠ produit fini — notre pipeline rectify + back-view + smooth + face-fix fait la différence qualitative.
+9. **GPU L40S par défaut, pas A100** : -48% coût pour qualité quasi-équivalente sur TRELLIS-2. A100 80GB ne sera JAMAIS utilisé (cher et pas plus rapide). H100 = option "Fast mode" premium +1 crédit.
+10. **Cash-positive d'emblée** : pas de free credits (sauf 1 démo unique). 0€ de coût fixe tant que pas de revenu.
+11. **Stockage R2, pas Supabase Storage** : 10× moins cher pour des GLB de 5-20 MB. Egress gratuit (clé pour téléchargements clients).
+
+### 2026-05-24 (Cloud architecture)
+12. **Cloud = port du renderer desktop**, pas un nouveau frontend custom. Mêmes fichiers HTML/CSS/JS sources copiés depuis `src/renderer/` vers `cloud/public/app/`, seul `meshyAPI-cloud.js` diffère (shim IPC→HTTP). Garantit cohérence UX/UI parfaite Desktop ↔ Cloud sans double maintenance.
+13. **Mode MOCK in-memory en dev** : permet de tester tout le flow UI avant d'avoir créé un seul compte externe (Supabase, Stripe, Cloudflare). Flag `MOCK=1` dans `.env.local`.
+14. **Provisioning Supabase scripté** via `supabase-setup.mjs` (PAT + Supabase CLI). Évite "click ops" répétitif sur le dashboard.
 
 ---
 

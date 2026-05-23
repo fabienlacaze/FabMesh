@@ -10,15 +10,32 @@ Frontend du produit P2 (Cloud SaaS). Stack :
 
 ## Démarrage local
 
+### Option A — Mode DEV mock (zéro signup) ⭐
 ```bash
 cd cloud/
-cp .env.example .env.local
-# remplir les clés (Supabase, Stripe test, Replicate, R2)
-
 npm install
-npm run dev
-# → http://localhost:3030
+# .env.local is already set up with MOCK=1
+npm run dev          # http://localhost:3030
 ```
+Tu auras un user instantané avec 50 crédits, GLB de test, et Stripe simulé.
+Idéal pour tester l'UI complète sans aucun service externe.
+
+### Option B — Mode PROD réel (avec Supabase + Stripe + Replicate)
+
+1. **Supabase auto** (recommandé) :
+   ```bash
+   node scripts/supabase-setup.mjs
+   ```
+   Crée un PAT sur https://supabase.com/dashboard/account/tokens, colle-le
+   quand demandé. Le script crée le projet, push le schema, et met à jour
+   ton `.env.local`.
+
+2. **Stripe + R2** : remplis les clés manuellement via :
+   ```powershell
+   .\scripts\setup-prod.ps1
+   ```
+
+3. `npm run dev` ou `npm run build && npm run start`
 
 ## Setup external services (one-time)
 
