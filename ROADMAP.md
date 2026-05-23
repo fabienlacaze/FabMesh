@@ -363,7 +363,7 @@ Zéro divergence UX/UI entre les 2 versions. Cohérence de marque parfaite.
 
 | # | Item | Effort | Doc |
 |---|---|---|---|
-| 1 | **Code-signing : MS Store Windows dev program (19 $ unique)** ⏳ **en cours d'achat 2026-05-24** | 10 min signup + 1-3 j validation identité | partner.microsoft.com → Programmes → Windows → Prise en main · Individual · Publisher display name = "MyFabmesh.AI" |
+| 1 | **MS Store Windows dev program** ✅ **payé 19 $ 2026-05-24** · App MyFabmesh.AI réservée (Product ID `9PH6GT8XKQDW`, statut "In draft") · Reste : récupérer Product Identity + packager .msix + soumettre | ~24-72 h validation identité MS · packaging .msix 1-2h | Publisher = **Ayros Studio** · partner.microsoft.com/en-US/dashboard/products/9PH6GT8XKQDW · Store deep link : `ms-windows-store://pdp/?productid=9PH6GT8XKQDW` |
 | 2 | Test wizard sur machine vierge (VM Win11 / PC ami) | 1 jour | `build/READY_TO_SHIP.md` étape 3 |
 | 3 | Listings Gumroad + itch.io | 50 min | `build/LISTINGS_GUIDE.md` |
 | 4 | Annoncer launch (Twitter / Reddit / HN / Discord) | 1 jour | `build/LAUNCH_KIT.md` |
