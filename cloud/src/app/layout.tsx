@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main>{children}</main>
         <footer className="site-footer">
           <div>
-            © 2026 FabWare · MyFabmesh.AI <span className="pill" style={{ marginLeft: 6 }}>BETA</span>
+            © 2026 Ayros Studio · MyFabmesh.AI <span className="pill" style={{ marginLeft: 6 }}>BETA</span>
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
             <a href="/legal/terms">Terms</a>

@@ -2,7 +2,7 @@
  MyFabmesh.AI — Software License Terms
 ================================================================================
 
-Copyright (c) 2026 Fabien Lacaze. All rights reserved.
+Copyright (c) 2026 Ayros Studio. All rights reserved.
 
 This software ("MyFabmesh.AI") is licensed under the MyFabmesh.AI
 Commercial Software License (this "License"). By installing, copying, or
