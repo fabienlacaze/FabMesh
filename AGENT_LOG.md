@@ -10,25 +10,53 @@ what happened, conclusion.
 
 ---
 
-## 2026-05-23 (cloud P2 kickoff)
+## 2026-05-23 (cloud P2 kickoff + scaffold complet)
 
 - POC Replicate via `scripts/cloud_poc.py` : appel `fishwowater/trellis2`
   (TRELLIS.2-4B vanilla) avec une image test pour valider le SDK
   Python + le token + le crédit. Confirmé que TRELLIS-2 EST déployé
   sur Replicate par un tiers — bon signe pour la stratégie.
-- Scaffold `cog/` pour le déploiement de NOTRE Cog (Phase B) :
-  `cog.yaml` + `predict.py` + README. Le predict.py reprend la liste
-  des post-process du Desktop (rectify / back-view / smooth / face_fix
-  / ultra_hd) avec les mêmes options. Implémentation predict() via
-  subprocess (les scripts Desktop sont CLI, pas importables — on évite
-  le refactoring pour Phase B v1).
+  → POC réussi en 481 s pour $0.33 sur A100 80GB (overpriced, cf ci-dessous).
+  → Mesh GLB visualisé via viewer HTML local (file:// bloque le fetch,
+  serveur HTTP local sur port 8765 contourne le problème) : voiture
+  reconnaissable mais qualité moyenne (aileron déformé, jointures
+  bosselées) — confirme que TRELLIS-2 seul ≠ produit fini, donc notre
+  pipeline (rectify + back-view + smooth) doit ajouter une vraie valeur.
+- `build/CLOUD_PRICING.md` créé : grille GPU Replicate, comparatif
+  L40S vs A100 vs H100. Insight : **L40S = -48% vs A100 mais 10-15%
+  plus lent ; H100 = même coût final que L40S mais 1.8× plus rapide**
+  → stratégie produit "Fast mode H100 +1 crédit" pour la latence
+  perçue, L40S par défaut pour le coût.
+- Phase B (Cog) terminée côté code : `cog/predict.py` refactorisé en
+  subprocess (scripts CLI-only, pas importables), `cog.yaml` documente
+  le choix L40S dans le dashboard Replicate post-push.
+- Phase C (frontend Next.js) scaffold complet sous `cloud/` :
+  - App Router 15.0.4 + React 19, build OK (12 pages + 4 API routes).
+  - Pages : `/` (landing), `/generate` (form + viewer 3D model-viewer),
+    `/buy` (3 packs Stripe), `/account` (solde + historique + paiements),
+    `/login` (Supabase magic-link), `/auth/callback`.
+  - API : `/api/generate` (FormData → Replicate prediction + spend_credits),
+    `/api/jobs/[id]` (poll Replicate + upload GLB R2 + refund on fail),
+    `/api/checkout` (Stripe Checkout session), `/api/stripe-webhook`
+    (verify signature + idempotent add_credits).
+  - Lib : `supabase.ts` (SSR + admin), `auth.ts` (RPC spend/add),
+    `replicate.ts` (dual schema: notre Cog OR fishwowater fallback),
+    `r2.ts` (SigV4 inline, pas de @aws-sdk de 15 MB),
+    `stripe.ts` (PACKS Starter/Pro/Studio).
+  - SQL : `cloud/sql/schema.sql` — profiles + jobs + payments + RLS +
+    RPCs atomiques `spend_credits`/`add_credits` (security definer,
+    grant à service_role seulement). Pas de free credits.
+  - README explique setup Supabase + Stripe + R2 + Replicate + deploy
+    Cloudflare Pages via `@cloudflare/next-on-pages`.
 - Token Replicate sauvé dans `build/replicate-token.txt` (gitignored,
-  comme HF token et Sentry DSN — pattern push-safe). $5 de credit
-  ajouté sur le compte Replicate avec auto-reload OFF.
-- Architecture Cloud détaillée dans `build/CLOUD_ARCHITECTURE.md` :
-  stack Cloudflare Pages + Workers + R2 + Supabase + Stripe + Replicate.
-  Politique cash-positive (5 free credits désactivés ou 1 démo max
-  par signup) pour garantir 0€ de coût fixe tant que pas de revenu.
+  comme HF token et Sentry DSN). $5 de credit ajouté sur Replicate
+  avec auto-reload OFF.
+
+État au coucher 2026-05-23 :
+- Code 100% écrit côté Cloud (build local OK).
+- Actions externes pending : créer projet Supabase + run schema.sql,
+  créer compte Stripe (test mode), créer bucket R2, push Cog (WSL+Docker),
+  déployer Cloudflare Pages.
 
 ---
 
