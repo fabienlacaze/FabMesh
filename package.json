@@ -19,11 +19,11 @@
     "@google/model-viewer": "^4.2.0",
     "@sentry/electron": "^7.13.0",
     "electron-updater": "^6.8.3",
-    "three": "^0.170.0"
+    "three": "^0.182.0"
   },
   "devDependencies": {
     "electron": "^31.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "ai.myfabmesh.desktop",
@@ -84,8 +84,10 @@
         }
       ],
       "icon": "icon.ico",
-      "publisherName": "Fabien Lacaze",
-      "verifyUpdateCodeSignature": false
+      "verifyUpdateCodeSignature": false,
+      "signtoolOptions": {
+        "publisherName": "Fabien Lacaze"
+      }
     },
     "publish": [
       {
