@@ -1,0 +1,96 @@
+# Build + push the MyFabmesh.AI Cog image to Replicate
+# (r8.im/fabienlacaze/myfabmesh-cloud) from a GitHub Actions runner
+# so the user doesn't need Docker/Cog installed locally.
+#
+# The whole flow:
+#   1. Trigger via "Run workflow" in the Actions tab (workflow_dispatch).
+#   2. GH installs Cog CLI, builds the Docker image from cog/cog.yaml,
+#      and pushes it to Replicate using REPLICATE_API_TOKEN.
+#   3. After ~30-90 min, the model is live at
+#      replicate.com/fabienlacaze/myfabmesh-cloud
+#      and can be called via our Worker (set REPLICATE_MODEL to it).
+#
+# Why workflow_dispatch (manual) and not on push:
+#   - Building takes ~30-90 min and pulls ~10-20 GB of weights.
+#   - Replicate charges nothing for build/push but every retry is slow.
+#   - Code-only changes (predict.py) trigger a quick rebuild; weight
+#     changes are rare and intentional.
+#
+# Required secret:
+#   REPLICATE_API_TOKEN — the same r8_* token already in
+#   build/replicate-token.txt locally. Add it via Settings → Secrets
+#   and variables → Actions → New repository secret.
+
+name: Cog — Build & Push to Replicate
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Replicate model slug (owner/name)'
+        default: 'fabienlacaze/myfabmesh-cloud'
+        required: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The cog needs scripts/ + cog/ at minimum, so a shallow
+          # clone of the repo is enough. lfs is off (no .glb in repo).
+          fetch-depth: 1
+
+      - name: Free up disk space on runner
+        # GH free runners come with only ~14 GB free; torch + diffusers
+        # + TRELLIS-2 + RealVisXL weights easily exceed that. Strip
+        # things we don't need (Android SDK, .NET, Haskell, etc.)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          docker system prune -af || true
+          df -h /
+
+      - name: Stage scripts/ inside cog/
+        # Cog only packages files under the cog.yaml directory by default.
+        # Our predict.py shells out to scripts/*.py at runtime, so copy
+        # them in next to cog.yaml. The predict.py sibling-lookup picks
+        # them up automatically.
+        run: |
+          mkdir -p cog/scripts
+          cp -r scripts/. cog/scripts/
+          ls cog/scripts | head -20
+          du -sh cog/scripts || true
+
+      - name: Install Cog CLI
+        # Pinned to a known-good version; bump deliberately.
+        run: |
+          curl -L --silent --show-error \
+            https://github.com/replicate/cog/releases/download/v0.14.10/cog_linux_amd64 \
+            -o /usr/local/bin/cog
+          chmod +x /usr/local/bin/cog
+          cog --version
+
+      - name: Login to Replicate
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        run: |
+          # cog reads REPLICATE_API_TOKEN from env; no `cog login` needed
+          # in non-interactive runs.
+          test -n "$REPLICATE_API_TOKEN" || { echo "::error::REPLICATE_API_TOKEN secret is missing"; exit 1; }
+          echo "Token present (length ${#REPLICATE_API_TOKEN})"
+
+      - name: Cog push
+        # `cog push` does build + push in one shot. The build runs in the
+        # ambient Docker engine (Docker is pre-installed on ubuntu-latest).
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        working-directory: cog
+        run: |
+          cog push "r8.im/${{ inputs.model }}"
+
+      - name: Disk usage report
+        if: always()
+        run: df -h /
