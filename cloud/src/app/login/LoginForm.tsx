@@ -4,13 +4,32 @@ import { createBrowserClient } from '@supabase/ssr';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK === '1';
 
+// Two-step sign-in:
+//   1. User enters email → server emails them a 6-digit code (+ a magic
+//      link as backup).
+//   2. User pastes the code → SDK exchanges it for a session in THIS
+//      browser (no cross-browser failure mode like PKCE has).
+//
+// Why not just the magic link? Supabase forces PKCE on magic links since
+// gotrue 2.155+, which stores a code_verifier in this browser's storage.
+// If the user clicks the mail from a different browser (Outlook desktop
+// opening the system default browser, for instance), the verifier is
+// missing and sign-in fails. OTP codes have no such state.
 export function LoginForm() {
+  const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit(e: React.FormEvent) {
+  function client() {
+    return createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+  }
+
+  async function sendCode(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
@@ -23,40 +42,84 @@ export function LoginForm() {
         window.location.href = new URLSearchParams(window.location.search).get('next') || '/';
         return;
       }
-      const sb = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        // Force implicit flow: PKCE stores a per-browser code_verifier
-        // in localStorage at sign-in time, which breaks when the user
-        // clicks the mail in a different browser than the one where
-        // they entered their email (very common with desktop webmail).
-        // Implicit flow puts the access_token straight in the URL hash,
-        // so any browser can complete the sign-in.
-        { auth: { flowType: 'implicit' } },
-      );
-      const { error } = await sb.auth.signInWithOtp({
+      const { error } = await client().auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        options: {
+          // The magic link inside the email still works as a fallback,
+          // but the recipient will see the 6-digit code rendered above
+          // it in the branded template.
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
       });
       if (error) throw error;
-      setSent(true);
+      setStep('code');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBusy(false); }
   }
 
-  if (sent) return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 42, marginBottom: 8 }}>✉</div>
-      <h3 style={{ marginBottom: 6 }}>Check your inbox</h3>
-      <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
-        A sign-in link has been sent to <strong>{email}</strong>.
-      </p>
-    </div>
+  async function verifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      const { error } = await client().auth.verifyOtp({
+        email,
+        token: code.trim(),
+        type: 'email',
+      });
+      if (error) throw error;
+      const next = new URLSearchParams(window.location.search).get('next') || '/account';
+      window.location.href = next;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setBusy(false); }
+  }
+
+  if (step === 'code') return (
+    <form onSubmit={verifyCode}>
+      <div style={{ textAlign: 'center', marginBottom: 18 }}>
+        <div style={{ fontSize: 42, marginBottom: 6 }}>✉</div>
+        <h3 style={{ marginBottom: 4 }}>Check your inbox</h3>
+        <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
+          We sent a 6-digit code to <strong>{email}</strong>.<br />
+          Paste it below to sign in.
+        </p>
+      </div>
+      <label>Sign-in code</label>
+      <input
+        type="text" required
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        pattern="[0-9]{6}"
+        maxLength={6}
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+        placeholder="123456"
+        style={{
+          marginBottom: 14, fontSize: 22, letterSpacing: 8,
+          textAlign: 'center', fontVariantNumeric: 'tabular-nums',
+        }}
+        autoFocus
+      />
+      <button type="submit" className="primary-btn" disabled={busy || code.length !== 6} style={{ width: '100%' }}>
+        {busy ? '…' : 'Verify code'}
+      </button>
+      <button
+        type="button"
+        onClick={() => { setStep('email'); setCode(''); setError(null); }}
+        style={{
+          background: 'transparent', border: 'none', color: 'var(--text-2)',
+          marginTop: 12, fontSize: 13, cursor: 'pointer', width: '100%',
+        }}
+      >
+        ← Use a different email
+      </button>
+      {error && <div className="banner error" style={{ marginTop: 12 }}>⚠ {error}</div>}
+    </form>
   );
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={sendCode}>
       {MOCK && (
         <div className="banner warn">
           🛠 <strong>DEV MODE</strong> · Instant login · 50 credits offered · No real email sent
@@ -71,7 +134,7 @@ export function LoginForm() {
         style={{ marginBottom: 14 }}
       />
       <button type="submit" className="primary-btn" disabled={busy} style={{ width: '100%' }}>
-        {busy ? '…' : MOCK ? 'Instant sign in' : 'Send magic link'}
+        {busy ? '…' : MOCK ? 'Instant sign in' : 'Email me a sign-in code'}
       </button>
       {error && <div className="banner error" style={{ marginTop: 12 }}>⚠ {error}</div>}
     </form>

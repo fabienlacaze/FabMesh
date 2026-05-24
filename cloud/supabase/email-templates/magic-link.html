@@ -15,23 +15,33 @@
               <div style="font-size:24px; font-weight:700; letter-spacing:-0.5px;">
                 MyFabmesh<span style="background:linear-gradient(135deg,#e94560,#a855f7); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">.AI</span>
               </div>
-              <div style="display:inline-block; margin-top:10px; padding:4px 10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); border-radius:999px; font-size:11px; color:#c4a8ff; font-weight:600; letter-spacing:0.5px;">
-                CLOUD · MAGIC LINK
+              <div style="display:inline-block; margin-top:10px; padding:4px 10px; background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.5); border-radius:999px; font-size:11px; color:#34d399; font-weight:600; letter-spacing:0.5px;">
+                CLOUD · SIGN-IN CODE
               </div>
             </td>
           </tr>
           <tr>
             <td style="padding:24px 32px 8px 32px;">
               <h1 style="margin:0 0 14px 0; font-size:22px; font-weight:600; color:#ffffff; line-height:1.3;">
-                Your sign-in link is ready.
+                Your MyFabmesh.AI sign-in code:
               </h1>
-              <p style="margin:0 0 24px 0; font-size:15px; color:#b8b8c8; line-height:1.6;">
-                Click the button below to securely sign in to your MyFabmesh.AI Cloud workspace. No password needed.
+              <p style="margin:0 0 18px 0; font-size:14px; color:#b8b8c8; line-height:1.6;">
+                Paste this 6-digit code into the sign-in page to access your Cloud workspace.
               </p>
             </td>
           </tr>
           <tr>
-            <td style="padding:8px 32px 24px 32px; text-align:center;">
+            <td style="padding:0 32px 22px 32px; text-align:center;">
+              <div style="display:inline-block; padding:16px 28px; background:#0b0b14; border:1px solid #2a2a40; border-radius:12px;
+                          font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+                          font-size:34px; font-weight:700; color:#34d399; letter-spacing:10px;">
+                {{ .Token }}
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 22px 32px; text-align:center;">
+              <p style="margin:0 0 12px 0; font-size:12px; color:#6a6a7e;">— or click the button to sign in directly —</p>
               <a href="{{ .ConfirmationURL }}" style="text-decoration:none; display:inline-block;">
                 <img src="https://myfabmesh-cloud.fabien65400.workers.dev/email-btn/sign-in.png"
                      alt="Sign in to MyFabmesh.AI"
@@ -41,17 +51,9 @@
             </td>
           </tr>
           <tr>
-            <td style="padding:0 32px 24px 32px;">
-              <p style="margin:0; font-size:12px; color:#8a8a9e; line-height:1.6;">
-                Or copy and paste this URL into your browser:<br>
-                <span style="color:#c4a8ff; word-break:break-all;">{{ .ConfirmationURL }}</span>
-              </p>
-            </td>
-          </tr>
-          <tr>
             <td style="padding:16px 32px 32px 32px; border-top:1px solid #23233a;">
               <p style="margin:0; font-size:12px; color:#6a6a7e; line-height:1.6;">
-                This link expires in 1 hour. If you didn't request it, you can safely ignore this email — your account stays secure.
+                The code and link expire in 1 hour. If you didn't request a sign-in, ignore this email — your account stays secure.
               </p>
             </td>
           </tr>
