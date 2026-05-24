@@ -983,6 +983,107 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
  * tunneled back through R2 so we get a stable cross-origin URL the
  * client can keep on the project.
  */
+/**
+ * Generate one image via Replicate's `black-forest-labs/flux-schnell`
+ * (4-step Flux model, ~3s, ~$0.003/image). Stores the result in R2 and
+ * returns a stable public URL on our origin.
+ *
+ * Folder controls the R2 key prefix: "front" / "back" / "view".
+ */
+async function replicateGenerateImage(env: Env, userId: string, prompt: string, folder: string, seed?: number): Promise<string> {
+  const token = env.REPLICATE_API_TOKEN ?? '';
+  if (!token) throw new Error('REPLICATE_API_TOKEN not set');
+  const actualSeed = seed ?? Math.floor(Math.random() * 1e9);
+
+  // black-forest-labs/flux-schnell — fast 4-step Flux. Owner+name path is
+  // accepted by Replicate's predictions.create when no version is pinned.
+  const createRes = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions', {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${token}`,
+      'content-type': 'application/json',
+      'prefer': 'wait=60',  // wait up to 60s for the result inline
+    },
+    body: JSON.stringify({
+      input: {
+        prompt,
+        seed: actualSeed,
+        aspect_ratio: '1:1',
+        num_outputs: 1,
+        output_format: 'png',
+        output_quality: 90,
+        disable_safety_checker: true,
+      },
+    }),
+  });
+  if (!createRes.ok) throw new Error(`Replicate create HTTP ${createRes.status}: ${await createRes.text()}`);
+  const created = await createRes.json() as { id: string; output?: string | string[]; status: string; error?: string };
+
+  // If "prefer: wait" gave us the output inline, use it directly. Otherwise poll.
+  let outputUrl: string | undefined;
+  if (created.status === 'succeeded') {
+    outputUrl = Array.isArray(created.output) ? created.output[0] : created.output;
+  } else if (created.status === 'failed') {
+    throw new Error(`Replicate failed: ${created.error || 'unknown'}`);
+  } else {
+    // Poll until done
+    const start = Date.now();
+    while (Date.now() - start < 90_000) {
+      await new Promise(r => setTimeout(r, 1500));
+      const pollRes = await fetch(`https://api.replicate.com/v1/predictions/${created.id}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const p = await pollRes.json() as { status: string; output?: string | string[]; error?: string };
+      if (p.status === 'succeeded') {
+        outputUrl = Array.isArray(p.output) ? p.output[0] : p.output;
+        break;
+      }
+      if (p.status === 'failed' || p.status === 'canceled') {
+        throw new Error(`Replicate ${p.status}: ${p.error || 'unknown'}`);
+      }
+    }
+    if (!outputUrl) throw new Error('Replicate timeout');
+  }
+  if (!outputUrl) throw new Error('Replicate succeeded but no output URL');
+
+  // Mirror into R2 so the client gets a stable URL on our origin
+  // (Replicate URLs are short-lived).
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    try {
+      const imgRes = await fetch(outputUrl);
+      if (imgRes.ok) {
+        const buf = await imgRes.arrayBuffer();
+        const key = `${userId}/${folder}/${Date.now()}_${actualSeed}.png`;
+        await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+        return `${env.R2_PUBLIC_URL}/${key}`;
+      }
+    } catch { /* fall back to raw Replicate URL */ }
+  }
+  return outputUrl;
+}
+
+async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const { prompt, numImages, seed } = await req.json() as {
+    prompt?: string;
+    numImages?: number;
+    seed?: number;
+  };
+  if (!prompt) return err(400, 'prompt required');
+  const n = Math.max(1, Math.min(4, numImages ?? 1));
+  const paths: string[] = [];
+  const seedBase = seed ?? Math.floor(Math.random() * 1e9);
+  for (let i = 0; i < n; i++) {
+    try {
+      paths.push(await replicateGenerateImage(env, user.id, prompt, 'front', seedBase + i));
+    } catch (e) {
+      return err(502, `image generation failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return json({ ok: true, success: true, paths });
+}
+
 async function handleGenerateBackView(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -992,30 +1093,17 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     numImages?: number;
     frontImageUrl?: string;
   };
-  void frontImageUrl;  // not used in the Pollinations fallback; kept for API compat
+  void frontImageUrl;  // (kept for API compat; not used in single-image flux-schnell)
   const base = (prompt ?? promptHint ?? '').toString().slice(0, 400);
   const n = Math.max(1, Math.min(4, numImages ?? 1));
-  const fullPrompt = `back view, rear view, full body, T-pose, plain white background, ${base}`;
+  const fullPrompt = `back view, rear view, full body, T-pose neutral stance, plain white background, no shadows, ${base}`;
   const paths: string[] = [];
   for (let i = 0; i < n; i++) {
-    const seed = Math.floor(Math.random() * 1e9);
-    const polUrl =
-      `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}`
-      + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&private=true`;
-    // Tunnel through R2 so the client gets a stable URL on our origin.
-    if (env.MESHES && env.R2_PUBLIC_URL) {
-      try {
-        const r = await fetch(polUrl);
-        if (r.ok) {
-          const buf = await r.arrayBuffer();
-          const key = `${user.id}/back/${Date.now()}_${seed}.png`;
-          await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-          paths.push(`${env.R2_PUBLIC_URL}/${key}`);
-          continue;
-        }
-      } catch (_) { /* fall through to raw pollinations URL */ }
+    try {
+      paths.push(await replicateGenerateImage(env, user.id, fullPrompt, 'back'));
+    } catch (e) {
+      return err(502, `back view generation failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    paths.push(polUrl);
   }
   return json({ ok: true, success: true, paths });
 }
@@ -1051,6 +1139,7 @@ export default {
         if (pathname === '/api/meshes/delete'         && method === 'POST') return await handleMeshesDelete(req, env);
         if (pathname === '/api/jobs/cancel'           && method === 'POST') return await handleJobCancel(req, env);
         if (pathname === '/api/remove-background'     && method === 'POST') return await handleRemoveBackground(req, env);
+        if (pathname === '/api/generate-image'        && method === 'POST') return await handleGenerateImage(req, env);
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
