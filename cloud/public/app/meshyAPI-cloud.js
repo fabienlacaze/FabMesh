@@ -18,9 +18,21 @@
   'use strict';
 
   const log = (...args) => console.log('[meshyAPI-cloud]', ...args);
+
+  // Return shape per stub name. The desktop renderer often does
+  // `for (const x of (await meshyAPI.listFoo()))` or
+  // `(arr).find(...)` on the result, so a stub that returns
+  // `{ ok: false, ... }` crashes the UI with "X is not iterable"
+  // or ".find is not a function".
+  //
+  // Heuristic: anything that reads like a list / collection returns []
+  // (an empty array is the safest "I have nothing for you" answer);
+  // other reads return a graceful object; writes return { ok: false }.
+  const ARRAY_LIKE_RE = /^(list|get(?:All)?(?:Image|Mesh|Folder|Rig|Animation|Version)s?$|get.*List|.*Folders?$|.*Meshes?$|.*Keywords?$|.*Versions?$|.*Templates?$|.*Animations?$|.*Reports?$)/i;
   const NOT_AVAIL = (name) => async (...args) => {
-    log(`stub: ${name}() — not yet implemented in Cloud`, args);
-    return { ok: false, cloudUnavailable: true, message: `"${name}" is not yet available in Cloud v1.` };
+    const arrayLike = ARRAY_LIKE_RE.test(name);
+    log(`stub: ${name}() — not yet implemented in Cloud`, arrayLike ? '[]' : '{ok:false}', args);
+    return arrayLike ? [] : { ok: false, cloudUnavailable: true, message: `"${name}" is not yet available in Cloud v1.` };
   };
 
   // --- HTTP helpers --------------------------------------------------
@@ -219,7 +231,9 @@
     toggleUnrestricted: async () => ({ ok: true }),
     checkProjectNsfw: async () => ({ ok: true, safe: true }),
     checkImagesNsfwTags: async () => ({ ok: true, safe: true }),
-    getNsfwKeywords: async () => ({ keywords: [] }),
+    // Renderer does `keywords.find(...)` directly on the return value,
+    // so we MUST return a plain array (not { keywords: [] }).
+    getNsfwKeywords: async () => [],
     checkImageNsfw: async () => ({ ok: true, safe: true }),
     batchCheckNsfw: async () => ({ ok: true, results: [] }),
 
