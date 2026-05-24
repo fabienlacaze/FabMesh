@@ -827,8 +827,15 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     .limit(500);
   if (error) return err(500, error.message);
 
-  const meshes = ((data ?? []) as CloudJobRow[]).map(j => ({
-    filename: `${j.id}.glb`,
+  const meshes = ((data ?? []) as CloudJobRow[]).map(j => {
+    // C7: name meshes like the desktop convention so meshProject()
+    // strips down to the project name. Format:
+    //   <safe_project>_trellis2_<timestamp_10digits>.glb
+    const safeName = (j.project_name || (j.options?.project_name as string | undefined) || 'untitled')
+                      .replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 32);
+    const stem = `${safeName}_trellis2_${j.id.slice(-10)}`;
+    return ({
+    filename: `${stem}.glb`,
     path: j.mesh_url!,
     url: j.mesh_url!,
     size: 0,
@@ -839,7 +846,7 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     asset_type: j.asset_type,
     projectName: j.project_name ?? (j.options?.project_name as string | undefined) ?? null,
     id: j.id,
-  }));
+  });});
   return json({ meshes });
 }
 

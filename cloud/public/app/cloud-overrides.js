@@ -17,6 +17,75 @@
 (function () {
   'use strict';
 
+  // ── C4: file:/// URL rewriter ────────────────────────────────────
+  // The desktop renderer prefixes every asset path with "file:///"
+  // because on Electron the renderer is loaded from file://. In the
+  // browser, that produces malformed URLs like "file:///https://r2.dev/..."
+  // which the browser refuses to load.
+  //
+  // We intercept HTMLImageElement.src + a MutationObserver to strip the
+  // bogus prefix at runtime, so every <img> tag the renderer creates
+  // ends up with a clean https/blob/data URL. Same for stylesheets and
+  // <a href> if we ever need to.
+  (function patchFilePrefix() {
+    const stripPrefix = (s) => {
+      if (typeof s !== 'string') return s;
+      return s.replace(/^file:\/{2,3}(?=https?:|blob:|data:)/i, '');
+    };
+    const proto = HTMLImageElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'src');
+    if (desc && desc.get && desc.set) {
+      Object.defineProperty(proto, 'src', {
+        get() { return desc.get.call(this); },
+        set(v) { desc.set.call(this, stripPrefix(v)); },
+        configurable: true,
+      });
+    }
+    // For images injected via innerHTML the setter doesn't fire — patch
+    // them after the fact via a MutationObserver.
+    const obs = new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (!(n instanceof Element)) continue;
+          if (n.tagName === 'IMG') {
+            const raw = n.getAttribute('src');
+            if (raw && /^file:\/{2,3}(?=https?:|blob:|data:)/i.test(raw)) {
+              n.setAttribute('src', stripPrefix(raw));
+            }
+          }
+          n.querySelectorAll?.('img').forEach((i) => {
+            const raw = i.getAttribute('src');
+            if (raw && /^file:\/{2,3}(?=https?:|blob:|data:)/i.test(raw)) {
+              i.setAttribute('src', stripPrefix(raw));
+            }
+          });
+        }
+      }
+    });
+    if (document.documentElement) {
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    // Three.js GLTFLoader loads URLs via THREE.FileLoader.load — patch
+    // that too. Wait for THREE to be defined (loaded lazily by the
+    // renderer); fall back silently if it never loads.
+    let triesLeft = 50;
+    const tryPatchThree = () => {
+      const T = window.THREE;
+      if (!T || !T.FileLoader || T.FileLoader.prototype.__myfmPatched) {
+        if (--triesLeft > 0) return setTimeout(tryPatchThree, 200);
+        return;
+      }
+      const fl = T.FileLoader.prototype;
+      const origLoad = fl.load;
+      fl.load = function (url, onLoad, onProgress, onError) {
+        return origLoad.call(this, stripPrefix(url), onLoad, onProgress, onError);
+      };
+      fl.__myfmPatched = true;
+    };
+    tryPatchThree();
+  })();
+
   function hideSectionByHeader(headerText) {
     const norm = headerText.trim().toLowerCase();
     document.querySelectorAll('.settings-section-header').forEach((h) => {
