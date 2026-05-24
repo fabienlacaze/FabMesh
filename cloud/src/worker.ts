@@ -660,64 +660,6 @@ async function handleMockLogout(req: Request, env: Env): Promise<Response> {
   return appendSetCookie(json({ ok: true }), cookie);
 }
 
-/**
- * GET /auth/callback?code=…&next=…
- *
- * Supabase magic-link redirect. Exchanges the OTP code for a session,
- * then forwards Set-Cookie headers and 302s to `next` (default /).
- *
- * Implements PKCE exchange manually to avoid the Next.js cookies() helper.
- */
-async function handleAuthCallback(req: Request, env: Env): Promise<Response> {
-  const url = new URL(req.url);
-  const code = url.searchParams.get('code');
-  const next = url.searchParams.get('next') ?? '/';
-  if (!code) return Response.redirect(`${url.origin}${next}`, 302);
-
-  const sbUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-  const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  if (!sbUrl || !anon) return Response.redirect(`${url.origin}${next}`, 302);
-
-  // Exchange code → session. We rely on Supabase's REST endpoint directly
-  // since we don't have the PKCE verifier in this stateless flow; magic
-  // links without PKCE return the session on this endpoint.
-  // (If you switch on PKCE in Supabase, also persist code_verifier in
-  // a cookie at sign-in time and forward it here.)
-  const r = await fetch(`${sbUrl}/auth/v1/token?grant_type=pkce`, {
-    method: 'POST',
-    headers: { 'apikey': anon, 'content-type': 'application/json' },
-    body: JSON.stringify({ auth_code: code }),
-  });
-  if (!r.ok) {
-    // PKCE may have failed because OTP magic-link doesn't carry a verifier;
-    // fall back: just redirect — the client SDK can pick up the hash itself
-    // if the URL contains the access_token (implicit flow).
-    return Response.redirect(`${url.origin}${next}`, 302);
-  }
-  const session = await r.json() as {
-    access_token?: string; refresh_token?: string;
-    expires_in?: number; token_type?: string; user?: { id: string };
-  };
-  if (!session.access_token) return Response.redirect(`${url.origin}${next}`, 302);
-
-  // Stash the access token in a cookie that `readSupabaseAccessToken` can parse.
-  const ref = sbUrl.replace(/^https?:\/\//, '').split('.')[0]; // ovoccoip... in URL
-  const cookieName = `sb-${ref}-auth-token`;
-  const payload = JSON.stringify({
-    access_token: session.access_token,
-    refresh_token: session.refresh_token,
-    expires_in: session.expires_in,
-    token_type: session.token_type,
-    user: session.user,
-  });
-  const cookieVal = encodeURIComponent(`base64-${btoa(payload)}`);
-  const cookieHeader = `${cookieName}=${cookieVal}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}; Secure`;
-
-  const res = new Response(null, { status: 302, headers: { location: `${url.origin}${next}` } });
-  res.headers.append('set-cookie', cookieHeader);
-  return res;
-}
-
 /* ────────────────────────── main fetch handler ─────────────────────── */
 
 export default {
@@ -728,9 +670,11 @@ export default {
 
     try {
       // ── /auth/callback ──
-      if (pathname === '/auth/callback' && method === 'GET') {
-        return await handleAuthCallback(req, env);
-      }
+      // Handled by a client-side Next.js page (src/app/auth/callback/page.tsx)
+      // which uses the Supabase JS SDK so the PKCE code_verifier saved in
+      // localStorage at sign-in time is reused on exchange. The Worker
+      // can't do this because it doesn't have access to that verifier.
+      // Fall through to env.ASSETS.fetch(req) at the bottom of fetch().
 
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
