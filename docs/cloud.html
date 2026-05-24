@@ -131,21 +131,24 @@
 <main>
 
   <section class="cloud-soon">
-    <span class="badge">🚀 Beta launching this week</span>
+    <span class="badge">🚀 Live now — public beta</span>
     <h1>Image to 3D mesh,<br><span class="grad">in your browser.</span></h1>
     <p class="lead">
       Same image-to-3D pipeline as Desktop, hosted on cloud GPU.
       Works on Mac, tablet, AMD, Intel, anything. Pay 0.20 € / mesh,
       no subscription, no install. <br>
-      <strong>Public beta opens this week — join the waitlist:</strong>
+      <strong>Open the Cloud workspace — no install, just a browser.</strong>
     </p>
 
-    <form class="waitlist-form" id="waitlist-form">
-      <input type="email" id="waitlist-email" placeholder="you@studio.com" required>
-      <button type="submit">Join waitlist</button>
-    </form>
-    <div class="waitlist-hint" id="waitlist-hint">
-      We'll email you the day the Cloud opens. No spam, ever.
+    <div class="waitlist-form">
+      <a href="https://myfabmesh-cloud.fabien65400.workers.dev/"
+         class="btn-primary"
+         style="padding:14px 28px; font-size:16px; background:linear-gradient(135deg,#e94560,#a855f7); color:white; border:none; border-radius:10px; text-decoration:none; font-weight:600; display:inline-block;">
+        Open MyFabmesh Cloud →
+      </a>
+    </div>
+    <div class="waitlist-hint">
+      Free credits to try. Pay-as-you-go after that — credit packs from 5 €.
     </div>
 
     <div class="cloud-feat-grid">
@@ -180,24 +183,6 @@
     © 2026 Ayros Studio · MyFabmesh.AI Cloud · <a href="index.html">myfabmesh.ai</a>
   </div>
 </footer>
-
-<script>
-  // Simple waitlist: open a pre-filled mailto. Replace later with
-  // a Formspree / Mailchimp / Resend endpoint when ready.
-  document.getElementById('waitlist-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const email = document.getElementById('waitlist-email').value.trim();
-    if (!email) return;
-    const subject = encodeURIComponent('[MyFabmesh.AI Cloud] Waitlist signup');
-    const body = encodeURIComponent(
-      `Hi Fabien,\n\nPlease add me to the MyFabmesh.AI Cloud beta waitlist.\n\nEmail: ${email}\n\nThanks!`
-    );
-    window.location.href = `mailto:fabien65400@hotmail.fr?subject=${subject}&body=${body}`;
-    const hint = document.getElementById('waitlist-hint');
-    hint.textContent = '✓ Opening your email app… If nothing happens, send your email to fabien65400@hotmail.fr manually.';
-    hint.style.color = 'var(--success)';
-  });
-</script>
 
 </body>
 </html>
