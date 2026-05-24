@@ -66,11 +66,13 @@ jobs:
 
       - name: Install Cog CLI
         # Pinned to a known-good version; bump deliberately.
+        # Cog's release asset name convention changed around v0.16:
+        # old `cog_linux_amd64` → new `cog_Linux_x86_64`.
         run: |
-          curl -L --silent --show-error \
-            https://github.com/replicate/cog/releases/download/v0.14.10/cog_linux_amd64 \
+          sudo curl -L \
+            "https://github.com/replicate/cog/releases/download/v0.20.0/cog_Linux_x86_64" \
             -o /usr/local/bin/cog
-          chmod +x /usr/local/bin/cog
+          sudo chmod +x /usr/local/bin/cog
           cog --version
 
       - name: Login to Replicate
