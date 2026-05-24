@@ -1,10 +1,21 @@
 import Replicate from 'replicate';
 
-const TOKEN = process.env.REPLICATE_API_TOKEN!;
-const MODEL = process.env.REPLICATE_MODEL ?? 'fishwowater/trellis2';
-const VERSION = process.env.REPLICATE_VERSION ?? '';
-
-export const replicate = new Replicate({ auth: TOKEN });
+// Lazy access — REPLICATE_API_TOKEN is a runtime secret on Cloudflare
+// Workers, not a build-time env var. Instantiating Replicate at module
+// load on a CI runner without the token would crash `next build`
+// during page data collection (Stripe had the same bug).
+let _replicate: Replicate | null = null;
+function getReplicate(): Replicate {
+  if (_replicate) return _replicate;
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) {
+    throw new Error('REPLICATE_API_TOKEN is not set as a Worker secret.');
+  }
+  _replicate = new Replicate({ auth: token });
+  return _replicate;
+}
+function getModel(): string { return process.env.REPLICATE_MODEL ?? 'fishwowater/trellis2'; }
+function getVersion(): string { return process.env.REPLICATE_VERSION ?? ''; }
 
 export interface GenerateInput {
   image: Blob | File | string;          // user upload (Blob) or URL
@@ -28,8 +39,9 @@ export interface GenerateInput {
  * accept different schemas — we adapt below.
  */
 export async function createPrediction(input: GenerateInput) {
-  const modelSlug = MODEL;
-  let version = VERSION;
+  const replicate = getReplicate();
+  const modelSlug = getModel();
+  let version = getVersion();
   if (!version) {
     // Resolve latest version of the model if not pinned.
     const model = await replicate.models.get(modelSlug.split('/')[0], modelSlug.split('/')[1]);
@@ -77,7 +89,7 @@ export async function createPrediction(input: GenerateInput) {
 }
 
 export async function getPrediction(id: string) {
-  return replicate.predictions.get(id);
+  return getReplicate().predictions.get(id);
 }
 
 /** Crédit cost for a given mode + flags. */
