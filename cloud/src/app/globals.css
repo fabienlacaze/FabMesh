@@ -189,7 +189,7 @@ label {
   font-size: 12px; color: var(--text-2);
   display: block; margin-bottom: 6px;
 }
-input[type=text], input[type=email], input[type=number], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=number], input[type=tel], input[type=url], select, textarea {
   width: 100%;
   background: var(--bg-2);
   color: var(--text-0);
