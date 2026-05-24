@@ -63,9 +63,8 @@ export function LoginForm() {
     setBusy(true); setError(null);
     try {
       // Codes from sb.auth.signInWithOtp() are 'email' type for brand-new
-      // signups and 'magiclink' for existing users. Try 'email' first
-      // (covers both signup and OTP-code), fall back to 'magiclink' if
-      // Supabase returns "Invalid OTP type".
+      // signups and 'magiclink' for existing users. Try 'email' first,
+      // fall back to 'magiclink'.
       const sb = client();
       let res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
       if (res.error) {
@@ -73,6 +72,28 @@ export function LoginForm() {
       }
       if (res.error) throw res.error;
       if (!res.data.session) throw new Error('Verification succeeded but no session was returned.');
+
+      // Force-write the session cookie in the exact shape the Worker
+      // expects (sb-<ref>-auth-token containing a base64-prefixed JSON
+      // blob). @supabase/ssr's default browser cookie writer sometimes
+      // skips this on first sign-in if no server-side cookies handler
+      // was registered, so we belt-and-braces it ourselves.
+      const session = res.data.session;
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const ref = url.replace(/^https?:\/\//, '').split('.')[0];
+      const payload = btoa(JSON.stringify({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        expires_in: session.expires_in,
+        expires_at: session.expires_at,
+        token_type: session.token_type,
+        user: session.user,
+      }));
+      const value = encodeURIComponent(`base64-${payload}`);
+      const days30 = 60 * 60 * 24 * 30;
+      document.cookie =
+        `sb-${ref}-auth-token=${value}; Path=/; Max-Age=${days30}; SameSite=Lax; Secure`;
+
       const next = new URLSearchParams(window.location.search).get('next') || '/account';
       window.location.href = next;
     } catch (err: unknown) {
