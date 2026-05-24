@@ -62,12 +62,17 @@ export function LoginForm() {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      const { error } = await client().auth.verifyOtp({
-        email,
-        token: code.trim(),
-        type: 'email',
-      });
-      if (error) throw error;
+      // Codes from sb.auth.signInWithOtp() are 'email' type for brand-new
+      // signups and 'magiclink' for existing users. Try 'email' first
+      // (covers both signup and OTP-code), fall back to 'magiclink' if
+      // Supabase returns "Invalid OTP type".
+      const sb = client();
+      let res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
+      if (res.error) {
+        res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'magiclink' });
+      }
+      if (res.error) throw res.error;
+      if (!res.data.session) throw new Error('Verification succeeded but no session was returned.');
       const next = new URLSearchParams(window.location.search).get('next') || '/account';
       window.location.href = next;
     } catch (err: unknown) {
