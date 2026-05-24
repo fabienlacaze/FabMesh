@@ -65,15 +65,14 @@ jobs:
           du -sh cog/scripts || true
 
       - name: Install Cog CLI
-        # Pinned to v0.19.3 — v0.20.0 switched the in-container Python
-        # builder to `uv run pip install`, which fails with PEP 668
-        # "externally-managed-environment" against the uv-managed Python
-        # runtime it just installed. Tracked as a known regression; until
-        # fixed upstream, v0.19.x uses the classic `pip install` path
-        # which works against our cog.yaml dependencies.
+        # Pinned to v0.14.10 (May 2025). The newer cog CLIs (v0.18+ at
+        # least) emit a Dockerfile that runs `uv run pip install` against
+        # a uv-managed Python install, which violates PEP 668 and the
+        # build dies before any of our deps are installed. v0.14.10
+        # generates a classic-pip Dockerfile that works.
         run: |
           sudo curl -L \
-            "https://github.com/replicate/cog/releases/download/v0.19.3/cog_Linux_x86_64" \
+            "https://github.com/replicate/cog/releases/download/v0.14.10/cog_Linux_x86_64" \
             -o /usr/local/bin/cog
           sudo chmod +x /usr/local/bin/cog
           cog --version
