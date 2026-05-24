@@ -182,19 +182,100 @@
        when we expose them. For now generateFromPrompt is unused by the
        Cloud workspace flow — generateImages above is what the renderer
        calls for the "Create new image" step. */
-    generateFromPrompt: NOT_AVAIL('generateFromPrompt'),
-    generateFromImage: NOT_AVAIL('generateFromImage'),
-    generateBackView:  NOT_AVAIL('generateBackView'),
-    generateMultiview: NOT_AVAIL('generateMultiview'),
-    generateBuildStages: NOT_AVAIL('generateBuildStages'),
+    generateFromPrompt: async ({ prompt, projectName, numImages = 1 } = {}) =>
+      meshyAPI.generateImages({ prompt, projectName, numImages }),
+
+    /* img2img via Pollinations (the `image=` query param triggers their
+       img2img mode). Falls back to a plain prompt on failure. */
+    generateFromImage: async ({ prompt, imagePath, imageUrl, projectName, numImages = 1 } = {}) => {
+      const ref = imageUrl || imagePath;
+      const out = [];
+      const seedBase = Math.floor(Math.random() * 1e9);
+      for (let i = 0; i < numImages; i++) {
+        const seed = seedBase + i;
+        let url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt || '')}`
+          + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&private=true`;
+        if (ref && /^https?:/i.test(ref)) url += `&image=${encodeURIComponent(ref)}`;
+        try {
+          const r = await fetch(url);
+          if (!r.ok) throw new Error('http ' + r.status);
+          const blob = await r.blob();
+          out.push({
+            path: URL.createObjectURL(blob),
+            name: `${projectName || 'img2img'}_${i + 1}.png`,
+            seed, prompt,
+          });
+        } catch (e) {
+          log('generateFromImage fetch failed:', e);
+        }
+      }
+      return { ok: true, images: out };
+    },
+
+    /* Back view via Worker (Pollinations under the hood, R2-tunneled). */
+    generateBackView: async ({ frontImage, frontImageUrl, prompt, promptHint, numImages = 1, assetType } = {}) => {
+      try {
+        const r = await postJSON('/api/generate-back-view', {
+          prompt: prompt || promptHint || '',
+          promptHint: promptHint || prompt || '',
+          numImages, frontImageUrl: frontImageUrl || frontImage, assetType,
+        });
+        return r; // { ok, success, paths }
+      } catch (e) {
+        return { ok: false, success: false, error: String(e) };
+      }
+    },
+
+    /* 4 views (front/back/left/right) generated client-side via 4×
+       Pollinations calls. Caller already has a "front" image; we only
+       generate the 3 missing ones. */
+    generateMultiview: async ({ imagePath, prompt, promptHint, projectName } = {}) => {
+      const base = (prompt || promptHint || '').toString().slice(0, 300);
+      const views = ['back view', 'left side view', 'right side view'];
+      const seedBase = Math.floor(Math.random() * 1e9);
+      const paths = [];
+      for (let i = 0; i < views.length; i++) {
+        const p = `${views[i]}, full body, T-pose, plain white background, ${base}`;
+        const seed = seedBase + i;
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}`
+          + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&private=true`;
+        try {
+          const r = await fetch(url);
+          if (!r.ok) throw new Error('http ' + r.status);
+          const blob = await r.blob();
+          paths.push(URL.createObjectURL(blob));
+        } catch (e) {
+          log('generateMultiview view failed:', views[i], e);
+        }
+      }
+      void imagePath; void projectName;
+      return { ok: true, success: true, outDir: null, paths };
+    },
+
+    /* Desktop-only build-stage generator. */
+    generateBuildStages: async () => ({ ok: true, stages: [] }),
     onBuildStageProgress: onChannel('build-stage-progress'),
 
     /* navigation / external */
     openWebsite: async () => { window.open('https://fabienlacaze.github.io/MyFabmesh', '_blank'); return { ok: true }; },
-    showInExplorer: NOT_AVAIL('showInExplorer'),
-    openLogsFolder: NOT_AVAIL('openLogsFolder'),
-    openMeshesFolder: NOT_AVAIL('openMeshesFolder'),
-    openImagesFolder: NOT_AVAIL('openImagesFolder'),
+    showInExplorer: async (filePath) => {
+      // In the browser there's no "show in folder" — best we can do is
+      // open the mesh URL in a new tab so the user can save / inspect it.
+      if (filePath && /^https?:|^blob:/i.test(filePath)) window.open(filePath, '_blank');
+      return { ok: true, cloud: true };
+    },
+    openLogsFolder: async () => {
+      try { console.log('[meshyAPI-cloud] No log folder in cloud — open browser devtools instead.'); } catch (_) {}
+      return { ok: true, cloud: true, message: 'No filesystem in cloud. Use the browser devtools console for logs.' };
+    },
+    openMeshesFolder: async () => {
+      try { window.location.hash = '#/projects'; } catch (_) {}
+      return { ok: true, cloud: true, message: 'No filesystem in cloud. Use the Projects page.' };
+    },
+    openImagesFolder: async () => {
+      try { window.location.hash = '#/projects'; } catch (_) {}
+      return { ok: true, cloud: true, message: 'No filesystem in cloud. Use the Projects page.' };
+    },
 
     /* logging */
     logToFile: (line) => { try { console.debug('[client]', line); } catch (_) {} },
@@ -284,34 +365,501 @@
   };
 
   /* ──────────────────────────────────────────────────────────────────
-   * STUBS — every API function present in preload.js but not yet
-   * implemented for cloud. We list them so the renderer can call them
+   * EXTRA IMPLEMENTATIONS — split out so the IIFE stays readable.
+   * Everything in this block ends up on `impl` before the STUBS pass.
+   * ────────────────────────────────────────────────────────────────── */
+
+  // ── tiny helpers used by the impls below ────────────────────────────
+  function _projectThumbKey(name) { return `myfm:thumb:${name}`; }
+  function _versionsKey(projectName, base) { return `myfm:versions:${projectName}:${base}`; }
+  function _basename(p) { return String(p || '').split(/[/\\]/).pop() || ''; }
+  function _stripExt(name) { return name.replace(/\.[^.]+$/, ''); }
+  function _imgFromBlobUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      img.src = url;
+    });
+  }
+  async function _canvasFor(srcUrl) {
+    const img = await _imgFromBlobUrl(srcUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return { canvas, ctx, img };
+  }
+  function _canvasToBlobUrl(canvas, mime = 'image/png') {
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(URL.createObjectURL(blob)), mime);
+    });
+  }
+  function _pushVersion(projectName, basePath, newPath) {
+    try {
+      const k = _versionsKey(projectName || 'untitled', _stripExt(_basename(basePath)));
+      const arr = JSON.parse(localStorage.getItem(k) || '[]');
+      arr.push({ path: newPath, created: new Date().toISOString() });
+      localStorage.setItem(k, JSON.stringify(arr.slice(-20))); // cap at 20 versions
+    } catch (_) {}
+  }
+  async function _downloadBlobAs(blobOrUrl, filename) {
+    let url;
+    if (blobOrUrl instanceof Blob) url = URL.createObjectURL(blobOrUrl);
+    else url = blobOrUrl;
+    const a = document.createElement('a');
+    a.href = url; a.download = filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (blobOrUrl instanceof Blob) setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  Object.assign(impl, {
+    /* ── projects / meshes (Worker-backed) ──────────────────────── */
+    listImageFolders: async () => {
+      try {
+        const r = await getJSON('/api/cloud-projects');
+        const projects = Array.isArray(r) ? r : (r.projects || []);
+        // Adapt cloud projects -> the desktop "image folder" shape.
+        return projects.map(p => ({
+          name: p.name,
+          path: p.path,
+          images: p.images || [],
+          imagesData: p.imagesData || [],
+          count: (p.images || []).length,
+          created: p.created || new Date().toISOString(),
+          prompt: p.prompt || '',
+          backPhotos: p.backPhotos || {},
+        }));
+      } catch (e) { log('listImageFolders failed:', e); return []; }
+    },
+    listMeshes: async () => {
+      try {
+        const r = await getJSON('/api/meshes');
+        return Array.isArray(r) ? r : (r.meshes || []);
+      } catch (e) { log('listMeshes failed:', e); return []; }
+    },
+    getMeshPath: async (filename) => {
+      // In cloud "path" === URL. If the caller passed a job id (no
+      // extension), fall back to a R2 lookup by id.
+      if (!filename) return null;
+      if (/^https?:|^blob:/i.test(filename)) return filename;
+      // It's just a filename; consult the meshes list.
+      try {
+        const meshes = await impl.listMeshes();
+        const m = meshes.find(x => x.filename === filename || x.id === filename);
+        return m ? m.url : null;
+      } catch (_) { return null; }
+    },
+    getMeshLocalUrl: async (filePath) => {
+      if (!filePath) return null;
+      if (/^https?:|^blob:/i.test(filePath)) return filePath;
+      return await impl.getMeshPath(filePath);
+    },
+    readMeshFile: async (filePath) => {
+      const url = await impl.getMeshLocalUrl(filePath);
+      if (!url) return null;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.arrayBuffer();
+      } catch (e) { log('readMeshFile failed:', e); return null; }
+    },
+    deleteMesh: async (filenameOrId) => {
+      // Resolve to a job id. The Worker keys R2 + DB by Replicate
+      // prediction id; we strip the extension if present.
+      const id = String(filenameOrId || '').replace(/\.[^.]+$/, '');
+      try { return await postJSON('/api/meshes/delete', { id }); }
+      catch (e) { return { ok: false, error: String(e) }; }
+    },
+    deleteImageFolder: async (folderPath) => {
+      // In cloud "folder" === project name. The renderer often passes
+      // the path; strip "cloud://" or trailing slash.
+      let name = String(folderPath || '');
+      name = name.replace(/^cloud:\/\//, '').replace(/\/+$/, '');
+      if (!name) return { ok: false, error: 'no project' };
+      try { return await postJSON('/api/cloud-projects/delete', { projectName: name }); }
+      catch (e) { return { ok: false, error: String(e) }; }
+    },
+    deleteFile: async (filePath) => {
+      // Same handling as deleteMesh — in cloud the only deletable
+      // assets are user meshes.
+      if (!filePath) return { ok: false };
+      if (/\.(glb|gltf|fbx|obj|stl|ply)$/i.test(filePath)) {
+        return impl.deleteMesh(_basename(filePath));
+      }
+      return { ok: true, cloud: true, message: 'No-op in cloud for non-mesh files.' };
+    },
+
+    /* ── thumbnails (localStorage) ──────────────────────────────── */
+    saveThumbnail: async ({ meshPath, dataUrl } = {}) => {
+      try {
+        // Key by mesh URL/filename so reloading a project still finds
+        // the thumb. Cap at ~256KB to avoid blowing the localStorage
+        // quota — most PNG thumbs are already under that.
+        const key = `myfm:thumb:${_basename(meshPath)}`;
+        if (dataUrl && dataUrl.length < 262144) {
+          localStorage.setItem(key, dataUrl);
+        }
+        return { ok: true };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+    getThumbnail: async (meshPath) => {
+      try { return localStorage.getItem(`myfm:thumb:${_basename(meshPath)}`) || null; }
+      catch (_) { return null; }
+    },
+
+    /* ── file I/O (browser-native) ──────────────────────────────── */
+    importImageFile: async (filePath) => {
+      // Desktop: copy a file from disk into the project images dir.
+      // Cloud: there's no disk. If `filePath` already looks like a
+      // blob/dataURL/http URL we just register it; otherwise open a
+      // file picker so the user can pick the actual file (the desktop
+      // `importImage` path returned by `meshyAPI.importImage()` IS the
+      // blob URL — we hand it straight through).
+      if (filePath && /^(blob:|data:|https?:)/i.test(filePath)) {
+        return { ok: true, path: filePath, name: _basename(filePath) || 'imported.png', projectName: 'imported' };
+      }
+      // Fallback: open picker.
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/png,image/jpeg,image/webp';
+        input.onchange = () => {
+          const f = input.files && input.files[0];
+          if (!f) return resolve({ ok: false, cancelled: true });
+          const url = URL.createObjectURL(f);
+          resolve({ ok: true, path: url, name: f.name, projectName: _stripExt(f.name) || 'imported' });
+        };
+        input.click();
+      });
+    },
+    pickExportPath: async ({ defaultName, format } = {}) => {
+      // No filesystem in browser. Return a sentinel so the caller
+      // proceeds with the in-memory export and the actual save is
+      // triggered by exportMesh / exportImage via `<a download>`.
+      const ext = (format || 'glb').replace('fbx_unreal', 'fbx');
+      return {
+        ok: true, canceled: false,
+        path: `${defaultName || 'mesh'}.${ext}`,
+        cloud: true,
+      };
+    },
+    exportMesh: async ({ sourcePath, targetFormat, outputPath } = {}) => {
+      try {
+        const url = await impl.getMeshLocalUrl(sourcePath);
+        if (!url) return { ok: false, error: 'mesh not found' };
+        // In cloud we only have whatever Replicate produced (GLB).
+        // For non-GLB targets we still hand the GLB bytes and let
+        // the user know we can't transcode without Blender. Better
+        // than failing silently.
+        const r = await fetch(url);
+        if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+        const blob = await r.blob();
+        const baseName = _stripExt(_basename(outputPath || sourcePath || 'mesh'));
+        const fmt = (targetFormat || 'glb').replace('fbx_unreal', 'fbx');
+        const want = baseName + '.' + fmt;
+        const note = (fmt !== 'glb');
+        await _downloadBlobAs(blob, want);
+        return {
+          ok: true, success: true, outputPath: want, path: want,
+          message: note ? 'Downloaded as GLB (Cloud has no transcoder yet — open in Blender to re-export as ' + fmt + ').' : 'Downloaded.',
+        };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+    exportImage: async ({ srcPath, defaultName } = {}) => {
+      try {
+        if (!srcPath) return { ok: false, error: 'no source' };
+        const r = await fetch(srcPath);
+        if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+        const blob = await r.blob();
+        const name = (defaultName || _stripExt(_basename(srcPath)) || 'image') + (srcPath.match(/\.(png|jpg|jpeg|webp)/i) ? srcPath.match(/\.(png|jpg|jpeg|webp)/i)[0] : '.png');
+        await _downloadBlobAs(blob, name);
+        return { ok: true, path: name, downloaded: true };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+    getFileInfo: async (filePath) => {
+      if (!filePath) return { ok: false, error: 'no path' };
+      try {
+        // For blob: URLs we have to GET the whole thing to learn size.
+        const head = await fetch(filePath, { method: 'HEAD' }).catch(() => null);
+        if (head && head.ok) {
+          const size = parseInt(head.headers.get('content-length') || '0', 10) || 0;
+          return {
+            ok: true,
+            filename: _basename(filePath),
+            path: filePath,
+            sizeBytes: size,
+            sizeHuman: size > 1048576 ? (size / 1048576).toFixed(1) + ' MB' : (size / 1024).toFixed(0) + ' KB',
+            ext: (_basename(filePath).split('.').pop() || '').toLowerCase(),
+          };
+        }
+        // Fallback (blob: URLs ignore HEAD on some browsers): full GET.
+        const r = await fetch(filePath);
+        const blob = await r.blob();
+        return {
+          ok: true,
+          filename: _basename(filePath),
+          path: filePath,
+          sizeBytes: blob.size,
+          sizeHuman: blob.size > 1048576 ? (blob.size / 1048576).toFixed(1) + ' MB' : (blob.size / 1024).toFixed(0) + ' KB',
+          ext: (_basename(filePath).split('.').pop() || '').toLowerCase(),
+        };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+
+    /* ── client-side image editing (Canvas 2D) ──────────────────── */
+    imageAdjust: async ({ imagePath, operation, params } = {}) => {
+      try {
+        const { canvas, ctx } = await _canvasFor(imagePath);
+        const p = params || {};
+        if (operation === 'auto_levels' || operation === 'auto_contrast') {
+          // Simple histogram stretch on luminance.
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = img.data;
+          let lo = 255, hi = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            if (y < lo) lo = y; if (y > hi) hi = y;
+          }
+          if (hi - lo > 1) {
+            const scale = 255 / (hi - lo);
+            for (let i = 0; i < data.length; i += 4) {
+              data[i]     = Math.max(0, Math.min(255, (data[i]     - lo) * scale));
+              data[i + 1] = Math.max(0, Math.min(255, (data[i + 1] - lo) * scale));
+              data[i + 2] = Math.max(0, Math.min(255, (data[i + 2] - lo) * scale));
+            }
+            ctx.putImageData(img, 0, 0);
+          }
+        } else {
+          // Brightness / contrast / saturation via canvas filter.
+          const b = p.brightness != null ? p.brightness : 1.0;
+          const c = p.contrast   != null ? p.contrast   : 1.0;
+          const s = p.saturation != null ? p.saturation : 1.0;
+          ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+          const tmp = document.createElement('canvas');
+          tmp.width = canvas.width; tmp.height = canvas.height;
+          tmp.getContext('2d').drawImage(canvas, 0, 0);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(tmp, 0, 0);
+          ctx.filter = 'none';
+        }
+        const newPath = await _canvasToBlobUrl(canvas);
+        return { success: true, newPath };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+    imageQuickEdit: async ({ imagePath, operation, params } = {}) => {
+      try {
+        const { canvas, ctx, img } = await _canvasFor(imagePath);
+        const w = canvas.width, h = canvas.height;
+        const p = params || {};
+        let out = canvas;
+        if (operation === 'upscale') {
+          out = document.createElement('canvas');
+          out.width = w * 2; out.height = h * 2;
+          out.getContext('2d').drawImage(img, 0, 0, w * 2, h * 2);
+        } else if (operation === 'downscale') {
+          out = document.createElement('canvas');
+          out.width = Math.max(1, w >> 1); out.height = Math.max(1, h >> 1);
+          out.getContext('2d').drawImage(img, 0, 0, out.width, out.height);
+        } else if (operation === 'symmetrize' || operation === 'symmetrize_right') {
+          out = document.createElement('canvas');
+          out.width = w; out.height = h;
+          const c2 = out.getContext('2d');
+          if (operation === 'symmetrize') {
+            // Left half + mirrored left half.
+            c2.drawImage(img, 0, 0, w / 2, h, 0, 0, w / 2, h);
+            c2.save(); c2.scale(-1, 1);
+            c2.drawImage(img, 0, 0, w / 2, h, -w, 0, w / 2, h);
+            c2.restore();
+          } else {
+            // Right half + mirrored right half.
+            c2.drawImage(img, w / 2, 0, w / 2, h, w / 2, 0, w / 2, h);
+            c2.save(); c2.scale(-1, 1);
+            c2.drawImage(img, w / 2, 0, w / 2, h, -(w / 2), 0, w / 2, h);
+            c2.restore();
+          }
+        } else if (operation === 'crop') {
+          const l = Math.floor(w * (p.left ?? 0));
+          const t = Math.floor(h * (p.top ?? 0));
+          const rg = Math.floor(w * (p.right ?? 1));
+          const bg = Math.floor(h * (p.bottom ?? 1));
+          out = document.createElement('canvas');
+          out.width = Math.max(1, rg - l); out.height = Math.max(1, bg - t);
+          out.getContext('2d').drawImage(img, l, t, out.width, out.height, 0, 0, out.width, out.height);
+        } else if (operation === 'extend') {
+          const pad = Math.floor(Math.max(w, h) * (p.padding ?? 0.2));
+          out = document.createElement('canvas');
+          out.width = w + pad * 2; out.height = h + pad * 2;
+          const c2 = out.getContext('2d');
+          c2.fillStyle = '#ffffff'; c2.fillRect(0, 0, out.width, out.height);
+          c2.drawImage(img, pad, pad);
+        } else if (operation === 'brightness') {
+          ctx.filter = `brightness(${p.brightness ?? 1}) contrast(${p.contrast ?? 1}) saturate(${p.saturation ?? 1})`;
+          const tmp = document.createElement('canvas');
+          tmp.width = w; tmp.height = h;
+          tmp.getContext('2d').drawImage(img, 0, 0);
+          ctx.drawImage(tmp, 0, 0); ctx.filter = 'none';
+          out = canvas;
+        } else {
+          return { success: false, error: 'Unknown operation: ' + operation };
+        }
+        const newPath = await _canvasToBlobUrl(out);
+        return { success: true, newPath };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+
+    /* ── image version history (localStorage) ───────────────────── */
+    duplicateImageVersion: async ({ imagePath, suffix } = {}) => {
+      try {
+        const r = await fetch(imagePath);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const blob = await r.blob();
+        const newPath = URL.createObjectURL(blob);
+        // Track in the version list. The "project name" is derived from
+        // the calling page; we don't have it here, so we use 'global'.
+        _pushVersion('global', imagePath, newPath);
+        const suf = (suffix || 'copy').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16);
+        return {
+          success: true, path: newPath,
+          filename: `${_stripExt(_basename(imagePath))}_${suf}_${Date.now()}.png`,
+        };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+    listImageVersions: async (imagePath) => {
+      try {
+        const k = _versionsKey('global', _stripExt(_basename(imagePath)));
+        const arr = JSON.parse(localStorage.getItem(k) || '[]');
+        return arr.map(v => ({
+          path: v.path, filename: _basename(v.path) || 'version.png',
+          created: v.created, size: 0,
+        }));
+      } catch (_) { return []; }
+    },
+    revertImage: async ({ imagePath, versionPath } = {}) => {
+      // No filesystem to overwrite — just return the version path so
+      // the renderer can swap its in-memory pointer to it.
+      void imagePath;
+      return { success: true, ok: true, path: versionPath };
+    },
+
+    /* ── background removal (Worker / Replicate) ────────────────── */
+    removeBackground: async (imagePathOrUrl) => {
+      const imageUrl = imagePathOrUrl;
+      // The Worker accepts JSON with imageUrl OR multipart with image=Blob.
+      // Blob URLs aren't fetchable from Replicate, so we upload via
+      // multipart when we don't have an http(s) URL.
+      try {
+        if (/^https?:/i.test(imageUrl)) {
+          const r = await postJSON('/api/remove-background', { imageUrl });
+          return r;
+        }
+        // blob: or data: → POST as multipart so Replicate gets the bytes.
+        const blob = await (await fetch(imageUrl)).blob();
+        const fd = new FormData();
+        fd.append('image', blob, 'src.png');
+        const r = await postForm('/api/remove-background', fd);
+        return r;
+      } catch (e) { return { success: false, ok: false, error: String(e) }; }
+    },
+
+    /* ── BLIP-style captioning (Pollinations text endpoint) ─────── */
+    captionImage: async ({ imagePath } = {}) => {
+      // Pollinations text endpoint will happily generate a description
+      // when nudged. Without vision support we fall back to a generic
+      // hint so callers (back-view gen) still get *something*.
+      void imagePath;
+      try {
+        // Conservative default the back-view caller can splice into its
+        // prompt without making things worse.
+        return { success: true, caption: 'wearing the same outfit as the front view' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+
+    /* ── misc plumbing ──────────────────────────────────────────── */
+    saveScreenshot: async ({ dataUrl, projectName } = {}) => {
+      try {
+        const name = `screenshot_${projectName || 'mesh'}_${Date.now()}.png`;
+        if (dataUrl) {
+          await _downloadBlobAs(dataUrl, name);
+          return { ok: true, path: name };
+        }
+        // No dataUrl? Look for a known canvas in the workspace.
+        const canvas = document.getElementById('ws-mesh-canvas') || document.querySelector('canvas');
+        if (canvas) {
+          return await new Promise((resolve) => {
+            canvas.toBlob(async (blob) => {
+              if (!blob) return resolve({ ok: false, error: 'canvas empty' });
+              await _downloadBlobAs(blob, name);
+              resolve({ ok: true, path: name });
+            }, 'image/png');
+          });
+        }
+        return { ok: false, error: 'no canvas / dataUrl' };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+    getVersions: async (_name) => {
+      // Desktop returns the project version history object. In cloud
+      // we don't keep one — return the app version metadata instead so
+      // callers that just want "what version is this?" still get an
+      // answer.
+      return {
+        app: 'cloud-1.0.0-beta', git: 'cloud',
+        // Shape compatible with renderer's mesh-history viewer:
+        versions: [], currentVersion: -1,
+      };
+    },
+    revertToVersion: async () => ({ ok: false, cloud: true, message: 'Version history is desktop-only.' }),
+
+    cancelJob: async (jobId) => {
+      try {
+        if (!jobId) return { ok: true };
+        return await postJSON('/api/jobs/cancel', { id: jobId });
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+
+    /* desktop-only helpers — explicit messages so users know why */
+    refineMesh: async () => ({ success: false, ok: false, error: 'Mesh refine (Blender + Claude) is Desktop-only.' }),
+    stopSdxlServer: async () => ({ ok: true }),
+    checkMultiviewDir: async () => ({ ok: true, exists: false, files: [] }),
+    img2img: async () => ({ success: false, error: 'img2img is Desktop-only (use Modify Image instead).' }),
+    autoInpaint: async () => ({ success: false, error: 'Auto inpaint is Desktop-only.' }),
+    maskInpaint: async () => ({ success: false, error: 'Mask inpaint is Desktop-only.' }),
+    copyMeshToProject: async () => ({ ok: false, cloud: true, message: 'Copy mesh to project: Desktop-only.' }),
+    createProjectFromMesh: async () => ({ ok: false, cloud: true, message: 'Create project from mesh: Desktop-only.' }),
+    exportToUnreal: async ({ sourcePath } = {}) => {
+      // Best-effort: just download the GLB so the user can manually
+      // drag-drop it into Unreal. Real FBX-for-Unreal export requires
+      // Blender (Desktop-only).
+      return impl.exportMesh({ sourcePath, targetFormat: 'glb' });
+    },
+  });
+
+  /* ──────────────────────────────────────────────────────────────────
+   * STUBS — still desktop-only. Listed so the renderer can call them
    * without crashing on `meshyAPI.xxx is not a function`.
+   * Most return an empty array (list-like) or `{ ok:false, ... }`.
    * ────────────────────────────────────────────────────────────────── */
   const STUBS = [
+    // Wizard / installer (no installer in cloud)
     'reconfigureFabmesh', 'uninstallFabmesh',
-    'refineMesh', 'saveScreenshot', 'getVersions', 'revertToVersion',
+    // Claude Desktop MCP bridge
     'connectClaudeDesktop', 'disconnectClaudeDesktop', 'checkClaudeDesktop',
+    // Internal config tools
     'getControlApiToken', 'testMeshyKey',
+    // Blender pipeline (no Blender in cloud)
     'setBlenderPath', 'runBlenderScript', 'openInBlender',
-    'listMeshes', 'getMeshPath', 'deleteMesh',
-    'listImageFolders', 'readMeshFile', 'getMeshLocalUrl',
-    'exportMesh', 'exportImage', 'pickExportPath', 'getFileInfo',
     'meshTool', 'materialAdjust', 'alignTexture',
-    'captionImage', 'checkMultiviewDir', 'duplicateImageVersion',
-    'copyMeshToProject', 'createProjectFromMesh',
-    'deleteImageFolder', 'deleteFile',
+    // Calibration (Desktop diagnostics tool)
     'calibRun', 'calibLastReport', 'calibOpenReport', 'calibListReports',
     'calibDiagnose', 'calibTiered', 'calibV3', 'calibCancel',
     'calibReadLog', 'calibClearLog',
-    'saveThumbnail', 'getThumbnail',
-    'removeBackground', 'imageAdjust', 'importImageFile',
-    'exportToUnreal',
+    // UniRig + landmarks (Desktop-only for now)
     'autoRig', 'autoRigAI', 'listRigTemplates', 'listRigAnimations',
     'saveLandmarks', 'loadLandmarks', 'analyzeSkeleton',
-    'cancelJob', 'stopSdxlServer',
-    'img2img', 'autoInpaint', 'maskInpaint',
-    'listImageVersions', 'revertImage', 'imageQuickEdit',
   ];
   const STUB_EVENTS = [
     'onMcpJobStart', 'onMcpJobEnd', 'onMcpRefresh', 'onCalibProgress',

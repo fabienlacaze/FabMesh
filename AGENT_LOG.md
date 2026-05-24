@@ -10,6 +10,59 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (Cloud: wire ~30 stubs in meshyAPI-cloud + 5 new Worker endpoints)
+
+- **Problème :** le shim `cloud/public/app/meshyAPI-cloud.js` exposait ~65 fonctions stub
+  qui retournaient `{ ok:false, cloudUnavailable:true }`. Un user qui ouvrait l'app cloud
+  hit ces stubs sur des actions courantes (lister ses projets, exporter un mesh, retirer
+  un fond, regénérer une vue arrière, etc.) → expérience cassée bien que "officiellement live".
+- **Actions :**
+  - **Worker (cloud/src/worker.ts) :** ajouté 5 endpoints :
+    - `GET  /api/cloud-projects` — groupe les `jobs` par `project_name`
+    - `GET  /api/meshes` — liste meshes succeeded (id, url R2, asset_type)
+    - `POST /api/meshes/delete { id }` — supprime R2 object + jobs row
+    - `POST /api/cloud-projects/delete { projectName }` — nullify project_name sur les jobs
+    - `POST /api/jobs/cancel { id }` — annule la prédiction Replicate + refund crédits
+    - `POST /api/remove-background { imageUrl | image }` — proxy Replicate 851-labs
+    - `POST /api/generate-back-view { prompt }` — proxy Pollinations, tunnellé R2
+  - **Migration Supabase (`20260524160000_add_project_name.sql`) :** ajout colonne
+    `project_name text` sur `jobs` + index `(user_id, project_name)`. Appliqué en live
+    via Management API (`POST /v1/projects/{ref}/database/query`).
+  - **Shim (cloud/public/app/meshyAPI-cloud.js) :** implémenté ~30 fonctions :
+    - Persistance projets : `listImageFolders`, `listMeshes`, `getMeshLocalUrl`,
+      `readMeshFile`, `getMeshPath`, `deleteMesh`, `deleteImageFolder`, `deleteFile`.
+    - Thumbnails : `saveThumbnail` / `getThumbnail` via localStorage (`myfm:thumb:<name>`).
+    - File I/O navigateur : `importImageFile`, `pickExportPath`, `exportMesh`, `exportImage`,
+      `getFileInfo`. Pas de filesystem → `<a download>` + blob URLs.
+    - Édition image client-side via Canvas 2D : `imageAdjust` (brightness/contrast/saturate
+      + auto_levels), `imageQuickEdit` (upscale, downscale, crop, extend, symmetrize, brightness).
+    - Versions image : `duplicateImageVersion`, `listImageVersions`, `revertImage` (localStorage).
+    - `removeBackground` → Worker /api/remove-background → Replicate 851-labs.
+    - `captionImage` → stub conservateur ("wearing the same outfit as the front view")
+      faute de vision dans Pollinations text endpoint.
+    - Multi-vues : `generateBackView` → Worker, `generateMultiview` → 3× Pollinations
+      (back/left/right) côté client, `generateFromImage` → Pollinations img2img.
+    - `cancelJob`, `saveScreenshot` (canvas.toBlob + download), `getVersions`,
+      `showInExplorer` (window.open), `openLogsFolder` / `openMeshesFolder` /
+      `openImagesFolder` (no-op + message friendly).
+  - **Stubs restants explicites Desktop-only :** Blender pipeline (meshTool, materialAdjust,
+    alignTexture, refineMesh, exportToUnreal → tombe sur GLB plain), Calibration (calibRun…
+    calibClearLog), UniRig (autoRig, autoRigAI, saveLandmarks…), MCP Claude Desktop bridge,
+    img2img/autoInpaint/maskInpaint avancés, getControlApiToken, testMeshyKey, setBlenderPath…
+  - **Choix éditorialaux :** removeBackground = gratuit pour la beta (pas de spend_credits),
+    à reviewer si abus. Multi-view : 3 vues additionnelles seulement (front existe déjà
+    chez le caller). Versions image : key globale (`myfm:versions:global:<basename>`) faute
+    de connaître le project name côté shim.
+- **Conclusion :** parcours user normal (image gen → edit → mesh → download → rouvrir
+  un projet → export) ne devrait plus toucher de stub. Build à valider via GH Actions
+  (`npx next build` impossible localement — sandbox).
+- **À ré-évaluer :** `captionImage` mériterait un vrai modèle vision (BLIP / GPT-4o-mini)
+  pour back-view, le stub conservateur dégradera la qualité du re-prompting outfit.
+  `exportMesh` ne transcode pas (Blender Desktop-only) — pour l'instant on télécharge
+  toujours le GLB original quel que soit le format demandé, avec un message d'avertissement.
+
+---
+
 ## 2026-05-24 (Cloud auth wiring: Resend SMTP + branded templates pushed via Management API)
 
 - **Problème :** mails Supabase de confirmation (a) envoyaient sur `localhost:3000`,
