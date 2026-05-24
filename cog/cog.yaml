@@ -18,13 +18,15 @@
 # A100 80GB is only needed if a model needs >40 GB VRAM, which TRELLIS-2
 # does not (peaks at ~14 GB in 1024 mode, ~22 GB in 1536 cascade).
 build:
+  # CUDA 12.4 is the highest version Cog CLI v0.14.10 understands.
+  # That pairs naturally with torch 2.4.x / cu124 wheels.
   gpu: true
-  cuda: "12.8"
+  cuda: "12.4"
   python_version: "3.11"
   python_packages:
     # CUDA-friendly torch from PyTorch's index
-    - "torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128"
-    - "torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128"
+    - "torch==2.4.1 --index-url https://download.pytorch.org/whl/cu124"
+    - "torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu124"
     # Core diffusion / 3D libs
     - "diffusers>=0.30"
     - "transformers>=4.41"
