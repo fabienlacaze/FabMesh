@@ -143,19 +143,29 @@
              requires `image: File` and otherwise responds 400. */
     imageTo3D: async (opts) => {
       const fd = new FormData();
-      let blob = opts.image instanceof Blob ? opts.image : null;
-      if (!blob && opts.imagePath) {
+      // Two paths:
+      //  - opts.image is a Blob/File the caller already has in hand → upload it.
+      //  - opts.imagePath is a URL (R2 / blob: / data:) → just forward the
+      //    string to the Worker, which fetches it server-side. Avoids the
+      //    R2 CORS round-trip the browser can't do.
+      if (opts.image instanceof Blob) {
+        fd.append('image', opts.image, 'src.png');
+      } else if (opts.imagePath && /^blob:/i.test(opts.imagePath)) {
+        // Local blob URL — we MUST fetch this client-side because it only
+        // exists in this tab; the Worker can't see it.
         try {
           const r = await fetch(opts.imagePath);
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          blob = await r.blob();
+          fd.append('image', await r.blob(), 'src.png');
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return { ok: false, success: false, error: 'cannot fetch source image: ' + msg };
+          return { ok: false, success: false, error: 'cannot fetch blob source: ' + (e instanceof Error ? e.message : String(e)) };
         }
+      } else if (opts.imagePath && /^https?:\/\//i.test(opts.imagePath)) {
+        // Public URL — let the Worker fetch it (same origin / no CORS).
+        fd.append('imagePath', opts.imagePath);
+      } else {
+        return { ok: false, success: false, error: 'no source image provided' };
       }
-      if (!blob) return { ok: false, success: false, error: 'no source image provided' };
-      fd.append('image', blob, 'src.png');
       for (const [k, v] of Object.entries(opts)) {
         if (k === 'image' || k === 'imagePath') continue;
         if (v === undefined || v === null) continue;
