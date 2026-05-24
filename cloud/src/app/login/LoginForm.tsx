@@ -26,6 +26,13 @@ export function LoginForm() {
       const sb = createBrowserClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        // Force implicit flow: PKCE stores a per-browser code_verifier
+        // in localStorage at sign-in time, which breaks when the user
+        // clicks the mail in a different browser than the one where
+        // they entered their email (very common with desktop webmail).
+        // Implicit flow puts the access_token straight in the URL hash,
+        // so any browser can complete the sign-in.
+        { auth: { flowType: 'implicit' } },
       );
       const { error } = await sb.auth.signInWithOtp({
         email,

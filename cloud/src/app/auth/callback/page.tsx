@@ -1,15 +1,17 @@
 'use client';
 
-// Handles the PKCE magic-link callback ENTIRELY on the client. Why:
-// Supabase's PKCE flow stores the `code_verifier` in localStorage at
-// sign-in time. The Worker handler we used before tried to exchange
-// the code server-side without that verifier and silently failed, so
-// users were bounced back to /login.
+// Handles the magic-link callback. Two scenarios:
 //
-// The browser SDK picks up the verifier automatically from
-// localStorage, calls /auth/v1/token?grant_type=pkce with the right
-// payload, then persists the session in a cookie that the Worker can
-// read on subsequent /api/* calls.
+// 1) Implicit flow (our default — see LoginForm.tsx) — Supabase sends
+//    the user back here with #access_token=… in the URL hash. The
+//    @supabase/ssr browser client picks it up on instantiation and
+//    writes the session cookie.
+//
+// 2) PKCE flow — Supabase appends ?code=… as a query param. We try
+//    exchangeCodeForSession(code), which only works if the same
+//    browser still has the code_verifier in localStorage from
+//    sign-in time. If the user clicked the mail in a different
+//    browser, this fails — we then send them back to /login.
 
 import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
@@ -24,25 +26,36 @@ export default function AuthCallbackPage() {
         const sb = createBrowserClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          { auth: { flowType: 'implicit' } },
         );
 
         const url = new URL(window.location.href);
         const code = url.searchParams.get('code');
         const next = url.searchParams.get('next') || '/account';
+        const hasHashToken =
+          typeof window !== 'undefined'
+          && window.location.hash.includes('access_token');
 
-        if (code) {
+        if (hasHashToken) {
+          // Implicit flow — SDK already absorbed the hash on init.
+          // Force a getSession() so the cookie is definitely flushed
+          // before we navigate.
+          await sb.auth.getSession();
+        } else if (code) {
+          // PKCE — only works if the same browser holds the verifier.
           const { error } = await sb.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else {
-          // Fall back to implicit flow — tokens come back in the hash
-          // fragment (#access_token=…). The SDK reads them on init.
+          // Maybe the SDK already picked things up from the URL.
           const { data, error } = await sb.auth.getSession();
           if (error) throw error;
-          if (!data.session) throw new Error('No session');
+          if (!data.session) throw new Error('No session in URL');
         }
 
         setStatus('ok');
         setMessage('Signed in — redirecting…');
+        // Strip query/hash before navigating so a reload doesn't loop.
+        window.history.replaceState(null, '', window.location.pathname);
         window.location.replace(next);
       } catch (err: unknown) {
         setStatus('error');
@@ -55,7 +68,7 @@ export default function AuthCallbackPage() {
 
   return (
     <main style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ textAlign: 'center', maxWidth: 420 }}>
+      <div style={{ textAlign: 'center', maxWidth: 460 }}>
         <div style={{ fontSize: 42, marginBottom: 12 }}>
           {status === 'working' ? '⏳' : status === 'ok' ? '✓' : '⚠'}
         </div>
