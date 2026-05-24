@@ -10,6 +10,40 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (Cloud setup live: Supabase + Stripe + Cloudflare + OpenNext)
+
+Session live avec le user — création des comptes externes et provisioning :
+
+- **Stripe** (compte existant "Fabidou", test mode acct_1TEArR3uvj2cFz0k) :
+  - 3 produits one-time créés : MyFabmesh.AI Starter (5€) / Pro (20€) / Studio (50€)
+  - Price IDs : price_1TaXwV3uvj2cFz0kJ57GGzxG / price_1TaY5C3uvj2cFz0knpUvfciv / price_1TaY6f3uvj2cFz0k0vofoq91
+  - pk_test + sk_test wirés dans cloud/.env.local
+- **Supabase** (compte existant) :
+  - PAT généré, projet `myfabmesh-cloud` créé en eu-west-3 (Paris)
+  - Ref `ovoccoipeqmkfnugkmyh`, anon + service_role keys récupérées
+  - Schema SQL pushé (profiles + jobs + payments + RPCs + RLS) via supabase db push
+- **Cloudflare** (nouveau compte) :
+  - R2 activé (free tier 10 GB)
+  - Bucket `myfabmesh-meshes` créé en Western Europe + public dev URL
+    pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev
+  - Account API token "Object Read & Write" scoped au bucket
+  - Account ID : a74e8ad01c363d77acec95c7f2123d9a
+- **Découverte** : Cloudflare a unifié Pages + Workers — le flow "Create"
+  pousse vers la nouvelle UI Workers (avec build/deploy commands custom)
+  au lieu de l'ancien Pages classique. Bascule de stratégie vers
+  `@opennextjs/cloudflare` (l'adaptateur officiel Next.js → Workers,
+  qui remplace `@cloudflare/next-on-pages` deprecated).
+- **Repo prep** :
+  - `cloud/package.json` : ajout `@opennextjs/cloudflare ^1.19.11`
+  - Création `cloud/open-next.config.ts` (defineCloudflareConfig minimal)
+  - `cloud/wrangler.toml` réécrit pour Workers (main=".open-next/worker.js",
+    binding R2 MESHES, assets, compatibility nodejs_compat + global_fetch_strictly_public)
+- **À faire** : commit + push pour que Cloudflare build voit la config,
+  puis user clique Deploy. Env vars à coller dans Settings après le 1er
+  deploy.
+
+---
+
 ## 2026-05-24 (Cloud ready check + DEPLOY_CLOUD_STEP_BY_STEP)
 
 Le user a demandé "est-ce qu'on est ready pour le Cloud ?". Bilan :
