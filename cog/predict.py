@@ -100,17 +100,28 @@ class Predictor(BasePredictor):
 
     def predict(
         self,
-        image: Path = Input(
-            description="Reference image (PNG / JPG). Optional if `prompt` is set.",
-            default=None,
+        task: str = Input(
+            description="What this call produces. "
+                        "text2image: enriched text prompt → 1 PNG (RealVisXL V4 or "
+                        "DreamShaper-XL Lightning + ControlNet OpenPose for T-pose). "
+                        "back-view: front image + prompt → 1 back-view PNG "
+                        "(RealVisXL V4 + ControlNet OpenPose back skeleton + IP-Adapter). "
+                        "The 3D mesh step lives in a separate Replicate model "
+                        "(microsoft/TRELLIS.2-4B) and is NOT handled here.",
+            choices=["text2image", "back-view"],
+            default="text2image",
         ),
         prompt: str = Input(
-            description="Text prompt — if `image` is empty, we run the desktop's "
-                        "RealVisXL V4.0 pipeline (or DreamShaper-XL Lightning + "
-                        "ControlNet OpenPose when the prompt asks for a T-pose) "
-                        "to generate the source image first. The asset_type + "
-                        "asset_style suffixes are appended automatically.",
+            description="Text prompt. For text2image this is the user's idea "
+                        "(asset_type + asset_style suffixes are appended). "
+                        "For back-view it's a hint about the subject's outfit "
+                        "(no need to mention 'back view' — we add that ourselves).",
             default="",
+        ),
+        image: Path = Input(
+            description="Source image — required for task=back-view "
+                        "(front image of the character to flip).",
+            default=None,
         ),
         asset_style: str = Input(
             description="Visual style suffix appended to the prompt (matches "
@@ -120,138 +131,63 @@ class Predictor(BasePredictor):
             default="realistic",
         ),
         asset_type: str = Input(
-            description="Asset category — drives the prompt suffix, the rectify "
-                        "mode, the back-view engine choice, and the post-process pipeline.",
+            description="Asset category — drives the prompt suffix.",
             choices=["character", "creature", "vehicle", "building",
                      "weapon", "prop", "environment", "icon", "custom"],
             default="character",
         ),
-        mode: str = Input(
-            description="Quality tier — matches desktop wizard modes",
-            choices=["lite", "standard", "full"],
-            default="standard",
-        ),
-        seed: int = Input(default=42, ge=0, le=2**31 - 1),
-        gen_steps: int = Input(
-            description="Diffusion steps for the optional text→image step (30 = desktop default).",
+        seed: int = Input(default=0, ge=0, le=2**31 - 1,
+            description="0 = random."),
+        steps: int = Input(
+            description="Diffusion steps. Desktop uses 30 for RealVisXL, 8 for the "
+                        "DreamShaper-XL Lightning T-pose path (auto-detected).",
             default=30, ge=4, le=60,
         ),
-        rectify: bool = Input(default=True,
-            description="Auto-rectify the source to a canonical view (skipped when "
-                        "image is generated from prompt — it's already canonical)."),
-        back_view: bool = Input(default=True,
-            description="Generate a back-view to improve mesh consistency (characters / creatures only)"),
-        smooth: bool = Input(default=True,
-            description="Bilateral filter on the base color atlas"),
-        face_fix: bool = Input(default=False,
-            description="SDXL inpaint on the face region (characters / creatures only)"),
-        ultra_hd: bool = Input(default=False,
-            description="Real-ESRGAN x2 texture upscale"),
-        texture_size: int = Input(default=2048, ge=512, le=4096),
     ) -> Path:
         t0 = time.time()
         work = tempfile.mkdtemp(prefix='myfabmesh_')
-        print(f'[predict] workdir = {work}', flush=True)
-        print(f'[predict] image={"yes" if image else "no"} prompt_chars={len(prompt or "")} '
-              f'asset={asset_type} style={asset_style} mode={mode} seed={seed} '
-              f'rectify={rectify} back={back_view} smooth={smooth} '
-              f'face={face_fix} hd={ultra_hd} tex={texture_size}',
+        print(f'[predict] task={task} workdir={work} asset={asset_type} '
+              f'style={asset_style} prompt_chars={len(prompt or "")} '
+              f'image={"yes" if image else "no"} seed={seed} steps={steps}',
               flush=True)
 
-        # --- 0. TEXT → IMAGE (if no image was uploaded) ----------------
-        # Mirrors src/main/main.js generate-images handler: build the
-        # enriched prompt (style prefix + user prompt + asset suffix),
-        # then call scripts/local_juggernaut_bridge.py exactly like the
-        # desktop does. Output is ref_1.png 1024².
-        if image is None:
+        if task == "text2image":
             if not prompt or not prompt.strip():
-                raise ValueError("Either `image` or `prompt` must be provided.")
+                raise ValueError("`prompt` is required for task=text2image.")
             enriched = _build_enriched_prompt(prompt.strip(), asset_type, asset_style)
             print(f'[predict] T→I via local_juggernaut_bridge.py — '
-                  f'"{enriched[:120]}…"', flush=True)
+                  f'"{enriched[:140]}…"', flush=True)
             img_dir = os.path.join(work, 'gen_image')
             os.makedirs(img_dir, exist_ok=True)
+            # local_juggernaut_bridge.py CLI:
+            #   python local_juggernaut_bridge.py <prompt> <out_dir> <num_images> <steps>
             _run('local_juggernaut_bridge.py',
-                 enriched, img_dir, '1', str(gen_steps))
-            # Pick the first ref_*.png produced.
-            refs = sorted(f for f in os.listdir(img_dir) if f.startswith('ref_') and f.endswith('.png'))
+                 enriched, img_dir, '1', str(steps))
+            refs = sorted(f for f in os.listdir(img_dir)
+                          if f.startswith('ref_') and f.endswith('.png'))
             if not refs:
-                raise RuntimeError('text→image step produced no ref_*.png')
-            src_path = os.path.join(img_dir, refs[0])
-            # Skip auto-rectify — the freshly-generated front is already canonical
-            # (RealVisXL + STRICT_FRONT_TAIL suffix in our enriched prompt).
-            rectify = False
-            print(f'[predict] T→I produced {src_path}', flush=True)
-        else:
-            src_path = str(image)
+                raise RuntimeError('text→image produced no ref_*.png')
+            out_path = os.path.join(img_dir, refs[0])
 
-        # --- 1. RECTIFY ------------------------------------------------
-        if rectify and asset_type in ('character', 'creature', 'vehicle',
-                                       'building', 'icon'):
-            rectified = os.path.join(work, 'rectified.png')
-            rectify_mode = 'front' if asset_type in ('character', 'creature') else 'iso'
-            _run('generate_front_strict.py',
-                 '--from-image', src_path,
-                 '--mode', rectify_mode,
-                 '--seeds', '3',
-                 '_unused_prompt_',
-                 rectified)
-            if os.path.isfile(rectified):
-                src_path = rectified
-
-        # --- 2. BACK-VIEW (so TRELLIS-2 gets front + back together) ---
-        # The desktop pipeline writes <stem>_multiview/view_*.png next to
-        # the source image, and trellis2_native auto-detects that dir.
-        if back_view and asset_type in ('character', 'creature'):
-            mv_dir = os.path.join(work, 'multiview')
+        elif task == "back-view":
+            if image is None:
+                raise ValueError("`image` is required for task=back-view.")
+            mv_dir = os.path.join(work, 'back')
             os.makedirs(mv_dir, exist_ok=True)
-            # generate_back_view writes back_<n>.png into out_dir.
-            _run('generate_back_view.py', src_path, mv_dir, '', '1')
-            # Rename to TRELLIS-2's expected view_1.png slot (view_0 = front).
-            for fn in os.listdir(mv_dir):
-                if fn.startswith('back') and fn.endswith('.png'):
-                    shutil.move(os.path.join(mv_dir, fn),
-                                os.path.join(mv_dir, 'view_1.png'))
-                    break
+            # generate_back_view.py CLI:
+            #   python generate_back_view.py <front> <out_dir> <prompt_hint> <num_images>
+            hint = (prompt or '').strip()
+            _run('generate_back_view.py', str(image), mv_dir, hint, '1')
+            # Script writes back_<stem>_<n>.png. Pick the first one.
+            backs = sorted(f for f in os.listdir(mv_dir)
+                           if f.startswith('back') and f.endswith('.png'))
+            if not backs:
+                raise RuntimeError('back-view produced no back_*.png')
+            out_path = os.path.join(mv_dir, backs[0])
 
-        # --- 3. TRELLIS-2 GENERATION ----------------------------------
-        mesh_out = os.path.join(work, 'mesh.glb')
-        decim = {'lite': 100_000, 'standard': 500_000, 'full': 1_500_000}[mode]
-        voxel_res = '1536' if mode == 'full' else '1024'
-        env = {
-            'FABMESH_TRELLIS2_NATIVE_MODE': voxel_res,
-            'FABMESH_TRELLIS2_NATIVE_SEED': str(seed),
-            'FABMESH_TRELLIS2_NATIVE_DECIM': str(decim),
-        }
-        if back_view and asset_type in ('character', 'creature'):
-            env['FABMESH_TRELLIS2_MULTIVIEW_DIR'] = os.path.join(work, 'multiview')
-        _run('trellis2_native_full_pipeline.py',
-             src_path, mesh_out, str(texture_size),
-             env_extra=env)
-
-        # --- 4. TEXTURE SMOOTH ----------------------------------------
-        if smooth:
-            smoothed = os.path.join(work, 'mesh_smooth.glb')
-            _run('texture_smooth.py', mesh_out, smoothed)
-            if os.path.isfile(smoothed):
-                mesh_out = smoothed
-
-        # --- 5. FACE INPAINT ------------------------------------------
-        if face_fix and asset_type in ('character', 'creature'):
-            inpainted = os.path.join(work, 'mesh_face.glb')
-            _run('face_inpaint_atlas.py', mesh_out, inpainted,
-                 '--strength', '0.45')
-            if os.path.isfile(inpainted):
-                mesh_out = inpainted
-
-        # --- 6. ULTRA HD 8K UPSCALE -----------------------------------
-        if ultra_hd:
-            upscaled = os.path.join(work, 'mesh_8k.glb')
-            _run('texture_upscale.py', mesh_out, upscaled,
-                 '--scale', '2', '--tile', '512')
-            if os.path.isfile(upscaled):
-                mesh_out = upscaled
+        else:
+            raise ValueError(f"unknown task: {task}")
 
         dt = time.time() - t0
-        print(f'[predict] DONE in {dt:.1f}s — out: {mesh_out}', flush=True)
-        return Path(mesh_out)
+        print(f'[predict] DONE task={task} in {dt:.1f}s — out: {out_path}', flush=True)
+        return Path(out_path)
