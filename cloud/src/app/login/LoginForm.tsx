@@ -4,23 +4,28 @@ import { createBrowserClient } from '@supabase/ssr';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK === '1';
 
-// Two-step sign-in:
-//   1. User enters email → server emails them a 6-digit code (+ a magic
-//      link as backup).
-//   2. User pastes the code → SDK exchanges it for a session in THIS
-//      browser (no cross-browser failure mode like PKCE has).
-//
-// Why not just the magic link? Supabase forces PKCE on magic links since
-// gotrue 2.155+, which stores a code_verifier in this browser's storage.
-// If the user clicks the mail from a different browser (Outlook desktop
-// opening the system default browser, for instance), the verifier is
-// missing and sign-in fails. OTP codes have no such state.
+/**
+ * Email + password sign-in (the classic flow).
+ *
+ * - "Sign in":   email + password → session
+ * - "Sign up":   email + password → Supabase emails a 6-digit OTP
+ *                code to verify ownership → user pastes code → session
+ *                (created with the password they chose, no second prompt)
+ * - "Forgot password": email → Supabase emails a reset link
+ *
+ * Returning users only ever see email + password. Codes are involved
+ * only on initial signup and password reset.
+ */
+type Mode = 'signin' | 'signup' | 'verify' | 'forgot' | 'forgot-sent';
+
 export function LoginForm() {
-  const [step, setStep] = useState<'email' | 'code'>('email');
+  const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   function client() {
     return createBrowserClient(
@@ -29,9 +34,30 @@ export function LoginForm() {
     );
   }
 
-  async function sendCode(e: React.FormEvent) {
+  /** Write the session cookie in the exact shape the Worker expects. */
+  function persistSession(session: { access_token: string; refresh_token?: string; expires_in?: number; expires_at?: number; token_type?: string; user?: unknown }) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const ref = url.replace(/^https?:\/\//, '').split('.')[0];
+    const payload = btoa(JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      expires_in: session.expires_in,
+      expires_at: session.expires_at,
+      token_type: session.token_type,
+      user: session.user,
+    }));
+    const value = encodeURIComponent(`base64-${payload}`);
+    document.cookie = `sb-${ref}-auth-token=${value}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax; Secure`;
+  }
+
+  function navigateAfterAuth() {
+    const next = new URLSearchParams(window.location.search).get('next') || '/account';
+    window.location.href = next;
+  }
+
+  async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setInfo(null);
     try {
       if (MOCK) {
         const r = await fetch('/api/mock-login', {
@@ -39,129 +65,196 @@ export function LoginForm() {
           headers: { 'Content-Type': 'application/json' },
         });
         if (!r.ok) throw new Error('mock login failed');
-        window.location.href = new URLSearchParams(window.location.search).get('next') || '/';
+        navigateAfterAuth();
         return;
       }
-      const { error } = await client().auth.signInWithOtp({
-        email,
-        options: {
-          // The magic link inside the email still works as a fallback,
-          // but the recipient will see the 6-digit code rendered above
-          // it in the branded template.
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
+      const { data, error } = await client().auth.signInWithPassword({ email, password });
       if (error) throw error;
-      setStep('code');
+      if (!data.session) throw new Error('Sign-in succeeded but no session was returned.');
+      persistSession(data.session);
+      navigateAfterAuth();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBusy(false); }
   }
 
-  async function verifyCode(e: React.FormEvent) {
+  async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setInfo(null);
+    if (password.length < 6) {
+      setBusy(false);
+      setError('Password must be at least 6 characters.');
+      return;
+    }
     try {
-      // Codes from sb.auth.signInWithOtp() are 'email' type for brand-new
-      // signups and 'magiclink' for existing users. Try 'email' first,
-      // fall back to 'magiclink'.
+      const { data, error } = await client().auth.signUp({
+        email, password,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      });
+      if (error) throw error;
+      // If email confirmation is required (default in Supabase), we don't
+      // get a session — we get a "check your inbox" state instead.
+      if (data.session) {
+        persistSession(data.session);
+        navigateAfterAuth();
+        return;
+      }
+      setMode('verify');
+      setInfo('Account created. Check your inbox for a 6-digit code to verify your email.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setBusy(false); }
+  }
+
+  async function handleVerifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null); setInfo(null);
+    try {
       const sb = client();
-      let res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
+      // For a brand-new signup, the OTP type is "signup".
+      let res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'signup' });
       if (res.error) {
-        res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'magiclink' });
+        // Fallback for users whose Supabase project sends "email" type instead.
+        res = await sb.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
       }
       if (res.error) throw res.error;
       if (!res.data.session) throw new Error('Verification succeeded but no session was returned.');
-
-      // Force-write the session cookie in the exact shape the Worker
-      // expects (sb-<ref>-auth-token containing a base64-prefixed JSON
-      // blob). @supabase/ssr's default browser cookie writer sometimes
-      // skips this on first sign-in if no server-side cookies handler
-      // was registered, so we belt-and-braces it ourselves.
-      const session = res.data.session;
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-      const ref = url.replace(/^https?:\/\//, '').split('.')[0];
-      const payload = btoa(JSON.stringify({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-        expires_in: session.expires_in,
-        expires_at: session.expires_at,
-        token_type: session.token_type,
-        user: session.user,
-      }));
-      const value = encodeURIComponent(`base64-${payload}`);
-      const days30 = 60 * 60 * 24 * 30;
-      document.cookie =
-        `sb-${ref}-auth-token=${value}; Path=/; Max-Age=${days30}; SameSite=Lax; Secure`;
-
-      const next = new URLSearchParams(window.location.search).get('next') || '/account';
-      window.location.href = next;
+      persistSession(res.data.session);
+      navigateAfterAuth();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBusy(false); }
   }
 
-  if (step === 'code') return (
-    <form onSubmit={verifyCode}>
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null); setInfo(null);
+    try {
+      const { error } = await client().auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+      if (error) throw error;
+      setMode('forgot-sent');
+      setInfo(`Password reset link sent to ${email}. Open the email and click it to choose a new password.`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setBusy(false); }
+  }
+
+  // -------------------------------------------------------------------
+
+  if (mode === 'verify') return (
+    <form onSubmit={handleVerifyCode}>
       <div style={{ textAlign: 'center', marginBottom: 18 }}>
         <div style={{ fontSize: 42, marginBottom: 6 }}>✉</div>
-        <h3 style={{ marginBottom: 4 }}>Check your inbox</h3>
+        <h3 style={{ marginBottom: 4 }}>Verify your email</h3>
         <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
           We sent a 6-digit code to <strong>{email}</strong>.<br />
-          Paste it below to sign in.
+          Paste it below to confirm your account.
         </p>
       </div>
-      <label>Sign-in code</label>
+      <label>Verification code</label>
       <input
-        type="text" required
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        pattern="[0-9]{6}"
-        maxLength={6}
-        value={code}
-        onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+        type="text" required inputMode="numeric" autoComplete="one-time-code"
+        pattern="[0-9]{6}" maxLength={6}
+        value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
         placeholder="123456"
-        style={{
-          marginBottom: 14, fontSize: 22, letterSpacing: 8,
-          textAlign: 'center', fontVariantNumeric: 'tabular-nums',
-        }}
+        style={{ marginBottom: 14, fontSize: 22, letterSpacing: 8, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
         autoFocus
       />
       <button type="submit" className="primary-btn" disabled={busy || code.length !== 6} style={{ width: '100%' }}>
-        {busy ? '…' : 'Verify code'}
+        {busy ? '…' : 'Confirm account'}
       </button>
-      <button
-        type="button"
-        onClick={() => { setStep('email'); setCode(''); setError(null); }}
-        style={{
-          background: 'transparent', border: 'none', color: 'var(--text-2)',
-          marginTop: 12, fontSize: 13, cursor: 'pointer', width: '100%',
-        }}
-      >
-        ← Use a different email
+      <button type="button" onClick={() => { setMode('signin'); setCode(''); setError(null); setInfo(null); }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', marginTop: 12, fontSize: 13, cursor: 'pointer', width: '100%' }}>
+        ← Back to sign in
+      </button>
+      {info && <div className="banner ok" style={{ marginTop: 12 }}>{info}</div>}
+      {error && <div className="banner error" style={{ marginTop: 12 }}>⚠ {error}</div>}
+    </form>
+  );
+
+  if (mode === 'forgot') return (
+    <form onSubmit={handleForgot}>
+      <h3 style={{ marginBottom: 6 }}>Reset your password</h3>
+      <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 18 }}>
+        Enter your account email — we&apos;ll send you a reset link.
+      </p>
+      <label>Email</label>
+      <input type="email" required value={email}
+             onChange={(e) => setEmail(e.target.value)}
+             placeholder="you@studio.com"
+             style={{ marginBottom: 14 }} autoFocus />
+      <button type="submit" className="primary-btn" disabled={busy} style={{ width: '100%' }}>
+        {busy ? '…' : 'Send reset link'}
+      </button>
+      <button type="button" onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', marginTop: 12, fontSize: 13, cursor: 'pointer', width: '100%' }}>
+        ← Back to sign in
       </button>
       {error && <div className="banner error" style={{ marginTop: 12 }}>⚠ {error}</div>}
     </form>
   );
 
+  if (mode === 'forgot-sent') return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: 42, marginBottom: 8 }}>✉</div>
+      <h3 style={{ marginBottom: 6 }}>Check your inbox</h3>
+      <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 18 }}>{info}</p>
+      <button type="button" onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
+              className="primary-btn" style={{ width: '100%' }}>
+        ← Back to sign in
+      </button>
+    </div>
+  );
+
+  // signin / signup
+  const isSignUp = mode === 'signup';
   return (
-    <form onSubmit={sendCode}>
+    <form onSubmit={isSignUp ? handleSignUp : handleSignIn}>
       {MOCK && (
         <div className="banner warn">
           🛠 <strong>DEV MODE</strong> · Instant login · 50 credits offered · No real email sent
         </div>
       )}
       <label>Email</label>
-      <input
-        type="email" required
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@studio.com"
-        style={{ marginBottom: 14 }}
-      />
+      <input type="email" required value={email}
+             onChange={(e) => setEmail(e.target.value)}
+             placeholder="you@studio.com"
+             autoComplete="email"
+             style={{ marginBottom: 14 }} />
+      <label>Password</label>
+      <input type="password" required value={password}
+             onChange={(e) => setPassword(e.target.value)}
+             placeholder={isSignUp ? 'Choose a password (6+ characters)' : 'Your password'}
+             autoComplete={isSignUp ? 'new-password' : 'current-password'}
+             minLength={6}
+             style={{ marginBottom: 14 }} />
       <button type="submit" className="primary-btn" disabled={busy} style={{ width: '100%' }}>
-        {busy ? '…' : MOCK ? 'Instant sign in' : 'Email me a sign-in code'}
+        {busy ? '…' : (isSignUp ? 'Create account' : 'Sign in')}
       </button>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14, fontSize: 13 }}>
+        {isSignUp ? (
+          <button type="button" onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 0 }}>
+            ← Have an account? Sign in
+          </button>
+        ) : (
+          <>
+            <button type="button" onClick={() => { setMode('signup'); setError(null); setInfo(null); }}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }}>
+              Create an account
+            </button>
+            <button type="button" onClick={() => { setMode('forgot'); setError(null); setInfo(null); }}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 0 }}>
+              Forgot password?
+            </button>
+          </>
+        )}
+      </div>
+
+      {info && <div className="banner ok" style={{ marginTop: 12 }}>{info}</div>}
       {error && <div className="banner error" style={{ marginTop: 12 }}>⚠ {error}</div>}
     </form>
   );
