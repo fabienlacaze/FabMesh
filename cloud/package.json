@@ -33,6 +33,6 @@
     "eslint": "^9",
     "eslint-config-next": "15.0.4",
     "typescript": "^5.6",
-    "wrangler": "^3.86.0"
+    "wrangler": "^4.94.0"
   }
 }
