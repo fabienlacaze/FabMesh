@@ -32,7 +32,13 @@
   const NOT_AVAIL = (name) => async (...args) => {
     const arrayLike = ARRAY_LIKE_RE.test(name);
     log(`stub: ${name}() — not yet implemented in Cloud`, arrayLike ? '[]' : '{ok:false}', args);
-    return arrayLike ? [] : { ok: false, cloudUnavailable: true, message: `"${name}" is not yet available in Cloud v1.` };
+    return arrayLike ? [] : {
+      ok: false, success: false, cloudUnavailable: true,
+      // D5: provide both `error` (string) AND `message` so renderer call
+      // sites that do `r?.error` get a useful toast instead of "undefined".
+      error: `"${name}" is a Desktop-only feature — open the Desktop app to use it.`,
+      message: `"${name}" is a Desktop-only feature.`,
+    };
   };
 
   // --- HTTP helpers --------------------------------------------------
@@ -128,21 +134,46 @@
     },
     deleteProject: async ({ id } = {}) => postJSON('/api/projects/delete', { id }),
 
-    /* image-to-3D (the headline feature) */
+    /* image-to-3D (the headline feature).
+       Two fixes wrapped in here:
+       - C2: return shape now matches desktop main.js (success:true,
+             meshPath:..., meshUrl:...). The renderer reads r.success.
+       - C3: when only opts.imagePath is provided (R2/blob URL),
+             fetch it into a Blob before posting — the Worker route
+             requires `image: File` and otherwise responds 400. */
     imageTo3D: async (opts) => {
       const fd = new FormData();
-      // The desktop sends a path; here the renderer should pass a Blob
-      // (we'll patch the calling sites if needed). For now, accept both.
-      if (opts.image instanceof Blob) fd.append('image', opts.image);
-      else if (opts.imagePath) fd.append('imagePath', opts.imagePath);
+      let blob = opts.image instanceof Blob ? opts.image : null;
+      if (!blob && opts.imagePath) {
+        try {
+          const r = await fetch(opts.imagePath);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          blob = await r.blob();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { ok: false, success: false, error: 'cannot fetch source image: ' + msg };
+        }
+      }
+      if (!blob) return { ok: false, success: false, error: 'no source image provided' };
+      fd.append('image', blob, 'src.png');
       for (const [k, v] of Object.entries(opts)) {
-        if (k !== 'image' && k !== 'imagePath') fd.append(k, String(v));
+        if (k === 'image' || k === 'imagePath') continue;
+        if (v === undefined || v === null) continue;
+        fd.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
       }
       const created = await postForm('/api/generate', fd);
-      if (created.error) throw new Error(created.error);
+      if (created.error) {
+        return { ok: false, success: false, error: created.error };
+      }
       window.__meshyEmit('ai3d-progress', { stage: 'queued', jobId: created.jobId });
       const result = await pollPrediction(created.jobId);
-      return { ok: true, meshUrl: result.url, jobId: created.jobId, duration_s: result.duration_s };
+      // Trigger credit pill refresh — mesh gen costs 1-2 credits.
+      if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+      return {
+        ok: true, success: true,
+        meshPath: result.url, meshUrl: result.url,
+        jobId: created.jobId, duration_s: result.duration_s,
+      };
     },
     imageToTrellis: function (opts) { return this.imageTo3D(opts); },
     onAI3DProgress: onChannel('ai3d-progress'),
@@ -153,7 +184,7 @@
        Returns the EXACT shape the desktop IPC returns:
          { success: bool, images: [path, path, ...], error?: string }
        so the renderer's caller works unchanged. */
-    generateImages: async ({ prompt, numImages = 1, jobId } = {}) => {
+    generateImages: async ({ prompt, projectName, numImages = 1, jobId } = {}) => {
       log(`generateImages via /api/generate-image (Replicate flux-schnell) — ${numImages}× "${(prompt || '').slice(0, 60)}…"`);
       window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
       try {
@@ -175,6 +206,10 @@
           return { success: false, images: [], error: msg };
         }
         window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
+        // C1: persist generated URLs in localStorage so listImageFolders
+        // returns them on the next refresh (the Worker doesn't store rows
+        // for individual PNGs).
+        _appendCloudImages(projectName, j.paths, 'front');
         // Force credit pill refresh after successful spend.
         if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
         return { success: true, images: j.paths };
@@ -220,15 +255,21 @@
     },
 
     /* Back view via Worker (Pollinations under the hood, R2-tunneled). */
-    generateBackView: async ({ frontImage, frontImageUrl, prompt, promptHint, numImages = 1, assetType } = {}) => {
+    generateBackView: async ({ frontImage, frontImageUrl, prompt, promptHint, numImages = 1, assetType, projectName } = {}) => {
       try {
         const r = await postJSON('/api/generate-back-view', {
           prompt: prompt || promptHint || '',
           promptHint: promptHint || prompt || '',
           numImages, frontImageUrl: frontImageUrl || frontImage, assetType,
         });
-        // Force credit pill refresh after successful spend.
-        if (r?.success && typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        if (r?.success && Array.isArray(r.paths)) {
+          // C1: persist back images and front->back mapping so the
+          // FRONT/BACK bar survives reload.
+          _appendCloudImages(projectName, r.paths, 'back');
+          const front = frontImageUrl || frontImage;
+          if (front && r.paths[0]) _saveBackPhoto(projectName, front, r.paths[0]);
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        }
         return r; // { ok, success, paths, creditsRemaining? }
       } catch (e) {
         return { ok: false, success: false, error: String(e) };
@@ -297,6 +338,12 @@
     confirmAppClose: () => {},
 
     /* file I/O — adapted for browser */
+    // C5: desktop importImage returns a string PATH or null. Renderer
+    // does `const filePath = await API.importImage(); if (!filePath) return;`
+    // so anything else (e.g. `{ ok:true, file:File }`) makes the renderer
+    // proceed with [object Object] and re-open the picker. We return a
+    // blob URL (stable enough for the renderer to use), and stash the
+    // File on window so importImageFile can pick it back up.
     importImage: async () => {
       return new Promise((resolve) => {
         const input = document.createElement('input');
@@ -304,10 +351,11 @@
         input.accept = 'image/png,image/jpeg,image/webp';
         input.onchange = () => {
           const f = input.files[0];
-          if (!f) return resolve({ ok: false, cancelled: true });
-          const reader = new FileReader();
-          reader.onload = () => resolve({ ok: true, file: f, dataUrl: reader.result, name: f.name });
-          reader.readAsDataURL(f);
+          if (!f) return resolve(null);
+          const url = URL.createObjectURL(f);
+          window.__cloudImportedFiles = window.__cloudImportedFiles || {};
+          window.__cloudImportedFiles[url] = f;
+          resolve(url);
         };
         input.click();
       });
@@ -349,7 +397,9 @@
     setGpuLimits: async () => ({ ok: true, cloud: true }),
 
     /* parental / NSFW (passthrough lenient defaults) */
-    getParentalStatus: async () => ({ enabled: false, unlocked: true }),
+    // Desktop contract is `unrestricted`, not `unlocked`. Cloud beta has
+    // no PIN flow yet, so we report no restrictions by default.
+    getParentalStatus: async () => ({ enabled: false, unrestricted: true, unlocked: true }),
     toggleUnrestricted: async () => ({ ok: true }),
     checkProjectNsfw: async () => ({ ok: true, safe: true }),
     checkImagesNsfwTags: async () => ({ ok: true, safe: true }),
@@ -426,24 +476,88 @@
     if (blobOrUrl instanceof Blob) setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
+  // ── C1: localStorage cache for generated images ─────────────────
+  // The Worker doesn't persist a DB row for each generated PNG (yet),
+  // so on the desktop renderer's `reloadCurrentProject()` → list-folders
+  // round-trip the workspace ends up empty. We cache front/back/multi-
+  // view URLs locally per project name and merge them back in.
+  const _imgKey  = (name) => `myfm:cloudimages:${name || 'untitled'}`;
+  const _backKey = (name) => `myfm:backphotos:${name || 'untitled'}`;
+  function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */) {
+    try {
+      const k = _imgKey(projectName);
+      const arr = JSON.parse(localStorage.getItem(k) || '[]');
+      for (const u of urls || []) arr.push({ path: u, kind, mtime: Date.now() });
+      // Cap at 200 entries to keep localStorage sane.
+      localStorage.setItem(k, JSON.stringify(arr.slice(-200)));
+    } catch (_) {}
+  }
+  function _readCloudImages(projectName) {
+    try { return JSON.parse(localStorage.getItem(_imgKey(projectName)) || '[]'); }
+    catch (_) { return []; }
+  }
+  function _saveBackPhoto(projectName, frontUrl, backUrl) {
+    try {
+      const k = _backKey(projectName);
+      const m = JSON.parse(localStorage.getItem(k) || '{}');
+      m[frontUrl] = backUrl;
+      localStorage.setItem(k, JSON.stringify(m));
+    } catch (_) {}
+  }
+  function _readBackPhotos(projectName) {
+    try { return JSON.parse(localStorage.getItem(_backKey(projectName)) || '{}'); }
+    catch (_) { return {}; }
+  }
+  function _projectsFromLocalCache() {
+    // Discover all project names we've cached locally.
+    const names = new Set();
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (k.startsWith('myfm:cloudimages:')) names.add(k.slice('myfm:cloudimages:'.length));
+      }
+    } catch (_) {}
+    return Array.from(names);
+  }
+  // Expose so other Cloud code can use them.
+  window.__cloudImg = { append: _appendCloudImages, read: _readCloudImages,
+                       saveBack: _saveBackPhoto, readBack: _readBackPhotos };
+
   Object.assign(impl, {
-    /* ── projects / meshes (Worker-backed) ──────────────────────── */
+    /* ── projects / meshes (Worker-backed + localStorage cache) ──── */
     listImageFolders: async () => {
+      let projects = [];
       try {
         const r = await getJSON('/api/cloud-projects');
-        const projects = Array.isArray(r) ? r : (r.projects || []);
-        // Adapt cloud projects -> the desktop "image folder" shape.
-        return projects.map(p => ({
+        projects = Array.isArray(r) ? r : (r.projects || []);
+      } catch (e) { log('listImageFolders failed:', e); }
+      // Merge in projects that only exist in localStorage (just generated).
+      const byName = new Map(projects.map(p => [p.name, p]));
+      for (const localName of _projectsFromLocalCache()) {
+        if (!byName.has(localName)) {
+          byName.set(localName, { name: localName, images: [], imagesData: [], path: '', created: new Date().toISOString(), prompt: '', backPhotos: {} });
+        }
+      }
+      return Array.from(byName.values()).map(p => {
+        const local = _readCloudImages(p.name);
+        const frontUrls = local.filter(x => x.kind === 'front' || x.kind === 'view').map(x => x.path);
+        const backCache = _readBackPhotos(p.name);
+        // Merge: server images first, then locally-cached ones we don't
+        // already have. Dedup on URL.
+        const seen = new Set(p.images || []);
+        const merged = [...(p.images || [])];
+        for (const u of frontUrls) if (!seen.has(u)) { seen.add(u); merged.push(u); }
+        return {
           name: p.name,
           path: p.path,
-          images: p.images || [],
+          images: merged,
           imagesData: p.imagesData || [],
-          count: (p.images || []).length,
-          created: p.created || new Date().toISOString(),
+          count: merged.length,
+          created: p.created || (local[0]?.mtime ? new Date(local[0].mtime).toISOString() : new Date().toISOString()),
           prompt: p.prompt || '',
-          backPhotos: p.backPhotos || {},
-        }));
-      } catch (e) { log('listImageFolders failed:', e); return []; }
+          backPhotos: { ...(p.backPhotos || {}), ...backCache },
+        };
+      });
     },
     listMeshes: async () => {
       try {
@@ -530,7 +644,14 @@
       // `importImage` path returned by `meshyAPI.importImage()` IS the
       // blob URL — we hand it straight through).
       if (filePath && /^(blob:|data:|https?:)/i.test(filePath)) {
-        return { ok: true, path: filePath, name: _basename(filePath) || 'imported.png', projectName: 'imported' };
+        // Recover the original File (if any) we stashed in importImage()
+        // so we get a real project name instead of an opaque blob URL.
+        const stashed = (window.__cloudImportedFiles || {})[filePath];
+        const name = stashed?.name || _basename(filePath) || 'imported.png';
+        const pname = _stripExt(name) || 'imported';
+        // Also cache it under that project so listImageFolders sees it.
+        _appendCloudImages(pname, [filePath], 'front');
+        return { ok: true, path: filePath, name, projectName: pname };
       }
       // Fallback: open picker.
       return new Promise((resolve) => {
