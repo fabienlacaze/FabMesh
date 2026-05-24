@@ -10,6 +10,36 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (Cloud deploy: abandon @opennextjs/cloudflare → static export + single Worker)
+
+- **Problème :** `@opennextjs/cloudflare build` crashait sur 3 runs CI
+  consécutifs avec `esbuild: Invalid alias name`. Pas fixable sans
+  attendre upstream.
+- **Décision :** on bascule sur `next.config.mjs { output: 'export' }`
+  (HTML statique dans `./out/`) + un **Worker monolithique**
+  `cloud/src/worker.ts` qui implémente les 11 routes API + `/auth/callback`
+  comme un simple router URL-pattern.
+- **Conversions client-side :** `Nav`, `page.tsx` (root), `account/page.tsx`,
+  `buy/page.tsx` étaient des Server Components appelant `getSessionUser()`.
+  Convertis en client components qui fetchent `/api/me` au mount.
+  La page Account ne montre plus la table des paiements (TODO: ajouter
+  `/api/payments` côté Worker si besoin).
+- **PACKS** extraits de `lib/stripe.ts` vers `lib/packs.ts` pour ne pas
+  drag-in le SDK Stripe dans le bundle client de `/buy`.
+- **Stripe webhook signature** : verif via `crypto.subtle` (Web Crypto)
+  au lieu de `stripe.webhooks.constructEvent` (qui dépend de node:crypto).
+- **Build local validé :** `npm run build` produit `out/` avec
+  `index.html`, `account.html`, `buy.html`, `login.html`, et le folder
+  `app/` (renderer desktop). `wrangler deploy --dry-run` compile le
+  Worker sans erreur (avant ça crashait à chaque build OpenNext).
+- **API folder supprimé :** `git rm -rf cloud/src/app/api cloud/src/app/auth`
+  (11 route handlers + le callback supabase fusionnés dans `worker.ts`).
+- **wrangler.toml** : `main = "src/worker.ts"`, `[assets] directory = "out"`,
+  flags = `nodejs_compat` seul (plus `global_fetch_strictly_public` qui
+  bloquait certains fetch externes).
+- **GH Actions** : step `npm run build` remplace
+  `npx @opennextjs/cloudflare build`. Même set de secrets, même token.
+
 ## 2026-05-24 (Cloud deploy: stub live + GitHub Actions for full Next.js)
 
 - **Cloudflare API token** créé via dashboard (`Edit Cloudflare Workers`

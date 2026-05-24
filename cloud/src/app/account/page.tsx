@@ -1,37 +1,44 @@
-import { getSessionUser } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/supabase';
-import { redirect } from 'next/navigation';
+'use client';
+//
+// Account page — was a server component that ran `getSessionUser()` and
+// direct Supabase admin queries. For static export we fetch the same
+// data from /api/me (user + credits) and /api/projects (recent jobs).
+//
+// Payments are no longer surfaced here — they're available via the Stripe
+// dashboard / webhook receipt email. (Adding a /api/payments endpoint would
+// require a new Worker route and exceeds the migration scope; see TODO.)
+//
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { LogoutButton } from './LogoutButton';
-import { MOCK, mock } from '@/lib/mock-store';
 
-interface JobRow {
-  id: string; asset_type: string; mode: string;
-  credit_cost: number; status: string;
-  mesh_url: string | null; created_at: string;
-}
-interface PaymentRow {
-  id: number | string; pack_id: string; credits: number;
-  amount_eur: number | null; created_at: string;
+interface User { id: string; email: string | null; credits: number; }
+interface Project {
+  id: string; asset_type: string; mode: string; status: string;
+  mesh_url: string | null; createdAt: string;
 }
 
-export default async function AccountPage({ searchParams }: { searchParams: Promise<{ paid?: string }> }) {
-  const user = await getSessionUser();
-  if (!user) redirect('/login?next=/account');
-  const sp = await searchParams;
+export default function AccountPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [jobs, setJobs] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [paidBanner, setPaidBanner] = useState(false);
 
-  let jobs: JobRow[] = [];
-  let payments: PaymentRow[] = [];
-  if (MOCK) {
-    jobs = mock.listJobs(user.id).slice(0, 20);
-    payments = mock.listPayments(user.id).slice(0, 10);
-  } else {
-    const sb = supabaseAdmin();
-    const j = await sb.from('jobs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
-    const p = await sb.from('payments').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10);
-    jobs = (j.data ?? []) as JobRow[];
-    payments = (p.data ?? []) as PaymentRow[];
-  }
+  useEffect(() => {
+    setPaidBanner(new URLSearchParams(window.location.search).get('paid') === '1');
+    (async () => {
+      const meRes = await fetch('/api/me');
+      if (!meRes.ok) { window.location.href = '/login?next=/account'; return; }
+      const me = await meRes.json();
+      setUser(me.user);
+      const pjRes = await fetch('/api/projects');
+      const pj = pjRes.ok ? await pjRes.json() : { projects: [] };
+      setJobs((pj.projects ?? []).slice(0, 20));
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading || !user) return <div className="page">…</div>;
 
   return (
     <div className="page">
@@ -43,7 +50,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         <LogoutButton />
       </div>
 
-      {sp.paid && (
+      {paidBanner && (
         <div className="banner ok" style={{ marginBottom: 24 }}>
           ✓ Payment received · credits are arriving in a few seconds.
         </div>
@@ -61,11 +68,11 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           <Link href="/buy" className="primary-btn">+ Top up</Link>
         </div>
         <div className="card">
-          <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Total spent</div>
+          <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Generations</div>
           <div style={{ fontSize: 42, fontWeight: 800, margin: '8px 0 4px' }}>
-            {(payments.reduce((s, p) => s + (p.amount_eur ?? 0), 0)).toFixed(2)} €
+            {jobs.length}
           </div>
-          <div style={{ color: 'var(--text-2)', fontSize: 12 }}>across {payments.length} payment{payments.length > 1 ? 's' : ''}</div>
+          <div style={{ color: 'var(--text-2)', fontSize: 12 }}>recent jobs</div>
         </div>
       </div>
 
@@ -76,17 +83,16 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         ) : (
           <table className="history">
             <thead>
-              <tr><th>Date</th><th>Type</th><th>Mode</th><th>Cost</th><th>Status</th><th></th></tr>
+              <tr><th>Date</th><th>Type</th><th>Mode</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
               {jobs.map((j) => {
                 const statusClass = j.status === 'succeeded' ? 'success' : j.status === 'failed' ? 'error' : 'warn';
                 return (
                   <tr key={j.id}>
-                    <td>{new Date(j.created_at).toLocaleString('fr', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td>{new Date(j.createdAt).toLocaleString('fr', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
                     <td>{j.asset_type}</td>
                     <td>{j.mode}</td>
-                    <td>{j.credit_cost} c</td>
                     <td><span className={`pill ${statusClass}`}>{j.status}</span></td>
                     <td style={{ textAlign: 'right' }}>
                       <Link href={`/project/${j.id}`} className="nav-link" style={{ fontSize: 12 }}>view</Link>
@@ -95,29 +101,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginBottom: 12 }}>Payments</h3>
-        {payments.length === 0 ? (
-          <p style={{ color: 'var(--text-2)' }}>No payment yet.</p>
-        ) : (
-          <table className="history">
-            <thead>
-              <tr><th>Date</th><th>Pack</th><th>Credits</th><th>Amount</th></tr>
-            </thead>
-            <tbody>
-              {payments.map((p) => (
-                <tr key={p.id}>
-                  <td>{new Date(p.created_at).toLocaleString('fr')}</td>
-                  <td>{p.pack_id}</td>
-                  <td>+{p.credits}</td>
-                  <td>{p.amount_eur?.toFixed(2)} €</td>
-                </tr>
-              ))}
             </tbody>
           </table>
         )}

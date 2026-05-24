@@ -1,29 +1,26 @@
-# Cloudflare Workers config for MyFabmesh.AI Cloud (Next.js 15 via OpenNext).
+# Cloudflare Workers config for MyFabmesh.AI Cloud.
 #
-# Build chain:
-#   cloud/$ npx @opennextjs/cloudflare build
-#   -> produces .open-next/ folder
+# Build chain (no more @opennextjs/cloudflare — esbuild "Invalid alias name"
+# bug blocked it on CI). New flow:
 #
-# Deploy:
-#   cloud/$ npx wrangler deploy
-#   -> uploads .open-next/worker.js and assets
+#   cloud/$ npm run build                # → ./out/ (next export static HTML)
+#   cloud/$ npx wrangler deploy          # → uploads src/worker.ts + ./out
 #
-# In Cloudflare dashboard, the build/deploy commands above are configured
-# under the project "myfabmesh-cloud":
-#   Build:  cd cloud && npm install --legacy-peer-deps && npx @opennextjs/cloudflare build
-#   Deploy: cd cloud && npx wrangler deploy
+# The Worker (src/worker.ts) handles all /api/* and /auth/callback routes,
+# everything else is served from the static `out/` directory via
+# env.ASSETS.fetch().
 #
-# Once live: https://myfabmesh-cloud.workers.dev
+# Once live: https://myfabmesh-cloud.fabien65400.workers.dev
 # Custom domain (optional): https://cloud.myfabmesh.ai
 
 name = "myfabmesh-cloud"
-main = ".open-next/worker.js"
+main = "src/worker.ts"
 compatibility_date = "2025-09-01"
-compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+compatibility_flags = ["nodejs_compat"]
 
-# Static assets (Next.js public/ + _next/static/) served from KV.
+# Static assets (the `next export` output).
 [assets]
-directory = ".open-next/assets"
+directory = "out"
 binding = "ASSETS"
 
 # Production R2 bucket binding (uploaded GLBs).
@@ -38,7 +35,7 @@ bucket_name = "myfabmesh-meshes"
 #
 #   MOCK = "0"
 #   NEXT_PUBLIC_MOCK = "0"
-#   NEXT_PUBLIC_SITE_URL = "https://myfabmesh-cloud.workers.dev"
+#   NEXT_PUBLIC_SITE_URL = "https://myfabmesh-cloud.fabien65400.workers.dev"
 #   NEXT_PUBLIC_SUPABASE_URL = "https://ovoccoipeqmkfnugkmyh.supabase.co"
 #   NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJ..."
 #   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_..."
@@ -46,11 +43,8 @@ bucket_name = "myfabmesh-meshes"
 #   STRIPE_PRICE_PRO     = "price_..."
 #   STRIPE_PRICE_STUDIO  = "price_..."
 #   REPLICATE_MODEL = "fishwowater/trellis2"
-#   R2_BUCKET = "myfabmesh-meshes"
 #   R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
-#   R2_S3_ENDPOINT = "https://a74e8ad01c363d77acec95c7f2123d9a.r2.cloudflarestorage.com"
-#   R2_ACCOUNT_ID = "a74e8ad01c363d77acec95c7f2123d9a"
 #
-# Secrets (encrypted in the dashboard):
+# Secrets (encrypted in the dashboard / `wrangler secret put`):
 #   REPLICATE_API_TOKEN, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY,
-#   STRIPE_WEBHOOK_SECRET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+#   STRIPE_WEBHOOK_SECRET

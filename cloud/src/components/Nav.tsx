@@ -1,9 +1,28 @@
+'use client';
+//
+// Nav — was a server component (`async function Nav` calling getSessionUser).
+// For static export (output: 'export') we can't run server code at request
+// time, so it's now a client component that fetches /api/me on mount.
+//
 import Link from 'next/link';
-import { getSessionUser } from '@/lib/auth';
-import { MOCK } from '@/lib/mock-store';
+import { useEffect, useState } from 'react';
 
-export async function Nav() {
-  const user = await getSessionUser();
+const MOCK = process.env.NEXT_PUBLIC_MOCK === '1';
+
+interface User { id: string; email: string | null; credits: number; }
+
+export function Nav() {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : { user: null })
+      .then(j => { if (!cancelled) setUser(j.user ?? null); })
+      .catch(() => { /* silent — anonymous */ });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <header className="topbar">
       <div className="topbar-left">
