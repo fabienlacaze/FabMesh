@@ -147,34 +147,24 @@
     imageToTrellis: function (opts) { return this.imageTo3D(opts); },
     onAI3DProgress: onChannel('ai3d-progress'),
 
-    /* image generation (txt2img). Uses Pollinations.ai's public endpoint
-       directly from the browser — free, no API key, CORS-OK. Same engine
-       the desktop calls behind its Python proxy. The image URL is the
-       finished PNG; we save it into the project as a Blob URL so the
-       renderer can display + later upload it for the mesh step. */
+    /* Image generation (txt2img). Goes through OUR Worker at
+       /api/generate-image, which calls Replicate's black-forest-labs/
+       flux-schnell (~3s, ~$0.003/image) and mirrors the PNG into R2
+       so we get a stable public URL on our origin. Same compute
+       provider as the mesh step — consistent quality, billed
+       per-prediction, no third-party freebies. */
     generateImages: async ({ prompt, projectName, numImages = 1, steps = 30, jobId } = {}) => {
-      log(`generateImages via pollinations.ai — ${numImages}× "${(prompt || '').slice(0, 60)}…"`);
-      const out = [];
-      const seedBase = Math.floor(Math.random() * 1e9);
-      for (let i = 0; i < numImages; i++) {
-        const seed = seedBase + i;
-        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`
-          + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`
-          + `&enhance=false&private=true`;
-        window.__meshyEmit('image-progress', { jobId, index: i, total: numImages, status: 'fetching' });
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`pollinations HTTP ${r.status}`);
-        const blob = await r.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        // The renderer indexes images by path. We use the blob URL as the
-        // pseudo-path; downstream code reads it via fetch(path) when sending
-        // to /api/generate, which works for blob: URLs in modern browsers.
-        out.push({
-          path: blobUrl, name: `${projectName || 'img'}_${i + 1}.png`,
-          seed, steps, prompt,
-        });
-        window.__meshyEmit('image-progress', { jobId, index: i, total: numImages, status: 'done' });
+      log(`generateImages via /api/generate-image (Replicate flux-schnell) — ${numImages}× "${(prompt || '').slice(0, 60)}…"`);
+      window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
+      const r = await postJSON('/api/generate-image', { prompt, numImages });
+      if (!r?.success || !r?.paths?.length) {
+        throw new Error(r?.error || 'image generation failed');
       }
+      const out = r.paths.map((url, i) => ({
+        path: url, name: `${projectName || 'img'}_${i + 1}.png`,
+        seed: 0, steps, prompt,
+      }));
+      window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
       return { ok: true, images: out };
     },
 
