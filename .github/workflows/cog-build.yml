@@ -77,13 +77,17 @@ jobs:
           sudo chmod +x /usr/local/bin/cog
           cog --version
 
-      - name: Login to Replicate
+      - name: Login to Replicate (Docker registry r8.im)
         env:
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
         run: |
-          # cog reads REPLICATE_API_TOKEN from env; no `cog login` needed
-          # in non-interactive runs.
           test -n "$REPLICATE_API_TOKEN" || { echo "::error::REPLICATE_API_TOKEN secret is missing"; exit 1; }
+          # cog push uses the underlying docker daemon to push to r8.im,
+          # which needs an explicit `docker login r8.im` — the cog CLI
+          # doesn't propagate REPLICATE_API_TOKEN as docker credentials.
+          # Username must be a literal "_token" per Replicate's docs:
+          #   https://replicate.com/docs/reference/auth#docker-registry
+          echo "$REPLICATE_API_TOKEN" | docker login r8.im --username "_token" --password-stdin
           echo "Token present (length ${#REPLICATE_API_TOKEN})"
 
       - name: Cog push
