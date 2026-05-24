@@ -10,6 +10,27 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (site web : primary download = MS Store deeplink)
+
+- **Contexte** : confirmé sur la machine du user que Smart App Control
+  bloque la création de fenêtre Electron même quand l'app installe via
+  NSIS et même avec admin elevation. Le seul moyen d'avoir un install
+  qui MARCHE pour tous les Win 10/11 = passer par MS Store (signé
+  automatiquement par Microsoft).
+- **Modif `docs/index.html` carte Desktop** :
+  - Bouton principal "Download — Free beta" → remplacé par
+    "Get from Microsoft Store" pointant vers
+    `ms-windows-store://pdp/?productid=9PH6GT8XKQDW`.
+  - Bouton direct download GitHub Releases déplacé dans un
+    `<details>` "Direct download (advanced users)" avec warning
+    explicite "may be blocked by Windows Smart App Control".
+- **Timing** : push fait maintenant. Le deeplink ms-windows-store://
+  retournera "App not available" jusqu'à ce que MS Store publie l'app
+  (cert en cours, ~24-72h). Quand l'app sera live, le bouton marchera
+  automatiquement sans nouvelle modif site.
+
+---
+
 ## 2026-05-24 (legal pages + IP scrub)
 
 - **Issue user** : "il y a du TRELLIS marqué et des infos que je ne veux
