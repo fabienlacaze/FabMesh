@@ -41,7 +41,7 @@ export default async function BuyPage() {
             <tr><td><strong>Full</strong> mesh</td><td>2 credits</td><td>~180 s · 1.5M tris · cascade 1536</td></tr>
             <tr><td>Fast mode (H100)</td><td>+1 credit</td><td>~50 s instead of 90 s</td></tr>
             <tr><td>Ultra HD 8K texture</td><td>+1 credit</td><td>Real-ESRGAN x2 upscale</td></tr>
-            <tr><td>Face fix (SDXL inpaint)</td><td>+1 credit</td><td>Characters / creatures only</td></tr>
+            <tr><td>Face fix (AI inpaint)</td><td>+1 credit</td><td>Characters / creatures only</td></tr>
           </tbody>
         </table>
       </div>

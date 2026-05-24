@@ -1,0 +1,132 @@
+# Auto-build NSIS .exe + MSIX .appx whenever a `v*` tag is pushed.
+# Trigger:    git tag v1.0.1 && git push origin v1.0.1
+# Output:     attached to the GitHub Release matching the tag,
+#             plus dist/installer/* downloadable as build artifacts.
+#
+# Note: the .appx is unsigned by design. Microsoft Store re-signs it
+# automatically when uploaded. For direct distribution, sign with your
+# own cert before publishing.
+#
+# Secrets needed on the repo:
+#   - GH_TOKEN          : auto-provided by Actions, no setup needed
+#   - SENTRY_DSN        : (optional) embedded in the build via extraResources
+#   - HF_FALLBACK_TOKEN : (optional) embedded for first-run model download
+#   - REPLICATE_TOKEN   : (optional) for Cloud Cog deployment, ignored here
+#
+# Sidecar files (build/sentry-dsn.txt, build/hf_fallback_token.txt) are
+# gitignored. The workflow recreates them from secrets if available, so
+# we don't have to commit them.
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+  # Manual trigger for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Required to create GitHub Releases
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need git history for electron-builder version detection
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Recreate sidecar files from secrets
+        # If a secret is empty/missing, we skip the file (electron-builder
+        # tolerates absent extraResources gracefully).
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          if ("${{ secrets.SENTRY_DSN }}") {
+            "${{ secrets.SENTRY_DSN }}" | Out-File -FilePath build/sentry-dsn.txt -Encoding utf8 -NoNewline
+          }
+          if ("${{ secrets.HF_FALLBACK_TOKEN }}") {
+            "${{ secrets.HF_FALLBACK_TOKEN }}" | Out-File -FilePath build/hf_fallback_token.txt -Encoding utf8 -NoNewline
+          }
+
+      - name: Build NSIS installer
+        run: npm run build:installer
+
+      - name: Build MSIX (.appx) for Microsoft Store
+        # Skip if previous step failed but keep the workflow running
+        if: success() || failure()
+        run: npm run build:msix
+
+      - name: List built artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/installer -File | Format-Table Name, Length, LastWriteTime -AutoSize
+
+      - name: Upload NSIS installer as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsis-installer
+          path: dist/installer/MyFabmesh.AI-Setup-*.exe
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload MSIX as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-appx
+          path: dist/installer/MyFabmesh.AI*.appx
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload latest.yml (for electron-updater)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-yml
+          path: dist/installer/latest.yml
+          if-no-files-found: warn
+
+      - name: Publish to GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/installer/MyFabmesh.AI-Setup-*.exe
+            dist/installer/MyFabmesh.AI*.appx
+            dist/installer/latest.yml
+            dist/installer/*.blockmap
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: true   # Beta releases are pre-releases
+          generate_release_notes: true
+          name: "MyFabmesh.AI ${{ github.ref_name }}"
+          body: |
+            Automated build from tag `${{ github.ref_name }}`.
+
+            **Installation**:
+            - **Microsoft Store (recommended)**: https://apps.microsoft.com/detail/9PH6GT8XKQDW
+            - Direct download below: `MyFabmesh.AI-Setup-*.exe`
+              (may be blocked by Windows Smart App Control — Store version is signed by Microsoft)
+
+            **Requirements**: Windows 10/11 64-bit, NVIDIA GPU 8 GB+ VRAM, 16 GB RAM, 30 GB disk.
+
+            Built by Ayros Studio.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
