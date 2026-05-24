@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirm your new MyFabmesh.AI email</title>
+</head>
+<body style="margin:0; padding:0; background:#0b0b14; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#e6e6f0;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b0b14;">
+    <tr>
+      <td align="center" style="padding:40px 20px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px; background:#13131e; border-radius:14px; overflow:hidden; border:1px solid #23233a;">
+          <tr>
+            <td style="padding:32px 32px 12px 32px; text-align:center;">
+              <div style="font-size:24px; font-weight:700; letter-spacing:-0.5px;">
+                MyFabmesh<span style="background:linear-gradient(135deg,#e94560,#a855f7); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;">.AI</span>
+              </div>
+              <div style="display:inline-block; margin-top:10px; padding:4px 10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); border-radius:999px; font-size:11px; color:#c4a8ff; font-weight:600; letter-spacing:0.5px;">
+                CLOUD · EMAIL CHANGE
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px 8px 32px;">
+              <h1 style="margin:0 0 14px 0; font-size:22px; font-weight:600; color:#ffffff; line-height:1.3;">
+                Confirm your new email.
+              </h1>
+              <p style="margin:0 0 24px 0; font-size:15px; color:#b8b8c8; line-height:1.6;">
+                You asked to change the email on your MyFabmesh.AI account from
+                <strong style="color:#ffffff;">{{ .Email }}</strong> to
+                <strong style="color:#ffffff;">{{ .NewEmail }}</strong>.
+                Click below to confirm.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 32px 24px 32px; text-align:center;">
+              <a href="{{ .ConfirmationURL }}"
+                 style="display:inline-block; padding:14px 32px; background:linear-gradient(135deg,#e94560,#a855f7); color:#ffffff; text-decoration:none; font-weight:600; font-size:15px; border-radius:10px;">
+                Confirm new email
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 24px 32px;">
+              <p style="margin:0; font-size:12px; color:#8a8a9e; line-height:1.6;">
+                Or copy and paste this URL into your browser:<br>
+                <span style="color:#c4a8ff; word-break:break-all;">{{ .ConfirmationURL }}</span>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 32px 32px; border-top:1px solid #23233a;">
+              <p style="margin:0; font-size:12px; color:#6a6a7e; line-height:1.6;">
+                If you didn't ask to change your email, ignore this message — your account stays linked to {{ .Email }}.
+              </p>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:20px 0 0 0; font-size:11px; color:#6a6a7e; text-align:center;">
+          © 2026 Ayros Studio · MyFabmesh.AI Cloud<br>
+          <a href="https://myfabmesh-cloud.fabien65400.workers.dev/" style="color:#a855f7; text-decoration:none;">myfabmesh-cloud.fabien65400.workers.dev</a>
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
