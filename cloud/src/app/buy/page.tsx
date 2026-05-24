@@ -1,9 +1,24 @@
-import { PACKS } from '@/lib/stripe';
+'use client';
+//
+// Buy page — was a server component. Static-export converts it to a
+// client component that fetches /api/me to get the credit balance.
+//
+import { useEffect, useState } from 'react';
+import { PACKS } from '@/lib/packs';
 import { BuyButton } from './BuyButton';
-import { getSessionUser } from '@/lib/auth';
 
-export default async function BuyPage() {
-  const user = await getSessionUser();
+interface User { id: string; email: string | null; credits: number; }
+
+export default function BuyPage() {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : { user: null })
+      .then(j => setUser(j.user ?? null))
+      .catch(() => setUser(null));
+  }, []);
+
   return (
     <div className="page">
       <div className="page-header">

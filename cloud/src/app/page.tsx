@@ -1,22 +1,31 @@
-import { redirect } from 'next/navigation';
-import { getSessionUser } from '@/lib/auth';
+'use client';
+//
+// Home page — was a server component calling getSessionUser() to redirect
+// authenticated users to /app/. For static export we do the same check on
+// the client: fetch /api/me, then navigate.
+//
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
-/**
- * Root route of the Cloud app.
- *
- * - Authenticated users → redirected to /app/ (the ported desktop renderer).
- * - Anonymous users → redirected to the public marketing site
- *   (docs/index.html → fabienlacaze.github.io/MyFabmesh) which has the
- *   Desktop vs Cloud product choice + downloads.
- *
- * We keep a minimal fallback HTML so direct visits to /cloud-myfabmesh.pages.dev
- * land on something useful instead of a 404.
- */
-export default async function HomePage() {
-  const user = await getSessionUser();
-  if (user) redirect('/app/');
+export default function HomePage() {
+  const [checking, setChecking] = useState(true);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me')
+      .then(r => r.ok ? r.json() : { user: null })
+      .then(j => {
+        if (cancelled) return;
+        if (j.user) window.location.href = '/app/';
+        else setChecking(false);
+      })
+      .catch(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (checking) {
+    return <div className="page" style={{ textAlign: 'center', paddingTop: 80 }}>…</div>;
+  }
   return (
     <div className="page" style={{ textAlign: 'center', paddingTop: 80 }}>
       <h1 style={{ marginBottom: 12 }}>MyFabmesh.AI <span style={{ color: 'var(--accent)' }}>Cloud</span></h1>

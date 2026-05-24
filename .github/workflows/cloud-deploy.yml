@@ -1,6 +1,15 @@
-# Build and deploy the Next.js Cloud app to Cloudflare Workers
-# from a Linux runner (where @opennextjs/cloudflare works — the
-# Windows build is broken because of esbuild path handling).
+# Build and deploy the Next.js Cloud app to Cloudflare Workers.
+#
+# Pipeline:
+#   1. `npm install` (legacy peer deps).
+#   2. `npm run build` → produces `cloud/out/` via Next.js static export
+#      (output: 'export' in next.config.mjs).
+#   3. `wrangler deploy` ships src/worker.ts + ./out to Cloudflare.
+#
+# We abandoned @opennextjs/cloudflare because its esbuild build step
+# crashed with "Invalid alias name" on CI for 3 consecutive runs.
+# The Worker (cloud/src/worker.ts) replaces all Next.js API routes
+# with a single-file router.
 #
 # Trigger: push to master that touches anything under cloud/, or
 # manual via "Run workflow" button in the Actions tab.
@@ -46,15 +55,13 @@ jobs:
         # --legacy-peer-deps: avoids React 19 peer-dep conflicts pulled
         # in by some Cloud deps (e.g. @sentry/nextjs).
         # --no-audit: keeps logs clean.
-        # No --omit=optional: cloud/ doesn't have the desktop Windows-only
-        # optionals that are at the root, so include all here.
         run: npm install --legacy-peer-deps --no-audit
 
-      - name: Build with @opennextjs/cloudflare
-        run: npx @opennextjs/cloudflare build
+      - name: Build static export (./out)
+        run: npm run build
         env:
           # Public env vars baked at build time. Secrets are NOT baked;
-          # they're read at runtime from the Worker secrets.
+          # they're read at runtime from the Worker bindings.
           NEXT_PUBLIC_MOCK: '0'
           NEXT_PUBLIC_SITE_URL: 'https://myfabmesh-cloud.fabien65400.workers.dev'
           NEXT_PUBLIC_SUPABASE_URL: 'https://ovoccoipeqmkfnugkmyh.supabase.co'
