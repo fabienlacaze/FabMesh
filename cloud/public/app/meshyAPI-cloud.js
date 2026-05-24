@@ -175,6 +175,8 @@
           return { success: false, images: [], error: msg };
         }
         window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
+        // Force credit pill refresh after successful spend.
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
         return { success: true, images: j.paths };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -225,7 +227,9 @@
           promptHint: promptHint || prompt || '',
           numImages, frontImageUrl: frontImageUrl || frontImage, assetType,
         });
-        return r; // { ok, success, paths }
+        // Force credit pill refresh after successful spend.
+        if (r?.success && typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        return r; // { ok, success, paths, creditsRemaining? }
       } catch (e) {
         return { ok: false, success: false, error: String(e) };
       }

@@ -1072,16 +1072,25 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   };
   if (!prompt) return err(400, 'prompt required');
   const n = Math.max(1, Math.min(4, numImages ?? 1));
+
+  // Charge 1 credit per image. Reserve BEFORE calling Replicate so
+  // an out-of-credit user can't slip through. Refund on any failure.
+  const remaining = await spendCredits(env, user.id, n);
+  if (remaining == null) {
+    return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${n} credit${n === 1 ? '' : 's'}` }, { status: 402 });
+  }
+
   const paths: string[] = [];
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
-  for (let i = 0; i < n; i++) {
-    try {
+  try {
+    for (let i = 0; i < n; i++) {
       paths.push(await replicateGenerateImage(env, user.id, prompt, 'front', seedBase + i));
-    } catch (e) {
-      return err(502, `image generation failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  } catch (e) {
+    await addCredits(env, user.id, n); // refund
+    return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
-  return json({ ok: true, success: true, paths });
+  return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
 
 async function handleGenerateBackView(req: Request, env: Env): Promise<Response> {
@@ -1096,16 +1105,24 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   void frontImageUrl;  // (kept for API compat; not used in single-image flux-schnell)
   const base = (prompt ?? promptHint ?? '').toString().slice(0, 400);
   const n = Math.max(1, Math.min(4, numImages ?? 1));
+
+  // 1 credit per back-view image, same pricing as front image gen.
+  const remaining = await spendCredits(env, user.id, n);
+  if (remaining == null) {
+    return json({ ok: false, success: false, error: `insufficient credits — back view costs ${n} credit${n === 1 ? '' : 's'}` }, { status: 402 });
+  }
+
   const fullPrompt = `back view, rear view, full body, T-pose neutral stance, plain white background, no shadows, ${base}`;
   const paths: string[] = [];
-  for (let i = 0; i < n; i++) {
-    try {
+  try {
+    for (let i = 0; i < n; i++) {
       paths.push(await replicateGenerateImage(env, user.id, fullPrompt, 'back'));
-    } catch (e) {
-      return err(502, `back view generation failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  } catch (e) {
+    await addCredits(env, user.id, n); // refund
+    return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
-  return json({ ok: true, success: true, paths });
+  return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
 
 /* ────────────────────────── main fetch handler ─────────────────────── */
