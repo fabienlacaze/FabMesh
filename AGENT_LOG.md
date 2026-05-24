@@ -10,6 +10,39 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (Cloud deploy: stub live + GitHub Actions for full Next.js)
+
+- **Cloudflare API token** créé via dashboard (`Edit Cloudflare Workers`
+  template) et fourni par le user — j'ai pris le contrôle complet via
+  wrangler CLI sans dashboard.
+- **Stub `Coming soon` live** sur `https://myfabmesh-cloud.fabien65400.workers.dev/`
+  (HTML inline avec branding Ayros Studio + gradient violet/crimson +
+  lien retour vers GitHub Pages). Deploy via `wrangler deploy` direct
+  (skip le build OpenNext qui échoue sur Windows à cause d'un bug esbuild
+  "Invalid alias name: next/dist/compiled/ws").
+- **13 secrets runtime du Worker** set via `wrangler secret put` :
+  REPLICATE_API_TOKEN + MODEL, SUPABASE_SERVICE_ROLE_KEY,
+  STRIPE_SECRET_KEY + 3 price IDs, R2_ACCOUNT_ID + ACCESS_KEY_ID +
+  SECRET_ACCESS_KEY + BUCKET + PUBLIC_URL + S3_ENDPOINT.
+  Vérifiés via `wrangler secret list`.
+- **GitHub repo secret `CLOUDFLARE_API_TOKEN`** ajouté via `gh secret set`
+  pour que le workflow GH Actions puisse deploy.
+- **`.github/workflows/cloud-deploy.yml`** créé : trigger sur push de
+  `cloud/**` ou manuel, runs sur ubuntu-latest, fait
+  `npm install --legacy-peer-deps && npx @opennextjs/cloudflare build &&
+  npx wrangler deploy`. Bake les NEXT_PUBLIC_* vars au moment du build.
+  Smoke test 5s après deploy.
+- **Blockers résolus en route** :
+  - Cloudflare auto-build CI échoue sur `npm ci` racine (electron-builder
+    peer deps Linux-incompat). Mon `.npmrc` (omit=optional, legacy-peer-deps,
+    ignore-scripts) marche en LOCAL mais Cloudflare auto-build a quand
+    même échoué. → bypass en utilisant GH Actions workflow custom qui
+    contrôle l'install au lieu de l'auto-install Cloudflare.
+  - Build OpenNext sur Windows : impossible (esbuild bug). GH Actions
+    runs sur Linux donc OK.
+
+---
+
 ## 2026-05-24 (Cloud setup live: Supabase + Stripe + Cloudflare + OpenNext)
 
 Session live avec le user — création des comptes externes et provisioning :

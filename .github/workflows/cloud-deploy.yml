@@ -1,0 +1,77 @@
+# Build and deploy the Next.js Cloud app to Cloudflare Workers
+# from a Linux runner (where @opennextjs/cloudflare works — the
+# Windows build is broken because of esbuild path handling).
+#
+# Trigger: push to master that touches anything under cloud/, or
+# manual via "Run workflow" button in the Actions tab.
+#
+# Required GitHub secrets:
+#   CLOUDFLARE_API_TOKEN  - "Edit Cloudflare Workers" template
+#                          (already created and saved locally in
+#                           build/cloudflare-token.txt — uploaded
+#                           to GitHub via `gh secret set` separately)
+#
+# Env vars / secrets that the Worker itself needs at runtime are
+# managed via `wrangler secret put` (or via the Cloudflare dashboard)
+# and live on the Worker, not in this workflow.
+
+name: Cloud — Build & Deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'cloud/**'
+      - '.github/workflows/cloud-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Cloud dependencies
+        # --legacy-peer-deps: avoids React 19 peer-dep conflicts pulled
+        # in by some Cloud deps (e.g. @sentry/nextjs).
+        # --no-audit: keeps logs clean.
+        # No --omit=optional: cloud/ doesn't have the desktop Windows-only
+        # optionals that are at the root, so include all here.
+        run: npm install --legacy-peer-deps --no-audit
+
+      - name: Build with @opennextjs/cloudflare
+        run: npx @opennextjs/cloudflare build
+        env:
+          # Public env vars baked at build time. Secrets are NOT baked;
+          # they're read at runtime from the Worker secrets.
+          NEXT_PUBLIC_MOCK: '0'
+          NEXT_PUBLIC_SITE_URL: 'https://myfabmesh-cloud.fabien65400.workers.dev'
+          NEXT_PUBLIC_SUPABASE_URL: 'https://ovoccoipeqmkfnugkmyh.supabase.co'
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92b2Njb2lwZXFta2ZudWdrbXloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTIzODgsImV4cCI6MjA5NTE4ODM4OH0.0vjGjN1VD_h_MefS4quDFnGXa-nTsbpM2KpNvQZKQlI'
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_51TEArR3uvj2cFz0krEmYFCk7Pfj3wnWboyu9dwEWxpBSTxelTH6Q80KLLBOjTrxXO4kxbt2Q05TSAt1Y3nUQSdA700OL4r1KcL'
+
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy
+
+      - name: Smoke test live URL
+        run: |
+          sleep 5
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://myfabmesh-cloud.fabien65400.workers.dev/)
+          echo "GET / -> HTTP $STATUS"
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "307" ]; then
+            echo "::error::Live URL returned non-OK status $STATUS"
+            exit 1
+          fi
