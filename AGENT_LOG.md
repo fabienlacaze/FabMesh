@@ -10,6 +10,38 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (legal pages + IP scrub)
+
+- **Issue user** : "il y a du TRELLIS marqué et des infos que je ne veux
+  pas partager ouvertement" — il a raison, le site public dévoilait
+  toute la stack tech.
+- **Scrub `docs/cloud.html`** : remplacé `TRELLIS-2 pipeline` → `image-to-3D
+  pipeline`, `NVIDIA L40S cloud GPU` → `Professional-grade cloud GPU`,
+  `Fast mode (H100)` → `Fast mode (premium tier)`. Affecte aussi le
+  meta og:description (preview cards Twitter/Discord).
+- **Déplacement `docs/ESSAIS_TEXTURING.md` + `docs/PIPELINE_VOIE_B.md`
+  vers `notes/`** — ces deux journaux dev internes étaient servis par
+  GitHub Pages (donc accessibles via URL directe) et révélaient toute
+  la stack : TRELLIS-2, IP-Adapter, SDXL, ControlNet, Hi3DGen, paths
+  WSL, patches Blackwell, etc. `notes/` n'est PAS servi par GitHub
+  Pages.
+- **Création `docs/terms.html`** : ToS standard SOHO français (license,
+  IP, beta status, no warranty, droit français, contact). Linked depuis
+  footer index.html.
+- **Fix `docs/index.html` footer** : Terms et Privacy pointaient vers
+  des ancres `#legal-terms` / `#legal-privacy` inexistantes (clic =
+  rien). Repointés vers `terms.html` / `privacy.html`.
+- **Note différée** : le store listing MS Store actuellement en
+  certification contient ENCORE la description avec TRELLIS-2 /
+  IP-Adapter / SDXL (rédigée hier soir). Modifiable APRÈS publication
+  sans nouvelle review du package — à faire dès que l'app est live.
+- **Leak historique** : les deux .md déplacés restent dans l'historique
+  git public. Pour scrub complet : `git filter-repo` sur master
+  (procédure déjà utilisée mi-mai). Faible priorité — URLs jamais
+  exposées depuis le site, indexation Google très improbable.
+
+---
+
 ## 2026-05-24 (rebrand publisher → "Ayros Studio")
 
 - **Contexte** : enregistrement MS Store dev account (Individual, 19 $) en
