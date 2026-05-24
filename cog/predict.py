@@ -27,8 +27,46 @@ import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, '..'))
-_SCRIPTS = os.path.join(_REPO_ROOT, 'scripts')
+# Look for scripts as a sibling first (the GitHub Actions build copies
+# scripts/ into cog/ so the Cog tarball is self-contained), then fall
+# back to the repo layout for local dev runs.
+_SCRIPTS_LOCAL = os.path.join(_HERE, 'scripts')
+_SCRIPTS_REPO = os.path.join(_REPO_ROOT, 'scripts')
+_SCRIPTS = _SCRIPTS_LOCAL if os.path.isdir(_SCRIPTS_LOCAL) else _SCRIPTS_REPO
 _PY = sys.executable
+
+
+# Mirror of src/renderer/index2.js ASSET_TYPE_PROMPTS + ASSET_STYLE_PROMPTS
+# (kept verbatim so the Cog produces byte-identical prompts to the desktop).
+_ASSET_TYPE_PROMPTS = {
+    'character':   'single isolated 3D character, one character only, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
+    'building':    'ONE building only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric angle, clean silhouette, no text, no UI, no duplicate, no second building',
+    'vehicle':     'ONE car only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second car, no twin, no rear view inset',
+    'weapon':      'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
+    'prop':        'ONE prop only, single instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
+    'creature':    'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
+    'environment': 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
+    'icon':        'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
+    'custom':      '',
+}
+_ASSET_STYLE_PROMPTS = {
+    'realistic':   'realistic style, photorealistic, sharp details, detailed materials',
+    'stylized':    'stylized art, mid-poly game asset, hand-painted textures, fantasy game style',
+    'low-poly':    'low-poly 3D art, flat-shaded, faceted geometry, minimalist, geometric shapes, vibrant colors',
+    'cartoon':     'cartoon style, bold outlines, cel-shading, vibrant flat colors, expressive shapes',
+    'anime':       'anime style, soft cel-shading, expressive features, japanese animation aesthetic',
+    'pixel-art':   'pixel art style, 16-bit retro game aesthetic, limited palette, sharp pixel edges',
+    'concept-art': 'painterly style, brushstroke textures, hand-painted concept art look',
+    'none':        '',
+}
+
+
+def _build_enriched_prompt(user_prompt: str, asset_type: str, asset_style: str) -> str:
+    """Mirror of index2.js buildFullPrompt()."""
+    style_prefix = _ASSET_STYLE_PROMPTS.get(asset_style, '')
+    type_suffix = _ASSET_TYPE_PROMPTS.get(asset_type, '')
+    parts = [p for p in (style_prefix, user_prompt, type_suffix) if p]
+    return ', '.join(parts)
 
 
 def _run(script: str, *args, env_extra: dict | None = None, timeout: int = 1800):
@@ -62,9 +100,28 @@ class Predictor(BasePredictor):
 
     def predict(
         self,
-        image: Path = Input(description="Reference image (PNG / JPG)"),
+        image: Path = Input(
+            description="Reference image (PNG / JPG). Optional if `prompt` is set.",
+            default=None,
+        ),
+        prompt: str = Input(
+            description="Text prompt — if `image` is empty, we run the desktop's "
+                        "RealVisXL V4.0 pipeline (or DreamShaper-XL Lightning + "
+                        "ControlNet OpenPose when the prompt asks for a T-pose) "
+                        "to generate the source image first. The asset_type + "
+                        "asset_style suffixes are appended automatically.",
+            default="",
+        ),
+        asset_style: str = Input(
+            description="Visual style suffix appended to the prompt (matches "
+                        "desktop's ASSET_STYLE_PROMPTS).",
+            choices=["realistic", "stylized", "cartoon", "anime",
+                     "low-poly", "pixel-art", "concept-art", "none"],
+            default="realistic",
+        ),
         asset_type: str = Input(
-            description="Asset category — drives the rectify mode and the post-process pipeline",
+            description="Asset category — drives the prompt suffix, the rectify "
+                        "mode, the back-view engine choice, and the post-process pipeline.",
             choices=["character", "creature", "vehicle", "building",
                      "weapon", "prop", "environment", "icon", "custom"],
             default="character",
@@ -75,8 +132,13 @@ class Predictor(BasePredictor):
             default="standard",
         ),
         seed: int = Input(default=42, ge=0, le=2**31 - 1),
+        gen_steps: int = Input(
+            description="Diffusion steps for the optional text→image step (30 = desktop default).",
+            default=30, ge=4, le=60,
+        ),
         rectify: bool = Input(default=True,
-            description="Auto-rectify the source to a canonical view"),
+            description="Auto-rectify the source to a canonical view (skipped when "
+                        "image is generated from prompt — it's already canonical)."),
         back_view: bool = Input(default=True,
             description="Generate a back-view to improve mesh consistency (characters / creatures only)"),
         smooth: bool = Input(default=True,
@@ -90,13 +152,40 @@ class Predictor(BasePredictor):
         t0 = time.time()
         work = tempfile.mkdtemp(prefix='myfabmesh_')
         print(f'[predict] workdir = {work}', flush=True)
-        print(f'[predict] asset={asset_type} mode={mode} seed={seed} '
+        print(f'[predict] image={"yes" if image else "no"} prompt_chars={len(prompt or "")} '
+              f'asset={asset_type} style={asset_style} mode={mode} seed={seed} '
               f'rectify={rectify} back={back_view} smooth={smooth} '
               f'face={face_fix} hd={ultra_hd} tex={texture_size}',
               flush=True)
 
+        # --- 0. TEXT → IMAGE (if no image was uploaded) ----------------
+        # Mirrors src/main/main.js generate-images handler: build the
+        # enriched prompt (style prefix + user prompt + asset suffix),
+        # then call scripts/local_juggernaut_bridge.py exactly like the
+        # desktop does. Output is ref_1.png 1024².
+        if image is None:
+            if not prompt or not prompt.strip():
+                raise ValueError("Either `image` or `prompt` must be provided.")
+            enriched = _build_enriched_prompt(prompt.strip(), asset_type, asset_style)
+            print(f'[predict] T→I via local_juggernaut_bridge.py — '
+                  f'"{enriched[:120]}…"', flush=True)
+            img_dir = os.path.join(work, 'gen_image')
+            os.makedirs(img_dir, exist_ok=True)
+            _run('local_juggernaut_bridge.py',
+                 enriched, img_dir, '1', str(gen_steps))
+            # Pick the first ref_*.png produced.
+            refs = sorted(f for f in os.listdir(img_dir) if f.startswith('ref_') and f.endswith('.png'))
+            if not refs:
+                raise RuntimeError('text→image step produced no ref_*.png')
+            src_path = os.path.join(img_dir, refs[0])
+            # Skip auto-rectify — the freshly-generated front is already canonical
+            # (RealVisXL + STRICT_FRONT_TAIL suffix in our enriched prompt).
+            rectify = False
+            print(f'[predict] T→I produced {src_path}', flush=True)
+        else:
+            src_path = str(image)
+
         # --- 1. RECTIFY ------------------------------------------------
-        src_path = str(image)
         if rectify and asset_type in ('character', 'creature', 'vehicle',
                                        'building', 'icon'):
             rectified = os.path.join(work, 'rectified.png')
