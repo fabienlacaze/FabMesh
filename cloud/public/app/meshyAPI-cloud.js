@@ -149,23 +149,38 @@
 
     /* Image generation (txt2img). Goes through OUR Worker at
        /api/generate-image, which calls Replicate's black-forest-labs/
-       flux-schnell (~3s, ~$0.003/image) and mirrors the PNG into R2
-       so we get a stable public URL on our origin. Same compute
-       provider as the mesh step — consistent quality, billed
-       per-prediction, no third-party freebies. */
-    generateImages: async ({ prompt, projectName, numImages = 1, steps = 30, jobId } = {}) => {
+       flux-schnell (~3s, ~$0.003/image) and mirrors the PNG into R2.
+       Returns the EXACT shape the desktop IPC returns:
+         { success: bool, images: [path, path, ...], error?: string }
+       so the renderer's caller works unchanged. */
+    generateImages: async ({ prompt, numImages = 1, jobId } = {}) => {
       log(`generateImages via /api/generate-image (Replicate flux-schnell) — ${numImages}× "${(prompt || '').slice(0, 60)}…"`);
       window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
-      const r = await postJSON('/api/generate-image', { prompt, numImages });
-      if (!r?.success || !r?.paths?.length) {
-        throw new Error(r?.error || 'image generation failed');
+      try {
+        const r = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, numImages }),
+          credentials: 'include',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const msg = j?.error || `HTTP ${r.status}`;
+          log('generateImages FAILED:', msg, j);
+          return { success: false, images: [], error: msg };
+        }
+        if (!j?.success || !Array.isArray(j?.paths) || !j.paths.length) {
+          const msg = j?.error || 'no images returned';
+          log('generateImages EMPTY:', msg, j);
+          return { success: false, images: [], error: msg };
+        }
+        window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
+        return { success: true, images: j.paths };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        log('generateImages THREW:', msg);
+        return { success: false, images: [], error: msg };
       }
-      const out = r.paths.map((url, i) => ({
-        path: url, name: `${projectName || 'img'}_${i + 1}.png`,
-        seed: 0, steps, prompt,
-      }));
-      window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
-      return { ok: true, images: out };
     },
 
     /* These will be wired against /api/generate-image (Replicate SDXL/Flux)
