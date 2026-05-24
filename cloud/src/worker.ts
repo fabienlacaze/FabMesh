@@ -491,8 +491,23 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
 
   const form = await req.formData();
-  const image = form.get('image');
-  if (!(image instanceof File)) return err(400, 'image required');
+  let image = form.get('image');
+  // Cloud convenience: accept `imagePath` (a R2/blob URL) and fetch it
+  // server-side. Saves the client from a CORS round-trip through R2.
+  if (!(image instanceof File)) {
+    const url = form.get('imagePath') || form.get('image_url');
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return err(400, `cannot fetch imagePath (HTTP ${r.status})`);
+        const buf = await r.arrayBuffer();
+        image = new File([buf], 'source.png', { type: r.headers.get('content-type') ?? 'image/png' });
+      } catch (e) {
+        return err(400, `cannot fetch imagePath: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+  if (!(image instanceof File)) return err(400, 'image required (File or imagePath URL)');
 
   const input: GenerateInput = {
     image,
