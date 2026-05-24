@@ -79,7 +79,7 @@ export default function AccountPage() {
       <div className="card" style={{ marginBottom: 24 }}>
         <h3 style={{ marginBottom: 12 }}>Recent generations</h3>
         {jobs.length === 0 ? (
-          <p style={{ color: 'var(--text-2)' }}>No generation yet. <Link href="/generate">Start a project →</Link></p>
+          <p style={{ color: 'var(--text-2)' }}>No generation yet. <a href="/app/" style={{ color: 'var(--accent)' }}>Start a project →</a></p>
         ) : (
           <table className="history">
             <thead>

@@ -35,8 +35,8 @@ export function Nav() {
       <div className="topbar-right">
         {user ? (
           <>
-            <Link href="/generate" className="nav-link">New mesh</Link>
-            <Link href="/" className="nav-link">My projects</Link>
+            <a href="/app/" className="nav-link">New mesh</a>
+            <a href="/app/" className="nav-link">My projects</a>
             <Link href="/buy" className="nav-link">Credits</Link>
             <Link href="/account" className="nav-link" title={user.email ?? ''}>
               {user.email?.split('@')[0]}
