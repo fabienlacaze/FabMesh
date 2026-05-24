@@ -30,21 +30,20 @@ binding = "ASSETS"
 binding = "MESHES"
 bucket_name = "myfabmesh-meshes"
 
-# Public env vars are set in the Cloudflare dashboard
-# (Settings -> Variables and Secrets). Listed here as documentation only:
+# Public (non-secret) runtime vars. The Worker accesses these via
+# env.<NAME>; they're also baked into the frontend at build time
+# (cloud-deploy.yml). Keeping them in wrangler.toml means they
+# follow the repo and never drift.
 #
-#   MOCK = "0"
-#   NEXT_PUBLIC_MOCK = "0"
-#   NEXT_PUBLIC_SITE_URL = "https://myfabmesh-cloud.fabien65400.workers.dev"
-#   NEXT_PUBLIC_SUPABASE_URL = "https://ovoccoipeqmkfnugkmyh.supabase.co"
-#   NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJ..."
-#   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_..."
-#   STRIPE_PRICE_STARTER = "price_..."
-#   STRIPE_PRICE_PRO     = "price_..."
-#   STRIPE_PRICE_STUDIO  = "price_..."
-#   REPLICATE_MODEL = "fishwowater/trellis2"
-#   R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
-#
-# Secrets (encrypted in the dashboard / `wrangler secret put`):
-#   REPLICATE_API_TOKEN, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY,
-#   STRIPE_WEBHOOK_SECRET
+# Sensitive values (Supabase service-role, Stripe secret + webhook
+# secret, Replicate token, R2 keys) live in `wrangler secret put`
+# and are NOT versioned here.
+[vars]
+MOCK = "0"
+NEXT_PUBLIC_MOCK = "0"
+NEXT_PUBLIC_SITE_URL = "https://myfabmesh-cloud.fabien65400.workers.dev"
+NEXT_PUBLIC_SUPABASE_URL = "https://ovoccoipeqmkfnugkmyh.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92b2Njb2lwZXFta2ZudWdrbXloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTIzODgsImV4cCI6MjA5NTE4ODM4OH0.0vjGjN1VD_h_MefS4quDFnGXa-nTsbpM2KpNvQZKQlI"
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_51TEArR3uvj2cFz0krEmYFCk7Pfj3wnWboyu9dwEWxpBSTxelTH6Q80KLLBOjTrxXO4kxbt2Q05TSAt1Y3nUQSdA700OL4r1KcL"
+REPLICATE_MODEL = "fishwowater/trellis2"
+R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
