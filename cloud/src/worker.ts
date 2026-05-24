@@ -55,6 +55,7 @@ export interface Env {
 interface R2Bucket {
   put(key: string, value: ReadableStream | ArrayBuffer | string, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   get(key: string): Promise<{ body: ReadableStream } | null>;
+  delete(key: string): Promise<void>;
 }
 
 /* ─────────────────────────── tiny helpers ──────────────────────────── */
@@ -534,10 +535,12 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     return err(502, 'replicate failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 
+  const projectName = (form.get('project_name') as string | null) || null;
   await supabaseAdmin(env).from('jobs').insert({
     id: prediction.id, user_id: user.id,
     asset_type: input.asset_type, mode: input.mode, seed: input.seed,
     credit_cost: cost, status: prediction.status,
+    project_name: projectName,
     options: {
       rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
       face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
@@ -692,6 +695,331 @@ async function handleMockLogout(req: Request, env: Env): Promise<Response> {
   return appendSetCookie(json({ ok: true }), cookie);
 }
 
+/* ─────────────── cloud projects / mesh helpers ────────────────────── */
+
+interface CloudJobRow {
+  id: string;
+  user_id: string;
+  asset_type: string;
+  mode: string;
+  status: string;
+  mesh_url: string | null;
+  created_at: string;
+  finished_at: string | null;
+  project_name: string | null;
+  options: Record<string, unknown> | null;
+}
+
+/**
+ * Lists the user's projects (grouped from the jobs table).
+ *
+ * One project = all jobs sharing the same `project_name` (or, when null,
+ * a stable name derived from the job id slice — "Project ab12cd").
+ * Each project bundles its meshes (succeeded jobs with mesh_url) and a
+ * sourceImage hint when available in `options`.
+ */
+async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  type ProjEntry = {
+    name: string; path: string;
+    images: string[];
+    imagesData: Array<{ path: string; created: string; size: number; mtime: string }>;
+    count: number;
+    created: string; prompt: string;
+    backPhotos: Record<string, string>;
+    meshes: Array<{ filename: string; path: string; url: string; created: string; format: string; sourceImage: string | null }>;
+  };
+  function emptyProj(name: string): ProjEntry {
+    return {
+      name, path: `cloud://${name}`,
+      images: [], imagesData: [],
+      count: 0,
+      created: new Date().toISOString(), prompt: '',
+      backPhotos: {}, meshes: [],
+    };
+  }
+
+  if (isMock(env)) {
+    const jobs = mock.listJobs(user.id);
+    const map = new Map<string, ProjEntry>();
+    for (const j of jobs) {
+      const name = (j.options as Record<string, unknown> | null)?.project_name as string
+        || `Project ${j.id.slice(-6)}`;
+      if (!map.has(name)) map.set(name, emptyProj(name));
+      const p = map.get(name)!;
+      if (j.mesh_url) {
+        p.meshes.push({
+          filename: `${j.id}.glb`, path: j.mesh_url, url: j.mesh_url,
+          created: j.created_at, format: 'GLB', sourceImage: null,
+        });
+      }
+      if (j.created_at > p.created) p.created = j.created_at;
+    }
+    return json({ projects: Array.from(map.values()) });
+  }
+
+  const { data, error } = await supabaseAdmin(env)
+    .from('jobs')
+    .select('id, user_id, asset_type, mode, status, mesh_url, created_at, finished_at, project_name, options')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) return err(500, error.message);
+
+  const rows = (data ?? []) as CloudJobRow[];
+  const map = new Map<string, ProjEntry>();
+  for (const j of rows) {
+    const name = j.project_name
+      || (j.options?.project_name as string | undefined)
+      || `Project ${j.id.slice(-6)}`;
+    if (!map.has(name)) map.set(name, emptyProj(name));
+    const p = map.get(name)!;
+    if (j.mesh_url && j.status === 'succeeded') {
+      p.meshes.push({
+        filename: `${j.id}.glb`, path: j.mesh_url, url: j.mesh_url,
+        created: j.created_at, format: 'GLB',
+        sourceImage: (j.options?.sourceImage as string | undefined) ?? null,
+      });
+    }
+    if (j.created_at > p.created) p.created = j.created_at;
+    if (!p.prompt && j.options?.prompt) p.prompt = String(j.options.prompt);
+  }
+  return json({ projects: Array.from(map.values()) });
+}
+
+/**
+ * List every succeeded mesh the user has generated. Used by the
+ * Projects home page to show meshes that don't belong to any image
+ * folder yet.
+ */
+async function handleListMeshes(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  if (isMock(env)) {
+    const jobs = mock.listJobs(user.id).filter(j => j.status === 'succeeded' && j.mesh_url);
+    return json({
+      meshes: jobs.map(j => ({
+        filename: `${j.id}.glb`,
+        path: j.mesh_url,
+        url: j.mesh_url,
+        size: 0,
+        created: j.created_at,
+        format: 'GLB',
+        thumb: null,
+        sourceImage: null,
+        asset_type: j.asset_type,
+        projectName: (j.options as Record<string, unknown> | null)?.project_name as string ?? null,
+        id: j.id,
+      })),
+    });
+  }
+
+  const { data, error } = await supabaseAdmin(env)
+    .from('jobs')
+    .select('id, asset_type, mode, status, mesh_url, created_at, project_name, options')
+    .eq('user_id', user.id)
+    .eq('status', 'succeeded')
+    .not('mesh_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) return err(500, error.message);
+
+  const meshes = ((data ?? []) as CloudJobRow[]).map(j => ({
+    filename: `${j.id}.glb`,
+    path: j.mesh_url!,
+    url: j.mesh_url!,
+    size: 0,
+    created: j.created_at,
+    format: 'GLB',
+    thumb: null,
+    sourceImage: (j.options?.sourceImage as string | undefined) ?? null,
+    asset_type: j.asset_type,
+    projectName: j.project_name ?? (j.options?.project_name as string | undefined) ?? null,
+    id: j.id,
+  }));
+  return json({ meshes });
+}
+
+/**
+ * Delete a generated mesh: removes the R2 object and the jobs row.
+ * Only the owning user can delete their own mesh.
+ */
+async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const { id } = await req.json() as { id?: string };
+  if (!id) return err(400, 'id required');
+
+  if (isMock(env)) {
+    mockStore().jobs.delete(id);
+    return json({ ok: true });
+  }
+
+  const sb = supabaseAdmin(env);
+  const { data: job } = await sb.from('jobs').select('id, user_id, mesh_url')
+    .eq('id', id).eq('user_id', user.id).maybeSingle();
+  if (!job) return err(404, 'not found');
+
+  // Best-effort R2 cleanup. We store under "<user_id>/<id>.glb" (see
+  // uploadGlbToR2). delete() never throws on a missing key.
+  if (env.MESHES) {
+    try { await env.MESHES.delete(`${user.id}/${id}.glb`); } catch (_) { /* ignore */ }
+  }
+
+  const { error } = await sb.from('jobs').delete().eq('id', id).eq('user_id', user.id);
+  if (error) return err(500, error.message);
+  return json({ ok: true });
+}
+
+/**
+ * Soft-delete a "project" (cloud projects are virtual — they're a
+ * group of jobs sharing a project_name). We just null out the
+ * project_name on every job belonging to the user with that name.
+ * The jobs themselves stay around so the user can still see/download
+ * the meshes individually.
+ */
+async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const { projectName } = await req.json() as { projectName?: string };
+  if (!projectName) return err(400, 'projectName required');
+
+  if (isMock(env)) return json({ ok: true });
+
+  const sb = supabaseAdmin(env);
+  const { error } = await sb.from('jobs')
+    .update({ project_name: null })
+    .eq('user_id', user.id)
+    .eq('project_name', projectName);
+  if (error) return err(500, error.message);
+  return json({ ok: true });
+}
+
+/**
+ * Cancel an in-flight Replicate prediction and mark the job canceled.
+ * Refunds the credits spent at job creation.
+ */
+async function handleJobCancel(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const { id } = await req.json() as { id?: string };
+  if (!id) return err(400, 'id required');
+
+  if (isMock(env)) {
+    mock.updateJob(id, { status: 'canceled', finished_at: new Date().toISOString() });
+    return json({ ok: true });
+  }
+
+  const sb = supabaseAdmin(env);
+  const { data: job } = await sb.from('jobs').select('id, user_id, status, credit_cost')
+    .eq('id', id).eq('user_id', user.id).maybeSingle();
+  if (!job) return err(404, 'not found');
+  if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'canceled') {
+    return json({ ok: true, alreadyDone: true });
+  }
+
+  // Best-effort Replicate cancellation. Continue even if it fails — the
+  // local status update is the source of truth for the UI.
+  try { await replicateClient(env).predictions.cancel(id); } catch (_) { /* ignore */ }
+  await sb.from('jobs')
+    .update({ status: 'canceled', finished_at: new Date().toISOString() })
+    .eq('id', id);
+  if (typeof job.credit_cost === 'number') {
+    await addCredits(env, user.id as string, job.credit_cost);
+  }
+  return json({ ok: true });
+}
+
+/**
+ * Background removal proxy. We POST an image URL (or raw blob) and the
+ * Worker forwards to Replicate "851-labs/background-remover", waits for
+ * the result, and returns the output URL. Free for now (no credit cost
+ * — see commit message for rationale).
+ */
+async function handleRemoveBackground(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.REPLICATE_API_TOKEN) return err(500, 'REPLICATE_API_TOKEN not set');
+
+  const ct = req.headers.get('content-type') ?? '';
+  let imageInput: string | File | null = null;
+  if (ct.includes('application/json')) {
+    const { imageUrl } = await req.json() as { imageUrl?: string };
+    if (!imageUrl) return err(400, 'imageUrl required');
+    imageInput = imageUrl;
+  } else {
+    const fd = await req.formData();
+    const f = fd.get('image');
+    if (f instanceof File) imageInput = f;
+    else if (typeof f === 'string') imageInput = f;
+  }
+  if (!imageInput) return err(400, 'image required');
+
+  const replicate = replicateClient(env);
+  const version = '851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc';
+  try {
+    const out = await replicate.run(version, { input: { image: imageInput } }) as unknown;
+    let url: string | null = null;
+    if (typeof out === 'string') url = out;
+    else if (Array.isArray(out) && typeof out[0] === 'string') url = out[0] as string;
+    else if (out && typeof (out as { url?: () => string }).url === 'function') {
+      url = (out as { url: () => string }).url();
+    }
+    if (!url) return err(502, 'background-remover returned no url');
+    return json({ ok: true, success: true, url, newPath: url });
+  } catch (e: unknown) {
+    return err(502, 'background-remover failed: ' + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+/**
+ * Generate a back view from a front image + prompt hint.
+ *
+ * Cheap stand-in: we proxy to Pollinations.ai with a "back view" prompt
+ * tweak. It's free, no auth, returns a finished PNG. The result is
+ * tunneled back through R2 so we get a stable cross-origin URL the
+ * client can keep on the project.
+ */
+async function handleGenerateBackView(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const { prompt, promptHint, numImages, frontImageUrl } = await req.json() as {
+    prompt?: string;
+    promptHint?: string;
+    numImages?: number;
+    frontImageUrl?: string;
+  };
+  void frontImageUrl;  // not used in the Pollinations fallback; kept for API compat
+  const base = (prompt ?? promptHint ?? '').toString().slice(0, 400);
+  const n = Math.max(1, Math.min(4, numImages ?? 1));
+  const fullPrompt = `back view, rear view, full body, T-pose, plain white background, ${base}`;
+  const paths: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const seed = Math.floor(Math.random() * 1e9);
+    const polUrl =
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}`
+      + `?width=1024&height=1024&seed=${seed}&model=flux&nologo=true&private=true`;
+    // Tunnel through R2 so the client gets a stable URL on our origin.
+    if (env.MESHES && env.R2_PUBLIC_URL) {
+      try {
+        const r = await fetch(polUrl);
+        if (r.ok) {
+          const buf = await r.arrayBuffer();
+          const key = `${user.id}/back/${Date.now()}_${seed}.png`;
+          await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+          paths.push(`${env.R2_PUBLIC_URL}/${key}`);
+          continue;
+        }
+      } catch (_) { /* fall through to raw pollinations URL */ }
+    }
+    paths.push(polUrl);
+  }
+  return json({ ok: true, success: true, paths });
+}
+
 /* ────────────────────────── main fetch handler ─────────────────────── */
 
 export default {
@@ -710,16 +1038,23 @@ export default {
 
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
-        if (pathname === '/api/me'              && method === 'GET')  return await handleMe(req, env);
-        if (pathname === '/api/debug-auth'      && method === 'GET')  return await handleDebugAuth(req, env);
-        if (pathname === '/api/checkout'        && method === 'POST') return await handleCheckout(req, env);
-        if (pathname === '/api/stripe-webhook'  && method === 'POST') return await handleStripeWebhook(req, env);
-        if (pathname === '/api/generate'        && method === 'POST') return await handleGenerate(req, env);
-        if (pathname === '/api/projects'        && method === 'GET')  return await handleProjects(req, env);
-        if (pathname === '/api/projects/delete' && method === 'POST') return await handleProjectsDelete(req, env);
-        if (pathname === '/api/mock-checkout'   && method === 'POST') return await handleMockCheckout(req, env);
-        if (pathname === '/api/mock-login'      && method === 'POST') return await handleMockLogin(req, env);
-        if (pathname === '/api/mock-logout'     && method === 'POST') return await handleMockLogout(req, env);
+        if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
+        if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
+        if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
+        if (pathname === '/api/stripe-webhook'        && method === 'POST') return await handleStripeWebhook(req, env);
+        if (pathname === '/api/generate'              && method === 'POST') return await handleGenerate(req, env);
+        if (pathname === '/api/projects'              && method === 'GET')  return await handleProjects(req, env);
+        if (pathname === '/api/projects/delete'       && method === 'POST') return await handleProjectsDelete(req, env);
+        if (pathname === '/api/cloud-projects'        && method === 'GET')  return await handleCloudProjects(req, env);
+        if (pathname === '/api/cloud-projects/delete' && method === 'POST') return await handleCloudProjectsDelete(req, env);
+        if (pathname === '/api/meshes'                && method === 'GET')  return await handleListMeshes(req, env);
+        if (pathname === '/api/meshes/delete'         && method === 'POST') return await handleMeshesDelete(req, env);
+        if (pathname === '/api/jobs/cancel'           && method === 'POST') return await handleJobCancel(req, env);
+        if (pathname === '/api/remove-background'     && method === 'POST') return await handleRemoveBackground(req, env);
+        if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
+        if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
+        if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
+        if (pathname === '/api/mock-logout'           && method === 'POST') return await handleMockLogout(req, env);
 
         // /api/jobs/[id] — dynamic
         const jobMatch = pathname.match(/^\/api\/jobs\/([^/]+)\/?$/);
