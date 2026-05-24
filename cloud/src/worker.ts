@@ -386,6 +386,38 @@ async function handleMe(req: Request, env: Env): Promise<Response> {
   return json({ user });
 }
 
+// Debug-only endpoint — returns what the Worker actually sees from the
+// browser's cookie jar and Supabase token validation. Useful for tracing
+// sign-in regressions without redeploying.
+async function handleDebugAuth(req: Request, env: Env): Promise<Response> {
+  const cookies = parseCookies(req);
+  const sbCookieKeys = Object.keys(cookies).filter(k => /^sb-[^-]+-auth-token(?:\.\d+)?$/.test(k));
+  const token = readSupabaseAccessToken(req);
+
+  let supabaseUserPayload: unknown = null;
+  let supabaseStatus = 0;
+  if (token) {
+    const url = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+    const r = await fetch(`${url}/auth/v1/user`, {
+      headers: { 'authorization': `Bearer ${token}`, 'apikey': anon },
+    });
+    supabaseStatus = r.status;
+    try { supabaseUserPayload = await r.json(); } catch { /* ignore */ }
+  }
+
+  return json({
+    receivedCookieHeader: req.headers.get('cookie') ? 'present' : 'missing',
+    sbCookieKeys,
+    rawCookieValuePreview: sbCookieKeys.length
+      ? cookies[sbCookieKeys[0]].slice(0, 80) + '…'
+      : null,
+    tokenExtracted: token ? token.slice(0, 24) + '…' : null,
+    supabaseValidationStatus: supabaseStatus,
+    supabaseUserPayload,
+  });
+}
+
 async function handleCheckout(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -679,6 +711,7 @@ export default {
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
         if (pathname === '/api/me'              && method === 'GET')  return await handleMe(req, env);
+        if (pathname === '/api/debug-auth'      && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'        && method === 'POST') return await handleCheckout(req, env);
         if (pathname === '/api/stripe-webhook'  && method === 'POST') return await handleStripeWebhook(req, env);
         if (pathname === '/api/generate'        && method === 'POST') return await handleGenerate(req, env);
