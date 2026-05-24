@@ -53,7 +53,73 @@
     // Defensive — if the Control API box ends up outside the AI Assistant
     // section in a future refactor, hide it explicitly too.
     hideById('set-control-api-box');
+
+    // Inject the credits pill into the topbar (Cloud-only — desktop has
+    // unlimited local GPU and doesn't need this).
+    installCreditsPill();
   }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Credits pill — shows the user's Replicate credit balance in the
+   * top-right of the /app/ topbar, polled on load + every 30s + after
+   * any successful generate/buy action.
+   * ────────────────────────────────────────────────────────────────── */
+  let _creditsPillEl = null;
+  let _creditsPollTimer = null;
+
+  function installCreditsPill() {
+    if (_creditsPillEl) return; // already installed
+    const right = document.querySelector('#topbar .topbar-right');
+    if (!right) return;
+
+    const pill = document.createElement('a');
+    pill.id = 'cloud-credits-pill';
+    pill.href = '/buy';
+    pill.title = 'Click to buy more credits';
+    pill.textContent = '… credits';
+    pill.style.cssText = [
+      'display:inline-flex', 'align-items:center', 'gap:6px',
+      'padding:5px 12px', 'margin-right:8px',
+      'background:linear-gradient(135deg,#e94560,#a855f7)',
+      'color:#ffffff', 'border-radius:999px',
+      'font-size:12px', 'font-weight:600',
+      'text-decoration:none', 'cursor:pointer',
+      'box-shadow:0 1px 4px rgba(168,85,247,0.4)',
+    ].join(';');
+    right.insertBefore(pill, right.firstChild);
+    _creditsPillEl = pill;
+
+    // First fetch + polling
+    refreshCreditsPill();
+    if (_creditsPollTimer) clearInterval(_creditsPollTimer);
+    _creditsPollTimer = setInterval(refreshCreditsPill, 30_000);
+  }
+
+  async function refreshCreditsPill() {
+    if (!_creditsPillEl) return;
+    try {
+      const r = await fetch('/api/me', { credentials: 'include' });
+      if (!r.ok) {
+        _creditsPillEl.textContent = 'Sign in';
+        _creditsPillEl.href = '/login';
+        return;
+      }
+      const j = await r.json();
+      const credits = j?.user?.credits;
+      if (typeof credits === 'number') {
+        _creditsPillEl.textContent = `⚡ ${credits} credit${credits === 1 ? '' : 's'}`;
+        _creditsPillEl.href = '/buy';
+      } else {
+        _creditsPillEl.textContent = 'Sign in';
+        _creditsPillEl.href = '/login';
+      }
+    } catch {
+      // network issue — leave the previous value visible
+    }
+  }
+
+  // Expose a hook so other Cloud code can force a refresh after spend.
+  window.__cloudCreditsRefresh = refreshCreditsPill;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', applyOverrides);
