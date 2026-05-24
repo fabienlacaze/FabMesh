@@ -10,6 +10,41 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (autonomous prep pendant que user joue à Battlefield)
+
+User parti jouer en demandant ce qu'on pouvait faire en parallèle de
+la cert MS Store. Travail solo, sans dépendance externe :
+
+- **`build/marketing/MS_STORE_LISTING_ANONYMIZED.md`** : description
+  Store anonymisée prête à coller post-cert (retire TRELLIS-2,
+  IP-Adapter, SDXL — info concurrent-friendly à ne pas exposer).
+- **`build/marketing/PRESS_KIT.md`** : pitch en 1/3 paragraphes,
+  facts table, comparatif vs Meshy/Tripo/CSM, FAQ, assets paths,
+  brand colors, contact. Prêt à envoyer aux journalistes.
+- **`build/marketing/LAUNCH_POSTS.md`** : drafts launch posts pour
+  Twitter (3 variants), Reddit (r/gamedev, r/3Dprinting, r/StableDiffusion),
+  Show HN, Discord, LinkedIn. Plus un schedule de posting recommandé
+  (Day 0 / Day 1) avec horaires CET optimaux par plateforme.
+- **`.github/workflows/build-release.yml`** : GitHub Actions workflow
+  qui auto-build NSIS .exe + MSIX .appx à chaque tag `v*` push,
+  uploads en artefacts + attache au GitHub Release. Recrée les
+  sidecar files (sentry-dsn.txt, hf_fallback_token.txt) depuis les
+  secrets repo. Plus de build manuel.
+- **`build/POST_CERT_CHECKLIST.md`** : checklist 7 étapes à exécuter
+  dès l'email "Passed certification" : test end-to-end install,
+  modif description anonymisée, vrais screenshots, annonces launch,
+  update OG tags, monitoring 48h, backlog.
+- **Sweep résidus TRELLIS/SDXL** : `cloud/src/app/buy/page.tsx`
+  ligne 44 — "Face fix (SDXL inpaint)" → "Face fix (AI inpaint)"
+  (la table pricing sera visible publiquement quand le Cloud sera live).
+  Le reste des mentions est dans des fichiers internes (build/*.md,
+  cloud/README.md) ou des submodules open-source — OK à laisser.
+- **Verif pages live** : index, privacy, terms, cloud OK 200.
+  ESSAIS_TEXTURING.md / PIPELINE_VOIE_B.md bien 404 (déplacés vers
+  notes/ hier).
+
+---
+
 ## 2026-05-24 (site web : primary download = MS Store deeplink)
 
 - **Contexte** : confirmé sur la machine du user que Smart App Control
