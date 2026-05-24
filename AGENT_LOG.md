@@ -10,6 +10,29 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (Cloud auth wiring: Resend SMTP + branded templates pushed via Management API)
+
+- **Problème :** mails Supabase de confirmation (a) envoyaient sur `localhost:3000`,
+  (b) rate-limit free tier (3/h) bloquait les retests, (c) rendu HTML défaut affreux.
+- **Actions:**
+  - Site URL + Redirect URLs Supabase pointés sur le Worker prod (via dashboard, pas trouvé
+    d'automatisation sans PAT à ce moment-là).
+  - SMTP custom Resend branché côté Supabase (host smtp.resend.com:465, user `resend`,
+    sender `onboarding@resend.dev` / "MyFabmesh.AI"). Free tier 3 000 mails/mois,
+    rate-limit Supabase passe à 30/h.
+  - 4 templates HTML brandés écrits dans `cloud/supabase/email-templates/`
+    (magic-link, confirm-signup, reset-password, change-email) — dark theme,
+    gradient `#e94560 → #a855f7`, footer Ayros Studio.
+  - Script idempotent `cloud/scripts/supabase-apply-email-templates.mjs` qui PATCH
+    les 4 sujets + 4 contenus via Management API en 1 appel. Lit le PAT depuis
+    env `SUPABASE_PAT` ou `build/supabase-pat.txt` (gitignored).
+- **Conclusion:** chaîne auth complète en prod : signup → SMTP Resend → mail brandé →
+  click → `myfabmesh-cloud.fabien65400.workers.dev/auth/callback` → session établie.
+  PAT Supabase stocké en sidecar gitignored, réutilisable pour toute config future
+  (MFA, OAuth providers, etc.) sans re-passer par le dashboard.
+
+---
+
 ## 2026-05-24 (Cloud deploy: abandon @opennextjs/cloudflare → static export + single Worker)
 
 - **Problème :** `@opennextjs/cloudflare build` crashait sur 3 runs CI

@@ -91,3 +91,8 @@ _commercial_audit_backup_*/
 _legacy_backup/
 *.backup_*
 build/cloudflare-token.txt
+build/resend-token.txt
+build/supabase-pat.txt
+
+# Supabase CLI temp / local state
+cloud/supabase/.temp/

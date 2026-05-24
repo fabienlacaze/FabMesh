@@ -4,28 +4,41 @@ Drop-in HTML templates for Supabase Auth → Email Templates.
 Dark theme matching the Cloud workspace: gradient pink → purple,
 Ayros Studio footer, mobile-safe `<table>` layout.
 
-## How to install (5 min, manual until we have a Supabase PAT)
+## How to install — automated
 
-Dashboard URL:
-https://supabase.com/dashboard/project/ovoccoipeqmkfnugkmyh/auth/templates
+```
+node cloud/scripts/supabase-apply-email-templates.mjs
+```
 
-For each of the 4 message types below, click the type in the left sidebar,
-paste the matching HTML into the **Message body (HTML)** field, save.
+The script reads a Supabase PAT from either:
+- env var `SUPABASE_PAT`, or
+- `build/supabase-pat.txt` (gitignored — paste an `sbp_...` token there)
+
+Then it PATCHes the project's Auth config with all 4 HTML bodies + subjects
+in one API call. Safe to re-run.
+
+## Mapping (for reference)
 
 | Supabase template name | File in this folder |
 |---|---|
 | Confirm signup | `confirm-signup.html` |
-| Invite user | (reuse `confirm-signup.html` — copy is the same) |
 | Magic Link | `magic-link.html` |
 | Change Email Address | `change-email.html` |
 | Reset Password | `reset-password.html` |
 
-You can also tweak the **Subject** field above the body. Suggestions:
-
+Subjects pushed by the script:
 - Confirm signup → `Welcome to MyFabmesh.AI — confirm your account`
 - Magic Link → `Your MyFabmesh.AI sign-in link`
 - Reset Password → `Reset your MyFabmesh.AI password`
 - Change Email → `Confirm your new MyFabmesh.AI email`
+
+## Manual fallback (if the API ever breaks)
+
+Dashboard URL:
+https://supabase.com/dashboard/project/ovoccoipeqmkfnugkmyh/auth/templates
+
+For each of the 4 message types, click the type in the left sidebar,
+paste the matching HTML into the **Message body (HTML)** field, save.
 
 ## Variables used
 
