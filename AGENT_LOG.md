@@ -10,6 +10,42 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-24 (Cloud ready check + DEPLOY_CLOUD_STEP_BY_STEP)
+
+Le user a demandé "est-ce qu'on est ready pour le Cloud ?". Bilan :
+
+**Code : 100% prêt.**
+- `npm run build` OK : 16 routes, 0 erreur TS.
+- Tests e2e MOCK (script automatisé) : tous passent
+  - GET / anonyme → 200 (landing visible)
+  - POST /api/mock-login → user créé avec 50 crédits
+  - GET /api/me avec cookie → user retourné
+  - GET / authentifié → 307 redirect vers /app/
+  - GET /app/ → 200 size=146608 (renderer desktop chargé, contient `index2.js`,
+    `meshyAPI-cloud`, `topbar`)
+  - POST /api/generate multipart → `{jobId, creditsRemaining: 49}` (mock decrement OK)
+  - Polling /api/jobs/[id] → "processing" puis "succeeded" après 5s avec
+    `url: /mock/sample.glb`
+  - GET /buy → 3 packs visibles
+  - GET /api/projects → `{projects: []}` (mock store vide pour nouveau user)
+
+**Deploy : il manque 3 signups externes** (Supabase / Stripe / Cloudflare).
+
+Ajouts ce tour :
+- `cloud/wrangler.toml` : config Cloudflare Pages (nodejs_compat, R2 binding,
+  vars publiques).
+- Découverte : `@cloudflare/next-on-pages` est BUGGÉ sur Windows (spawn npx
+  ENOENT sur Vercel CLI). → Bascule de stratégie vers **GitHub integration
+  native Cloudflare Pages** : Cloudflare clone le repo + build côté serveur,
+  pas besoin de build local Windows. Plus simple, plus fiable.
+- `cloud/DEPLOY_CLOUD_STEP_BY_STEP.md` : guide complet (1500+ lignes) avec
+  les ~5 actions humaines (PAT Supabase + Stripe signup + Cloudflare signup
+  + GitHub integration + env vars) + smoke tests + troubleshooting + Cog push
+  optionnel + custom domain optionnel + Sentry optionnel + timeline réaliste
+  (90 min pour Cloud test mode live, 3-4h pour Cloud avec notre Cog).
+
+---
+
 ## 2026-05-24 (autonomous prep pendant que user joue à Battlefield)
 
 User parti jouer en demandant ce qu'on pouvait faire en parallèle de

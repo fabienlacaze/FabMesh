@@ -1,0 +1,55 @@
+# Cloudflare Pages config for MyFabmesh.AI Cloud (Next.js 15).
+#
+# Deployment:
+#   npm run pages:build    # transpile Next.js -> Cloudflare Workers format
+#   npm run pages:deploy   # wrangler pages deploy
+#
+# First time:
+#   npx wrangler login     # auth via browser (one-time)
+#   npx wrangler pages project create myfabmesh-cloud --production-branch master
+#
+# Once live: https://myfabmesh-cloud.pages.dev/
+# Custom domain (optional): https://cloud.myfabmesh.ai/  (configure DNS in dashboard)
+#
+# Secrets (set via dashboard or `wrangler pages secret put NAME --project-name myfabmesh-cloud`):
+#   REPLICATE_API_TOKEN
+#   SUPABASE_SERVICE_ROLE_KEY
+#   STRIPE_SECRET_KEY
+#   STRIPE_WEBHOOK_SECRET
+#   R2_ACCESS_KEY_ID
+#   R2_SECRET_ACCESS_KEY
+#
+# Public env vars (NEXT_PUBLIC_*) go in vars/, not secrets.
+
+name = "myfabmesh-cloud"
+compatibility_date = "2025-09-01"
+
+# Required for Next.js server-side features (cookies, headers, etc.).
+# Without this flag, getServerSideProps / Server Components break in production.
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Public env vars baked into the build. Override per environment if needed.
+NEXT_PUBLIC_MOCK = "0"
+NEXT_PUBLIC_SITE_URL = "https://myfabmesh-cloud.pages.dev"
+# These are filled at deploy time from the dashboard:
+# NEXT_PUBLIC_SUPABASE_URL
+# NEXT_PUBLIC_SUPABASE_ANON_KEY
+# NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+# Production R2 bucket binding (uploaded GLBs).
+# The bucket name must exist beforehand:
+#   npx wrangler r2 bucket create myfabmesh-meshes
+[[r2_buckets]]
+binding = "MESHES"
+bucket_name = "myfabmesh-meshes"
+
+# Pages-specific config
+[pages.dev]
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Build settings (mirrored in the Cloudflare dashboard):
+#   Build command:   npm run pages:build
+#   Build output:    .vercel/output/static
+#   Root directory:  cloud/    (if monorepo)
