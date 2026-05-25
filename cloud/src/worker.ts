@@ -51,6 +51,7 @@ export interface Env {
   // URL is empty/unset so we can disable Modal instantly without redeploy.
   MODAL_TEXT2IMAGE_URL?: string;
   MODAL_BACKVIEW_URL?: string;
+  MODAL_MESH_URL?: string;
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -1284,6 +1285,54 @@ async function callModalBackView(env: Env, userId: string, input: {
     return `${env.R2_PUBLIC_URL}/${key}`;
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal back-view output');
+}
+
+/** Modal mesh endpoint (TRELLIS-2 image-to-3D).
+ *  POST { _auth, front_image_url, mode, seed, decimation_target, texture_size }
+ *  → GLB bytes (model/gltf-binary).
+ *  We upload the GLB into R2 and return its public URL.
+ *  Same auth pattern as the other Modal endpoints. */
+async function callModalMesh(env: Env, userId: string, input: {
+  frontImageUrl: string;
+  mode?: string;
+  seed?: number;
+  decimation_target?: number;
+  texture_size?: number;
+}, key: string): Promise<string> {
+  const url = env.MODAL_MESH_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_MESH_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      front_image_url: input.frontImageUrl,
+      mode: input.mode ?? '1024',
+      seed: input.seed,
+      decimation_target: input.decimation_target,
+      texture_size: input.texture_size,
+    }),
+    // TRELLIS-2 inference takes ~60-120s warm, plus snapshot cold-start
+    // can add another 30-60s on a cold container. 8 min cap.
+    signal: AbortSignal.timeout(480_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal mesh HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] mesh dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    await env.MESHES.put(key, buf, {
+      httpMetadata: { contentType: 'model/gltf-binary' },
+    });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  throw new Error('R2 bucket unavailable; cannot persist Modal mesh output');
 }
 
 async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
