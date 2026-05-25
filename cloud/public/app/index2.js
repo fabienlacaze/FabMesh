@@ -5566,11 +5566,17 @@ async function showStep2Preview(mesh) {
     }
   }
   // Load the GLB
+  console.log('[mesh-viewer] fetching mesh:', mesh.path);
   const buffer = await API.readMeshFile(mesh.path);
-  if (!buffer) return;
+  if (!buffer) {
+    console.error('[mesh-viewer] readMeshFile returned null for', mesh.path);
+    return;
+  }
+  console.log('[mesh-viewer] buffer bytes:', buffer.byteLength);
   if (wsModel) { wsScene.remove(wsModel); wsModel = null; }
   const loader = new GLTFLoader();
   loader.parse(buffer, '', (gltf) => {
+    console.log('[mesh-viewer] parse OK, scene children:', gltf.scene.children.length);
     wsModel = gltf.scene;
     wsScene.add(wsModel);
     _applyMeshTextureFilter(wsModel);
@@ -5659,6 +5665,11 @@ function _applyMeshTextureFilter(root) {
         tex.anisotropy = Math.min(16, maxAniso);
         tex.needsUpdate = true;
       }
+    }
+  }, (err) => {
+    console.error('[mesh-viewer] GLTFLoader.parse ERROR:', err);
+    if (typeof showToast === 'function') {
+      showToast('Mesh load error: ' + (err?.message || err), 'error');
     }
   });
 }
