@@ -720,25 +720,42 @@ class MyFabmeshMesh:
         out_path = f"/data/{job_id}.glb"
         err_path = f"/data/{job_id}.err"
         try:
+            def _fetch_image(url: str):
+                """Fetch a URL with a browser UA (Cloudflare R2 returns
+                403 to default python-urllib UA). Returns a PIL Image."""
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent":
+                             "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    data = r.read()
+                return _PImg.open(io.BytesIO(data))
+
             front_url = (payload.get("front_image_url") or "").strip()
             if not front_url:
                 raise ValueError("front_image_url required")
-            # Cloudflare R2 (pub-…r2.dev) blocks the default python-urllib
-            # User-Agent with 403. Send a browser UA to bypass the bot
-            # filter. Same hack we'll need for any Cloudflare-fronted CDN.
             print(f"[mesh] fetching front_url={front_url[:120]}", flush=True)
-            req = urllib.request.Request(
-                front_url,
-                headers={"User-Agent":
-                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as r:
-                front_bytes = r.read()
-            front_img = _PImg.open(io.BytesIO(front_bytes))
+            front_img = _fetch_image(front_url)
+            # Optional back image for multi-view conditioning. When
+            # provided, TRELLIS-2 gets a 2-image cond and the resulting
+            # texture is materially better on the back faces (matches
+            # the desktop's `FABMESH_TRELLIS2_MULTIVIEW_DIR` flow).
+            back_img = None
+            back_url = (payload.get("back_image_url") or "").strip()
+            if back_url:
+                print(f"[mesh] fetching back_url={back_url[:120]}", flush=True)
+                try:
+                    back_img = _fetch_image(back_url)
+                except Exception as e:
+                    print(f"[mesh] back image fetch failed ({e}) — "
+                          f"falling back to single-view", flush=True)
+
             glb_bytes = generate(
                 self.pipeline,
                 self.o_voxel,
                 front_img,
+                back_img=back_img,
                 mode=payload.get("mode") or "1024",
                 seed=int(payload.get("seed") or 42),
                 decimation_target=int(payload.get("decimation_target") or 500_000),
