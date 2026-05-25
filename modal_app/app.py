@@ -65,6 +65,9 @@ image = (
         # Image processing
         "pillow>=10",
         "numpy>=1.26,<2.0",
+        # FastAPI — required since Modal 1.x for @modal.fastapi_endpoint.
+        # `[standard]` pulls in uvicorn and a few useful extras.
+        "fastapi[standard]>=0.115",
     )
     # Ship our cloud-specific helper modules into the image. We do NOT
     # ship anything from `scripts/` — desktop pipeline stays separate.
@@ -94,16 +97,27 @@ app = modal.App("myfabmesh-cloud", image=image)
 @app.cls(
     gpu="L40S",
     timeout=600,
-    scaledown_window=180,
+    # 30 s is aggressive: a container is killed 30 s after its last
+    # request, so back-to-back gens stay warm but a user who pauses
+    # 1 min between gens will pay the snapshot-restore cold start
+    # again (~54 s). The trade-off: 180 s scaledown billed ~$0.10
+    # of idle L40S per gen, while 30 s billed ~$0.02. We checked the
+    # user's first invoice on 2026-05-25 ($0.52 for 2 gens) and it
+    # was dominated by scaledown idle time. 30 s is the sweet spot
+    # for the bursty workload of an image generator (one user
+    # iterates on 3-5 gens in a row, then is idle for minutes).
+    scaledown_window=30,
     enable_memory_snapshot=True,
     # Surface the HF token + R2 creds so the predictor can pull
     # private/gated weights and (optionally) upload directly to R2.
     secrets=[
-        modal.Secret.from_name("huggingface", required_keys=["HF_TOKEN"]),
-        # Shared secret the Worker sends in the Authorization header so
-        # random people can't burn our credits hitting the public URL.
+        # Shared secret the Worker sends in the request body so random
+        # people can't burn our credits hitting the public URL.
         # Set via:  modal secret create myfabmesh-shared SHARED_SECRET=<32-byte hex>
         modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
+        # HuggingFace token is OPTIONAL for the POC — RealVisXL V4.0 is
+        # a public model. If you ever swap in a gated model, uncomment:
+        #   modal.Secret.from_name("huggingface", required_keys=["HF_TOKEN"]),
     ],
 )
 class MyFabmeshPredictor:
