@@ -1,0 +1,225 @@
+<!doctype html>
+<!--
+  MyFabmesh admin dashboard — INDEPENDENT page, not linked from the
+  user-facing app or desktop. Served as a static asset at
+  https://myfabmesh-cloud.fabien65400.workers.dev/admin
+  Access is gated server-side: every /api/admin/* endpoint re-checks
+  the session email against ADMIN_EMAILS in cloud/src/worker.ts.
+  Don't bother trying to discover this page — the page itself only
+  shows data; without an admin cookie all the data fetches return 403.
+-->
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>MyFabmesh — Admin</title>
+  <style>
+    :root {
+      --bg-0: #0a0a0e; --bg-1: #14141a; --bg-2: #1d1d27;
+      --border: #2a2a36;
+      --text-0: #f0f0f0; --text-1: #c0c0cc; --text-2: #8888a0;
+      --accent: #c84cff; --ok: #4cd964; --warn: #ffaa33; --err: #ff5252;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 32px;
+      background: var(--bg-0); color: var(--text-0);
+      font: 14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    }
+    h1 { margin: 0 0 4px; font-size: 24px; }
+    .sub { color: var(--text-2); font-size: 13px; margin-bottom: 24px; }
+    .grid { display: grid; gap: 14px; }
+    .row-stats { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 24px; }
+    .card {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px;
+    }
+    .card .label {
+      text-transform: uppercase; letter-spacing: 1px;
+      font-size: 11px; color: var(--text-2);
+    }
+    .card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    .card .delta { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+    .card.accent .value { color: var(--accent); }
+    .card.ok    .value { color: var(--ok); }
+    .card.warn  .value { color: var(--warn); }
+    .card.err   .value { color: var(--err); }
+    table {
+      width: 100%; border-collapse: collapse;
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+    }
+    th, td {
+      padding: 8px 12px; text-align: left;
+      border-bottom: 1px solid var(--border); font-size: 13px;
+    }
+    th {
+      background: var(--bg-2); color: var(--text-2);
+      text-transform: uppercase; font-size: 10px; letter-spacing: 1px;
+    }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .actions { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+    .btn {
+      background: var(--bg-2); color: var(--text-0);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 14px; font-size: 13px; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { background: var(--bg-1); border-color: var(--accent); }
+    .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .err-msg {
+      background: rgba(255,82,82,0.1); border: 1px solid var(--err);
+      color: var(--err); padding: 12px; border-radius: 8px; margin-bottom: 16px;
+    }
+    .chart {
+      height: 200px; display: flex; align-items: flex-end;
+      gap: 2px; padding-top: 12px;
+    }
+    .bar {
+      flex: 1; background: var(--accent); border-radius: 2px 2px 0 0;
+      min-height: 2px; position: relative; transition: opacity .15s;
+    }
+    .bar:hover { opacity: 0.7; }
+    .bar:hover::after {
+      content: attr(data-tip); position: absolute;
+      bottom: 100%; left: 50%; transform: translateX(-50%);
+      background: var(--bg-2); border: 1px solid var(--border);
+      padding: 4px 8px; border-radius: 4px; white-space: nowrap;
+      font-size: 11px; color: var(--text-0);
+      margin-bottom: 4px; pointer-events: none; z-index: 2;
+    }
+    .by-type { margin-top: 24px; }
+    .muted { color: var(--text-2); }
+    .login-prompt {
+      max-width: 400px; margin: 80px auto; padding: 32px;
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 10px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 MyFabmesh — Admin</h1>
+  <div class="sub" id="generated_at">Loading…</div>
+
+  <div id="err" class="err-msg" style="display:none"></div>
+  <div id="login-prompt" class="login-prompt" style="display:none">
+    <h3>Sign in required</h3>
+    <p class="muted">This dashboard is only accessible to the admin account.</p>
+    <a class="btn btn-accent" href="/login?next=/admin">Sign in</a>
+  </div>
+
+  <div id="main" style="display:none">
+    <div class="actions">
+      <a class="btn btn-accent" href="/api/admin/history.xls" download>⬇ Export full history (Excel)</a>
+      <a class="btn" href="/api/admin/history.csv" download>… or CSV</a>
+      <button class="btn" onclick="refresh()">🔄 Refresh</button>
+    </div>
+
+    <div class="grid row-stats" id="stats"></div>
+
+    <div class="card">
+      <div class="label">Activity — last 30 days (ops/day)</div>
+      <div class="chart" id="chart"></div>
+    </div>
+
+    <div class="by-type">
+      <h3>By operation type</h3>
+      <table id="by-type-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th class="num">Count</th>
+            <th class="num">Revenue (€)</th>
+            <th class="num">Cost (€)</th>
+            <th class="num">Margin (€)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function refresh() {
+      const errEl = document.getElementById('err');
+      const main  = document.getElementById('main');
+      const login = document.getElementById('login-prompt');
+      errEl.style.display = 'none';
+      try {
+        const r = await fetch('/api/admin/stats.json', { credentials: 'include' });
+        if (r.status === 401) { main.style.display = 'none'; login.style.display = 'block'; return; }
+        if (r.status === 403) {
+          main.style.display = 'none';
+          errEl.textContent = 'Forbidden — this account is not in the admin allowlist.';
+          errEl.style.display = 'block'; return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        login.style.display = 'none';
+        main.style.display = 'block';
+        render(d);
+      } catch (e) {
+        main.style.display = 'none';
+        errEl.textContent = 'Load failed: ' + (e && e.message || e);
+        errEl.style.display = 'block';
+      }
+    }
+
+    function render(d) {
+      document.getElementById('generated_at').textContent =
+        'Generated ' + new Date(d.generated_at).toLocaleString('fr');
+
+      const stats = [
+        { label: 'Users (total)',          value: d.users.total, cls: 'accent' },
+        { label: 'Ops total',              value: d.operations.total },
+        { label: 'Ops succeeded',          value: d.operations.succeeded, cls: 'ok' },
+        { label: 'Ops failed',             value: d.operations.failed, cls: 'err' },
+        { label: 'Revenue net (€)',        value: d.revenue.total_net_eur.toFixed(2), cls: 'accent' },
+        { label: 'Cost Modal (€)',         value: d.revenue.total_cost_eur.toFixed(2), cls: 'warn' },
+        { label: 'Margin (€)',             value: d.revenue.total_margin_eur.toFixed(2), cls: 'ok',
+          delta: d.revenue.total_net_eur > 0
+            ? Math.round(100 * d.revenue.total_margin_eur / d.revenue.total_net_eur) + '% margin'
+            : '—' },
+        { label: 'Gross Stripe (€)',       value: d.revenue.total_gross_eur.toFixed(2),
+          delta: d.revenue.payments_count + ' paid orders' },
+        { label: 'Last 7d ops',            value: d.last_7d.ops },
+        { label: 'Last 7d margin (€)',     value: d.last_7d.margin_eur.toFixed(2), cls: 'ok' },
+        { label: 'Desktop downloads',      value: d.desktop_downloads_total },
+      ];
+      document.getElementById('stats').innerHTML = stats.map(s => `
+        <div class="card ${s.cls || ''}">
+          <div class="label">${s.label}</div>
+          <div class="value">${s.value}</div>
+          ${s.delta ? `<div class="delta">${s.delta}</div>` : ''}
+        </div>
+      `).join('');
+
+      const maxOps = Math.max(1, ...d.series_30d.map(p => p.ops));
+      document.getElementById('chart').innerHTML = d.series_30d.map(p => `
+        <div class="bar"
+             style="height:${Math.max(2, 200 * p.ops / maxOps)}px"
+             data-tip="${p.day}: ${p.ops} ops, ${p.users} users, ${p.margin_eur.toFixed(2)}€ margin"></div>
+      `).join('');
+
+      const rows = Object.entries(d.by_type)
+        .sort((a, b) => b[1].margin_eur - a[1].margin_eur)
+        .map(([type, m]) => `
+          <tr>
+            <td>${type}</td>
+            <td class="num">${m.count}</td>
+            <td class="num">${m.revenue_eur.toFixed(2)}</td>
+            <td class="num">${m.cost_eur.toFixed(2)}</td>
+            <td class="num" style="color:${m.margin_eur >= 0 ? 'var(--ok)' : 'var(--err)'}">
+              ${m.margin_eur.toFixed(2)}
+            </td>
+          </tr>
+        `).join('');
+      document.querySelector('#by-type-table tbody').innerHTML =
+        rows || '<tr><td colspan="5" class="muted">No data yet</td></tr>';
+    }
+
+    refresh();
+  </script>
+</body>
+</html>
