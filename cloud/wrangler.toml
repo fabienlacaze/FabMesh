@@ -82,7 +82,12 @@ R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
 # `_meta/userdaily/<userId>/<YYYY-MM-DD>`) and reset at UTC midnight.
 # Raise these once we're confident in the cost model — they exist
 # precisely to stop another cost runaway like the one on 2026-05-24.
-MAX_DAILY_SPEND_USD = "0.50"
+# Daily Replicate spend cap. Bumped 0.50 → 5.00 on 2026-05-25 because
+# a single mesh = $0.50 (Replicate fishwowater/trellis2) so the $0.50
+# cap allowed 1 mesh per day. $5 = ~10 meshes/day, matches expected
+# user volume. text2image + back-view live on Modal (own counter at
+# MAX_DAILY_MODAL_SPEND_USD), no impact here.
+MAX_DAILY_SPEND_USD = "5.00"
 # Per-user daily call cap. Bumped from 10 → 100 on 2026-05-25 because
 # the 10 ceiling was hit during a normal afternoon of debugging
 # (Modal migration POC). Modal is ~5-10× cheaper than Replicate, so a
