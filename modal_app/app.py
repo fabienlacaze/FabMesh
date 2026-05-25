@@ -72,6 +72,12 @@ image = (
     # Ship our cloud-specific helper modules into the image. We do NOT
     # ship anything from `scripts/` — desktop pipeline stays separate.
     .add_local_python_source("modal_app")
+    # Static asset shipped with the image: the back T-pose skeleton used
+    # as ControlNet OpenPose conditioning for back-view generation.
+    .add_local_file(
+        "modal_app/back_tpose_skeleton.png",
+        remote_path="/opt/back_tpose_skeleton.png",
+    )
 )
 
 app = modal.App("myfabmesh-cloud", image=image)
@@ -257,6 +263,175 @@ class MyFabmeshPredictor:
             seed=int(payload.get("seed") or 0),
             steps=int(payload.get("steps") or 30),
         )
+        return Response(content=png, media_type="image/png")
+
+
+# ===========================================================================
+# Back-view predictor — second @app.cls with its own snapshot.
+#
+# We don't merge with MyFabmeshPredictor because:
+#   - 4 extra models would push the text2image snapshot from ~9 GB to ~22 GB
+#     (past Modal's comfort zone) and slow the snapshot restore for the
+#     common-case text2image path.
+#   - text2image and back-view are independent — splitting them lets each
+#     scale-down on its own and lets a back-view cold start NOT block a
+#     text2image call (they can warm up in parallel).
+#
+# Snapshot contents (~15 GB CPU memory after @enter(snap=True)):
+#   - RealVisXL V4 base
+#   - ControlNet OpenPose SDXL (xinsir/controlnet-openpose-sdxl-1.0)
+#   - CLIP image encoder for IP-Adapter (h94/IP-Adapter)
+#   - Florence-2 large (microsoft/Florence-2-large, pinned revision)
+#   - The PIL back-skeleton image (shipped in /opt/back_tpose_skeleton.png)
+#
+# IP-Adapter weights are loaded by `pipe.load_ip_adapter()` AFTER the
+# pipe is on GPU — calling it before .to('cuda') silently picks the CPU
+# path and crashes at inference. That call lives in @enter(snap=False).
+# ===========================================================================
+@app.cls(
+    gpu="L40S",
+    timeout=600,
+    scaledown_window=30,
+    enable_memory_snapshot=True,
+    secrets=[
+        modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
+    ],
+)
+class MyFabmeshBackview:
+    @modal.enter(snap=True)
+    def load_to_cpu(self):
+        """CPU-only load — RealVisXL + ControlNet + Florence-2 + CLIP."""
+        t0 = time.time()
+        print("[backview/snap] loading RealVisXL + ControlNet + Florence-2 onto CPU…", flush=True)
+        import torch
+        from diffusers import StableDiffusionXLControlNetPipeline, ControlNetModel
+        from transformers import (
+            CLIPVisionModelWithProjection,
+            AutoProcessor, AutoModelForCausalLM,
+        )
+        from PIL import Image
+        from modal_app._backview import FLORENCE2_REVISION
+
+        image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+            "h94/IP-Adapter", subfolder="models/image_encoder",
+            torch_dtype=torch.float16,
+        )
+        controlnet = ControlNetModel.from_pretrained(
+            "xinsir/controlnet-openpose-sdxl-1.0",
+            torch_dtype=torch.float16,
+        )
+        self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+            "SG161222/RealVisXL_V4.0",
+            controlnet=controlnet,
+            torch_dtype=torch.float16,
+            variant="fp16",
+            use_safetensors=True,
+            image_encoder=image_encoder,
+        )
+        self.pipe.unet.to(torch.float16)
+        self.pipe.vae.to(torch.float16)
+        self.pipe.text_encoder.to(torch.float16)
+        self.pipe.text_encoder_2.to(torch.float16)
+        self.pipe.controlnet.to(torch.float16)
+
+        # Florence-2 — pinned revision + eager attn (sdpa missing in this rev).
+        self.florence_proc = AutoProcessor.from_pretrained(
+            "microsoft/Florence-2-large",
+            revision=FLORENCE2_REVISION,
+            trust_remote_code=True,
+        )
+        self.florence_model = AutoModelForCausalLM.from_pretrained(
+            "microsoft/Florence-2-large",
+            revision=FLORENCE2_REVISION,
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+            attn_implementation="eager",
+        )
+        # Florence-2 was written before DynamicCache (transformers 4.56+) —
+        # disable cache so prepare_inputs_for_generation doesn't crash.
+        self.florence_model.config.use_cache = False
+
+        # Pre-load the back skeleton (shipped via image.add_local_file).
+        self.skel_img = Image.open("/opt/back_tpose_skeleton.png").convert("RGB")
+
+        print(f"[backview/snap] CPU load done in {time.time() - t0:.1f}s", flush=True)
+
+    @modal.enter(snap=False)
+    def move_to_gpu(self):
+        """After snapshot restore + GPU attach: move everything to CUDA
+        and load IP-Adapter (it MUST come after .to('cuda')).
+        Expected ~25-35 s on L40S — the ControlNet + IP-Adapter make
+        this heavier than the text2image path's ~18 s GPU move."""
+        t0 = time.time()
+        print("[backview/ready] moving pipes → CUDA + loading IP-Adapter…", flush=True)
+        self.pipe.to("cuda")
+        self.florence_model.to("cuda")
+        self.pipe.load_ip_adapter(
+            "h94/IP-Adapter", subfolder="sdxl_models",
+            weight_name="ip-adapter-plus_sdxl_vit-h.safetensors",
+        )
+        # IP-Adapter scale set per-call (default 0.65 in _backview.generate).
+        try:
+            self.pipe.enable_xformers_memory_efficient_attention()
+        except Exception as e:
+            print(f"[backview/ready] xformers skipped: {e}", flush=True)
+        print(f"[backview/ready] GPU move done in {time.time() - t0:.1f}s", flush=True)
+
+    @modal.fastapi_endpoint(method="POST")
+    def back_view(self, payload: dict):
+        """HTTPS endpoint for back-view generation.
+
+        Request body (JSON):
+            {
+              "_auth": "<shared_secret>",
+              "front_image_url": "https://.../front.png",
+              "prompt_hint": "wearing red robe",  // optional
+              "ip_scale": 0.65,                   // optional
+              "steps": 30,                        // optional
+              "seed": 424242,                     // optional
+              "n_candidates": 4                   // optional
+            }
+        Response: raw PNG bytes (the best of N candidates by outfit color).
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+        import urllib.request
+        from PIL import Image
+        from modal_app._backview import generate
+
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload.get("_auth") or "").strip()
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+        front_url = (payload.get("front_image_url") or "").strip()
+        if not front_url:
+            raise HTTPException(status_code=400, detail="front_image_url required")
+
+        # Pull the front image (R2 public URL or any HTTPS URL).
+        try:
+            with urllib.request.urlopen(front_url, timeout=30) as r:
+                front_bytes = r.read()
+            front_img = Image.open(io.BytesIO(front_bytes)).convert("RGB")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"front download: {e}")
+
+        t0 = time.time()
+        img = generate(
+            self.pipe,
+            self.florence_proc, self.florence_model,
+            self.skel_img,
+            front_img,
+            prompt_hint=payload.get("prompt_hint") or "",
+            ip_scale=float(payload.get("ip_scale") or 0.65),
+            steps=int(payload.get("steps") or 30),
+            seed=int(payload.get("seed") or 424242),
+            n_candidates=int(payload.get("n_candidates") or 4),
+        )
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=False)
+        png = buf.getvalue()
+        print(f"[backview] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
 
