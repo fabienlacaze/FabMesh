@@ -10,6 +10,45 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud: Vague 1.6 — face_fix réel — atlas SDXL inpaint)
+
+- **Contexte :** TRELLIS-2 produit régulièrement des visages flous /
+  asymétriques (limitation de résolution voxel). Le desktop a
+  `scripts/face_inpaint_atlas.py` qui rend le mesh ortho-front, détecte
+  le visage via OpenCV Haar Cascade, projette le bbox sur l'atlas UV,
+  fait un SDXL inpaint à 1024² sur la zone, recompose dans l'atlas
+  natif. Le Worker propage déjà `face_fix: bool` depuis longtemps mais
+  côté Modal c'était NO-OP — un flag accepté qui ne faisait rien.
+- **Substitution clé vs desktop :** PAS de pyrender / OSMesa côté cloud
+  (trop fragile à builder dans Modal images, dépend de l'environnement
+  GL headless). À la place, **detection sur l'image FRONT d'entrée**
+  qui sert déjà à conditionner TRELLIS-2. Justification : TRELLIS-2
+  positionne le visage du mesh aux MÊMES coords screen-space que dans
+  l'image conditionnante (c'est ce que la chaîne ortho-front du
+  pipeline garantit). Donc bbox(front_img) projetée sur l'atlas via la
+  même formule ortho landed on the same UV triangles que
+  bbox(rendered_mesh) would. Le reste — projection UV, inpaint, blend —
+  est verbatim.
+- **Lazy-load :** SDXL inpaint (RealVisXL_V4.0 weights via
+  `StableDiffusionXLInpaintPipeline`) chargé paresseusement sur
+  `MyFabmeshMesh.inpaint_pipe`. Ne pas le mettre dans
+  `@enter()` parce que 90% des calls mesh n'ont pas face_fix, et le
+  charger ajouterait ~30-60s à tous les cold starts. Premier
+  `face_fix=true` paye le coût (~60s), suivants l'utilisent en cache
+  jusqu'au scaledown.
+- **Robustesse :** wrapped dans try/except, fallback bbox = top 30% si
+  Haar Cascade rate. `apply_face_fix` retourne le GLB ORIGINAL inchangé
+  si quoi que ce soit échoue (passthrough policy — un flag face_fix
+  ne doit jamais casser un mesh valide). Même politique que le desktop
+  (shutil.copy de fallback).
+- **Aucune nouvelle dépendance Modal :** opencv-python-headless +
+  diffusers déjà dans `mesh_image`. cv2.data.haarcascades bundled même
+  dans la version headless.
+- **Statut :** Python ast OK. Prêt pour deploy. Vague 1 cloud parity
+  COMPLÈTE — il reste juste le deploy + smoke test.
+
+---
+
 ## 2026-05-25 (Cloud: Vague 1.5 — Auto-rectify orthographic front / 3-4 ISO)
 
 - **Contexte :** la plupart des références utilisateur sont des concept-arts

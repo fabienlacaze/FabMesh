@@ -877,8 +877,39 @@ class MyFabmeshMesh:
         self.pipeline.cuda()
         import o_voxel
         self.o_voxel = o_voxel
+        # SDXL inpaint pipe is lazy-loaded on first face_fix request — it's
+        # ~6 GB and most mesh calls don't ask for face_fix, so paying that
+        # cost upfront would slow every cold start by 30-60s for nothing.
+        self.inpaint_pipe = None
         print(f"[mesh/ready] full load + GPU move done in {time.time() - t0:.1f}s",
               flush=True)
+
+    def _get_inpaint_pipe(self):
+        """Lazy-load SDXL inpaint (RealVisXL_V4.0 weights). Cached on the
+        instance so subsequent face_fix calls don't reload."""
+        if self.inpaint_pipe is not None:
+            return self.inpaint_pipe
+        t0 = time.time()
+        print("[mesh/face-fix] loading SDXL inpaint (RealVisXL V4.0)…", flush=True)
+        import torch
+        from diffusers import StableDiffusionXLInpaintPipeline
+        pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
+            "SG161222/RealVisXL_V4.0",
+            torch_dtype=torch.float16,
+            variant="fp16",
+            use_safetensors=True,
+        )
+        pipe.unet.to(torch.float16)
+        pipe.vae.to(torch.float16)
+        pipe.text_encoder.to(torch.float16)
+        pipe.text_encoder_2.to(torch.float16)
+        # CPU offload — keeps VRAM headroom for the TRELLIS-2 pipeline
+        # that's already on GPU. Same trade-off the desktop makes.
+        pipe.enable_model_cpu_offload()
+        self.inpaint_pipe = pipe
+        print(f"[mesh/face-fix] SDXL inpaint ready in {time.time() - t0:.1f}s",
+              flush=True)
+        return self.inpaint_pipe
 
     @modal.method()
     def generate_to_volume(self, job_id: str, payload: dict):
@@ -936,6 +967,29 @@ class MyFabmeshMesh:
                 decimation_target=int(payload.get("decimation_target") or 500_000),
                 texture_size=int(payload.get("texture_size") or 2048),
             )
+
+            # Optional face polish — SDXL inpaint on the atlas face region.
+            # Verbatim port of scripts/face_inpaint_atlas.py (with the
+            # pyrender step replaced by face detection on the original
+            # front input — TRELLIS-2 puts the mesh face at the same
+            # screen-space coords as the input image, see _face_fix.py).
+            # Wrapped in try/except so a face_fix failure never tanks an
+            # otherwise-valid mesh (same passthrough policy as desktop).
+            if payload.get("face_fix"):
+                try:
+                    from modal_app._face_fix import apply_face_fix
+                    t_ff = time.time()
+                    glb_bytes = apply_face_fix(
+                        glb_bytes,
+                        front_img,
+                        self._get_inpaint_pipe(),
+                        strength=float(payload.get("face_fix_strength") or 0.4),
+                    )
+                    print(f"[mesh] face_fix done in {time.time()-t_ff:.1f}s "
+                          f"bytes={len(glb_bytes)}", flush=True)
+                except Exception as e:
+                    print(f"[mesh] face_fix skipped: {e}", flush=True)
+
             with open(out_path, "wb") as f:
                 f.write(glb_bytes)
             mesh_output_volume.commit()
