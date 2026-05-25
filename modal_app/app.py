@@ -708,6 +708,84 @@ class MyFabmeshBackview:
               f"dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
+    @modal.fastapi_endpoint(method="POST")
+    def rectify(self, payload: dict):
+        """HTTPS endpoint for strict orthographic FRONT (or 3/4 ISO) view
+        rectification. Verbatim port of `scripts/generate_front_strict.py`.
+
+        Runs the SAME pipeline as back_view/tpose but with ControlNet
+        neutralized (cn_scale=0 + black image). Multi-seed (default 3),
+        picks the best candidate by horizontal-symmetry IoU on the rembg
+        silhouette.
+
+        Request body (JSON):
+            {
+              "_auth": "<shared_secret>",
+              "prompt": "concept-art warrior",        // optional in img2img
+              "ref_image_url": "https://.../img.png", // optional, enables IPAdapter
+              "mode": "front" | "iso",                // default "front"
+              "seeds": 3,                             // optional
+              "steps": 30,                            // optional
+              "guidance": 7.0,                        // optional
+              "ip_scale": 0.7                         // optional
+            }
+        Response: raw PNG bytes (rembg + centered).
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+        import urllib.request
+        from PIL import Image
+        from modal_app._rectify import generate as rectify_generate
+
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload.get("_auth") or "").strip()
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+        prompt = (payload.get("prompt") or "").strip()
+        ref_url = (payload.get("ref_image_url") or "").strip()
+        if not prompt and not ref_url:
+            raise HTTPException(status_code=400, detail="prompt or ref_image_url required")
+
+        ref_img = None
+        if ref_url:
+            try:
+                req = urllib.request.Request(
+                    ref_url,
+                    headers={"User-Agent":
+                             "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    ref_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"ref download: {e}")
+            if not prompt:
+                # Same generic fallback as desktop generate_front_strict.py:main()
+                prompt = "subject"
+
+        mode = (payload.get("mode") or "front").strip()
+        if mode not in ("front", "iso"):
+            mode = "front"
+
+        t0 = time.time()
+        img = rectify_generate(
+            self.pipe,
+            prompt,
+            ref_img=ref_img,
+            mode=mode,
+            seeds=int(payload.get("seeds") or 3),
+            steps=int(payload.get("steps") or 30),
+            guidance=float(payload.get("guidance") or 7.0),
+            ip_scale=float(payload.get("ip_scale") or 0.7),
+        )
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=False)
+        png = buf.getvalue()
+        print(f"[rectify] DONE mode={mode} dt={time.time() - t0:.1f}s "
+              f"bytes={len(png)}", flush=True)
+        return Response(content=png, media_type="image/png")
+
 
 # ===========================================================================
 # Mesh predictor — TRELLIS-2 image-to-3D — ASYNC ARCHITECTURE.
