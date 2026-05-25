@@ -132,7 +132,17 @@
       const j = await getJSON('/api/projects');
       return Array.isArray(j) ? j : (j.projects || []);
     },
-    deleteProject: async ({ id } = {}) => postJSON('/api/projects/delete', { id }),
+    deleteProject: async ({ projectName, id } = {}) => {
+      // Cloud projects are virtual — they're just a group of jobs sharing
+      // a `project_name`. The Worker exposes /api/cloud-projects/delete
+      // which nulls the project_name on every job belonging to the user.
+      // The renderer calls this with `projectName`; older callers may
+      // still pass `id` (= projectName in their semantics).
+      const name = projectName || id;
+      if (!name) return { ok: false, error: 'projectName required' };
+      try { return await postJSON('/api/cloud-projects/delete', { projectName: name }); }
+      catch (e) { return { ok: false, error: String(e) }; }
+    },
 
     /* image-to-3D (the headline feature).
        Two fixes wrapped in here:
