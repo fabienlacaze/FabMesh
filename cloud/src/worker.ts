@@ -83,6 +83,12 @@ export interface Env {
   // are checked against the desktop's NSFW_KEYWORDS + NSFW_COMBOS.
   FABMESH_UNRESTRICTED?: string;
 
+  // Secret password gating /admin and every /api/admin/* endpoint. In
+  // addition to the Supabase email check, the caller must present a
+  // valid admin_session cookie set by POST /api/admin/login with this
+  // password. Stored as a Cloudflare Worker secret — never logged.
+  ADMIN_PASSWORD?: string;
+
   SUPABASE_SERVICE_ROLE_KEY?: string;
 
   // Optional R2 S3 endpoint (kept for parity; native R2 binding is preferred).
@@ -2319,6 +2325,48 @@ const ADMIN_EMAILS = new Set<string>([
   'fabien65400@hotmail.fr',
 ]);
 
+// Admin session — short-lived signed token stored in an httpOnly cookie.
+// Layer 2 of defense on top of the Supabase email check. Even if a
+// non-admin email somehow ends up in ADMIN_EMAILS, they still can't get
+// in without knowing ADMIN_PASSWORD. Signature uses HMAC-SHA256.
+const ADMIN_COOKIE = 'admin_session';
+const ADMIN_TTL_SEC = 60 * 60 * 4;  // 4 hours
+
+async function _hmacSign(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
+  // Base64url so the value is cookie-safe.
+  const bytes = new Uint8Array(sig);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+async function _adminTokenCheck(req: Request, env: Env): Promise<boolean> {
+  const secret = env.ADMIN_PASSWORD;
+  if (!secret) return false;  // Server misconfigured — fail closed.
+  const raw = parseCookies(req)[ADMIN_COOKIE];
+  if (!raw) return false;
+  const dot = raw.lastIndexOf('.');
+  if (dot < 0) return false;
+  const payload = raw.slice(0, dot);
+  const sig = raw.slice(dot + 1);
+  // payload is "<userEmail>:<expiresAt>"
+  const parts = payload.split(':');
+  if (parts.length !== 2) return false;
+  const exp = parseInt(parts[1], 10);
+  if (!exp || Date.now() / 1000 > exp) return false;
+  const expectedSig = await _hmacSign(secret, payload);
+  // Constant-time compare to dodge timing leaks.
+  if (sig.length !== expectedSig.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expectedSig.charCodeAt(i);
+  return diff === 0;
+}
+
 async function _requireAdmin(req: Request, env: Env)
   : Promise<{ id: string; email: string | null; credits: number } | Response> {
   const user = await getSessionUser(req, env);
@@ -2326,7 +2374,59 @@ async function _requireAdmin(req: Request, env: Env)
   if (!user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
     return err(403, 'forbidden');
   }
+  // Second factor — must have unlocked /admin with the password and
+  // still hold a valid signed session cookie.
+  if (!(await _adminTokenCheck(req, env))) {
+    return err(401, 'admin_password_required');
+  }
   return user;
+}
+
+/** POST /api/admin/login — exchange the admin password for a signed
+ *  cookie. Body: { password: string }. The cookie is httpOnly + Secure
+ *  + SameSite=Strict and TTL 4h. Rate-limited by Cloudflare's default
+ *  burst protection (no extra logic needed at this scale). */
+async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user || !user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
+    // We don't disclose which factor failed — generic 401 keeps the
+    // password attack surface low.
+    return err(401, 'unauthorized');
+  }
+  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
+
+  let body: { password?: string };
+  try { body = await req.json() as { password?: string }; } catch { return err(400, 'bad json'); }
+  const provided = String(body.password ?? '');
+  if (!provided) return err(400, 'password required');
+  // Constant-time compare so a wrong password doesn't leak length.
+  if (provided.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
+  let diff = 0;
+  for (let i = 0; i < provided.length; i++) diff |= provided.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
+  if (diff !== 0) return err(401, 'invalid password');
+
+  const exp = Math.floor(Date.now() / 1000) + ADMIN_TTL_SEC;
+  const payload = `${user.email.toLowerCase()}:${exp}`;
+  const sig = await _hmacSign(env.ADMIN_PASSWORD, payload);
+  const value = `${payload}.${sig}`;
+  return new Response(JSON.stringify({ ok: true, expires_at: exp }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'set-cookie': `${ADMIN_COOKIE}=${value}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ADMIN_TTL_SEC}`,
+    },
+  });
+}
+
+/** POST /api/admin/logout — clear the admin cookie. Idempotent. */
+async function handleAdminLogout(_req: Request, _env: Env): Promise<Response> {
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'set-cookie': `${ADMIN_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`,
+    },
+  });
 }
 
 /** GET /api/history.csv — PUBLIC user export. Shows the user their own
@@ -2606,9 +2706,8 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   });
 }
 
-// HTML-escape (Excel parses the file as HTML when served with the
-// vnd.ms-excel mime, so user-supplied strings need entity-escaping).
-function _htmlEsc(s: unknown): string {
+// XML-escape for cell text — minimal entities required by xlsx spec.
+function _xmlEsc(s: unknown): string {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -2616,39 +2715,175 @@ function _htmlEsc(s: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
-// Render an Excel-compatible workbook by wrapping an HTML <table> with
-// the application/vnd.ms-excel mime type. Excel 2003+ opens it natively
-// (it shows a "the file format doesn't match its extension" toast the
-// first time, then opens fine). Cheaper than shipping a 500 KB xlsx
-// library on a Cloudflare Worker and good enough for export use cases.
-function _excelResponse(filename: string, headers: string[], rows: string[][]): Response {
-  const xml = [
-    '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
-    '      xmlns:x="urn:schemas-microsoft-com:office:excel"',
-    '      xmlns="http://www.w3.org/TR/REC-html40">',
-    '<head><meta charset="utf-8"><style>',
-    'table { border-collapse: collapse; }',
-    'th { background:#1d1d27; color:#fff; padding:6px 10px; text-align:left; }',
-    'td { padding:4px 10px; border:1px solid #ccc; }',
-    'td.num { mso-number-format:"#,##0.0000"; text-align:right; }',
-    'td.int { mso-number-format:"0"; text-align:right; }',
-    '</style></head><body>',
-    '<table>',
-    '<thead><tr>' + headers.map(h => `<th>${_htmlEsc(h)}</th>`).join('') + '</tr></thead>',
-    '<tbody>',
-    ...rows.map(r => '<tr>' + r.join('') + '</tr>'),
-    '</tbody></table></body></html>',
-  ].join('\n');
-  return new Response('﻿' + xml, {
+// CRC-32 over a byte array — needed for ZIP file headers. Standard
+// polynomial 0xEDB88320, init 0xFFFFFFFF, final XOR 0xFFFFFFFF. Table
+// is computed lazily on first call.
+let _crcTable: Uint32Array | null = null;
+function _crc32(buf: Uint8Array): number {
+  if (!_crcTable) {
+    _crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      _crcTable[i] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) crc = (_crcTable[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8)) >>> 0;
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+/** Build a minimal valid .xlsx workbook (ZIP container with the five
+ *  required XML files). Stored uncompressed for code simplicity — a
+ *  typical history export is 50-200 KB, perfectly fine without deflate.
+ *  Returns the raw .xlsx bytes ready to ship as a Response body. */
+function _buildXlsx(headers: string[], rows: Array<Array<string | number>>): Uint8Array {
+  const enc = new TextEncoder();
+  // Convert each cell to xlsx <c> XML. Numbers go in as type "n",
+  // everything else as inline string ("inlineStr"). Skips the
+  // sharedStrings.xml file → simpler workbook, still valid.
+  function cellXml(v: string | number, colLetter: string, row: number): string {
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return `<c r="${colLetter}${row}" t="n"><v>${v}</v></c>`;
+    }
+    return `<c r="${colLetter}${row}" t="inlineStr"><is><t xml:space="preserve">${_xmlEsc(v)}</t></is></c>`;
+  }
+  function colLetter(i: number): string {
+    let s = '';
+    let n = i;
+    while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; }
+    return s;
+  }
+  const allRows = [headers, ...rows];
+  const sheetRows: string[] = [];
+  for (let r = 0; r < allRows.length; r++) {
+    const cells = allRows[r].map((v, c) => cellXml(v, colLetter(c), r + 1)).join('');
+    sheetRows.push(`<row r="${r + 1}">${cells}</row>`);
+  }
+  const sheetXml =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+    `<sheetData>${sheetRows.join('')}</sheetData></worksheet>`;
+
+  const files: Record<string, string> = {
+    '[Content_Types].xml':
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/>` +
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+      `</Types>`,
+    '_rels/.rels':
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+      `</Relationships>`,
+    'xl/workbook.xml':
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"` +
+      ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+      `<sheets><sheet name="History" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels':
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
+      `</Relationships>`,
+    'xl/worksheets/sheet1.xml': sheetXml,
+  };
+
+  // Now wrap the files into a ZIP archive. Stored (no compression),
+  // simpler to code and Excel reads it just the same.
+  type Entry = { name: Uint8Array; data: Uint8Array; crc: number; offset: number };
+  const entries: Entry[] = [];
+  const parts: Uint8Array[] = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const nameBytes = enc.encode(name);
+    const dataBytes = enc.encode(content);
+    const crc = _crc32(dataBytes);
+    // Local file header (30 bytes fixed + name).
+    const hdr = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(hdr.buffer);
+    dv.setUint32(0,  0x04034b50, true);    // signature
+    dv.setUint16(4,  20, true);            // version needed
+    dv.setUint16(6,  0, true);             // flags
+    dv.setUint16(8,  0, true);             // method = stored
+    dv.setUint16(10, 0, true);             // mod time
+    dv.setUint16(12, 0x21, true);          // mod date (any valid value works)
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, dataBytes.length, true); // compressed size
+    dv.setUint32(22, dataBytes.length, true); // uncompressed size
+    dv.setUint16(26, nameBytes.length, true);
+    dv.setUint16(28, 0, true);
+    hdr.set(nameBytes, 30);
+    entries.push({ name: nameBytes, data: dataBytes, crc, offset });
+    parts.push(hdr, dataBytes);
+    offset += hdr.length + dataBytes.length;
+  }
+  // Central directory.
+  const cdParts: Uint8Array[] = [];
+  let cdSize = 0;
+  for (const e of entries) {
+    const cd = new Uint8Array(46 + e.name.length);
+    const dv = new DataView(cd.buffer);
+    dv.setUint32(0,  0x02014b50, true);    // central dir signature
+    dv.setUint16(4,  20, true);            // version made by
+    dv.setUint16(6,  20, true);            // version needed
+    dv.setUint16(8,  0, true);
+    dv.setUint16(10, 0, true);             // method stored
+    dv.setUint16(12, 0, true);
+    dv.setUint16(14, 0x21, true);
+    dv.setUint32(16, e.crc, true);
+    dv.setUint32(20, e.data.length, true);
+    dv.setUint32(24, e.data.length, true);
+    dv.setUint16(28, e.name.length, true);
+    dv.setUint16(30, 0, true);
+    dv.setUint16(32, 0, true);
+    dv.setUint16(34, 0, true);
+    dv.setUint16(36, 0, true);
+    dv.setUint32(38, 0, true);
+    dv.setUint32(42, e.offset, true);
+    cd.set(e.name, 46);
+    cdParts.push(cd);
+    cdSize += cd.length;
+  }
+  const cdOffset = offset;
+  for (const p of cdParts) { parts.push(p); offset += p.length; }
+  // End of central directory record.
+  const eocd = new Uint8Array(22);
+  const dv = new DataView(eocd.buffer);
+  dv.setUint32(0,  0x06054b50, true);
+  dv.setUint16(4,  0, true);
+  dv.setUint16(6,  0, true);
+  dv.setUint16(8,  entries.length, true);
+  dv.setUint16(10, entries.length, true);
+  dv.setUint32(12, cdSize, true);
+  dv.setUint32(16, cdOffset, true);
+  dv.setUint16(20, 0, true);
+  parts.push(eocd);
+
+  // Concatenate.
+  const total = parts.reduce((a, p) => a + p.length, 0);
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const p of parts) { out.set(p, pos); pos += p.length; }
+  return out;
+}
+
+function _xlsxResponse(filename: string, headers: string[], rows: Array<Array<string | number>>): Response {
+  const bytes = _buildXlsx(headers, rows);
+  return new Response(bytes, {
     headers: {
-      'content-type': 'application/vnd.ms-excel; charset=utf-8',
+      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'content-disposition': `attachment; filename="${filename}"`,
     },
   });
 }
 
-/** GET /api/history.xls — PUBLIC user export in Excel format.
- *  Same columns as /api/history.csv (no margin), Excel-shaped. */
+/** GET /api/history.xlsx — PUBLIC user export in proper Excel format
+ *  (real OOXML, no warning on open). Same columns as /api/history.csv
+ *  (no margin), Excel-shaped. */
 async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -2668,7 +2903,7 @@ async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
     created_at: string; finished_at: string | null;
     project_name: string | null;
   };
-  const rows: string[][] = ((data ?? []) as J[]).map(j => {
+  const rows: Array<Array<string | number>> = ((data ?? []) as J[]).map(j => {
     const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const durMs = j.options?.duration_ms != null
       ? Number(j.options.duration_ms)
@@ -2677,21 +2912,64 @@ async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
           : 0);
     const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
     return [
-      `<td>${_htmlEsc(new Date(j.created_at).toLocaleString('fr'))}</td>`,
-      `<td>${_htmlEsc(opType)}</td>`,
-      `<td>${_htmlEsc(j.status)}</td>`,
-      `<td class="num">${(durMs / 1000).toFixed(1)}</td>`,
-      `<td class="int">${credits}</td>`,
-      `<td>${_htmlEsc(j.project_name ?? '')}</td>`,
-      `<td>${_htmlEsc(j.asset_type ?? '')}</td>`,
-      `<td>${_htmlEsc(j.mode ?? '')}</td>`,
+      new Date(j.created_at).toLocaleString('fr'),
+      opType,
+      j.status,
+      Number((durMs / 1000).toFixed(1)),
+      credits,
+      j.project_name ?? '',
+      j.asset_type ?? '',
+      j.mode ?? '',
     ];
   });
   const stamp = new Date().toISOString().slice(0, 10);
-  return _excelResponse(`myfabmesh-history-${stamp}.xls`, headers, rows);
+  return _xlsxResponse(`myfabmesh-history-${stamp}.xlsx`, headers, rows);
 }
 
-/** GET /api/admin/history.xls — ADMIN ONLY full export with margin. */
+/** GET /api/history.json — same data the popup shows the user
+ *  (rendered as a table in cloud/public/app/index.html). No margin. */
+async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  const { data, error } = await supabaseAdmin(env)
+    .from('jobs')
+    .select('id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) return err(500, error.message);
+
+  type J = {
+    id: string; asset_type: string; mode: string; status: string;
+    credit_cost: number; options: Record<string, unknown> | null;
+    created_at: string; finished_at: string | null;
+    project_name: string | null;
+  };
+  const rows = ((data ?? []) as J[]).map(j => {
+    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const durMs = j.options?.duration_ms != null
+      ? Number(j.options.duration_ms)
+      : (j.finished_at
+          ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
+          : 0);
+    const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
+    return {
+      id: j.id,
+      date: j.created_at,
+      type: opType,
+      status: j.status,
+      duration_s: +(durMs / 1000).toFixed(1),
+      credits,
+      project: j.project_name ?? '',
+      asset_type: j.asset_type ?? '',
+      mode: j.mode ?? '',
+    };
+  });
+  return json({ rows });
+}
+
+/** GET /api/admin/history.xlsx — ADMIN ONLY full export with margin. */
 async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
   if (userOrResp instanceof Response) return userOrResp;
@@ -2727,7 +3005,7 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
     project_name: string | null; mesh_url: string | null;
   };
   let totalMargin = 0;
-  const rows: string[][] = ((data ?? []) as J[]).map(j => {
+  const rows: Array<Array<string | number>> = ((data ?? []) as J[]).map(j => {
     const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const costUsd = Number(j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
@@ -2743,30 +3021,28 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
     const marginEur = revenueEur - costEur;
     totalMargin += marginEur;
     return [
-      `<td>${_htmlEsc(new Date(j.created_at).toLocaleString('fr'))}</td>`,
-      `<td>${_htmlEsc(emailById.get(j.user_id) ?? '')}</td>`,
-      `<td>${_htmlEsc(opType)}</td>`,
-      `<td>${_htmlEsc(j.status)}</td>`,
-      `<td class="num">${(durMs / 1000).toFixed(1)}</td>`,
-      `<td class="int">${credits}</td>`,
-      `<td class="num">${costUsd.toFixed(4)}</td>`,
-      `<td class="num">${costEur.toFixed(4)}</td>`,
-      `<td class="num">${revenueEur.toFixed(4)}</td>`,
-      `<td class="num">${marginEur.toFixed(4)}</td>`,
-      `<td>${_htmlEsc(j.project_name ?? '')}</td>`,
-      `<td>${_htmlEsc(j.asset_type ?? '')}</td>`,
-      `<td>${_htmlEsc(j.mode ?? '')}</td>`,
-      `<td>${_htmlEsc(j.mesh_url ?? '')}</td>`,
+      new Date(j.created_at).toLocaleString('fr'),
+      emailById.get(j.user_id) ?? '',
+      opType,
+      j.status,
+      Number((durMs / 1000).toFixed(1)),
+      credits,
+      Number(costUsd.toFixed(4)),
+      Number(costEur.toFixed(4)),
+      Number(revenueEur.toFixed(4)),
+      Number(marginEur.toFixed(4)),
+      j.project_name ?? '',
+      j.asset_type ?? '',
+      j.mode ?? '',
+      j.mesh_url ?? '',
     ];
   });
-  // Append a TOTAL row at the bottom for the margin column.
+  // Append a TOTAL row.
   rows.push([
-    `<td colspan="9" style="text-align:right;font-weight:bold;background:#f0f0f0">TOTAL margin (EUR)</td>`,
-    `<td class="num" style="font-weight:bold;background:#f0f0f0">${totalMargin.toFixed(4)}</td>`,
-    `<td colspan="4" style="background:#f0f0f0"></td>`,
+    '', '', '', '', '', '', '', '', 'TOTAL margin (EUR)', Number(totalMargin.toFixed(4)), '', '', '', '',
   ]);
   const stamp = new Date().toISOString().slice(0, 10);
-  return _excelResponse(`admin-history-${stamp}.xls`, headers, rows);
+  return _xlsxResponse(`admin-history-${stamp}.xlsx`, headers, rows);
 }
 
 /** GET /download/track — increment the desktop-downloads counter in R2.
@@ -2895,9 +3171,12 @@ export default {
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
-        if (pathname === '/api/history.xls'           && method === 'GET')  return await handleHistoryXls(req, env);
+        if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
+        if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
+        if (pathname === '/api/admin/login'           && method === 'POST') return await handleAdminLogin(req, env);
+        if (pathname === '/api/admin/logout'          && method === 'POST') return await handleAdminLogout(req, env);
         if (pathname === '/api/admin/history.csv'     && method === 'GET')  return await handleAdminHistoryCsv(req, env);
-        if (pathname === '/api/admin/history.xls'     && method === 'GET')  return await handleAdminHistoryXls(req, env);
+        if (pathname === '/api/admin/history.xlsx'    && method === 'GET')  return await handleAdminHistoryXls(req, env);
         if (pathname === '/api/admin/stats.json'      && method === 'GET')  return await handleAdminStats(req, env);
         if (pathname === '/download/track'            && method === 'GET')  return await handleDownloadTrack(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
