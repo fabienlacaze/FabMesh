@@ -413,7 +413,17 @@ async function refreshProjectsPage() {
     const p = ensure(cleanName);
     p.images.push(...(f.images || []).map(img => ({ path: img, folder: f.name })));
     if (!p.thumb && f.images && f.images[0]) p.thumb = f.images[0];
-    if (f.created && f.created > p.latestTimestamp) p.latestTimestamp = f.created;
+    // f.created is an ISO string ("2026-05-26T00:42:37.000Z") in cloud
+    // (and a number ms on desktop) — coerce both to ms so the sort at
+    // line 477 actually orders newest-first. Without `new Date(...)`,
+    // `"2026..." > 0` evaluates NaN > 0 = false → every imageless-mesh
+    // project stays at latestTimestamp = 0 → indeterministic order.
+    if (f.created) {
+      const ts = typeof f.created === 'number'
+        ? f.created
+        : new Date(f.created).getTime();
+      if (!isNaN(ts) && ts > p.latestTimestamp) p.latestTimestamp = ts;
+    }
     // Keep the latest prompt for the project (folders are listed newest first)
     if (!p.prompt && f.prompt) p.prompt = f.prompt;
     // Merge back-photo map from disk so the FRONT/BACK bar shows even
