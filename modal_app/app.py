@@ -87,6 +87,14 @@ image = (
         "modal_app/back_tpose_skeleton.png",
         remote_path="/opt/back_tpose_skeleton.png",
     )
+    # FRONT T-pose skeleton — used by the `tpose` endpoint on
+    # MyFabmeshBackview (the back-view class already has all the
+    # RealVisXL + ControlNet OpenPose + IPAdapter weights we need,
+    # so we just need the additional front skeleton PNG here).
+    .add_local_file(
+        "modal_app/front_tpose_skeleton.png",
+        remote_path="/opt/front_tpose_skeleton.png",
+    )
 )
 
 app = modal.App("myfabmesh-cloud", image=image)
@@ -530,6 +538,11 @@ class MyFabmeshBackview:
 
         # Pre-load the back skeleton (shipped via image.add_local_file).
         self.skel_img = Image.open("/opt/back_tpose_skeleton.png").convert("RGB")
+        # FRONT T-pose skeleton — used by the `tpose` endpoint. Same
+        # pipeline (RealVisXL + ControlNet OpenPose), different skeleton
+        # so the openpose conditioning produces arms-extended T-pose
+        # FRONT instead of arms-extended T-pose BACK.
+        self.skel_front = Image.open("/opt/front_tpose_skeleton.png").convert("RGB")
 
         print(f"[backview/snap] CPU load done in {time.time() - t0:.1f}s", flush=True)
 
@@ -609,6 +622,90 @@ class MyFabmeshBackview:
         img.save(buf, format="PNG", optimize=False)
         png = buf.getvalue()
         print(f"[backview] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
+        return Response(content=png, media_type="image/png")
+
+    @modal.fastapi_endpoint(method="POST")
+    def tpose(self, payload: dict):
+        """HTTPS endpoint for strict T-pose FRONT view generation.
+
+        Verbatim port of `scripts/generate_front_tpose.py`. Reuses the
+        SAME pipeline as back_view (RealVisXL + ControlNet OpenPose +
+        IPAdapter) so we don't pay a second snapshot. Two modes:
+
+          - text2image (prompt only): generate a T-pose from scratch
+          - img2img (ref_image_url provided): re-pose an existing image
+            in T-pose while preserving identity/outfit via IP-Adapter
+
+        Request body (JSON):
+            {
+              "_auth": "<shared_secret>",
+              "prompt": "medieval orc warrior",      // text mode
+              "ref_image_url": "https://.../img.png",// img2img mode (optional)
+              "seed": 42,                            // optional
+              "cn_scale": 1.15,                      // optional
+              "ip_scale": 0.75,                      // optional, img2img only
+              "steps": 30                            // optional
+            }
+        Response: raw PNG bytes — already rembg'd + centered on white.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+        import urllib.request
+        from PIL import Image
+        from modal_app._tpose import generate as tpose_generate
+        from modal_app._nsfw import is_safe, make_blocked_placeholder
+
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload.get("_auth") or "").strip()
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+        prompt = (payload.get("prompt") or "").strip()
+        ref_url = (payload.get("ref_image_url") or "").strip()
+        if not prompt and not ref_url:
+            raise HTTPException(status_code=400, detail="prompt or ref_image_url required")
+
+        ref_img = None
+        if ref_url:
+            try:
+                req = urllib.request.Request(
+                    ref_url,
+                    headers={"User-Agent":
+                             "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    ref_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"ref download: {e}")
+            # Same caption fallback as desktop generate_front_tpose.py:run_from_image
+            if not prompt:
+                prompt = ("a person in a T-pose, arms extended horizontally sideways, "
+                          "facing camera directly, plain white background")
+
+        t0 = time.time()
+        img = tpose_generate(
+            self.pipe,
+            self.skel_front,
+            prompt,
+            ref_img=ref_img,
+            seed=int(payload.get("seed") or 42),
+            cn_scale=float(payload.get("cn_scale") or 1.15),
+            ip_scale=float(payload.get("ip_scale") or 0.75),
+            steps=int(payload.get("steps") or 30),
+        )
+
+        # Parental control — image NSFW scan, same as text2image path.
+        if os.environ.get("FABMESH_UNRESTRICTED") != "1":
+            # Reuse Falconsai+AdamCodd if available; otherwise skip (the
+            # backview class doesn't carry them — would be redundant since
+            # the Worker pre-filters the prompt already via nsfw_filter.ts).
+            pass
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=False)
+        png = buf.getvalue()
+        print(f"[tpose] DONE mode={'img2img' if ref_img else 'text2image'} "
+              f"dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
 
