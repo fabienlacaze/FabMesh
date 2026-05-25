@@ -1445,8 +1445,11 @@ async function callModalMeshStart(env: Env, input: {
       decimation_target: input.decimation_target,
       texture_size: input.texture_size,
     }),
-    // mesh-start returns instantly (< 1 s, just enqueues).
-    signal: AbortSignal.timeout(30_000),
+    // mesh-start returns instantly (< 1 s) once the lightweight HTTP
+    // container is warm, but a COLD container for the start endpoint
+    // itself takes 30-60 s to come up (it loads the shared `image`
+    // even though it doesn't use the GPU). 2 min cap covers it.
+    signal: AbortSignal.timeout(120_000),
   });
   if (!r.ok) {
     throw new Error(`Modal mesh-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
