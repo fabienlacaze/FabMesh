@@ -1159,9 +1159,9 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
       headers: {
         'authorization': `Bearer ${token}`,
         'content-type': 'application/json',
-        // For text2image (RealVisXL 30 steps) we expect ~5-15s; for
-        // back-view (RealVisXL + ControlNet + IP-Adapter) ~30-60s.
-        // 'prefer: wait' inlines the result up to 60s, beyond we poll.
+        // 'prefer: wait' inlines the result up to 60s (counts as ONE
+        // subrequest). Cold-start = ~90s so we usually need a few extra
+        // polls beyond that.
         'prefer': 'wait=60',
       },
       body: JSON.stringify({ version, input }),
@@ -1172,31 +1172,75 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
   }
   const created = await createRes.json() as { id: string; output?: string | string[]; status: string; error?: string };
 
-  let outputUrl: string | undefined;
-  if (created.status === 'succeeded') {
-    outputUrl = Array.isArray(created.output) ? created.output[0] : created.output;
-  } else if (created.status === 'failed') {
-    throw new Error(`Replicate failed: ${created.error || 'unknown'}`);
-  } else {
-    // Poll for up to 5 min (cold-start can be slow on first call).
-    const start = Date.now();
-    while (Date.now() - start < 300_000) {
-      await new Promise(r => setTimeout(r, 2500));
-      const pollRes = await fetch(`https://api.replicate.com/v1/predictions/${created.id}`, {
-        headers: { authorization: `Bearer ${token}` },
+  // CRITICAL: track the prediction in R2 *immediately* so /api/cleanup-
+  // orphans can find and cancel it if this Worker dies mid-flight
+  // (subrequest limit, CPU limit, OOM, etc). Without this the prediction
+  // keeps running on Replicate and burns money even after the user sees
+  // an error. R2 PUT counts as 1 subrequest — worth it.
+  const leaseKey = `_meta/inflight/${created.id}`;
+  try {
+    await env.MESHES.put(leaseKey, JSON.stringify({
+      userId, folder, model: 'myfabmesh-cloud',
+      createdAt: Date.now(),
+    }));
+  } catch { /* non-fatal */ }
+
+  // Cancel the prediction in any error path — protects against partial
+  // failures where the Worker is still alive but can't continue.
+  const cancelPrediction = async () => {
+    try {
+      await fetch(`https://api.replicate.com/v1/predictions/${created.id}/cancel`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}` },
       });
-      const p = await pollRes.json() as { status: string; output?: string | string[]; error?: string };
-      if (p.status === 'succeeded') {
-        outputUrl = Array.isArray(p.output) ? p.output[0] : p.output;
-        break;
+    } catch { /* best-effort */ }
+    try { await env.MESHES.delete(leaseKey); } catch { /* ignore */ }
+  };
+
+  let outputUrl: string | undefined;
+  try {
+    if (created.status === 'succeeded') {
+      outputUrl = Array.isArray(created.output) ? created.output[0] : created.output;
+    } else if (created.status === 'failed') {
+      throw new Error(`Replicate failed: ${created.error || 'unknown'}`);
+    } else {
+      // HARD CAP on poll count: subrequest budget on Workers is 50
+      // (free) / 1000 (paid). We use at most MAX_POLLS = 20 polls so
+      // total subrequests for this call stay ~25 (create + 20 polls +
+      // R2 lease + output fetch + R2 mirror + lease delete). With
+      // MAX_POLLS=20 × 6s interval = 120s of polling AFTER the 60s
+      // wait=60 above = 180s total. That covers cold start (~90s) +
+      // typical inference (~35s) with headroom.
+      const MAX_POLLS = 20;
+      const POLL_INTERVAL_MS = 6000;
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        const pollRes = await fetch(`https://api.replicate.com/v1/predictions/${created.id}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        const p = await pollRes.json() as { status: string; output?: string | string[]; error?: string };
+        if (p.status === 'succeeded') {
+          outputUrl = Array.isArray(p.output) ? p.output[0] : p.output;
+          break;
+        }
+        if (p.status === 'failed' || p.status === 'canceled') {
+          throw new Error(`Replicate ${p.status}: ${p.error || 'unknown'}`);
+        }
       }
-      if (p.status === 'failed' || p.status === 'canceled') {
-        throw new Error(`Replicate ${p.status}: ${p.error || 'unknown'}`);
+      if (!outputUrl) {
+        // Timeout: cancel so the prediction doesn't keep burning GPU.
+        await cancelPrediction();
+        throw new Error(`Replicate timeout after ${(60 + MAX_POLLS * POLL_INTERVAL_MS / 1000)}s`);
       }
     }
-    if (!outputUrl) throw new Error('Replicate timeout');
+    if (!outputUrl) throw new Error('Replicate succeeded but no output URL');
+  } catch (e) {
+    // Any error path → cancel the upstream prediction so we stop billing.
+    await cancelPrediction();
+    throw e;
   }
-  if (!outputUrl) throw new Error('Replicate succeeded but no output URL');
+
+  // Success: clear the lease.
+  try { await env.MESHES.delete(leaseKey); } catch { /* ignore */ }
 
   // Mirror into R2 so the browser gets a stable same-origin URL.
   if (env.MESHES && env.R2_PUBLIC_URL) {

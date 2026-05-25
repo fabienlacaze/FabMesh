@@ -10,6 +10,34 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud worker: subrequest-limit fix + anti-orphan lease)
+
+- **Problème :** `callMyfabmeshCog()` polling jusqu'à 120 fetch() par image en
+  une seule invocation Worker → "Too many subrequests by single Worker
+  invocation" (limite CF = 50 free / 1000 paid). Quand le Worker meurt,
+  la prediction Replicate **continue de tourner et facture**. Cas observé
+  ce matin : prediction `ap13hy70gxrmy0cybk7tvvqbnr` orpheline pendant
+  9 min avant cancel manuel.
+- **Fixes (cloud/src/worker.ts) :**
+  - Poll : 2.5s interval / 300s timeout → **6s interval / 20 polls max**
+    (= 180s après le `prefer:wait=60`). Subrequests par appel : ~120 → ~25.
+  - **Lease R2** : on PUT `_meta/inflight/<predId>` dès la création
+    (avant tout poll). Permet à un /api/cleanup-orphans de retrouver
+    et cancel les zombies si le Worker meurt brutalement.
+  - **Cancel-on-error** : try/catch autour de tout le polling — n'importe
+    quelle erreur (timeout, status failed, exception) déclenche un
+    cancel HTTP de la prediction avant de throw.
+  - Lease supprimé sur succès.
+- **Action #1 (en cours) :** rebuild Cog SANS pre-download D pour ramener
+  setup_time de 957s → ~87s (×11 économie sur cold-start). Workflow run
+  26395964348 déclenché.
+- **Conclusion :** Le problème de fond reste que le polling vit dans
+  la même invocation que la création. Refactor futur : déplacer le poll
+  côté client (POST crée la prediction et retourne l'ID, client GET
+  status) — pas fait ce coup-ci, mais le lease R2 sert déjà de filet.
+
+---
+
 ## 2026-05-24 (Cloud: wire ~30 stubs in meshyAPI-cloud + 5 new Worker endpoints)
 
 - **Problème :** le shim `cloud/public/app/meshyAPI-cloud.js` exposait ~65 fonctions stub
