@@ -45,6 +45,13 @@ export interface Env {
   REPLICATE_MODEL?: string;
   REPLICATE_VERSION?: string;
 
+  // Modal feature flag — when MODAL_TEXT2IMAGE_URL is set, text2image
+  // calls go to Modal (Memory Snapshots → ~5s cold start, ~5× cheaper)
+  // instead of Replicate. The Worker falls back to Replicate if the
+  // URL is empty/unset so we can disable Modal instantly without redeploy.
+  MODAL_TEXT2IMAGE_URL?: string;
+  MODAL_SHARED_SECRET?: string;
+
   // Budget safeguards (override the defaults if set).
   MAX_DAILY_SPEND_USD?: string;
   MAX_USER_DAILY_CALLS?: string;
@@ -1143,6 +1150,67 @@ async function resolveMyfabmeshCogVersion(token: string): Promise<string> {
   return _myfabmeshCogVersion;
 }
 
+/* ───────────────────────── Modal backend ────────────────────────
+ * Modal.com hosts the same RealVisXL pipeline as our Cog but with
+ * Memory Snapshots, so cold start drops from ~90s → ~5s and we no
+ * longer get billed the setup_time (~78% of the Replicate invoice).
+ *
+ * The Modal app exposes ONE HTTPS endpoint per @modal.fastapi_endpoint
+ * decorator. URL pattern (set by Modal at deploy time):
+ *   https://<workspace>--myfabmesh-cloud-myfabmeshpredictor-text2image.modal.run
+ *
+ * The Worker:
+ *   1. POSTs JSON { prompt, asset_type, asset_style, seed, steps, _auth }
+ *   2. Gets PNG bytes back inline (sync, single HTTP roundtrip — no polling)
+ *   3. Writes the PNG to R2 + returns the R2 URL.
+ *
+ * Auth: MODAL_SHARED_SECRET is a 32-byte hex set on BOTH sides via
+ *   modal secret create myfabmesh-shared SHARED_SECRET=<hex>
+ *   wrangler secret put MODAL_SHARED_SECRET   # then paste the same hex
+ *
+ * NO POLLING means no subrequest-limit risk for this call path (we use
+ * ~5 subrequests total per image instead of ~25 for Replicate).
+ * ──────────────────────────────────────────────────────────────── */
+async function callModalText2Image(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
+  const url = env.MODAL_TEXT2IMAGE_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_TEXT2IMAGE_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      prompt: input.prompt,
+      asset_type: input.asset_type,
+      asset_style: input.asset_style,
+      seed: input.seed,
+      steps: input.steps,
+    }),
+    // Modal cold-start can hit ~30s on first call before the snapshot
+    // is warm. We give it 4 min before timing out — generous but safe.
+    signal: AbortSignal.timeout(240_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] text2image dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  // Mirror to R2 (same key shape as the Cog path so downstream stays uniform).
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+    const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  // Without R2 we can't return a stable URL — failure is preferable
+  // to handing the client a one-shot data URL.
+  throw new Error('R2 bucket unavailable; cannot persist Modal output');
+}
+
 async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
   const token = env.REPLICATE_API_TOKEN ?? '';
   if (!token) throw new Error('REPLICATE_API_TOKEN not set');
@@ -1307,9 +1375,14 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
 
   const paths: string[] = [];
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
+  // Route to Modal if the feature flag is set, else fall back to the
+  // Cog on Replicate. The flag is a single env var (MODAL_TEXT2IMAGE_URL)
+  // so we can flip-back to Replicate without redeploying the Worker.
+  const useModal = !!env.MODAL_TEXT2IMAGE_URL;
+  const callBackend = useModal ? callModalText2Image : callMyfabmeshCog;
   try {
     for (let i = 0; i < n; i++) {
-      paths.push(await callMyfabmeshCog(env, user.id, {
+      paths.push(await callBackend(env, user.id, {
         task: 'text2image',
         prompt: rawPrompt,
         asset_type: asset_type || 'character',
