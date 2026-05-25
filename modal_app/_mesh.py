@@ -1,0 +1,202 @@
+"""TRELLIS-2 image-to-3D — cloud version.
+
+Mirrors `scripts/trellis2_native_full_pipeline.py` but as a pure function
+that takes a PIL image and returns GLB bytes. The pipeline + o_voxel
+post-processor are loaded ONCE in @modal.enter and reused per call.
+
+CAUTION: TRELLIS-2 ships custom CUDA kernels (diffoctreerast, spconv,
+mip-gaussian) that compile on first .cuda() call. Memory Snapshots
+DON'T capture compiled CUDA state — the kernels recompile at every
+cold restore. The cold-start UX depends on whether `pipeline.cuda()`
+triggers compilation (~30-60s) or just memcpy (~5-10s). We measure
+this on the POC and rollback to Replicate if compilation dominates.
+
+License: MIT (microsoft/TRELLIS.2-4B) → we can redistribute.
+"""
+import io
+import os
+import time
+
+import numpy as np
+from PIL import Image, ImageEnhance
+
+
+def prep_image(image: Image.Image) -> Image.Image:
+    """Background removal via rembg u2net (Apache 2.0) — same as
+    desktop pipeline. Skip if image already has a non-trivial alpha."""
+    needs_rembg = True
+    if image.mode == 'RGBA':
+        a = np.asarray(image)[:, :, 3]
+        if not (a == 255).all():
+            needs_rembg = False
+    if needs_rembg:
+        import rembg
+        image = rembg.remove(
+            image.convert('RGBA'),
+            session=rembg.new_session('u2net'))
+    return image
+
+
+def brighten_baseColor(glb_obj) -> None:
+    """In-place +50% brightness / +30% sat / +10% contrast on
+    baseColorTexture — compensates the ACES tonemap of glTF viewers
+    (model-viewer / Babylon / Three.js KHR_lights_image_based). Same
+    multipliers as desktop's trellis2_native_full_pipeline.py."""
+    geoms = (list(glb_obj.geometry.values())
+             if hasattr(glb_obj, 'geometry') else [glb_obj])
+    for m in geoms:
+        visual = getattr(m, 'visual', None)
+        if not visual: continue
+        material = getattr(visual, 'material', None)
+        if not material: continue
+        tex = getattr(material, 'baseColorTexture', None)
+        if not tex: continue
+        tex = ImageEnhance.Brightness(tex).enhance(1.5)
+        tex = ImageEnhance.Color(tex).enhance(1.3)
+        tex = ImageEnhance.Contrast(tex).enhance(1.1)
+        material.baseColorTexture = tex
+
+
+def generate(
+    pipeline,                     # Trellis2ImageTo3DPipeline (already on GPU)
+    o_voxel_module,               # imported o_voxel module
+    front_img: Image.Image,
+    back_img: Image.Image = None,  # optional, for multi-view conditioning
+    mode: str = '1024',
+    seed: int = 42,
+    decimation_target: int = 500_000,
+    texture_size: int = 2048,
+) -> bytes:
+    """Run TRELLIS-2 inference + GLB export. Returns the GLB bytes
+    (caller pushes to R2). When `back_img` is provided, runs the
+    multi-view conditioning path (mirror of the desktop fork's
+    `scripts/trellis2_native_full_pipeline.py:main()` multi-view
+    branch using pipeline.get_cond([front, back])). Otherwise runs
+    single-view pipeline.run()."""
+    import torch
+
+    t0 = time.time()
+    img = prep_image(front_img)
+    print(f'[mesh] image prepared in {time.time()-t0:.1f}s size={img.size}', flush=True)
+    mv_images = [img]
+    if back_img is not None:
+        back_prepped = prep_image(back_img)
+        mv_images.append(back_prepped)
+        print(f'[mesh] multi-view conditioning: 2 images (front + back)', flush=True)
+
+    torch.manual_seed(seed)
+    t_inf = time.time()
+    if len(mv_images) > 1 and mode in ('512', '1024'):
+        # Multi-view path — verbatim port of
+        # scripts/trellis2_native_full_pipeline.py:210-254 (the same
+        # stage chain that runs on the user's desktop). Cascade modes
+        # use single-view fallback because their `sample_shape_slat_cascade`
+        # has extra constraints we haven't threaded through yet.
+        cond_512 = pipeline.get_cond(mv_images, 512)
+        cond_1024 = pipeline.get_cond(mv_images, 1024) if mode != '512' else None
+        ss_res = {'512': 32, '1024': 64}[mode]
+        coords = pipeline.sample_sparse_structure(cond_512, ss_res, 1, {})
+        if mode == '512':
+            shape_slat = pipeline.sample_shape_slat(
+                cond_512,
+                pipeline.models['shape_slat_flow_model_512'],
+                coords, {})
+            tex_slat = pipeline.sample_tex_slat(
+                cond_512,
+                pipeline.models['tex_slat_flow_model_512'],
+                shape_slat, {})
+            res = 512
+        else:  # '1024'
+            shape_slat = pipeline.sample_shape_slat(
+                cond_1024,
+                pipeline.models['shape_slat_flow_model_1024'],
+                coords, {})
+            tex_slat = pipeline.sample_tex_slat(
+                cond_1024,
+                pipeline.models['tex_slat_flow_model_1024'],
+                shape_slat, {})
+            res = 1024
+        torch.cuda.empty_cache()
+        o_voxel_obj = pipeline.decode_latent(shape_slat, tex_slat, res)
+        if isinstance(o_voxel_obj, list):
+            o_voxel_obj = o_voxel_obj[0]
+    else:
+        # Single-view path (or cascade fallback) — same as before.
+        out = pipeline.run(img, num_samples=1, seed=seed,
+                           pipeline_type=mode, preprocess_image=False)
+        o_voxel_obj = out[0]
+    print(f'[mesh] TRELLIS-2 inference dt={time.time()-t_inf:.1f}s '
+          f'mode={mode} views={len(mv_images)}', flush=True)
+
+    t_glb = time.time()
+    glb_obj = o_voxel_module.postprocess.to_glb(
+        vertices=o_voxel_obj.vertices,
+        faces=o_voxel_obj.faces,
+        attr_volume=o_voxel_obj.attrs,
+        coords=o_voxel_obj.coords,
+        attr_layout=o_voxel_obj.layout,
+        voxel_size=o_voxel_obj.voxel_size,
+        aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+        decimation_target=decimation_target,
+        texture_size=texture_size,
+        remesh=True,
+        verbose=False,
+    )
+    print(f'[mesh] GLB export dt={time.time()-t_glb:.1f}s', flush=True)
+
+    try:
+        brighten_baseColor(glb_obj)
+    except Exception as e:
+        print(f'[mesh] brighten skipped: {e}', flush=True)
+
+    # Serialize to bytes in-memory (trimesh's .export needs a path OR
+    # a writeable file-like; BytesIO works).
+    buf = io.BytesIO()
+    glb_obj.export(buf, file_type='glb', extension_webp=True)
+    glb_bytes = buf.getvalue()
+
+    # EU AI Act art. 50 metadata — required by EU Regulation 2024/1689,
+    # applicable from 2026-08-02. Marks the GLB as AI-generated. Same
+    # patch as scripts/add_ai_metadata.py:patch_glb() on desktop.
+    glb_bytes = _patch_ai_act_metadata(glb_bytes)
+
+    print(f'[mesh] TOTAL dt={time.time()-t0:.1f}s bytes={len(glb_bytes)}', flush=True)
+    return glb_bytes
+
+
+def _patch_ai_act_metadata(glb_bytes: bytes) -> bytes:
+    """Inject asset.extras.aiGenerated + asset.generator into the JSON
+    chunk of a GLB. Returns a new GLB byte string. Compatible with the
+    desktop `add_ai_metadata.py` so the cloud output is interchangeable
+    with the desktop output."""
+    import struct, json
+    if len(glb_bytes) < 12 or glb_bytes[:4] != b'glTF':
+        return glb_bytes
+    version, total_length = struct.unpack('<II', glb_bytes[4:12])
+    if version != 2:
+        return glb_bytes
+    json_chunk_len = struct.unpack('<I', glb_bytes[12:16])[0]
+    json_chunk_type = glb_bytes[16:20]
+    if json_chunk_type != b'JSON':
+        return glb_bytes
+    json_blob = glb_bytes[20:20 + json_chunk_len]
+    rest = glb_bytes[20 + json_chunk_len:]
+    try:
+        gltf = json.loads(json_blob.decode('utf-8'))
+    except Exception:
+        return glb_bytes
+    asset = gltf.setdefault('asset', {})
+    asset['generator'] = 'FabMesh 1.0.0 (AI-generated)'
+    extras = asset.setdefault('extras', {})
+    extras['aiGenerated'] = True
+    extras['aiSystem'] = 'FabMesh'
+    extras['aiActArticle50'] = True
+    # Re-serialize JSON, pad to 4-byte boundary.
+    new_json = json.dumps(gltf, separators=(',', ':')).encode('utf-8')
+    while len(new_json) % 4:
+        new_json += b' '
+    # Rebuild GLB header + chunks.
+    new_total = 12 + 8 + len(new_json) + len(rest)
+    header = b'glTF' + struct.pack('<II', 2, new_total)
+    json_chunk = struct.pack('<I', len(new_json)) + b'JSON' + new_json
+    return header + json_chunk + rest

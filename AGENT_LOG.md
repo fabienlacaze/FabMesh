@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud: Vague 1.3 — NSFW prompt pre-filter Worker-side)
+
+- **Contexte :** audit parité desktop/cloud a révélé que le cloud n'avait
+  AUCUN pre-filter NSFW sur les prompts text2image / back-view. Toute la
+  charge anti-abus reposait sur le post-gen `modal_app/_nsfw.py` côté
+  image. Risque : un prompt bloquant ("nude child …") cramerait quand
+  même un appel GPU avant d'être recalé en sortie — coût + responsabilité.
+- **Port :** `src/main/main.js:223-303 checkPromptSafety` → port verbatim
+  vers `cloud/src/nsfw_filter.ts` (TypeScript). NSFW_KEYWORDS (~150
+  termes FR + EN couvrant sexe, gore, mineurs, drogue, terro, haine,
+  armes) + NSFW_COMBOS (enfants×nudité, anyone×sexuel extrême,
+  violence×enfants) + `_matchesKeyword` avec word-boundary court terme.
+- **Intégration Worker :** `handleGenerateImage` (text2image) +
+  `handleGenerateBackView` lèvent un HTTP 400 avant toute facturation /
+  appel Modal si le prompt match. Bypass via `FABMESH_UNRESTRICTED=1`
+  (dev only). Ajouté à l'interface `Env`.
+- **Pas porté :** classifier ML Falconsai/NSFW_text_classifier (desktop
+  l'utilise après les keywords). Trop coûteux à inférer sur Worker pour
+  notre échelle ; on garde le post-gen image NSFW Modal.
+- **Statut :** Vague 1.3 finie. Wave 1.1 (AI Act metadata GLB) + 1.2
+  (multi-view mesh path) déjà commitées plus tôt dans la session.
+  Prochain : 1.4 T-pose mode (DreamShaper XL Lightning + ControlNet
+  OpenPose), critique pour les unités RTS.
+
+---
+
 ## 2026-05-25 (Cloud: Modal mesh_image — fix DINOv3ViTModel import crash)
 
 - **Symptôme :** `MyFabmeshMesh.load_to_cpu` crash-loop sur Modal avec

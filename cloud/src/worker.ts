@@ -16,6 +16,7 @@
 import Stripe from 'stripe';
 import Replicate from 'replicate';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { checkPromptSafety } from './nsfw_filter';
 
 /* ──────────────────────────── env binding ──────────────────────────── */
 
@@ -63,6 +64,11 @@ export interface Env {
   MAX_DAILY_SPEND_USD?: string;       // Replicate-side cap (default $0.50)
   MAX_DAILY_MODAL_SPEND_USD?: string; // Modal-side cap   (default $2.00)
   MAX_USER_DAILY_CALLS?: string;
+
+  // NSFW filter bypass — set to "1" to disable the prompt pre-filter
+  // (intended for dev/staging, NEVER in prod). When unset, all prompts
+  // are checked against the desktop's NSFW_KEYWORDS + NSFW_COMBOS.
+  FABMESH_UNRESTRICTED?: string;
 
   SUPABASE_SERVICE_ROLE_KEY?: string;
 
@@ -621,6 +627,15 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   if (typeof urlField === 'string' && /^https?:\/\//i.test(urlField)) {
     imageHttpsUrl = urlField;
   }
+  // Optional back-view URL — when the user enables `multiref` the
+  // renderer sends `imagePathBack`. We forward it to the Modal mesh
+  // endpoint which passes both URLs to TRELLIS-2's get_cond([f, b])
+  // for multi-view conditioning (better back-texture coherence).
+  let backImageHttpsUrl: string | null = null;
+  const backField = form.get('imagePathBack') || form.get('image_back_url');
+  if (typeof backField === 'string' && /^https?:\/\//i.test(backField)) {
+    backImageHttpsUrl = backField;
+  }
   // Cloud convenience: accept `imagePath` (a R2/blob URL) and fetch it
   // server-side. Saves the client from a CORS round-trip through R2.
   // Still needed for the Replicate Cog path which takes a File input.
@@ -647,6 +662,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     face_fix: form.get('face_fix') === 'true',
     ultra_hd: form.get('ultra_hd') === 'true',
     fast: form.get('fast') === 'true',
+    multiref: form.get('multiref') === 'true' || !!backImageHttpsUrl,
   };
 
   const cost = creditCost(input);
@@ -731,6 +747,10 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       await callModalMeshStart(env, {
         jobId,
         frontImageUrl: frontUrl,
+        // Pass the back URL when multiref is on so TRELLIS-2 can
+        // condition on both front + back (better back texture).
+        // Falls through to single-view if backImageHttpsUrl is null.
+        backImageUrl: input.multiref ? backImageHttpsUrl : null,
         mode: input.mode === 'full' ? '1024_cascade'
             : input.mode === 'lite' ? '512'
             : '1024',
@@ -738,6 +758,13 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         decimation_target: input.mode === 'lite' ? 100_000
                          : input.mode === 'full' ? 1_500_000 : 500_000,
         texture_size: input.mode === 'full' ? 2048 : 1024,
+        // Auto-rectify the source image before mesh — port of
+        // scripts/generate_front_strict.py. Modal mesh class handles
+        // this when `rectify=true` in the payload.
+        rectify: input.rectify,
+        // Face fix toggle — runs an SDXL face inpaint step on the
+        // mesh's texture atlas. Honoured by Modal mesh when `face_fix=true`.
+        face_fix: input.face_fix,
       });
     } catch (e: unknown) {
       await addCredits(env, user.id, cost);
@@ -1436,10 +1463,13 @@ async function callModalBackView(env: Env, userId: string, input: {
 async function callModalMeshStart(env: Env, input: {
   jobId: string;
   frontImageUrl: string;
+  backImageUrl?: string | null;
   mode?: string;
   seed?: number;
   decimation_target?: number;
   texture_size?: number;
+  rectify?: boolean;
+  face_fix?: boolean;
 }): Promise<{ job_id: string }> {
   const url = env.MODAL_MESH_START_URL;
   const secret = env.MODAL_SHARED_SECRET;
@@ -1453,10 +1483,13 @@ async function callModalMeshStart(env: Env, input: {
       _auth: secret,
       job_id: input.jobId,
       front_image_url: input.frontImageUrl,
+      back_image_url: input.backImageUrl ?? null,
       mode: input.mode ?? '1024',
       seed: input.seed,
       decimation_target: input.decimation_target,
       texture_size: input.texture_size,
+      rectify: !!input.rectify,
+      face_fix: !!input.face_fix,
     }),
     // mesh-start returns instantly (< 1 s) once the lightweight HTTP
     // container is warm, but a COLD container for the start endpoint
@@ -1643,6 +1676,21 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // the renderer sent in case userPrompt isn't broken out.
   const rawPrompt = (userPrompt ?? prompt ?? '').toString().trim();
   if (!rawPrompt) return err(400, 'prompt required');
+  // NSFW prompt pre-filter — block keywords and dangerous combos BEFORE
+  // we spend credits or hit Modal/Replicate. Saves the user the cost
+  // of a generation that the post-image NSFW classifier would block
+  // anyway, and rejects intent-only prompts that wouldn't render any
+  // visible NSFW (e.g. "child + sensual" with a safe negative prompt).
+  // Bypass via FABMESH_UNRESTRICTED env var on the Worker for testing.
+  {
+    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const safety = checkPromptSafety(rawPrompt, unrestricted);
+    if (!safety.safe) {
+      return json({ ok: false, success: false,
+        error: safety.reason ?? 'prompt blocked by content filter',
+        blocked: safety.blocked }, { status: 400 });
+    }
+  }
   const n = Math.max(1, Math.min(4, numImages ?? 1));
   const COST_PER_IMAGE = 2;
   const cost = n * COST_PER_IMAGE;
@@ -1723,6 +1771,18 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   };
   if (!frontImageUrl) return err(400, 'frontImageUrl required for back-view generation');
   const hint = (prompt ?? promptHint ?? '').toString().slice(0, 400);
+
+  // NSFW prompt pre-filter — same policy as text2image / desktop checkPromptSafety.
+  {
+    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const safety = checkPromptSafety(hint, unrestricted);
+    if (!safety.safe) {
+      return json({ ok: false, success: false,
+        error: safety.reason ?? 'prompt blocked by content filter',
+        blocked: safety.blocked }, { status: 400 });
+    }
+  }
+
   const n = Math.max(1, Math.min(4, numImages ?? 1));
   const COST_PER_BACK = 2;
   const cost = n * COST_PER_BACK;
