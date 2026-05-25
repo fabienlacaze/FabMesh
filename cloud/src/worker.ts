@@ -53,7 +53,8 @@ export interface Env {
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
-  MAX_DAILY_SPEND_USD?: string;
+  MAX_DAILY_SPEND_USD?: string;       // Replicate-side cap (default $0.50)
+  MAX_DAILY_MODAL_SPEND_USD?: string; // Modal-side cap   (default $2.00)
   MAX_USER_DAILY_CALLS?: string;
 
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -83,6 +84,9 @@ interface R2Bucket {
  * Tune via environment variables; defaults are conservative.
  * ──────────────────────────────────────────────────────────────────── */
 const DEFAULT_MAX_DAILY_SPEND_USD = 0.50;
+const DEFAULT_MAX_MODAL_SPEND_USD = 2.00;  // Modal is ~5-10× cheaper per
+                                           // image but the cap is its OWN
+                                           // wallet, not shared with Replicate.
 const DEFAULT_MAX_USER_DAILY_CALLS = 10;
 
 function todayUTC(): string { return new Date().toISOString().slice(0, 10); }
@@ -109,6 +113,27 @@ async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number): Prom
  *  accurate even when we abort. */
 async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
   const key = `_meta/spend/${todayUTC()}`;
+  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
+  await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
+}
+
+/** Modal has its own budget counter (`_meta/modal_spend/<YYYY-MM-DD>`)
+ *  because Modal billing is a separate wallet from Replicate. Sharing
+ *  the cap would lock the user out of Modal as soon as the Replicate
+ *  counter is exhausted, which is exactly the bug the user hit on
+ *  2026-05-25. The default cap is MORE generous than Replicate ($2 vs
+ *  $0.50) because Modal is ~5-10× cheaper per image. */
+async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Promise<number | null> {
+  const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
+  const key = `_meta/modal_spend/${todayUTC()}`;
+  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
+  if (cur + estimatedUsd > maxUsd) return null;
+  await env.MESHES.put(key, String(cur + estimatedUsd));
+  return maxUsd - cur - estimatedUsd;
+}
+
+async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
+  const key = `_meta/modal_spend/${todayUTC()}`;
   const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
   await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
 }
@@ -1346,40 +1371,51 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const n = Math.max(1, Math.min(4, numImages ?? 1));
   const COST_PER_IMAGE = 2;
   const cost = n * COST_PER_IMAGE;
+
+  // Pick the backend BEFORE the budget check — the budget cap is
+  // Replicate-only (Modal has its own provider-side spend cap and
+  // doesn't share a wallet with Replicate). Counting Modal calls
+  // against the Replicate budget locks the user out of Modal as soon
+  // as the (separate) Replicate counter is exhausted.
+  const useModal = !!env.MODAL_TEXT2IMAGE_URL;
+  const callBackend = useModal ? callModalText2Image : callMyfabmeshCog;
+
   // Worst-case Replicate cost estimate per image (cold-start + active
   // + idle tail). We bill this against the daily cap BEFORE spending
-  // any credits so a runaway burst never crosses the cap.
-  const ESTIMATED_USD_PER_IMAGE = 0.30;
+  // any credits so a runaway burst never crosses the cap. Modal is
+  // 5-10× cheaper than Replicate, so the per-image estimate is split.
+  const ESTIMATED_USD_PER_IMAGE = useModal ? 0.06 : 0.30;
   const estimatedTotal = ESTIMATED_USD_PER_IMAGE * n;
 
-  // Hard daily spend cap — refund the Replicate-side estimate if the
-  // call fails. Conservative — never falsifies the budget upward.
-  const remainingBudget = await checkAndIncrementDailySpend(env, estimatedTotal);
+  // Hard daily spend cap — refund the estimate if the call fails.
+  // Conservative — never falsifies the budget upward. Modal uses its
+  // own R2 counter so the two backends don't share a cap.
+  const remainingBudget = useModal
+    ? await checkAndIncrementModalSpend(env, estimatedTotal)
+    : await checkAndIncrementDailySpend(env, estimatedTotal);
   if (remainingBudget == null) {
+    const provider = useModal ? 'Modal' : 'Replicate';
     return json({ ok: false, success: false,
-      error: `daily Replicate budget reached. Try again after midnight UTC, or raise MAX_DAILY_SPEND_USD.` }, { status: 429 });
+      error: `daily ${provider} budget reached. Try again after midnight UTC, or raise MAX_DAILY_${useModal ? 'MODAL_' : ''}SPEND_USD.` }, { status: 429 });
   }
   // Per-user daily call cap — refund on failure too.
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundDailySpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit. Comes back at midnight UTC.` }, { status: 429 });
   }
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundDailySpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
   const paths: string[] = [];
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
-  // Route to Modal if the feature flag is set, else fall back to the
-  // Cog on Replicate. The flag is a single env var (MODAL_TEXT2IMAGE_URL)
-  // so we can flip-back to Replicate without redeploying the Worker.
-  const useModal = !!env.MODAL_TEXT2IMAGE_URL;
-  const callBackend = useModal ? callModalText2Image : callMyfabmeshCog;
   try {
     for (let i = 0; i < n; i++) {
       paths.push(await callBackend(env, user.id, {
@@ -1393,7 +1429,8 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
-    await refundDailySpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal);
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
