@@ -612,19 +612,26 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
 
   const form = await req.formData();
   let image = form.get('image');
+  // If the client passed an HTTPS URL (R2/blob), capture it so the
+  // Modal mesh path can re-use it directly without round-tripping
+  // through a File upload (Modal's container fetches the URL on its
+  // own; we don't need to re-host the bytes).
+  let imageHttpsUrl: string | null = null;
+  const urlField = form.get('imagePath') || form.get('image_url');
+  if (typeof urlField === 'string' && /^https?:\/\//i.test(urlField)) {
+    imageHttpsUrl = urlField;
+  }
   // Cloud convenience: accept `imagePath` (a R2/blob URL) and fetch it
   // server-side. Saves the client from a CORS round-trip through R2.
-  if (!(image instanceof File)) {
-    const url = form.get('imagePath') || form.get('image_url');
-    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-      try {
-        const r = await fetch(url);
-        if (!r.ok) return err(400, `cannot fetch imagePath (HTTP ${r.status})`);
-        const buf = await r.arrayBuffer();
-        image = new File([buf], 'source.png', { type: r.headers.get('content-type') ?? 'image/png' });
-      } catch (e) {
-        return err(400, `cannot fetch imagePath: ${e instanceof Error ? e.message : String(e)}`);
-      }
+  // Still needed for the Replicate Cog path which takes a File input.
+  if (!(image instanceof File) && imageHttpsUrl) {
+    try {
+      const r = await fetch(imageHttpsUrl);
+      if (!r.ok) return err(400, `cannot fetch imagePath (HTTP ${r.status})`);
+      const buf = await r.arrayBuffer();
+      image = new File([buf], 'source.png', { type: r.headers.get('content-type') ?? 'image/png' });
+    } catch (e) {
+      return err(400, `cannot fetch imagePath: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   if (!(image instanceof File)) return err(400, 'image required (File or imagePath URL)');
@@ -687,12 +694,30 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   const projectName = (form.get('project_name') as string | null) || null;
 
   if (useModalMesh) {
+    // Modal needs a fetchable HTTPS URL (its container will pull the
+    // bytes itself). We DON'T pass `input.image` (a File) — Modal's
+    // urlopen wouldn't know what to do with a multipart blob.
+    // If the client only sent a File and no URL, mirror the bytes to
+    // R2 first so we can give Modal a stable URL.
+    let frontUrl = imageHttpsUrl;
+    if (!frontUrl) {
+      if (!env.MESHES || !env.R2_PUBLIC_URL) {
+        await addCredits(env, user.id, cost);
+        return err(500, 'modal mesh path needs R2 (no imagePath URL provided)');
+      }
+      const fileBytes = new Uint8Array(await input.image.arrayBuffer());
+      const key = `${user.id}/source/${Date.now()}_${input.seed ?? 42}.png`;
+      await env.MESHES.put(key, fileBytes, {
+        httpMetadata: { contentType: input.image.type || 'image/png' },
+      });
+      frontUrl = `${env.R2_PUBLIC_URL}/${key}`;
+    }
     // Worker generates the job_id (uuid hex). Modal echoes it back.
     const jobId = 'modal_' + crypto.randomUUID().replace(/-/g, '');
     try {
       await callModalMeshStart(env, {
         jobId,
-        frontImageUrl: input.image,
+        frontImageUrl: frontUrl,
         mode: input.mode === 'full' ? '1024_cascade'
             : input.mode === 'lite' ? '512'
             : '1024',
