@@ -126,6 +126,47 @@
     // Inject the credits pill into the topbar (Cloud-only — desktop has
     // unlimited local GPU and doesn't need this).
     installCreditsPill();
+
+    // Adapt engine dropdowns to what Cloud actually wires.
+    pruneEngineSelectors();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Trim the image / 3D engine selectors to the engines we actually
+   * route to a Replicate model. The Desktop renderer ships with options
+   * for legacy local engines, Meshy.ai, etc. that have no equivalent
+   * cloud handler.
+   * ────────────────────────────────────────────────────────────────── */
+  function pruneEngineSelectors() {
+    // 3D engine — cloud only supports trellis2_native (via fishwowater/
+    // trellis2). The "MyFabmesh.AI Legacy" (hi3dgen) and "Meshy.ai"
+    // options aren't wired server-side and would 404.
+    const eng3d = document.getElementById('ws-3d-engine');
+    if (eng3d) {
+      [...eng3d.options].forEach((opt) => {
+        if (opt.value !== 'trellis2_native') opt.remove();
+      });
+      // Relabel the lone remaining option so the user sees what the
+      // cloud actually does, not the desktop "in one shot, local" copy.
+      if (eng3d.options.length === 1) {
+        eng3d.options[0].textContent = 'MyFabmesh.AI 3D Native (cloud GPU · TRELLIS-2 · ~100s · 1 credit)';
+        eng3d.value = 'trellis2_native';
+      }
+    }
+
+    // Image engine — only the default path (RealVisXL via our Cog) is
+    // wired. The "Meshy.ai" / "Pollinations" / "Local SD" options the
+    // desktop exposes aren't backed by a cloud handler.
+    const engImg = document.getElementById('ws-image-engine');
+    if (engImg) {
+      [...engImg.options].forEach((opt) => {
+        const keep = ['local-flux', 'cloud', 'realvis', ''].includes(opt.value);
+        if (!keep) opt.remove();
+      });
+      if (engImg.options.length >= 1) {
+        engImg.options[0].textContent = 'MyFabmesh.AI Image Engine (cloud GPU · RealVisXL V4 · 1 credit/image)';
+      }
+    }
   }
 
   /* ──────────────────────────────────────────────────────────────────
