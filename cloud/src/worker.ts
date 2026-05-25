@@ -60,6 +60,11 @@ export interface Env {
   // multi-seed symmetry scoring (port of generate_front_strict.py). Same
   // container as back-view/tpose, ControlNet is neutralized at call time.
   MODAL_RECTIFY_URL?: string;
+  // 4-view orthographic sheet (port of multiview_sheet_gen.py). Used as
+  // the back-view source for hard-surface assets (vehicle/building/etc.)
+  // where the realvis T-pose pipeline doesn't make sense. Single SDXL
+  // pass with IPAdapter Plus — same RealVis snapshot as backview/tpose.
+  MODAL_SHEET_URL?: string;
   // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
   // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
   // to the Replicate Cog.
@@ -753,6 +758,96 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       });
       frontUrl = `${env.R2_PUBLIC_URL}/${key}`;
     }
+
+    const isOrganic = input.asset_type === 'character'
+                   || input.asset_type === 'creature'
+                   || input.asset_type === 'animal';
+
+    // ── Wave 2.1 — Auto-rectify according to asset_type ────────────
+    // Desktop parity (main.js:4012-4014): generate_front_strict.py is
+    // applied automatically before mesh with --mode front for character
+    // /creature/animal and --mode iso for vehicle/building/weapon/prop
+    // /icon. Without this, concept-art 3/4 inputs produce trapu meshes.
+    //
+    // Toggled off by `rectify: false` in the request (default ON).
+    // Failure is non-fatal — we fall back to the un-rectified image so
+    // a transient rectify outage doesn't tank the whole mesh.
+    if (env.MODAL_RECTIFY_URL && input.rectify !== false) {
+      const rectifyMode: 'front' | 'iso' = isOrganic ? 'front' : 'iso';
+      try {
+        const rectifiedUrl = await callModalRectify(env, user.id, {
+          refImageUrl: frontUrl,
+          mode: rectifyMode,
+          seeds: 3,
+        }, 'rectify');
+        console.log(`[wave2.1] rectified front → ${rectifyMode} (asset=${input.asset_type})`);
+        frontUrl = rectifiedUrl;
+      } catch (e: unknown) {
+        console.warn(`[wave2.1] rectify failed, using original front: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────
+
+    // ── Wave 2.2 / 2.3 — Auto-back-view dispatch by asset_type ──────
+    // Desktop parity (main.js:4804-4806): the back-view generator is
+    // dispatched by asset_type to one of FOUR pipelines:
+    //   character          → realvis  (RealVisXL + CN OpenPose T-pose
+    //                                   + IP-Adapter + Florence-2)
+    //   creature, animal   → mvadapter (MV-Adapter 6 orthographic views)
+    //   vehicle, building,
+    //   weapon, prop       → sheet    (RealVisXL 2x2 sheet w/ IP-Adapter
+    //                                   Plus — consistent identity)
+    //   icon               → none     (2D flat, no back)
+    //
+    // Wave 2.2 ports realvis (already deployed as MODAL_BACKVIEW_URL).
+    // Wave 2.3 ports sheet  (MODAL_SHEET_URL — new endpoint).
+    // Wave 2.4 will port mvadapter — until then creature/animal share
+    // the realvis path, which is suboptimal but better than no back.
+    //
+    // Skipped when:
+    //   - back_view is explicitly false in the request
+    //   - the caller already provided a back image (don't re-bill)
+    //   - asset is icon (2D flat, no back to generate)
+    const isHardSurface = input.asset_type === 'vehicle'
+                       || input.asset_type === 'building'
+                       || input.asset_type === 'weapon'
+                       || input.asset_type === 'prop';
+    if (input.back_view !== false && !backImageHttpsUrl
+        && input.asset_type !== 'icon') {
+      try {
+        let autoBackUrl: string | null = null;
+        if (isHardSurface && env.MODAL_SHEET_URL) {
+          // Wave 2.3 — sheet dispatch.
+          autoBackUrl = await callModalSheet(env, user.id, {
+            frontImageUrl: frontUrl,
+            promptHint: '',
+            seed: (input.seed ?? 42) + 1000,
+          }, 'back-auto');
+          console.log(`[wave2.3] sheet back-view for ${input.asset_type}`);
+        } else if (isOrganic && env.MODAL_BACKVIEW_URL) {
+          // Wave 2.2 — realvis dispatch (also used as creature fallback
+          // until Wave 2.4 brings mvadapter).
+          autoBackUrl = await callModalBackView(env, user.id, {
+            frontImageUrl: frontUrl,
+            promptHint: '',
+            seed: (input.seed ?? 42) + 1000,
+          }, 'back-auto');
+          console.log(`[wave2.2] realvis back-view for ${input.asset_type}`);
+        }
+        if (autoBackUrl) {
+          backImageHttpsUrl = autoBackUrl;
+          // multiref is read at the call site below (`input.multiref ?
+          // backImageHttpsUrl : null`). At payload-parse time multiref
+          // was decided BEFORE we generated the back — force it on now
+          // that we have 2 views.
+          input.multiref = true;
+        }
+      } catch (e: unknown) {
+        console.warn(`[wave2.x] auto back-view failed, falling back to single-view: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────
+
     // Worker generates the job_id (uuid hex). Modal echoes it back.
     const jobId = 'modal_' + crypto.randomUUID().replace(/-/g, '');
     try {
@@ -1508,6 +1603,55 @@ async function callModalTpose(env: Env, userId: string, input: {
     return `${env.R2_PUBLIC_URL}/${key}`;
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
+}
+
+/** 4-view orthographic model-sheet — port of multiview_sheet_gen.py.
+ *  Used by Wave 2.3 to auto-generate a back-view for hard-surface assets
+ *  (vehicle/building/weapon/prop) where the realvis T-pose pipeline
+ *  doesn't apply. Single SDXL + IPAdapter Plus pass guarantees the back
+ *  matches the front's identity / paint / wear. Returns the back-view
+ *  cell (the other 3 cells aren't currently consumed cloud-side). */
+async function callModalSheet(env: Env, userId: string, input: {
+  frontImageUrl: string;
+  promptHint?: string;
+  seed?: number;
+  ip_scale?: number;
+  steps?: number;
+}, folder: string): Promise<string> {
+  const url = env.MODAL_SHEET_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_SHEET_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      front_image_url: input.frontImageUrl,
+      prompt_hint: input.promptHint ?? '',
+      seed: input.seed,
+      ip_scale: input.ip_scale,
+      steps: input.steps,
+    }),
+    // 4-view sheet renders at 2048² (4× the pixels of a single view) →
+    // ~2× the GPU time. 5 min budget covers cold start + render.
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal sheet HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] sheet dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+    const key = `${userId}/${folder}/${Date.now()}_${seed}_sheet_back.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  throw new Error('R2 bucket unavailable; cannot persist Modal sheet output');
 }
 
 /** Auto-rectify — strict orthographic FRONT or 3/4 ISO regen with
