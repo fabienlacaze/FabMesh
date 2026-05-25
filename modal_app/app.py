@@ -201,6 +201,12 @@ mesh_image = (
         "git clone --depth 1 --branch v1.0.0 --recursive "
         "https://github.com/JeffreyXiang/FlexGEMM.git /tmp/flexgemm "
         "&& pip install /tmp/flexgemm --no-build-isolation --no-deps",
+        # flash-attn — required by TRELLIS-2's attention layers. Without
+        # it the mesh runtime fails with `ModuleNotFoundError: flash_attn`
+        # at the first pipeline.run() call. Same version the desktop
+        # setup.sh installs. --no-deps so it doesn't try to upgrade torch.
+        # We install BEFORE the triton 3.2 pin and the build-time guards.
+        "pip install --no-deps --no-build-isolation flash-attn==2.7.3",
         # *** THE FIX FROM 17 DEPLOYS OF FAILURE ***
         # flex-gemm's `flex_gemm/utils/autotuner.py` does:
         #   class TritonPersistentCacheAutotuner(triton.runtime.Autotuner):
@@ -607,10 +613,230 @@ class MyFabmeshBackview:
 
 
 # ===========================================================================
-# Mesh predictor DISABLED (2026-05-25 19:55) — workspace at 80% spend limit.
-# Worker routes mesh to Replicate fishwowater/trellis2 which works.
-# Re-enable: git show a961465 -- modal_app/app.py + redeploy.
+# Mesh predictor — TRELLIS-2 image-to-3D — ASYNC ARCHITECTURE.
+#
+# Why async: Modal web endpoints have a 150 s HTTP response timeout that we
+# cannot extend. The mesh cold start alone (no @enter(snap=True) because
+# flex_gemm's @triton_autotune decorators need GPU at import time) takes
+# ~169 s just to load TRELLIS-2 + DINOv3 + GPU move. Sync mesh = guaranteed
+# HTTP 303 every cold call.
+#
+# So we split the endpoint in two:
+#   POST /mesh-start  — spawns the work in background via .spawn(), returns
+#                       {"job_id": "<uuid>"} immediately (< 1s).
+#   POST /mesh-status — reads the persistent Volume; returns the GLB inline
+#                       when ready, or {"ready": false} otherwise.
+#
+# The GLB is persisted to a `modal.Volume` mounted at /data — the volume
+# survives between container restarts so the status endpoint (which may
+# land on a different container than the generate function) can read it.
 # ===========================================================================
+
+# Persistent volume that stores GLB outputs keyed by job_id. Auto-created
+# on first deploy. Worker can poll the status endpoint until ready.
+mesh_output_volume = modal.Volume.from_name(
+    "myfabmesh-mesh-output", create_if_missing=True,
+)
+
+
+@app.cls(
+    image=mesh_image,
+    gpu="L40S",
+    timeout=900,           # full TRELLIS-2 pipeline can run ~5-10 min cold
+    scaledown_window=30,
+    enable_memory_snapshot=False,  # flex_gemm's @triton_autotune needs GPU at import
+    volumes={"/data": mesh_output_volume},
+    secrets=[
+        modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
+        modal.Secret.from_name("huggingface", required_keys=["HF_TOKEN"]),
+    ],
+)
+class MyFabmeshMesh:
+    @modal.enter()
+    def load_everything(self):
+        """All TRELLIS-2 loading happens here (GPU attached).
+
+        Mirror of scripts/trellis2_native_full_pipeline.py:main().
+        We CANNOT use @modal.enter(snap=True) because flex_gemm /
+        cumesh chain decorate module-level kernels with @triton_autotune
+        which calls driver.active.get_benchmarker() at IMPORT time.
+        Without a GPU that fails with "0 active drivers"."""
+        t0 = time.time()
+        print("[mesh/ready] importing trellis2 + loading TRELLIS.2-4B…", flush=True)
+        import sys
+        sys.path.insert(0, "/opt/trellis2_local")
+
+        # Env vars matching the desktop script defaults.
+        os.environ.setdefault("TRELLIS2_USE_KAOLIN_RASTER", "1")
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+        os.environ.setdefault("TORCHINDUCTOR_USE_TRITON", "0")
+        os.environ.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
+
+        # Patch the cached pipeline.json to swap the gated briaai/RMBG-2.0
+        # for ZhengPeng7/BiRefNet (Apache 2.0). Same logic as the desktop
+        # script's _patch_rmbg_in_hf_cache().
+        try:
+            from huggingface_hub import snapshot_download
+            cache_root = snapshot_download(
+                "microsoft/TRELLIS.2-4B",
+                allow_patterns=["pipeline.json"],
+            )
+            pipeline_json = os.path.join(cache_root, "pipeline.json")
+            if os.path.isfile(pipeline_json):
+                with open(pipeline_json, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if "briaai/RMBG-2.0" in content:
+                    with open(pipeline_json, "w", encoding="utf-8") as f:
+                        f.write(content.replace(
+                            "briaai/RMBG-2.0", "ZhengPeng7/BiRefNet"))
+                    print("[mesh/ready] patched HF cache: briaai/RMBG-2.0 -> ZhengPeng7/BiRefNet",
+                          flush=True)
+        except Exception as e:
+            print(f"[mesh/ready] rmbg patch skipped: {e}", flush=True)
+
+        from trellis2.pipelines import Trellis2ImageTo3DPipeline
+        self.pipeline = Trellis2ImageTo3DPipeline.from_pretrained(
+            "microsoft/TRELLIS.2-4B")
+        self.pipeline.rembg_model = None
+        self.pipeline.cuda()
+        import o_voxel
+        self.o_voxel = o_voxel
+        print(f"[mesh/ready] full load + GPU move done in {time.time() - t0:.1f}s",
+              flush=True)
+
+    @modal.method()
+    def generate_to_volume(self, job_id: str, payload: dict):
+        """Run TRELLIS-2 pipeline + write GLB bytes to /data/<job_id>.glb
+        in the shared Volume so the status endpoint can return it.
+        Errors are written to /data/<job_id>.err for the status endpoint
+        to surface."""
+        import urllib.request
+        import traceback
+        from PIL import Image as _PImg
+        from modal_app._mesh import generate
+
+        t0 = time.time()
+        out_path = f"/data/{job_id}.glb"
+        err_path = f"/data/{job_id}.err"
+        try:
+            front_url = (payload.get("front_image_url") or "").strip()
+            if not front_url:
+                raise ValueError("front_image_url required")
+            with urllib.request.urlopen(front_url, timeout=30) as r:
+                front_bytes = r.read()
+            front_img = _PImg.open(io.BytesIO(front_bytes))
+            glb_bytes = generate(
+                self.pipeline,
+                self.o_voxel,
+                front_img,
+                mode=payload.get("mode") or "1024",
+                seed=int(payload.get("seed") or 42),
+                decimation_target=int(payload.get("decimation_target") or 500_000),
+                texture_size=int(payload.get("texture_size") or 2048),
+            )
+            with open(out_path, "wb") as f:
+                f.write(glb_bytes)
+            mesh_output_volume.commit()
+            print(f"[mesh] DONE job={job_id} dt={time.time() - t0:.1f}s "
+                  f"bytes={len(glb_bytes)}", flush=True)
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+            try:
+                with open(err_path, "w") as f:
+                    f.write(err_msg)
+                mesh_output_volume.commit()
+            except Exception:
+                pass
+            print(f"[mesh] FAILED job={job_id}: {err_msg}", flush=True)
+            raise
+
+    # NOTE: mesh_start / mesh_status are NOT on this class. They live
+    # below as @app.function (lightweight image, no GPU) so that an
+    # HTTP request to /mesh-start does NOT trigger this class's heavy
+    # @enter (TRELLIS-2 load = 170 s, would blow past Modal's 150 s
+    # HTTP timeout even for "instant" enqueue calls).
+
+
+# Lightweight HTTP endpoints that DELEGATE to the heavy mesh class.
+# These use the regular `image` (text2image + back-view) — no GPU
+# needed for the endpoint itself, just for the spawned background
+# work. Cold-start of these endpoints is fast (CPU container with
+# the cached `image`) so the HTTP response comes back in <1 s.
+
+@app.function(
+    image=image,
+    volumes={"/data": mesh_output_volume},
+    secrets=[
+        modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
+    ],
+)
+@modal.fastapi_endpoint(method="POST")
+def mesh_start(payload: dict):
+    """Enqueue a TRELLIS-2 mesh job. Returns the job_id in <1 s; the
+    actual mesh work runs on a separate GPU container (MyFabmeshMesh
+    class) and writes the GLB to /data/<job_id>.glb in the shared
+    Volume. The Worker stores the id in Supabase and polls mesh_status
+    until the GLB is ready."""
+    from fastapi import HTTPException
+    import uuid
+    expected = os.environ.get("SHARED_SECRET", "")
+    provided = (payload.get("_auth") or "").strip()
+    if not expected or provided != expected:
+        raise HTTPException(status_code=401, detail="auth")
+    if not payload.get("front_image_url"):
+        raise HTTPException(status_code=400, detail="front_image_url required")
+
+    job_id = payload.get("job_id") or uuid.uuid4().hex
+    # .spawn() on the class method enqueues work; Modal allocates a
+    # GPU container for MyFabmeshMesh and runs @enter once, then
+    # generate_to_volume(). Returns INSTANTLY from this endpoint.
+    MyFabmeshMesh().generate_to_volume.spawn(job_id, payload)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.function(
+    image=image,
+    volumes={"/data": mesh_output_volume},
+    secrets=[
+        modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
+    ],
+)
+@modal.fastapi_endpoint(method="POST")
+def mesh_status(payload: dict):
+    """Worker polls this endpoint to know whether a mesh job is ready.
+    Returns base64-encoded GLB inline once the worker container has
+    written it to the Volume. No GPU needed — just a Volume read."""
+    from fastapi import HTTPException
+    import base64
+    expected = os.environ.get("SHARED_SECRET", "")
+    provided = (payload.get("_auth") or "").strip()
+    if not expected or provided != expected:
+        raise HTTPException(status_code=401, detail="auth")
+    job_id = (payload.get("job_id") or "").strip()
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+
+    # Reload so we see the latest commits from the GPU worker container.
+    mesh_output_volume.reload()
+    out_path = f"/data/{job_id}.glb"
+    err_path = f"/data/{job_id}.err"
+    if os.path.isfile(err_path):
+        with open(err_path) as f:
+            return {"ready": False, "error": f.read()[:500]}
+    if os.path.isfile(out_path):
+        with open(out_path, "rb") as f:
+            glb = f.read()
+        return {
+            "ready": True,
+            "glb_base64": base64.b64encode(glb).decode("ascii"),
+            "bytes": len(glb),
+        }
+    return {"ready": False}
+
+
+# ===========================================================================
+
 
 @app.local_entrypoint()
 def smoke():

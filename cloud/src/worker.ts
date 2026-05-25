@@ -51,7 +51,12 @@ export interface Env {
   // URL is empty/unset so we can disable Modal instantly without redeploy.
   MODAL_TEXT2IMAGE_URL?: string;
   MODAL_BACKVIEW_URL?: string;
-  MODAL_MESH_URL?: string;
+  // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
+  // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
+  // to the Replicate Cog.
+  MODAL_MESH_START_URL?: string;
+  MODAL_MESH_STATUS_URL?: string;
+  MODAL_MESH_URL?: string;  // legacy sync url — kept so old deploys don't break
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -673,6 +678,48 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     return json({ jobId, creditsRemaining: remaining, mock: true });
   }
 
+  // Modal-for-mesh routing. When MODAL_MESH_START_URL + MODAL_MESH_STATUS_URL
+  // are set, we run the mesh on our own TRELLIS-2 deployment instead of the
+  // Replicate fishwowater/trellis2 model. Same desktop code, ~5-10× cheaper
+  // per mesh in steady state. The Worker stores a `modal_<uuid>` jobId in
+  // Supabase and handleJob() polls Modal's /mesh-status endpoint.
+  const useModalMesh = !!(env.MODAL_MESH_START_URL && env.MODAL_MESH_STATUS_URL);
+  const projectName = (form.get('project_name') as string | null) || null;
+
+  if (useModalMesh) {
+    // Worker generates the job_id (uuid hex). Modal echoes it back.
+    const jobId = 'modal_' + crypto.randomUUID().replace(/-/g, '');
+    try {
+      await callModalMeshStart(env, {
+        jobId,
+        frontImageUrl: input.image,
+        mode: input.mode === 'full' ? '1024_cascade'
+            : input.mode === 'lite' ? '512'
+            : '1024',
+        seed: input.seed ?? 42,
+        decimation_target: input.mode === 'lite' ? 100_000
+                         : input.mode === 'full' ? 1_500_000 : 500_000,
+        texture_size: input.mode === 'full' ? 2048 : 1024,
+      });
+    } catch (e: unknown) {
+      await addCredits(env, user.id, cost);
+      return err(502, 'modal mesh-start failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
+    await supabaseAdmin(env).from('jobs').insert({
+      id: jobId, user_id: user.id,
+      asset_type: input.asset_type, mode: input.mode, seed: input.seed,
+      credit_cost: cost, status: 'processing',
+      project_name: projectName,
+      options: {
+        rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
+        face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
+        backend: 'modal',
+      },
+      created_at: new Date().toISOString(),
+    });
+    return json({ jobId, creditsRemaining: remaining });
+  }
+
   let prediction;
   try {
     prediction = await createReplicatePrediction(env, input);
@@ -681,7 +728,6 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     return err(502, 'replicate failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 
-  const projectName = (form.get('project_name') as string | null) || null;
   await supabaseAdmin(env).from('jobs').insert({
     id: prediction.id, user_id: user.id,
     asset_type: input.asset_type, mode: input.mode, seed: input.seed,
@@ -715,6 +761,50 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
       return json({ status: 'succeeded', url: MOCK_GLB_URL, duration_s: age / 1000 });
     }
     return json({ status: 'processing' });
+  }
+
+  // Modal-backed mesh jobs use a `modal_<uuid>` id and are polled
+  // through callModalMeshStatus instead of Replicate. Once the GLB
+  // is ready we persist it to R2 (so the renderer gets a stable URL
+  // not the inline base64) and flip the Supabase row to succeeded.
+  if (id.startsWith('modal_')) {
+    const sbm = supabaseAdmin(env);
+    const { data: job } = await sbm.from('jobs').select('*').eq('id', id).maybeSingle();
+    if (!job) return json({ status: 'failed', error: 'job not found' });
+    if (job.status === 'succeeded' && job.mesh_url) {
+      const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
+      return json({ status: 'succeeded', url: job.mesh_url as string,
+                    duration_s: (Date.now() - start) / 1000 });
+    }
+    try {
+      const status = await callModalMeshStatus(env, id);
+      if (status.error) {
+        await sbm.from('jobs')
+          .update({ status: 'failed', error: status.error.slice(0, 500),
+                    finished_at: new Date().toISOString() })
+          .eq('id', id);
+        // Refund credits on failure (same policy as Replicate).
+        if (typeof job.user_id === 'string' && typeof job.credit_cost === 'number') {
+          await addCredits(env, job.user_id, job.credit_cost);
+        }
+        return json({ status: 'failed', error: status.error });
+      }
+      if (!status.ready || !status.glb_base64) {
+        return json({ status: 'processing' });
+      }
+      const stableUrl = await persistModalGlb(env, id, status.glb_base64);
+      await sbm.from('jobs')
+        .update({ status: 'succeeded', mesh_url: stableUrl,
+                  finished_at: new Date().toISOString() })
+        .eq('id', id);
+      const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
+      return json({ status: 'succeeded', url: stableUrl,
+                    duration_s: (Date.now() - start) / 1000 });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('modal poll error:', msg);
+      return json({ status: 'processing', poll_warning: msg.slice(0, 200) });
+    }
   }
 
   const prediction = await replicateClient(env).predictions.get(id);
@@ -1287,52 +1377,97 @@ async function callModalBackView(env: Env, userId: string, input: {
   throw new Error('R2 bucket unavailable; cannot persist Modal back-view output');
 }
 
-/** Modal mesh endpoint (TRELLIS-2 image-to-3D).
- *  POST { _auth, front_image_url, mode, seed, decimation_target, texture_size }
- *  → GLB bytes (model/gltf-binary).
- *  We upload the GLB into R2 and return its public URL.
- *  Same auth pattern as the other Modal endpoints. */
-async function callModalMesh(env: Env, userId: string, input: {
+/* ───────────────────── Modal mesh — ASYNC pattern ─────────────────────
+ * The mesh pipeline (TRELLIS-2) takes ~5-10 min on a cold container.
+ * Modal web endpoints hard-cap HTTP responses at 150 s, so we cannot
+ * use a sync request/reply. Instead:
+ *
+ *   1. callModalMeshStart()  → POSTs to <MODAL_MESH_URL>/mesh-start,
+ *      returns a job_id in <1 s. Modal spawns the work in background.
+ *   2. callModalMeshStatus() → POSTs to <MODAL_MESH_URL>/mesh-status
+ *      with the job_id; gets back {ready, glb_base64} when done.
+ *   3. handleJob() (existing poll endpoint) calls #2 repeatedly until
+ *      the GLB is ready, then mirrors it into R2 like Replicate output.
+ *
+ * MODAL_MESH_URL stores the BASE URL of the Modal app (without
+ * /mesh-start). The /mesh-start and /mesh-status suffixes are appended
+ * here. Or we can store both URLs as two separate envs — chose the
+ * single-base approach to keep secrets short.
+ * ──────────────────────────────────────────────────────────────────── */
+
+async function callModalMeshStart(env: Env, input: {
+  jobId: string;
   frontImageUrl: string;
   mode?: string;
   seed?: number;
   decimation_target?: number;
   texture_size?: number;
-}, key: string): Promise<string> {
-  const url = env.MODAL_MESH_URL;
+}): Promise<{ job_id: string }> {
+  const url = env.MODAL_MESH_START_URL;
   const secret = env.MODAL_SHARED_SECRET;
-  if (!url) throw new Error('MODAL_MESH_URL not set');
+  if (!url) throw new Error('MODAL_MESH_START_URL not set');
   if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
 
-  const t0 = Date.now();
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       _auth: secret,
+      job_id: input.jobId,
       front_image_url: input.frontImageUrl,
       mode: input.mode ?? '1024',
       seed: input.seed,
       decimation_target: input.decimation_target,
       texture_size: input.texture_size,
     }),
-    // TRELLIS-2 inference takes ~60-120s warm, plus snapshot cold-start
-    // can add another 30-60s on a cold container. 8 min cap.
-    signal: AbortSignal.timeout(480_000),
+    // mesh-start returns instantly (< 1 s, just enqueues).
+    signal: AbortSignal.timeout(30_000),
   });
   if (!r.ok) {
-    throw new Error(`Modal mesh HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Modal mesh-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
-  const buf = await r.arrayBuffer();
-  console.log(`[modal] mesh dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  return await r.json() as { job_id: string };
+}
 
-  if (env.MESHES && env.R2_PUBLIC_URL) {
-    await env.MESHES.put(key, buf, {
-      httpMetadata: { contentType: 'model/gltf-binary' },
-    });
-    return `${env.R2_PUBLIC_URL}/${key}`;
+interface ModalMeshStatusResp {
+  ready: boolean;
+  glb_base64?: string;
+  bytes?: number;
+  error?: string;
+}
+
+async function callModalMeshStatus(env: Env, jobId: string): Promise<ModalMeshStatusResp> {
+  const url = env.MODAL_MESH_STATUS_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_MESH_STATUS_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ _auth: secret, job_id: jobId }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal mesh-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
-  throw new Error('R2 bucket unavailable; cannot persist Modal mesh output');
+  return await r.json() as ModalMeshStatusResp;
+}
+
+/** Save a base64-encoded GLB to R2 and return the public URL. */
+async function persistModalGlb(env: Env, jobId: string, glbBase64: string): Promise<string> {
+  if (!env.MESHES || !env.R2_PUBLIC_URL) {
+    throw new Error('R2 bucket unavailable; cannot persist Modal mesh');
+  }
+  // Decode base64 → ArrayBuffer.
+  const bin = atob(glbBase64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const key = `mesh/${jobId}.glb`;
+  await env.MESHES.put(key, buf.buffer, {
+    httpMetadata: { contentType: 'model/gltf-binary' },
+  });
+  return `${env.R2_PUBLIC_URL}/${key}`;
 }
 
 async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
