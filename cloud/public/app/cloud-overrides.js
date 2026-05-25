@@ -152,6 +152,11 @@
     // unlimited local GPU and doesn't need this).
     installCreditsPill();
 
+    // Sign-out button next to the credits pill. Sessions are stored in
+    // non-httpOnly `sb-<ref>-auth-token` cookies (set by LoginForm.tsx
+    // and read by worker.ts:getSessionUser) so JS can delete them.
+    installLogoutButton();
+
     // Adapt engine dropdowns to what Cloud actually wires.
     pruneEngineSelectors();
 
@@ -315,6 +320,57 @@
 
   // Expose a hook so other Cloud code can force a refresh after spend.
   window.__cloudCreditsRefresh = refreshCreditsPill;
+
+  /* ────────────────────────── Logout button ──────────────────────────
+   * Sits in the topbar-right, just before the credits pill. Clicking
+   * it clears all `sb-*-auth-token` cookies — these are non-httpOnly,
+   * set by Supabase JS client + LoginForm.persistSession — then sends
+   * the user back to /login. The browser also drops any in-memory
+   * Supabase client session that way.
+   * ────────────────────────────────────────────────────────────────── */
+  function installLogoutButton() {
+    if (document.querySelector('#cloud-logout-btn')) return;
+    const right = document.querySelector('#topbar .topbar-right');
+    if (!right) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'cloud-logout-btn';
+    btn.type = 'button';
+    btn.title = 'Sign out';
+    btn.setAttribute('aria-label', 'Sign out');
+    btn.innerHTML = '⎋';
+    btn.style.cssText = [
+      'display:inline-flex', 'align-items:center', 'justify-content:center',
+      'width:32px', 'height:32px', 'margin-right:8px',
+      'background:transparent',
+      'border:1px solid rgba(255,255,255,0.12)',
+      'border-radius:8px',
+      'color:#cfd0e0', 'cursor:pointer',
+      'font-size:16px',
+    ].join(';');
+    btn.onmouseenter = () => { btn.style.background = 'rgba(233,69,96,0.12)'; btn.style.borderColor = '#e94560'; btn.style.color = '#fff'; };
+    btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.borderColor = 'rgba(255,255,255,0.12)'; btn.style.color = '#cfd0e0'; };
+
+    btn.onclick = () => {
+      // Wipe every cookie that looks like a Supabase session token —
+      // belt + suspenders covers chunked tokens (`.0`/`.1` suffixes).
+      try {
+        document.cookie.split(';').forEach((c) => {
+          const name = c.trim().split('=')[0];
+          if (!name) return;
+          if (/^sb-[^-]+-auth-token(?:\.\d+)?$/.test(name) ||
+              name === 'myfm_mock_session') {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+          }
+        });
+      } catch { /* ignore */ }
+      // Hint to /api/me callers that we just logged out (no race).
+      try { sessionStorage.clear(); } catch { /* ignore */ }
+      window.location.href = '/login';
+    };
+
+    right.insertBefore(btn, right.firstChild);
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', applyOverrides);
