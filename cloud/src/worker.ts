@@ -1028,13 +1028,35 @@ interface CogInput {
   steps?: number;
 }
 
+// Cached version id for fabienlacaze/myfabmesh-cloud. We resolve it
+// once per Worker instance (cold start) via the models endpoint, then
+// reuse for every prediction. Bump the Cog → push to Replicate → the
+// next call refreshes this automatically.
+let _myfabmeshCogVersion: string | null = null;
+async function resolveMyfabmeshCogVersion(token: string): Promise<string> {
+  if (_myfabmeshCogVersion) return _myfabmeshCogVersion;
+  const r = await fetch(
+    'https://api.replicate.com/v1/models/fabienlacaze/myfabmesh-cloud',
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+  if (!r.ok) throw new Error(`Cannot resolve Cog version: HTTP ${r.status}`);
+  const j = await r.json() as { latest_version?: { id?: string } };
+  if (!j.latest_version?.id) throw new Error('Cog has no pushed version yet');
+  _myfabmeshCogVersion = j.latest_version.id;
+  return _myfabmeshCogVersion;
+}
+
 async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
   const token = env.REPLICATE_API_TOKEN ?? '';
   if (!token) throw new Error('REPLICATE_API_TOKEN not set');
 
-  // Use the model endpoint (no version pin → always latest_version).
+  const version = await resolveMyfabmeshCogVersion(token);
+
+  // Private models require /v1/predictions with `version: <id>` — the
+  // /v1/models/<owner>/<name>/predictions endpoint returns 404 for
+  // private models. Public models can use either.
   const createRes = await fetch(
-    'https://api.replicate.com/v1/models/fabienlacaze/myfabmesh-cloud/predictions',
+    'https://api.replicate.com/v1/predictions',
     {
       method: 'POST',
       headers: {
@@ -1045,7 +1067,7 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
         // 'prefer: wait' inlines the result up to 60s, beyond we poll.
         'prefer': 'wait=60',
       },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify({ version, input }),
     },
   );
   if (!createRes.ok) {
