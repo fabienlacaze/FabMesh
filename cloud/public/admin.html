@@ -220,7 +220,13 @@
           return false;
         }
         if (!r.ok) {
-          errEl.textContent = 'Login failed: HTTP ' + r.status;
+          // Try to surface the JSON {error: "..."} the worker returns so
+          // misconfigurations (ADMIN_PASSWORD not set on the worker, etc.)
+          // are visible without diving into network devtools.
+          let detail = '';
+          try { const j = await r.json(); detail = j.error || ''; } catch (_) {}
+          errEl.textContent = 'Login failed: HTTP ' + r.status
+            + (detail ? ' — ' + detail : '');
           errEl.style.display = 'block';
           return false;
         }
