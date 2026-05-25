@@ -135,7 +135,14 @@ export function LoginForm() {
       });
       if (error) throw error;
       setMode('forgot-sent');
-      setInfo(`Password reset link sent to ${email}. Open the email and click it to choose a new password.`);
+      // CRITICAL: do NOT instruct the user to "click the link in the
+      // email" — Outlook SafeLinks blocks Supabase auth URLs as
+      // "unsafe" (the email domain `onboarding@resend.dev` has poor
+      // reputation + the Supabase callback URL is unknown to Outlook),
+      // which locks every hotmail/outlook user out of password reset.
+      // The 6-digit code path works in 100% of cases — that's what we
+      // direct people to.
+      setInfo(`We sent a 6-digit code to ${email}. Open the email (check spam too) and enter the code on the next screen.`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBusy(false); }
@@ -201,8 +208,17 @@ export function LoginForm() {
       <div style={{ fontSize: 42, marginBottom: 8 }}>✉</div>
       <h3 style={{ marginBottom: 6 }}>Check your inbox</h3>
       <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 18 }}>{info}</p>
+      {/* Primary CTA = the code path. Don't rely on clicking the email
+          link — Outlook SafeLinks blocks Supabase callback URLs and
+          locks users out. */}
+      <a href="/auth/reset-password" className="primary-btn"
+         style={{ width: '100%', display: 'block', boxSizing: 'border-box', textDecoration: 'none' }}>
+        I have the code → Enter it
+      </a>
       <button type="button" onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
-              className="primary-btn" style={{ width: '100%' }}>
+              style={{ width: '100%', marginTop: 10, background: 'transparent',
+                       border: 'none', color: 'var(--text-3)', cursor: 'pointer',
+                       padding: '8px 0', fontSize: 13 }}>
         ← Back to sign in
       </button>
     </div>
