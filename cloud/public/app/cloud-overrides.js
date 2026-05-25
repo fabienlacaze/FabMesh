@@ -17,6 +17,31 @@
 (function () {
   'use strict';
 
+  // ── Auto-redirect on 401 ─────────────────────────────────────────
+  // Anywhere in the /app/ workspace, if a fetch to /api/* comes back
+  // 401 we know the Supabase session cookie expired. Send the user
+  // straight to /login with a ?next= so they bounce right back here
+  // after re-auth. One hard guard: only redirect once per page load
+  // to avoid loops if /login itself happens to 401 somehow.
+  let _redirectedFor401 = false;
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = async function patchedFetch(input, init) {
+    const res = await _origFetch(input, init);
+    try {
+      const url = typeof input === 'string' ? input
+                : input instanceof URL ? input.href
+                : input?.url ?? '';
+      const sameOriginApi = url.startsWith('/api/')
+        || url.startsWith(window.location.origin + '/api/');
+      if (res.status === 401 && sameOriginApi && !_redirectedFor401) {
+        _redirectedFor401 = true;
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.replace(`/login?next=${next}`);
+      }
+    } catch (_) { /* ignore */ }
+    return res;
+  };
+
   // ── C4: file:/// URL rewriter ────────────────────────────────────
   // The desktop renderer prefixes every asset path with "file:///"
   // because on Electron the renderer is loaded from file://. In the
