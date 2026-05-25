@@ -365,63 +365,63 @@
                     <summary style="cursor:pointer; color:var(--text-muted);">&#9881;&#65039; Advanced texture options</summary>
                     <div class="form-row" style="margin-top:6px;">
                       <label style="font-size:11px;">Quality preset</label>
-                      <select id="ws-trellis2-preset">
-                        <option value="fast" selected>Fast (12 steps · 2048px · ~90s)</option>
-                        <option value="balanced">Balanced (24 steps · 2048px · ~130s)</option>
-                        <option value="quality">Quality (32 steps · 4096px · ~3min)</option>
+                      <select id="ws-trellis2-preset" data-cost-base="1">
+                        <option value="fast" selected data-credits="1">Fast (12 steps · 2048px · ~90s · 1 cr)</option>
+                        <option value="balanced" data-credits="2">Balanced (24 steps · 2048px · ~130s · 2 cr)</option>
+                        <option value="quality" data-credits="4">Quality (32 steps · 4096px · ~3min · 4 cr)</option>
                       </select>
                     </div>
                     <div class="form-row check-row" id="ws-trellis2-multiref-row" style="margin-top:6px; display:none;">
                       <label class="inline-check" style="font-size:11px;">
-                        <input type="checkbox" id="ws-trellis2-multiref" />
-                        Multi-reference (use front + back photo)
+                        <input type="checkbox" id="ws-trellis2-multiref" data-credits="1" />
+                        Multi-reference (use front + back photo · +1 cr)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:6px;">
                       <label class="inline-check" style="font-size:11px;" title="Tile-by-tile detail refinement that adds micro-details (skin pores, fabric weave, scales, fur). Works best on objects/animals/creatures; less effective on human faces.">
-                        <input type="checkbox" id="ws-trellis2-refine" />
-                        Detail refine (+~90s, sharper micro-details)
+                        <input type="checkbox" id="ws-trellis2-refine" data-credits="2" />
+                        Detail refine (+~90s · +2 cr · sharper micro-details)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Pre-process: rectify source image to a canonical view (strict front for characters, 3/4 ISO for vehicles / objects / creatures). Dramatically improves mesh proportions. Sampled over 3 seeds with auto-scoring. Adds ~36s.">
-                        <input type="checkbox" id="ws-trellis2-rectify" checked />
-                        Auto-rectify source view (+~36s, better mesh proportions)
+                        <input type="checkbox" id="ws-trellis2-rectify" data-credits="1" checked />
+                        Auto-rectify source view (+~36s · +1 cr · better mesh proportions)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Edge-preserving bilateral filter on the baseColor atlas. Cleans speckled grain on smooth surfaces (paint, chrome, glass) while keeping panel-gap edges sharp. No AI, no hallucination. Best for vehicles / objects / hard surfaces.">
-                        <input type="checkbox" id="ws-trellis2-smooth" checked />
-                        Texture smooth (+~12s, cleaner smooth surfaces, no AI)
+                        <input type="checkbox" id="ws-trellis2-smooth" data-credits="0" checked />
+                        Texture smooth (+~12s · free · CPU only, no AI)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Cascade mode (2-stage generation) + decim 1M faces. Sharper geometry on edges (panel gaps, grilles). Adds ~30s.">
-                        <input type="checkbox" id="ws-trellis2-quality-plus" checked />
-                        Quality+ (cascade mode, decim 1M, +~30s)
+                        <input type="checkbox" id="ws-trellis2-quality-plus" data-credits="1" checked />
+                        Quality+ (cascade mode, decim 1M · +~30s · +1 cr)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Voxel resolution 1536 (vs 1024 default) for finer geometric detail on faces and small features. Strongly recommended for character/creature assets where facial fidelity matters. Adds ~50s and ~30MB to the GLB. Overrides Quality+ mode setting.">
-                        <input type="checkbox" id="ws-trellis2-ultra-q" />
-                        Ultra Quality (1536_cascade, fine face detail, +~50s)
+                        <input type="checkbox" id="ws-trellis2-ultra-q" data-credits="2" />
+                        Ultra Quality (1536_cascade · +~50s · +2 cr · fine face detail)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Upscale the baseColor atlas to 8192² (no hallucination, lossless detail recovery). Final GLB ~120 MB.">
-                        <input type="checkbox" id="ws-trellis2-ultra-hd" checked />
-                        Ultra HD 8K texture (+~5min)
+                        <input type="checkbox" id="ws-trellis2-ultra-hd" data-credits="3" checked />
+                        Ultra HD 8K texture (+~5min · +3 cr)
                       </label>
                     </div>
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Post-process the baseColor atlas to refine the face zone. Fixes blurry or distorted faces on characters. Strength 0.45.">
-                        <input type="checkbox" id="ws-trellis2-face-fix" />
-                        Face fix (+~60s)
+                        <input type="checkbox" id="ws-trellis2-face-fix" data-credits="2" />
+                        Face fix (+~60s · +2 cr)
                       </label>
                     </div>
                     <div class="form-hint" style="font-size:10px;">PBR baseColor + roughness + metallic exported in the GLB automatically.</div>
                   </details>
-                  <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D <span style="opacity:0.75; font-weight:400;">(1–2 credits)</span></button>
+                  <button id="ws-generate-mesh" class="primary-btn" disabled>Generate 3D <span id="ws-mesh-cost-pill" style="opacity:0.9; font-weight:600;">(<span id="ws-mesh-cost-value">8</span> credits)</span></button>
                 </div>
                 <div class="stage-create-source">
                   <div class="stage-source-label">Source image for 3D (front)</div>
