@@ -271,13 +271,35 @@ interface GenerateInput {
   seed?: number;
   rectify?: boolean; back_view?: boolean; smooth?: boolean;
   face_fix?: boolean; ultra_hd?: boolean; fast?: boolean;
+  // Trellis2 advanced options — values MUST match the data-credits
+  // attributes in cloud/public/app/index.html so the UI cost meter and
+  // the server never disagree.
+  preset?: 'fast' | 'balanced' | 'quality';
+  multiref?: boolean;
+  refine?: boolean;
+  quality_plus?: boolean;
+  ultra_q?: boolean;
 }
 
-function creditCost(i: Pick<GenerateInput, 'mode' | 'fast' | 'ultra_hd' | 'face_fix'>): number {
-  let n = i.mode === 'lite' ? 1 : i.mode === 'standard' ? 1 : 2;
-  if (i.fast) n += 1;
-  if (i.ultra_hd) n += 1;
-  if (i.face_fix) n += 1;
+function creditCost(i: GenerateInput): number {
+  // Preset base cost
+  let n: number;
+  if (i.preset === 'quality')       n = 4;
+  else if (i.preset === 'balanced') n = 2;
+  else                              n = 1;  // fast (default)
+
+  // Optional add-ons — same costs as the HTML data-credits.
+  if (i.multiref)     n += 1;
+  if (i.refine)       n += 2;
+  if (i.rectify)      n += 1;
+  // smooth is free — CPU-only bilateral filter, no AI
+  if (i.quality_plus) n += 1;
+  if (i.ultra_q)      n += 2;
+  if (i.ultra_hd)     n += 3;
+  if (i.face_fix)     n += 2;
+
+  // Legacy: old clients still send mode=full without preset.
+  if (i.mode === 'full' && !i.preset) n = Math.max(n, 4);
   return n;
 }
 

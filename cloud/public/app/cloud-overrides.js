@@ -157,6 +157,41 @@
 
     // Strip Desktop-only bits from the About modal.
     pruneAboutModal();
+
+    // Wire the live cost meter on the "Generate 3D" button so users
+    // see the total credit cost change as they toggle options.
+    installMeshCostMeter();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Live mesh-cost meter — sums data-credits on the active preset +
+   * every checked option, rewrites the "Generate 3D (N credits)" pill.
+   * Re-runs on any change in the advanced texture options.
+   * ────────────────────────────────────────────────────────────────── */
+  function installMeshCostMeter() {
+    const preset = document.getElementById('ws-trellis2-preset');
+    const valueEl = document.getElementById('ws-mesh-cost-value');
+    if (!preset || !valueEl) return;
+    const optionIds = [
+      'ws-trellis2-multiref', 'ws-trellis2-refine', 'ws-trellis2-rectify',
+      'ws-trellis2-smooth',   'ws-trellis2-quality-plus',
+      'ws-trellis2-ultra-q',  'ws-trellis2-ultra-hd', 'ws-trellis2-face-fix',
+    ];
+
+    function recompute() {
+      let total = parseInt(preset.selectedOptions[0]?.dataset?.credits || '1', 10);
+      for (const id of optionIds) {
+        const el = document.getElementById(id);
+        if (el?.checked) total += parseInt(el.dataset.credits || '0', 10);
+      }
+      valueEl.textContent = String(total);
+    }
+
+    preset.addEventListener('change', recompute);
+    for (const id of optionIds) {
+      document.getElementById(id)?.addEventListener('change', recompute);
+    }
+    recompute();
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -167,6 +202,10 @@
     const upBtn = document.getElementById('about-check-update');
     const upSection = upBtn?.closest('.about-section');
     if (upSection) upSection.style.display = 'none';
+
+    // VRAM/GPU/TEMP/RAM widget on the job-details modal — no local GPU
+    // in the browser, so always "--". Just hide it.
+    hideById('job-gpu-monitor');
 
     // Rewrite the bottom credit line so it doesn't claim Sentry crash
     // reporting that we haven't wired up yet on Cloud.
