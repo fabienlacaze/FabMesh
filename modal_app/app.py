@@ -289,7 +289,7 @@ mesh_image = (
     # was dominated by scaledown idle time. 30 s is the sweet spot
     # for the bursty workload of an image generator (one user
     # iterates on 3-5 gens in a row, then is idle for minutes).
-    scaledown_window=30,
+    scaledown_window=300,  # keep warm 5 min after last call so back-to-back gens stay fast
     enable_memory_snapshot=True,
     # Surface the HF token + R2 creds so the predictor can pull
     # private/gated weights and (optionally) upload directly to R2.
@@ -468,7 +468,7 @@ class MyFabmeshPredictor:
 @app.cls(
     gpu="L40S",
     timeout=600,
-    scaledown_window=30,
+    scaledown_window=300,  # keep warm 5 min after last call so back-to-back gens stay fast
     enable_memory_snapshot=True,
     secrets=[
         modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
@@ -643,7 +643,7 @@ mesh_output_volume = modal.Volume.from_name(
     image=mesh_image,
     gpu="L40S",
     timeout=900,           # full TRELLIS-2 pipeline can run ~5-10 min cold
-    scaledown_window=30,
+    scaledown_window=300,  # keep warm 5 min after last call so back-to-back gens stay fast
     enable_memory_snapshot=False,  # flex_gemm's @triton_autotune needs GPU at import
     volumes={"/data": mesh_output_volume},
     secrets=[
@@ -723,7 +723,16 @@ class MyFabmeshMesh:
             front_url = (payload.get("front_image_url") or "").strip()
             if not front_url:
                 raise ValueError("front_image_url required")
-            with urllib.request.urlopen(front_url, timeout=30) as r:
+            # Cloudflare R2 (pub-…r2.dev) blocks the default python-urllib
+            # User-Agent with 403. Send a browser UA to bypass the bot
+            # filter. Same hack we'll need for any Cloudflare-fronted CDN.
+            print(f"[mesh] fetching front_url={front_url[:120]}", flush=True)
+            req = urllib.request.Request(
+                front_url,
+                headers={"User-Agent":
+                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as r:
                 front_bytes = r.read()
             front_img = _PImg.open(io.BytesIO(front_bytes))
             glb_bytes = generate(
