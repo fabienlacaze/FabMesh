@@ -10,6 +10,42 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud: Modal mesh_image — fix DINOv3ViTModel import crash)
+
+- **Symptôme :** `MyFabmeshMesh.load_to_cpu` crash-loop sur Modal avec
+  `ImportError: cannot import name 'DINOv3ViTModel' from 'transformers'`.
+  La chaîne d'import est `from trellis2.pipelines import …` →
+  `trellis2/modules/image_feature_extractor.py:5` →
+  `from transformers import DINOv3ViTModel`.
+- **Root cause (vérifiée web) :** `DINOv3ViTModel` n'a été ajouté à
+  HuggingFace `transformers` qu'à partir de la **4.56.0** (release du
+  2025-08-29, support code mergé 2025-08-14). Le mesh_image était pinné
+  à `transformers==4.51.3` — pas de cache Modal foireux, juste la
+  mauvaise version (le commentaire dans app.py affirmait à tort que
+  4.51 était la plus basse version contenant le symbole).
+- **Fix :**
+  - bump `transformers==4.51.3` → `transformers==4.56.0` dans le
+    pip_install initial ET le run_commands explicite. tokenizers bumpé
+    à `>=0.22,<0.23` (4.56 exige tokenizers 0.22+). huggingface_hub
+    floor à 0.34.
+  - `pip install /opt/trellis2_local/o-voxel` reçoit `--no-deps` pour
+    qu'il ne puisse pas redéscendre transformers via une dep transitive.
+  - Ajout de deux **guards Python `-c`** dans le build (après le
+    upgrade transformers, et après le `--force-reinstall torch`) qui
+    importent `DINOv3ViTModel` — si une étape clobbe transformers, le
+    build échoue avec un traceback clair AU LIEU de crash-loop le
+    container runtime.
+- **Compat torch :** transformers 4.56 exige torch >= 2.2 → torch 2.4.1
+  pin reste valide, pas besoin de bump torch.
+- **Plan B prêt si re-crash :** patcher
+  `external/TRELLIS2_win/src/trellis2/modules/image_feature_extractor.py`
+  pour rendre l'import lazy (`DINOv3ViTModel` chargé dans `__init__` de
+  `DinoV3FeatureExtractor` seulement) et tomber back sur la classe
+  `DinoV2FeatureExtractor` du même fichier si la 4.56 pose un autre
+  problème.
+
+---
+
 ## 2026-05-25 (Cloud: Modal POC scaffolding — replace Replicate for text2image)
 
 - **Constat (réel sur facture Replicate du 25 mai) :**
