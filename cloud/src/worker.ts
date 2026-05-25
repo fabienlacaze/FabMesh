@@ -650,22 +650,34 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   };
 
   const cost = creditCost(input);
-  // Mesh worst-case Replicate estimate: $0.50 (full mode with all
-  // post-processes can hit ~$0.40-0.50 on L40S).
-  const ESTIMATED_USD_MESH = 0.50;
+  // Decide backend FIRST so we hit the right budget counter. Mesh
+  // routes to Modal when both MODAL_MESH_* URLs are set; otherwise
+  // falls back to the Replicate Cog (fishwowater/trellis2). Each
+  // backend has its own daily $ cap (and own counter in R2).
+  const useModalMesh = !!(env.MODAL_MESH_START_URL && env.MODAL_MESH_STATUS_URL);
+  // Cost estimates: Replicate ~$0.50/mesh (full mode all post-process),
+  // Modal ~$0.16/mesh (TRELLIS-2 5min L40S × $0.000542 + R2 ops).
+  const ESTIMATED_USD_MESH = useModalMesh ? 0.16 : 0.50;
 
-  const remainingBudget = await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH);
+  const remainingBudget = useModalMesh
+    ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH)
+    : await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH);
   if (remainingBudget == null) {
-    return err(429, 'daily Replicate budget reached. Try again after midnight UTC.');
+    const provider = useModalMesh ? 'Modal' : 'Replicate';
+    return err(429, `daily ${provider} budget reached. Try again after midnight UTC, or raise MAX_DAILY_${useModalMesh ? 'MODAL_' : ''}SPEND_USD.`);
   }
+  const refundMeshSpend = async () => {
+    if (useModalMesh) await refundModalSpend(env, ESTIMATED_USD_MESH);
+    else await refundDailySpend(env, ESTIMATED_USD_MESH);
+  };
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundDailySpend(env, ESTIMATED_USD_MESH);
+    await refundMeshSpend();
     return err(429, 'you have reached the per-user daily generation limit.');
   }
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundDailySpend(env, ESTIMATED_USD_MESH);
+    await refundMeshSpend();
     return err(402, 'insufficient credits');
   }
 
@@ -685,12 +697,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     return json({ jobId, creditsRemaining: remaining, mock: true });
   }
 
-  // Modal-for-mesh routing. When MODAL_MESH_START_URL + MODAL_MESH_STATUS_URL
-  // are set, we run the mesh on our own TRELLIS-2 deployment instead of the
-  // Replicate fishwowater/trellis2 model. Same desktop code, ~5-10× cheaper
-  // per mesh in steady state. The Worker stores a `modal_<uuid>` jobId in
-  // Supabase and handleJob() polls Modal's /mesh-status endpoint.
-  const useModalMesh = !!(env.MODAL_MESH_START_URL && env.MODAL_MESH_STATUS_URL);
+  // (useModalMesh already declared above before the budget check.)
   // Accept BOTH snake_case (original API contract) AND camelCase
   // (the cloud JS shim sends `projectName` because it iterates over
   // user-provided opts as-is). Without this fallback every cloud-side
