@@ -398,6 +398,61 @@ interface GenerateInput {
   ultra_q?: boolean;
 }
 
+/** Approximate Modal cost per operation type, in USD. Used by the
+ *  history CSV to compute net margin without re-deriving it from the
+ *  GPU rate × elapsed time. Numbers come from the financial audit on
+ *  2026-05-26 (warm-container amortised, including a fair share of the
+ *  scaledown_window=300s idle). Tune as Modal pricing evolves. */
+const MODAL_COST_USD: Record<string, number> = {
+  'text2image':  0.020,
+  'back-view':   0.050,
+  'rectify':     0.070,
+  'sheet':       0.050,
+  'tpose':       0.040,
+  'mesh':        0.060,   // base mesh (no face_fix, warm container)
+  'mesh-face':   0.110,   // mesh + face_fix lazy SDXL inpaint
+  'remove-bg':   0.005,
+};
+
+/** Persist a single non-mesh operation in the jobs table so the
+ *  history CSV can show it. Mesh inserts happen inline in handleGenerate
+ *  (they already need a job row for status polling). Fire-and-forget —
+ *  a logging failure must never bubble up to the user-visible response. */
+async function logOperation(
+  env: Env,
+  userId: string,
+  opType: keyof typeof MODAL_COST_USD,
+  credits: number,
+  startTs: number,
+  endTs: number,
+  status: 'succeeded' | 'failed',
+  meta: Record<string, unknown> = {},
+): Promise<void> {
+  if (isMock(env)) return;
+  try {
+    const cost = MODAL_COST_USD[opType] ?? 0;
+    await supabaseAdmin(env).from('jobs').insert({
+      id: 'op_' + crypto.randomUUID().replace(/-/g, ''),
+      user_id: userId,
+      asset_type: opType,
+      mode: 'op',
+      seed: 0,
+      credit_cost: credits,
+      status,
+      options: {
+        operation_type: opType,
+        cost_usd: cost,
+        duration_ms: endTs - startTs,
+        ...meta,
+      },
+      created_at: new Date(startTs).toISOString(),
+      finished_at: new Date(endTs).toISOString(),
+    });
+  } catch (e) {
+    console.warn('[history] logOperation failed:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 function creditCost(i: GenerateInput): number {
   // Preset base cost
   let n: number;
@@ -886,6 +941,11 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
         face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
         backend: 'modal',
+        // History tracking — operation_type + cost_usd let /api/history.csv
+        // compute the margin without re-deriving it from credit_cost alone.
+        // face_fix doubles GPU usage so the cost_usd is bumped.
+        operation_type: 'mesh',
+        cost_usd: input.face_fix ? MODAL_COST_USD['mesh-face'] : MODAL_COST_USD['mesh'],
       },
       created_at: new Date().toISOString(),
     });
@@ -2016,6 +2076,8 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
 
   const paths: string[] = [];
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
+  const opStart = Date.now();
+  const opType = useTpose ? 'tpose' : 'text2image';
   try {
     for (let i = 0; i < n; i++) {
       if (useTpose) {
@@ -2043,7 +2105,18 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     await addCredits(env, user.id, cost);
     if (useModal) await refundModalSpend(env, estimatedTotal);
     else await refundDailySpend(env, estimatedTotal);
+    // Log the failure so the history CSV reflects the refunded attempt.
+    await logOperation(env, user.id, opType as keyof typeof MODAL_COST_USD,
+                       0, opStart, Date.now(), 'failed',
+                       { error: e instanceof Error ? e.message : String(e), n, asset_type });
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // Success path — record each generation as a separate row so the
+  // CSV totals match the actual GPU calls (e.g. count=3 logs 3 entries).
+  for (let i = 0; i < n; i++) {
+    await logOperation(env, user.id, opType as keyof typeof MODAL_COST_USD,
+                       COST_PER_IMAGE, opStart, Date.now(), 'succeeded',
+                       { asset_type, asset_style });
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
@@ -2110,6 +2183,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   }
 
   const paths: string[] = [];
+  const opStart = Date.now();
   try {
     for (let i = 0; i < n; i++) {
       if (useModal) {
@@ -2131,7 +2205,14 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     await addCredits(env, user.id, cost);
     if (useModal) await refundModalSpend(env, estimatedTotal);
     else await refundDailySpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'back-view', 0, opStart, Date.now(),
+                       'failed', { error: e instanceof Error ? e.message : String(e), n });
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+  for (let i = 0; i < n; i++) {
+    await logOperation(env, user.id, 'back-view',
+                       COST_PER_BACK, opStart, Date.now(), 'succeeded',
+                       { asset_type });
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
@@ -2197,6 +2278,7 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   }
 
   let path: string;
+  const opStart = Date.now();
   try {
     path = await callModalRectify(env, user.id, {
       prompt: rawPrompt,
@@ -2210,9 +2292,98 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'rectify', 0, opStart, Date.now(),
+                       'failed', { error: e instanceof Error ? e.message : String(e), mode, nSeeds });
     return err(502, `rectify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
+  await logOperation(env, user.id, 'rectify', cost, opStart, Date.now(),
+                     'succeeded', { mode, nSeeds });
   return json({ ok: true, success: true, path, creditsRemaining: remaining });
+}
+
+/** GET /api/history.csv — export of every operation logged for the
+ *  current user, with computed margin per row. Columns:
+ *    date, type, status, duration_s, credits, cost_usd, cost_eur,
+ *    revenue_eur, margin_eur, project, mesh_url
+ *
+ *  Revenue is computed from the Pro-tier €/credit (0.162) — the user
+ *  can manually re-weigh by their actual pack mix. Cost is the
+ *  Modal-estimated USD from MODAL_COST_USD * 0.93 EUR/USD.
+ *  Failed jobs report credits=0 (refunded) and revenue=0. */
+async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  const { data, error } = await supabaseAdmin(env)
+    .from('jobs')
+    .select('id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(5000);
+  if (error) return err(500, error.message);
+
+  // Pricing constants — keep in sync with PACKS[].euros / .credits.
+  // Pro tier (€20 / 120 credits) is the median pack and the best proxy
+  // for an "average" sale; the user can re-weigh in their own sheet.
+  const EUR_PER_CREDIT_NET = 0.162;
+  const USD_TO_EUR = 0.93;
+
+  const header = [
+    'date_iso', 'type', 'status', 'duration_s', 'credits',
+    'cost_usd', 'cost_eur', 'revenue_eur', 'margin_eur',
+    'project', 'asset_type', 'mode', 'mesh_url'
+  ];
+  const lines: string[] = [header.join(',')];
+
+  type J = {
+    id: string; asset_type: string; mode: string; status: string;
+    credit_cost: number; options: Record<string, unknown> | null;
+    created_at: string; finished_at: string | null;
+    project_name: string | null; mesh_url: string | null;
+  };
+  for (const j of ((data ?? []) as J[])) {
+    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const costUsd = Number(j.options?.cost_usd
+                          ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
+                          ?? 0);
+    const durMs = j.options?.duration_ms != null
+      ? Number(j.options.duration_ms)
+      : (j.finished_at
+          ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
+          : 0);
+    const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
+    const revenueEur = credits * EUR_PER_CREDIT_NET;
+    const costEur = costUsd * USD_TO_EUR;
+    const marginEur = revenueEur - costEur;
+
+    // CSV field escape — quote if contains comma/quote/newline.
+    const esc = (s: unknown): string => {
+      const v = String(s ?? '');
+      return /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    };
+    lines.push([
+      j.created_at,
+      opType,
+      j.status,
+      (durMs / 1000).toFixed(1),
+      credits,
+      costUsd.toFixed(4),
+      costEur.toFixed(4),
+      revenueEur.toFixed(4),
+      marginEur.toFixed(4),
+      esc(j.project_name ?? ''),
+      esc(j.asset_type ?? ''),
+      esc(j.mode ?? ''),
+      esc(j.mesh_url ?? ''),
+    ].join(','));
+  }
+
+  return new Response(lines.join('\n'), {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="myfabmesh-history-${new Date().toISOString().slice(0, 10)}.csv"`,
+    },
+  });
 }
 
 /* ────────────────────────── pre-warm cron ──────────────────────────── */
@@ -2325,6 +2496,7 @@ export default {
         if (pathname === '/api/generate-image'        && method === 'POST') return await handleGenerateImage(req, env);
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
+        if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
         if (pathname === '/api/mock-logout'           && method === 'POST') return await handleMockLogout(req, env);

@@ -77,7 +77,12 @@ export default function AccountPage() {
       </div>
 
       <div className="card" style={{ marginBottom: 24 }}>
-        <h3 style={{ marginBottom: 12 }}>Recent generations</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>Recent generations</h3>
+          <a href="/api/history.csv" download className="ghost-btn" style={{ fontSize: 13 }}>
+            ⬇ Download history (CSV)
+          </a>
+        </div>
         {jobs.length === 0 ? (
           <p style={{ color: 'var(--text-2)' }}>No generation yet. <a href="/app/" style={{ color: 'var(--accent)' }}>Start a project →</a></p>
         ) : (
