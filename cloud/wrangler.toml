@@ -39,19 +39,19 @@ bucket_name = "myfabmesh-meshes"
 # secret, Replicate token, R2 keys) live in `wrangler secret put`
 # and are NOT versioned here.
 ###############################################################################
-# Pre-warm cron — keep the Replicate Cog hot.
+# Pre-warm cron — DISABLED for now.
 #
-# Without this, our /api/generate-image cold-starts in ~3 min (Replicate
-# allocates a GPU + copies the 18 GB image to it). Once the worker is
-# warm, predictions take ~10-30 s. Replicate dropps the worker after ~5
-# min of inactivity, so we hit it every 4 minutes with a trivial call.
-#
-# The cron is wired in src/worker.ts's `scheduled()` handler, which
-# fires a 1-step text2image at low cost (~$0.02/call) just to keep the
-# instance allocated. Off-peak cost: ~$5-9/month for 24/7 warm.
+# The naive every-4-min cron was burning credits 24/7 even when no user
+# was online. The smart-heartbeat version (only fires if a tab is open)
+# is being wired up; once that's deployed, re-enable with:
+#   [triggers]
+#   crons = ["*/4 * * * *"]
+# The scheduled() handler in src/worker.ts already gates on
+# isUserOnline() so it will no-op if no /api/heartbeat was received
+# in the last 5 minutes. Re-enabling is safe.
 ###############################################################################
-[triggers]
-crons = ["*/4 * * * *"]
+# [triggers]
+# crons = ["*/4 * * * *"]
 
 [vars]
 MOCK = "0"

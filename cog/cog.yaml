@@ -59,18 +59,12 @@ build:
     - "libsm6"
     - "libxext6"
     - "libxrender-dev"
-  run:
-    # Pre-download the heavy HF weights INTO the image so the first
-    # prediction doesn't pay 87s of setup-time billing on Replicate.
-    # We bake the model files into /root/.cache/huggingface/hub so
-    # diffusers' from_pretrained finds them locally on cold-start.
-    #
-    # RealVisXL V4.0 weights (~6.5 GB) — used by every image gen call
-    # including back-view. Always-needed → always-baked.
-    - python -c "from huggingface_hub import snapshot_download; snapshot_download('SG161222/RealVisXL_V4.0', allow_patterns=['*.safetensors','*.json','*.txt','*.bin'])"
-    # ControlNet OpenPose SDXL (~5 GB) — used by back-view.
-    - python -c "from huggingface_hub import snapshot_download; snapshot_download('xinsir/controlnet-openpose-sdxl-1.0', allow_patterns=['diffusion_pytorch_model.safetensors','config.json'])"
-    # IP-Adapter Plus SDXL (~700 MB) — used by back-view + rectify.
-    - python -c "from huggingface_hub import snapshot_download; snapshot_download('h94/IP-Adapter', allow_patterns=['sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors','models/image_encoder/*'])"
+  # NOTE: we used to pre-download the heavy HF weights here at build
+  # time. The intent was to skip the ~30 s of runtime weight download
+  # on cold start. Result was the OPPOSITE: the Docker image grew from
+  # 6 GB → 18 GB, and Replicate's setup time (which bills the user
+  # while it copies the image onto the GPU worker) jumped from ~87 s
+  # to ~957 s. Reverted. The 30 s of runtime HF download is way
+  # cheaper than carrying 12 GB of weights in the image.
 
 predict: "predict.py:Predictor"
