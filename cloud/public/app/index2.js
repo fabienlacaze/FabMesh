@@ -472,7 +472,15 @@ async function refreshProjectsPage() {
     return base || 'untitled';
   }
   for (const m of meshes) {
-    const project = meshProject(m.filename);
+    // Cloud API attaches the original `projectName` directly on each mesh
+    // (see worker.ts:handleListMeshes). The desktop fallback `meshProject`
+    // derives the name from the filename, which the Worker has to sanitize
+    // (spaces → underscores) so the desktop's same regex parser still works.
+    // Without this preference, "medieval soldier" (image folder) and
+    // "medieval_soldier" (derived from sanitized mesh filename) split into
+    // two phantom projects in the UI.
+    const project = (m.projectName && String(m.projectName).trim())
+                 || meshProject(m.filename);
     const p = ensure(project);
     if (/_rigged_/i.test(m.filename)) p.rigs.push(m);
     else p.meshes.push(m);
