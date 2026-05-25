@@ -691,7 +691,13 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   // per mesh in steady state. The Worker stores a `modal_<uuid>` jobId in
   // Supabase and handleJob() polls Modal's /mesh-status endpoint.
   const useModalMesh = !!(env.MODAL_MESH_START_URL && env.MODAL_MESH_STATUS_URL);
-  const projectName = (form.get('project_name') as string | null) || null;
+  // Accept BOTH snake_case (original API contract) AND camelCase
+  // (the cloud JS shim sends `projectName` because it iterates over
+  // user-provided opts as-is). Without this fallback every cloud-side
+  // mesh would land in the "untitled" project.
+  const projectName = (form.get('project_name') as string | null)
+                   || (form.get('projectName') as string | null)
+                   || null;
 
   if (useModalMesh) {
     // Modal needs a fetchable HTTPS URL (its container will pull the
