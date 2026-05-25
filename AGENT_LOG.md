@@ -10,6 +10,41 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud: Vague 1.4 — T-pose front strict mode)
+
+- **Contexte :** RTS / Unreal pipeline a besoin d'un input strictly
+  T-pose front pour que TRELLIS-2 + cascade MVAdapter cascade
+  proprement. Le desktop a `scripts/generate_front_tpose.py` (RealVisXL
+  + ControlNet OpenPose xinsir + IPAdapter h94 plus_sdxl_vit-h, cn_scale
+  1.15 / ip_scale 0.75 / 30 steps / 1024², post-rembg + center @ 92%
+  hauteur). Le cloud n'avait RIEN — quand le user demandait un perso
+  RTS, il obtenait un free-pose qui chiait à l'export 3D.
+- **Modèle :** **PAS** DreamShaper XL Lightning (mon plan initial était
+  faux). Verbatim : RealVisXL_V4.0 + xinsir/controlnet-openpose-sdxl-1.0
+  + h94/IP-Adapter (sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors).
+  Exactement les mêmes weights que le desktop.
+- **Architecture :** réutilise la classe existante
+  `MyFabmeshBackview` (RealVisXL + ControlNet + IPAdapter déjà
+  snapshotés). Le seul ajout est le skeleton T-pose FRONT
+  (`modal_app/front_tpose_skeleton.png` copié depuis
+  `scripts/_front_tpose_skeleton.png`), shipped en `/opt/` via
+  `add_local_file`. Nouveau module `modal_app/_tpose.py` (verbatim port
+  de la logique desktop). Nouvel endpoint `tpose` sur
+  MyFabmeshBackview qui dispatch entre text2image (prompt) et img2img
+  (refImageUrl via IP-Adapter).
+- **Worker :** nouveau env `MODAL_TPOSE_URL`, helper `callModalTpose()`,
+  flag `tpose: true` + `refImageUrl?` dans `handleGenerateImage`.
+  Coût estimé $0.10/image (≈ back-view, vs $0.06 pour text2image
+  simple). NSFW pre-filter (Vague 1.3) s'applique au prompt T-pose
+  AVANT facturation.
+- **Pas snapshot séparé :** ne pas créer une nouvelle `@app.cls` —
+  ça ajouterait 15 GB de RAM snapshot + 30s de cold start juste pour
+  un endpoint qui a STRICTEMENT les mêmes weights que back-view.
+- **Statut :** code écrit. TSC passe (cloud/), Python ast parse OK.
+  Sera déployé+smoke-testé dans la phase Deploy en fin de Vague 1.
+
+---
+
 ## 2026-05-25 (Cloud: Vague 1.3 — NSFW prompt pre-filter Worker-side)
 
 - **Contexte :** audit parité desktop/cloud a révélé que le cloud n'avait

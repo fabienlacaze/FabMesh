@@ -52,6 +52,10 @@ export interface Env {
   // URL is empty/unset so we can disable Modal instantly without redeploy.
   MODAL_TEXT2IMAGE_URL?: string;
   MODAL_BACKVIEW_URL?: string;
+  // Strict T-pose front generation (verbatim port of generate_front_tpose.py).
+  // Shares the back-view container's RealVisXL + ControlNet OpenPose +
+  // IPAdapter snapshot, so cold start ≈ back-view (~30-40s).
+  MODAL_TPOSE_URL?: string;
   // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
   // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
   // to the Replicate Cog.
@@ -1442,6 +1446,62 @@ async function callModalBackView(env: Env, userId: string, input: {
   throw new Error('R2 bucket unavailable; cannot persist Modal back-view output');
 }
 
+/** Strict T-pose FRONT generation — verbatim port of the desktop's
+ *  `scripts/generate_front_tpose.py` (RealVisXL + ControlNet OpenPose +
+ *  optional IPAdapter for identity preservation). Reuses the back-view
+ *  Modal container's snapshot, so cold start matches back-view (~30-40s).
+ *
+ *  Mode A (text2image): pass `prompt`. The Worker pre-filters NSFW via
+ *  nsfw_filter.ts before calling.
+ *  Mode B (img2img with identity preservation): pass `refImageUrl` to
+ *  re-pose an existing front image as T-pose. `prompt` becomes optional
+ *  (Modal falls back to the same caption as desktop run_from_image). */
+async function callModalTpose(env: Env, userId: string, input: {
+  prompt?: string;
+  refImageUrl?: string;
+  seed?: number;
+  cn_scale?: number;
+  ip_scale?: number;
+  steps?: number;
+}, folder: string): Promise<string> {
+  const url = env.MODAL_TPOSE_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_TPOSE_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      prompt: input.prompt ?? '',
+      ref_image_url: input.refImageUrl ?? '',
+      seed: input.seed,
+      cn_scale: input.cn_scale,
+      ip_scale: input.ip_scale,
+      steps: input.steps,
+    }),
+    // T-pose runs on the back-view container — same heavy pipeline,
+    // same 5 min budget (cold start ~30s + diffusion ~35s, plenty of
+    // headroom for retries on cold L40S).
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal tpose HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] tpose dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+    const key = `${userId}/${folder}/${Date.now()}_${seed}_tpose.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
+}
+
 /* ───────────────────── Modal mesh — ASYNC pattern ─────────────────────
  * The mesh pipeline (TRELLIS-2) takes ~5-10 min on a cold container.
  * Modal web endpoints hard-cap HTTP responses at 150 s, so we cannot
@@ -1662,7 +1722,8 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
 async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  const { prompt, numImages, seed, asset_type, asset_style, userPrompt, steps } = await req.json() as {
+  const { prompt, numImages, seed, asset_type, asset_style, userPrompt, steps,
+          tpose, refImageUrl, cn_scale, ip_scale } = await req.json() as {
     prompt?: string;
     userPrompt?: string;
     numImages?: number;
@@ -1670,6 +1731,15 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     asset_type?: string;
     asset_style?: string;
     steps?: number;
+    // Strict T-pose front mode (verbatim port of desktop's
+    // generate_front_tpose.py). When true, routes to MyFabmeshBackview's
+    // /tpose endpoint instead of text2image. Required by RTS unit
+    // workflows where the input MUST be a clean T-pose silhouette
+    // for TRELLIS-2 + MVAdapter cascade.
+    tpose?: boolean;
+    refImageUrl?: string;   // T-pose img2img mode: re-pose this image
+    cn_scale?: number;
+    ip_scale?: number;
   };
   // The Cog rebuilds the enriched prompt itself from userPrompt + type
   // + style — we forward those. Fall back to the full enriched prompt
@@ -1700,14 +1770,18 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // doesn't share a wallet with Replicate). Counting Modal calls
   // against the Replicate budget locks the user out of Modal as soon
   // as the (separate) Replicate counter is exhausted.
-  const useModal = !!env.MODAL_TEXT2IMAGE_URL;
+  // T-pose mode requires Modal (no Replicate fallback yet).
+  const useTpose = !!tpose && !!env.MODAL_TPOSE_URL;
+  const useModal = useTpose || !!env.MODAL_TEXT2IMAGE_URL;
   const callBackend = useModal ? callModalText2Image : callMyfabmeshCog;
 
   // Worst-case Replicate cost estimate per image (cold-start + active
   // + idle tail). We bill this against the daily cap BEFORE spending
   // any credits so a runaway burst never crosses the cap. Modal is
   // 5-10× cheaper than Replicate, so the per-image estimate is split.
-  const ESTIMATED_USD_PER_IMAGE = useModal ? 0.06 : 0.30;
+  // T-pose runs on the heavier back-view container (RealVisXL + CN +
+  // IPAdapter) — costs about as much as a back-view (~$0.10).
+  const ESTIMATED_USD_PER_IMAGE = useTpose ? 0.10 : (useModal ? 0.06 : 0.30);
   const estimatedTotal = ESTIMATED_USD_PER_IMAGE * n;
 
   // Hard daily spend cap — refund the estimate if the call fails.
@@ -1741,14 +1815,26 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
   try {
     for (let i = 0; i < n; i++) {
-      paths.push(await callBackend(env, user.id, {
-        task: 'text2image',
-        prompt: rawPrompt,
-        asset_type: asset_type || 'character',
-        asset_style: asset_style || 'realistic',
-        seed: seedBase + i,
-        steps: steps || 30,
-      }, 'front'));
+      if (useTpose) {
+        // Strict T-pose front — verbatim port of desktop generate_front_tpose.py.
+        paths.push(await callModalTpose(env, user.id, {
+          prompt: rawPrompt,
+          refImageUrl,
+          seed: seedBase + i,
+          cn_scale,
+          ip_scale,
+          steps: steps || 30,
+        }, 'front'));
+      } else {
+        paths.push(await callBackend(env, user.id, {
+          task: 'text2image',
+          prompt: rawPrompt,
+          asset_type: asset_type || 'character',
+          asset_style: asset_style || 'realistic',
+          seed: seedBase + i,
+          steps: steps || 30,
+        }, 'front'));
+      }
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
