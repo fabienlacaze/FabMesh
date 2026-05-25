@@ -54,7 +54,7 @@ export interface Env {
 /** Minimal R2Bucket type (avoid pulling @cloudflare/workers-types). */
 interface R2Bucket {
   put(key: string, value: ReadableStream | ArrayBuffer | string, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
-  get(key: string): Promise<{ body: ReadableStream } | null>;
+  get(key: string): Promise<{ body: ReadableStream; text(): Promise<string> } | null>;
   delete(key: string): Promise<void>;
 }
 
@@ -1244,13 +1244,41 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
  *
  * Triggered from wrangler.toml's [triggers] crons block.
  */
+/**
+ * Heartbeat-gated pre-warm. The frontend (when /app/ is visible)
+ * pings /api/heartbeat every ~2 min. If no heartbeat has been
+ * received in the last 5 min, we assume nobody is online and skip
+ * the pre-warm call — saving the ~$0.005 it would have cost.
+ */
+const HEARTBEAT_KEY = '_meta/last_user_heartbeat';
+const HEARTBEAT_WINDOW_MS = 5 * 60 * 1000;
+
+async function markHeartbeat(env: Env): Promise<void> {
+  if (!env.MESHES) return;
+  await env.MESHES.put(HEARTBEAT_KEY, String(Date.now()));
+}
+
+async function isUserOnline(env: Env): Promise<boolean> {
+  if (!env.MESHES) return false;
+  const obj = await env.MESHES.get(HEARTBEAT_KEY);
+  if (!obj) return false;
+  const txt = await obj.text();
+  const ts = parseInt(txt, 10);
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() - ts < HEARTBEAT_WINDOW_MS;
+}
+
 async function preWarmCog(env: Env): Promise<void> {
+  if (!(await isUserOnline(env))) {
+    console.log('[pre-warm] skipped — no recent heartbeat (nobody online)');
+    return;
+  }
   const token = env.REPLICATE_API_TOKEN ?? '';
   if (!token) return;
   try {
     const version = await resolveMyfabmeshCogVersion(token);
-    // Fire-and-forget — no Prefer:wait. Replicate keeps the worker hot
-    // as soon as it accepts the job, even if we never poll the result.
+    // Fire-and-forget — Replicate keeps the worker hot as soon as it
+    // accepts the job, even if we never poll the result.
     await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -1259,10 +1287,19 @@ async function preWarmCog(env: Env): Promise<void> {
         input: { task: 'text2image', prompt: 'keepalive', asset_type: 'prop', asset_style: 'none', seed: 1, steps: 4 },
       }),
     });
-    console.log('[pre-warm] sent keepalive prediction');
+    console.log('[pre-warm] sent keepalive (user online)');
   } catch (e) {
     console.error('[pre-warm] failed:', e instanceof Error ? e.message : String(e));
   }
+}
+
+async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
+  // No auth — heartbeat is cheap and unauthenticated.
+  // (We don't want to fail the heartbeat if the user's cookie has
+  // expired; we just want to know "is the tab still open".)
+  void req;
+  await markHeartbeat(env);
+  return json({ ok: true });
 }
 
 /* ────────────────────────── main fetch handler ─────────────────────── */
