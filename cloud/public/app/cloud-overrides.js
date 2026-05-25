@@ -154,6 +154,27 @@
 
     // Adapt engine dropdowns to what Cloud actually wires.
     pruneEngineSelectors();
+
+    // Strip Desktop-only bits from the About modal.
+    pruneAboutModal();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * About modal — strip the "Updates" section (browser has no auto-
+   * updater; the in-house Sentry crash reporter is also disabled).
+   * ────────────────────────────────────────────────────────────────── */
+  function pruneAboutModal() {
+    const upBtn = document.getElementById('about-check-update');
+    const upSection = upBtn?.closest('.about-section');
+    if (upSection) upSection.style.display = 'none';
+
+    // Rewrite the bottom credit line so it doesn't claim Sentry crash
+    // reporting that we haven't wired up yet on Cloud.
+    document.querySelectorAll('.about-card p').forEach((p) => {
+      if (p.textContent && p.textContent.includes('Crash reports sent anonymously via Sentry')) {
+        p.textContent = 'An Ayros Studio production · MIT / Apache / BSD / OpenRAIL++-M models · runs on Cloudflare Workers + Replicate GPU.';
+      }
+    });
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -262,12 +283,15 @@
     applyOverrides();
   }
 
-  // The Settings modal sometimes lazy-injects content; re-apply if it
-  // opens after our first pass. A MutationObserver is overkill; instead
-  // wait one frame after any click on the settings button.
+  // The Settings / About modals sometimes lazy-inject content; re-apply
+  // if they open after our first pass. A MutationObserver is overkill;
+  // instead wait one frame after any click on either button.
   document.addEventListener('click', (e) => {
     const t = e.target;
-    if (t && (t.id === 'btn-settings' || t.closest?.('#btn-settings'))) {
+    if (t && (
+      t.id === 'btn-settings' || t.closest?.('#btn-settings') ||
+      t.id === 'btn-about'    || t.closest?.('#btn-about')
+    )) {
       requestAnimationFrame(applyOverrides);
     }
   });
