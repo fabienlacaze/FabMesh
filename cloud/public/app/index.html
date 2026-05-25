@@ -40,7 +40,7 @@
       </div>
       <div class="topbar-right">
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
-        <a href="/api/history.xls" download class="icon-btn" title="Export my usage history (Excel)" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center;">&#128229;</a>
+        <button id="btn-history" class="icon-btn" title="My usage history">&#128229;</button>
         <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
         <button id="btn-about" class="icon-btn" title="About MyFabmesh.AI">?</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
@@ -2124,6 +2124,104 @@
       </div>
     </div>
   </div>
+
+  <!-- ============================================================
+       USAGE HISTORY MODAL — opened by topbar 📥 button.
+       Lists the user's recent operations with a Download Excel CTA.
+       Styled with the same primitives as the rest of the app
+       (var(--bg-1), --border, --accent…).
+       ============================================================ -->
+  <div id="history-modal" style="z-index:9998; position:fixed; inset:0; background:rgba(0,0,0,0.85); display:none; align-items:center; justify-content:center; padding:24px; overflow-y:auto;">
+    <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; max-width:900px; width:100%; max-height:88vh; display:flex; flex-direction:column; overflow:hidden;">
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border);">
+        <h2 style="margin:0; font-size:18px;">&#128229; My usage history</h2>
+        <div style="display:flex; gap:8px;">
+          <a id="history-export-btn" href="/api/history.xlsx" download class="primary-btn" style="text-decoration:none;">&#11015; Export Excel</a>
+          <button id="history-close-btn" class="ghost-btn">&#x2715;</button>
+        </div>
+      </div>
+      <div id="history-error" style="display:none; background:rgba(255,82,82,0.1); border:1px solid #ff5252; color:#ff5252; padding:10px 14px; margin:12px 20px; border-radius:8px;"></div>
+      <div style="flex:1; overflow-y:auto; padding:8px 20px 20px;">
+        <table id="history-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead>
+            <tr style="position:sticky; top:0; background:var(--bg-2); z-index:1;">
+              <th style="padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border);">Date</th>
+              <th style="padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border);">Type</th>
+              <th style="padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border);">Status</th>
+              <th style="padding:8px 10px; text-align:right; font-size:11px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border);">Duration</th>
+              <th style="padding:8px 10px; text-align:right; font-size:11px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border);">Credits</th>
+              <th style="padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border);">Project</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function historyInit() {
+      const btn   = document.getElementById('btn-history');
+      const modal = document.getElementById('history-modal');
+      const close = document.getElementById('history-close-btn');
+      const tbody = document.getElementById('history-tbody');
+      const errEl = document.getElementById('history-error');
+      if (!btn || !modal) return;
+
+      function open() {
+        modal.style.display = 'flex';
+        load();
+      }
+      function shut() { modal.style.display = 'none'; }
+
+      btn.addEventListener('click', open);
+      close.addEventListener('click', shut);
+      modal.addEventListener('click', (e) => { if (e.target === modal) shut(); });
+
+      async function load() {
+        errEl.style.display = 'none';
+        tbody.innerHTML = '<tr><td colspan="6" style="padding:16px; color:var(--text-2);">Loading…</td></tr>';
+        try {
+          const r = await fetch('/api/history.json');
+          if (r.status === 401) { window.location.href = '/login'; return; }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const d = await r.json();
+          render(d.rows || []);
+        } catch (e) {
+          errEl.textContent = 'Load failed: ' + (e && e.message || e);
+          errEl.style.display = 'block';
+          tbody.innerHTML = '';
+        }
+      }
+
+      function render(rows) {
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="padding:24px; color:var(--text-2); text-align:center;">No generations yet.</td></tr>';
+          return;
+        }
+        const OK = '#4cd964', WARN = '#ffaa33', ERR = '#ff5252';
+        function pillColor(s) {
+          if (s === 'succeeded') return OK;
+          if (s === 'failed') return ERR;
+          return WARN;
+        }
+        tbody.innerHTML = rows.map(r => `
+          <tr>
+            <td style="padding:6px 10px; border-bottom:1px solid var(--border); white-space:nowrap;">
+              ${new Date(r.date).toLocaleString('fr', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
+            </td>
+            <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.type}</td>
+            <td style="padding:6px 10px; border-bottom:1px solid var(--border);">
+              <span style="background:${pillColor(r.status)}22; color:${pillColor(r.status)}; padding:2px 8px; border-radius:10px; font-size:11px;">${r.status}</span>
+            </td>
+            <td style="padding:6px 10px; border-bottom:1px solid var(--border); text-align:right; font-variant-numeric:tabular-nums;">${r.duration_s.toFixed(1)}s</td>
+            <td style="padding:6px 10px; border-bottom:1px solid var(--border); text-align:right; font-variant-numeric:tabular-nums;">${r.credits}</td>
+            <td style="padding:6px 10px; border-bottom:1px solid var(--border); color:var(--text-2);">${r.project || '—'}</td>
+          </tr>
+        `).join('');
+      }
+    })();
+  </script>
 
 </body>
 </html>

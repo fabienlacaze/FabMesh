@@ -108,12 +108,24 @@
     <p class="muted">This dashboard is only accessible to the admin account.</p>
     <a class="btn btn-accent" href="/login?next=/admin">Sign in</a>
   </div>
+  <div id="password-prompt" class="login-prompt" style="display:none">
+    <h3>🔐 Admin password</h3>
+    <p class="muted" style="margin-bottom:16px">Even logged in as admin, this dashboard needs the admin password (separate from the Supabase login).</p>
+    <form id="password-form" autocomplete="off" onsubmit="return adminLogin(event)">
+      <input id="password-input" type="password" autocomplete="current-password"
+             placeholder="Admin password"
+             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:12px;" />
+      <div id="password-error" style="color:var(--err); font-size:12px; margin-bottom:12px; display:none"></div>
+      <button type="submit" class="btn btn-accent" style="width:100%; justify-content:center;">Unlock dashboard</button>
+    </form>
+  </div>
 
   <div id="main" style="display:none">
     <div class="actions">
-      <a class="btn btn-accent" href="/api/admin/history.xls" download>⬇ Export full history (Excel)</a>
+      <a class="btn btn-accent" href="/api/admin/history.xlsx" download>⬇ Export full history (Excel)</a>
       <a class="btn" href="/api/admin/history.csv" download>… or CSV</a>
       <button class="btn" onclick="refresh()">🔄 Refresh</button>
+      <button class="btn" onclick="adminLogout()" style="margin-left:auto;">🔓 Lock</button>
     </div>
 
     <div class="grid row-stats" id="stats"></div>
@@ -142,21 +154,44 @@
 
   <script>
     async function refresh() {
-      const errEl = document.getElementById('err');
-      const main  = document.getElementById('main');
-      const login = document.getElementById('login-prompt');
+      const errEl  = document.getElementById('err');
+      const main   = document.getElementById('main');
+      const login  = document.getElementById('login-prompt');
+      const passwd = document.getElementById('password-prompt');
       errEl.style.display = 'none';
       try {
+        // /api/admin/stats.json now returns:
+        //   401 unauthorized            — not signed in to Supabase
+        //   401 admin_password_required — signed in OK but no admin cookie
+        //   403 forbidden               — Supabase email not in admin list
+        //   200                         — full access
         const r = await fetch('/api/admin/stats.json', { credentials: 'include' });
-        if (r.status === 401) { main.style.display = 'none'; login.style.display = 'block'; return; }
+        if (r.status === 401) {
+          const txt = await r.text().catch(() => '');
+          if (/admin_password_required/.test(txt)) {
+            // Logged in as admin but needs to enter the password.
+            main.style.display = 'none';
+            login.style.display = 'none';
+            passwd.style.display = 'block';
+            setTimeout(() => document.getElementById('password-input')?.focus(), 50);
+            return;
+          }
+          main.style.display = 'none';
+          passwd.style.display = 'none';
+          login.style.display = 'block';
+          return;
+        }
         if (r.status === 403) {
           main.style.display = 'none';
+          login.style.display = 'none';
+          passwd.style.display = 'none';
           errEl.textContent = 'Forbidden — this account is not in the admin allowlist.';
           errEl.style.display = 'block'; return;
         }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const d = await r.json();
         login.style.display = 'none';
+        passwd.style.display = 'none';
         main.style.display = 'block';
         render(d);
       } catch (e) {
@@ -164,6 +199,45 @@
         errEl.textContent = 'Load failed: ' + (e && e.message || e);
         errEl.style.display = 'block';
       }
+    }
+
+    async function adminLogin(ev) {
+      ev.preventDefault();
+      const input = document.getElementById('password-input');
+      const errEl = document.getElementById('password-error');
+      errEl.style.display = 'none';
+      try {
+        const r = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ password: input.value }),
+        });
+        if (r.status === 401) {
+          errEl.textContent = 'Invalid password.';
+          errEl.style.display = 'block';
+          input.select();
+          return false;
+        }
+        if (!r.ok) {
+          errEl.textContent = 'Login failed: HTTP ' + r.status;
+          errEl.style.display = 'block';
+          return false;
+        }
+        input.value = '';
+        await refresh();
+      } catch (e) {
+        errEl.textContent = 'Login failed: ' + (e && e.message || e);
+        errEl.style.display = 'block';
+      }
+      return false;
+    }
+
+    async function adminLogout() {
+      try {
+        await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
+      } catch (_) { /* ignore */ }
+      await refresh();
     }
 
     function render(d) {
