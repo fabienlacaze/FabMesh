@@ -50,6 +50,7 @@ export interface Env {
   // instead of Replicate. The Worker falls back to Replicate if the
   // URL is empty/unset so we can disable Modal instantly without redeploy.
   MODAL_TEXT2IMAGE_URL?: string;
+  MODAL_BACKVIEW_URL?: string;
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -1236,6 +1237,55 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
   throw new Error('R2 bucket unavailable; cannot persist Modal output');
 }
 
+/** Modal back-view endpoint. Different schema from text2image:
+ *  input is a front image URL + a free-form prompt hint. Output is
+ *  PNG bytes (best of N candidates auto-picked by outfit color match).
+ *  Same auth + R2 mirror pattern as callModalText2Image. */
+async function callModalBackView(env: Env, userId: string, input: {
+  frontImageUrl: string;
+  promptHint?: string;
+  seed?: number;
+  steps?: number;
+  ip_scale?: number;
+  n_candidates?: number;
+}, folder: string): Promise<string> {
+  const url = env.MODAL_BACKVIEW_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_BACKVIEW_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      front_image_url: input.frontImageUrl,
+      prompt_hint: input.promptHint ?? '',
+      seed: input.seed,
+      steps: input.steps,
+      ip_scale: input.ip_scale,
+      n_candidates: input.n_candidates,
+    }),
+    // Back-view is heavier than text2image (4 models in pipeline +
+    // multi-seed scoring) so we give it 5 min before timeout.
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal back-view HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] back-view dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+    const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  throw new Error('R2 bucket unavailable; cannot persist Modal back-view output');
+}
+
 async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
   const token = env.REPLICATE_API_TOKEN ?? '';
   if (!token) throw new Error('REPLICATE_API_TOKEN not set');
@@ -1451,42 +1501,62 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   const n = Math.max(1, Math.min(4, numImages ?? 1));
   const COST_PER_BACK = 2;
   const cost = n * COST_PER_BACK;
-  // Back-view is heavier than front (RealVisXL + ControlNet + IP-
-  // Adapter + Florence-2) so estimate $0.50 each for the budget cap.
-  const ESTIMATED_USD_PER_BACK = 0.50;
+
+  // Pick backend BEFORE budget check (same pattern as text2image).
+  const useModal = !!env.MODAL_BACKVIEW_URL;
+
+  // Back-view is heavier than front (RealVisXL + ControlNet + IP-Adapter
+  // + Florence-2). On Replicate that's ~$0.50/image, on Modal with the
+  // snapshot we expect ~$0.10/image (similar to mesh cost — heavier
+  // GPU move than text2image due to ControlNet + IP-Adapter modules).
+  const ESTIMATED_USD_PER_BACK = useModal ? 0.10 : 0.50;
   const estimatedTotal = ESTIMATED_USD_PER_BACK * n;
 
-  const remainingBudget = await checkAndIncrementDailySpend(env, estimatedTotal);
+  const remainingBudget = useModal
+    ? await checkAndIncrementModalSpend(env, estimatedTotal)
+    : await checkAndIncrementDailySpend(env, estimatedTotal);
   if (remainingBudget == null) {
+    const provider = useModal ? 'Modal' : 'Replicate';
     return json({ ok: false, success: false,
-      error: `daily Replicate budget reached. Try again after midnight UTC.` }, { status: 429 });
+      error: `daily ${provider} budget reached. Try again after midnight UTC.` }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
-    await refundDailySpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false,
       error: `you've reached the per-user daily generation limit.` }, { status: 429 });
   }
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    await refundDailySpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false, error: `insufficient credits — back view costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
   const paths: string[] = [];
   try {
     for (let i = 0; i < n; i++) {
-      paths.push(await callMyfabmeshCog(env, user.id, {
-        task: 'back-view',
-        prompt: hint,
-        image: frontImageUrl,
-        asset_type: asset_type || 'character',
-      }, 'back'));
+      if (useModal) {
+        paths.push(await callModalBackView(env, user.id, {
+          frontImageUrl,
+          promptHint: hint,
+          seed: 424242 + i * 1000,
+        }, 'back'));
+      } else {
+        paths.push(await callMyfabmeshCog(env, user.id, {
+          task: 'back-view',
+          prompt: hint,
+          image: frontImageUrl,
+          asset_type: asset_type || 'character',
+        }, 'back'));
+      }
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
-    await refundDailySpend(env, estimatedTotal);
+    if (useModal) await refundModalSpend(env, estimatedTotal);
+    else await refundDailySpend(env, estimatedTotal);
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
