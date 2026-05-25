@@ -1006,52 +1006,63 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
  * client can keep on the project.
  */
 /**
- * Generate one image via Replicate's `black-forest-labs/flux-schnell`
- * (4-step Flux model, ~3s, ~$0.003/image). Stores the result in R2 and
- * returns a stable public URL on our origin.
+ * Call our own Cog `fabienlacaze/myfabmesh-cloud` on Replicate. The
+ * model packages the desktop's text-to-image and back-view scripts
+ * (RealVisXL V4.0 + ControlNet OpenPose + IP-Adapter), so the cloud
+ * output matches the desktop byte-for-byte.
  *
- * Folder controls the R2 key prefix: "front" / "back" / "view".
+ * Two tasks supported by the Cog:
+ *   task: 'text2image' — input: prompt + asset_type + asset_style
+ *   task: 'back-view'  — input: prompt + image (front URL)
+ *
+ * Result is a single PNG URL. We mirror it into R2 for a stable origin
+ * URL the browser can fetch without CORS.
  */
-async function replicateGenerateImage(env: Env, userId: string, prompt: string, folder: string, seed?: number): Promise<string> {
+interface CogInput {
+  task: 'text2image' | 'back-view';
+  prompt?: string;
+  image?: string;
+  asset_type?: string;
+  asset_style?: string;
+  seed?: number;
+  steps?: number;
+}
+
+async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
   const token = env.REPLICATE_API_TOKEN ?? '';
   if (!token) throw new Error('REPLICATE_API_TOKEN not set');
-  const actualSeed = seed ?? Math.floor(Math.random() * 1e9);
 
-  // black-forest-labs/flux-schnell — fast 4-step Flux. Owner+name path is
-  // accepted by Replicate's predictions.create when no version is pinned.
-  const createRes = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions', {
-    method: 'POST',
-    headers: {
-      'authorization': `Bearer ${token}`,
-      'content-type': 'application/json',
-      'prefer': 'wait=60',  // wait up to 60s for the result inline
-    },
-    body: JSON.stringify({
-      input: {
-        prompt,
-        seed: actualSeed,
-        aspect_ratio: '1:1',
-        num_outputs: 1,
-        output_format: 'png',
-        output_quality: 90,
-        disable_safety_checker: true,
+  // Use the model endpoint (no version pin → always latest_version).
+  const createRes = await fetch(
+    'https://api.replicate.com/v1/models/fabienlacaze/myfabmesh-cloud/predictions',
+    {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${token}`,
+        'content-type': 'application/json',
+        // For text2image (RealVisXL 30 steps) we expect ~5-15s; for
+        // back-view (RealVisXL + ControlNet + IP-Adapter) ~30-60s.
+        // 'prefer: wait' inlines the result up to 60s, beyond we poll.
+        'prefer': 'wait=60',
       },
-    }),
-  });
-  if (!createRes.ok) throw new Error(`Replicate create HTTP ${createRes.status}: ${await createRes.text()}`);
+      body: JSON.stringify({ input }),
+    },
+  );
+  if (!createRes.ok) {
+    throw new Error(`Replicate create HTTP ${createRes.status}: ${await createRes.text()}`);
+  }
   const created = await createRes.json() as { id: string; output?: string | string[]; status: string; error?: string };
 
-  // If "prefer: wait" gave us the output inline, use it directly. Otherwise poll.
   let outputUrl: string | undefined;
   if (created.status === 'succeeded') {
     outputUrl = Array.isArray(created.output) ? created.output[0] : created.output;
   } else if (created.status === 'failed') {
     throw new Error(`Replicate failed: ${created.error || 'unknown'}`);
   } else {
-    // Poll until done
+    // Poll for up to 5 min (cold-start can be slow on first call).
     const start = Date.now();
-    while (Date.now() - start < 90_000) {
-      await new Promise(r => setTimeout(r, 1500));
+    while (Date.now() - start < 300_000) {
+      await new Promise(r => setTimeout(r, 2500));
       const pollRes = await fetch(`https://api.replicate.com/v1/predictions/${created.id}`, {
         headers: { authorization: `Bearer ${token}` },
       });
@@ -1068,14 +1079,14 @@ async function replicateGenerateImage(env: Env, userId: string, prompt: string, 
   }
   if (!outputUrl) throw new Error('Replicate succeeded but no output URL');
 
-  // Mirror into R2 so the client gets a stable URL on our origin
-  // (Replicate URLs are short-lived).
+  // Mirror into R2 so the browser gets a stable same-origin URL.
   if (env.MESHES && env.R2_PUBLIC_URL) {
     try {
       const imgRes = await fetch(outputUrl);
       if (imgRes.ok) {
         const buf = await imgRes.arrayBuffer();
-        const key = `${userId}/${folder}/${Date.now()}_${actualSeed}.png`;
+        const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+        const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
         await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
         return `${env.R2_PUBLIC_URL}/${key}`;
       }
@@ -1087,16 +1098,22 @@ async function replicateGenerateImage(env: Env, userId: string, prompt: string, 
 async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  const { prompt, numImages, seed } = await req.json() as {
+  const { prompt, numImages, seed, asset_type, asset_style, userPrompt, steps } = await req.json() as {
     prompt?: string;
+    userPrompt?: string;
     numImages?: number;
     seed?: number;
+    asset_type?: string;
+    asset_style?: string;
+    steps?: number;
   };
-  if (!prompt) return err(400, 'prompt required');
+  // The Cog rebuilds the enriched prompt itself from userPrompt + type
+  // + style — we forward those. Fall back to the full enriched prompt
+  // the renderer sent in case userPrompt isn't broken out.
+  const rawPrompt = (userPrompt ?? prompt ?? '').toString().trim();
+  if (!rawPrompt) return err(400, 'prompt required');
   const n = Math.max(1, Math.min(4, numImages ?? 1));
 
-  // Charge 1 credit per image. Reserve BEFORE calling Replicate so
-  // an out-of-credit user can't slip through. Refund on any failure.
   const remaining = await spendCredits(env, user.id, n);
   if (remaining == null) {
     return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${n} credit${n === 1 ? '' : 's'}` }, { status: 402 });
@@ -1106,10 +1123,17 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
   try {
     for (let i = 0; i < n; i++) {
-      paths.push(await replicateGenerateImage(env, user.id, prompt, 'front', seedBase + i));
+      paths.push(await callMyfabmeshCog(env, user.id, {
+        task: 'text2image',
+        prompt: rawPrompt,
+        asset_type: asset_type || 'character',
+        asset_style: asset_style || 'realistic',
+        seed: seedBase + i,
+        steps: steps || 30,
+      }, 'front'));
     }
   } catch (e) {
-    await addCredits(env, user.id, n); // refund
+    await addCredits(env, user.id, n);
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
@@ -1118,30 +1142,34 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
 async function handleGenerateBackView(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  const { prompt, promptHint, numImages, frontImageUrl } = await req.json() as {
+  const { prompt, promptHint, numImages, frontImageUrl, asset_type } = await req.json() as {
     prompt?: string;
     promptHint?: string;
     numImages?: number;
     frontImageUrl?: string;
+    asset_type?: string;
   };
-  void frontImageUrl;  // (kept for API compat; not used in single-image flux-schnell)
-  const base = (prompt ?? promptHint ?? '').toString().slice(0, 400);
+  if (!frontImageUrl) return err(400, 'frontImageUrl required for back-view generation');
+  const hint = (prompt ?? promptHint ?? '').toString().slice(0, 400);
   const n = Math.max(1, Math.min(4, numImages ?? 1));
 
-  // 1 credit per back-view image, same pricing as front image gen.
   const remaining = await spendCredits(env, user.id, n);
   if (remaining == null) {
     return json({ ok: false, success: false, error: `insufficient credits — back view costs ${n} credit${n === 1 ? '' : 's'}` }, { status: 402 });
   }
 
-  const fullPrompt = `back view, rear view, full body, T-pose neutral stance, plain white background, no shadows, ${base}`;
   const paths: string[] = [];
   try {
     for (let i = 0; i < n; i++) {
-      paths.push(await replicateGenerateImage(env, user.id, fullPrompt, 'back'));
+      paths.push(await callMyfabmeshCog(env, user.id, {
+        task: 'back-view',
+        prompt: hint,
+        image: frontImageUrl,
+        asset_type: asset_type || 'character',
+      }, 'back'));
     }
   } catch (e) {
-    await addCredits(env, user.id, n); // refund
+    await addCredits(env, user.id, n);
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });

@@ -194,14 +194,23 @@
        Returns the EXACT shape the desktop IPC returns:
          { success: bool, images: [path, path, ...], error?: string }
        so the renderer's caller works unchanged. */
-    generateImages: async ({ prompt, projectName, numImages = 1, jobId } = {}) => {
-      log(`generateImages via /api/generate-image (Replicate flux-schnell) — ${numImages}× "${(prompt || '').slice(0, 60)}…"`);
+    generateImages: async ({ prompt, userPrompt, projectName, numImages = 1, steps, jobId } = {}) => {
+      log(`generateImages via /api/generate-image (Cog myfabmesh-cloud) — ${numImages}× "${(userPrompt || prompt || '').slice(0, 60)}…"`);
       window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
+      // Read asset type / style from the workspace dropdowns so the
+      // Worker can rebuild the enriched prompt server-side using the
+      // exact tables from index2.js (cloud output matches desktop).
+      const asset_type = document.getElementById('ws-asset-type')?.value || 'character';
+      const asset_style = document.getElementById('ws-asset-style')?.value || 'realistic';
       try {
         const r = await fetch('/api/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, numImages }),
+          body: JSON.stringify({
+            prompt,              // already-enriched fallback
+            userPrompt,          // raw user text (Worker re-enriches)
+            numImages, asset_type, asset_style, steps,
+          }),
           credentials: 'include',
         });
         const j = await r.json().catch(() => ({}));
