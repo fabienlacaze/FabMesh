@@ -722,12 +722,16 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   }
 
   // (useModalMesh already declared above before the budget check.)
-  // Accept BOTH snake_case (original API contract) AND camelCase
-  // (the cloud JS shim sends `projectName` because it iterates over
-  // user-provided opts as-is). Without this fallback every cloud-side
-  // mesh would land in the "untitled" project.
+  // Accept snake_case (original API), camelCase (cloud JS shim forwards
+  // user opts as-is), AND `outputName` (what cloud/public/app/index2.js
+  // actually sends — it inherits the desktop param name where the mesh
+  // was written to <outputName>.glb on disk; the project name and the
+  // output filename were the same string in the desktop world).
+  // Without this fallback every cloud-side mesh would land in
+  // "untitled" — that was the bug on 2026-05-26.
   const projectName = (form.get('project_name') as string | null)
                    || (form.get('projectName') as string | null)
+                   || (form.get('outputName') as string | null)
                    || null;
 
   if (useModalMesh) {
