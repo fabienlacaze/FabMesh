@@ -239,6 +239,12 @@
         // returns them on the next refresh (the Worker doesn't store rows
         // for individual PNGs).
         _appendCloudImages(projectName, j.paths, 'front');
+        // Persist the prompt so the "Copy prompt" button (index2.js:1808-1830)
+        // can appear on the project after a reload. userPrompt is the user
+        // input; prompt is the enriched version (with style template). We
+        // prefer the raw user input — matches what desktop's main.js writes
+        // to `prompt.txt` next to the image folder.
+        _savePrompt(projectName, userPrompt || prompt || '');
         // Force credit pill refresh after successful spend.
         if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
         return { success: true, images: j.paths };
@@ -510,8 +516,23 @@
   // so on the desktop renderer's `reloadCurrentProject()` → list-folders
   // round-trip the workspace ends up empty. We cache front/back/multi-
   // view URLs locally per project name and merge them back in.
-  const _imgKey  = (name) => `myfm:cloudimages:${name || 'untitled'}`;
-  const _backKey = (name) => `myfm:backphotos:${name || 'untitled'}`;
+  const _imgKey    = (name) => `myfm:cloudimages:${name || 'untitled'}`;
+  const _backKey   = (name) => `myfm:backphotos:${name || 'untitled'}`;
+  // Local cache of the last prompt used per project. The Worker doesn't
+  // persist prompts in the DB (jobs.options.prompt is empty for cloud
+  // mesh inserts, and image gens don't create DB rows at all). Without
+  // this cache, the "Copy prompt" button never appears in the cloud UI
+  // because index2.js conditions it on p.prompt being non-empty.
+  const _promptKey = (name) => `myfm:prompt:${name || 'untitled'}`;
+  function _savePrompt(projectName, prompt) {
+    if (!projectName || !prompt) return;
+    try { localStorage.setItem(_promptKey(projectName), String(prompt)); }
+    catch (_) {}
+  }
+  function _readPrompt(projectName) {
+    try { return localStorage.getItem(_promptKey(projectName)) || ''; }
+    catch (_) { return ''; }
+  }
   function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */) {
     try {
       const k = _imgKey(projectName);
@@ -583,7 +604,10 @@
           imagesData: p.imagesData || [],
           count: merged.length,
           created: p.created || (local[0]?.mtime ? new Date(local[0].mtime).toISOString() : new Date().toISOString()),
-          prompt: p.prompt || '',
+          // Prefer server-side prompt (from a mesh job's options); fall
+          // back to the localStorage cache populated by generateImages.
+          // Either source feeds the "Copy prompt" button in the UI.
+          prompt: p.prompt || _readPrompt(p.name) || '',
           backPhotos: { ...(p.backPhotos || {}), ...backCache },
         };
       });
