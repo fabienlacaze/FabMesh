@@ -62,3 +62,13 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOi
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_51TEArR3uvj2cFz0krEmYFCk7Pfj3wnWboyu9dwEWxpBSTxelTH6Q80KLLBOjTrxXO4kxbt2Q05TSAt1Y3nUQSdA700OL4r1KcL"
 REPLICATE_MODEL = "fishwowater/trellis2"
 R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
+
+# Hard budget safeguards — the Worker refuses any Replicate call if
+# the cumulative daily spend (across ALL users) would exceed
+# MAX_DAILY_SPEND_USD, OR if a single user hits MAX_USER_DAILY_CALLS.
+# Counters live in R2 (`_meta/spend/<YYYY-MM-DD>` and
+# `_meta/userdaily/<userId>/<YYYY-MM-DD>`) and reset at UTC midnight.
+# Raise these once we're confident in the cost model — they exist
+# precisely to stop another cost runaway like the one on 2026-05-24.
+MAX_DAILY_SPEND_USD = "0.50"
+MAX_USER_DAILY_CALLS = "10"

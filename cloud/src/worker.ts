@@ -45,6 +45,10 @@ export interface Env {
   REPLICATE_MODEL?: string;
   REPLICATE_VERSION?: string;
 
+  // Budget safeguards (override the defaults if set).
+  MAX_DAILY_SPEND_USD?: string;
+  MAX_USER_DAILY_CALLS?: string;
+
   SUPABASE_SERVICE_ROLE_KEY?: string;
 
   // Optional R2 S3 endpoint (kept for parity; native R2 binding is preferred).
@@ -56,6 +60,61 @@ interface R2Bucket {
   put(key: string, value: ReadableStream | ArrayBuffer | string, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   get(key: string): Promise<{ body: ReadableStream; text(): Promise<string> } | null>;
   delete(key: string): Promise<void>;
+  list(opts?: { prefix?: string; limit?: number; cursor?: string }): Promise<{ objects: Array<{ key: string; size: number; uploaded: Date }>; truncated: boolean; cursor?: string }>;
+}
+
+/* ───────────────────────── budget safeguards ────────────────────────
+ * Tracks spending and per-user rate-limits in R2 so a runaway loop
+ * (or a bug) can't burn through the prepaid Replicate balance again.
+ *
+ * MAX_DAILY_SPEND_USD: total Worker-side spend cap. Reset at UTC midnight.
+ *                     Any call that would push us over is refused 402.
+ * MAX_USER_DAILY_CALLS: per-user call ceiling. Stops a single user (or
+ *                      a bug spamming with one cookie) from draining
+ *                      the budget alone.
+ *
+ * Tune via environment variables; defaults are conservative.
+ * ──────────────────────────────────────────────────────────────────── */
+const DEFAULT_MAX_DAILY_SPEND_USD = 0.50;
+const DEFAULT_MAX_USER_DAILY_CALLS = 10;
+
+function todayUTC(): string { return new Date().toISOString().slice(0, 10); }
+
+async function r2GetText(env: Env, key: string): Promise<string | null> {
+  if (!env.MESHES) return null;
+  const obj = await env.MESHES.get(key);
+  if (!obj) return null;
+  try { return await obj.text(); } catch { return null; }
+}
+
+/** Check the daily Replicate spend cap. Returns the remaining budget
+ *  in USD, or null if the request would push us over. */
+async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number): Promise<number | null> {
+  const maxUsd = parseFloat(env.MAX_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_DAILY_SPEND_USD;
+  const key = `_meta/spend/${todayUTC()}`;
+  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
+  if (cur + estimatedUsd > maxUsd) return null;
+  await env.MESHES.put(key, String(cur + estimatedUsd));
+  return maxUsd - cur - estimatedUsd;
+}
+
+/** Refund the spend if the call ended up failing — keeps the budget
+ *  accurate even when we abort. */
+async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
+  const key = `_meta/spend/${todayUTC()}`;
+  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
+  await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
+}
+
+/** Check the per-user daily call cap. Increments on success.
+ *  Returns the remaining call budget, or null if over. */
+async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<number | null> {
+  const maxCalls = parseInt(env.MAX_USER_DAILY_CALLS ?? '', 10) || DEFAULT_MAX_USER_DAILY_CALLS;
+  const key = `_meta/userdaily/${userId}/${todayUTC()}`;
+  const cur = parseInt((await r2GetText(env, key)) || '0', 10) || 0;
+  if (cur >= maxCalls) return null;
+  await env.MESHES.put(key, String(cur + 1));
+  return maxCalls - cur - 1;
 }
 
 /* ─────────────────────────── tiny helpers ──────────────────────────── */
@@ -545,8 +604,24 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   };
 
   const cost = creditCost(input);
+  // Mesh worst-case Replicate estimate: $0.50 (full mode with all
+  // post-processes can hit ~$0.40-0.50 on L40S).
+  const ESTIMATED_USD_MESH = 0.50;
+
+  const remainingBudget = await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH);
+  if (remainingBudget == null) {
+    return err(429, 'daily Replicate budget reached. Try again after midnight UTC.');
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundDailySpend(env, ESTIMATED_USD_MESH);
+    return err(429, 'you have reached the per-user daily generation limit.');
+  }
   const remaining = await spendCredits(env, user.id, cost);
-  if (remaining == null) return err(402, 'insufficient credits');
+  if (remaining == null) {
+    await refundDailySpend(env, ESTIMATED_USD_MESH);
+    return err(402, 'insufficient credits');
+  }
 
   if (isMock(env)) {
     const jobId = 'mock_' + Date.now();
@@ -1157,15 +1232,32 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const rawPrompt = (userPrompt ?? prompt ?? '').toString().trim();
   if (!rawPrompt) return err(400, 'prompt required');
   const n = Math.max(1, Math.min(4, numImages ?? 1));
-  // 2 credits per image — covers Replicate's setup + idle overhead
-  // (active compute alone is ~$0.04, but cold-start adds ~$0.08 + 5min
-  // idle adds ~$0.30, so we charge 2 credits = ~0.40€ to stay margin-
-  // positive on the first call of a session).
   const COST_PER_IMAGE = 2;
   const cost = n * COST_PER_IMAGE;
+  // Worst-case Replicate cost estimate per image (cold-start + active
+  // + idle tail). We bill this against the daily cap BEFORE spending
+  // any credits so a runaway burst never crosses the cap.
+  const ESTIMATED_USD_PER_IMAGE = 0.30;
+  const estimatedTotal = ESTIMATED_USD_PER_IMAGE * n;
+
+  // Hard daily spend cap — refund the Replicate-side estimate if the
+  // call fails. Conservative — never falsifies the budget upward.
+  const remainingBudget = await checkAndIncrementDailySpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: `daily Replicate budget reached. Try again after midnight UTC, or raise MAX_DAILY_SPEND_USD.` }, { status: 429 });
+  }
+  // Per-user daily call cap — refund on failure too.
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundDailySpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `you've reached the per-user daily generation limit. Comes back at midnight UTC.` }, { status: 429 });
+  }
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
+    await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
@@ -1184,6 +1276,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
+    await refundDailySpend(env, estimatedTotal);
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
@@ -1202,14 +1295,28 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   if (!frontImageUrl) return err(400, 'frontImageUrl required for back-view generation');
   const hint = (prompt ?? promptHint ?? '').toString().slice(0, 400);
   const n = Math.max(1, Math.min(4, numImages ?? 1));
-  // 2 credits per back view image, same pricing as front. Back view
-  // is actually MORE expensive on Replicate (~96s vs ~35s active) but
-  // we keep parity with front for simplicity.
   const COST_PER_BACK = 2;
   const cost = n * COST_PER_BACK;
+  // Back-view is heavier than front (RealVisXL + ControlNet + IP-
+  // Adapter + Florence-2) so estimate $0.50 each for the budget cap.
+  const ESTIMATED_USD_PER_BACK = 0.50;
+  const estimatedTotal = ESTIMATED_USD_PER_BACK * n;
+
+  const remainingBudget = await checkAndIncrementDailySpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: `daily Replicate budget reached. Try again after midnight UTC.` }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundDailySpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `you've reached the per-user daily generation limit.` }, { status: 429 });
+  }
 
   const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
+    await refundDailySpend(env, estimatedTotal);
     return json({ ok: false, success: false, error: `insufficient credits — back view costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
@@ -1225,6 +1332,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     }
   } catch (e) {
     await addCredits(env, user.id, cost);
+    await refundDailySpend(env, estimatedTotal);
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
