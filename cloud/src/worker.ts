@@ -1135,10 +1135,16 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const rawPrompt = (userPrompt ?? prompt ?? '').toString().trim();
   if (!rawPrompt) return err(400, 'prompt required');
   const n = Math.max(1, Math.min(4, numImages ?? 1));
+  // 2 credits per image — covers Replicate's setup + idle overhead
+  // (active compute alone is ~$0.04, but cold-start adds ~$0.08 + 5min
+  // idle adds ~$0.30, so we charge 2 credits = ~0.40€ to stay margin-
+  // positive on the first call of a session).
+  const COST_PER_IMAGE = 2;
+  const cost = n * COST_PER_IMAGE;
 
-  const remaining = await spendCredits(env, user.id, n);
+  const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${n} credit${n === 1 ? '' : 's'}` }, { status: 402 });
+    return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
   const paths: string[] = [];
@@ -1155,7 +1161,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
       }, 'front'));
     }
   } catch (e) {
-    await addCredits(env, user.id, n);
+    await addCredits(env, user.id, cost);
     return err(502, `image generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
@@ -1174,10 +1180,15 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   if (!frontImageUrl) return err(400, 'frontImageUrl required for back-view generation');
   const hint = (prompt ?? promptHint ?? '').toString().slice(0, 400);
   const n = Math.max(1, Math.min(4, numImages ?? 1));
+  // 2 credits per back view image, same pricing as front. Back view
+  // is actually MORE expensive on Replicate (~96s vs ~35s active) but
+  // we keep parity with front for simplicity.
+  const COST_PER_BACK = 2;
+  const cost = n * COST_PER_BACK;
 
-  const remaining = await spendCredits(env, user.id, n);
+  const remaining = await spendCredits(env, user.id, cost);
   if (remaining == null) {
-    return json({ ok: false, success: false, error: `insufficient credits — back view costs ${n} credit${n === 1 ? '' : 's'}` }, { status: 402 });
+    return json({ ok: false, success: false, error: `insufficient credits — back view costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
   const paths: string[] = [];
@@ -1191,7 +1202,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
       }, 'back'));
     }
   } catch (e) {
-    await addCredits(env, user.id, n);
+    await addCredits(env, user.id, cost);
     return err(502, `back view generation failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
