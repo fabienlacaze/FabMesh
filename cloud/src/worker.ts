@@ -578,7 +578,12 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 async function handleMe(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return json({ user: null }, { status: 401 });
-  return json({ user });
+  // Expose `is_admin` so the frontend can show/hide the admin dashboard
+  // button without having to make a second request. The check stays on
+  // the server (frontend just trusts the flag for UI purposes — every
+  // admin endpoint re-checks the email in _requireAdmin).
+  const is_admin = !!(user.email && ADMIN_EMAILS.has(user.email.toLowerCase()));
+  return json({ user: { ...user, is_admin } });
 }
 
 // Debug-only endpoint — returns what the Worker actually sees from the
@@ -2301,15 +2306,33 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, success: true, path, creditsRemaining: remaining });
 }
 
-/** GET /api/history.csv — export of every operation logged for the
- *  current user, with computed margin per row. Columns:
- *    date, type, status, duration_s, credits, cost_usd, cost_eur,
- *    revenue_eur, margin_eur, project, mesh_url
- *
- *  Revenue is computed from the Pro-tier €/credit (0.162) — the user
- *  can manually re-weigh by their actual pack mix. Cost is the
- *  Modal-estimated USD from MODAL_COST_USD * 0.93 EUR/USD.
- *  Failed jobs report credits=0 (refunded) and revenue=0. */
+// CSV-field escape — quote if the value contains , " or newline.
+function _csvEsc(s: unknown): string {
+  const v = String(s ?? '');
+  return /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+// Hardcoded list of admin emails — only these accounts can hit
+// /api/admin/*. Putting the check here keeps the secret out of the
+// frontend bundle. Add new admins here as the team grows.
+const ADMIN_EMAILS = new Set<string>([
+  'fabien65400@hotmail.fr',
+]);
+
+async function _requireAdmin(req: Request, env: Env)
+  : Promise<{ id: string; email: string | null; credits: number } | Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
+    return err(403, 'forbidden');
+  }
+  return user;
+}
+
+/** GET /api/history.csv — PUBLIC user export. Shows the user their own
+ *  activity (date, type, status, duration, credits spent). Does NOT
+ *  reveal cost or margin — those are business-internal numbers and live
+ *  on /api/admin/history.csv only. */
 async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -2322,22 +2345,88 @@ async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
     .limit(5000);
   if (error) return err(500, error.message);
 
-  // Pricing constants — keep in sync with PACKS[].euros / .credits.
-  // Pro tier (€20 / 120 credits) is the median pack and the best proxy
-  // for an "average" sale; the user can re-weigh in their own sheet.
-  const EUR_PER_CREDIT_NET = 0.162;
-  const USD_TO_EUR = 0.93;
-
   const header = [
     'date_iso', 'type', 'status', 'duration_s', 'credits',
-    'cost_usd', 'cost_eur', 'revenue_eur', 'margin_eur',
-    'project', 'asset_type', 'mode', 'mesh_url'
+    'project', 'asset_type', 'mode'
   ];
   const lines: string[] = [header.join(',')];
 
   type J = {
     id: string; asset_type: string; mode: string; status: string;
     credit_cost: number; options: Record<string, unknown> | null;
+    created_at: string; finished_at: string | null;
+    project_name: string | null; mesh_url: string | null;
+  };
+  for (const j of ((data ?? []) as J[])) {
+    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const durMs = j.options?.duration_ms != null
+      ? Number(j.options.duration_ms)
+      : (j.finished_at
+          ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
+          : 0);
+    const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
+    lines.push([
+      j.created_at,
+      opType,
+      j.status,
+      (durMs / 1000).toFixed(1),
+      credits,
+      _csvEsc(j.project_name ?? ''),
+      _csvEsc(j.asset_type ?? ''),
+      _csvEsc(j.mode ?? ''),
+    ].join(','));
+  }
+
+  return new Response(lines.join('\n'), {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="myfabmesh-history-${new Date().toISOString().slice(0, 10)}.csv"`,
+    },
+  });
+}
+
+/** GET /api/admin/history.csv — ADMIN ONLY. Every operation across
+ *  every user, with margin per row. Same columns as the user CSV
+ *  PLUS cost_usd, cost_eur, revenue_eur, margin_eur, user_email. */
+async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> {
+  const userOrResp = await _requireAdmin(req, env);
+  if (userOrResp instanceof Response) return userOrResp;
+
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb
+    .from('jobs')
+    .select('id, user_id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url')
+    .order('created_at', { ascending: false })
+    .limit(10000);
+  if (error) return err(500, error.message);
+
+  // Resolve user_id → email by querying the profiles table. We batch
+  // the lookup to avoid N+1 round-trips on a 10k-row export.
+  const userIds = Array.from(new Set((data ?? []).map((j: { user_id: string }) => j.user_id)));
+  const emailById = new Map<string, string>();
+  if (userIds.length) {
+    const { data: profiles } = await sb
+      .from('profiles')
+      .select('id, email')
+      .in('id', userIds);
+    for (const p of (profiles ?? []) as { id: string; email: string }[]) {
+      emailById.set(p.id, p.email ?? '');
+    }
+  }
+
+  const EUR_PER_CREDIT_NET = 0.162;
+  const USD_TO_EUR = 0.93;
+
+  const header = [
+    'date_iso', 'user_email', 'type', 'status', 'duration_s', 'credits',
+    'cost_usd', 'cost_eur', 'revenue_eur', 'margin_eur',
+    'project', 'asset_type', 'mode', 'mesh_url'
+  ];
+  const lines: string[] = [header.join(',')];
+
+  type J = {
+    id: string; user_id: string; asset_type: string; mode: string;
+    status: string; credit_cost: number; options: Record<string, unknown> | null;
     created_at: string; finished_at: string | null;
     project_name: string | null; mesh_url: string | null;
   };
@@ -2356,13 +2445,9 @@ async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
     const costEur = costUsd * USD_TO_EUR;
     const marginEur = revenueEur - costEur;
 
-    // CSV field escape — quote if contains comma/quote/newline.
-    const esc = (s: unknown): string => {
-      const v = String(s ?? '');
-      return /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-    };
     lines.push([
       j.created_at,
+      _csvEsc(emailById.get(j.user_id) ?? ''),
       opType,
       j.status,
       (durMs / 1000).toFixed(1),
@@ -2371,19 +2456,332 @@ async function handleHistoryCsv(req: Request, env: Env): Promise<Response> {
       costEur.toFixed(4),
       revenueEur.toFixed(4),
       marginEur.toFixed(4),
-      esc(j.project_name ?? ''),
-      esc(j.asset_type ?? ''),
-      esc(j.mode ?? ''),
-      esc(j.mesh_url ?? ''),
+      _csvEsc(j.project_name ?? ''),
+      _csvEsc(j.asset_type ?? ''),
+      _csvEsc(j.mode ?? ''),
+      _csvEsc(j.mesh_url ?? ''),
     ].join(','));
   }
 
   return new Response(lines.join('\n'), {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="myfabmesh-history-${new Date().toISOString().slice(0, 10)}.csv"`,
+      'content-disposition': `attachment; filename="admin-history-${new Date().toISOString().slice(0, 10)}.csv"`,
     },
   });
+}
+
+/** GET /api/admin/stats.json — ADMIN ONLY. Aggregated business metrics
+ *  for the monitoring dashboard. Returns counts + revenue/margin totals
+ *  across the whole user base, plus 7/30-day series. */
+async function handleAdminStats(req: Request, env: Env): Promise<Response> {
+  const userOrResp = await _requireAdmin(req, env);
+  if (userOrResp instanceof Response) return userOrResp;
+
+  const sb = supabaseAdmin(env);
+
+  // Job-derived metrics — one query, then aggregate in-Worker (rows
+  // are tiny, this is cheaper than 6 round-trips and keeps the SQL
+  // simple for now).
+  const { data: jobs, error: jobsErr } = await sb
+    .from('jobs')
+    .select('user_id, status, credit_cost, options, created_at')
+    .order('created_at', { ascending: false })
+    .limit(20000);
+  if (jobsErr) return err(500, jobsErr.message);
+
+  const EUR_PER_CREDIT_NET = 0.162;
+  const USD_TO_EUR = 0.93;
+  const now = Date.now();
+  const DAY = 86400_000;
+
+  const uniqueUsers = new Set<string>();
+  const ops = { total: 0, succeeded: 0, failed: 0 };
+  const byType: Record<string, { count: number; revenue_eur: number; cost_eur: number; margin_eur: number }> = {};
+  let totalRevenueEur = 0, totalCostEur = 0;
+  // Activity series (last 30 days, bucket by day).
+  const seriesByDay: Record<string, { ops: number; users: Set<string>; revenue_eur: number; margin_eur: number }> = {};
+
+  type J = {
+    user_id: string; status: string; credit_cost: number;
+    options: Record<string, unknown> | null; created_at: string;
+  };
+  for (const j of ((jobs ?? []) as J[])) {
+    uniqueUsers.add(j.user_id);
+    ops.total += 1;
+    if (j.status === 'succeeded') ops.succeeded += 1;
+    if (j.status === 'failed') ops.failed += 1;
+
+    const opType = String(j.options?.operation_type ?? 'mesh');
+    const costUsd = Number(j.options?.cost_usd
+                          ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
+                          ?? 0);
+    const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
+    const revenueEur = credits * EUR_PER_CREDIT_NET;
+    const costEur = costUsd * USD_TO_EUR;
+    const marginEur = revenueEur - costEur;
+
+    totalRevenueEur += revenueEur;
+    totalCostEur += costEur;
+
+    const bucket = (byType[opType] ??= { count: 0, revenue_eur: 0, cost_eur: 0, margin_eur: 0 });
+    bucket.count += 1;
+    bucket.revenue_eur += revenueEur;
+    bucket.cost_eur += costEur;
+    bucket.margin_eur += marginEur;
+
+    const t = new Date(j.created_at).getTime();
+    if (now - t < 30 * DAY) {
+      const day = new Date(j.created_at).toISOString().slice(0, 10);
+      const s = (seriesByDay[day] ??= { ops: 0, users: new Set(), revenue_eur: 0, margin_eur: 0 });
+      s.ops += 1;
+      s.users.add(j.user_id);
+      s.revenue_eur += revenueEur;
+      s.margin_eur += marginEur;
+    }
+  }
+
+  // Payments — gross revenue (Stripe charges, before fees).
+  let grossRevenueEur = 0;
+  let paymentsCount = 0;
+  try {
+    const { data: pays } = await sb
+      .from('payments')
+      .select('amount_total, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    for (const p of (pays ?? []) as { amount_total: number }[]) {
+      grossRevenueEur += (p.amount_total ?? 0) / 100;
+      paymentsCount += 1;
+    }
+  } catch { /* payments table optional */ }
+
+  // Desktop downloads counter (KV-free counter stored in R2). One
+  // increment per GET /download/track. Read-only here.
+  let desktopDownloads = 0;
+  try {
+    const txt = await r2GetText(env, '_meta/desktop_downloads.txt');
+    desktopDownloads = parseInt(txt ?? '0', 10) || 0;
+  } catch { /* ignore */ }
+
+  // Activity in the last 7 / 30 days.
+  const series30: Array<{ day: string; ops: number; users: number; revenue_eur: number; margin_eur: number }> = [];
+  for (let i = 29; i >= 0; i--) {
+    const day = new Date(now - i * DAY).toISOString().slice(0, 10);
+    const s = seriesByDay[day];
+    series30.push({
+      day,
+      ops: s?.ops ?? 0,
+      users: s?.users.size ?? 0,
+      revenue_eur: +(s?.revenue_eur ?? 0).toFixed(2),
+      margin_eur:  +(s?.margin_eur  ?? 0).toFixed(2),
+    });
+  }
+  const last7 = series30.slice(-7);
+  const sum7 = (k: keyof typeof series30[number]) =>
+    last7.reduce((a, b) => a + (typeof b[k] === 'number' ? (b[k] as number) : 0), 0);
+
+  return json({
+    generated_at: new Date().toISOString(),
+    users: {
+      total: uniqueUsers.size,
+      active_7d: new Set(last7.flatMap(d => []).concat([...new Set([...uniqueUsers])])).size,  // proxy
+    },
+    operations: ops,
+    by_type: byType,
+    revenue: {
+      total_gross_eur:  +grossRevenueEur.toFixed(2),
+      total_net_eur:    +totalRevenueEur.toFixed(2),   // sum of credit revenue, net of Stripe
+      total_cost_eur:   +totalCostEur.toFixed(2),
+      total_margin_eur: +(totalRevenueEur - totalCostEur).toFixed(2),
+      payments_count: paymentsCount,
+    },
+    last_7d: {
+      ops: sum7('ops'),
+      revenue_eur: +sum7('revenue_eur').toFixed(2),
+      margin_eur:  +sum7('margin_eur').toFixed(2),
+    },
+    series_30d: series30,
+    desktop_downloads_total: desktopDownloads,
+  });
+}
+
+// HTML-escape (Excel parses the file as HTML when served with the
+// vnd.ms-excel mime, so user-supplied strings need entity-escaping).
+function _htmlEsc(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Render an Excel-compatible workbook by wrapping an HTML <table> with
+// the application/vnd.ms-excel mime type. Excel 2003+ opens it natively
+// (it shows a "the file format doesn't match its extension" toast the
+// first time, then opens fine). Cheaper than shipping a 500 KB xlsx
+// library on a Cloudflare Worker and good enough for export use cases.
+function _excelResponse(filename: string, headers: string[], rows: string[][]): Response {
+  const xml = [
+    '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
+    '      xmlns:x="urn:schemas-microsoft-com:office:excel"',
+    '      xmlns="http://www.w3.org/TR/REC-html40">',
+    '<head><meta charset="utf-8"><style>',
+    'table { border-collapse: collapse; }',
+    'th { background:#1d1d27; color:#fff; padding:6px 10px; text-align:left; }',
+    'td { padding:4px 10px; border:1px solid #ccc; }',
+    'td.num { mso-number-format:"#,##0.0000"; text-align:right; }',
+    'td.int { mso-number-format:"0"; text-align:right; }',
+    '</style></head><body>',
+    '<table>',
+    '<thead><tr>' + headers.map(h => `<th>${_htmlEsc(h)}</th>`).join('') + '</tr></thead>',
+    '<tbody>',
+    ...rows.map(r => '<tr>' + r.join('') + '</tr>'),
+    '</tbody></table></body></html>',
+  ].join('\n');
+  return new Response('﻿' + xml, {
+    headers: {
+      'content-type': 'application/vnd.ms-excel; charset=utf-8',
+      'content-disposition': `attachment; filename="${filename}"`,
+    },
+  });
+}
+
+/** GET /api/history.xls — PUBLIC user export in Excel format.
+ *  Same columns as /api/history.csv (no margin), Excel-shaped. */
+async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  const { data, error } = await supabaseAdmin(env)
+    .from('jobs')
+    .select('asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(5000);
+  if (error) return err(500, error.message);
+
+  const headers = ['Date', 'Type', 'Status', 'Duration (s)', 'Credits', 'Project', 'Asset type', 'Mode'];
+  type J = {
+    asset_type: string; mode: string; status: string;
+    credit_cost: number; options: Record<string, unknown> | null;
+    created_at: string; finished_at: string | null;
+    project_name: string | null;
+  };
+  const rows: string[][] = ((data ?? []) as J[]).map(j => {
+    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const durMs = j.options?.duration_ms != null
+      ? Number(j.options.duration_ms)
+      : (j.finished_at
+          ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
+          : 0);
+    const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
+    return [
+      `<td>${_htmlEsc(new Date(j.created_at).toLocaleString('fr'))}</td>`,
+      `<td>${_htmlEsc(opType)}</td>`,
+      `<td>${_htmlEsc(j.status)}</td>`,
+      `<td class="num">${(durMs / 1000).toFixed(1)}</td>`,
+      `<td class="int">${credits}</td>`,
+      `<td>${_htmlEsc(j.project_name ?? '')}</td>`,
+      `<td>${_htmlEsc(j.asset_type ?? '')}</td>`,
+      `<td>${_htmlEsc(j.mode ?? '')}</td>`,
+    ];
+  });
+  const stamp = new Date().toISOString().slice(0, 10);
+  return _excelResponse(`myfabmesh-history-${stamp}.xls`, headers, rows);
+}
+
+/** GET /api/admin/history.xls — ADMIN ONLY full export with margin. */
+async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> {
+  const userOrResp = await _requireAdmin(req, env);
+  if (userOrResp instanceof Response) return userOrResp;
+
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb
+    .from('jobs')
+    .select('user_id, asset_type, mode, status, credit_cost, options, created_at, finished_at, project_name, mesh_url')
+    .order('created_at', { ascending: false })
+    .limit(10000);
+  if (error) return err(500, error.message);
+
+  const userIds = Array.from(new Set((data ?? []).map((j: { user_id: string }) => j.user_id)));
+  const emailById = new Map<string, string>();
+  if (userIds.length) {
+    const { data: profiles } = await sb.from('profiles').select('id, email').in('id', userIds);
+    for (const p of (profiles ?? []) as { id: string; email: string }[]) {
+      emailById.set(p.id, p.email ?? '');
+    }
+  }
+
+  const EUR_PER_CREDIT_NET = 0.162;
+  const USD_TO_EUR = 0.93;
+  const headers = [
+    'Date', 'User email', 'Type', 'Status', 'Duration (s)', 'Credits',
+    'Cost USD', 'Cost EUR', 'Revenue EUR', 'Margin EUR',
+    'Project', 'Asset type', 'Mode', 'Mesh URL'
+  ];
+  type J = {
+    user_id: string; asset_type: string; mode: string; status: string;
+    credit_cost: number; options: Record<string, unknown> | null;
+    created_at: string; finished_at: string | null;
+    project_name: string | null; mesh_url: string | null;
+  };
+  let totalMargin = 0;
+  const rows: string[][] = ((data ?? []) as J[]).map(j => {
+    const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
+    const costUsd = Number(j.options?.cost_usd
+                          ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
+                          ?? 0);
+    const durMs = j.options?.duration_ms != null
+      ? Number(j.options.duration_ms)
+      : (j.finished_at
+          ? new Date(j.finished_at).getTime() - new Date(j.created_at).getTime()
+          : 0);
+    const credits = j.status === 'succeeded' ? (j.credit_cost ?? 0) : 0;
+    const revenueEur = credits * EUR_PER_CREDIT_NET;
+    const costEur = costUsd * USD_TO_EUR;
+    const marginEur = revenueEur - costEur;
+    totalMargin += marginEur;
+    return [
+      `<td>${_htmlEsc(new Date(j.created_at).toLocaleString('fr'))}</td>`,
+      `<td>${_htmlEsc(emailById.get(j.user_id) ?? '')}</td>`,
+      `<td>${_htmlEsc(opType)}</td>`,
+      `<td>${_htmlEsc(j.status)}</td>`,
+      `<td class="num">${(durMs / 1000).toFixed(1)}</td>`,
+      `<td class="int">${credits}</td>`,
+      `<td class="num">${costUsd.toFixed(4)}</td>`,
+      `<td class="num">${costEur.toFixed(4)}</td>`,
+      `<td class="num">${revenueEur.toFixed(4)}</td>`,
+      `<td class="num">${marginEur.toFixed(4)}</td>`,
+      `<td>${_htmlEsc(j.project_name ?? '')}</td>`,
+      `<td>${_htmlEsc(j.asset_type ?? '')}</td>`,
+      `<td>${_htmlEsc(j.mode ?? '')}</td>`,
+      `<td>${_htmlEsc(j.mesh_url ?? '')}</td>`,
+    ];
+  });
+  // Append a TOTAL row at the bottom for the margin column.
+  rows.push([
+    `<td colspan="9" style="text-align:right;font-weight:bold;background:#f0f0f0">TOTAL margin (EUR)</td>`,
+    `<td class="num" style="font-weight:bold;background:#f0f0f0">${totalMargin.toFixed(4)}</td>`,
+    `<td colspan="4" style="background:#f0f0f0"></td>`,
+  ]);
+  const stamp = new Date().toISOString().slice(0, 10);
+  return _excelResponse(`admin-history-${stamp}.xls`, headers, rows);
+}
+
+/** GET /download/track — increment the desktop-downloads counter in R2.
+ *  Public endpoint (no auth) — call this from the marketing site's
+ *  download button BEFORE redirecting to the actual .exe / .dmg / .AppImage. */
+async function handleDownloadTrack(_req: Request, env: Env): Promise<Response> {
+  if (!env.MESHES) return new Response('', { status: 204 });
+  try {
+    const key = '_meta/desktop_downloads.txt';
+    const current = parseInt((await r2GetText(env, key)) ?? '0', 10) || 0;
+    await env.MESHES.put(key, String(current + 1));
+  } catch (e) {
+    console.warn('[download/track] failed:', e instanceof Error ? e.message : String(e));
+  }
+  return new Response('', { status: 204 });
 }
 
 /* ────────────────────────── pre-warm cron ──────────────────────────── */
@@ -2497,6 +2895,11 @@ export default {
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
+        if (pathname === '/api/history.xls'           && method === 'GET')  return await handleHistoryXls(req, env);
+        if (pathname === '/api/admin/history.csv'     && method === 'GET')  return await handleAdminHistoryCsv(req, env);
+        if (pathname === '/api/admin/history.xls'     && method === 'GET')  return await handleAdminHistoryXls(req, env);
+        if (pathname === '/api/admin/stats.json'      && method === 'GET')  return await handleAdminStats(req, env);
+        if (pathname === '/download/track'            && method === 'GET')  return await handleDownloadTrack(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
         if (pathname === '/api/mock-logout'           && method === 'POST') return await handleMockLogout(req, env);
