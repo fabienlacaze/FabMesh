@@ -10,6 +10,64 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud: Modal POC scaffolding — replace Replicate for text2image)
+
+- **Constat (réel sur facture Replicate du 25 mai) :**
+  - Setup time = 78 % de la facture (2 307 s sur 2 971 s) — l'image
+    Docker Cog post-pre-download faisait 18 GB → ~957 s de pull par
+    cold start = $0.93 / image avant qu'on commence à générer quoi
+    que ce soit. Le rebuild rollback ramène ça à ~87 s = $0.085,
+    mais c'est encore 78 % du coût total.
+  - Modal.com facture aussi le setup mais le mécanisme **Memory
+    Snapshots** capture les weights chargés en CPU et les restaure
+    en ~5 s sur cold start → setup quasi gratuit + UX cold start ~5 s
+    au lieu de ~90 s. Pricing par-seconde L40S aussi -44 % ($0.000542
+    vs $0.000975).
+  - Cible : ~$0.022 / image (×5.5 moins cher que Replicate).
+- **Actions (sans toucher au desktop) :**
+  - Nouveau dossier `modal_app/` (renommé depuis `modal/` parce que
+    le nom collisionne avec le SDK Python `modal`) :
+    - `_prompts.py` — asset/style suffixes copiés depuis index2.js
+      + cog/predict.py (verbatim, pour parité output desktop ↔ cloud).
+    - `_realvis.py` — `generate(pipe, prompt, seed, steps)` pure
+      function, port du chemin non-T-pose de
+      scripts/local_juggernaut_bridge.py (prompts optimisés,
+      anti-doubling, negative prompt avec poids 1.4-1.6 inchangé).
+    - `_nsfw.py` — dual-model NSFW filter + skin-ratio fallback,
+      même politique que desktop (Falconsai + AdamCodd, threshold 0.5,
+      skin > 35 % bloque). FABMESH_UNRESTRICTED=1 bypass préservé.
+    - `app.py` — Modal `@app.cls` avec `@modal.enter(snap=True)`
+      qui charge RealVisXL + les 2 classifieurs NSFW **sur CPU**, puis
+      `@modal.enter(snap=False)` qui les move sur GPU après attach.
+      Endpoint HTTPS via `@modal.fastapi_endpoint(method="POST")` —
+      pas de polling côté Worker (1 seul fetch), donc plus de risque
+      subrequest-limit.
+    - Auth : shared secret 32-byte via header (`_auth` dans body JSON,
+      vérifié contre `SHARED_SECRET` injecté par `modal.Secret.from_name`).
+  - `cloud/src/worker.ts` :
+    - Ajout 2 env vars : `MODAL_TEXT2IMAGE_URL` + `MODAL_SHARED_SECRET`.
+    - Nouvelle fonction `callModalText2Image()` : POST JSON → reçoit
+      PNG bytes → push R2 → renvoie URL. ~5 subrequests vs ~25 pour
+      le path Cog.
+    - `handleGenerateImage()` route vers Modal si la URL est set, sinon
+      fallback Cog/Replicate. Feature flag instantané (delete secret
+      = retour Replicate, pas de redeploy).
+  - `cloud/wrangler.toml` : commentaires des secrets Modal documentés.
+- **Pas encore fait (suivi) :**
+  - back-view sur Modal : nécessite 4 modèles snapshot (RealVisXL +
+    ControlNet OpenPose + IP-Adapter + Florence-2) — ~14 GB de
+    snapshot, hors confort zone Modal. Séparation en classe dédiée
+    à faire après validation du POC text2image.
+  - Le smoke test desktop reste à valider — théoriquement aucun
+    fichier de `scripts/` n'est touché donc rien ne devrait casser.
+- **Conclusion (anticipée) :** scaffolding posé, deploy + mesure cold
+  start à faire côté Modal pour confirmer le gain réel. Si Memory
+  Snapshots ne marchent pas avec notre stack (CUDA 12.4 + torch 2.4
+  + xformers 0.0.28 + diffusers 0.31), gain Modal tombe à ~2×
+  pricing seulement — à comparer avec coût de migration.
+
+---
+
 ## 2026-05-25 (Cloud worker: subrequest-limit fix + anti-orphan lease)
 
 - **Problème :** `callMyfabmeshCog()` polling jusqu'à 120 fetch() par image en

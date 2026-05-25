@@ -38,6 +38,18 @@ bucket_name = "myfabmesh-meshes"
 # Sensitive values (Supabase service-role, Stripe secret + webhook
 # secret, Replicate token, R2 keys) live in `wrangler secret put`
 # and are NOT versioned here.
+#
+# MODAL FEATURE FLAG (POC — text2image only):
+#   wrangler secret put MODAL_TEXT2IMAGE_URL   # paste the URL Modal
+#                                              # printed on `modal deploy`
+#                                              # (looks like https://<ws>--
+#                                              #  myfabmesh-cloud-...-modal.run)
+#   wrangler secret put MODAL_SHARED_SECRET    # same 32-byte hex used
+#                                              # on Modal via
+#                                              # `modal secret create
+#                                              #   myfabmesh-shared
+#                                              #   SHARED_SECRET=<hex>`
+# Rollback to Replicate: `wrangler secret delete MODAL_TEXT2IMAGE_URL`.
 ###############################################################################
 # Pre-warm cron — DISABLED for now.
 #
