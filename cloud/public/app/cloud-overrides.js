@@ -322,54 +322,75 @@
   window.__cloudCreditsRefresh = refreshCreditsPill;
 
   /* ────────────────────────── Logout button ──────────────────────────
-   * Sits in the topbar-right, just before the credits pill. Clicking
-   * it clears all `sb-*-auth-token` cookies — these are non-httpOnly,
-   * set by Supabase JS client + LoginForm.persistSession — then sends
-   * the user back to /login. The browser also drops any in-memory
-   * Supabase client session that way.
+   * Moved 2026-05-25 from the topbar to a fresh "Account" section
+   * injected at the TOP of the Settings panel — keeps the topbar
+   * uncluttered and groups the logout next to the user account
+   * controls where users instinctively look for it.
+   *
+   * Clicking it clears all `sb-*-auth-token` cookies (non-httpOnly,
+   * set by Supabase JS + LoginForm.persistSession) and bounces to
+   * /login. Any in-memory Supabase client session is dropped at that
+   * point too.
    * ────────────────────────────────────────────────────────────────── */
+  function performSignOut() {
+    try {
+      document.cookie.split(';').forEach((c) => {
+        const name = c.trim().split('=')[0];
+        if (!name) return;
+        if (/^sb-[^-]+-auth-token(?:\.\d+)?$/.test(name) ||
+            name === 'myfm_mock_session') {
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+        }
+      });
+    } catch { /* ignore */ }
+    try { sessionStorage.clear(); } catch { /* ignore */ }
+    window.location.href = '/login';
+  }
+
   function installLogoutButton() {
-    if (document.querySelector('#cloud-logout-btn')) return;
-    const right = document.querySelector('#topbar .topbar-right');
-    if (!right) return;
+    if (document.querySelector('#cloud-account-section')) return;
+
+    // The settings panel doesn't have a stable wrapper ID, but every
+    // section is a `.settings-section-header` sibling of the boxes.
+    // We anchor on the FIRST one ("Cloud Services") and insert our
+    // Account section right before it so logout sits at the very top.
+    const firstHeader = document.querySelector('.settings-section-header');
+    if (!firstHeader) return;
+
+    const header = document.createElement('div');
+    header.className = 'settings-section-header';
+    header.id = 'cloud-account-section';
+    header.textContent = 'Account';
+
+    const box = document.createElement('div');
+    box.className = 'settings-box';
+    box.innerHTML = `
+      <div class="settings-box-title">Session</div>
+      <div class="settings-box-desc">Sign out of MyFabmesh.AI Cloud on this device.</div>
+    `;
 
     const btn = document.createElement('button');
     btn.id = 'cloud-logout-btn';
     btn.type = 'button';
-    btn.title = 'Sign out';
-    btn.setAttribute('aria-label', 'Sign out');
-    btn.innerHTML = '⎋';
+    btn.textContent = 'Sign out';
     btn.style.cssText = [
-      'display:inline-flex', 'align-items:center', 'justify-content:center',
-      'width:32px', 'height:32px', 'margin-right:8px',
+      'margin-top:10px', 'padding:8px 18px',
       'background:transparent',
-      'border:1px solid rgba(255,255,255,0.12)',
-      'border-radius:8px',
-      'color:#cfd0e0', 'cursor:pointer',
-      'font-size:16px',
+      'border:1px solid #e94560', 'border-radius:8px',
+      'color:#e94560', 'font-weight:600', 'cursor:pointer',
+      'font-size:13px', 'transition:all 0.15s',
     ].join(';');
-    btn.onmouseenter = () => { btn.style.background = 'rgba(233,69,96,0.12)'; btn.style.borderColor = '#e94560'; btn.style.color = '#fff'; };
-    btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.borderColor = 'rgba(255,255,255,0.12)'; btn.style.color = '#cfd0e0'; };
-
-    btn.onclick = () => {
-      // Wipe every cookie that looks like a Supabase session token —
-      // belt + suspenders covers chunked tokens (`.0`/`.1` suffixes).
-      try {
-        document.cookie.split(';').forEach((c) => {
-          const name = c.trim().split('=')[0];
-          if (!name) return;
-          if (/^sb-[^-]+-auth-token(?:\.\d+)?$/.test(name) ||
-              name === 'myfm_mock_session') {
-            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
-          }
-        });
-      } catch { /* ignore */ }
-      // Hint to /api/me callers that we just logged out (no race).
-      try { sessionStorage.clear(); } catch { /* ignore */ }
-      window.location.href = '/login';
+    btn.onmouseenter = () => {
+      btn.style.background = '#e94560'; btn.style.color = '#fff';
     };
+    btn.onmouseleave = () => {
+      btn.style.background = 'transparent'; btn.style.color = '#e94560';
+    };
+    btn.onclick = performSignOut;
+    box.appendChild(btn);
 
-    right.insertBefore(btn, right.firstChild);
+    firstHeader.parentNode.insertBefore(header, firstHeader);
+    firstHeader.parentNode.insertBefore(box, firstHeader);
   }
 
   if (document.readyState === 'loading') {

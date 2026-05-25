@@ -83,4 +83,9 @@ R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
 # Raise these once we're confident in the cost model — they exist
 # precisely to stop another cost runaway like the one on 2026-05-24.
 MAX_DAILY_SPEND_USD = "0.50"
-MAX_USER_DAILY_CALLS = "10"
+# Per-user daily call cap. Bumped from 10 → 100 on 2026-05-25 because
+# the 10 ceiling was hit during a normal afternoon of debugging
+# (Modal migration POC). Modal is ~5-10× cheaper than Replicate, so a
+# higher per-user ceiling now matches a safer dollar exposure than the
+# original 10 calls assumed at Replicate rates.
+MAX_USER_DAILY_CALLS = "100"
