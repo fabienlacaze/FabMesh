@@ -27,13 +27,16 @@ build:
     # CUDA-friendly torch from PyTorch's index
     - "torch==2.4.1 --index-url https://download.pytorch.org/whl/cu124"
     - "torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu124"
-    # Core diffusion / 3D libs
-    - "diffusers>=0.30"
-    - "transformers>=4.41"
-    - "huggingface_hub>=0.24"
-    - "accelerate>=0.30"
-    - "safetensors>=0.4"
-    - "xformers"
+    # Core diffusion / 3D libs — pinned tight to versions that work with
+    # torch 2.4. transformers 4.47+ requires torch.distributed.tensor.
+    # device_mesh which only exists in torch 2.5+ → ModuleNotFoundError
+    # at import.
+    - "transformers==4.45.2"
+    - "diffusers==0.31.0"
+    - "huggingface_hub==0.25.2"
+    - "accelerate==0.34.2"
+    - "safetensors==0.4.5"
+    - "xformers==0.0.28"
     # 3D processing
     - "trimesh>=4.4"
     - "pygltflib>=1.16"
