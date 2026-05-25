@@ -10,6 +10,63 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-26 (Cloud: Vague 2.1/2.2/2.3 — règles multi-view par asset_type)
+
+- **Contexte :** l'utilisateur a remarqué que les règles desktop de
+  génération multi-vue par asset_type n'étaient pas appliquées côté
+  cloud. Audit confirmé : main.js:4012-4014 (rectify selon type) et
+  main.js:4804-4806 (back-view selon type) étaient ABSENTS du Worker
+  cloud — seul un `back_view` boolean était propagé sans dispatch.
+- **Règles desktop portées :**
+
+  | asset_type | rectify mode | back-view mode |
+  |---|---|---|
+  | character          | front | realvis (RealVisXL+CN OpenPose+IPA) |
+  | creature, animal   | front | realvis* (Wave 2.4 → mvadapter) |
+  | vehicle, building, |       |                                     |
+  | weapon, prop       | iso   | **sheet** (Wave 2.3 nouveau)        |
+  | icon               | iso   | aucune                              |
+
+  *creature/animal devraient utiliser mvadapter (6 vues orthos) — pour
+   l'instant fallback sur realvis en attendant Wave 2.4.
+
+- **Wave 2.1 — Auto-rectify avant le mesh.** Dans `handleGenerate`
+  path Modal mesh, juste après le upload R2 du front, on call
+  `MODAL_RECTIFY_URL` avec le mode dérivé de l'asset_type.
+  `frontUrl` est remplacé par la version rectifiée. Non-fatal :
+  fallback sur le front original si rectify rate. Toggle off via
+  `rectify: false` dans la request.
+
+- **Wave 2.2 — Auto back-view organique.** character/creature/animal
+  auto-génère via `MODAL_BACKVIEW_URL`, ajoute la back au mesh comme
+  2-view conditioning (`input.multiref = true`). Skip si back déjà
+  fournie ou `back_view: false`.
+
+- **Wave 2.3 — Sheet back-view hard-surface.** Nouveau module
+  `modal_app/_sheet.py` (port verbatim de `multiview_sheet_gen.py` 4-view
+  branch) + endpoint `sheet` sur `MyFabmeshBackview` (réutilise encore
+  la même snapshot RealVisXL+IPAdapter+ControlNet, neutralisée via
+  cn_scale=0 comme dans `_rectify.py`). Worker helper
+  `callModalSheet()` + env `MODAL_SHEET_URL`. Le endpoint génère un
+  2x2 grid 2048² et retourne UNIQUEMENT la back-view (les 3 autres
+  vues ne sont pas consommées car le multi-view texture refine n'est
+  pas porté — pourra être Wave 2.5+).
+
+- **Limitation héritée :** TRELLIS-2 multi-view conditioning est
+  désactivé par défaut côté desktop depuis 2026-05-20 (siamese meshes
+  confirmées sur 4B). On envoie 2 vues à Modal mais le mesh est en
+  réalité 1-view en pratique. Le bénéfice principal des Vagues 2.x est
+  donc pour le futur texture refine (les back-views sont stockées sur
+  R2 et seront utilisables quand on portera `texture_project.py`).
+
+- **Coût additionnel par mesh :** +$0.30 rectify + $0.10 back =
+  +$0.40 Modal par mesh (versus single-view de avant). À surveiller
+  sur le budget Starter $30/mois.
+
+- **Statut :** TSC propre, Python ast OK. À deployer.
+
+---
+
 ## 2026-05-25 (Cloud: Vague 1.6 — face_fix réel — atlas SDXL inpaint)
 
 - **Contexte :** TRELLIS-2 produit régulièrement des visages flous /

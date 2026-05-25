@@ -786,6 +786,77 @@ class MyFabmeshBackview:
               f"bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
+    @modal.fastapi_endpoint(method="POST")
+    def sheet(self, payload: dict):
+        """4-view orthographic model-sheet generator (front/right/back/left).
+        Verbatim port of `scripts/multiview_sheet_gen.py` — single SDXL
+        pass with IPAdapter Plus on RealVisXL produces a 2x2 grid where
+        all 4 cells share the same identity / lighting / paint.
+
+        Used by Wave 2.2/2.3 for hard-surface asset types (vehicle,
+        building, weapon, prop) — for these the desktop dispatches the
+        `sheet` back-view mode (main.js:4806) instead of the realvis
+        T-pose pipeline (which only makes sense for humanoids).
+
+        Returns ONLY the BACK view as PNG (cloud doesn't yet consume the
+        other 3 views — multi-view texture refine is a future Wave).
+
+        Request body (JSON):
+            {
+              "_auth": "<shared_secret>",
+              "front_image_url": "https://.../front.png",
+              "prompt_hint": "off-road jeep, sand color",  // optional
+              "ip_scale": 0.6,                              // optional
+              "seed": 424242,                               // optional
+              "steps": 30                                   // optional
+            }
+        Response: raw PNG bytes — the back-view cell from the 2x2 grid.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+        import urllib.request
+        from PIL import Image
+        from modal_app._sheet import generate as sheet_generate
+
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload.get("_auth") or "").strip()
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+        front_url = (payload.get("front_image_url") or "").strip()
+        if not front_url:
+            raise HTTPException(status_code=400, detail="front_image_url required")
+
+        try:
+            req = urllib.request.Request(
+                front_url,
+                headers={"User-Agent":
+                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as r:
+                front_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"front download: {e}")
+
+        t0 = time.time()
+        views = sheet_generate(
+            self.pipe,
+            front_img,
+            prompt_hint=payload.get("prompt_hint") or "",
+            ip_scale=float(payload.get("ip_scale") or 0.6),
+            seed=int(payload.get("seed") or 424242),
+            steps=int(payload.get("steps") or 30),
+        )
+        back_img = views.get("back")
+        if back_img is None:
+            raise HTTPException(status_code=500, detail="sheet split missing back cell")
+
+        buf = io.BytesIO()
+        back_img.save(buf, format="PNG", optimize=False)
+        png = buf.getvalue()
+        print(f"[sheet] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
+        return Response(content=png, media_type="image/png")
+
 
 # ===========================================================================
 # Mesh predictor — TRELLIS-2 image-to-3D — ASYNC ARCHITECTURE.
