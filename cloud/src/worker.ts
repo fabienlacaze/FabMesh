@@ -1230,9 +1230,48 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
 
+/* ────────────────────────── pre-warm cron ──────────────────────────── */
+
+/**
+ * Fire a cheap dummy prediction at the Cog every 4 minutes so the
+ * Replicate worker stays allocated. Without this, the first user call
+ * after 5 min of inactivity pays a 2-3 min cold start (GPU allocation
+ * + 18 GB image copy).
+ *
+ * We use steps=4 (fastest) on the text2image task — flux-dev-tier
+ * latency, ~$0.005 per call. 12 calls/hour × 24h × 30d = ~$50/month
+ * worst case, more realistically ~$15/month with off-peak GPU pricing.
+ *
+ * Triggered from wrangler.toml's [triggers] crons block.
+ */
+async function preWarmCog(env: Env): Promise<void> {
+  const token = env.REPLICATE_API_TOKEN ?? '';
+  if (!token) return;
+  try {
+    const version = await resolveMyfabmeshCogVersion(token);
+    // Fire-and-forget — no Prefer:wait. Replicate keeps the worker hot
+    // as soon as it accepts the job, even if we never poll the result.
+    await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version,
+        input: { task: 'text2image', prompt: 'keepalive', asset_type: 'prop', asset_style: 'none', seed: 1, steps: 4 },
+      }),
+    });
+    console.log('[pre-warm] sent keepalive prediction');
+  } catch (e) {
+    console.error('[pre-warm] failed:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 /* ────────────────────────── main fetch handler ─────────────────────── */
 
 export default {
+  async scheduled(_event: unknown, env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void }): Promise<void> {
+    ctx.waitUntil(preWarmCog(env));
+  },
+
   async fetch(req: Request, env: Env, _ctx: unknown): Promise<Response> {
     const url = new URL(req.url);
     const { pathname } = url;

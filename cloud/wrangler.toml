@@ -38,6 +38,21 @@ bucket_name = "myfabmesh-meshes"
 # Sensitive values (Supabase service-role, Stripe secret + webhook
 # secret, Replicate token, R2 keys) live in `wrangler secret put`
 # and are NOT versioned here.
+###############################################################################
+# Pre-warm cron — keep the Replicate Cog hot.
+#
+# Without this, our /api/generate-image cold-starts in ~3 min (Replicate
+# allocates a GPU + copies the 18 GB image to it). Once the worker is
+# warm, predictions take ~10-30 s. Replicate dropps the worker after ~5
+# min of inactivity, so we hit it every 4 minutes with a trivial call.
+#
+# The cron is wired in src/worker.ts's `scheduled()` handler, which
+# fires a 1-step text2image at low cost (~$0.02/call) just to keep the
+# instance allocated. Off-peak cost: ~$5-9/month for 24/7 warm.
+###############################################################################
+[triggers]
+crons = ["*/4 * * * *"]
+
 [vars]
 MOCK = "0"
 NEXT_PUBLIC_MOCK = "0"
