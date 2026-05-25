@@ -2600,7 +2600,7 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const byType: Record<string, { count: number; revenue_eur: number; cost_eur: number; margin_eur: number }> = {};
   let totalRevenueEur = 0, totalCostEur = 0;
   // Activity series (last 30 days, bucket by day).
-  const seriesByDay: Record<string, { ops: number; users: Set<string>; revenue_eur: number; margin_eur: number }> = {};
+  const seriesByDay: Record<string, { ops: number; users: Set<string>; revenue_eur: number; cost_eur: number; margin_eur: number }> = {};
 
   type J = {
     user_id: string; status: string; credit_cost: number;
@@ -2633,10 +2633,11 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     const t = new Date(j.created_at).getTime();
     if (now - t < 30 * DAY) {
       const day = new Date(j.created_at).toISOString().slice(0, 10);
-      const s = (seriesByDay[day] ??= { ops: 0, users: new Set(), revenue_eur: 0, margin_eur: 0 });
+      const s = (seriesByDay[day] ??= { ops: 0, users: new Set(), revenue_eur: 0, cost_eur: 0, margin_eur: 0 });
       s.ops += 1;
       s.users.add(j.user_id);
       s.revenue_eur += revenueEur;
+      s.cost_eur += costEur;
       s.margin_eur += marginEur;
     }
   }
@@ -2656,16 +2657,28 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     }
   } catch { /* payments table optional */ }
 
-  // Desktop downloads counter (KV-free counter stored in R2). One
-  // increment per GET /download/track. Read-only here.
+  // Desktop downloads — both the all-time total and the 30-day series
+  // (one R2 file per day, _meta/desktop_downloads_YYYY-MM-DD.txt). Total
+  // is _meta/desktop_downloads.txt for cheap O(1) reads.
   let desktopDownloads = 0;
   try {
     const txt = await r2GetText(env, '_meta/desktop_downloads.txt');
     desktopDownloads = parseInt(txt ?? '0', 10) || 0;
   } catch { /* ignore */ }
+  // Per-day counts — issue 30 R2 reads in parallel (cheap, R2 is fast
+  // for tiny files). Missing = 0 (no download that day).
+  const dailyDownloads = new Map<string, number>();
+  try {
+    const days30 = Array.from({ length: 30 }, (_, i) =>
+      new Date(now - (29 - i) * DAY).toISOString().slice(0, 10));
+    const reads = await Promise.all(days30.map(d =>
+      r2GetText(env, `_meta/desktop_downloads_${d}.txt`).then(t => [d, parseInt(t ?? '0', 10) || 0] as const)
+    ));
+    for (const [d, n] of reads) dailyDownloads.set(d, n);
+  } catch { /* ignore */ }
 
   // Activity in the last 7 / 30 days.
-  const series30: Array<{ day: string; ops: number; users: number; revenue_eur: number; margin_eur: number }> = [];
+  const series30: Array<{ day: string; ops: number; users: number; revenue_eur: number; cost_eur: number; margin_eur: number; downloads: number }> = [];
   for (let i = 29; i >= 0; i--) {
     const day = new Date(now - i * DAY).toISOString().slice(0, 10);
     const s = seriesByDay[day];
@@ -2674,7 +2687,9 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
       ops: s?.ops ?? 0,
       users: s?.users.size ?? 0,
       revenue_eur: +(s?.revenue_eur ?? 0).toFixed(2),
+      cost_eur:    +(s?.cost_eur    ?? 0).toFixed(2),
       margin_eur:  +(s?.margin_eur  ?? 0).toFixed(2),
+      downloads:   dailyDownloads.get(day) ?? 0,
     });
   }
   const last7 = series30.slice(-7);
@@ -3045,15 +3060,24 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
   return _xlsxResponse(`admin-history-${stamp}.xlsx`, headers, rows);
 }
 
-/** GET /download/track — increment the desktop-downloads counter in R2.
- *  Public endpoint (no auth) — call this from the marketing site's
- *  download button BEFORE redirecting to the actual .exe / .dmg / .AppImage. */
+/** GET /download/track — increment the desktop-downloads counters in R2.
+ *  Two counters in parallel: an all-time total and a per-day series so
+ *  the admin dashboard can chart downloads alongside revenue/cost.
+ *  Public endpoint (no auth) — call from the marketing site's download
+ *  button BEFORE redirecting to the actual .exe / .dmg / .AppImage. */
 async function handleDownloadTrack(_req: Request, env: Env): Promise<Response> {
   if (!env.MESHES) return new Response('', { status: 204 });
   try {
-    const key = '_meta/desktop_downloads.txt';
-    const current = parseInt((await r2GetText(env, key)) ?? '0', 10) || 0;
-    await env.MESHES.put(key, String(current + 1));
+    const totalKey = '_meta/desktop_downloads.txt';
+    const dayKey   = `_meta/desktop_downloads_${todayUTC()}.txt`;
+    const [totalCur, dayCur] = await Promise.all([
+      r2GetText(env, totalKey).then(t => parseInt(t ?? '0', 10) || 0),
+      r2GetText(env, dayKey).then(t => parseInt(t ?? '0', 10) || 0),
+    ]);
+    await Promise.all([
+      env.MESHES.put(totalKey, String(totalCur + 1)),
+      env.MESHES.put(dayKey,   String(dayCur   + 1)),
+    ]);
   } catch (e) {
     console.warn('[download/track] failed:', e instanceof Error ? e.message : String(e));
   }
