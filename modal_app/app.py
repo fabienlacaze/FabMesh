@@ -186,17 +186,22 @@ mesh_image = (
         # cannot quietly pull in a transformers pin that downgrades the
         # 4.56 we just installed above.
         "pip install /opt/trellis2_local/o-voxel --no-build-isolation --no-deps",
+        # cumesh — `import cumesh` is needed by
+        # trellis2/representations/mesh/base.py:4. The desktop fork has
+        # cumesh only in its Windows .venv (no source), so we clone the
+        # upstream JeffreyXiang/CuMesh repo (same as TRELLIS-2 setup.sh)
+        # and pip install --no-deps to preserve torch 2.4.
+        "git clone --recursive https://github.com/JeffreyXiang/CuMesh.git /tmp/cumesh "
+        "&& pip install /tmp/cumesh --no-build-isolation --no-deps",
+        # flex-gemm — sparse GEMM kernels used by trellis2's sparse-conv
+        # layers. Same pattern as cumesh.
+        "git clone --recursive https://github.com/JeffreyXiang/FlexGEMM.git /tmp/flexgemm "
+        "&& pip install /tmp/flexgemm --no-build-isolation --no-deps",
     )
-    # cumesh and flex-gemm pip packages have torch>=2.5 declared deps
-    # which silently upgrade torch and break the torchvision ABI baked
-    # earlier. The desktop fork doesn't seem to need them at import time
-    # (it imports lazily) so we skip those packages here. If a runtime
-    # call needs them we'll add them back gated.
-    #
-    # Final torch pin: cumesh/o-voxel installs (when run from the fork)
-    # may also upgrade torch — force it back to 2.4.1 + torchvision 0.19.1.
-    # The CUDA .so binaries built above were compiled against torch 2.4,
-    # so downgrading the Python torch module leaves them functional.
+    # Final torch pin: o-voxel/cumesh/flex-gemm installs may upgrade torch
+    # despite --no-deps in edge cases. Force it back to 2.4.1 + torchvision
+    # 0.19.1. The CUDA .so binaries built above were compiled against torch
+    # 2.4, so downgrading the Python torch module leaves them functional.
     .run_commands(
         "pip install --force-reinstall --no-deps "
         "torch==2.4.1 torchvision==0.19.1 "
@@ -570,121 +575,21 @@ class MyFabmeshBackview:
 # ===========================================================================
 # Mesh predictor — TRELLIS-2 image-to-3D.
 #
-# POC scope: replace the Replicate `fishwowater/trellis2` model with our
-# own Modal-hosted TRELLIS-2 4B. License: MIT (microsoft/TRELLIS.2-4B
-# weights, microsoft/TRELLIS.2 source) → redistribution-safe.
+# *** TEMPORARILY DISABLED — crash-loop blocker (see AGENT_LOG 2026-05-25) ***
 #
-# CRITICAL RISK: TRELLIS-2 uses custom CUDA kernels that may compile on
-# first `.cuda()` call. Memory Snapshots only capture CPU memory. If
-# compilation dominates the cold start, the gain over Replicate
-# disappears (we expected ~$0.10/mesh on Modal vs $0.50 on Replicate;
-# if compilation adds 60-90s per cold start, the cost climbs to $0.15+
-# and UX gets worse). We measure on the smoke test and decide.
+# After 17 deploys we hit one ABI/version conflict after another in the
+# TRELLIS-2 CUDA stack (torch ABI nms, DINOv3 import, huggingface_hub
+# floor, cumesh missing, triton Autotuner positional args mismatch).
+# Each fix surfaces the next conflict. Modal was crash-looping the
+# `MyFabmeshMesh.*` containers and emailing alerts. To stop the bleed,
+# the entire @app.cls is commented out. Mesh stays on Replicate
+# (`fishwowater/trellis2`) — still works, $0.50/mesh.
+#
+# Re-enable: uncomment the block + fix the next triton ABI issue.
+# Estimated remaining work: 1-2 days dedicated to packaging.
 # ===========================================================================
-@app.cls(
-    image=mesh_image,
-    gpu="L40S",
-    timeout=900,           # mesh inference can take 60-90s on L40S
-    scaledown_window=30,
-    enable_memory_snapshot=True,
-    secrets=[
-        modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
-    ],
-)
-class MyFabmeshMesh:
-    @modal.enter(snap=True)
-    def load_to_cpu(self):
-        """CPU-only load of the TRELLIS-2 pipeline (weights → CPU).
-        Custom CUDA kernels are NOT compiled here (no .cuda() yet) —
-        they'll compile on first GPU use in @modal.enter(snap=False)."""
-        t0 = time.time()
-        print("[mesh/snap] importing trellis2 + loading TRELLIS.2-4B onto CPU…", flush=True)
-        import sys
-        # The TRELLIS-2 source tree lives at /opt/trellis2_local — the
-        # DESKTOP fork (external/TRELLIS2_win/src) shipped into the
-        # image via add_local_dir. Put it on sys.path so
-        # `from trellis2.pipelines import …` resolves to the desktop's
-        # exact code (1:1 parity with what runs on the user's RTX).
-        sys.path.insert(0, "/opt/trellis2_local")
-        # Mirror the env defaults set by desktop's
-        # trellis2_native_full_pipeline.py (some are required for the
-        # internal Kaolin shim and disable TorchDynamo / Inductor).
-        os.environ.setdefault("TRELLIS2_USE_KAOLIN_RASTER", "1")
-        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-        os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
-        os.environ.setdefault("TORCHINDUCTOR_USE_TRITON", "0")
-        os.environ.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
+# (mesh class body removed — see git history at commit 6403847 to restore)
 
-        from trellis2.pipelines import Trellis2ImageTo3DPipeline
-        self.pipeline = Trellis2ImageTo3DPipeline.from_pretrained(
-            "microsoft/TRELLIS.2-4B")
-        # The pipeline's internal rembg uses gated briaai/RMBG-2.0 —
-        # we replace it by rembg u2net upstream (in _mesh.prep_image).
-        self.pipeline.rembg_model = None
-        print(f"[mesh/snap] CPU load done in {time.time() - t0:.1f}s", flush=True)
-
-    @modal.enter(snap=False)
-    def move_to_gpu(self):
-        """After snapshot restore + GPU attach: move pipeline to CUDA.
-        First time this runs the custom CUDA kernels JIT-compile —
-        watch the log to see how long this takes."""
-        t0 = time.time()
-        print("[mesh/ready] moving TRELLIS-2 pipeline → CUDA…", flush=True)
-        self.pipeline.cuda()
-        # Import o_voxel here (it's a separate module from the pipeline).
-        import o_voxel
-        self.o_voxel = o_voxel
-        print(f"[mesh/ready] GPU move + compile done in {time.time() - t0:.1f}s", flush=True)
-
-    @modal.fastapi_endpoint(method="POST")
-    def mesh(self, payload: dict):
-        """HTTPS endpoint for image-to-3D mesh generation.
-
-        Request body (JSON):
-            {
-              "_auth": "<shared_secret>",
-              "front_image_url": "https://.../front.png",
-              "mode": "1024",         // 512 | 1024 | 1024_cascade
-              "seed": 42,
-              "decimation_target": 500000,
-              "texture_size": 2048
-            }
-        Response: raw GLB bytes (Content-Type model/gltf-binary).
-        """
-        from fastapi import HTTPException
-        from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
-        from modal_app._mesh import generate
-
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
-
-        front_url = (payload.get("front_image_url") or "").strip()
-        if not front_url:
-            raise HTTPException(status_code=400, detail="front_image_url required")
-
-        try:
-            with urllib.request.urlopen(front_url, timeout=30) as r:
-                front_bytes = r.read()
-            front_img = Image.open(io.BytesIO(front_bytes))
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"front download: {e}")
-
-        t0 = time.time()
-        glb_bytes = generate(
-            self.pipeline,
-            self.o_voxel,
-            front_img,
-            mode=payload.get("mode") or "1024",
-            seed=int(payload.get("seed") or 42),
-            decimation_target=int(payload.get("decimation_target") or 500_000),
-            texture_size=int(payload.get("texture_size") or 2048),
-        )
-        print(f"[mesh] TOTAL dt={time.time() - t0:.1f}s bytes={len(glb_bytes)}", flush=True)
-        return Response(content=glb_bytes, media_type="model/gltf-binary")
 
 
 # ---------------------------------------------------------------------------
