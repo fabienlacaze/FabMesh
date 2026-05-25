@@ -597,6 +597,13 @@
         const seen = new Set(p.images || []);
         const merged = [...(p.images || [])];
         for (const u of frontUrls) if (!seen.has(u)) { seen.add(u); merged.push(u); }
+        // Desktop convention: index2.js labels versions as
+        // `v${images.length - 1 - i}`, expecting the most recent image at
+        // i=0 (label = max version number). On desktop main.js sorts
+        // folder entries by mtime DESC; cloud accumulates them push-order
+        // (newest last) via _appendCloudImages. Reverse the merged list
+        // so the freshest generation appears as vN, not v0.
+        merged.reverse();
         return {
           name: p.name,
           path: p.path,
