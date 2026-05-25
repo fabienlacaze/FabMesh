@@ -10,6 +10,38 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-25 (Cloud: Vague 1.5 — Auto-rectify orthographic front / 3-4 ISO)
+
+- **Contexte :** la plupart des références utilisateur sont des concept-arts
+  3/4 angle, pas des fronts orthographiques. TRELLIS-2 + MVAdapter cascade
+  proprement seulement avec un front strict (humanoïdes) ou un ISO 3/4
+  (véhicules/objets). Le desktop a `scripts/generate_front_strict.py`
+  qui re-génère 3 candidats RealVisXL et garde le meilleur par
+  symmetry-IoU sur la silhouette rembg.
+- **Pipeline :** RealVisXL_V4.0 alone + IPAdapter h94 plus_sdxl_vit-h
+  (optionnel pour préserver identité). Multi-seed (default 3) avec
+  symmetry_score :
+    - mode 'front' → max IoU (silhouette symétrique)
+    - mode 'iso'   → max (1 - IoU) si sym < 0.85 (sinon 0, évite back/side)
+- **Architecture cloud :** réutilise encore la `MyFabmeshBackview`
+  (RealVisXL + ControlNet OpenPose + IPAdapter déjà snapshotés). Le
+  ControlNet est NEUTRALISÉ à l'appel : `image=blank_skel` +
+  `controlnet_conditioning_scale=0.0` → la branche conv tourne mais
+  ses résiduels sont multipliés par 0, donc le UNet ignore le
+  ControlNet et on a un comportement strictement équivalent à un
+  `StableDiffusionXLPipeline` pur (= ce que fait le desktop).
+- **Nouveaux fichiers :**
+  - `modal_app/_rectify.py` (verbatim port de generate_front_strict.py)
+  - endpoint `rectify` sur `MyFabmeshBackview`
+  - env `MODAL_RECTIFY_URL` + `callModalRectify()` + route
+    `POST /api/rectify-image` côté Worker.
+- **Coût :** 3 credits par appel (multi-seed). Estimé $0.30 Modal
+  pour 3 seeds × $0.10. NSFW pre-filter (Vague 1.3) appliqué au prompt
+  AVANT facturation.
+- **Statut :** TSC clean, Python ast OK. Prêt pour deploy.
+
+---
+
 ## 2026-05-25 (Cloud: Vague 1.4 — T-pose front strict mode)
 
 - **Contexte :** RTS / Unreal pipeline a besoin d'un input strictly

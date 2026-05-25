@@ -56,6 +56,10 @@ export interface Env {
   // Shares the back-view container's RealVisXL + ControlNet OpenPose +
   // IPAdapter snapshot, so cold start ≈ back-view (~30-40s).
   MODAL_TPOSE_URL?: string;
+  // Auto-rectify — strict orthographic FRONT or 3/4 ISO regeneration with
+  // multi-seed symmetry scoring (port of generate_front_strict.py). Same
+  // container as back-view/tpose, ControlNet is neutralized at call time.
+  MODAL_RECTIFY_URL?: string;
   // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
   // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
   // to the Replicate Cog.
@@ -1502,6 +1506,57 @@ async function callModalTpose(env: Env, userId: string, input: {
   throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
 }
 
+/** Auto-rectify — strict orthographic FRONT or 3/4 ISO regen with
+ *  multi-seed silhouette symmetry scoring (port of generate_front_strict.py).
+ *  Runs on the same Modal container as back-view/tpose; ControlNet is
+ *  zeroed at call time so the diffusion path is plain RealVisXL +
+ *  optional IPAdapter. Cost ≈ back-view × seeds (default 3 seeds). */
+async function callModalRectify(env: Env, userId: string, input: {
+  prompt?: string;
+  refImageUrl?: string;
+  mode?: 'front' | 'iso';
+  seeds?: number;
+  steps?: number;
+  guidance?: number;
+  ip_scale?: number;
+}, folder: string): Promise<string> {
+  const url = env.MODAL_RECTIFY_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_RECTIFY_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      prompt: input.prompt ?? '',
+      ref_image_url: input.refImageUrl ?? '',
+      mode: input.mode ?? 'front',
+      seeds: input.seeds,
+      steps: input.steps,
+      guidance: input.guidance,
+      ip_scale: input.ip_scale,
+    }),
+    // Multi-seed (3) × diffusion (35s) + rembg per candidate.
+    // 8 min budget covers cold start + 3 candidates + scoring.
+    signal: AbortSignal.timeout(480_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal rectify HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] rectify dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const key = `${userId}/${folder}/${Date.now()}_rectified.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  throw new Error('R2 bucket unavailable; cannot persist Modal rectify output');
+}
+
 /* ───────────────────── Modal mesh — ASYNC pattern ─────────────────────
  * The mesh pipeline (TRELLIS-2) takes ~5-10 min on a cold container.
  * Modal web endpoints hard-cap HTTP responses at 150 s, so we cannot
@@ -1933,6 +1988,85 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
 
+/** Auto-rectify endpoint — re-generate an orthographic FRONT (or 3/4 ISO)
+ *  view from a prompt and/or a reference image, using multi-seed silhouette
+ *  symmetry scoring. Verbatim feature port of `generate_front_strict.py`.
+ *  Requires Modal (no Replicate fallback). */
+async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_RECTIFY_URL) {
+    return err(503, 'rectify backend unavailable (MODAL_RECTIFY_URL not configured)');
+  }
+  const { prompt, refImageUrl, mode, seeds, steps, guidance, ip_scale } =
+    await req.json() as {
+      prompt?: string;
+      refImageUrl?: string;
+      mode?: 'front' | 'iso';
+      seeds?: number;
+      steps?: number;
+      guidance?: number;
+      ip_scale?: number;
+    };
+  const rawPrompt = (prompt ?? '').toString().trim();
+  if (!rawPrompt && !refImageUrl) return err(400, 'prompt or refImageUrl required');
+
+  // NSFW prompt pre-filter (same policy as text2image / back-view).
+  if (rawPrompt) {
+    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const safety = checkPromptSafety(rawPrompt, unrestricted);
+    if (!safety.safe) {
+      return json({ ok: false, success: false,
+        error: safety.reason ?? 'prompt blocked by content filter',
+        blocked: safety.blocked }, { status: 400 });
+    }
+  }
+
+  // Cost: 1 rectify call ≈ N seeds × back-view ≈ $0.10 × 3 = $0.30 estimate.
+  // Credit-wise we charge 3 credits to match the GPU work.
+  const nSeeds = Math.max(1, Math.min(5, seeds ?? 3));
+  const COST_PER_RECTIFY = 3;
+  const cost = COST_PER_RECTIFY;
+  const estimatedTotal = 0.10 * nSeeds;
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: `daily Modal budget reached. Try again after midnight UTC.` }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `you've reached the per-user daily generation limit.` }, { status: 429 });
+  }
+
+  const remaining = await spendCredits(env, user.id, cost);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — rectify costs ${cost} credits` }, { status: 402 });
+  }
+
+  let path: string;
+  try {
+    path = await callModalRectify(env, user.id, {
+      prompt: rawPrompt,
+      refImageUrl,
+      mode: mode === 'iso' ? 'iso' : 'front',
+      seeds: nSeeds,
+      steps,
+      guidance,
+      ip_scale,
+    }, 'rectify');
+  } catch (e) {
+    await addCredits(env, user.id, cost);
+    await refundModalSpend(env, estimatedTotal);
+    return err(502, `rectify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ ok: true, success: true, path, creditsRemaining: remaining });
+}
+
 /* ────────────────────────── pre-warm cron ──────────────────────────── */
 
 /**
@@ -2042,6 +2176,7 @@ export default {
         if (pathname === '/api/remove-background'     && method === 'POST') return await handleRemoveBackground(req, env);
         if (pathname === '/api/generate-image'        && method === 'POST') return await handleGenerateImage(req, env);
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
+        if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
         if (pathname === '/api/mock-logout'           && method === 'POST') return await handleMockLogout(req, env);
