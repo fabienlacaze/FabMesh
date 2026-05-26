@@ -408,6 +408,15 @@
 
         <div id="services-list" style="display:flex; flex-direction:column; gap:14px;"></div>
 
+        <!-- Force logout all users — nuclear session reset -->
+        <h3 style="margin:32px 0 12px;">🔁 Force logout</h3>
+        <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:16px;">
+          <div style="font-size:13px; color:var(--text-1);">Invalidates every active Supabase session in one click. Users see a "session expired" error on their next request and land back on /login. Your own admin session is preserved.</div>
+          <div style="margin-top:12px;">
+            <button class="btn btn-accent" id="force-logout-btn" style="background:var(--err); border-color:var(--err);">🔁 Force logout all users</button>
+          </div>
+        </div>
+
         <!-- 2FA / TOTP section — Microsoft Authenticator setup -->
         <h3 style="margin:32px 0 12px;">🔑 Two-factor authentication</h3>
         <div id="totp-status-row" style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:16px;">
@@ -1385,6 +1394,29 @@
     document.getElementById('services-unlock-btn')?.addEventListener('click', unlockServicesPanel);
     document.getElementById('services-password-input')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') unlockServicesPanel();
+    });
+    document.getElementById('force-logout-btn')?.addEventListener('click', () => {
+      confirmAction(
+        'Force logout all users?',
+        'Every active session is invalidated. Users land back on /login on their next request. Your own admin session is preserved.',
+        async () => {
+          const r = await fetch('/api/admin/force-logout-all', {
+            method: 'POST', credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ password: _killswitchPassword }),
+          });
+          if (r.status === 401) {
+            _killswitchPassword = '';
+            document.getElementById('services-lock').style.display = '';
+            document.getElementById('services-panel').style.display = 'none';
+            showAdminInfo('Locked', 'Password no longer valid. Please re-enter.', 'err');
+            return;
+          }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          showAdminInfo('Sessions invalidated', 'Every user (except admins) will be logged out within ~60s.', 'ok');
+        },
+        { okLabel: '🔁 Force logout', okColor: 'var(--err)' },
+      );
     });
 
     /* ═══════════════════════════════════════════════════════════════
