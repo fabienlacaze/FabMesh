@@ -417,11 +417,34 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       return { ok: true, path: filename, downloaded: true };
     },
-    saveImageDataUrl: async ({ dataUrl, filename } = {}) => {
-      const a = document.createElement('a');
-      a.href = dataUrl; a.download = filename || 'image.png';
-      a.click();
-      return { ok: true, path: filename, downloaded: true };
+    saveImageDataUrl: async ({ dataUrl, filename, basePath, suffix } = {}) => {
+      // Cloud-correct behaviour: convert the dataURL produced by the
+      // canvas editor (Clone Stamp, Mask, Blur, Paint, etc.) into a
+      // blob: URL, attach it as a new version of the current project,
+      // and return { success: true, newPath } so the caller's
+      // confirmation logic actually fires. The desktop shim downloads
+      // a file — pointless in the browser.
+      if (!dataUrl) return { success: false, error: 'dataUrl required' };
+      try {
+        // dataURL → Blob
+        const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+        if (!m) return { success: false, error: 'invalid dataUrl' };
+        const mime = m[1] || 'image/png';
+        const bin = atob(m[2]);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: mime });
+        const newPath = URL.createObjectURL(blob);
+        // Attach to the current project's localStorage cache so
+        // reloadCurrentProject() picks it up as a new version.
+        _attachToCurrentProject(newPath, 'front');
+        const base = basePath ? _stripExt(_basename(basePath)) : 'image';
+        const suf  = (suffix || 'edit').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16);
+        const fn   = filename || `${base}_${suf}_${Date.now()}.png`;
+        return { success: true, ok: true, newPath, path: newPath, filename: fn };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
     },
 
     /* hardware checks — cloud always "OK" */
