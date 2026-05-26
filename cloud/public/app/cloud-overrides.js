@@ -304,6 +304,12 @@
     const style = document.createElement('style');
     style.id = 'cloud-cost-badge-style';
     style.textContent = `
+      /* The tool buttons use flex with their label in the middle. Force
+         space-between when we attach a badge so the chip is pinned to
+         the right edge (was floating right after the text). */
+      .tool-btn:has(> .cloud-cost-badge) {
+        justify-content: space-between !important;
+      }
       .cloud-cost-badge {
         display: inline-flex;
         align-items: center;
@@ -311,7 +317,7 @@
         min-width: 30px;
         height: 24px;
         padding: 0 9px 0 7px;
-        margin-left: 8px;
+        margin-left: auto;
         background: linear-gradient(135deg, #ffd84a, #f5a623);
         color: #1a1a1a;
         border: 1px solid rgba(255, 255, 255, 0.3);
@@ -324,6 +330,7 @@
         box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5),
                     inset 0 1px 0 rgba(255, 255, 255, 0.4);
         text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+        flex-shrink: 0;
       }
       /* Same yellow bolt as the credits pill (emoji ⚡). Outlined in
          dark + drop-shadow so it stays readable against the gold
