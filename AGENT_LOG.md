@@ -10,6 +10,29 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-26 (Cloud: resumePendingJobs fix — popup ne réapparaît pas)
+
+- **Bug :** après reload pendant une génération mesh, la popup ne se
+  réaffichait pas. La génération continuait côté Modal mais l'user ne
+  la voyait pas.
+- **Cause :** `cloud/public/app/index.html:1747` charge `index2.js`
+  avec `type="module"`. Les `function pushJob/completeJob/...` au
+  top-level d'un module ne sont **pas** attachées à `window`.
+  `resumePendingJobs()` checkait `window.pushJob` (undefined) et
+  abandonnait silencieusement.
+- **Fix :**
+  1. `index2.js` : `window.reloadCurrentProject = reloadCurrentProject;`
+     (les jobs étaient déjà exposés via `window.fabmeshJobs`).
+  2. `meshyAPI-cloud.js:resumePendingJobs` : utilise
+     `window.fabmeshJobs.push/.complete` au lieu de `window.pushJob`.
+     Retry 10× × 1s si fabmeshJobs pas prêt (module evaluation async).
+     Fall-through silencieux si jamais prêt — pollPrediction continue
+     quand même, mieux que d'abandonner.
+- **Test :** lance un mesh, F5 immédiatement, la popup doit se
+  recréer avec "Resumed: after page reload" dans les params.
+
+---
+
 ## 2026-05-26 (Cloud: tri projets + Modal status poll)
 
 - **Bug :** sur la home grid, le projet le plus récemment édité
