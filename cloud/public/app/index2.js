@@ -4359,8 +4359,12 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('sym-apply')?.addEventListener('click', async () => {
   const canvas = document.getElementById('sym-canvas');
   if (!canvas || !symState.imgPath) return;
-  document.getElementById('modal-symmetrize')?.classList.add('hidden');
-  showToast('Saving symmetrized version...', 'info', 1500);
+  _closeSym();
+  const p = state.currentProject;
+  const imgName = String(symState.imgPath).split(/[\\/]/).pop();
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`Symmetrize: ${p?.name || ''}`, null, { Image: imgName }, 5000)
+    : null;
   try {
     const dataUrl = canvas.toDataURL('image/png');
     const r = await API.saveImageDataUrl({
@@ -4369,12 +4373,16 @@ document.getElementById('sym-apply')?.addEventListener('click', async () => {
       suffix: 'symmetrized',
     });
     if (r?.success) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
       showToast('Symmetrized!', 'success');
       await reloadCurrentProject();
     } else {
-      showToast('Save failed: ' + (r?.error || ''), 'error');
+      const msg = r?.error || 'unknown';
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      showToast('Save failed: ' + msg, 'error');
     }
   } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
     showToast('Error: ' + e.message, 'error');
   }
 });
@@ -4859,24 +4867,37 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
   if (!modal || !canvas) return;
   const ctx = canvas.getContext('2d');
   modal.classList.remove('hidden');
-  const img = new Image();
-  img.onload = () => {
-    canvas.width = img.width; canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-    // Center canvas in container
-    const container = document.getElementById('cpick-canvas-container');
-    const cw = container.clientWidth || 800;
-    const ch = container.clientHeight || 600;
-    const scale = Math.min(cw / img.width, ch / img.height, 1);
-    const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
-    canvas.style.left = Math.round((cw - dw) / 2) + 'px';
-    canvas.style.top = Math.round((ch - dh) / 2) + 'px';
-    document.getElementById('cpick-swatch').style.background = '#000';
-    document.getElementById('cpick-hex').textContent = '';
-    document.getElementById('cpick-rgb').textContent = 'Move cursor over image';
+  const loadFrom = (finalSrc) => {
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width; canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      const container = document.getElementById('cpick-canvas-container');
+      const cw = container.clientWidth || 800;
+      const ch = container.clientHeight || 600;
+      const scale = Math.min(cw / img.width, ch / img.height, 1);
+      const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
+      canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+      canvas.style.left = Math.round((cw - dw) / 2) + 'px';
+      canvas.style.top = Math.round((ch - dh) / 2) + 'px';
+      document.getElementById('cpick-swatch').style.background = '#000';
+      document.getElementById('cpick-hex').textContent = '';
+      document.getElementById('cpick-rgb').textContent = 'Move cursor over image';
+    };
+    img.onerror = () => showToast('Color picker: load failed', 'error', 4000);
+    img.src = finalSrc;
   };
-  img.src = 'file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (/^https?:/i.test(tgt)) {
+    const proxied = '/api/proxy-image?url=' + encodeURIComponent(tgt);
+    fetch(proxied, { credentials: 'omit' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then(blob => loadFrom(URL.createObjectURL(blob)))
+      .catch(e => showToast('Color picker: fetch failed: ' + (e?.message || e), 'error', 5000));
+  } else if (/^(?:blob|data):/i.test(tgt)) {
+    loadFrom(tgt);
+  } else {
+    loadFrom('file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now());
+  }
 });
 (() => {
   const cpCanvas = document.getElementById('cpick-canvas');
