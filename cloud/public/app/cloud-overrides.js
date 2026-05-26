@@ -203,23 +203,28 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 18px;
-        height: 18px;
-        padding: 0 6px;
-        margin-left: 6px;
-        background: #f5c518;
+        min-width: 26px;
+        height: 22px;
+        padding: 0 8px;
+        margin-left: 8px;
+        background: linear-gradient(135deg, #ffd84a, #f5a623);
         color: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.25);
         border-radius: 999px;
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 13px;
+        font-weight: 800;
         line-height: 1;
         font-variant-numeric: tabular-nums;
         vertical-align: middle;
+        box-shadow: 0 2px 6px rgba(245, 166, 35, 0.45),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
       }
       .cloud-cost-badge::before {
         content: '⚡';
-        margin-right: 2px;
-        font-size: 9px;
+        margin-right: 3px;
+        font-size: 13px;
+        filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.4));
       }
     `;
     document.head.appendChild(style);
