@@ -363,77 +363,120 @@
       if (allow.has(initial)) activate(initial);
     })();
 
-    function renderOpsChart(series) {
-      const W = 600, H = 160, P = 22;
-      const maxOps = Math.max(1, ...series.map(p => p.ops));
-      const bw = (W - 2 * P) / series.length;
-      const bars = series.map((p, i) => {
-        const x = P + i * bw + 1;
-        const h = ((p.ops / maxOps) * (H - 2 * P)) || 0;
-        const y = H - P - h;
-        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent)" rx="1"><title>${p.day}: ${p.ops} ops · ${p.users} users · ${p.margin_eur.toFixed(2)}€ margin</title></rect>`;
-      }).join('');
-      // Y axis ticks
-      const yTicks = [0, maxOps / 2, maxOps].map(v => {
-        const y = H - P - (v / maxOps) * (H - 2 * P);
+    // Single-series line+area chart helper, used by ops and downloads.
+    // color: any CSS color (e.g. 'var(--accent)' or '#c84cff').
+    // valueFn(p) → number; tooltipFn(p) → string shown on hover.
+    function renderLineChartInto(elId, series, color, valueFn, tooltipFn, opts) {
+      const H = (opts && opts.height) || 160, W = 600, P = 22;
+      const innerW = W - 2 * P;
+      const innerH = H - 2 * P;
+      const maxVal = Math.max(1, ...series.map(valueFn));
+      const n = series.length;
+      const xAt = (i) => P + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+      const yAt = (v) => H - P - (Math.max(0, v) / maxVal) * innerH;
+
+      const pts = series.map((p, i) => [xAt(i), yAt(valueFn(p))]);
+      const lineD = 'M ' + pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' L ');
+      const areaD = lineD
+        + ` L ${pts[pts.length - 1][0].toFixed(1)},${(H - P).toFixed(1)}`
+        + ` L ${pts[0][0].toFixed(1)},${(H - P).toFixed(1)} Z`;
+      const yTicks = [0, maxVal / 2, maxVal].map(v => {
+        const y = H - P - (v / maxVal) * innerH;
         return `<text x="${P - 4}" y="${y + 3}" font-size="9" fill="var(--text-2)" text-anchor="end">${Math.round(v)}</text>` +
                `<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3"/>`;
       }).join('');
-      // X axis labels — every 5 days
       const xTicks = series.map((p, i) => i % 5 === 0
-        ? `<text x="${P + i * bw + bw / 2}" y="${H - 6}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
+        ? `<text x="${xAt(i)}" y="${H - 6}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
         : '').join('');
-      document.getElementById('chart-ops').innerHTML = yTicks + bars + xTicks;
+      const dots = pts.map(([x, y], i) =>
+        `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="${color}"><title>${tooltipFn(series[i])}</title></circle>`
+      ).join('');
+      document.getElementById(elId).innerHTML =
+        yTicks +
+        `<path d="${areaD}" fill="${color}" opacity="0.15"/>` +
+        `<path d="${lineD}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+        dots + xTicks;
+    }
+
+    function renderOpsChart(series) {
+      renderLineChartInto('chart-ops', series, 'var(--accent)',
+        p => p.ops,
+        p => `${p.day}: ${p.ops} ops · ${p.users} users · ${p.margin_eur.toFixed(2)}€ margin`);
     }
 
     function renderDownloadsChart(series) {
-      const W = 600, H = 160, P = 22;
-      const maxDl = Math.max(1, ...series.map(p => p.downloads || 0));
-      const bw = (W - 2 * P) / series.length;
-      const bars = series.map((p, i) => {
-        const n = p.downloads || 0;
-        const x = P + i * bw + 1;
-        const h = ((n / maxDl) * (H - 2 * P)) || 0;
-        const y = H - P - h;
-        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent)" rx="1"><title>${p.day}: ${n} downloads</title></rect>`;
-      }).join('');
-      const yTicks = [0, maxDl / 2, maxDl].map(v => {
-        const y = H - P - (v / maxDl) * (H - 2 * P);
-        return `<text x="${P - 4}" y="${y + 3}" font-size="9" fill="var(--text-2)" text-anchor="end">${Math.round(v)}</text>` +
-               `<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3"/>`;
-      }).join('');
-      const xTicks = series.map((p, i) => i % 5 === 0
-        ? `<text x="${P + i * bw + bw / 2}" y="${H - 6}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
-        : '').join('');
-      document.getElementById('chart-downloads').innerHTML = yTicks + bars + xTicks;
+      renderLineChartInto('chart-downloads', series, 'var(--accent)',
+        p => p.downloads || 0,
+        p => `${p.day}: ${p.downloads || 0} downloads`);
     }
 
-    // Reused for both the Finances tab (full 220px) and Overview (200px).
+    // Three overlaid line/area series — revenue (green), cost (orange),
+    // margin (purple). Reused for the Finances tab (H=220) and Overview
+    // (H=200). Areas are filled with a low-alpha rgba so the lines stay
+    // visible when series overlap. Each datapoint is a clickable circle
+    // with a <title> tooltip so hover reveals the exact daily values.
     function renderMoneyChartInto(elId, series, H) {
-      const W = 600, P = 28;
-      const maxVal = Math.max(1, ...series.flatMap(p => [p.revenue_eur, p.cost_eur, Math.max(0, p.margin_eur)]));
-      const bw = (W - 2 * P) / series.length;
-      const innerBw = (bw - 2) / 3;
-      const bars = series.map((p, i) => {
-        const x0 = P + i * bw + 1;
-        const bar = (v, color, offset, tooltip) => {
-          const h = ((Math.max(0, v) / maxVal) * (H - 2 * P)) || 0;
-          const y = H - P - h;
-          return `<rect x="${(x0 + offset * innerBw).toFixed(1)}" y="${y.toFixed(1)}" width="${(innerBw - 0.5).toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" rx="1"><title>${p.day} · ${tooltip}</title></rect>`;
-        };
-        return bar(p.revenue_eur, 'var(--revenue)', 0, `Revenue ${p.revenue_eur.toFixed(2)}€`)
-             + bar(p.cost_eur,    'var(--cost)',    1, `Cost ${p.cost_eur.toFixed(2)}€`)
-             + bar(p.margin_eur,  'var(--margin)',  2, `Margin ${p.margin_eur.toFixed(2)}€`);
-      }).join('');
+      const W = 600, P = 30;
+      const innerW = W - 2 * P;
+      const innerH = H - 2 * P;
+      const maxVal = Math.max(0.01,
+        ...series.flatMap(p => [p.revenue_eur, p.cost_eur, Math.max(0, p.margin_eur)]));
+      const n = series.length;
+      // Spread the points across the inner width — first at left margin,
+      // last at right margin, rest evenly spaced.
+      const xAt = (i) => P + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+      const yAt = (v) => H - P - (Math.max(0, v) / maxVal) * innerH;
+
+      // Build a path "M x0,y0 L x1,y1 …" for a line, and an area path
+      // that closes back to the baseline so it can be filled.
+      function buildPaths(getValue) {
+        const pts = series.map((p, i) => [xAt(i), yAt(getValue(p))]);
+        const lineD = 'M ' + pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' L ');
+        const areaD = lineD
+          + ` L ${pts[pts.length - 1][0].toFixed(1)},${(H - P).toFixed(1)}`
+          + ` L ${pts[0][0].toFixed(1)},${(H - P).toFixed(1)} Z`;
+        return { line: lineD, area: areaD, pts };
+      }
+      const rev = buildPaths(p => p.revenue_eur);
+      const cst = buildPaths(p => p.cost_eur);
+      const mar = buildPaths(p => p.margin_eur);
+
+      // Tooltipped datapoints (small invisible circles for hit-testing,
+      // visible circles for marker).
+      function dotsFor(pts, color, getValue, label) {
+        return pts.map(([x, y], i) => {
+          const v = getValue(series[i]);
+          return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="${color}">` +
+                 `<title>${series[i].day} · ${label} ${v.toFixed(2)}€</title></circle>`;
+        }).join('');
+      }
+
       const yTicks = [0, maxVal / 2, maxVal].map(v => {
-        const y = H - P - (v / maxVal) * (H - 2 * P);
+        const y = H - P - (v / maxVal) * innerH;
         return `<text x="${P - 4}" y="${y + 3}" font-size="9" fill="var(--text-2)" text-anchor="end">${v.toFixed(2)}€</text>` +
                `<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3"/>`;
       }).join('');
       const xTicks = series.map((p, i) => i % 5 === 0
-        ? `<text x="${P + i * bw + bw / 2}" y="${H - 8}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
+        ? `<text x="${xAt(i)}" y="${H - 8}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
         : '').join('');
-      document.getElementById(elId).innerHTML = yTicks + bars + xTicks;
+
+      // Order matters: draw areas first (cost, margin, revenue) so the
+      // green revenue area sits on top — but use low alpha so all three
+      // are visible at once.
+      const areas =
+        `<path d="${cst.area}" fill="var(--cost)"    opacity="0.10"/>` +
+        `<path d="${mar.area}" fill="var(--margin)"  opacity="0.10"/>` +
+        `<path d="${rev.area}" fill="var(--revenue)" opacity="0.10"/>`;
+      const lines =
+        `<path d="${cst.line}" fill="none" stroke="var(--cost)"    stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+        `<path d="${mar.line}" fill="none" stroke="var(--margin)"  stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+        `<path d="${rev.line}" fill="none" stroke="var(--revenue)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const dots =
+        dotsFor(cst.pts, 'var(--cost)',    p => p.cost_eur,    'Cost') +
+        dotsFor(mar.pts, 'var(--margin)',  p => p.margin_eur,  'Margin') +
+        dotsFor(rev.pts, 'var(--revenue)', p => p.revenue_eur, 'Revenue');
+
+      document.getElementById(elId).innerHTML = yTicks + areas + lines + dots + xTicks;
     }
 
     function render(d) {
