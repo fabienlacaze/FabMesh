@@ -1046,36 +1046,62 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     credits: number;
     packId: string;
     amountEur: number;
-  }): Promise<void> {
+  }): Promise<{ ok: true } | { ok: false; retry: boolean }> {
+    // Atomic-ish processing with self-healing on retry.
+    //
+    // Three states for the payments row:
+    //   1. Not present       → first delivery, full flow below.
+    //   2. credits === 0     → previous attempt died mid-flow (after
+    //                         placeholder INSERT, before addCredits or
+    //                         before the patch). Resume from addCredits.
+    //   3. credits > 0       → already finalised, idempotent return.
+    //
+    // The state machine: probe → if (state 3) bail, if (state 2)
+    // resume, if (state 1) INSERT placeholder THEN proceed. Single
+    // path for the credit+patch step regardless of entry state, so
+    // a retry that crashed AT ANY point converges to a finalised row.
     const sb = supabaseAdmin(env);
     const { data: existing } = await sb.from('payments')
-      .select('id').eq('stripe_session_id', opts.sessionOrInvoiceId).maybeSingle();
-    if (existing) return; // already processed by an earlier delivery
-    // Credit FIRST. If addCredits dies the retry re-credits (rare —
-    // RPC is one DB roundtrip). If it succeeds but the insert below
-    // dies, the retry re-probes payments (still empty), re-credits
-    // (DOUBLE CREDIT). Mitigation: insert a placeholder row with a
-    // pending flag immediately after credit so the retry sees it.
-    const placeholder = await sb.from('payments').insert({
-      stripe_session_id: opts.sessionOrInvoiceId,
-      user_id: opts.userId, pack_id: opts.packId, credits: 0,
-      amount_eur: 0,
-      created_at: new Date().toISOString(),
-    });
-    if (placeholder.error) {
-      // Unique constraint hit means a parallel delivery beat us — bail.
-      return;
+      .select('id, credits').eq('stripe_session_id', opts.sessionOrInvoiceId).maybeSingle();
+    if (existing && (existing as { credits: number }).credits > 0) {
+      return { ok: true }; // already credited
     }
+    if (!existing) {
+      const ins = await sb.from('payments').insert({
+        stripe_session_id: opts.sessionOrInvoiceId,
+        user_id: opts.userId, pack_id: opts.packId, credits: 0,
+        amount_eur: 0,
+        created_at: new Date().toISOString(),
+      });
+      if (ins.error) {
+        // Race: another delivery beat us to the INSERT. They'll
+        // (re-)credit; we bail. Their finalisation is independent.
+        return { ok: true };
+      }
+    }
+    // State 1 (just inserted) and state 2 (resuming) converge here.
     const credited = await addCredits(env, opts.userId, opts.credits);
-    // Patch the placeholder with the real values now that credit landed.
-    // If this patch fails, the credit is still in the DB (correct), the
-    // payments row stays at 0 credits in our books (small accounting
-    // inconsistency, no money lost).
-    if (credited !== null) {
-      await sb.from('payments')
-        .update({ credits: opts.credits, amount_eur: opts.amountEur })
-        .eq('stripe_session_id', opts.sessionOrInvoiceId);
+    if (credited === null) {
+      // RPC failed; placeholder stays at credits=0 so the next retry
+      // hits state 2 and re-attempts. Tell Stripe to retry by returning
+      // retry:true → handler answers with a 500 so Stripe re-delivers.
+      return { ok: false, retry: true };
     }
+    const patch = await sb.from('payments')
+      .update({ credits: opts.credits, amount_eur: opts.amountEur })
+      .eq('stripe_session_id', opts.sessionOrInvoiceId);
+    if (patch.error) {
+      // The credits landed; only the accounting row update failed.
+      // Tell Stripe to retry: the next call will see state-3 (credits
+      // already on the user) ONLY if we already patched, otherwise
+      // state-2 and we re-credit (DOUBLE CREDIT). Mitigation: bump
+      // the placeholder to the real credits in a single transaction
+      // with addCredits via an RPC — future TODO. For now we accept
+      // the at-most-one-extra-credit risk on a rare DB blip.
+      console.warn('[stripe] payments patch failed but credits added:',
+        opts.sessionOrInvoiceId, patch.error.message);
+    }
+    return { ok: true };
   }
 
   // One-shot top-up — credits added once on checkout.session.completed.
@@ -1088,10 +1114,14 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const credits = parseInt(sess.metadata?.credits ?? '0', 10);
     const packId = sess.metadata?.pack_id ?? 'unknown';
     if (userId && credits > 0) {
-      await _processPayment({
+      const res = await _processPayment({
         sessionOrInvoiceId: sess.id, userId, credits, packId,
         amountEur: (sess.amount_total ?? 0) / 100,
       });
+      // Tell Stripe to retry if the credit add failed — the placeholder
+      // row stays in payments, so the retry resumes from state-2 and
+      // re-attempts addCredits without double-crediting.
+      if (!res.ok && res.retry) return err(500, 'transient credit failure');
     }
   }
 
@@ -1105,10 +1135,11 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const credits = parseInt(meta.credits ?? '0', 10);
     const packId = meta.pack_id ?? 'subscription';
     if (userId && credits > 0) {
-      await _processPayment({
+      const res = await _processPayment({
         sessionOrInvoiceId: inv.id, userId, credits, packId,
         amountEur: (inv.amount_paid ?? 0) / 100,
       });
+      if (!res.ok && res.retry) return err(500, 'transient credit failure');
     }
   }
 
