@@ -2617,6 +2617,56 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   }
 }
 
+/** Attach an existing mesh URL to a (possibly new) project for the
+ *  current user. Used by both copyMeshToProject and
+ *  createProjectFromMesh — the two desktop operations are the same
+ *  thing in the cloud DB model (project = grouping by name on jobs).
+ *  No GPU call, no Modal cost, no credit spend. */
+async function handleCopyMeshToProject(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  const { meshUrl, meshId, targetProject } = await req.json() as {
+    meshUrl?: string;
+    meshId?: string;
+    targetProject?: string;
+  };
+  const projectName = (targetProject ?? '').toString().trim();
+  if (!projectName) return err(400, 'targetProject required');
+
+  // Resolve a final URL — caller can pass either the mesh URL directly
+  // OR the job id (we look it up in the DB).
+  let finalUrl = meshUrl ?? '';
+  let assetType = 'character';
+  let mode = 'standard';
+  if (!finalUrl && meshId) {
+    const { data, error } = await supabaseAdmin(env)
+      .from('jobs')
+      .select('mesh_url, asset_type, mode')
+      .eq('id', meshId).eq('user_id', user.id).maybeSingle();
+    if (error || !data) return err(404, 'mesh not found in your account');
+    finalUrl = (data as { mesh_url: string | null }).mesh_url ?? '';
+    assetType = (data as { asset_type?: string }).asset_type ?? assetType;
+    mode      = (data as { mode?: string }).mode ?? mode;
+  }
+  if (!finalUrl) return err(400, 'meshUrl or meshId required');
+
+  // Insert a new job row with the same mesh_url but the new project_name.
+  // credit_cost = 0 (no GPU work — just a project re-grouping).
+  const newId = 'copy_' + crypto.randomUUID().replace(/-/g, '');
+  await supabaseAdmin(env).from('jobs').insert({
+    id: newId, user_id: user.id,
+    asset_type: assetType, mode, seed: 0,
+    credit_cost: 0, status: 'succeeded',
+    mesh_url: finalUrl,
+    project_name: projectName,
+    options: { operation_type: 'mesh', cost_usd: 0, copied_from: meshId ?? null },
+    created_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+  });
+  return json({ ok: true, success: true, id: newId, project_name: projectName, mesh_url: finalUrl });
+}
+
 /** Auto-rectify endpoint — re-generate an orthographic FRONT (or 3/4 ISO)
  *  view from a prompt and/or a reference image, using multi-seed silhouette
  *  symmetry scoring. Verbatim feature port of `generate_front_strict.py`.
@@ -3587,6 +3637,7 @@ export default {
         if (pathname === '/api/auto-inpaint'          && method === 'POST') return await handleAutoInpaint(req, env);
         if (pathname === '/api/mask-inpaint'          && method === 'POST') return await handleMaskInpaint(req, env);
         if (pathname === '/api/face-fix-image'        && method === 'POST') return await handleFaceFixImage(req, env);
+        if (pathname === '/api/copy-mesh-to-project'  && method === 'POST') return await handleCopyMeshToProject(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);

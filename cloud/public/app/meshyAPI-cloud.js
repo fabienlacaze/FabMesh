@@ -1082,8 +1082,34 @@
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
     },
-    copyMeshToProject: async () => ({ ok: false, cloud: true, message: 'Copy mesh to project: Desktop-only.' }),
-    createProjectFromMesh: async () => ({ ok: false, cloud: true, message: 'Create project from mesh: Desktop-only.' }),
+    copyMeshToProject: async ({ meshPath, meshUrl, meshId, targetProject, projectName } = {}) => {
+      // Cloud port — backed by /api/copy-mesh-to-project. In the cloud
+      // DB model a project is just a `project_name` field on jobs, so
+      // copying is a 0-cost INSERT pointing at the same R2 mesh URL.
+      const target = targetProject || projectName;
+      if (!target) return { ok: false, error: 'targetProject required' };
+      const body = { meshUrl: meshUrl || meshPath, meshId, targetProject: target };
+      try {
+        const r = await postJSON('/api/copy-mesh-to-project', body);
+        if (r?.success) return { ok: true, id: r.id, project_name: r.project_name };
+        return { ok: false, error: r?.error || 'unknown' };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+    createProjectFromMesh: async ({ meshPath, meshUrl, meshId, projectName, name } = {}) => {
+      // Same endpoint as copyMeshToProject — semantically "create a new
+      // project from this mesh" is just copyMeshToProject with a
+      // brand-new project_name. The user-facing distinction (the
+      // desktop renderer has separate buttons) is preserved at the API
+      // level so future divergence is easy.
+      const target = projectName || name;
+      if (!target) return { ok: false, error: 'projectName required' };
+      const body = { meshUrl: meshUrl || meshPath, meshId, targetProject: target };
+      try {
+        const r = await postJSON('/api/copy-mesh-to-project', body);
+        if (r?.success) return { ok: true, cloud: true, id: r.id, project_name: r.project_name };
+        return { ok: false, error: r?.error || 'unknown' };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
     exportToUnreal: async ({ sourcePath } = {}) => {
       // Best-effort: just download the GLB so the user can manually
       // drag-drop it into Unreal. Real FBX-for-Unreal export requires
