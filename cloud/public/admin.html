@@ -189,6 +189,8 @@
       <button class="tab" data-tab="ops">⚙️ Opérations <span class="tab-badge" id="badge-ops">0</span></button>
       <button class="tab" data-tab="finance">💰 Finances</button>
       <button class="tab" data-tab="bytype">📊 Par type</button>
+      <button class="tab" data-tab="active">🛑 Active jobs <span class="tab-badge" id="badge-active">0</span></button>
+      <button class="tab" data-tab="users">🧑 Users</button>
     </div>
 
     <!-- Tab: Overview — compact summary of all sections -->
@@ -255,6 +257,76 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <!-- Tab: Active Jobs -->
+    <div class="tab-panel" data-panel="active">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <span style="color:var(--text-2); font-size:12px;">Running mesh generations. "Stop" refunds credits and marks the job canceled in Supabase.</span>
+        <button class="btn" onclick="loadActiveJobs()">🔄 Reload</button>
+      </div>
+      <table id="active-jobs-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>User</th>
+            <th>Project</th>
+            <th>Asset</th>
+            <th>Mode</th>
+            <th class="num">Cost</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="8" style="color:var(--text-2)">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Tab: Users -->
+    <div class="tab-panel" data-panel="users">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
+        <input id="user-search" type="search" placeholder="Search by email or id…"
+               style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:13px;" />
+        <button class="btn" onclick="loadUsers()">🔄 Reload</button>
+      </div>
+      <table id="users-table">
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>ID</th>
+            <th class="num">Credits</th>
+            <th>Joined</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Confirm modal (used by stop / ban) -->
+    <div id="confirm-overlay"
+         style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; max-width:420px; width:90%;">
+        <div id="confirm-title" style="font-size:16px; font-weight:700; margin-bottom:8px;"></div>
+        <div id="confirm-body" style="color:var(--text-1); font-size:13px; margin-bottom:16px;"></div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="btn" id="confirm-cancel">Cancel</button>
+          <button class="btn btn-accent" id="confirm-ok" style="background:var(--err); border-color:var(--err);">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mesh viewer modal -->
+    <div id="meshes-overlay"
+         style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1001; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:20px; max-width:90vw; max-height:90vh; width:1000px; overflow:auto;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+          <div id="meshes-title" style="font-size:16px; font-weight:700;"></div>
+          <button class="btn" onclick="document.getElementById('meshes-overlay').style.display='none'">✕ Close</button>
+        </div>
+        <div id="meshes-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px;"></div>
+      </div>
     </div>
   </div>
 
@@ -553,6 +625,185 @@
       document.querySelector('#by-type-table tbody').innerHTML =
         rows || '<tr><td colspan="5" class="muted">No data yet</td></tr>';
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       ACTIVE JOBS + USERS — admin moderation tools
+       ═══════════════════════════════════════════════════════════════ */
+
+    function fmtDate(iso) {
+      try { return new Date(iso).toLocaleString(); } catch { return iso || ''; }
+    }
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function confirmAction(title, body, onConfirm) {
+      const ov = document.getElementById('confirm-overlay');
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-body').textContent = body;
+      const okBtn = document.getElementById('confirm-ok');
+      const cancelBtn = document.getElementById('confirm-cancel');
+      const close = () => { ov.style.display = 'none'; };
+      okBtn.onclick = async () => { close(); try { await onConfirm(); } catch (e) { alert(e?.message || e); } };
+      cancelBtn.onclick = close;
+      ov.style.display = 'flex';
+    }
+
+    async function loadActiveJobs() {
+      const tbody = document.querySelector('#active-jobs-table tbody');
+      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-2)">Loading…</td></tr>';
+      let data;
+      try {
+        const r = await fetch('/api/admin/jobs/active', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        data = await r.json();
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="8" style="color:var(--err)">${escapeHtml(e.message || e)}</td></tr>`;
+        return;
+      }
+      const jobs = data.jobs || [];
+      document.getElementById('badge-active').textContent = jobs.length;
+      if (!jobs.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="muted">No active jobs.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = jobs.map((j) => `
+        <tr>
+          <td>${escapeHtml(fmtDate(j.created_at))}</td>
+          <td>${escapeHtml(j.email || j.user_id?.slice(0, 8))}</td>
+          <td>${escapeHtml(j.project_name || '')}</td>
+          <td>${escapeHtml(j.asset_type)}</td>
+          <td>${escapeHtml(j.mode)}</td>
+          <td class="num">${j.credit_cost}</td>
+          <td><span style="color:var(--warn)">${escapeHtml(j.status)}</span></td>
+          <td><button class="btn" style="background:var(--err); border-color:var(--err);"
+                     onclick="stopJob('${escapeHtml(j.id)}', '${escapeHtml(j.email || j.user_id)}')">🛑 Stop</button></td>
+        </tr>
+      `).join('');
+    }
+
+    function stopJob(jobId, who) {
+      confirmAction(
+        'Stop this job?',
+        `Cancel job ${jobId} (user ${who}) and refund credits? The Modal GPU may keep running for ~30s.`,
+        async () => {
+          const r = await fetch('/api/admin/jobs/cancel', {
+            method: 'POST', credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jobId }),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+          alert(`Cancelled. Refunded ${j.refunded} credits.`);
+          loadActiveJobs();
+        },
+      );
+    }
+
+    let _allUsers = [];
+    async function loadUsers() {
+      const tbody = document.querySelector('#users-table tbody');
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr>';
+      try {
+        const r = await fetch('/api/admin/users', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        _allUsers = data.users || [];
+        renderUsers();
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:var(--err)">${escapeHtml(e.message || e)}</td></tr>`;
+      }
+    }
+
+    function renderUsers() {
+      const q = (document.getElementById('user-search')?.value || '').toLowerCase();
+      const list = q
+        ? _allUsers.filter((u) => (u.email || '').toLowerCase().includes(q) || u.id.toLowerCase().includes(q))
+        : _allUsers;
+      const tbody = document.querySelector('#users-table tbody');
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="muted">No users.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map((u) => `
+        <tr>
+          <td>${escapeHtml(u.email || '—')}</td>
+          <td style="font-family:ui-monospace,monospace; font-size:11px;">${escapeHtml(u.id.slice(0,8))}…</td>
+          <td class="num">${u.credits}</td>
+          <td>${escapeHtml(fmtDate(u.created_at))}</td>
+          <td>${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn" onclick="viewUserMeshes('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}')">👁 Meshes</button>
+            <button class="btn" style="background:${u.banned ? 'var(--ok)' : 'var(--err)'}; border-color:${u.banned ? 'var(--ok)' : 'var(--err)'};"
+                    onclick="toggleBan('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}', ${!u.banned})">
+              ${u.banned ? '✓ Unban' : '🚫 Ban'}
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+    document.getElementById('user-search')?.addEventListener('input', renderUsers);
+
+    function toggleBan(userId, who, ban) {
+      confirmAction(
+        ban ? 'Ban this user?' : 'Unban this user?',
+        ban
+          ? `User ${who} will be locked out on their next request (within ~60s cache TTL).`
+          : `User ${who} will regain access immediately.`,
+        async () => {
+          const r = await fetch('/api/admin/users/ban', {
+            method: 'POST', credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ userId, ban }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          loadUsers();
+        },
+      );
+    }
+
+    async function viewUserMeshes(userId, who) {
+      const grid = document.getElementById('meshes-grid');
+      document.getElementById('meshes-title').textContent = 'Meshes for ' + who;
+      grid.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
+      document.getElementById('meshes-overlay').style.display = 'flex';
+      try {
+        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/meshes`, { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const meshes = data.meshes || [];
+        if (!meshes.length) {
+          grid.innerHTML = '<div style="color:var(--text-2);">No succeeded meshes.</div>';
+          return;
+        }
+        grid.innerHTML = meshes.map((m) => `
+          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
+            <div style="font-weight:600; font-size:13px;">${escapeHtml(m.project_name || '—')}</div>
+            <div style="color:var(--text-2); font-size:11px;">${escapeHtml(m.asset_type)} · ${escapeHtml(fmtDate(m.created_at))}</div>
+            <a class="btn" href="${escapeHtml(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download GLB</a>
+            <a class="btn" href="https://gltf-viewer.donmccurdy.com/?model=${encodeURIComponent(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">👁 Open in viewer</a>
+          </div>
+        `).join('');
+      } catch (e) {
+        grid.innerHTML = `<div style="color:var(--err)">${escapeHtml(e.message || e)}</div>`;
+      }
+    }
+
+    // Auto-load active jobs + users when their tab opens for the first time.
+    document.querySelectorAll('.tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.tab;
+        if (t === 'active' && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
+        if (t === 'users'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+      });
+    });
+    // Poll active jobs every 30s when that tab is open.
+    setInterval(() => {
+      const activeTab = document.querySelector('.tab.active');
+      if (activeTab?.dataset?.tab === 'active') loadActiveJobs();
+    }, 30_000);
 
     refresh();
   </script>
