@@ -203,28 +203,34 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 26px;
-        height: 22px;
-        padding: 0 8px;
+        min-width: 30px;
+        height: 24px;
+        padding: 0 9px 0 7px;
         margin-left: 8px;
         background: linear-gradient(135deg, #ffd84a, #f5a623);
         color: #1a1a1a;
-        border: 1px solid rgba(255, 255, 255, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 999px;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 800;
         line-height: 1;
         font-variant-numeric: tabular-nums;
         vertical-align: middle;
-        box-shadow: 0 2px 6px rgba(245, 166, 35, 0.45),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+        box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.4);
         text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
       }
+      /* Inline SVG bolt — dark gold fill with white outline + drop
+         shadow. Much higher contrast than the emoji ⚡ which renders
+         pale yellow against the gold badge background. */
       .cloud-cost-badge::before {
-        content: '⚡';
-        margin-right: 3px;
-        font-size: 13px;
-        filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.4));
+        content: '';
+        display: inline-block;
+        width: 11px; height: 16px;
+        margin-right: 4px;
+        background: no-repeat center/contain
+          url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32"><path d="M14 0 L0 18 L9 18 L7 32 L24 12 L14 12 Z" fill="%231a1a1a" stroke="%23ffffff" stroke-width="1.5" stroke-linejoin="round"/></svg>');
+        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
       }
     `;
     document.head.appendChild(style);
