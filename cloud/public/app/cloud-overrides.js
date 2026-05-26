@@ -190,8 +190,9 @@
     'ws-autoinpaint-btn':   3,   // /api/auto-inpaint — CLIPSeg + SDXL inpaint
     'ws-removebg-btn':      1,   // /api/remove-background
     'ws-multiview-btn':     6,   // generateMultiviews — 6 views generated
-    // Resolution / Face Fix / Sym. Auto are canvas-only at the moment
-    // (no Modal call) → no badge so they read as "free" by absence.
+    'ws-facefix-btn':       2,   // /api/face-fix-image — OpenCV + SDXL inpaint
+    // Resolution / Sym. Auto / Crop / Brightness stay canvas-only — no
+    // badge so they read as "free" by absence.
   };
 
   function _ensureCostBadgeStyle() {

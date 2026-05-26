@@ -1687,14 +1687,15 @@ async function callModalTpose(env: Env, userId: string, input: {
  *  Returns either the persisted R2 URL or a discriminated mask-empty
  *  shape for the auto_inpaint case (so the Worker can refund). */
 async function callModalImageOp(env: Env, userId: string, input: {
-  op: 'modify' | 'auto_inpaint';
+  op: 'modify' | 'auto_inpaint' | 'mask_inpaint' | 'face_fix_image';
   imageUrl: string;
   prompt?: string;
-  strength?: number;          // modify only
+  strength?: number;          // modify + face_fix_image
   seed?: number;
   steps?: number;
   targetText?: string;        // auto_inpaint only
   dilate?: number;
+  maskUrl?: string;           // mask_inpaint only
 }, folder: string): Promise<{ url: string } | { maskEmpty: true; error: string }> {
   const url = env.MODAL_IMAGE_OP_URL;
   const secret = env.MODAL_SHARED_SECRET;
@@ -1711,9 +1712,13 @@ async function callModalImageOp(env: Env, userId: string, input: {
     body.strength = input.strength ?? 0.55;
     body.seed = input.seed;
     body.steps = input.steps;
-  } else {
+  } else if (input.op === 'auto_inpaint') {
     body.target_text = input.targetText ?? '';
     body.dilate = input.dilate ?? 15;
+  } else if (input.op === 'mask_inpaint') {
+    body.mask_url = input.maskUrl ?? '';
+  } else if (input.op === 'face_fix_image') {
+    body.strength = input.strength ?? 0.45;
   }
 
   const t0 = Date.now();
@@ -2456,6 +2461,159 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
     return err(502, `auto-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** Manual mask inpaint — user paints the mask in the renderer's Draw
+ *  Mask modal, we forward image + mask URLs to image_op. */
+async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_IMAGE_OP_URL) return err(503, 'mask-inpaint backend unavailable');
+
+  const { imagePath, imageUrl, maskDataUrl, prompt } = await req.json() as {
+    imagePath?: string; imageUrl?: string; maskDataUrl?: string; prompt?: string;
+  };
+  const src = imageUrl || imagePath;
+  if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!maskDataUrl) return err(400, 'maskDataUrl required');
+  const rawPrompt = (prompt ?? '').toString().trim();
+  if (!rawPrompt) return err(400, 'prompt required');
+
+  // NSFW pre-filter on prompt.
+  {
+    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const safety = checkPromptSafety(rawPrompt, unrestricted);
+    if (!safety.safe) {
+      return json({ ok: false, success: false,
+        error: safety.reason ?? 'prompt blocked by content filter',
+        blocked: safety.blocked }, { status: 400 });
+    }
+  }
+
+  // Decode the mask data URL → bytes → upload to R2 → get a stable URL
+  // for Modal to fetch.
+  let maskUrl: string;
+  try {
+    const m = /^data:image\/(\w+);base64,(.+)$/.exec(maskDataUrl);
+    if (!m) return err(400, 'invalid maskDataUrl (expected data:image/...;base64,...)');
+    const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+    const bin = atob(m[2]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (!env.MESHES || !env.R2_PUBLIC_URL) {
+      return err(500, 'R2 binding required to forward mask');
+    }
+    const key = `${user.id}/masks/${Date.now()}_user.${ext}`;
+    await env.MESHES.put(key, bytes, {
+      httpMetadata: { contentType: `image/${m[1]}` },
+    });
+    maskUrl = `${env.R2_PUBLIC_URL}/${key}`;
+  } catch (e) {
+    return err(400, `mask decode failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const COST_PER = 3;
+  const estimatedTotal = 0.07;
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: 'daily Modal budget reached. Try again after midnight UTC.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: 'per-user daily generation limit reached.' }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, COST_PER);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — mask inpaint costs ${COST_PER} credits` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    const result = await callModalImageOp(env, user.id, {
+      op: 'mask_inpaint',
+      imageUrl: src,
+      maskUrl,
+      prompt: rawPrompt,
+    }, 'inpaint');
+    if ('maskEmpty' in result) {
+      // mask_inpaint never returns mask_empty (caller-supplied mask).
+      throw new Error('unexpected mask_empty from mask_inpaint');
+    }
+    await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
+                       'succeeded', { op: 'mask_inpaint' });
+    return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
+  } catch (e) {
+    await addCredits(env, user.id, COST_PER);
+    await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                       'failed', { op: 'mask_inpaint', error: e instanceof Error ? e.message : String(e) });
+    return err(502, `mask-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** Image-level face fix — OpenCV Haar Cascade picks the face bbox,
+ *  SDXL Inpaint polishes it. Costs 2 credits, refund if no face found. */
+async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_IMAGE_OP_URL) return err(503, 'face-fix backend unavailable');
+
+  const { imagePath, imageUrl, strength } = await req.json() as {
+    imagePath?: string; imageUrl?: string; strength?: number;
+  };
+  const src = imageUrl || imagePath;
+  if (!src) return err(400, 'imageUrl or imagePath required');
+
+  const COST_PER = 2;
+  const estimatedTotal = 0.05;
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: 'daily Modal budget reached.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, COST_PER);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false, error: `insufficient credits — face-fix costs ${COST_PER}` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    const result = await callModalImageOp(env, user.id, {
+      op: 'face_fix_image',
+      imageUrl: src,
+      strength: strength ?? 0.45,
+    }, 'facefix');
+    if ('maskEmpty' in result) {
+      // No face detected — refund.
+      await addCredits(env, user.id, COST_PER);
+      await refundModalSpend(env, estimatedTotal);
+      await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                         'failed', { op: 'face_fix_image', reason: 'no_face' });
+      return json({ ok: false, success: false,
+        error: 'no face detected in image (credits refunded)' }, { status: 422 });
+    }
+    await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
+                       'succeeded', { op: 'face_fix_image' });
+    return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
+  } catch (e) {
+    await addCredits(env, user.id, COST_PER);
+    await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                       'failed', { op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
+    return err(502, `face-fix failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -3427,6 +3585,8 @@ export default {
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
         if (pathname === '/api/modify-image'          && method === 'POST') return await handleModifyImage(req, env);
         if (pathname === '/api/auto-inpaint'          && method === 'POST') return await handleAutoInpaint(req, env);
+        if (pathname === '/api/mask-inpaint'          && method === 'POST') return await handleMaskInpaint(req, env);
+        if (pathname === '/api/face-fix-image'        && method === 'POST') return await handleFaceFixImage(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
