@@ -4440,6 +4440,23 @@ async function handleAdminForceLogoutAll(req: Request, env: Env): Promise<Respon
   return json({ ok: true, min_session_iat: iat });
 }
 
+/** GET /api/pricing — PUBLIC. Returns the live credit costs so the
+ *  UI can render accurate cost pills and add-on hints without re-
+ *  deploying the static bundle every time the admin tunes a price. */
+async function handlePublicPricing(_req: Request, env: Env): Promise<Response> {
+  const prices = await _getPricing(env);
+  // Cache 30 s on the edge so a viral landing page doesn't multiply
+  // R2 reads. Admin POSTs invalidate the in-process cache; the edge
+  // cache will follow within 30 s.
+  return new Response(JSON.stringify({ prices }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': 'public, max-age=30',
+    },
+  });
+}
+
 /** GET /api/admin/pricing — current credit costs + defaults. */
 async function handleAdminGetPricing(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
@@ -4904,6 +4921,7 @@ export default {
         if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
         if (pathname === '/api/admin/services'        && method === 'GET')  return await handleAdminServices(req, env);
         if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
+        if (pathname === '/api/pricing'               && method === 'GET')  return await handlePublicPricing(req, env);
         if (pathname === '/api/admin/pricing'         && method === 'GET')  return await handleAdminGetPricing(req, env);
         if (pathname === '/api/admin/pricing'         && method === 'POST') return await handleAdminSetPricing(req, env);
         if (pathname === '/api/admin/force-logout-all' && method === 'POST') return await handleAdminForceLogoutAll(req, env);
