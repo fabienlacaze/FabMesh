@@ -366,6 +366,41 @@ function _invalidateBanCache() {
   _banListCache = { set: new Set(), ts: 0 };
 }
 
+/* Service kill-switches — admin can disable Modal calls or the entire
+ * site from the dashboard (panic button if the GPU is being abused or
+ * Stripe webhooks are misbehaving). Stored in R2 alongside the ban list.
+ * Cache TTL is 30 s so flipping a switch propagates quickly without
+ * doubling R2 reads for every request. */
+type ServiceFlags = { modal_enabled: boolean; site_enabled: boolean };
+const SERVICE_FLAGS_KEY = '_meta/service-flags.json';
+const SERVICE_FLAGS_TTL_MS = 30_000;
+let _serviceFlagsCache: { flags: ServiceFlags; ts: number } = {
+  flags: { modal_enabled: true, site_enabled: true },
+  ts: 0,
+};
+
+async function _getServiceFlags(env: Env): Promise<ServiceFlags> {
+  const now = Date.now();
+  if (now - _serviceFlagsCache.ts < SERVICE_FLAGS_TTL_MS) return _serviceFlagsCache.flags;
+  try {
+    const obj = await env.MESHES.get(SERVICE_FLAGS_KEY);
+    const raw = obj ? await obj.json() as Partial<ServiceFlags> : {};
+    const flags: ServiceFlags = {
+      modal_enabled: raw.modal_enabled !== false,
+      site_enabled: raw.site_enabled !== false,
+    };
+    _serviceFlagsCache = { flags, ts: now };
+    return flags;
+  } catch {
+    _serviceFlagsCache = { flags: { modal_enabled: true, site_enabled: true }, ts: now };
+    return _serviceFlagsCache.flags;
+  }
+}
+
+function _invalidateServiceFlagsCache() {
+  _serviceFlagsCache = { flags: { modal_enabled: true, site_enabled: true }, ts: 0 };
+}
+
 async function getSessionUser(req: Request, env: Env): Promise<SessionUser | null> {
   if (isMock(env)) {
     const c = parseCookies(req);
@@ -3939,6 +3974,56 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   return json({ users: users.map((u) => ({ ...u, banned: banned.has(u.id) })) });
 }
 
+/** GET /api/admin/services — current state of the kill switches. */
+async function handleAdminServices(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  // Force a fresh read — admin UI only calls this when the menu is
+  // opened, so the 30 s cache doesn't help us here and stale data is
+  // worse than a single extra R2 read.
+  _invalidateServiceFlagsCache();
+  const flags = await _getServiceFlags(env);
+  return json(flags);
+}
+
+/** POST /api/admin/services  body: { service: 'modal'|'site', enabled, password }
+ *  Requires the ADMIN_PASSWORD on every flip — second factor on top
+ *  of the admin session cookie, so a stolen cookie alone can't kill
+ *  the site. */
+async function handleAdminServicesToggle(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { service?: string; enabled?: boolean; password?: string } | null = null;
+  try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
+  const service = String(body?.service || '').trim();
+  const enabled = !!body?.enabled;
+  const password = String(body?.password || '');
+  if (!['modal', 'site'].includes(service)) return err(400, 'service must be modal|site');
+  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
+  // Constant-time compare.
+  if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
+  let diff = 0;
+  for (let i = 0; i < password.length; i++) {
+    diff |= password.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
+  }
+  if (diff !== 0) return err(401, 'invalid password');
+
+  let current: Partial<ServiceFlags> = {};
+  try {
+    const obj = await env.MESHES.get(SERVICE_FLAGS_KEY);
+    if (obj) current = await obj.json() as Partial<ServiceFlags>;
+  } catch {}
+  const next: ServiceFlags = {
+    modal_enabled: current.modal_enabled !== false,
+    site_enabled: current.site_enabled !== false,
+    ...(service === 'modal' ? { modal_enabled: enabled } : {}),
+    ...(service === 'site'  ? { site_enabled: enabled }  : {}),
+  };
+  await env.MESHES.put(SERVICE_FLAGS_KEY, JSON.stringify(next));
+  _invalidateServiceFlagsCache();
+  return json({ ok: true, ...next });
+}
+
 /** GET /api/admin/users/<userId>/images — ADMIN ONLY. Lists every PNG
  *  in R2 under <userId>/* so the admin can preview / moderate. Doesn't
  *  hit Supabase because logOperation never stored the result URL —
@@ -4180,6 +4265,27 @@ export default {
       // can't do this because it doesn't have access to that verifier.
       // Fall through to env.ASSETS.fetch(req) at the bottom of fetch().
 
+      // ── kill switches (site-wide + Modal) ───────────────────────
+      // site_enabled=false → every /api/* (non-admin) returns 503 so
+      // the admin can lock things down during an attack.
+      // modal_enabled=false → only the endpoints that talk to Modal
+      // return 503; Replicate-only ones still work as a partial fallback.
+      const MODAL_PATHS = new Set([
+        '/api/generate', '/api/generate-image', '/api/generate-back-view',
+        '/api/rectify-image', '/api/modify-image', '/api/auto-inpaint',
+        '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
+        '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
+      ]);
+      if (pathname.startsWith('/api/') && !pathname.startsWith('/api/admin/')) {
+        const flags = await _getServiceFlags(env);
+        if (!flags.site_enabled) {
+          return err(503, 'site temporarily disabled by admin');
+        }
+        if (!flags.modal_enabled && MODAL_PATHS.has(pathname)) {
+          return err(503, 'Modal backend temporarily disabled by admin');
+        }
+      }
+
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
         if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
@@ -4220,6 +4326,8 @@ export default {
         if (pathname === '/api/admin/jobs/cancel'     && method === 'POST') return await handleAdminCancelJob(req, env);
         if (pathname === '/api/admin/users'           && method === 'GET')  return await handleAdminListUsers(req, env);
         if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
+        if (pathname === '/api/admin/services'        && method === 'GET')  return await handleAdminServices(req, env);
+        if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
         if (pathname === '/download/track'            && method === 'GET')  return await handleDownloadTrack(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
