@@ -588,6 +588,22 @@ async function _runNsfwBackgroundScan() {
  * Home view toggle — Projects / Images / Meshes. Same project data,
  * three views: cards (default), flat image grid, flat mesh grid.
  * --------------------------------------------------------------------- */
+function _updateHomeViewCounts() {
+  let imgN = 0, meshN = 0;
+  for (const p of state.projects || []) {
+    imgN += (p.images || []).length;
+    meshN += (p.meshes || []).length;
+  }
+  const projN = (state.projects || []).length;
+  const set = (k, n) => {
+    const el = document.querySelector(`.home-view-count[data-count="${k}"]`);
+    if (el) el.textContent = `(${n})`;
+  };
+  set('projects', projN);
+  set('images', imgN);
+  set('meshes', meshN);
+}
+
 let _homeView = 'projects';
 function _setHomeView(view) {
   _homeView = view;
@@ -790,6 +806,7 @@ async function renderProjectsGrid() {
   }
   renderProjectsBulkBar();
   _syncSelectAllBtn();
+  _updateHomeViewCounts();
   // Keep the alternate views in sync with the freshly-loaded project
   // list so flipping back to Images/Meshes doesn't show stale data.
   if (_homeView === 'images') renderAllImagesGrid();

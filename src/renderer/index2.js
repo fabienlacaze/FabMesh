@@ -569,6 +569,22 @@ async function _runNsfwBackgroundScan() {
 /* ----------------------------------------------------------------------
  * Home view toggle — Projects / Images / Meshes
  * --------------------------------------------------------------------- */
+function _updateHomeViewCounts() {
+  let imgN = 0, meshN = 0;
+  for (const p of state.projects || []) {
+    imgN += (p.images || []).length;
+    meshN += (p.meshes || []).length;
+  }
+  const projN = (state.projects || []).length;
+  const set = (k, n) => {
+    const el = document.querySelector(`.home-view-count[data-count="${k}"]`);
+    if (el) el.textContent = `(${n})`;
+  };
+  set('projects', projN);
+  set('images', imgN);
+  set('meshes', meshN);
+}
+
 let _homeView = 'projects';
 function _setHomeView(view) {
   _homeView = view;
@@ -767,6 +783,7 @@ async function renderProjectsGrid() {
   }
   renderProjectsBulkBar();
   _syncSelectAllBtn();
+  _updateHomeViewCounts();
   // Sync the alternate home views with fresh project data.
   if (_homeView === 'images') renderAllImagesGrid();
   else if (_homeView === 'meshes') renderAllMeshesGrid();
