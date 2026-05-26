@@ -315,8 +315,25 @@
     if (sm) sm.style.display = 'none';
 
     requestAnimationFrame(function () {
-      _cloneMgr.loadImage('file:///' + imagePath.replace(/\\/g, '/') + '?t=' + Date.now()).then(function () {
+      // imagePath is either a desktop filesystem path (needs file:///
+      // prefix + slash conversion) OR a cloud URL (http://, https://,
+      // blob:, data:). The legacy code assumed desktop only; on cloud
+      // that produced file:///https:/... which fails to load → empty
+      // sourceImageData → "no clone happens when I paint" symptom.
+      var srcUrl = /^(?:https?|blob|data|file):/i.test(imagePath)
+        ? imagePath
+        : 'file:///' + imagePath.replace(/\\/g, '/');
+      // Cache-bust only for filesystem URLs — blob: / data: don't accept
+      // query strings.
+      if (/^(?:https?|file):/i.test(srcUrl)) {
+        srcUrl += (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+      }
+      _cloneMgr.loadImage(srcUrl).then(function () {
         cloneState.sourceImageData = _cloneMgr.ctx.getImageData(0, 0, _cloneMgr.w, _cloneMgr.h);
+      }).catch(function (e) {
+        console.error('[clone] source image load failed:', e);
+        if (typeof window.cloneShowError === 'function')
+          window.cloneShowError('source image load failed: ' + (e && e.message || e));
       });
     });
   }
