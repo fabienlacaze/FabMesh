@@ -371,13 +371,15 @@ function _invalidateBanCache() {
  * Stripe webhooks are misbehaving). Stored in R2 alongside the ban list.
  * Cache TTL is 30 s so flipping a switch propagates quickly without
  * doubling R2 reads for every request. */
-type ServiceFlags = { modal_enabled: boolean; site_enabled: boolean };
+type ServiceFlags = {
+  modal_enabled: boolean;
+  site_enabled: boolean;
+  total_enabled: boolean;
+};
 const SERVICE_FLAGS_KEY = '_meta/service-flags.json';
 const SERVICE_FLAGS_TTL_MS = 30_000;
-let _serviceFlagsCache: { flags: ServiceFlags; ts: number } = {
-  flags: { modal_enabled: true, site_enabled: true },
-  ts: 0,
-};
+const DEFAULT_FLAGS: ServiceFlags = { modal_enabled: true, site_enabled: true, total_enabled: true };
+let _serviceFlagsCache: { flags: ServiceFlags; ts: number } = { flags: DEFAULT_FLAGS, ts: 0 };
 
 async function _getServiceFlags(env: Env): Promise<ServiceFlags> {
   const now = Date.now();
@@ -388,17 +390,18 @@ async function _getServiceFlags(env: Env): Promise<ServiceFlags> {
     const flags: ServiceFlags = {
       modal_enabled: raw.modal_enabled !== false,
       site_enabled: raw.site_enabled !== false,
+      total_enabled: raw.total_enabled !== false,
     };
     _serviceFlagsCache = { flags, ts: now };
     return flags;
   } catch {
-    _serviceFlagsCache = { flags: { modal_enabled: true, site_enabled: true }, ts: now };
+    _serviceFlagsCache = { flags: DEFAULT_FLAGS, ts: now };
     return _serviceFlagsCache.flags;
   }
 }
 
 function _invalidateServiceFlagsCache() {
-  _serviceFlagsCache = { flags: { modal_enabled: true, site_enabled: true }, ts: 0 };
+  _serviceFlagsCache = { flags: DEFAULT_FLAGS, ts: 0 };
 }
 
 /* TOTP (RFC 6238) helpers — compatible with Microsoft / Google
@@ -4158,7 +4161,7 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   const service = String(body?.service || '').trim();
   const enabled = !!body?.enabled;
   const password = String(body?.password || '');
-  if (!['modal', 'site'].includes(service)) return err(400, 'service must be modal|site');
+  if (!['modal', 'site', 'total'].includes(service)) return err(400, 'service must be modal|site|total');
   if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
   // Constant-time compare.
   if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
@@ -4176,8 +4179,10 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   const next: ServiceFlags = {
     modal_enabled: current.modal_enabled !== false,
     site_enabled: current.site_enabled !== false,
+    total_enabled: current.total_enabled !== false,
     ...(service === 'modal' ? { modal_enabled: enabled } : {}),
     ...(service === 'site'  ? { site_enabled: enabled }  : {}),
+    ...(service === 'total' ? { total_enabled: enabled } : {}),
   };
   await env.MESHES.put(SERVICE_FLAGS_KEY, JSON.stringify(next));
   _invalidateServiceFlagsCache();
@@ -4425,24 +4430,45 @@ export default {
       // can't do this because it doesn't have access to that verifier.
       // Fall through to env.ASSETS.fetch(req) at the bottom of fetch().
 
-      // ── kill switches (site-wide + Modal) ───────────────────────
-      // site_enabled=false → every /api/* (non-admin) returns 503 so
-      // the admin can lock things down during an attack.
-      // modal_enabled=false → only the endpoints that talk to Modal
-      // return 503; Replicate-only ones still work as a partial fallback.
+      // ── kill switches ──────────────────────────────────────────
+      // Three nested levels, weakest -> strongest:
+      //   modal_enabled=false  -> only Modal-bound /api/* return 503
+      //   site_enabled=false   -> every /api/* (non-admin) returns 503
+      //   total_enabled=false  -> static assets ALSO get a blackout
+      //                           page; only /admin and /api/admin/*
+      //                           keep working so the admin can flip
+      //                           the switch back on.
       const MODAL_PATHS = new Set([
         '/api/generate', '/api/generate-image', '/api/generate-back-view',
         '/api/rectify-image', '/api/modify-image', '/api/auto-inpaint',
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
       ]);
-      if (pathname.startsWith('/api/') && !pathname.startsWith('/api/admin/')) {
+      const isAdminRoute = pathname.startsWith('/admin') || pathname.startsWith('/api/admin/');
+      if (!isAdminRoute) {
         const flags = await _getServiceFlags(env);
-        if (!flags.site_enabled) {
-          return err(503, 'site temporarily disabled by admin');
+        if (!flags.total_enabled) {
+          // Static assets get a friendly HTML blackout page so users
+          // see what's happening instead of a raw worker error.
+          if (!pathname.startsWith('/api/')) {
+            return new Response(
+              `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+              <title>MyFabmesh.AI — Maintenance</title>
+              <style>body{margin:0;font:16px system-ui,sans-serif;background:#0a0a0e;color:#f0f0f0;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px}.card{max-width:480px}h1{margin:0 0 12px}p{color:#8888a0;line-height:1.6}</style>
+              <div class=card><h1>🛠 Service temporarily unavailable</h1>
+              <p>MyFabmesh.AI is down for maintenance. We'll be back shortly.</p></div>`,
+              { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
+            );
+          }
+          return err(503, 'site fully disabled by admin');
         }
-        if (!flags.modal_enabled && MODAL_PATHS.has(pathname)) {
-          return err(503, 'Modal backend temporarily disabled by admin');
+        if (pathname.startsWith('/api/')) {
+          if (!flags.site_enabled) {
+            return err(503, 'site temporarily disabled by admin');
+          }
+          if (!flags.modal_enabled && MODAL_PATHS.has(pathname)) {
+            return err(503, 'Modal backend temporarily disabled by admin');
+          }
         }
       }
 
