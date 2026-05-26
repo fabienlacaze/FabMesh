@@ -3878,20 +3878,36 @@ document.getElementById('ws-mask-btn').addEventListener('click', () => {
 // ----------- New image tools -----------
 
 // Helper: run a quick image edit via Python PIL and reload the project
+const QUICK_EDIT_EXPECTED_MS = {
+  crop:       4000,
+  brightness: 4000,
+  blur:       4000,
+  upscale:    20000,
+  paint:      4000,
+};
+
 async function runQuickEdit(operation, params) {
   const p = state.currentProject;
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
-  showToast(`${operation}...`, 'info', 1500);
+  const expectedMs = QUICK_EDIT_EXPECTED_MS[operation] || 6000;
+  const imgName = String(target).split(/[\\/]/).pop();
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`${operation}: ${p.name}`, null, { Image: imgName }, expectedMs)
+    : null;
   try {
     const r = await API.imageQuickEdit({ imagePath: target, operation, params });
     if (r?.success) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
       showToast(`${operation} done`, 'success');
       await reloadCurrentProject();
     } else {
-      showToast(`${operation} failed: ${r?.error || 'unknown'}`, 'error', 5000);
+      const msg = r?.error || 'unknown';
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      showToast(`${operation} failed: ${msg}`, 'error', 5000);
     }
   } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
     showToast(`${operation} error: ${e.message}`, 'error', 5000);
   }
 }
