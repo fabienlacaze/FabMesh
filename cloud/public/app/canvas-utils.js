@@ -93,7 +93,11 @@ class CanvasManager {
       img.src = finalSrc;
     });
     if (/^https?:/i.test(src)) {
-      return fetch(src, { credentials: 'omit' })
+      // Same-origin proxy on the Worker so CORS doesn't bite and
+      // canvas getImageData() works on any whitelisted upstream
+      // (R2 public, Replicate, Pollinations).
+      const proxied = '/api/proxy-image?url=' + encodeURIComponent(src);
+      return fetch(proxied, { credentials: 'omit' })
         .then(r => {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.blob();

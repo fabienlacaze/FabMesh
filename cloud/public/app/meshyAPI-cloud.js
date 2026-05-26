@@ -486,7 +486,12 @@
         img.src = finalUrl;
       };
       if (/^https?:/i.test(url)) {
-        fetch(url, { credentials: 'omit' })
+        // Same-origin proxy bypasses CORS on R2/Replicate/etc. Without
+        // this, browser fetch() to a 3rd-party host without CORS
+        // returns "Failed to fetch" — and even when CORS is open, the
+        // <img> tag's getImageData taints the canvas.
+        const proxied = '/api/proxy-image?url=' + encodeURIComponent(url);
+        fetch(proxied, { credentials: 'omit' })
           .then(r => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
             return r.blob();

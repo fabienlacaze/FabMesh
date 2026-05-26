@@ -1742,6 +1742,17 @@ async function callModalImageOp(env: Env, userId: string, input: {
     return { maskEmpty: true, error: (await r.text()).slice(0, 200) };
   }
   if (!r.ok) {
+    // HTTP 524 specifically means Cloudflare's CDN gave up waiting for
+    // the Modal container to respond (100s subrequest timeout). The
+    // user almost always sees this on the FIRST call after the
+    // container scaled down to zero. Surface a friendly hint instead
+    // of "HTTP 524" so they know to just retry.
+    if (r.status === 524) {
+      throw new Error(
+        `the AI model is warming up (cold start). Please retry in 30-60 seconds — ` +
+        `the next call will be much faster as the container stays warm.`
+      );
+    }
     throw new Error(`Modal image_op (${input.op}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
@@ -2621,6 +2632,62 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
     return err(502, `face-fix failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
+ *  URL, returned as-is so the browser sees a same-origin response and
+ *  bypasses CORS entirely. Used by every canvas tool that needs to
+ *  pull bytes back into a <canvas> (Crop, Brightness, Sym, Mask, Blur,
+ *  Paint, Clone, Modify-preview, Upscale).
+ *
+ *  Whitelist: only fetch URLs whose host matches a list of allowed
+ *  domains we control or know send safe content. Without this the
+ *  endpoint becomes an open proxy that anyone could abuse to bounce
+ *  arbitrary traffic through our Cloudflare account. */
+async function handleProxyImage(req: Request, env: Env): Promise<Response> {
+  // Public — no auth required. The user already needs the URL to call
+  // this; auth would just complicate canvas tooling for no win.
+  const u = new URL(req.url);
+  const target = u.searchParams.get('url');
+  if (!target) return err(400, 'url required');
+
+  let parsed: URL;
+  try { parsed = new URL(target); } catch { return err(400, 'invalid url'); }
+  if (parsed.protocol !== 'https:') return err(400, 'https:// only');
+
+  // Allow R2 public buckets + a few known image-serving hosts. Add to
+  // this list as new generation backends are wired in.
+  const allowed = new Set<string>([
+    'pub-ca633fb6a3334d0ea29be5fe53cae66c.r2.dev',  // myfabmesh-meshes public
+    'replicate.delivery',
+    'pbxt.replicate.delivery',
+    'image.pollinations.ai',
+  ]);
+  if (env.R2_PUBLIC_URL) {
+    try { allowed.add(new URL(env.R2_PUBLIC_URL).host); } catch { /* ignore */ }
+  }
+  if (!allowed.has(parsed.host)) {
+    return err(403, `proxy: host ${parsed.host} not allowed`);
+  }
+
+  try {
+    const r = await fetch(parsed.toString(), {
+      headers: { 'user-agent': 'myfabmesh-cloud-proxy/1.0' },
+    });
+    if (!r.ok) return err(r.status, `upstream HTTP ${r.status}`);
+    // Stream the body back. Set permissive CORS headers so any cloud
+    // page can read it via fetch() + canvas getImageData().
+    return new Response(r.body, {
+      status: 200,
+      headers: {
+        'content-type': r.headers.get('content-type') || 'image/png',
+        'cache-control': 'public, max-age=300',
+        'access-control-allow-origin': '*',
+      },
+    });
+  } catch (e) {
+    return err(502, `proxy fetch failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -3697,6 +3764,7 @@ export default {
         if (pathname === '/api/face-fix-image'        && method === 'POST') return await handleFaceFixImage(req, env);
         if (pathname === '/api/copy-mesh-to-project'  && method === 'POST') return await handleCopyMeshToProject(req, env);
         if (pathname === '/api/upscale-image'         && method === 'POST') return await handleUpscaleImage(req, env);
+        if (pathname === '/api/proxy-image'           && method === 'GET')  return await handleProxyImage(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
