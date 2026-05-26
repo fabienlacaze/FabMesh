@@ -418,28 +418,26 @@
       return { ok: true, path: filename, downloaded: true };
     },
     saveImageDataUrl: async ({ dataUrl, filename, basePath, suffix } = {}) => {
-      // Cloud-correct behaviour: convert the dataURL produced by the
-      // canvas editor (Clone Stamp, Mask, Blur, Paint, etc.) into a
-      // blob: URL, attach it as a new version of the current project,
-      // and return { success: true, newPath } so the caller's
-      // confirmation logic actually fires. The desktop shim downloads
-      // a file — pointless in the browser.
+      // Cloud-correct behaviour: upload the dataURL produced by the
+      // canvas editor (Clone Stamp, Mask, Blur, Paint, etc.) to R2 via
+      // the Worker, get back a stable HTTPS URL, attach it as a new
+      // version of the current project.
+      //
+      // Why R2 not blob:? URL.createObjectURL produces a blob: URL
+      // that's only valid for the current page session. After a reload
+      // the blob is revoked and the version thumb 404s in the strip.
+      // Persisting to R2 gives us a permanent URL the user can come
+      // back to.
       if (!dataUrl) return { success: false, error: 'dataUrl required' };
       try {
-        // dataURL → Blob
-        const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-        if (!m) return { success: false, error: 'invalid dataUrl' };
-        const mime = m[1] || 'image/png';
-        const bin = atob(m[2]);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const blob = new Blob([bytes], { type: mime });
-        const newPath = URL.createObjectURL(blob);
-        // Attach to the current project's localStorage cache so
-        // reloadCurrentProject() picks it up as a new version.
+        const suf = (suffix || 'edit').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16);
+        const r = await postJSON('/api/upload-image', { dataUrl, suffix: suf });
+        if (!r?.success || !r.path) {
+          return { success: false, error: r?.error || 'upload failed' };
+        }
+        const newPath = r.path;
         _attachToCurrentProject(newPath, 'front');
         const base = basePath ? _stripExt(_basename(basePath)) : 'image';
-        const suf  = (suffix || 'edit').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16);
         const fn   = filename || `${base}_${suf}_${Date.now()}.png`;
         return { success: true, ok: true, newPath, path: newPath, filename: fn };
       } catch (e) {
@@ -535,8 +533,17 @@
     ctx.drawImage(img, 0, 0);
     return { canvas, ctx, img };
   }
-  function _canvasToBlobUrl(canvas, mime = 'image/png') {
-    return new Promise((resolve) => {
+  // Persist a canvas to R2 via /api/upload-image so the resulting URL
+  // survives a page reload. Falls back to a local blob: URL (which
+  // does NOT survive reload — see _canvasFor warning) if the upload
+  // fails, so the user at least sees the result in this session.
+  async function _canvasToBlobUrl(canvas, mime = 'image/png', suffix = 'edit') {
+    const dataUrl = canvas.toDataURL(mime);
+    try {
+      const r = await postJSON('/api/upload-image', { dataUrl, suffix });
+      if (r?.success && r.path) return r.path;
+    } catch (_) { /* fall through to blob */ }
+    return await new Promise((resolve) => {
       canvas.toBlob((blob) => resolve(URL.createObjectURL(blob)), mime);
     });
   }

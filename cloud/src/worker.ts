@@ -2733,6 +2733,44 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   }
 }
 
+/** POST /api/upload-image — body: { dataUrl, suffix? }. Decodes a
+ *  data URL (PNG from a canvas modal — Clone Stamp, Mask, Blur, Paint
+ *  save), uploads to R2 under the user's namespace, returns the
+ *  public URL. Replaces `blob:` URLs that don't survive a page reload. */
+async function handleUploadImage(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  const { dataUrl, suffix } = await req.json() as { dataUrl?: string; suffix?: string };
+  if (!dataUrl) return err(400, 'dataUrl required');
+
+  const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return err(400, 'invalid dataUrl (expected data:image/...;base64,...)');
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  let bytes: Uint8Array;
+  try {
+    const bin = atob(m[2]);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch (e) {
+    return err(400, `base64 decode failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // Cheap size guard — canvas saves should be <10 MB at 4K.
+  if (bytes.byteLength > 20 * 1024 * 1024) return err(413, 'image too large (20 MB max)');
+
+  const safeSuf = (suffix ?? 'edit').toString().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 16);
+  const key = `${user.id}/canvas/${Date.now()}_${safeSuf}.${ext}`;
+  try {
+    await env.MESHES.put(key, bytes, {
+      httpMetadata: { contentType: `image/${m[1]}` },
+    });
+  } catch (e) {
+    return err(502, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ ok: true, success: true, path: `${env.R2_PUBLIC_URL}/${key}` });
+}
+
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
  *  URL, returned as-is so the browser sees a same-origin response and
  *  bypasses CORS entirely. Used by every canvas tool that needs to
@@ -3863,6 +3901,7 @@ export default {
         if (pathname === '/api/copy-mesh-to-project'  && method === 'POST') return await handleCopyMeshToProject(req, env);
         if (pathname === '/api/upscale-image'         && method === 'POST') return await handleUpscaleImage(req, env);
         if (pathname === '/api/proxy-image'           && method === 'GET')  return await handleProxyImage(req, env);
+        if (pathname === '/api/upload-image'          && method === 'POST') return await handleUploadImage(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
