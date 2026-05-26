@@ -172,6 +172,12 @@
     // hovering / clicking. Mirrors what Generate 3D and Smooth already
     // show by hand.
     installActionCostBadges();
+
+    // Hide buttons that need a Three.js sculpting/selection editor in
+    // the browser (Sculpt, Paint vertex, Select) — not feasible to
+    // port in cloud without a major UI effort. Same for Re-Texture
+    // (TRELLIS-2 full): cloud uses the regular Generate-3D path.
+    _hideDesktopOnlyButtons();
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -210,7 +216,28 @@
     'ws-mesh-center-btn':       1,
     'ws-mesh-fixnormals-btn':   1,
     'ws-mesh-fillholes-btn':    1,
+    'ws-mesh-subdivide-btn':    1,   // Wave 4.2
+    'ws-mesh-aligntex-btn':     1,   // Wave 4.2 (no-op for now)
+    'ws-mesh-material-btn':     1,   // Wave 4.2 (PBR normalize)
+    'ws-mesh-retexture-btn':    1,   // Wave 4.2 (atlas swap)
   };
+
+  // Buttons we hide on cloud because they need a Three.js sculpting /
+  // selection editor in the browser (gros chantier, Wave 5+ if ever).
+  // Better to remove the affordance than show a "Desktop-only" toast
+  // on every click.
+  const CLOUD_HIDE_BUTTONS = [
+    'ws-mesh-sculpt-btn',
+    'ws-mesh-paintvert-btn',
+    'ws-mesh-selectface-btn',
+    'ws-mesh-trellis2-btn',  // full TRELLIS-2 retexture — explained in shim error
+  ];
+  function _hideDesktopOnlyButtons() {
+    for (const id of CLOUD_HIDE_BUTTONS) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    }
+  }
 
   function _ensureCostBadgeStyle() {
     if (document.getElementById('cloud-cost-badge-style')) return;

@@ -1161,17 +1161,44 @@
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.
     // Anything else returns Desktop-only (Blender etc.).
-    meshTool: async ({ operation, meshPath, meshUrl, meshId, params } = {}) => {
-      const CLOUD_OPS = new Set(['smooth', 'decimate', 'center', 'fix_normals', 'fill_holes']);
-      if (!CLOUD_OPS.has(operation)) {
+    meshTool: async ({ operation, meshPath, meshUrl, meshId, imagePath, params } = {}) => {
+      // 'retexture' is the desktop's quick re-texture (UV reproject via
+      // Blender). Cloud has no Blender → we do a best-effort
+      // baseColorTexture swap, which works when the new image was
+      // derived from the original front view (Modify/Style/AutoInpaint
+      // output etc.). The new image URL is the imagePath arg.
+      const opMap = {
+        'retexture': 'retex_swap',
+      };
+      const realOp = opMap[operation] || operation;
+      const CLOUD_OPS = new Set([
+        'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
+        'subdivide', 'align_texture', 'material', 'retex_swap',
+      ]);
+      // 'trellis2_retex' = full TRELLIS-2 retexture. On cloud we don't
+      // have a texture-only pipeline; the closest equivalent is to
+      // re-generate the mesh from the same image with the same prompt
+      // — same effective output (new texture from same input). Wire
+      // that explicit redirect here so the button isn't a stub.
+      if (operation === 'trellis2_retex') {
+        return { success: false, ok: false,
+          error: 'Re-Texture (TRELLIS-2) on cloud uses the standard "Generate 3D" path — please use the Image step\'s Modify/Style tool to change the source, then click Generate 3D to re-bake.' };
+      }
+      if (!CLOUD_OPS.has(realOp)) {
         return { success: false, ok: false,
           error: `mesh op '${operation}' is Desktop-only on cloud (Blender / UniRig / sculpt required).` };
       }
       const url = meshUrl || meshPath;
       if (!url && !meshId) return { success: false, error: 'meshPath, meshUrl or meshId required' };
+      // retex_swap needs the image_url in params.
+      const finalParams = Object.assign({}, params || {});
+      if (realOp === 'retex_swap' && !finalParams.image_url) {
+        if (!imagePath) return { success: false, error: 'imagePath required for retexture' };
+        finalParams.image_url = imagePath;
+      }
       try {
         const r = await postJSON('/api/mesh-op', {
-          meshUrl: url, meshId, opType: operation, params: params || {},
+          meshUrl: url, meshId, opType: realOp, params: finalParams,
         });
         if (r?.success && (r.path || r.newPath || r.mesh_url)) {
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
