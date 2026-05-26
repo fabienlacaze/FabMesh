@@ -26,19 +26,34 @@ from PIL import Image, ImageFilter
 # Keys are matched case-insensitively as substrings in the user's
 # stripped noun phrase.
 _CONCEPT_BOOSTERS = {
+    # Weapons
     'bazooka': 'M1 bazooka shoulder-fired rocket launcher, large green metal tube, military weapon, tactical hardware',
     'rocket launcher': 'M72 LAW shoulder-fired rocket launcher, large tube weapon, military tactical hardware',
     'sword': 'large medieval sword, sharp steel blade, leather-wrapped hilt, fantasy weapon',
     'shield': 'large round battle shield, embossed metal, leather straps, fantasy armor',
     'gun': 'realistic firearm, metallic, detailed mechanism',
     'rifle': 'tactical assault rifle, military firearm, detailed scope and stock',
+    'axe':   'heavy battle axe, sharp steel blade, wooden handle, fantasy weapon',
+    # Armor / clothing
     'helmet': 'fitted protective helmet, metal alloy, articulated visor, fantasy armor',
-    'flower': 'large blooming flower, vibrant petals, garden quality, botanical',
     'crown': 'ornate royal crown, gold inlay, jewels, fantasy regalia',
     'hat':   'fitted hat, recognizable headwear',
     'cape':  'flowing fabric cape, draped, ornate trim',
+    'mask':  'theatrical face mask, detailed, expressive features',
+    # Sci-fi / transformations
+    'robotic': 'cyborg face, mechanical metallic plating, glowing red eye, exposed wires, sci-fi cybernetic, chrome and steel, hyper-detailed',
+    'cyborg':  'cyborg face, mechanical metallic plating, glowing red eye, exposed wires, sci-fi cybernetic, chrome and steel, hyper-detailed',
+    'android': 'android face, smooth synthetic skin, mechanical components visible at seams, sci-fi humanoid',
+    'cybernetic': 'cyborg face, mechanical metallic plating, glowing red eye, exposed wires, sci-fi cybernetic',
+    'robot face': 'robotic face, metallic head, glowing eyes, mechanical jaw, chrome plating, sci-fi',
+    # Fantasy creatures
     'wings': 'large feathered wings spread wide, anatomically integrated',
     'dragon': 'majestic dragon, scaled, large wings',
+    'horns':  'curved fantasy horns, bone texture, naturally integrated',
+    # Nature
+    'flower': 'large blooming flower, vibrant petals, garden quality, botanical',
+    'fire':   'bright flames, glowing embers, smoke wisps',
+    'lightning': 'electric lightning bolts, bright glowing arcs, energy crackling',
 }
 
 
@@ -190,8 +205,13 @@ def generate(
         # Up-scale crop to SDXL native (typically 1024²).
         work = (sdxl_native // 8) * 8
         crop_img_w = crop_img.resize((work, work), Image.LANCZOS)
+        # GaussianBlur radius dropped 4 → 2: stronger boundary makes
+        # SDXL actually inpaint to the edges of the mask. Too much blur
+        # creates a wide soft transition zone where the inpaint fades
+        # back to the source — symptom: "I painted a robotic face but
+        # the lion's face still mostly shows through".
         crop_msk_w = crop_msk.resize((work, work), Image.LANCZOS) \
-                              .filter(ImageFilter.GaussianBlur(4))
+                              .filter(ImageFilter.GaussianBlur(2))
 
         result_w = inpaint_pipe(
             prompt=pos_prompt,
@@ -212,9 +232,10 @@ def generate(
 
         # Composite-back using the FULL-resolution painted mask, so
         # only the user-painted pixels actually change (the area we
-        # cropped but didn't paint is preserved). Slight blur on the
-        # final mask for seamless blending.
-        msk_full = msk.filter(ImageFilter.GaussianBlur(3))
+        # cropped but didn't paint is preserved). Light blur (radius
+        # 1.5) for seam smoothing without bleeding the inpaint result
+        # back into the source.
+        msk_full = msk.filter(ImageFilter.GaussianBlur(1.5))
         src_arr = np.array(src, dtype=np.float32)
         new_arr = np.array(composed, dtype=np.float32)
         mask_arr = np.array(msk_full, dtype=np.float32) / 255.0
