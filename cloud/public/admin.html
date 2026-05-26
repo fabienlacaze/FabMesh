@@ -311,12 +311,16 @@
       </table>
     </div>
 
-    <!-- Confirm modal (used by stop / ban) -->
+    <!-- Confirm modal (used by stop / ban / info) -->
     <div id="confirm-overlay"
          style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; max-width:420px; width:90%;">
+      <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; max-width:440px; width:90%;">
         <div id="confirm-title" style="font-size:16px; font-weight:700; margin-bottom:8px;"></div>
-        <div id="confirm-body" style="color:var(--text-1); font-size:13px; margin-bottom:16px;"></div>
+        <div id="confirm-body" style="color:var(--text-1); font-size:13px; margin-bottom:16px; white-space:pre-wrap;"></div>
+        <label id="confirm-refund-row" style="display:none; align-items:center; gap:8px; margin-bottom:16px; padding:10px 12px; background:var(--bg-2); border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:13px;">
+          <input type="checkbox" id="confirm-refund-cb" checked style="cursor:pointer;" />
+          <span>Refund credits to the user</span>
+        </label>
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <button class="btn" id="confirm-cancel">Cancel</button>
           <button class="btn btn-accent" id="confirm-ok" style="background:var(--err); border-color:var(--err);">Confirm</button>
@@ -646,15 +650,51 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    function confirmAction(title, body, onConfirm) {
+    function confirmAction(title, body, onConfirm, opts = {}) {
       const ov = document.getElementById('confirm-overlay');
       document.getElementById('confirm-title').textContent = title;
       document.getElementById('confirm-body').textContent = body;
       const okBtn = document.getElementById('confirm-ok');
       const cancelBtn = document.getElementById('confirm-cancel');
+      const refundRow = document.getElementById('confirm-refund-row');
+      const refundCb = document.getElementById('confirm-refund-cb');
+      // Refund checkbox only shows when the caller opts in. Always
+      // reset to checked so a previous "don't refund" doesn't bleed
+      // into the next dialog.
+      if (opts.refundChoice) {
+        refundRow.style.display = 'flex';
+        refundCb.checked = true;
+      } else {
+        refundRow.style.display = 'none';
+      }
+      okBtn.textContent = opts.okLabel || 'Confirm';
+      okBtn.style.background = opts.okColor || 'var(--err)';
+      okBtn.style.borderColor = opts.okColor || 'var(--err)';
       const close = () => { ov.style.display = 'none'; };
-      okBtn.onclick = async () => { close(); try { await onConfirm(); } catch (e) { alert(e?.message || e); } };
+      okBtn.onclick = async () => {
+        close();
+        const refund = opts.refundChoice ? refundCb.checked : undefined;
+        try { await onConfirm(refund); } catch (e) { showAdminInfo('Error', e?.message || String(e), 'err'); }
+      };
       cancelBtn.onclick = close;
+      ov.style.display = 'flex';
+    }
+
+    // Replace native alert() with a styled modal so admin actions
+    // don't spawn the browser's default chrome.
+    function showAdminInfo(title, body, kind) {
+      const ov = document.getElementById('confirm-overlay');
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-body').textContent = body;
+      document.getElementById('confirm-refund-row').style.display = 'none';
+      const okBtn = document.getElementById('confirm-ok');
+      const cancelBtn = document.getElementById('confirm-cancel');
+      okBtn.textContent = 'OK';
+      okBtn.style.background = kind === 'err' ? 'var(--err)' : 'var(--ok)';
+      okBtn.style.borderColor = kind === 'err' ? 'var(--err)' : 'var(--ok)';
+      cancelBtn.style.display = 'none';
+      const close = () => { ov.style.display = 'none'; cancelBtn.style.display = ''; };
+      okBtn.onclick = close;
       ov.style.display = 'flex';
     }
 
@@ -700,41 +740,53 @@
       if (!jobs.length) return;
       confirmAction(
         `Stop all ${jobs.length} active jobs?`,
-        `Cancel and refund credits for every running mesh job. This affects every user, not just one. Modal GPUs may keep running ~30s each.`,
-        async () => {
+        `Cancel every running mesh job. This affects every user, not just one. Modal GPUs may keep running ~30s each.`,
+        async (refund) => {
           let okCount = 0;
           let failCount = 0;
+          let refunded = 0;
           for (const j of jobs) {
             try {
               const r = await fetch('/api/admin/jobs/cancel', {
                 method: 'POST', credentials: 'include',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ jobId: j.id }),
+                body: JSON.stringify({ jobId: j.id, refund }),
               });
-              if (r.ok) okCount++; else failCount++;
+              const body = await r.json().catch(() => ({}));
+              if (r.ok) { okCount++; refunded += body.refunded || 0; } else failCount++;
             } catch { failCount++; }
           }
-          alert(`Cancelled ${okCount} job(s)${failCount ? `, ${failCount} failed` : ''}.`);
+          showAdminInfo(
+            'Done',
+            `Cancelled ${okCount} job(s)${failCount ? `, ${failCount} failed` : ''}.\nTotal refunded: ${refunded} credits.`,
+            'ok',
+          );
           loadActiveJobs();
         },
+        { refundChoice: true, okLabel: 'Stop all', okColor: 'var(--err)' },
       );
     }
 
     function stopJob(jobId, who) {
       confirmAction(
         'Stop this job?',
-        `Cancel job ${jobId} (user ${who}) and refund credits? The Modal GPU may keep running for ~30s.`,
-        async () => {
+        `Cancel job ${jobId} (user ${who}). The Modal GPU may keep running for ~30s.`,
+        async (refund) => {
           const r = await fetch('/api/admin/jobs/cancel', {
             method: 'POST', credentials: 'include',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jobId }),
+            body: JSON.stringify({ jobId, refund }),
           });
           const j = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
-          alert(`Cancelled. Refunded ${j.refunded} credits.`);
+          showAdminInfo(
+            'Cancelled',
+            j.refunded > 0 ? `Refunded ${j.refunded} credits.` : 'No refund issued.',
+            'ok',
+          );
           loadActiveJobs();
         },
+        { refundChoice: true, okLabel: 'Stop', okColor: 'var(--err)' },
       );
     }
 

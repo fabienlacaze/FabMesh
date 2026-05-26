@@ -3834,9 +3834,12 @@ async function handleAdminActiveJobs(req: Request, env: Env): Promise<Response> 
 async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
   if (guard instanceof Response) return guard;
-  let body: { jobId?: string } | null = null;
-  try { body = await req.json() as { jobId?: string }; } catch { return err(400, 'body required'); }
+  let body: { jobId?: string; refund?: boolean } | null = null;
+  try { body = await req.json() as { jobId?: string; refund?: boolean }; } catch { return err(400, 'body required'); }
   const jobId = String(body?.jobId || '').trim();
+  // Default true so the existing UI keeps working — admin must
+  // explicitly send refund:false to skip the refund (abuse cases).
+  const refund = body?.refund !== false;
   if (!jobId) return err(400, 'jobId required');
   const sb = supabaseAdmin(env);
   const { data: job } = await sb.from('jobs')
@@ -3848,13 +3851,15 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
   if (['succeeded', 'failed', 'canceled'].includes(j.status)) {
     return err(409, `job already ${j.status}`);
   }
-  await addCredits(env, j.user_id, j.credit_cost);
+  if (refund) {
+    await addCredits(env, j.user_id, j.credit_cost);
+  }
   await sb.from('jobs').update({
     status: 'canceled',
-    error: 'admin canceled',
+    error: refund ? 'admin canceled' : 'admin canceled (no refund)',
     finished_at: new Date().toISOString(),
   }).eq('id', jobId);
-  return json({ ok: true, refunded: j.credit_cost });
+  return json({ ok: true, refunded: refund ? j.credit_cost : 0 });
 }
 
 /** POST /api/admin/users/ban  body: { userId, ban: boolean }
