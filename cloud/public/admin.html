@@ -863,43 +863,49 @@
     }
 
     let _activeJobsCache = [];
-    async function loadActiveJobs() {
+    // silent=true for the 5s poll — keeps the previous rows visible
+    // while fetching so the table doesn't flash empty every cycle.
+    // Only the initial click / manual reload shows the "Loading…" row.
+    async function loadActiveJobs(silent = false) {
       const tbody = document.querySelector('#active-jobs-table tbody');
-      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-2)">Loading…</td></tr>';
+      if (!silent) {
+        tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-2)">Loading…</td></tr>';
+      }
       let data;
       try {
         const r = await fetch('/api/admin/jobs/active', { credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         data = await r.json();
       } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="8" style="color:var(--err)">${escapeHtml(e.message || e)}</td></tr>`;
+        if (!silent) {
+          tbody.innerHTML = `<tr><td colspan="8" style="color:var(--err)">${escapeHtml(e.message || e)}</td></tr>`;
+        }
         return;
       }
       const jobs = data.jobs || [];
       _activeJobsCache = jobs;
       document.getElementById('badge-active').textContent = jobs.length;
       const stopAll = document.getElementById('stop-all-btn');
-      // Hide the bulk-stop button when there's barely anything to stop —
-      // for 1 or 2 jobs the per-row Stop is faster and less risky than
-      // a "kill everything" confirm.
       if (stopAll) stopAll.style.display = jobs.length > 2 ? '' : 'none';
-      if (!jobs.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="muted">No active jobs.</td></tr>';
-        return;
-      }
-      tbody.innerHTML = jobs.map((j) => `
-        <tr>
-          <td>${escapeHtml(fmtDate(j.created_at))}</td>
-          <td>${escapeHtml(j.email || j.user_id?.slice(0, 8))}</td>
-          <td>${escapeHtml(j.project_name || '')}</td>
-          <td>${escapeHtml(j.asset_type)}</td>
-          <td>${escapeHtml(j.mode)}</td>
-          <td class="num">${j.credit_cost}</td>
-          <td><span style="color:var(--warn)">${escapeHtml(j.status)}</span></td>
-          <td><button class="btn" style="background:var(--err); border-color:var(--err);"
-                     onclick="stopJob('${escapeHtml(j.id)}', '${escapeHtml(j.email || j.user_id)}')">🛑 Stop</button></td>
-        </tr>
-      `).join('');
+      // Build the new HTML, compare with the current one — skip the
+      // DOM swap if nothing changed so we don't lose the user's
+      // scroll position or any hover state mid-poll.
+      const newHtml = jobs.length
+        ? jobs.map((j) => `
+          <tr>
+            <td>${escapeHtml(fmtDate(j.created_at))}</td>
+            <td>${escapeHtml(j.email || j.user_id?.slice(0, 8))}</td>
+            <td>${escapeHtml(j.project_name || '')}</td>
+            <td>${escapeHtml(j.asset_type)}</td>
+            <td>${escapeHtml(j.mode)}</td>
+            <td class="num">${j.credit_cost}</td>
+            <td><span style="color:var(--warn)">${escapeHtml(j.status)}</span></td>
+            <td><button class="btn" style="background:var(--err); border-color:var(--err);"
+                       onclick="stopJob('${escapeHtml(j.id)}', '${escapeHtml(j.email || j.user_id)}')">🛑 Stop</button></td>
+          </tr>
+        `).join('')
+        : '<tr><td colspan="8" class="muted">No active jobs.</td></tr>';
+      if (tbody.innerHTML !== newHtml) tbody.innerHTML = newHtml;
     }
 
     function stopAllJobs() {
@@ -1616,9 +1622,10 @@
     });
     // Poll active jobs every 5s when that tab is open. Endpoint only
     // hits Supabase (no Modal, no Replicate), so 12 reqs/min is fine.
+    // silent=true so the table doesn't flash "Loading…" every cycle.
     setInterval(() => {
       const activeTab = document.querySelector('.tab.active');
-      if (activeTab?.dataset?.tab === 'active') loadActiveJobs();
+      if (activeTab?.dataset?.tab === 'active') loadActiveJobs(true);
     }, 5_000);
 
     // Probe services state on every load so the tab badge appears even
