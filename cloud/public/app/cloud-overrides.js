@@ -178,6 +178,58 @@
     // port in cloud without a major UI effort. Same for Re-Texture
     // (TRELLIS-2 full): cloud uses the regular Generate-3D path.
     _hideDesktopOnlyButtons();
+
+    // Cold-start indicator. Polls /api/modal-status periodically and
+    // exposes the result globally so the AI tool buttons / job
+    // estimators can size their progress bars + show a warm/cold pill.
+    installModalStatusPoll();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Cold-start tracking. The Worker writes a timestamp to R2 every
+   * time an image_op call succeeds; /api/modal-status reports whether
+   * the last success is within the scaledown window (~9 min).
+   *
+   * We expose the result on:
+   *   window.__modalWarm  — bool (true while warm)
+   *   window.__modalExpectedSeconds — number (30 if warm, ~150 if cold)
+   *
+   * Job creators (pushJob expected duration) read this to size their
+   * progress bars correctly. Modals that want a visual indicator can
+   * also bind to the same global.
+   * ────────────────────────────────────────────────────────────────── */
+  let _modalStatusTimer = null;
+
+  async function _pollModalStatus() {
+    try {
+      const r = await fetch('/api/modal-status', { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const io = d?.image_op || {};
+      window.__modalWarm = !!io.warm;
+      window.__modalExpectedSeconds = io.warm
+        ? (io.expected_seconds_warm || 30)
+        : (io.expected_seconds_cold || 150);
+      window.__modalSecondsSinceLastSuccess = io.seconds_since_last_success;
+      // Notify any listener (AI tool modals can update their pill).
+      try { window.dispatchEvent(new CustomEvent('modal-status', { detail: io })); }
+      catch (_) {}
+    } catch (_) { /* ignore */ }
+  }
+
+  function installModalStatusPoll() {
+    _pollModalStatus();
+    if (_modalStatusTimer) clearInterval(_modalStatusTimer);
+    // Poll every 30s — cheap (R2 read), keeps the pill fresh during
+    // long edit sessions.
+    _modalStatusTimer = setInterval(_pollModalStatus, 30_000);
+    // Force-refresh after a click on any AI tool button: the click
+    // itself usually triggers an op so we want the freshest answer.
+    document.addEventListener('click', (e) => {
+      if (e.target && e.target.closest && e.target.closest('.tool-btn')) {
+        _pollModalStatus();
+      }
+    }, true);
   }
 
   /* ──────────────────────────────────────────────────────────────────
