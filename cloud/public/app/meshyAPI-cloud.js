@@ -57,6 +57,17 @@
   }
   async function getJSON(url) {
     const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) {
+      // Surface server errors (503 kill-switch, 401 ban, 5xx...) so
+      // callers like pollPrediction can stop instead of looping on
+      // a JSON payload that doesn't carry a `status` field.
+      let detail = '';
+      try { const j = await r.clone().json(); detail = j.error || ''; } catch {}
+      const err = new Error(`HTTP ${r.status}${detail ? ': ' + detail : ''}`);
+      err.status = r.status;
+      err.detail = detail;
+      throw err;
+    }
     return r.json();
   }
 
@@ -79,14 +90,44 @@
    * ────────────────────────────────────────────────────────────────── */
   async function pollPrediction(jobId, { onProgress, channel = 'ai3d-progress' } = {}) {
     const start = Date.now();
+    let consecutiveErrors = 0;
     while (Date.now() - start < 600_000) {
       await new Promise((r) => setTimeout(r, 2500));
-      const j = await getJSON(`/api/jobs/${jobId}`);
+      let j;
+      try {
+        j = await getJSON(`/api/jobs/${jobId}`);
+        consecutiveErrors = 0;
+      } catch (e) {
+        // 503 = kill-switch on, 401 = banned, 5xx = worker issue.
+        // Bail with a clear message instead of polling forever.
+        if (e.status === 503) {
+          throw new Error('Generation aborted: the service is in maintenance mode. Please try again in a few minutes.');
+        }
+        if (e.status === 401) {
+          throw new Error('Generation aborted: session expired or account banned.');
+        }
+        // Transient network glitch — let up to 5 in a row pass before bailing.
+        consecutiveErrors++;
+        if (consecutiveErrors >= 5) {
+          throw new Error('Generation aborted after 5 consecutive poll failures: ' + (e.message || e));
+        }
+        continue;
+      }
       if (onProgress) onProgress(j);
       if (channel) window.__meshyEmit(channel, j);
       if (j.status === 'succeeded') return j;
       if (j.status === 'failed' || j.status === 'canceled') {
-        throw new Error(j.error || 'Generation failed');
+        // Admin-cancelled jobs come back as status='canceled' with
+        // error='admin canceled' (or 'admin canceled (no refund)').
+        // Surface that verbatim so the user knows it wasn't a glitch.
+        const msg = j.error
+          ? (/admin\s*can?celled?/i.test(j.error)
+              ? (/no\s*refund/i.test(j.error)
+                  ? 'Generation cancelled by an administrator (no refund).'
+                  : 'Generation cancelled by an administrator. Your credits have been refunded.')
+              : j.error)
+          : 'Generation failed';
+        throw new Error(msg);
       }
     }
     throw new Error('Timeout');
