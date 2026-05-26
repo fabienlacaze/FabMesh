@@ -10,6 +10,24 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-26 (Cloud: tri projets + Modal status poll)
+
+- **Bug :** sur la home grid, le projet le plus récemment édité
+  n'apparaissait pas en première position. Cause :
+  `meshyAPI-cloud.js` calculait `created` = `local[0]?.mtime` =
+  premier item ajouté au cache (le plus ancien), pas le dernier.
+- **Fix :** `created` = `max(mtime)` sur toutes les entrées du cache
+  localStorage du projet. Le tri downstream (index2.js → projects par
+  `latestTimestamp` décroissant) place maintenant le plus récent à
+  gauche. Cf. `meshyAPI-cloud.js` lignes 690-697.
+- **Poll Modal status :** descendu 30s → 60s avec throttle 5s sur les
+  clics tool-btn. État warm/cold ne flippe que toutes les ~9 min donc
+  ±1 min de staleness OK. Divise par 2 la charge R2 reads.
+- **Déployé :** wrangler deploy → version d09ca88b. Le user doit hard-
+  refresh pour voir l'effet.
+
+---
+
 ## 2026-05-26 (Cloud: Vague 2.1/2.2/2.3 — règles multi-view par asset_type)
 
 - **Contexte :** l'utilisateur a remarqué que les règles desktop de

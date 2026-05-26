@@ -681,7 +681,20 @@
           images: merged,
           imagesData: p.imagesData || [],
           count: merged.length,
-          created: p.created || (local[0]?.mtime ? new Date(local[0].mtime).toISOString() : new Date().toISOString()),
+          // `created` is the LATEST activity timestamp for the project,
+          // not the first one — the projects-home grid sorts on this so
+          // a project that was just Modify'd / Auto-Inpainted should
+          // float to the left. Picks the max(mtime) over every cached
+          // local image, falling back to the server-side timestamp or
+          // "now" for projects that have no local trace yet.
+          created: (function () {
+            let latest = 0;
+            for (const x of local) {
+              if (x && typeof x.mtime === 'number' && x.mtime > latest) latest = x.mtime;
+            }
+            if (latest > 0) return new Date(latest).toISOString();
+            return p.created || new Date().toISOString();
+          })(),
           // Prefer server-side prompt (from a mesh job's options); fall
           // back to the localStorage cache populated by generateImages.
           // Either source feeds the "Copy prompt" button in the UI.
