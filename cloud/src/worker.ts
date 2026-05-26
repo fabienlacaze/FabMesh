@@ -38,6 +38,12 @@ export interface Env {
   MOCK?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  // Stripe Price IDs for the monthly subscriptions (created in
+  // Stripe Dashboard once, then set as Worker secrets). Without
+  // these the subscription packs return 503 in /api/checkout.
+  STRIPE_PRICE_SUB_STARTER?: string;
+  STRIPE_PRICE_SUB_PRO?: string;
+  STRIPE_PRICE_SUB_STUDIO?: string;
   STRIPE_PRICE_STARTER?: string;
   STRIPE_PRICE_PRO?: string;
   STRIPE_PRICE_STUDIO?: string;
@@ -406,6 +412,73 @@ function _invalidateServiceFlagsCache() {
   _serviceFlagsCache = { flags: DEFAULT_FLAGS, ts: 0 };
 }
 
+/* Pricing — credit costs per operation. Admin can override every entry
+ * via the Pricing tab in /admin without redeploying. Stored in R2
+ * `_meta/pricing.json` as a partial override applied on top of these
+ * defaults at lookup time.
+ *
+ * Keys are stable wire names — adding a new operation here also needs
+ * the admin UI list + the handler that consumes it. Removing one is
+ * safe but leftover R2 entries are simply ignored.
+ */
+const PRICING_DEFAULTS = {
+  // Image ops
+  text2image:       2,
+  back_view:        2,
+  modify:           2,
+  auto_inpaint:     3,
+  mask_inpaint:     3,
+  face_fix_image:   2,
+  upscale:          2,  // x2 = this price, x4 = this + 1
+  rectify:          1,
+  remove_background: 1,
+  // Mesh ops
+  mesh_op_simple:   1,
+  mesh_fast:        1,
+  mesh_balanced:    2,
+  mesh_quality:     4,
+  mesh_multiref:    1,
+  mesh_refine:      2,
+  mesh_rectify:     1,
+  mesh_quality_plus: 1,
+  mesh_ultra_q:     2,
+  mesh_ultra_hd:    3,
+  mesh_face_fix:    2,
+  face_fix_mesh:    2,
+};
+type PricingKey = keyof typeof PRICING_DEFAULTS;
+const PRICING_KEY = '_meta/pricing.json';
+const PRICING_TTL_MS = 60_000;
+let _pricingCache: { prices: Record<string, number>; ts: number } = {
+  prices: { ...PRICING_DEFAULTS }, ts: 0,
+};
+
+async function _getPricing(env: Env): Promise<Record<string, number>> {
+  const now = Date.now();
+  if (now - _pricingCache.ts < PRICING_TTL_MS) return _pricingCache.prices;
+  try {
+    const obj = await env.MESHES.get(PRICING_KEY);
+    const overrides = obj ? await obj.json() as Record<string, number> : {};
+    const sanitized: Record<string, number> = {};
+    for (const [k, v] of Object.entries(overrides)) {
+      if (typeof v === 'number' && v >= 0 && Number.isFinite(v)) sanitized[k] = Math.floor(v);
+    }
+    _pricingCache = { prices: { ...PRICING_DEFAULTS, ...sanitized }, ts: now };
+  } catch {
+    _pricingCache = { prices: { ...PRICING_DEFAULTS }, ts: now };
+  }
+  return _pricingCache.prices;
+}
+
+function _invalidatePricingCache() {
+  _pricingCache = { prices: { ...PRICING_DEFAULTS }, ts: 0 };
+}
+
+async function getPrice(env: Env, key: PricingKey): Promise<number> {
+  const all = await _getPricing(env);
+  return all[key] ?? PRICING_DEFAULTS[key];
+}
+
 /* TOTP (RFC 6238) helpers — compatible with Microsoft / Google
  * Authenticator out of the box. Secrets are base32-encoded random 20
  * bytes, codes are 6 digits with a 30 s window and ±1 step drift
@@ -537,9 +610,16 @@ async function addCredits(env: Env, userId: string, amount: number): Promise<num
 /* ────────────────────────── replicate logic ────────────────────────── */
 
 const PACKS = {
-  starter: { id: 'starter', name: 'Starter',  euros: 5,  credits: 25 },
-  pro:     { id: 'pro',     name: 'Pro',      euros: 20, credits: 120 },
-  studio:  { id: 'studio',  name: 'Studio',   euros: 50, credits: 350 },
+  // One-shot top-ups (Stripe Payment mode).
+  starter: { id: 'starter', name: 'Starter',  euros: 5,  credits: 25,  mode: 'payment' as const },
+  pro:     { id: 'pro',     name: 'Pro',      euros: 20, credits: 120, mode: 'payment' as const },
+  studio:  { id: 'studio',  name: 'Studio',   euros: 50, credits: 350, mode: 'payment' as const },
+  // Monthly subscriptions (Stripe Subscription mode). Credits drop in
+  // every billing cycle. price_id is set as a Worker env var so the
+  // admin can rotate Stripe prices without a code change.
+  sub_starter: { id: 'sub_starter', name: 'Starter Monthly', euros: 5,  credits: 30,  mode: 'subscription' as const, interval: 'month' as const },
+  sub_pro:     { id: 'sub_pro',     name: 'Pro Monthly',     euros: 15, credits: 100, mode: 'subscription' as const, interval: 'month' as const },
+  sub_studio:  { id: 'sub_studio',  name: 'Studio Monthly',  euros: 40, credits: 300, mode: 'subscription' as const, interval: 'month' as const },
 } as const;
 type PackId = keyof typeof PACKS;
 
@@ -616,25 +696,27 @@ async function logOperation(
   }
 }
 
-function creditCost(i: GenerateInput): number {
-  // Preset base cost
+async function creditCost(env: Env, i: GenerateInput): Promise<number> {
+  const p = await _getPricing(env);
+  // Preset base cost — fast (default) / balanced / quality
   let n: number;
-  if (i.preset === 'quality')       n = 4;
-  else if (i.preset === 'balanced') n = 2;
-  else                              n = 1;  // fast (default)
+  if (i.preset === 'quality')       n = p.mesh_quality   ?? 4;
+  else if (i.preset === 'balanced') n = p.mesh_balanced  ?? 2;
+  else                              n = p.mesh_fast      ?? 1;
 
-  // Optional add-ons — same costs as the HTML data-credits.
-  if (i.multiref)     n += 1;
-  if (i.refine)       n += 2;
-  if (i.rectify)      n += 1;
-  // smooth is free — CPU-only bilateral filter, no AI
-  if (i.quality_plus) n += 1;
-  if (i.ultra_q)      n += 2;
-  if (i.ultra_hd)     n += 3;
-  if (i.face_fix)     n += 2;
+  // Optional add-ons — admin can tune each one independently.
+  if (i.multiref)     n += p.mesh_multiref     ?? 1;
+  if (i.refine)       n += p.mesh_refine       ?? 2;
+  if (i.rectify)      n += p.mesh_rectify      ?? 1;
+  if (i.quality_plus) n += p.mesh_quality_plus ?? 1;
+  if (i.ultra_q)      n += p.mesh_ultra_q      ?? 2;
+  if (i.ultra_hd)     n += p.mesh_ultra_hd     ?? 3;
+  if (i.face_fix)     n += p.mesh_face_fix     ?? 2;
 
   // Legacy: old clients still send mode=full without preset.
-  if (i.mode === 'full' && !i.preset) n = Math.max(n, 4);
+  if (i.mode === 'full' && !i.preset) {
+    n = Math.max(n, p.mesh_quality ?? 4);
+  }
   return n;
 }
 
@@ -798,6 +880,36 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
 
   const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2025-02-24.acacia' as Stripe.LatestApiVersion });
   const SITE = siteUrl(env, 'http://localhost:3030');
+
+  // Subscriptions need a Stripe Price ID created in the Stripe Dashboard
+  // (recurring monthly). Set STRIPE_PRICE_<PACKID> as a Worker secret —
+  // e.g. STRIPE_PRICE_SUB_STARTER=price_xxx. Without it we fall back to
+  // a 400 error so the user knows the plan isn't configured yet.
+  if (pack.mode === 'subscription') {
+    const envKey = `STRIPE_PRICE_${pack.id.toUpperCase()}` as keyof Env;
+    const priceId = (env[envKey] as string | undefined) ?? '';
+    if (!priceId) {
+      return err(503, `subscription plan ${pack.id} not yet configured (missing ${envKey})`);
+    }
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      customer_email: user.email ?? undefined,
+      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: {
+        user_id: user.id, pack_id: pack.id,
+        credits: String(pack.credits), is_subscription: 'true',
+      },
+      subscription_data: {
+        metadata: { user_id: user.id, pack_id: pack.id, credits: String(pack.credits) },
+      },
+      success_url: `${SITE}/account?paid=1`,
+      cancel_url: `${SITE}/buy?canceled=1`,
+    });
+    return json({ url: session.url });
+  }
+
+  // One-shot top-up — original payment-mode flow.
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     payment_method_types: ['card'],
@@ -829,11 +941,15 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   const ok = await verifyStripeSignature(raw, sig, secret);
   if (!ok) return err(400, 'bad signature');
 
-  let event: { type: string; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number } } };
+  let event: { type: string; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> } } } };
   try { event = JSON.parse(raw); } catch { return err(400, 'bad json'); }
 
+  // One-shot top-up — credits added once on checkout.session.completed.
   if (event.type === 'checkout.session.completed') {
     const sess = event.data.object;
+    // Subscriptions handled by invoice.paid below (covers both the
+    // first cycle and every renewal). Skip here to avoid double-credit.
+    if (sess.metadata?.is_subscription === 'true') return json({ received: true });
     const userId = sess.metadata?.user_id;
     const credits = parseInt(sess.metadata?.credits ?? '0', 10);
     const packId = sess.metadata?.pack_id ?? 'unknown';
@@ -852,6 +968,32 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
       }
     }
   }
+
+  // Subscriptions — Stripe fires invoice.paid every billing cycle
+  // (including the first one). Idempotent on stripe_session_id which
+  // we set to the invoice id here so a retried webhook doesn't double-credit.
+  if (event.type === 'invoice.paid') {
+    const inv = event.data.object;
+    const meta = inv.lines?.data?.[0]?.metadata ?? {};
+    const userId = meta.user_id;
+    const credits = parseInt(meta.credits ?? '0', 10);
+    const packId = meta.pack_id ?? 'subscription';
+    if (userId && credits > 0) {
+      const sb = supabaseAdmin(env);
+      const { data: existing } = await sb.from('payments')
+        .select('id').eq('stripe_session_id', inv.id).maybeSingle();
+      if (!existing) {
+        await sb.from('payments').insert({
+          stripe_session_id: inv.id,
+          user_id: userId, pack_id: packId, credits,
+          amount_eur: (inv.amount_paid ?? 0) / 100,
+          created_at: new Date().toISOString(),
+        });
+        await addCredits(env, userId, credits);
+      }
+    }
+  }
+
   return json({ received: true });
 }
 
@@ -912,7 +1054,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     preset: (form.get('preset') as GenerateInput['preset']) || undefined,
   };
 
-  const cost = creditCost(input);
+  const cost = await creditCost(env, input);
   // Decide backend FIRST so we hit the right budget counter. Mesh
   // routes to Modal when both MODAL_MESH_* URLs are set; otherwise
   // falls back to the Replicate Cog (fishwowater/trellis2). Each
@@ -2329,7 +2471,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     }
   }
   const n = Math.max(1, Math.min(4, numImages ?? 1));
-  const COST_PER_IMAGE = 2;
+  const COST_PER_IMAGE = await getPrice(env, 'text2image');
   const cost = n * COST_PER_IMAGE;
 
   // Pick the backend BEFORE the budget check — the budget cap is
@@ -2450,7 +2592,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
   }
 
   const n = Math.max(1, Math.min(4, numImages ?? 1));
-  const COST_PER_BACK = 2;
+  const COST_PER_BACK = await getPrice(env, 'back_view');
   const cost = n * COST_PER_BACK;
 
   // Pick backend BEFORE budget check (same pattern as text2image).
@@ -2552,7 +2694,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
     }
   }
 
-  const COST_PER_MODIFY = 2;  // same as text2image (single SDXL pass)
+  const COST_PER_MODIFY = await getPrice(env, 'modify');
   const cost = COST_PER_MODIFY;
   const estimatedTotal = 0.05;  // ≈ back-view cost, warm container
 
@@ -2633,7 +2775,7 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
     }
   }
 
-  const COST_PER_INPAINT = 3;   // 2 model load + SDXL inpaint heavier than text2image
+  const COST_PER_INPAINT = await getPrice(env, 'auto_inpaint');
   const cost = COST_PER_INPAINT;
   const estimatedTotal = 0.08;
 
@@ -2732,7 +2874,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
     return err(400, `mask decode failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const COST_PER = 3;
+  const COST_PER = await getPrice(env, 'mask_inpaint');
   const estimatedTotal = 0.07;
 
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
@@ -2790,7 +2932,7 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   const src = imageUrl || imagePath;
   if (!src) return err(400, 'imageUrl or imagePath required');
 
-  const COST_PER = 2;
+  const COST_PER = await getPrice(env, 'face_fix_image');
   const estimatedTotal = 0.05;
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
@@ -2871,8 +3013,8 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   }
   if (!finalUrl) return err(400, 'meshUrl or meshId required');
 
-  // Cheap op (CPU, ~$0.001 Modal) — 1 credit flat.
-  const COST_PER = 1;
+  // Cheap op (CPU, ~$0.001 Modal) — defaults to 1 credit, admin-tunable.
+  const COST_PER = await getPrice(env, 'mesh_op_simple');
   const estimatedTotal = 0.005;
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
@@ -3079,7 +3221,9 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
   if (!src) return err(400, 'imageUrl or imagePath required');
   const factor = scale === 4 ? 4 : 2;  // only 2 or 4 supported
 
-  const COST_PER = factor === 4 ? 3 : 2;
+  // Upscale: x2 = base price, x4 = base + 1 (heavier).
+  const upscaleBase = await getPrice(env, 'upscale');
+  const COST_PER = factor === 4 ? upscaleBase + 1 : upscaleBase;
   const estimatedTotal = factor === 4 ? 0.07 : 0.05;
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
@@ -4195,6 +4339,49 @@ async function handleAdminTotpDisable(req: Request, env: Env): Promise<Response>
   return json({ ok: true });
 }
 
+/** GET /api/admin/pricing — current credit costs + defaults. */
+async function handleAdminGetPricing(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  _invalidatePricingCache();
+  const current = await _getPricing(env);
+  // Send defaults too so the UI can show "modified" badges.
+  return json({ current, defaults: PRICING_DEFAULTS });
+}
+
+/** POST /api/admin/pricing — overwrite the whole R2 pricing object.
+ *  Requires ADMIN_PASSWORD on every save — second factor on top of
+ *  the admin cookie, same as the services toggle. */
+async function handleAdminSetPricing(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { prices?: Record<string, number>; password?: string } | null = null;
+  try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
+  const prices = body?.prices;
+  const password = String(body?.password || '');
+  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
+  if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
+  let diff = 0;
+  for (let i = 0; i < password.length; i++) {
+    diff |= password.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
+  }
+  if (diff !== 0) return err(401, 'invalid password');
+  if (!prices || typeof prices !== 'object') return err(400, 'prices object required');
+  // Only persist keys we know about — silently drop unknown keys.
+  const sanitized: Record<string, number> = {};
+  for (const k of Object.keys(PRICING_DEFAULTS)) {
+    const v = (prices as Record<string, unknown>)[k];
+    if (typeof v === 'number' && v >= 0 && Number.isFinite(v)) {
+      sanitized[k] = Math.floor(v);
+    } else {
+      sanitized[k] = (PRICING_DEFAULTS as Record<string, number>)[k];
+    }
+  }
+  await env.MESHES.put(PRICING_KEY, JSON.stringify(sanitized));
+  _invalidatePricingCache();
+  return json({ ok: true, current: sanitized });
+}
+
 /** GET /api/admin/services — current state of the kill switches. */
 async function handleAdminServices(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
@@ -4616,6 +4803,8 @@ export default {
         if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
         if (pathname === '/api/admin/services'        && method === 'GET')  return await handleAdminServices(req, env);
         if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
+        if (pathname === '/api/admin/pricing'         && method === 'GET')  return await handleAdminGetPricing(req, env);
+        if (pathname === '/api/admin/pricing'         && method === 'POST') return await handleAdminSetPricing(req, env);
         if (pathname === '/api/admin/totp/status'     && method === 'GET')  return await handleAdminTotpStatus(req, env);
         if (pathname === '/api/admin/totp/setup'      && method === 'POST') return await handleAdminTotpSetup(req, env);
         if (pathname === '/api/admin/totp/confirm'    && method === 'POST') return await handleAdminTotpConfirm(req, env);

@@ -211,6 +211,7 @@
       <button class="tab" data-tab="active">🛑 Active jobs <span class="tab-badge" id="badge-active">0</span></button>
       <button class="tab" data-tab="users">🧑 Users</button>
       <button class="tab" data-tab="services">🚨 Services <span id="services-badge" class="tab-badge" style="display:none;">!</span></button>
+      <button class="tab" data-tab="pricing">💰 Pricing</button>
     </div>
 
     <!-- Tab: Overview — compact summary of all sections -->
@@ -422,6 +423,33 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Tab: Pricing — admin-tunable credit costs per operation -->
+    <div class="tab-panel" data-panel="pricing">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px;">
+        <span style="color:var(--text-2); font-size:12px;">Credit cost per operation. Saves take effect within ~60s for every user. "Reset" reverts a single row to its hardcoded default.</span>
+        <button class="btn" onclick="loadPricing()">🔄 Reload</button>
+      </div>
+      <table id="pricing-table">
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>Description</th>
+            <th class="num">Default</th>
+            <th class="num">Current</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="5" style="color:var(--text-2)">Loading…</td></tr></tbody>
+      </table>
+      <div style="display:flex; gap:12px; align-items:center; margin-top:16px; flex-wrap:wrap;">
+        <input id="pricing-password" type="password" placeholder="Admin password (required to save)"
+               style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:13px;" />
+        <button class="btn btn-accent" id="pricing-save-btn">💾 Save all prices</button>
+        <button class="btn" id="pricing-reset-all-btn">↻ Reset all to defaults</button>
+      </div>
+      <div id="pricing-feedback" style="margin-top:10px; font-size:12px; display:none;"></div>
     </div>
 
     <!-- Confirm modal (used by stop / ban / info) -->
@@ -1433,12 +1461,153 @@
       }
     }
 
+    /* ═══════════════════════════════════════════════════════════════
+       PRICING — admin-tunable credit costs
+       ═══════════════════════════════════════════════════════════════ */
+    const PRICING_DESCRIPTIONS = {
+      text2image:        'Image generation (text → image)',
+      back_view:         'Back-view generation from front photo',
+      modify:            'Modify image (img2img)',
+      auto_inpaint:      'Auto Inpaint (CLIPSeg + SDXL)',
+      mask_inpaint:      'Mask Inpaint (user-drawn mask)',
+      face_fix_image:    'Face fix on a 2D image',
+      upscale:           'Image upscale x2 (x4 = this + 1)',
+      rectify:           'Auto-rectify front strict',
+      remove_background: 'Remove background',
+      mesh_op_simple:    'Mesh smooth/decimate/center/etc.',
+      mesh_fast:         '3D fast preset (base)',
+      mesh_balanced:     '3D balanced preset (base)',
+      mesh_quality:      '3D quality preset (base)',
+      mesh_multiref:     'Mesh add-on: multi-reference',
+      mesh_refine:       'Mesh add-on: detail refine',
+      mesh_rectify:      'Mesh add-on: auto-rectify',
+      mesh_quality_plus: 'Mesh add-on: Quality+',
+      mesh_ultra_q:      'Mesh add-on: Ultra Quality',
+      mesh_ultra_hd:    'Mesh add-on: Ultra HD 8K',
+      mesh_face_fix:     'Mesh add-on: face fix on atlas',
+      face_fix_mesh:     'Face fix on a generated mesh',
+    };
+
+    let _pricingDefaults = {};
+    let _pricingCurrent = {};
+
+    async function loadPricing() {
+      const tbody = document.querySelector('#pricing-table tbody');
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-2)">Loading…</td></tr>';
+      try {
+        const r = await fetch('/api/admin/pricing', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        _pricingDefaults = data.defaults || {};
+        _pricingCurrent  = { ..._pricingDefaults, ...(data.current || {}) };
+        _renderPricingTable();
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" style="color:var(--err)">${escapeHtml(e?.message || e)}</td></tr>`;
+      }
+    }
+
+    function _renderPricingTable() {
+      const tbody = document.querySelector('#pricing-table tbody');
+      const rows = Object.keys(_pricingDefaults).map((k) => {
+        const def = _pricingDefaults[k];
+        const cur = _pricingCurrent[k];
+        const modified = cur !== def;
+        return `
+          <tr data-key="${escapeHtml(k)}">
+            <td style="font-family:ui-monospace,monospace; font-size:12px;">${escapeHtml(k)}</td>
+            <td style="color:var(--text-2); font-size:12px;">${escapeHtml(PRICING_DESCRIPTIONS[k] || '')}</td>
+            <td class="num" style="color:var(--text-2);">${def}</td>
+            <td class="num">
+              <input type="number" min="0" step="1" value="${cur}" class="pricing-input"
+                     style="width:80px; padding:4px 8px; background:var(--bg-2); color:${modified ? 'var(--warn)' : 'var(--text-0)'}; border:1px solid ${modified ? 'var(--warn)' : 'var(--border)'}; border-radius:4px; font-size:13px; text-align:right;" />
+            </td>
+            <td>
+              <button class="btn pricing-row-reset" ${modified ? '' : 'disabled'} style="padding:4px 10px; font-size:11px;">↻</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+      tbody.innerHTML = rows;
+      // Bind row reset
+      tbody.querySelectorAll('.pricing-row-reset').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const tr = e.target.closest('tr');
+          const key = tr.dataset.key;
+          const input = tr.querySelector('.pricing-input');
+          input.value = _pricingDefaults[key];
+          input.dispatchEvent(new Event('input'));
+        });
+      });
+      // Track edits — keep _pricingCurrent in sync + visual feedback.
+      tbody.querySelectorAll('.pricing-input').forEach((input) => {
+        input.addEventListener('input', (e) => {
+          const tr = e.target.closest('tr');
+          const key = tr.dataset.key;
+          const v = parseInt(e.target.value, 10);
+          if (Number.isFinite(v) && v >= 0) {
+            _pricingCurrent[key] = v;
+            const modified = v !== _pricingDefaults[key];
+            e.target.style.color = modified ? 'var(--warn)' : 'var(--text-0)';
+            e.target.style.borderColor = modified ? 'var(--warn)' : 'var(--border)';
+            const resetBtn = tr.querySelector('.pricing-row-reset');
+            if (resetBtn) resetBtn.disabled = !modified;
+          }
+        });
+      });
+    }
+
+    document.getElementById('pricing-save-btn')?.addEventListener('click', async () => {
+      const pwInput = document.getElementById('pricing-password');
+      const feedback = document.getElementById('pricing-feedback');
+      const pw = pwInput.value;
+      feedback.style.display = 'none';
+      if (!pw) {
+        feedback.textContent = 'Admin password required to save.';
+        feedback.style.color = 'var(--err)';
+        feedback.style.display = '';
+        pwInput.focus();
+        return;
+      }
+      try {
+        const r = await fetch('/api/admin/pricing', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prices: _pricingCurrent, password: pw }),
+        });
+        if (r.status === 401) {
+          feedback.textContent = 'Wrong admin password.';
+          feedback.style.color = 'var(--err)';
+          feedback.style.display = '';
+          pwInput.select();
+          return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        _pricingCurrent = data.current || _pricingCurrent;
+        _renderPricingTable();
+        pwInput.value = '';
+        feedback.textContent = '✓ Saved — propagates to all users within 60s.';
+        feedback.style.color = 'var(--ok)';
+        feedback.style.display = '';
+      } catch (e) {
+        feedback.textContent = 'Save failed: ' + (e?.message || e);
+        feedback.style.color = 'var(--err)';
+        feedback.style.display = '';
+      }
+    });
+
+    document.getElementById('pricing-reset-all-btn')?.addEventListener('click', () => {
+      _pricingCurrent = { ..._pricingDefaults };
+      _renderPricingTable();
+    });
+
     // Auto-load active jobs + users when their tab opens for the first time.
     document.querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.tab;
-        if (t === 'active' && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
-        if (t === 'users'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+        if (t === 'active'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
+        if (t === 'users'   && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+        if (t === 'pricing' && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadPricing(); }
         // Services tab: focus the password input if still locked.
         if (t === 'services' && !_killswitchPassword) {
           setTimeout(() => document.getElementById('services-password-input')?.focus(), 50);
