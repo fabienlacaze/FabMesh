@@ -266,8 +266,10 @@
 
     <!-- Tab: Active Jobs -->
     <div class="tab-panel" data-panel="active">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-        <span style="color:var(--text-2); font-size:12px;">Running mesh generations. "Stop" refunds credits and marks the job canceled in Supabase.</span>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
+        <span style="color:var(--text-2); font-size:12px; flex:1; min-width:200px;">Running mesh generations. "Stop" refunds credits and marks the job canceled in Supabase.</span>
+        <button class="btn" id="stop-all-btn" style="background:var(--err); border-color:var(--err);"
+                onclick="stopAllJobs()">🛑 Stop all</button>
         <button class="btn" onclick="loadActiveJobs()">🔄 Reload</button>
       </div>
       <table id="active-jobs-table">
@@ -656,6 +658,7 @@
       ov.style.display = 'flex';
     }
 
+    let _activeJobsCache = [];
     async function loadActiveJobs() {
       const tbody = document.querySelector('#active-jobs-table tbody');
       tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-2)">Loading…</td></tr>';
@@ -669,7 +672,10 @@
         return;
       }
       const jobs = data.jobs || [];
+      _activeJobsCache = jobs;
       document.getElementById('badge-active').textContent = jobs.length;
+      const stopAll = document.getElementById('stop-all-btn');
+      if (stopAll) stopAll.disabled = !jobs.length;
       if (!jobs.length) {
         tbody.innerHTML = '<tr><td colspan="8" class="muted">No active jobs.</td></tr>';
         return;
@@ -687,6 +693,31 @@
                      onclick="stopJob('${escapeHtml(j.id)}', '${escapeHtml(j.email || j.user_id)}')">🛑 Stop</button></td>
         </tr>
       `).join('');
+    }
+
+    function stopAllJobs() {
+      const jobs = _activeJobsCache.slice();
+      if (!jobs.length) return;
+      confirmAction(
+        `Stop all ${jobs.length} active jobs?`,
+        `Cancel and refund credits for every running mesh job. This affects every user, not just one. Modal GPUs may keep running ~30s each.`,
+        async () => {
+          let okCount = 0;
+          let failCount = 0;
+          for (const j of jobs) {
+            try {
+              const r = await fetch('/api/admin/jobs/cancel', {
+                method: 'POST', credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ jobId: j.id }),
+              });
+              if (r.ok) okCount++; else failCount++;
+            } catch { failCount++; }
+          }
+          alert(`Cancelled ${okCount} job(s)${failCount ? `, ${failCount} failed` : ''}.`);
+          loadActiveJobs();
+        },
+      );
     }
 
     function stopJob(jobId, who) {
