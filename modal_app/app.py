@@ -786,6 +786,100 @@ class MyFabmeshBackview:
               f"bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
+    def _get_auto_inpaint_models(self):
+        """Lazy-load CLIPSeg + SDXL Inpainting on first auto_inpaint call.
+        These add ~7 GB on GPU so we don't snapshot them upfront — most
+        sessions never use auto-inpaint, no reason to pay that cost.
+        Cached on self so subsequent calls reuse."""
+        if getattr(self, '_ai_loaded', False):
+            return self._ai_seg_processor, self._ai_seg_model, self._ai_inpaint_pipe
+        t0 = time.time()
+        print('[auto-inpaint] lazy-loading CLIPSeg + SDXL Inpainting...', flush=True)
+        import torch
+        from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+        from diffusers import StableDiffusionXLInpaintPipeline
+        self._ai_seg_processor = CLIPSegProcessor.from_pretrained(
+            'CIDAS/clipseg-rd64-refined')
+        self._ai_seg_model = CLIPSegForImageSegmentation.from_pretrained(
+            'CIDAS/clipseg-rd64-refined').to('cuda').eval()
+        # SDXL inpainting model — different from RealVisXL; it's the
+        # dedicated 5-channel UNet from diffusers (same one the desktop
+        # script loads at scripts/local_inpaint_bridge.py:98).
+        self._ai_inpaint_pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
+            'diffusers/stable-diffusion-xl-1.0-inpainting-0.1',
+            torch_dtype=torch.float16, variant='fp16',
+        )
+        self._ai_inpaint_pipe.to('cuda')
+        self._ai_inpaint_pipe.enable_attention_slicing()
+        self._ai_inpaint_pipe.enable_vae_tiling()
+        self._ai_loaded = True
+        print(f'[auto-inpaint] models ready in {time.time() - t0:.1f}s', flush=True)
+        return self._ai_seg_processor, self._ai_seg_model, self._ai_inpaint_pipe
+
+    @modal.fastapi_endpoint(method="POST")
+    def auto_inpaint(self, payload: dict):
+        """Auto-inpaint — CLIPSeg detects `target_text` in the image,
+        SDXL Inpainting paints `prompt` (or removes if empty) onto the
+        detected area. Verbatim port of scripts/local_inpaint_bridge.py.
+
+        Request body:
+            {
+              "_auth": "<shared_secret>",
+              "image_url": "https://.../source.png",
+              "target_text": "hat",          // what to find + replace
+              "prompt": "long hair",         // what to draw (empty=remove)
+              "dilate": 15                   // optional mask padding
+            }
+        Response: raw PNG bytes.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+        import urllib.request
+        from PIL import Image
+        from modal_app._auto_inpaint import generate as ai_generate
+
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload.get("_auth") or "").strip()
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+        image_url   = (payload.get("image_url") or "").strip()
+        target_text = (payload.get("target_text") or "").strip()
+        if not image_url:   raise HTTPException(status_code=400, detail="image_url required")
+        if not target_text: raise HTTPException(status_code=400, detail="target_text required")
+
+        try:
+            req = urllib.request.Request(
+                image_url,
+                headers={"User-Agent":
+                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as r:
+                src_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"image download: {e}")
+
+        seg_proc, seg_model, inpaint_pipe = self._get_auto_inpaint_models()
+
+        t0 = time.time()
+        try:
+            img = ai_generate(
+                seg_proc, seg_model, inpaint_pipe,
+                src_img, target_text,
+                prompt=payload.get("prompt") or "",
+                dilate=int(payload.get("dilate") or 15),
+            )
+        except ValueError as e:
+            # mask-empty — surface to the caller as 422 so credit refund
+            # logic on the Worker can refund the user.
+            raise HTTPException(status_code=422, detail=str(e))
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=False)
+        png = buf.getvalue()
+        print(f'[auto-inpaint] DONE dt={time.time() - t0:.1f}s bytes={len(png)}', flush=True)
+        return Response(content=png, media_type="image/png")
+
     @modal.fastapi_endpoint(method="POST")
     def modify(self, payload: dict):
         """SDXL img2img — modify an existing image with a prompt.
