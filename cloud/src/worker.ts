@@ -474,6 +474,53 @@ function _invalidatePricingCache() {
   _pricingCache = { prices: { ...PRICING_DEFAULTS }, ts: 0 };
 }
 
+/* Force-logout all users — admin nuclear button. Stores a unix-seconds
+ * timestamp in R2; getSessionUser rejects any Supabase JWT whose `iat`
+ * (issued-at) claim is older than this value, so every session token
+ * minted before the click stops being valid. Users land back on /login.
+ *
+ * Cache 60 s to dodge a R2 read on every request. Bumping the value
+ * also bumps the cache invalidation marker. */
+const MIN_SESSION_IAT_KEY = '_meta/min-session-iat.json';
+const MIN_SESSION_TTL_MS = 60_000;
+let _minSessionIatCache: { iat: number; ts: number } = { iat: 0, ts: 0 };
+
+async function _getMinSessionIat(env: Env): Promise<number> {
+  const now = Date.now();
+  if (now - _minSessionIatCache.ts < MIN_SESSION_TTL_MS) return _minSessionIatCache.iat;
+  try {
+    const obj = await env.MESHES.get(MIN_SESSION_IAT_KEY);
+    const raw = obj ? await obj.json() as { iat?: number } : {};
+    const iat = typeof raw.iat === 'number' && raw.iat > 0 ? raw.iat : 0;
+    _minSessionIatCache = { iat, ts: now };
+    return iat;
+  } catch {
+    _minSessionIatCache = { iat: 0, ts: now };
+    return 0;
+  }
+}
+
+function _invalidateMinSessionIatCache() {
+  _minSessionIatCache = { iat: 0, ts: 0 };
+}
+
+/** Decode a JWT payload without verifying — we only need the `iat`
+ *  claim and Supabase already verified the signature in the call to
+ *  /auth/v1/user that returned the user object. */
+function _decodeJwtIat(token: string): number | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = padded.length % 4 === 0 ? '' : '='.repeat(4 - (padded.length % 4));
+    const json = atob(padded + pad);
+    const payload = JSON.parse(json) as { iat?: number };
+    return typeof payload.iat === 'number' ? payload.iat : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getPrice(env: Env, key: PricingKey): Promise<number> {
   const all = await _getPricing(env);
   return all[key] ?? PRICING_DEFAULTS[key];
@@ -578,6 +625,16 @@ async function getSessionUser(req: Request, env: Env): Promise<SessionUser | nul
   if (!meRes.ok) return null;
   const me = await meRes.json() as { id?: string; email?: string };
   if (!me.id) return null;
+
+  // Force-logout check — admin can stamp _meta/min-session-iat.json
+  // with the current unix-seconds time; every JWT minted before that
+  // is treated as expired. Bypasses ADMIN_EMAILS so the admin doesn't
+  // log themselves out when flipping this.
+  const minIat = await _getMinSessionIat(env);
+  if (minIat > 0 && !(me.email && ADMIN_EMAILS.has(me.email.toLowerCase()))) {
+    const iat = _decodeJwtIat(token);
+    if (iat !== null && iat < minIat) return null;
+  }
 
   // Ban check — banned users look like "not authenticated" to every
   // downstream caller, which is exactly what we want (clean 401).
@@ -4347,6 +4404,30 @@ async function handleAdminTotpDisable(req: Request, env: Env): Promise<Response>
   return json({ ok: true });
 }
 
+/** POST /api/admin/force-logout-all — invalidate every active Supabase
+ *  session by stamping a minimum-iat. Requires the admin password as
+ *  a second factor so a stolen cookie alone can't nuke every login.
+ *  Admin emails (ADMIN_EMAILS) are excluded from the kick — otherwise
+ *  the admin would log themselves out right after pressing the button. */
+async function handleAdminForceLogoutAll(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { password?: string } | null = null;
+  try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
+  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
+  const pw = String(body?.password || '');
+  if (pw.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
+  let diff = 0;
+  for (let i = 0; i < pw.length; i++) diff |= pw.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
+  if (diff !== 0) return err(401, 'invalid password');
+  const iat = Math.floor(Date.now() / 1000);
+  await env.MESHES.put(MIN_SESSION_IAT_KEY, JSON.stringify({
+    iat, stamped_by: guard.email, stamped_at: new Date().toISOString(),
+  }));
+  _invalidateMinSessionIatCache();
+  return json({ ok: true, min_session_iat: iat });
+}
+
 /** GET /api/admin/pricing — current credit costs + defaults. */
 async function handleAdminGetPricing(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
@@ -4813,6 +4894,7 @@ export default {
         if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
         if (pathname === '/api/admin/pricing'         && method === 'GET')  return await handleAdminGetPricing(req, env);
         if (pathname === '/api/admin/pricing'         && method === 'POST') return await handleAdminSetPricing(req, env);
+        if (pathname === '/api/admin/force-logout-all' && method === 'POST') return await handleAdminForceLogoutAll(req, env);
         if (pathname === '/api/admin/totp/status'     && method === 'GET')  return await handleAdminTotpStatus(req, env);
         if (pathname === '/api/admin/totp/setup'      && method === 'POST') return await handleAdminTotpSetup(req, env);
         if (pathname === '/api/admin/totp/confirm'    && method === 'POST') return await handleAdminTotpConfirm(req, env);
