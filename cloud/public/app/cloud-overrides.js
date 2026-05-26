@@ -192,6 +192,10 @@
     'ws-multiview-btn':     6,   // generateMultiviews — 6 views generated
     'ws-facefix-btn':       2,   // /api/face-fix-image — OpenCV + SDXL inpaint
     'ws-resolution-btn':    2,   // /api/upscale-image — LANCZOS + SDXL refine
+    // Style: when the user picks an entry in the style dropdown,
+    // index2.js:4754 calls API.img2img with the style as prompt →
+    // /api/modify-image → Modal. 2 credits per pick.
+    'ws-style-btn':         2,
     // Manual tools — only Draw Mask actually triggers a Modal call
     // (mask_inpaint, 3 cr) when the user clicks "Apply" inside the
     // modal. The dance of painting the mask itself is canvas-only and
