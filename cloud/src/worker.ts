@@ -65,6 +65,9 @@ export interface Env {
   // where the realvis T-pose pipeline doesn't make sense. Single SDXL
   // pass with IPAdapter Plus — same RealVis snapshot as backview/tpose.
   MODAL_SHEET_URL?: string;
+  // SDXL img2img (Modify image) — direct port of the desktop's /img2img
+  // endpoint. Reuses RealVisXL via from_pipe so cold start ≈ back-view.
+  MODAL_MODIFY_URL?: string;
   // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
   // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
   // to the Replicate Cog.
@@ -1676,6 +1679,49 @@ async function callModalTpose(env: Env, userId: string, input: {
   throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
 }
 
+/** SDXL img2img — desktop's "Modify image" tool. Sends the source image
+ *  URL + prompt + strength to Modal; gets back a re-painted PNG. */
+async function callModalModify(env: Env, userId: string, input: {
+  imageUrl: string;
+  prompt: string;
+  strength?: number;
+  seed?: number;
+  steps?: number;
+}, folder: string): Promise<string> {
+  const url = env.MODAL_MODIFY_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_MODIFY_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      image_url: input.imageUrl,
+      prompt: input.prompt,
+      strength: input.strength ?? 0.55,
+      seed: input.seed,
+      steps: input.steps,
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal modify HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] modify dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+    const key = `${userId}/${folder}/${Date.now()}_${seed}_modified.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return `${env.R2_PUBLIC_URL}/${key}`;
+  }
+  throw new Error('R2 bucket unavailable; cannot persist modify output');
+}
+
 /** 4-view orthographic model-sheet — port of multiview_sheet_gen.py.
  *  Used by Wave 2.3 to auto-generate a back-view for hard-surface assets
  *  (vehicle/building/weapon/prop) where the realvis T-pose pipeline
@@ -2226,6 +2272,81 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
                        { asset_type });
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
+}
+
+/** Modify (img2img) endpoint — desktop "Modify image" tool ported to
+ *  the cloud. Takes an existing image URL + a prompt and returns a
+ *  variation via SDXL img2img on RealVisXL. */
+async function handleModifyImage(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_MODIFY_URL) {
+    return err(503, 'modify backend unavailable (MODAL_MODIFY_URL not configured)');
+  }
+  const { imageUrl, prompt, strength, seed, steps } = await req.json() as {
+    imageUrl?: string;
+    prompt?: string;
+    strength?: number;
+    seed?: number;
+    steps?: number;
+  };
+  if (!imageUrl) return err(400, 'imageUrl required');
+  const rawPrompt = (prompt ?? '').toString().trim();
+  if (!rawPrompt) return err(400, 'prompt required');
+
+  // NSFW pre-filter — same policy as text2image/back-view/rectify.
+  {
+    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const safety = checkPromptSafety(rawPrompt, unrestricted);
+    if (!safety.safe) {
+      return json({ ok: false, success: false,
+        error: safety.reason ?? 'prompt blocked by content filter',
+        blocked: safety.blocked }, { status: 400 });
+    }
+  }
+
+  const COST_PER_MODIFY = 2;  // same as text2image (single SDXL pass)
+  const cost = COST_PER_MODIFY;
+  const estimatedTotal = 0.05;  // ≈ back-view cost, warm container
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: `daily Modal budget reached. Try again after midnight UTC.` }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `you've reached the per-user daily generation limit.` }, { status: 429 });
+  }
+
+  const remaining = await spendCredits(env, user.id, cost);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — modify costs ${cost} credits` }, { status: 402 });
+  }
+
+  let path: string;
+  const opStart = Date.now();
+  try {
+    path = await callModalModify(env, user.id, {
+      imageUrl, prompt: rawPrompt,
+      strength: strength ?? 0.55,
+      seed: seed ?? Math.floor(Math.random() * 1e9),
+      steps,
+    }, 'modified');
+  } catch (e) {
+    await addCredits(env, user.id, cost);
+    await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                       'failed', { error: e instanceof Error ? e.message : String(e), op: 'modify' });
+    return err(502, `modify failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+  await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
+                     'succeeded', { op: 'modify', strength });
+  return json({ ok: true, success: true, path, newPath: path, creditsRemaining: remaining });
 }
 
 /** Auto-rectify endpoint — re-generate an orthographic FRONT (or 3/4 ISO)
@@ -3194,6 +3315,7 @@ export default {
         if (pathname === '/api/generate-image'        && method === 'POST') return await handleGenerateImage(req, env);
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
+        if (pathname === '/api/modify-image'          && method === 'POST') return await handleModifyImage(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
