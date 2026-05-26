@@ -19,21 +19,56 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 
+# Concept-specific boosters — SDXL Inpaint v1.0 is weak on bare nouns
+# for distinctive objects. A bare "bazooka" gets generated as a tube
+# or pipe. Adding concept-specific synonyms + visual descriptors
+# disambiguates ("M72 LAW", "shoulder-fired rocket launcher", etc.).
+# Keys are matched case-insensitively as substrings in the user's
+# stripped noun phrase.
+_CONCEPT_BOOSTERS = {
+    'bazooka': 'M1 bazooka shoulder-fired rocket launcher, large green metal tube, military weapon, tactical hardware',
+    'rocket launcher': 'M72 LAW shoulder-fired rocket launcher, large tube weapon, military tactical hardware',
+    'sword': 'large medieval sword, sharp steel blade, leather-wrapped hilt, fantasy weapon',
+    'shield': 'large round battle shield, embossed metal, leather straps, fantasy armor',
+    'gun': 'realistic firearm, metallic, detailed mechanism',
+    'rifle': 'tactical assault rifle, military firearm, detailed scope and stock',
+    'helmet': 'fitted protective helmet, metal alloy, articulated visor, fantasy armor',
+    'flower': 'large blooming flower, vibrant petals, garden quality, botanical',
+    'crown': 'ornate royal crown, gold inlay, jewels, fantasy regalia',
+    'hat':   'fitted hat, recognizable headwear',
+    'cape':  'flowing fabric cape, draped, ornate trim',
+    'wings': 'large feathered wings spread wide, anatomically integrated',
+    'dragon': 'majestic dragon, scaled, large wings',
+}
+
+
+def _boost(obj: str) -> str:
+    low = obj.lower()
+    for key, repl in _CONCEPT_BOOSTERS.items():
+        if key in low:
+            return f'{repl}, in place of "{obj}"'
+    return obj
+
+
 def _enrich_prompt(raw: str) -> tuple[str, str]:
     """Turn a user instruction into a description SDXL Inpaint can
     actually paint. SDXL Inpaint replaces masked pixels by what the
     prompt DESCRIBES, not by what the prompt INSTRUCTS — so "add a
-    bazooka" just continues the existing texture, while "a bazooka
-    rocket launcher weapon, military, highly detailed" actually
-    produces a bazooka in the masked zone.
+    bazooka" just continues the existing texture, while "M1 bazooka
+    shoulder-fired rocket launcher, large green metal tube, military
+    weapon, photorealistic" actually produces a recognizable bazooka.
 
     Strategy:
       - "add a/an X" / "put a/an X" / "place a/an X" → drop the verb,
-        keep "X" as a noun phrase + detail-booster suffix
+        keep "X" as a noun phrase + concept booster + detail suffix
       - "remove X" / "delete X" → describe what would naturally be
-        behind it (clothing, skin, background) — pass to a generic
-        "continuation of surrounding area" prompt
-      - Anything else → use as-is + detail-booster prefix
+        behind it ("continuation of the surrounding area, no X")
+      - Anything else → use as-is + concept booster + detail suffix
+
+    The concept booster table (_CONCEPT_BOOSTERS) hand-rolls synonyms
+    for popular SDXL-weak nouns (bazooka → "M1 bazooka shoulder-fired
+    rocket launcher, large green metal tube") so the result is
+    visually recognizable.
 
     Returns (positive_prompt, negative_prompt).
     """
@@ -62,14 +97,17 @@ def _enrich_prompt(raw: str) -> tuple[str, str]:
     else:
         obj = p
 
+    boosted = _boost(obj)
     positive = (
-        f'{obj}, highly detailed, photorealistic, intricate details, '
+        f'{boosted}, highly detailed, photorealistic, intricate details, '
         f'sharp focus, professional photography, masterpiece, 8k, '
-        f'natural integration into the scene, perfect composition'
+        f'centered subject, clearly recognizable, '
+        f'naturally integrated into the scene'
     )
     negative = (
         'blurry, distorted, low quality, ugly, deformed, '
-        'extra limbs, duplicate, artifact, watermark, signature, text'
+        'extra limbs, duplicate, artifact, watermark, signature, text, '
+        'tube, pipe, cylinder, generic object, abstract'
     )
     return (positive, negative)
 
@@ -170,8 +208,8 @@ def generate(
             negative_prompt=neg_prompt,
             image=crop_img_w,
             mask_image=crop_msk_w,
-            num_inference_steps=40,
-            guidance_scale=11.0,
+            num_inference_steps=50,
+            guidance_scale=12.0,
             strength=0.99,
             height=work, width=work,
         ).images[0]
