@@ -498,6 +498,13 @@
     _creditsPollTimer = setInterval(refreshCreditsPill, 30_000);
   }
 
+  // Same outlined-yellow bolt as .cloud-cost-badge::before. Inline so
+  // it survives setting innerHTML on the pill.
+  const _BOLT_HTML = '<span style="font-size:13px;line-height:1;color:#ffe066;'
+    + 'text-shadow:-1px -1px 0 #1a1a1a,1px -1px 0 #1a1a1a,'
+    + '-1px 1px 0 #1a1a1a,1px 1px 0 #1a1a1a,0 1px 2px rgba(0,0,0,0.5);'
+    + 'margin-right:1px;">⚡</span>';
+
   async function refreshCreditsPill() {
     if (!_creditsPillEl) return;
     try {
@@ -510,7 +517,7 @@
       const j = await r.json();
       const credits = j?.user?.credits;
       if (typeof credits === 'number') {
-        _creditsPillEl.textContent = `⚡ ${credits} credit${credits === 1 ? '' : 's'}`;
+        _creditsPillEl.innerHTML = `${_BOLT_HTML} ${credits} credit${credits === 1 ? '' : 's'}`;
         _creditsPillEl.href = '/buy';
       } else {
         _creditsPillEl.textContent = 'Sign in';
