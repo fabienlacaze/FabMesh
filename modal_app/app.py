@@ -787,6 +787,66 @@ class MyFabmeshBackview:
         return Response(content=png, media_type="image/png")
 
     @modal.fastapi_endpoint(method="POST")
+    def modify(self, payload: dict):
+        """SDXL img2img — modify an existing image with a prompt.
+        Verbatim port of the desktop /img2img endpoint (main.js:2874).
+        Reuses the RealVisXL weights already on GPU via diffusers
+        `from_pipe` (no second snapshot).
+
+        Request body:
+            {
+              "_auth": "<shared_secret>",
+              "image_url": "https://.../source.png",
+              "prompt": "the same character in golden armor",
+              "strength": 0.55,    // 0=identity, 1=fully redrawn
+              "seed": 42,
+              "steps": 30
+            }
+        Response: raw PNG bytes.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import Response
+        import urllib.request
+        from PIL import Image
+        from modal_app._modify import generate as modify_generate
+
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload.get("_auth") or "").strip()
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+        image_url = (payload.get("image_url") or "").strip()
+        prompt    = (payload.get("prompt") or "").strip()
+        if not image_url:
+            raise HTTPException(status_code=400, detail="image_url required")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="prompt required")
+
+        try:
+            req = urllib.request.Request(
+                image_url,
+                headers={"User-Agent":
+                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as r:
+                src_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"image download: {e}")
+
+        t0 = time.time()
+        img = modify_generate(
+            self.pipe, src_img, prompt,
+            strength=float(payload.get("strength") or 0.55),
+            seed=int(payload.get("seed") or 42),
+            steps=int(payload.get("steps") or 30),
+        )
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=False)
+        png = buf.getvalue()
+        print(f"[modify] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
+        return Response(content=png, media_type="image/png")
+
+    @modal.fastapi_endpoint(method="POST")
     def sheet(self, payload: dict):
         """4-view orthographic model-sheet generator (front/right/back/left).
         Verbatim port of `scripts/multiview_sheet_gen.py` — single SDXL

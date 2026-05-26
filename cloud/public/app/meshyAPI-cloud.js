@@ -1015,7 +1015,25 @@
     refineMesh: async () => ({ success: false, ok: false, error: 'Mesh refine (Blender + Claude) is Desktop-only.' }),
     stopSdxlServer: async () => ({ ok: true }),
     checkMultiviewDir: async () => ({ ok: true, exists: false, files: [] }),
-    img2img: async () => ({ success: false, error: 'img2img is Desktop-only (use Modify Image instead).' }),
+    img2img: async ({ imagePath, prompt, strength } = {}) => {
+      // Cloud port of the desktop /img2img IPC handler (main.js:2874).
+      // Worker POSTs to MODAL_MODIFY_URL with imageUrl + prompt + strength
+      // and returns the URL of the freshly written R2 PNG. We expose the
+      // same { success, newPath } shape so the renderer's `Modify Image`
+      // button works unchanged.
+      if (!imagePath) return { success: false, error: 'imagePath required' };
+      if (!prompt)    return { success: false, error: 'prompt required' };
+      try {
+        const r = await postJSON('/api/modify-image', {
+          imageUrl: imagePath, prompt, strength: strength ?? 0.55,
+        });
+        if (r?.success && (r.newPath || r.path)) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: true, newPath: r.newPath || r.path };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
     autoInpaint: async () => ({ success: false, error: 'Auto inpaint is Desktop-only.' }),
     maskInpaint: async () => ({ success: false, error: 'Mask inpaint is Desktop-only.' }),
     copyMeshToProject: async () => ({ ok: false, cloud: true, message: 'Copy mesh to project: Desktop-only.' }),
