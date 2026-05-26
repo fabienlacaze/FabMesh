@@ -566,6 +566,107 @@ async function _runNsfwBackgroundScan() {
   _nsfwScanRunning = false;
 }
 
+/* ----------------------------------------------------------------------
+ * Home view toggle — Projects / Images / Meshes
+ * --------------------------------------------------------------------- */
+let _homeView = 'projects';
+function _setHomeView(view) {
+  _homeView = view;
+  document.querySelectorAll('.home-view-btn').forEach((b) => {
+    const active = b.dataset.view === view;
+    b.classList.toggle('active', active);
+    b.style.background = active ? 'var(--accent-grad)' : 'transparent';
+    b.style.color = active ? 'white' : 'var(--text-1)';
+  });
+  const pg = document.getElementById('projects-grid');
+  const ig = document.getElementById('all-images-grid');
+  const mg = document.getElementById('all-meshes-grid');
+  if (pg) pg.classList.toggle('hidden', view !== 'projects');
+  if (ig) ig.classList.toggle('hidden', view !== 'images');
+  if (mg) mg.classList.toggle('hidden', view !== 'meshes');
+  if (view === 'images') renderAllImagesGrid();
+  else if (view === 'meshes') renderAllMeshesGrid();
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target?.closest?.('.home-view-btn');
+  if (btn && btn.dataset.view) _setHomeView(btn.dataset.view);
+});
+
+function _imgSrcHome(path) {
+  if (!path) return '';
+  if (/^(?:https?|blob|data):/i.test(path)) return path;
+  return 'file:///' + String(path).replace(/\\/g, '/');
+}
+
+function renderAllImagesGrid() {
+  const grid = document.getElementById('all-images-grid');
+  if (!grid) return;
+  const items = [];
+  for (const p of state.projects || []) {
+    for (const img of (p.images || [])) {
+      items.push({ project: p, path: img.path || img });
+    }
+  }
+  if (!items.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:40px;">No images yet.</div>';
+    return;
+  }
+  grid.innerHTML = items.map((it) => `
+    <div class="project-card" style="cursor:pointer;" data-project="${escapeHtml(it.project.name)}">
+      <div class="project-card-thumb">
+        <img src="${escapeHtml(_imgSrcHome(it.path))}" alt="" loading="lazy">
+      </div>
+      <div class="project-card-body">
+        <div class="project-card-name" style="font-size:13px;">${escapeHtml(it.project.name)}</div>
+        <div class="project-card-meta" style="font-size:11px;">${escapeHtml(String(it.path).split(/[\\/]/).pop())}</div>
+      </div>
+    </div>
+  `).join('');
+  grid.querySelectorAll('[data-project]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.project;
+      const p = (state.projects || []).find((x) => x.name === name);
+      if (p) openProject(p);
+    });
+  });
+}
+
+function renderAllMeshesGrid() {
+  const grid = document.getElementById('all-meshes-grid');
+  if (!grid) return;
+  const items = [];
+  for (const p of state.projects || []) {
+    for (const m of (p.meshes || [])) {
+      items.push({ project: p, mesh: m });
+    }
+  }
+  if (!items.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:40px;">No meshes yet.</div>';
+    return;
+  }
+  // Desktop: GLB paths are file:// so model-viewer can't load them.
+  // Show a placeholder + filename + "Open project" — clicking opens
+  // the project workspace where the proper three.js viewer takes over.
+  grid.innerHTML = items.map((it) => {
+    const url = it.mesh.url || it.mesh.path || '';
+    const fname = String(it.mesh.filename || url).split(/[\\/]/).pop();
+    return `
+      <div class="project-card" style="cursor:pointer; padding:8px;" data-project="${escapeHtml(it.project.name)}">
+        <div style="font-size:13px; font-weight:600; padding:4px 4px 6px;">${escapeHtml(it.project.name)}</div>
+        <div style="height:200px; background:#0a0a0e; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:32px; border-radius:6px;">🧊</div>
+        <div class="project-card-meta" style="font-size:11px; padding:6px 4px 0;">${escapeHtml(fname)}</div>
+      </div>
+    `;
+  }).join('');
+  grid.querySelectorAll('[data-project]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.project;
+      const p = (state.projects || []).find((x) => x.name === name);
+      if (p) openProject(p);
+    });
+  });
+}
+
 async function renderProjectsGrid() {
   const grid = document.getElementById('projects-grid');
   const empty = document.getElementById('projects-empty');
@@ -666,6 +767,9 @@ async function renderProjectsGrid() {
   }
   renderProjectsBulkBar();
   _syncSelectAllBtn();
+  // Sync the alternate home views with fresh project data.
+  if (_homeView === 'images') renderAllImagesGrid();
+  else if (_homeView === 'meshes') renderAllMeshesGrid();
   // Add the "+ New" card at the end
   const newCard = document.createElement('div');
   newCard.className = 'project-card new-card';
