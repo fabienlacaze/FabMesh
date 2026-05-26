@@ -4049,7 +4049,7 @@ async function handleAdminBanUser(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, banned: ban, total: set.size });
 }
 
-/** GET /api/admin/users — ADMIN ONLY. Profiles + ban flag annotated. */
+/** GET /api/admin/users — ADMIN ONLY. Profiles + ban flag + counts. */
 async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
   if (guard instanceof Response) return guard;
@@ -4061,7 +4061,63 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   if (error) return err(500, error.message);
   const banned = await _getBannedUserIds(env);
   const users = (data || []) as Array<{ id: string; [k: string]: unknown }>;
-  return json({ users: users.map((u) => ({ ...u, banned: banned.has(u.id) })) });
+
+  // Aggregate counts from jobs in one query. project_name and mesh_url
+  // come straight from the table — we count distinct projects + every
+  // succeeded mesh per user. Image count comes from R2 (logged jobs
+  // never stored the result URL).
+  const { data: jobsRows } = await sb.from('jobs')
+    .select('user_id, project_name, mesh_url, status')
+    .limit(50_000);
+  type ProjectsMap = Map<string, Set<string>>;
+  const projects: ProjectsMap = new Map();
+  const meshes = new Map<string, number>();
+  for (const row of (jobsRows || []) as Array<{
+    user_id: string; project_name: string | null; mesh_url: string | null; status: string;
+  }>) {
+    if (row.project_name) {
+      const set = projects.get(row.user_id) || new Set<string>();
+      set.add(row.project_name);
+      projects.set(row.user_id, set);
+    }
+    if (row.mesh_url && row.status === 'succeeded') {
+      meshes.set(row.user_id, (meshes.get(row.user_id) || 0) + 1);
+    }
+  }
+
+  // Image counts via R2 — only computed for the users we'll actually
+  // display (limit 500) and capped at 200 listings each so the
+  // endpoint stays under a few seconds. Parallel.
+  let imageCounts = new Map<string, number>();
+  if (env.MESHES) {
+    const tasks = users.slice(0, 500).map(async (u) => {
+      let n = 0;
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const result = await env.MESHES.list({
+          prefix: `${u.id}/`, limit: 1000, cursor,
+        });
+        for (const obj of result.objects) {
+          if (/\.(png|jpg|jpeg|webp)$/i.test(obj.key)) n++;
+        }
+        cursor = result.truncated ? result.cursor : undefined;
+        pages++;
+      } while (cursor && pages < 5);
+      imageCounts.set(u.id, n);
+    });
+    await Promise.all(tasks);
+  }
+
+  return json({
+    users: users.map((u) => ({
+      ...u,
+      banned: banned.has(u.id),
+      projects_count: projects.get(u.id)?.size || 0,
+      meshes_count: meshes.get(u.id) || 0,
+      images_count: imageCounts.get(u.id) || 0,
+    })),
+  });
 }
 
 /** GET /api/admin/totp/status — { enrolled: bool, enrolled_at, email }. */
@@ -4224,6 +4280,39 @@ async function handleAdminUserImages(req: Request, env: Env, userId: string): Pr
   } while (cursor && out.length < 500);
   out.sort((a, b) => b.uploaded.localeCompare(a.uploaded));
   return json({ images: out });
+}
+
+/** GET /api/admin/users/<userId>/projects — ADMIN ONLY. Groups the
+ *  user's jobs by project_name and returns one summary row per project
+ *  (thumb URL, image count, mesh count, last activity). */
+async function handleAdminUserProjects(req: Request, env: Env, userId: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .select('project_name, asset_type, mesh_url, status, created_at')
+    .eq('user_id', userId)
+    .not('project_name', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(5000);
+  if (error) return err(500, error.message);
+  type Row = { project_name: string | null; asset_type: string; mesh_url: string | null; status: string; created_at: string };
+  type Project = { name: string; asset_type: string; meshes: number; latest: string };
+  const byName = new Map<string, Project>();
+  for (const row of (data || []) as Row[]) {
+    if (!row.project_name) continue;
+    const cur = byName.get(row.project_name) || {
+      name: row.project_name,
+      asset_type: row.asset_type,
+      meshes: 0,
+      latest: row.created_at,
+    };
+    if (row.mesh_url && row.status === 'succeeded') cur.meshes++;
+    if (row.created_at > cur.latest) cur.latest = row.created_at;
+    byName.set(row.project_name, cur);
+  }
+  const projects = [...byName.values()].sort((a, b) => b.latest.localeCompare(a.latest));
+  return json({ projects });
 }
 
 /** GET /api/admin/users/<userId>/meshes — ADMIN ONLY. Lists every
@@ -4539,6 +4628,10 @@ export default {
         // /api/admin/users/<userId>/images — dynamic
         const adminImages = pathname.match(/^\/api\/admin\/users\/([^/]+)\/images\/?$/);
         if (adminImages && method === 'GET') return await handleAdminUserImages(req, env, decodeURIComponent(adminImages[1]));
+
+        // /api/admin/users/<userId>/projects — dynamic
+        const adminProj = pathname.match(/^\/api\/admin\/users\/([^/]+)\/projects\/?$/);
+        if (adminProj && method === 'GET') return await handleAdminUserProjects(req, env, decodeURIComponent(adminProj[1]));
 
         return err(404, `no route for ${method} ${pathname}`);
       }
