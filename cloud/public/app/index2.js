@@ -4661,11 +4661,22 @@ function _cropSetPreset(aspect, id) {
   document.getElementById(id)?.classList.add('tool-active');
   cropState.aspect = aspect;
   if (aspect === 'center') {
-    // Auto-center: crop 10% from each edge
     cropState.x1 = 0.1; cropState.y1 = 0.1; cropState.x2 = 0.9; cropState.y2 = 0.9;
     cropState.aspect = null;
-    _cropDrawOverlay(); _cropUpdateLabel();
+  } else if (typeof aspect === 'number' && aspect > 0) {
+    const W = cropState.w, H = cropState.h;
+    if (W && H) {
+      let cwn = 0.9;
+      let chn = (cwn * W) / (H * aspect);
+      if (chn > 0.9) { chn = 0.9; cwn = (chn * H * aspect) / W; }
+      cropState.x1 = (1 - cwn) / 2;
+      cropState.x2 = (1 + cwn) / 2;
+      cropState.y1 = (1 - chn) / 2;
+      cropState.y2 = (1 + chn) / 2;
+    }
   }
+  _cropDrawOverlay();
+  _cropUpdateLabel();
 }
 document.getElementById('crop-preset-free')?.addEventListener('click', () => _cropSetPreset(null, 'crop-preset-free'));
 document.getElementById('crop-preset-1-1')?.addEventListener('click', () => _cropSetPreset(1, 'crop-preset-1-1'));
