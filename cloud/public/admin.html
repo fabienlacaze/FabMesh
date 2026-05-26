@@ -715,7 +715,10 @@
       _activeJobsCache = jobs;
       document.getElementById('badge-active').textContent = jobs.length;
       const stopAll = document.getElementById('stop-all-btn');
-      if (stopAll) stopAll.disabled = !jobs.length;
+      // Hide the bulk-stop button when there's barely anything to stop —
+      // for 1 or 2 jobs the per-row Stop is faster and less risky than
+      // a "kill everything" confirm.
+      if (stopAll) stopAll.style.display = jobs.length > 2 ? '' : 'none';
       if (!jobs.length) {
         tbody.innerHTML = '<tr><td colspan="8" class="muted">No active jobs.</td></tr>';
         return;
