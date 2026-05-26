@@ -646,6 +646,67 @@ function renderAllImagesGrid() {
   });
 }
 
+// Lazy three.js mesh thumbnail. Spins up a tiny scene + GLTFLoader the
+// first time the card scrolls into view (IntersectionObserver), then
+// renders ONE frame and disposes the renderer. With 500+ meshes a
+// per-card animation loop would melt the GPU; a single static frame is
+// enough to identify the asset.
+function _mountMeshThumb(card, url) {
+  if (!card || !url || card.dataset.thumbMounted) return;
+  card.dataset.thumbMounted = '1';
+  const slot = card.querySelector('.mesh-thumb-slot');
+  if (!slot) return;
+  const w = slot.clientWidth || 240;
+  const h = slot.clientHeight || 200;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(w, h, false);
+  renderer.setClearColor(0x0a0a0e, 1);
+  slot.innerHTML = '';
+  slot.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(35, w / h, 0.1, 200);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+  dir.position.set(2, 3, 2);
+  scene.add(dir);
+  const loader = new GLTFLoader();
+  loader.load(url, (gltf) => {
+    const root = gltf.scene;
+    scene.add(root);
+    // Frame the model — bbox center to origin, scale to unit, camera back.
+    const bbox = new THREE.Box3().setFromObject(root);
+    const size = bbox.getSize(new THREE.Vector3());
+    const center = bbox.getCenter(new THREE.Vector3());
+    root.position.sub(center);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const fitDist = (maxDim / 2) / Math.tan((camera.fov * Math.PI) / 360);
+    camera.position.set(fitDist * 0.9, fitDist * 0.7, fitDist * 1.4);
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+    // Free GPU memory after the single frame.
+    renderer.dispose();
+  }, undefined, (e) => {
+    console.warn('[mesh-thumb] load failed:', url, e);
+    slot.innerHTML = '<div style="height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:32px;">🧊</div>';
+  });
+}
+
+let _meshThumbObserver = null;
+function _initMeshThumbObserver() {
+  if (_meshThumbObserver) return;
+  _meshThumbObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        const card = e.target;
+        const url = card.dataset.meshUrl;
+        if (url) _mountMeshThumb(card, url);
+        _meshThumbObserver.unobserve(card);
+      }
+    }
+  }, { rootMargin: '200px' });
+}
+
 function renderAllMeshesGrid() {
   const grid = document.getElementById('all-meshes-grid');
   if (!grid) return;
@@ -659,26 +720,33 @@ function renderAllMeshesGrid() {
     grid.innerHTML = '<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:40px;">No meshes yet.</div>';
     return;
   }
-  // Desktop: GLB paths are file:// so model-viewer can't load them.
-  // Show a placeholder + filename + "Open project" — clicking opens
-  // the project workspace where the proper three.js viewer takes over.
+  _initMeshThumbObserver();
   grid.innerHTML = items.map((it) => {
     const url = it.mesh.url || it.mesh.path || '';
     const fname = String(it.mesh.filename || url).split(/[\\/]/).pop();
+    // Desktop paths come in as Windows backslashes. The <canvas> in
+    // .mesh-thumb-slot gets the real three.js render once visible.
+    const fileUrl = /^(?:https?|file|blob|data):/i.test(url)
+      ? url
+      : 'file:///' + String(url).replace(/\\/g, '/');
     return `
-      <div class="project-card" style="cursor:pointer; padding:8px;" data-project="${escapeHtml(it.project.name)}">
+      <div class="project-card" style="cursor:pointer; padding:8px;" data-project="${escapeHtml(it.project.name)}" data-mesh-url="${escapeHtml(fileUrl)}">
         <div style="font-size:13px; font-weight:600; padding:4px 4px 6px;">${escapeHtml(it.project.name)}</div>
-        <div style="height:200px; background:#0a0a0e; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:32px; border-radius:6px;">🧊</div>
+        <div class="mesh-thumb-slot" style="height:200px; background:#0a0a0e; border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:14px;">Loading…</div>
         <div class="project-card-meta" style="font-size:11px; padding:6px 4px 0;">${escapeHtml(fname)}</div>
       </div>
     `;
   }).join('');
   grid.querySelectorAll('[data-project]').forEach((el) => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      // Don't open the project if the user clicked the canvas
+      // (might be wanting to interact with the thumbnail).
+      if (e.target.tagName === 'CANVAS') return;
       const name = el.dataset.project;
       const p = (state.projects || []).find((x) => x.name === name);
       if (p) openProject(p);
     });
+    _meshThumbObserver.observe(el);
   });
 }
 
