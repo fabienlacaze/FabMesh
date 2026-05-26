@@ -3984,8 +3984,7 @@ function openSymmetrize() {
   const ctx = canvas.getContext('2d');
   const octx = overlay.getContext('2d');
   modal.classList.remove('hidden');
-  const img = new Image();
-  img.onload = () => {
+  const onReady = (img) => {
     canvas.width = img.width; canvas.height = img.height;
     overlay.width = img.width; overlay.height = img.height;
     ctx.drawImage(img, 0, 0);
@@ -3998,7 +3997,30 @@ function openSymmetrize() {
     symState.undoStack = [];
     _symDrawPreview();
   };
-  img.src = 'file:///' + symState.imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  const loadFrom = (finalSrc) => {
+    const img = new Image();
+    img.onload = () => onReady(img);
+    img.onerror = () => showToast('symmetrize: image load failed (' + finalSrc.slice(0, 80) + ')', 'error', 5000);
+    img.src = finalSrc;
+  };
+  // Cloud port: imgPath is now an http(s) URL on cloud (R2) — the
+  // legacy `file:///...` prefix produces file:///https:/... which
+  // silently fails. Fetch to blob: bypasses CORS + canvas-tainting +
+  // gives us a real onerror.
+  const src = symState.imgPath;
+  if (/^(?:https?|blob|data):/i.test(src)) {
+    if (/^https?:/i.test(src)) {
+      fetch(src, { credentials: 'omit' })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+        .then(blob => loadFrom(URL.createObjectURL(blob)))
+        .catch(e => showToast('symmetrize: fetch failed: ' + (e?.message || e), 'error', 5000));
+    } else {
+      loadFrom(src);
+    }
+  } else {
+    // Desktop filesystem path.
+    loadFrom('file:///' + src.replace(/\\/g, '/') + '?t=' + Date.now());
+  }
 }
 
 function _symDrawPreview() {
@@ -4893,8 +4915,17 @@ document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
   }
   modal.classList.remove('hidden');
   _blurMgr.activate();
-  // Load AFTER modal is visible so container has real dimensions
-  await _blurMgr.loadImage('file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now());
+  // Load AFTER modal is visible so container has real dimensions.
+  // Cloud-aware: pass http/blob/data URLs straight through (CanvasManager
+  // fetches them as blob: to bypass CORS). file:/// only for local paths.
+  const blurSrc = /^(?:https?|blob|data|file):/i.test(tgt)
+    ? tgt
+    : 'file:///' + tgt.replace(/\\/g, '/');
+  try {
+    await _blurMgr.loadImage(blurSrc);
+  } catch (e) {
+    showToast('blur: image load failed: ' + (e?.message || e), 'error', 5000);
+  }
 });
 
 // Mode toggle
@@ -5356,7 +5387,12 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
   paintState.eyedropping = false;
   document.getElementById('paint-eyedropper')?.classList.remove('tool-active');
   requestAnimationFrame(() => {
-    _paintMgr.loadImage('file:///' + paintState.imgPath.replace(/\\/g, '/') + '?t=' + Date.now());
+    const paintSrc = /^(?:https?|blob|data|file):/i.test(paintState.imgPath)
+      ? paintState.imgPath
+      : 'file:///' + paintState.imgPath.replace(/\\/g, '/');
+    _paintMgr.loadImage(paintSrc).catch(e => {
+      showToast('paint: image load failed: ' + (e?.message || e), 'error', 5000);
+    });
   });
 });
 
