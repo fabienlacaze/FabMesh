@@ -64,7 +64,14 @@ class CanvasManager {
   }
 
   loadImage(src) {
-    return new Promise((resolve) => {
+    // For http(s) sources we fetch first and turn the response into a
+    // blob: URL. Two reasons:
+    //   1. Without it the <img> would either taint the canvas (no
+    //      crossOrigin attr → getImageData throws), or silently fail
+    //      to load if the R2 CORS doesn't allow the bare Origin.
+    //   2. We get a real Promise rejection on network failure instead
+    //      of a forever-pending Promise (no onerror in the old code).
+    const setupImg = (finalSrc) => new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         this.w = img.width;
@@ -82,8 +89,21 @@ class CanvasManager {
         this._updateBtns();
         resolve();
       };
-      img.src = src;
+      img.onerror = () => reject(new Error('image decode failed: ' + finalSrc));
+      img.src = finalSrc;
     });
+    if (/^https?:/i.test(src)) {
+      return fetch(src, { credentials: 'omit' })
+        .then(r => {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.blob();
+        })
+        .then(blob => setupImg(URL.createObjectURL(blob)))
+        .catch(e => {
+          throw new Error('image fetch failed: ' + (e?.message || e));
+        });
+    }
+    return setupImg(src);
   }
 
   _applyTransform() {

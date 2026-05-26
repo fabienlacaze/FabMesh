@@ -469,12 +469,33 @@
   function _basename(p) { return String(p || '').split(/[/\\]/).pop() || ''; }
   function _stripExt(name) { return name.replace(/\.[^.]+$/, ''); }
   function _imgFromBlobUrl(url) {
+    // Two-stage load. For http(s) URLs we fetch the bytes ourselves
+    // and turn them into a `blob:` URL — that way:
+    //   1. CORS happens on fetch() (where it works), not on <img> (where
+    //      a missing Access-Control-Allow-Origin header silently taints
+    //      the canvas and breaks getImageData → "[object Event]").
+    //   2. Errors come back as real Error messages, not DOM Events that
+    //      stringify to "[object Event]".
+    // For blob: and data: URLs we skip the fetch since they're already
+    // same-origin / inline.
     return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
-      img.onerror = (e) => reject(e);
-      img.src = url;
+      const loadInto = (finalUrl) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('image decode failed: ' + finalUrl));
+        img.src = finalUrl;
+      };
+      if (/^https?:/i.test(url)) {
+        fetch(url, { credentials: 'omit' })
+          .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.blob();
+          })
+          .then(blob => loadInto(URL.createObjectURL(blob)))
+          .catch(e => reject(new Error('image fetch failed: ' + (e?.message || e))));
+      } else {
+        loadInto(url);
+      }
     });
   }
   async function _canvasFor(srcUrl) {
