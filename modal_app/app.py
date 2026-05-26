@@ -1340,15 +1340,43 @@ def mesh_start(payload: dict):
             "glb_base64": base64.b64encode(out).decode("ascii"),
         }
 
+    # ── Cancel a running spawn ─────────────────────────────────────
+    if op_type == "cancel":
+        job_id = (payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id required for cancel")
+        call_id_path = f"/data/{job_id}.call_id"
+        try:
+            with open(call_id_path) as f:
+                call_id = f.read().strip()
+        except FileNotFoundError:
+            # Job finished before we could cancel, or never spawned.
+            return {"ok": True, "cancelled": False, "reason": "no call_id on file"}
+        try:
+            modal.FunctionCall.from_id(call_id).cancel(terminate_containers=True)
+            return {"ok": True, "cancelled": True, "call_id": call_id}
+        except Exception as e:
+            # Already finished, already cancelled, or transient — surface
+            # the error but don't fail hard so the admin UI can still
+            # mark the job canceled in Supabase.
+            return {"ok": True, "cancelled": False, "error": str(e)}
+
     # ── Async TRELLIS-2 generate (original behaviour) ───────────────
     if not payload.get("front_image_url"):
         raise HTTPException(status_code=400, detail="front_image_url required")
 
     job_id = payload.get("job_id") or uuid.uuid4().hex
-    # .spawn() on the class method enqueues work; Modal allocates a
-    # GPU container for MyFabmeshMesh and runs @enter once, then
-    # generate_to_volume(). Returns INSTANTLY from this endpoint.
-    MyFabmeshMesh().generate_to_volume.spawn(job_id, payload)
+    # .spawn() returns a FunctionCall; save its object_id in the shared
+    # volume so mesh_start with op_type='cancel' can find it and call
+    # .cancel(). Without this we can mark the job canceled in Supabase
+    # but the GPU keeps running to completion.
+    call = MyFabmeshMesh().generate_to_volume.spawn(job_id, payload)
+    try:
+        with open(f"/data/{job_id}.call_id", "w") as f:
+            f.write(call.object_id)
+        mesh_output_volume.commit()
+    except Exception as e:
+        print(f"[mesh_start] WARN could not persist call_id for {job_id}: {e}", flush=True)
     return {"job_id": job_id, "status": "queued"}
 
 

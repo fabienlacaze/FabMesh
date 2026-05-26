@@ -3837,8 +3837,6 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
   let body: { jobId?: string; refund?: boolean } | null = null;
   try { body = await req.json() as { jobId?: string; refund?: boolean }; } catch { return err(400, 'body required'); }
   const jobId = String(body?.jobId || '').trim();
-  // Default true so the existing UI keeps working — admin must
-  // explicitly send refund:false to skip the refund (abuse cases).
   const refund = body?.refund !== false;
   if (!jobId) return err(400, 'jobId required');
   const sb = supabaseAdmin(env);
@@ -3851,6 +3849,38 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
   if (['succeeded', 'failed', 'canceled'].includes(j.status)) {
     return err(409, `job already ${j.status}`);
   }
+  // Best-effort: tell Modal to actually kill the GPU container running
+  // this job. mesh_start with op_type=cancel reads the function_call
+  // ID we saved in /data/<job_id>.call_id and runs FunctionCall.cancel().
+  // Falls through silently if Modal is unreachable so the Supabase
+  // bookkeeping still happens.
+  let modalCancelled = false;
+  let modalError: string | null = null;
+  if (env.MODAL_MESH_START_URL && env.MODAL_SHARED_SECRET) {
+    try {
+      const mr = await fetch(env.MODAL_MESH_START_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          _auth: env.MODAL_SHARED_SECRET,
+          op_type: 'cancel',
+          // Modal mesh_start persisted call_id under the same job_id it
+          // received from the worker — full `modal_<uuid>` prefix.
+          job_id: jobId,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (mr.ok) {
+        const mj = await mr.json() as { cancelled?: boolean; error?: string };
+        modalCancelled = !!mj.cancelled;
+        modalError = mj.error || null;
+      } else {
+        modalError = `HTTP ${mr.status}`;
+      }
+    } catch (e) {
+      modalError = e instanceof Error ? e.message : String(e);
+    }
+  }
   if (refund) {
     await addCredits(env, j.user_id, j.credit_cost);
   }
@@ -3859,7 +3889,12 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
     error: refund ? 'admin canceled' : 'admin canceled (no refund)',
     finished_at: new Date().toISOString(),
   }).eq('id', jobId);
-  return json({ ok: true, refunded: refund ? j.credit_cost : 0 });
+  return json({
+    ok: true,
+    refunded: refund ? j.credit_cost : 0,
+    modalCancelled,
+    modalError,
+  });
 }
 
 /** POST /api/admin/users/ban  body: { userId, ban: boolean }

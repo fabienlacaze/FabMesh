@@ -780,11 +780,11 @@
           });
           const j = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
-          showAdminInfo(
-            'Cancelled',
-            j.refunded > 0 ? `Refunded ${j.refunded} credits.` : 'No refund issued.',
-            'ok',
-          );
+          const refundLine = j.refunded > 0 ? `Refunded ${j.refunded} credits.` : 'No refund issued.';
+          const modalLine = j.modalCancelled
+            ? 'Modal GPU killed.'
+            : (j.modalError ? `Modal: ${j.modalError}` : 'Modal: nothing to cancel.');
+          showAdminInfo('Cancelled', `${refundLine}\n${modalLine}`, 'ok');
           loadActiveJobs();
         },
         { refundChoice: true, okLabel: 'Stop', okColor: 'var(--err)' },
@@ -928,11 +928,12 @@
         if (t === 'users'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
       });
     });
-    // Poll active jobs every 30s when that tab is open.
+    // Poll active jobs every 5s when that tab is open. Endpoint only
+    // hits Supabase (no Modal, no Replicate), so 12 reqs/min is fine.
     setInterval(() => {
       const activeTab = document.querySelector('.tab.active');
       if (activeTab?.dataset?.tab === 'active') loadActiveJobs();
-    }, 30_000);
+    }, 5_000);
 
     refresh();
   </script>
