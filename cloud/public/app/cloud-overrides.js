@@ -173,6 +173,14 @@
     // show by hand.
     installActionCostBadges();
 
+    // Pull the live prices set by the admin via /admin > Pricing and
+    // overwrite the HTML data-credits attributes + the per-button
+    // badges. Without this the UI keeps showing the hardcoded defaults
+    // even after the admin saved new values.
+    syncLivePricing();
+    // Re-sync every 5 min in case the admin changed a price mid-session.
+    setInterval(syncLivePricing, 5 * 60_000);
+
     // Hide buttons that need a Three.js sculpting/selection editor in
     // the browser (Sculpt, Paint vertex, Select) — not feasible to
     // port in cloud without a major UI effort. Same for Re-Texture
@@ -405,6 +413,76 @@
    * every checked option, rewrites the "Generate 3D (N credits)" pill.
    * Re-runs on any change in the advanced texture options.
    * ────────────────────────────────────────────────────────────────── */
+  /* Sync the static data-credits attributes + the per-button cost
+   * badges with the dynamic pricing the admin set in /admin > Pricing.
+   * Maps PRICING_DEFAULTS keys (server-side) to the HTML element ids
+   * (UI-side). Runs once on boot — admin tweaks propagate to users
+   * within 30s thanks to the public endpoint's Cache-Control + the
+   * worker's _getPricing 60s in-memory cache. */
+  const PRICING_TO_DATA_CREDITS = {
+    mesh_fast:        'ws-trellis2-preset:fast',
+    mesh_balanced:    'ws-trellis2-preset:balanced',
+    mesh_quality:     'ws-trellis2-preset:quality',
+    mesh_multiref:    'ws-trellis2-multiref',
+    mesh_refine:      'ws-trellis2-refine',
+    mesh_rectify:     'ws-trellis2-rectify',
+    mesh_quality_plus:'ws-trellis2-quality-plus',
+    mesh_ultra_q:     'ws-trellis2-ultra-q',
+    mesh_ultra_hd:    'ws-trellis2-ultra-hd',
+    mesh_face_fix:    'ws-trellis2-face-fix',
+  };
+  // Tool-button badges (ACTION_COSTS keys) -> pricing keys.
+  const ACTION_COST_TO_PRICING = {
+    'ws-modify-btn':       'modify',
+    'ws-autoinpaint-btn':  'auto_inpaint',
+    'ws-mask-btn':         'mask_inpaint',
+    'ws-facefix-btn':      'face_fix_image',
+    'ws-removebg-btn':     'remove_background',
+    'ws-resolution-btn':   'upscale',
+  };
+  async function syncLivePricing() {
+    let prices;
+    try {
+      const r = await fetch('/api/pricing');
+      if (!r.ok) return;
+      const j = await r.json();
+      prices = j.prices || {};
+    } catch { return; }
+    for (const [pkey, target] of Object.entries(PRICING_TO_DATA_CREDITS)) {
+      const v = prices[pkey];
+      if (typeof v !== 'number') continue;
+      if (target.includes(':')) {
+        const [selectId, optVal] = target.split(':');
+        const opt = document.querySelector(`#${selectId} option[value="${optVal}"]`);
+        if (opt) opt.dataset.credits = String(v);
+      } else {
+        const el = document.getElementById(target);
+        if (el) el.dataset.credits = String(v);
+      }
+    }
+    // Re-attach action cost badges using fresh prices.
+    if (typeof window.ACTION_COSTS_OVERRIDE !== 'object') {
+      window.ACTION_COSTS_OVERRIDE = {};
+    }
+    for (const [btnId, pkey] of Object.entries(ACTION_COST_TO_PRICING)) {
+      const v = prices[pkey];
+      if (typeof v !== 'number') continue;
+      const btn = document.getElementById(btnId);
+      if (!btn) continue;
+      const existing = btn.querySelector('.cloud-cost-badge');
+      if (existing) existing.textContent = String(v);
+    }
+    // Trigger mesh meter recompute (it'll read the fresh data-credits).
+    const preset = document.getElementById('ws-trellis2-preset');
+    if (preset) preset.dispatchEvent(new Event('change'));
+    // Update the image cost pill — refreshButtonLabelsAndHiding reads
+    // #ws-image-cost-value, so just bumping its text is enough.
+    const imgVal = document.getElementById('ws-image-cost-value');
+    if (imgVal && typeof prices.text2image === 'number') {
+      imgVal.textContent = String(prices.text2image);
+    }
+  }
+
   function installMeshCostMeter() {
     const preset = document.getElementById('ws-trellis2-preset');
     if (!preset) return;
