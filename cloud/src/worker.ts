@@ -338,6 +338,34 @@ const mock = {
 
 const MOCK_COOKIE = 'myfm_mock_session';
 
+// Ban list cached in module scope. 60 s TTL — admin actions trigger
+// a forced refresh by writing to R2 and clearing this. R2 read per
+// request would double the cost-per-API-call; we accept up-to-60 s
+// staleness for a banned user (they keep working briefly, no big
+// deal versus the cost saving).
+let _banListCache: { set: Set<string>; ts: number } = { set: new Set(), ts: 0 };
+const BAN_LIST_KEY = '_meta/banned-users.json';
+const BAN_LIST_TTL_MS = 60_000;
+
+async function _getBannedUserIds(env: Env): Promise<Set<string>> {
+  const now = Date.now();
+  if (now - _banListCache.ts < BAN_LIST_TTL_MS) return _banListCache.set;
+  try {
+    const obj = await env.MESHES.get(BAN_LIST_KEY);
+    const list = obj ? await obj.json() : [];
+    const set = new Set<string>(Array.isArray(list) ? list as string[] : []);
+    _banListCache = { set, ts: now };
+    return set;
+  } catch {
+    _banListCache = { set: new Set(), ts: now };
+    return _banListCache.set;
+  }
+}
+
+function _invalidateBanCache() {
+  _banListCache = { set: new Set(), ts: 0 };
+}
+
 async function getSessionUser(req: Request, env: Env): Promise<SessionUser | null> {
   if (isMock(env)) {
     const c = parseCookies(req);
@@ -351,7 +379,6 @@ async function getSessionUser(req: Request, env: Env): Promise<SessionUser | nul
   const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
   if (!url || !anon) return null;
 
-  // Validate token against Supabase Auth (cheap call, returns the user).
   const meRes = await fetch(`${url}/auth/v1/user`, {
     headers: { 'authorization': `Bearer ${token}`, 'apikey': anon },
   });
@@ -359,7 +386,11 @@ async function getSessionUser(req: Request, env: Env): Promise<SessionUser | nul
   const me = await meRes.json() as { id?: string; email?: string };
   if (!me.id) return null;
 
-  // Fetch credit balance from the admin client (bypass RLS).
+  // Ban check — banned users look like "not authenticated" to every
+  // downstream caller, which is exactly what we want (clean 401).
+  const banned = await _getBannedUserIds(env);
+  if (banned.has(me.id)) return null;
+
   const sb = supabaseAdmin(env);
   const { data: profile } = await sb
     .from('profiles')
@@ -3771,6 +3802,120 @@ async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
   return json({ rows });
 }
 
+/** GET /api/admin/jobs/active — ADMIN ONLY. Returns every job whose
+ *  status is still in-flight (starting / processing / queued). Joined
+ *  with profiles so the UI can show the user email next to each row. */
+async function handleAdminActiveJobs(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .select('id, user_id, asset_type, mode, status, credit_cost, created_at, options, project_name')
+    .in('status', ['starting', 'processing', 'queued'])
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) return err(500, error.message);
+  const rows = (data || []) as Array<{ user_id: string; [k: string]: unknown }>;
+  const userIds = [...new Set(rows.map((j) => j.user_id))];
+  const emails = new Map<string, string | null>();
+  if (userIds.length) {
+    const { data: profiles } = await sb.from('profiles').select('id, email').in('id', userIds);
+    for (const p of (profiles || []) as Array<{ id: string; email: string | null }>) {
+      emails.set(p.id, p.email);
+    }
+  }
+  return json({ jobs: rows.map((j) => ({ ...j, email: emails.get(j.user_id) ?? null })) });
+}
+
+/** POST /api/admin/jobs/cancel  body: { jobId }
+ *  Refunds credits + marks the job canceled. Modal-side the GPU keeps
+ *  running for ~30 s until the container is reused; we accept that
+ *  cost — there's no public Modal API to abort a running spawn. */
+async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { jobId?: string } | null = null;
+  try { body = await req.json() as { jobId?: string }; } catch { return err(400, 'body required'); }
+  const jobId = String(body?.jobId || '').trim();
+  if (!jobId) return err(400, 'jobId required');
+  const sb = supabaseAdmin(env);
+  const { data: job } = await sb.from('jobs')
+    .select('user_id, status, credit_cost')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (!job) return err(404, 'job not found');
+  const j = job as { user_id: string; status: string; credit_cost: number };
+  if (['succeeded', 'failed', 'canceled'].includes(j.status)) {
+    return err(409, `job already ${j.status}`);
+  }
+  await addCredits(env, j.user_id, j.credit_cost);
+  await sb.from('jobs').update({
+    status: 'canceled',
+    error: 'admin canceled',
+    finished_at: new Date().toISOString(),
+  }).eq('id', jobId);
+  return json({ ok: true, refunded: j.credit_cost });
+}
+
+/** POST /api/admin/users/ban  body: { userId, ban: boolean }
+ *  Stores the ban list in R2 (no schema migration needed). The
+ *  banlist cache in getSessionUser is invalidated immediately so the
+ *  user is locked out on their next request. */
+async function handleAdminBanUser(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { userId?: string; ban?: boolean } | null = null;
+  try { body = await req.json() as { userId?: string; ban?: boolean }; } catch { return err(400, 'body required'); }
+  const userId = String(body?.userId || '').trim();
+  const ban = !!body?.ban;
+  if (!userId) return err(400, 'userId required');
+  let list: string[] = [];
+  try {
+    const obj = await env.MESHES.get(BAN_LIST_KEY);
+    if (obj) {
+      const raw = await obj.json();
+      if (Array.isArray(raw)) list = raw as string[];
+    }
+  } catch {}
+  const set = new Set(list);
+  if (ban) set.add(userId); else set.delete(userId);
+  await env.MESHES.put(BAN_LIST_KEY, JSON.stringify([...set]));
+  _invalidateBanCache();
+  return json({ ok: true, banned: ban, total: set.size });
+}
+
+/** GET /api/admin/users — ADMIN ONLY. Profiles + ban flag annotated. */
+async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('profiles')
+    .select('id, email, credits, created_at')
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) return err(500, error.message);
+  const banned = await _getBannedUserIds(env);
+  const users = (data || []) as Array<{ id: string; [k: string]: unknown }>;
+  return json({ users: users.map((u) => ({ ...u, banned: banned.has(u.id) })) });
+}
+
+/** GET /api/admin/users/<userId>/meshes — ADMIN ONLY. Lists every
+ *  succeeded mesh job for a user so the admin can preview / moderate. */
+async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .select('id, asset_type, mesh_url, status, project_name, created_at, options')
+    .eq('user_id', userId)
+    .eq('status', 'succeeded')
+    .not('mesh_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) return err(500, error.message);
+  return json({ meshes: data || [] });
+}
+
 /** GET /api/admin/history.xlsx — ADMIN ONLY full export with margin. */
 async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> {
   const userOrResp = await _requireAdmin(req, env);
@@ -3999,6 +4144,10 @@ export default {
         if (pathname === '/api/admin/history.csv'     && method === 'GET')  return await handleAdminHistoryCsv(req, env);
         if (pathname === '/api/admin/history.xlsx'    && method === 'GET')  return await handleAdminHistoryXls(req, env);
         if (pathname === '/api/admin/stats.json'      && method === 'GET')  return await handleAdminStats(req, env);
+        if (pathname === '/api/admin/jobs/active'     && method === 'GET')  return await handleAdminActiveJobs(req, env);
+        if (pathname === '/api/admin/jobs/cancel'     && method === 'POST') return await handleAdminCancelJob(req, env);
+        if (pathname === '/api/admin/users'           && method === 'GET')  return await handleAdminListUsers(req, env);
+        if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
         if (pathname === '/download/track'            && method === 'GET')  return await handleDownloadTrack(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);
@@ -4007,6 +4156,10 @@ export default {
         // /api/jobs/[id] — dynamic
         const jobMatch = pathname.match(/^\/api\/jobs\/([^/]+)\/?$/);
         if (jobMatch && method === 'GET') return await handleJob(req, env, decodeURIComponent(jobMatch[1]));
+
+        // /api/admin/users/<userId>/meshes — dynamic
+        const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
+        if (adminMeshes && method === 'GET') return await handleAdminUserMeshes(req, env, decodeURIComponent(adminMeshes[1]));
 
         return err(404, `no route for ${method} ${pathname}`);
       }
