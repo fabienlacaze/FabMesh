@@ -2647,10 +2647,18 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     meshUrl?: string; meshId?: string; opType?: string;
     params?: Record<string, unknown>;
   };
-  const allowed = new Set(['smooth', 'decimate', 'center', 'fix_normals', 'fill_holes']);
+  const allowed = new Set([
+    'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
+    'subdivide', 'align_texture', 'material', 'retex_swap',
+  ]);
   const op = (opType ?? '').toLowerCase();
   if (!allowed.has(op)) {
     return err(400, `opType must be one of ${Array.from(allowed).join(', ')}`);
+  }
+  // retex_swap reads payload.params.image_url — surface a clearer
+  // 400 if it's missing instead of letting Modal noop the op.
+  if (op === 'retex_swap' && !(params && (params as Record<string, unknown>).image_url)) {
+    return err(400, 'retex_swap needs params.image_url');
   }
 
   // Resolve mesh URL — caller can pass URL directly OR a job id.

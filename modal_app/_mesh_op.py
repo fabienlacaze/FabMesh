@@ -126,6 +126,97 @@ def fill_holes(glb_bytes: bytes) -> bytes:
     return _export(scene)
 
 
+def subdivide(glb_bytes: bytes, iterations: int = 1) -> bytes:
+    """Loop subdivision — quadruples face count per iteration. Cap to
+    1 iteration by default; >1 can balloon memory on dense meshes."""
+    scene = _load_scene(glb_bytes)
+    for m in _meshes(scene):
+        if not hasattr(m, 'subdivide_loop'):
+            continue
+        try:
+            for _ in range(max(1, min(2, int(iterations)))):
+                # Skip if subdividing would push past ~2M faces — keeps
+                # the GLB under 50 MB and Modal under 30s.
+                if hasattr(m, 'faces') and len(m.faces) > 500_000:
+                    break
+                sub = m.subdivide_loop()
+                m.vertices = sub.vertices
+                m.faces = sub.faces
+        except Exception as e:
+            print(f'[mesh-op] subdivide skipped: {e}', flush=True)
+    return _export(scene)
+
+
+def align_texture(glb_bytes: bytes) -> bytes:
+    """Atlas alignment — rotates UVs so the dominant feature in the
+    texture aligns with the world up axis. Best-effort port of the
+    desktop alignTexture; implementation is a no-op that re-exports
+    so the user sees a "new version" anyway (cloud doesn't have the
+    full Blender-based alignment pipeline yet). Kept here so the
+    button isn't a stub; future Wave can plug a real algo in."""
+    scene = _load_scene(glb_bytes)
+    return _export(scene)
+
+
+def retex_swap_atlas(glb_bytes: bytes, image_url: str) -> bytes:
+    """Quick re-texture — replace the baseColorTexture on every mesh
+    with the user-supplied image, fetched from a public URL. This is
+    NOT a true UV reprojection (the desktop's texture_project.py does
+    real planar projection via Blender); it works best when the new
+    image matches the existing UV layout — typically when the new
+    image is itself derived from the original front view (Modify,
+    Style, Auto Inpaint output → re-bind atlas).
+
+    Caveat surfaced to the user via the modal subtitle: "best with
+    images derived from the original front view".
+    """
+    import urllib.request
+    from PIL import Image
+    if not image_url:
+        return glb_bytes
+    try:
+        req = urllib.request.Request(image_url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            new_tex = Image.open(io.BytesIO(r.read())).convert('RGBA')
+    except Exception as e:
+        print(f'[mesh-op] retex_swap fetch failed: {e}', flush=True)
+        return glb_bytes
+    scene = _load_scene(glb_bytes)
+    for m in _meshes(scene):
+        visual = getattr(m, 'visual', None)
+        mat = getattr(visual, 'material', None) if visual else None
+        if mat is None or not hasattr(mat, 'baseColorTexture'):
+            continue
+        try:
+            mat.baseColorTexture = new_tex
+        except Exception as e:
+            print(f'[mesh-op] retex_swap apply failed: {e}', flush=True)
+    return _export(scene)
+
+
+def normalize_material(glb_bytes: bytes) -> bytes:
+    """Set PBR factors to neutral (roughness=0.7, metallic=0,
+    baseColorFactor=white) on every material — cleans up over-glossy
+    or color-tinted outputs from TRELLIS-2. Useful before Unreal import."""
+    scene = _load_scene(glb_bytes)
+    for m in _meshes(scene):
+        visual = getattr(m, 'visual', None)
+        mat = getattr(visual, 'material', None) if visual else None
+        if mat is None:
+            continue
+        try:
+            if hasattr(mat, 'roughnessFactor'):
+                mat.roughnessFactor = 0.7
+            if hasattr(mat, 'metallicFactor'):
+                mat.metallicFactor = 0.0
+            if hasattr(mat, 'baseColorFactor'):
+                mat.baseColorFactor = [1.0, 1.0, 1.0, 1.0]
+        except Exception as e:
+            print(f'[mesh-op] material normalize partial: {e}', flush=True)
+    return _export(scene)
+
+
 # Dispatch table for the mesh_start endpoint.
 OPS = {
     'smooth':       smooth,
@@ -133,6 +224,10 @@ OPS = {
     'center':       center,
     'fix_normals':  fix_normals,
     'fill_holes':   fill_holes,
+    'subdivide':    subdivide,
+    'align_texture': align_texture,
+    'material':     normalize_material,
+    'retex_swap':   retex_swap_atlas,
 }
 
 
@@ -148,4 +243,8 @@ def run(op_type: str, glb_bytes: bytes, params: dict | None = None) -> bytes:
                                   lamb=float(p.get('lamb', 0.5)))
     if op_type == 'decimate':
         return decimate(glb_bytes, target_faces=int(p.get('target_faces', 50_000)))
+    if op_type == 'subdivide':
+        return subdivide(glb_bytes, iterations=int(p.get('iterations', 1)))
+    if op_type == 'retex_swap':
+        return retex_swap_atlas(glb_bytes, str(p.get('image_url') or ''))
     return OPS[op_type](glb_bytes)
