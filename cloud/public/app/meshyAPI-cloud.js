@@ -1052,7 +1052,36 @@
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
     },
-    maskInpaint: async () => ({ success: false, error: 'Mask inpaint is Desktop-only.' }),
+    maskInpaint: async ({ imagePath, maskDataUrl, prompt } = {}) => {
+      // Cloud port of the desktop /mask-inpaint IPC (main.js:2790).
+      // Frontend sends image URL + base64 mask + prompt; Worker
+      // decodes the mask, uploads it to R2, and forwards to Modal's
+      // image_op endpoint with op='mask_inpaint'.
+      if (!imagePath)   return { success: false, error: 'imagePath required' };
+      if (!maskDataUrl) return { success: false, error: 'maskDataUrl required' };
+      if (!prompt)      return { success: false, error: 'prompt required' };
+      try {
+        const r = await postJSON('/api/mask-inpaint', { imageUrl: imagePath, maskDataUrl, prompt });
+        if (r?.success && (r.newPath || r.path)) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: true, newPath: r.newPath || r.path };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
+    // Image-level Face Fix (NOT the 3D atlas one). OpenCV Haar Cascade
+    // → SDXL Inpaint over the face bbox. Was a stub before Wave 3.
+    faceFixImage: async ({ imagePath, strength } = {}) => {
+      if (!imagePath) return { success: false, error: 'imagePath required' };
+      try {
+        const r = await postJSON('/api/face-fix-image', { imageUrl: imagePath, strength });
+        if (r?.success && (r.newPath || r.path)) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: true, newPath: r.newPath || r.path };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
     copyMeshToProject: async () => ({ ok: false, cloud: true, message: 'Copy mesh to project: Desktop-only.' }),
     createProjectFromMesh: async () => ({ ok: false, cloud: true, message: 'Create project from mesh: Desktop-only.' }),
     exportToUnreal: async ({ sourcePath } = {}) => {

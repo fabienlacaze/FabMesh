@@ -74,6 +74,11 @@ _base_image = (
         # trust_remote_code — without these the @enter(snap=True)
         # crashes with ImportError before the snapshot is even taken.
         "einops>=0.7", "timm>=0.9",
+        # opencv-python-headless ships the Haar Cascade XMLs we need
+        # for face detection in the image_op face_fix op. Pure CPU
+        # (no GPU), runs in ~50ms per image. headless variant avoids
+        # libQt5 — no need for GUI windowing.
+        "opencv-python-headless",
     )
 )
 
@@ -853,8 +858,9 @@ class MyFabmeshBackview:
         image_url = (payload.get("image_url") or "").strip()
         if not image_url:
             raise HTTPException(status_code=400, detail="image_url required")
-        if op not in ("modify", "auto_inpaint"):
-            raise HTTPException(status_code=400, detail="op must be 'modify' or 'auto_inpaint'")
+        if op not in ("modify", "auto_inpaint", "mask_inpaint", "face_fix_image"):
+            raise HTTPException(status_code=400,
+                detail="op must be 'modify', 'auto_inpaint', 'mask_inpaint' or 'face_fix_image'")
 
         try:
             req = urllib.request.Request(
@@ -880,7 +886,7 @@ class MyFabmeshBackview:
                 steps=int(payload.get("steps") or 30),
             )
             tag = "modify"
-        else:  # auto_inpaint
+        elif op == "auto_inpaint":
             from modal_app._auto_inpaint import generate as ai_generate
             target_text = (payload.get("target_text") or "").strip()
             if not target_text:
@@ -895,6 +901,43 @@ class MyFabmeshBackview:
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e))
             tag = "auto_inpaint"
+
+        elif op == "mask_inpaint":
+            # Caller-supplied mask (drawn by the user in the renderer's
+            # Draw Mask modal). Reuses the SDXL Inpainting pipe loaded
+            # by _get_auto_inpaint_models() — same model, different mask
+            # source.
+            from modal_app._mask_inpaint import generate as mask_generate
+            mask_url = (payload.get("mask_url") or "").strip()
+            prompt   = (payload.get("prompt") or "").strip()
+            if not mask_url: raise HTTPException(status_code=400, detail="mask_url required for mask_inpaint")
+            if not prompt:   raise HTTPException(status_code=400, detail="prompt required for mask_inpaint")
+            try:
+                req = urllib.request.Request(mask_url, headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    mask_img = Image.open(io.BytesIO(r.read())).convert("L")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"mask download: {e}")
+            _, _, inpaint_pipe = self._get_auto_inpaint_models()
+            img = mask_generate(inpaint_pipe, src_img, mask_img, prompt)
+            tag = "mask_inpaint"
+
+        else:  # face_fix_image
+            # Auto face detection (OpenCV Haar) + SDXL Inpaint on the
+            # detected bbox. Mirrors the mesh-level face_fix but applied
+            # to a flat 2D image (no GLB atlas).
+            from modal_app._face_fix_image import generate as ffi_generate
+            _, _, inpaint_pipe = self._get_auto_inpaint_models()
+            try:
+                img = ffi_generate(
+                    inpaint_pipe, src_img,
+                    strength=float(payload.get("strength") or 0.45),
+                )
+            except ValueError as e:
+                # No face detected — caller refunds credits.
+                raise HTTPException(status_code=422, detail=str(e))
+            tag = "face_fix_image"
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)

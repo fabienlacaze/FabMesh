@@ -4459,7 +4459,23 @@ document.getElementById('bright-apply')?.addEventListener('click', async () => {
   const sh = document.getElementById('bright-sharpness').value / 100;
   await runQuickEdit('brightness', { brightness: b, contrast: c, saturation: s, sharpness: sh });
 });
-document.getElementById('ws-facefix-btn')?.addEventListener('click', () => runQuickEdit('facefix'));
+document.getElementById('ws-facefix-btn')?.addEventListener('click', async () => {
+  // Cloud-aware: prefer the real faceFixImage API when present (Modal
+  // SDXL inpaint), fall back to the runQuickEdit('facefix') canvas
+  // version on desktop. Desktop never wires faceFixImage.
+  const target = editTarget(state.currentProject);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  if (typeof window.meshyAPI?.faceFixImage === 'function') {
+    showToast('Face fix (cloud SDXL)...', 'info', 2000);
+    try {
+      const r = await window.meshyAPI.faceFixImage({ imagePath: target });
+      if (r?.success) { showToast('Face fix done', 'success'); await reloadCurrentProject(); }
+      else            { showToast('Face fix failed: ' + (r?.error || 'unknown'), 'error', 5000); }
+    } catch (e) { showToast('Face fix error: ' + e.message, 'error', 5000); }
+    return;
+  }
+  runQuickEdit('facefix');
+});
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
 // ============================================================
 // CROP TOOL — interactive modal with drag selection + presets
