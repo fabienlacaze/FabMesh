@@ -65,12 +65,12 @@ export interface Env {
   // where the realvis T-pose pipeline doesn't make sense. Single SDXL
   // pass with IPAdapter Plus — same RealVis snapshot as backview/tpose.
   MODAL_SHEET_URL?: string;
-  // SDXL img2img (Modify image) — direct port of the desktop's /img2img
-  // endpoint. Reuses RealVisXL via from_pipe so cold start ≈ back-view.
-  MODAL_MODIFY_URL?: string;
-  // Auto-inpaint — CLIPSeg + SDXL Inpainting. First call lazy-loads
-  // both models (~45s); subsequent calls reuse the cached pipe (~17s).
-  MODAL_AUTO_INPAINT_URL?: string;
+  // Unified image-op endpoint — single Modal URL that dispatches
+  // between img2img (modify) and CLIPSeg+SDXL Inpaint (auto_inpaint)
+  // based on payload.op. We use one endpoint because Modal Starter
+  // caps Web Functions at 8 per app and we'd otherwise need to
+  // upgrade. Same URL for both ops; the Worker sets op in the body.
+  MODAL_IMAGE_OP_URL?: string;
   // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
   // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
   // to the Replicate Cog.
@@ -1682,93 +1682,67 @@ async function callModalTpose(env: Env, userId: string, input: {
   throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
 }
 
-/** Auto-inpaint — CLIPSeg picks the area, SDXL Inpaint fills it. */
-async function callModalAutoInpaint(env: Env, userId: string, input: {
+/** Unified image-op caller — POSTs to MODAL_IMAGE_OP_URL with `op` to
+ *  dispatch between modify (img2img) and auto_inpaint (CLIPSeg+SDXL).
+ *  Returns either the persisted R2 URL or a discriminated mask-empty
+ *  shape for the auto_inpaint case (so the Worker can refund). */
+async function callModalImageOp(env: Env, userId: string, input: {
+  op: 'modify' | 'auto_inpaint';
   imageUrl: string;
-  targetText: string;
   prompt?: string;
+  strength?: number;          // modify only
+  seed?: number;
+  steps?: number;
+  targetText?: string;        // auto_inpaint only
   dilate?: number;
 }, folder: string): Promise<{ url: string } | { maskEmpty: true; error: string }> {
-  const url = env.MODAL_AUTO_INPAINT_URL;
+  const url = env.MODAL_IMAGE_OP_URL;
   const secret = env.MODAL_SHARED_SECRET;
-  if (!url) throw new Error('MODAL_AUTO_INPAINT_URL not set');
+  if (!url) throw new Error('MODAL_IMAGE_OP_URL not set');
   if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const body: Record<string, unknown> = {
+    _auth: secret,
+    op: input.op,
+    image_url: input.imageUrl,
+    prompt: input.prompt ?? '',
+  };
+  if (input.op === 'modify') {
+    body.strength = input.strength ?? 0.55;
+    body.seed = input.seed;
+    body.steps = input.steps;
+  } else {
+    body.target_text = input.targetText ?? '';
+    body.dilate = input.dilate ?? 15;
+  }
 
   const t0 = Date.now();
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _auth: secret,
-      image_url: input.imageUrl,
-      target_text: input.targetText,
-      prompt: input.prompt ?? '',
-      dilate: input.dilate ?? 15,
-    }),
-    // 1st call lazy-loads CLIPSeg + SDXL inpaint (~45s) + inference 17s,
-    // so 5 min covers cold + 1 retry.
+    body: JSON.stringify(body),
+    // auto_inpaint cold-start lazy-loads ~7 GB (CLIPSeg + SDXL inpaint)
+    // so 5 min covers cold + inference + 1 retry. Modify is much faster
+    // but reuses the same budget.
     signal: AbortSignal.timeout(300_000),
   });
   if (r.status === 422) {
-    // Mask empty — caller should refund credits. Return a discriminated
-    // shape instead of throwing so handleAutoInpaint can refund cleanly.
-    const txt = await r.text();
-    return { maskEmpty: true, error: txt };
+    return { maskEmpty: true, error: (await r.text()).slice(0, 200) };
   }
   if (!r.ok) {
-    throw new Error(`Modal auto_inpaint HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    throw new Error(`Modal image_op (${input.op}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
   }
   const buf = await r.arrayBuffer();
-  console.log(`[modal] auto_inpaint dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  console.log(`[modal] image_op op=${input.op} dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+
   if (env.MESHES && env.R2_PUBLIC_URL) {
-    const key = `${userId}/${folder}/${Date.now()}_inpaint.png`;
+    const tag = input.op === 'modify' ? 'modified' : 'inpaint';
+    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
+    const key = `${userId}/${folder}/${Date.now()}_${seed}_${tag}.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
     return { url: `${env.R2_PUBLIC_URL}/${key}` };
   }
-  throw new Error('R2 bucket unavailable; cannot persist auto_inpaint output');
-}
-
-/** SDXL img2img — desktop's "Modify image" tool. Sends the source image
- *  URL + prompt + strength to Modal; gets back a re-painted PNG. */
-async function callModalModify(env: Env, userId: string, input: {
-  imageUrl: string;
-  prompt: string;
-  strength?: number;
-  seed?: number;
-  steps?: number;
-}, folder: string): Promise<string> {
-  const url = env.MODAL_MODIFY_URL;
-  const secret = env.MODAL_SHARED_SECRET;
-  if (!url) throw new Error('MODAL_MODIFY_URL not set');
-  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
-
-  const t0 = Date.now();
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _auth: secret,
-      image_url: input.imageUrl,
-      prompt: input.prompt,
-      strength: input.strength ?? 0.55,
-      seed: input.seed,
-      steps: input.steps,
-    }),
-    signal: AbortSignal.timeout(180_000),
-  });
-  if (!r.ok) {
-    throw new Error(`Modal modify HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  }
-  const buf = await r.arrayBuffer();
-  console.log(`[modal] modify dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
-
-  if (env.MESHES && env.R2_PUBLIC_URL) {
-    const seed = input.seed ?? Math.floor(Math.random() * 1e9);
-    const key = `${userId}/${folder}/${Date.now()}_${seed}_modified.png`;
-    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return `${env.R2_PUBLIC_URL}/${key}`;
-  }
-  throw new Error('R2 bucket unavailable; cannot persist modify output');
+  throw new Error('R2 bucket unavailable; cannot persist image_op output');
 }
 
 /** 4-view orthographic model-sheet — port of multiview_sheet_gen.py.
@@ -2329,8 +2303,8 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
 async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  if (!env.MODAL_MODIFY_URL) {
-    return err(503, 'modify backend unavailable (MODAL_MODIFY_URL not configured)');
+  if (!env.MODAL_IMAGE_OP_URL) {
+    return err(503, 'modify backend unavailable (MODAL_IMAGE_OP_URL not configured)');
   }
   const { imageUrl, prompt, strength, seed, steps } = await req.json() as {
     imageUrl?: string;
@@ -2377,15 +2351,21 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
       error: `insufficient credits — modify costs ${cost} credits` }, { status: 402 });
   }
 
-  let path: string;
+  let url: string;
   const opStart = Date.now();
   try {
-    path = await callModalModify(env, user.id, {
+    const result = await callModalImageOp(env, user.id, {
+      op: 'modify',
       imageUrl, prompt: rawPrompt,
       strength: strength ?? 0.55,
       seed: seed ?? Math.floor(Math.random() * 1e9),
       steps,
     }, 'modified');
+    if ('maskEmpty' in result) {
+      // modify can't return mask-empty, but TS narrowing needs both arms.
+      throw new Error('unexpected mask_empty from modify');
+    }
+    url = result.url;
   } catch (e) {
     await addCredits(env, user.id, cost);
     await refundModalSpend(env, estimatedTotal);
@@ -2395,7 +2375,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   }
   await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
                      'succeeded', { op: 'modify', strength });
-  return json({ ok: true, success: true, path, newPath: path, creditsRemaining: remaining });
+  return json({ ok: true, success: true, path: url, newPath: url, creditsRemaining: remaining });
 }
 
 /** Auto-inpaint HTTP handler — desktop "Auto Inpaint" tool. NSFW
@@ -2404,7 +2384,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
 async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  if (!env.MODAL_AUTO_INPAINT_URL) {
+  if (!env.MODAL_IMAGE_OP_URL) {
     return err(503, 'auto-inpaint backend unavailable');
   }
   const { imagePath, imageUrl, targetText, prompt, dilate } = await req.json() as {
@@ -2453,7 +2433,8 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
 
   const opStart = Date.now();
   try {
-    const result = await callModalAutoInpaint(env, user.id, {
+    const result = await callModalImageOp(env, user.id, {
+      op: 'auto_inpaint',
       imageUrl: src, targetText, prompt: rawPrompt, dilate,
     }, 'inpaint');
     if ('maskEmpty' in result) {
