@@ -1226,6 +1226,25 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
 
     // Worker generates the job_id (uuid hex). Modal echoes it back.
     const jobId = 'modal_' + crypto.randomUUID().replace(/-/g, '');
+    // Insert the job BEFORE the Modal call so the admin's Active jobs
+    // tab sees it immediately. Without this the row only appeared
+    // after callModalMeshStart returned — and Modal cold-start
+    // sometimes takes 60-150s, leaving the admin staring at "No
+    // active jobs" while the user was already waiting.
+    await supabaseAdmin(env).from('jobs').insert({
+      id: jobId, user_id: user.id,
+      asset_type: input.asset_type, mode: input.mode, seed: input.seed,
+      credit_cost: cost, status: 'queued',
+      project_name: projectName,
+      options: {
+        rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
+        face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
+        backend: 'modal',
+        operation_type: 'mesh',
+        cost_usd: input.face_fix ? MODAL_COST_USD['mesh-face'] : MODAL_COST_USD['mesh'],
+      },
+      created_at: new Date().toISOString(),
+    });
     try {
       // Resolve TRELLIS-2 mode. ultra_q wins (1536 voxels for the
        // finest face detail), then quality_plus (cascade), then the
@@ -1260,27 +1279,16 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         ultra_hd: input.ultra_hd,
         multiref: input.multiref,
       });
+      // Modal accepted the spawn — flip queued -> processing.
+      await supabaseAdmin(env).from('jobs').update({ status: 'processing' }).eq('id', jobId);
     } catch (e: unknown) {
       await addCredits(env, user.id, cost);
-      return err(502, 'modal mesh-start failed: ' + (e instanceof Error ? e.message : String(e)));
+      const msg = e instanceof Error ? e.message : String(e);
+      await supabaseAdmin(env).from('jobs').update({
+        status: 'failed', error: msg, finished_at: new Date().toISOString(),
+      }).eq('id', jobId);
+      return err(502, 'modal mesh-start failed: ' + msg);
     }
-    await supabaseAdmin(env).from('jobs').insert({
-      id: jobId, user_id: user.id,
-      asset_type: input.asset_type, mode: input.mode, seed: input.seed,
-      credit_cost: cost, status: 'processing',
-      project_name: projectName,
-      options: {
-        rectify: input.rectify, back_view: input.back_view, smooth: input.smooth,
-        face_fix: input.face_fix, ultra_hd: input.ultra_hd, fast: input.fast,
-        backend: 'modal',
-        // History tracking — operation_type + cost_usd let /api/history.csv
-        // compute the margin without re-deriving it from credit_cost alone.
-        // face_fix doubles GPU usage so the cost_usd is bumped.
-        operation_type: 'mesh',
-        cost_usd: input.face_fix ? MODAL_COST_USD['mesh-face'] : MODAL_COST_USD['mesh'],
-      },
-      created_at: new Date().toISOString(),
-    });
     return json({ jobId, creditsRemaining: remaining });
   }
 
