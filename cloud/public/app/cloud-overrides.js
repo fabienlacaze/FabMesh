@@ -220,14 +220,22 @@
   function installModalStatusPoll() {
     _pollModalStatus();
     if (_modalStatusTimer) clearInterval(_modalStatusTimer);
-    // Poll every 30s — cheap (R2 read), keeps the pill fresh during
-    // long edit sessions.
-    _modalStatusTimer = setInterval(_pollModalStatus, 30_000);
-    // Force-refresh after a click on any AI tool button: the click
-    // itself usually triggers an op so we want the freshest answer.
+    // Poll every 60s — warm/cold state only flips every ~9 min so the
+    // pill stays accurate within ±1 min, and it halves R2 read load
+    // vs the previous 30s.
+    _modalStatusTimer = setInterval(_pollModalStatus, 60_000);
+    // Force-refresh after a click on an AI tool button — the click
+    // is about to fire an op so we want the freshest answer for the
+    // ETA. Throttled to once per 5 s so a furious clicker doesn't
+    // hammer the endpoint.
+    let _lastClickPoll = 0;
     document.addEventListener('click', (e) => {
       if (e.target && e.target.closest && e.target.closest('.tool-btn')) {
-        _pollModalStatus();
+        const now = Date.now();
+        if (now - _lastClickPoll > 5000) {
+          _lastClickPoll = now;
+          _pollModalStatus();
+        }
       }
     }, true);
   }
