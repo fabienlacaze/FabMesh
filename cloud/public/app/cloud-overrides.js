@@ -481,11 +481,13 @@
     pill.style.cssText = [
       'display:inline-flex', 'align-items:center', 'gap:6px',
       'padding:5px 12px', 'margin-right:8px',
-      'background:linear-gradient(135deg,#e94560,#a855f7)',
-      'color:#ffffff', 'border-radius:999px',
-      'font-size:12px', 'font-weight:600',
+      'background:linear-gradient(135deg,#ffd84a,#f5a623)',
+      'color:#1a1a1a', 'border-radius:999px',
+      'border:1px solid rgba(255,255,255,0.3)',
+      'font-size:12px', 'font-weight:700',
       'text-decoration:none', 'cursor:pointer',
-      'box-shadow:0 1px 4px rgba(168,85,247,0.4)',
+      'box-shadow:0 2px 6px rgba(245,166,35,0.5),inset 0 1px 0 rgba(255,255,255,0.4)',
+      'text-shadow:0 1px 0 rgba(255,255,255,0.3)',
     ].join(';');
     right.insertBefore(pill, right.firstChild);
     _creditsPillEl = pill;
