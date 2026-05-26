@@ -87,7 +87,9 @@ image = (
     # image). Kept here (NOT in _base_image) so adding it doesn't
     # invalidate mesh_image — which would re-build CuMesh + the
     # nvdiffrast + o-voxel CUDA stack for 30-60min for nothing.
-    .pip_install("opencv-python-headless")
+    # Same logic for trimesh: needed by mesh_start's op_type dispatch
+    # (smooth/decimate/center/fix_normals/fill_holes) but pure CPU.
+    .pip_install("opencv-python-headless", "trimesh>=4.0", "scipy>=1.10")
     .add_local_python_source("modal_app")
     .add_local_file(
         "modal_app/back_tpose_skeleton.png",
@@ -1279,17 +1281,66 @@ class MyFabmeshMesh:
 )
 @modal.fastapi_endpoint(method="POST")
 def mesh_start(payload: dict):
-    """Enqueue a TRELLIS-2 mesh job. Returns the job_id in <1 s; the
-    actual mesh work runs on a separate GPU container (MyFabmeshMesh
-    class) and writes the GLB to /data/<job_id>.glb in the shared
-    Volume. The Worker stores the id in Supabase and polls mesh_status
-    until the GLB is ready."""
+    """Dual-purpose endpoint:
+
+    - op_type unset OR 'generate'   → async TRELLIS-2 mesh job. Spawns
+      MyFabmeshMesh, returns {job_id, status: 'queued'} in <1s; the
+      Worker polls mesh_status until the GLB is ready.
+
+    - op_type ∈ {smooth, decimate, center, fix_normals, fill_holes} →
+      synchronous CPU mesh edit via trimesh. Caller supplies a
+      `mesh_url` (R2 / public HTTPS) we fetch, transform, and return
+      as base64-encoded GLB. ~1s wall-clock for typical meshes, no GPU.
+      We hijack this endpoint instead of adding a new one because
+      Modal Starter caps web functions at 8 and we're already at 8.
+
+    Body for the sync ops:
+        {
+          "_auth": "...",
+          "op_type": "smooth" | "decimate" | "center" | "fix_normals" | "fill_holes",
+          "mesh_url": "https://.../mesh.glb",
+          "params": { ... }   // op-specific (e.g. iterations, target_faces)
+        }
+    Returns: { "glb_base64": "...", "bytes": N }
+    """
     from fastapi import HTTPException
     import uuid
     expected = os.environ.get("SHARED_SECRET", "")
     provided = (payload.get("_auth") or "").strip()
     if not expected or provided != expected:
         raise HTTPException(status_code=401, detail="auth")
+
+    op_type = (payload.get("op_type") or "generate").strip().lower()
+
+    # ── Synchronous CPU mesh edits ──────────────────────────────────
+    if op_type != "generate":
+        from modal_app._mesh_op import OPS, run as run_mesh_op
+        if op_type not in OPS:
+            raise HTTPException(status_code=400,
+                detail=f"unknown op_type '{op_type}' (allowed: generate, {', '.join(OPS.keys())})")
+        mesh_url = (payload.get("mesh_url") or "").strip()
+        if not mesh_url:
+            raise HTTPException(status_code=400, detail="mesh_url required for op_type=" + op_type)
+        import urllib.request, base64
+        try:
+            req = urllib.request.Request(mesh_url, headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                src = r.read()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"mesh download: {e}")
+        try:
+            out = run_mesh_op(op_type, src, payload.get("params") or {})
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {
+            "ok": True,
+            "op_type": op_type,
+            "bytes": len(out),
+            "glb_base64": base64.b64encode(out).decode("ascii"),
+        }
+
+    # ── Async TRELLIS-2 generate (original behaviour) ───────────────
     if not payload.get("front_image_url"):
         raise HTTPException(status_code=400, detail="front_image_url required")
 

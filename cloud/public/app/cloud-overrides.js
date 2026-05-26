@@ -203,6 +203,13 @@
     'ws-mask-btn':          3,   // /api/mask-inpaint — user-painted mask
     // Other manual tools (clone, blur, picker, paint, crop, brightness,
     // symmetrize, color pick) are pure canvas ops — no badge.
+
+    // Mesh step — CPU trimesh ops via /api/mesh-op. ~1 credit flat each.
+    'ws-mesh-smooth-btn':       1,
+    'ws-mesh-decimate-btn':     1,
+    'ws-mesh-center-btn':       1,
+    'ws-mesh-fixnormals-btn':   1,
+    'ws-mesh-fillholes-btn':    1,
   };
 
   function _ensureCostBadgeStyle() {

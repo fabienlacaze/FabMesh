@@ -2635,6 +2635,91 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   }
 }
 
+/** POST /api/mesh-op — sync CPU mesh transformation via trimesh on
+ *  Modal. Routes through mesh_start with op_type set so we don't burn
+ *  a Modal Web Function slot. Returns the new GLB mirrored to R2. */
+async function handleMeshOp(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_MESH_START_URL) return err(503, 'mesh-op backend unavailable');
+
+  const { meshUrl, meshId, opType, params } = await req.json() as {
+    meshUrl?: string; meshId?: string; opType?: string;
+    params?: Record<string, unknown>;
+  };
+  const allowed = new Set(['smooth', 'decimate', 'center', 'fix_normals', 'fill_holes']);
+  const op = (opType ?? '').toLowerCase();
+  if (!allowed.has(op)) {
+    return err(400, `opType must be one of ${Array.from(allowed).join(', ')}`);
+  }
+
+  // Resolve mesh URL — caller can pass URL directly OR a job id.
+  let finalUrl = meshUrl ?? '';
+  if (!finalUrl && meshId) {
+    const { data } = await supabaseAdmin(env)
+      .from('jobs').select('mesh_url').eq('id', meshId).eq('user_id', user.id).maybeSingle();
+    finalUrl = (data as { mesh_url?: string } | null)?.mesh_url ?? '';
+  }
+  if (!finalUrl) return err(400, 'meshUrl or meshId required');
+
+  // Cheap op (CPU, ~$0.001 Modal) — 1 credit flat.
+  const COST_PER = 1;
+  const estimatedTotal = 0.005;
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false, error: 'daily Modal budget reached.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, COST_PER);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — ${op} costs ${COST_PER}` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    const r = await fetch(env.MODAL_MESH_START_URL!, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET ?? '',
+        op_type: op,
+        mesh_url: finalUrl,
+        params: params ?? {},
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!r.ok) throw new Error(`Modal mesh_op HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const data = await r.json() as { glb_base64?: string };
+    if (!data.glb_base64) throw new Error('Modal mesh_op missing glb_base64');
+
+    // Decode base64 → R2 → return URL.
+    const bin = atob(data.glb_base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (!env.MESHES || !env.R2_PUBLIC_URL) throw new Error('R2 binding required');
+    const key = `${user.id}/mesh-op/${Date.now()}_${op}.glb`;
+    await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
+    const url = `${env.R2_PUBLIC_URL}/${key}`;
+    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+                       COST_PER, opStart, Date.now(), 'succeeded',
+                       { op_type: op, mesh_url_in: finalUrl });
+    return json({ ok: true, success: true, path: url, newPath: url, mesh_url: url, creditsRemaining: remaining });
+  } catch (e) {
+    await addCredits(env, user.id, COST_PER);
+    await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+                       0, opStart, Date.now(), 'failed',
+                       { op_type: op, error: e instanceof Error ? e.message : String(e) });
+    return err(502, `mesh ${op} failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
  *  URL, returned as-is so the browser sees a same-origin response and
  *  bypasses CORS entirely. Used by every canvas tool that needs to
@@ -3765,6 +3850,7 @@ export default {
         if (pathname === '/api/copy-mesh-to-project'  && method === 'POST') return await handleCopyMeshToProject(req, env);
         if (pathname === '/api/upscale-image'         && method === 'POST') return await handleUpscaleImage(req, env);
         if (pathname === '/api/proxy-image'           && method === 'GET')  return await handleProxyImage(req, env);
+        if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
