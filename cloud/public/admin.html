@@ -146,6 +146,11 @@
     }
     .muted { color: var(--text-2); }
   </style>
+  <!-- Google's model-viewer web component (three.js + GLTFLoader bundled).
+       Lets us preview GLBs inline in the admin without sending users
+       off to gltf-viewer.donmccurdy.com (whose iframe can't reach the
+       R2 URL when CORS is off). -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 </head>
 <body>
   <h1>📊 MyFabmesh — Admin</h1>
@@ -782,8 +787,15 @@
           <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
             <div style="font-weight:600; font-size:13px;">${escapeHtml(m.project_name || '—')}</div>
             <div style="color:var(--text-2); font-size:11px;">${escapeHtml(m.asset_type)} · ${escapeHtml(fmtDate(m.created_at))}</div>
+            <model-viewer
+                src="${escapeHtml(m.mesh_url)}"
+                camera-controls
+                touch-action="pan-y"
+                shadow-intensity="1"
+                exposure="1"
+                style="width:100%; height:240px; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;">
+            </model-viewer>
             <a class="btn" href="${escapeHtml(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download GLB</a>
-            <a class="btn" href="https://gltf-viewer.donmccurdy.com/?model=${encodeURIComponent(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">👁 Open in viewer</a>
           </div>
         `).join('');
       } catch (e) {
