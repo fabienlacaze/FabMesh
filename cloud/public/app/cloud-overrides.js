@@ -166,6 +166,81 @@
     // Wire the live cost meter on the "Generate 3D" button so users
     // see the total credit cost change as they toggle options.
     installMeshCostMeter();
+
+    // Pin a small yellow "N credits" badge on every action button that
+    // actually spends credits, so users can read the cost without
+    // hovering / clicking. Mirrors what Generate 3D and Smooth already
+    // show by hand.
+    installActionCostBadges();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Cost badges on action buttons.
+   *
+   * The Worker is the source of truth on actual credit cost (worker.ts
+   * COST_PER_IMAGE / COST_PER_BACK / COST_PER_RECTIFY etc.). Keep this
+   * dict in lockstep with those constants when they change.
+   *
+   * Pattern: a tiny `<span class="cloud-cost-badge">N</span>` is
+   * appended to the button label. Click handlers are untouched.
+   * ────────────────────────────────────────────────────────────────── */
+  const ACTION_COSTS = {
+    // AI tools panel (right side of Image step) ----------------------
+    'ws-modify-btn':        2,   // /api/modify-image — SDXL img2img
+    'ws-autoinpaint-btn':   3,   // /api/auto-inpaint — CLIPSeg + SDXL inpaint
+    'ws-removebg-btn':      1,   // /api/remove-background
+    'ws-multiview-btn':     6,   // generateMultiviews — 6 views generated
+    // Resolution / Face Fix / Sym. Auto are canvas-only at the moment
+    // (no Modal call) → no badge so they read as "free" by absence.
+  };
+
+  function _ensureCostBadgeStyle() {
+    if (document.getElementById('cloud-cost-badge-style')) return;
+    const style = document.createElement('style');
+    style.id = 'cloud-cost-badge-style';
+    style.textContent = `
+      .cloud-cost-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 6px;
+        margin-left: 6px;
+        background: #f5c518;
+        color: #1a1a1a;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        vertical-align: middle;
+      }
+      .cloud-cost-badge::before {
+        content: '⚡';
+        margin-right: 2px;
+        font-size: 9px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function _attachCostBadge(button, credits) {
+    if (!button) return;
+    // Idempotent — skip if we already pinned one (e.g. on re-init).
+    if (button.querySelector('.cloud-cost-badge')) return;
+    const badge = document.createElement('span');
+    badge.className = 'cloud-cost-badge';
+    badge.textContent = String(credits);
+    badge.title = `${credits} credit${credits === 1 ? '' : 's'}`;
+    button.appendChild(badge);
+  }
+
+  function installActionCostBadges() {
+    _ensureCostBadgeStyle();
+    for (const [id, cost] of Object.entries(ACTION_COSTS)) {
+      _attachCostBadge(document.getElementById(id), cost);
+    }
   }
 
   /* ──────────────────────────────────────────────────────────────────
