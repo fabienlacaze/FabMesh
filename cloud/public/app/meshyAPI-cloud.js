@@ -559,6 +559,21 @@
     try { return localStorage.getItem(_promptKey(projectName)) || ''; }
     catch (_) { return ''; }
   }
+
+  // Push a newly-generated image URL into the current project's local
+  // cache so reloadCurrentProject() picks it up. Used by every shim
+  // that produces a new image (img2img, autoInpaint, maskInpaint,
+  // faceFixImage, upscale, etc.) — without this the user clicks
+  // Modify, the call succeeds, but the new version is invisible
+  // because the Worker stores it under /users/<id>/modified/ not
+  // /users/<id>/<project>/.
+  function _attachToCurrentProject(newPath, kind /* 'front'|'back' */) {
+    if (!newPath) return;
+    try {
+      const projectName = window.state?.currentProject?.name;
+      if (projectName) _appendCloudImages(projectName, [newPath], kind || 'front');
+    } catch (_) { /* ignore */ }
+  }
   function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */) {
     try {
       const k = _imgKey(projectName);
@@ -877,8 +892,10 @@
         try {
           const r = await postJSON('/api/upscale-image', { imageUrl: imagePath, scale: (params?.scale === 4 ? 4 : 2) });
           if (r?.success && (r.newPath || r.path)) {
+            const newPath = r.newPath || r.path;
+            _attachToCurrentProject(newPath, 'front');
             if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-            return { success: true, newPath: r.newPath || r.path };
+            return { success: true, newPath };
           }
           // Fall through to the canvas path on cloud upscale failure so
           // the user gets *something* (at worst the desktop's behaviour).
@@ -940,6 +957,7 @@
           return { success: false, error: 'Unknown operation: ' + operation };
         }
         const newPath = await _canvasToBlobUrl(out);
+        _attachToCurrentProject(newPath, 'front');
         return { success: true, newPath };
       } catch (e) { return { success: false, error: String(e) }; }
     },
@@ -985,15 +1003,19 @@
       // Blob URLs aren't fetchable from Replicate, so we upload via
       // multipart when we don't have an http(s) URL.
       try {
+        let r;
         if (/^https?:/i.test(imageUrl)) {
-          const r = await postJSON('/api/remove-background', { imageUrl });
-          return r;
+          r = await postJSON('/api/remove-background', { imageUrl });
+        } else {
+          // blob: or data: → POST as multipart so Replicate gets the bytes.
+          const blob = await (await fetch(imageUrl)).blob();
+          const fd = new FormData();
+          fd.append('image', blob, 'src.png');
+          r = await postForm('/api/remove-background', fd);
         }
-        // blob: or data: → POST as multipart so Replicate gets the bytes.
-        const blob = await (await fetch(imageUrl)).blob();
-        const fd = new FormData();
-        fd.append('image', blob, 'src.png');
-        const r = await postForm('/api/remove-background', fd);
+        if (r?.success && (r.newPath || r.path)) {
+          _attachToCurrentProject(r.newPath || r.path, 'front');
+        }
         return r;
       } catch (e) { return { success: false, ok: false, error: String(e) }; }
     },
@@ -1070,8 +1092,10 @@
           imageUrl: imagePath, prompt, strength: strength ?? 0.55,
         });
         if (r?.success && (r.newPath || r.path)) {
+          const newPath = r.newPath || r.path;
+          _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-          return { success: true, newPath: r.newPath || r.path };
+          return { success: true, newPath };
         }
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
@@ -1088,8 +1112,10 @@
           imageUrl: imagePath, targetText, prompt: prompt || '', dilate: dilate || 15,
         });
         if (r?.success && (r.newPath || r.path)) {
+          const newPath = r.newPath || r.path;
+          _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-          return { success: true, newPath: r.newPath || r.path };
+          return { success: true, newPath };
         }
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
@@ -1105,8 +1131,10 @@
       try {
         const r = await postJSON('/api/mask-inpaint', { imageUrl: imagePath, maskDataUrl, prompt });
         if (r?.success && (r.newPath || r.path)) {
+          const newPath = r.newPath || r.path;
+          _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-          return { success: true, newPath: r.newPath || r.path };
+          return { success: true, newPath };
         }
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
@@ -1118,8 +1146,10 @@
       try {
         const r = await postJSON('/api/face-fix-image', { imageUrl: imagePath, strength });
         if (r?.success && (r.newPath || r.path)) {
+          const newPath = r.newPath || r.path;
+          _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-          return { success: true, newPath: r.newPath || r.path };
+          return { success: true, newPath };
         }
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
