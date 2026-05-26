@@ -317,6 +317,10 @@
     requestAnimationFrame(function () {
       _cloneMgr.loadImage('file:///' + imagePath.replace(/\\/g, '/') + '?t=' + Date.now()).then(function () {
         cloneState.sourceImageData = _cloneMgr.ctx.getImageData(0, 0, _cloneMgr.w, _cloneMgr.h);
+      }).catch(function (e) {
+        console.error('[clone] source image load failed:', e);
+        if (typeof window.cloneShowError === 'function')
+          window.cloneShowError('source image load failed: ' + (e && e.message || e));
       });
     });
   }
@@ -592,6 +596,10 @@
         // Clear the overlay after base image loads
         maskOverlayCtx.clearRect(0, 0, _maskMgr.w, _maskMgr.h);
         updateMaskApplyBtn();
+      }).catch(function (e) {
+        console.error('[mask] base image load failed:', e);
+        if (typeof showToast === 'function')
+          showToast('Mask tool: image load failed', 'error', 4000);
       });
     });
   }

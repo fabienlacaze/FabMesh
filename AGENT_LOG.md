@@ -10,6 +10,30 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-26 (Parity audit cloud vs desktop — loadImage error handling)
+
+- **Contexte :** audit complet déclenché par "fais en sorte que tout
+  soit bien implémenté dans le cloud et dans le desktop".
+- **Findings :**
+  - Tri-toggle home + popups d'avancement + crop preset fix : déjà
+    portés desktop (commits f8392a6, bf8d2a5, 6b7e875, b541873).
+  - Features cloud-only par design : admin panel, 2FA, kill switches,
+    billing, model-viewer, /api/proxy-image, R2 storage.
+  - Features desktop-only par design : file:// paths, GPU local,
+    Blender integration via main.js.
+  - Manquait côté desktop : error handling sur `loadImage` (pas de
+    reject, pas de .catch). Sur cloud on l'avait pour le debug.
+- **Fix :**
+  - `canvas-utils.js`: ajout `img.onerror = () => reject(...)` dans
+    CanvasManager.loadImage.
+  - `index2-edit-tools.js`: ajout `.catch` aux 2 loadImage (clone +
+    mask) avec console.error + toast user.
+- **Conclusion :** parité fonctionnelle complète sur tout ce qui est
+  partageable. Le reste des diffs (cloud-overrides.js, meshyAPI-cloud.js,
+  CSP, etc.) est cloud-only par design.
+
+---
+
 ## 2026-05-26 (Cloud: resumePendingJobs fix — popup ne réapparaît pas)
 
 - **Bug :** après reload pendant une génération mesh, la popup ne se

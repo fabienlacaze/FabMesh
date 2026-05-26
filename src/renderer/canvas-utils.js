@@ -64,7 +64,7 @@ class CanvasManager {
   }
 
   loadImage(src) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         this.w = img.width;
@@ -82,6 +82,7 @@ class CanvasManager {
         this._updateBtns();
         resolve();
       };
+      img.onerror = () => reject(new Error('image decode failed: ' + src));
       img.src = src;
     });
   }
