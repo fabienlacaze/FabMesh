@@ -817,104 +817,44 @@ class MyFabmeshBackview:
         return self._ai_seg_processor, self._ai_seg_model, self._ai_inpaint_pipe
 
     @modal.fastapi_endpoint(method="POST")
-    def auto_inpaint(self, payload: dict):
-        """Auto-inpaint — CLIPSeg detects `target_text` in the image,
-        SDXL Inpainting paints `prompt` (or removes if empty) onto the
-        detected area. Verbatim port of scripts/local_inpaint_bridge.py.
+    def image_op(self, payload: dict):
+        """Unified img2img/auto-inpaint dispatcher.
+
+        Modal Starter caps web functions at 8 per app; rather than ask
+        the user to upgrade their plan we route both AI-edit operations
+        through this single endpoint and dispatch on `op` in the body.
 
         Request body:
-            {
-              "_auth": "<shared_secret>",
-              "image_url": "https://.../source.png",
-              "target_text": "hat",          // what to find + replace
-              "prompt": "long hair",         // what to draw (empty=remove)
-              "dilate": 15                   // optional mask padding
-            }
+          { "_auth": "<secret>",
+            "op": "modify" | "auto_inpaint",
+            "image_url": "https://.../source.png",
+            ...op-specific fields... }
+
+        For op="modify":
+          prompt (required), strength (default 0.55), seed, steps
+
+        For op="auto_inpaint":
+          target_text (required), prompt (optional, empty=remove),
+          dilate (default 15)
+
         Response: raw PNG bytes.
         """
         from fastapi import HTTPException
         from fastapi.responses import Response
         import urllib.request
         from PIL import Image
-        from modal_app._auto_inpaint import generate as ai_generate
 
         expected = os.environ.get("SHARED_SECRET", "")
         provided = (payload.get("_auth") or "").strip()
         if not expected or provided != expected:
             raise HTTPException(status_code=401, detail="auth")
 
-        image_url   = (payload.get("image_url") or "").strip()
-        target_text = (payload.get("target_text") or "").strip()
-        if not image_url:   raise HTTPException(status_code=400, detail="image_url required")
-        if not target_text: raise HTTPException(status_code=400, detail="target_text required")
-
-        try:
-            req = urllib.request.Request(
-                image_url,
-                headers={"User-Agent":
-                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as r:
-                src_img = Image.open(io.BytesIO(r.read())).convert("RGB")
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"image download: {e}")
-
-        seg_proc, seg_model, inpaint_pipe = self._get_auto_inpaint_models()
-
-        t0 = time.time()
-        try:
-            img = ai_generate(
-                seg_proc, seg_model, inpaint_pipe,
-                src_img, target_text,
-                prompt=payload.get("prompt") or "",
-                dilate=int(payload.get("dilate") or 15),
-            )
-        except ValueError as e:
-            # mask-empty — surface to the caller as 422 so credit refund
-            # logic on the Worker can refund the user.
-            raise HTTPException(status_code=422, detail=str(e))
-
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=False)
-        png = buf.getvalue()
-        print(f'[auto-inpaint] DONE dt={time.time() - t0:.1f}s bytes={len(png)}', flush=True)
-        return Response(content=png, media_type="image/png")
-
-    @modal.fastapi_endpoint(method="POST")
-    def modify(self, payload: dict):
-        """SDXL img2img — modify an existing image with a prompt.
-        Verbatim port of the desktop /img2img endpoint (main.js:2874).
-        Reuses the RealVisXL weights already on GPU via diffusers
-        `from_pipe` (no second snapshot).
-
-        Request body:
-            {
-              "_auth": "<shared_secret>",
-              "image_url": "https://.../source.png",
-              "prompt": "the same character in golden armor",
-              "strength": 0.55,    // 0=identity, 1=fully redrawn
-              "seed": 42,
-              "steps": 30
-            }
-        Response: raw PNG bytes.
-        """
-        from fastapi import HTTPException
-        from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
-        from modal_app._modify import generate as modify_generate
-
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
-
+        op        = (payload.get("op") or "").strip()
         image_url = (payload.get("image_url") or "").strip()
-        prompt    = (payload.get("prompt") or "").strip()
         if not image_url:
             raise HTTPException(status_code=400, detail="image_url required")
-        if not prompt:
-            raise HTTPException(status_code=400, detail="prompt required")
+        if op not in ("modify", "auto_inpaint"):
+            raise HTTPException(status_code=400, detail="op must be 'modify' or 'auto_inpaint'")
 
         try:
             req = urllib.request.Request(
@@ -928,16 +868,38 @@ class MyFabmeshBackview:
             raise HTTPException(status_code=502, detail=f"image download: {e}")
 
         t0 = time.time()
-        img = modify_generate(
-            self.pipe, src_img, prompt,
-            strength=float(payload.get("strength") or 0.55),
-            seed=int(payload.get("seed") or 42),
-            steps=int(payload.get("steps") or 30),
-        )
+        if op == "modify":
+            from modal_app._modify import generate as modify_generate
+            prompt = (payload.get("prompt") or "").strip()
+            if not prompt:
+                raise HTTPException(status_code=400, detail="prompt required for modify")
+            img = modify_generate(
+                self.pipe, src_img, prompt,
+                strength=float(payload.get("strength") or 0.55),
+                seed=int(payload.get("seed") or 42),
+                steps=int(payload.get("steps") or 30),
+            )
+            tag = "modify"
+        else:  # auto_inpaint
+            from modal_app._auto_inpaint import generate as ai_generate
+            target_text = (payload.get("target_text") or "").strip()
+            if not target_text:
+                raise HTTPException(status_code=400, detail="target_text required for auto_inpaint")
+            seg_proc, seg_model, inpaint_pipe = self._get_auto_inpaint_models()
+            try:
+                img = ai_generate(
+                    seg_proc, seg_model, inpaint_pipe, src_img, target_text,
+                    prompt=payload.get("prompt") or "",
+                    dilate=int(payload.get("dilate") or 15),
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            tag = "auto_inpaint"
+
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)
         png = buf.getvalue()
-        print(f"[modify] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
+        print(f"[{tag}] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
     @modal.fastapi_endpoint(method="POST")
