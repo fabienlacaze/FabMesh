@@ -709,13 +709,37 @@
       catch (e) { return { ok: false, error: String(e) }; }
     },
     deleteFile: async (filePath) => {
-      // Same handling as deleteMesh — in cloud the only deletable
-      // assets are user meshes.
       if (!filePath) return { ok: false };
       if (/\.(glb|gltf|fbx|obj|stl|ply)$/i.test(filePath)) {
         return impl.deleteMesh(_basename(filePath));
       }
-      return { ok: true, cloud: true, message: 'No-op in cloud for non-mesh files.' };
+      // Image versions: drop the URL from the project's localStorage
+      // cache so reloadCurrentProject() stops returning it. We don't
+      // delete the R2 blob — keeps undo cheap and the per-mesh-op
+      // storage cost is tiny. Also remove the back-photo mapping if
+      // this image had one attached.
+      try {
+        const projectName = window.state?.currentProject?.name;
+        if (projectName) {
+          const k = _imgKey(projectName);
+          const arr = JSON.parse(localStorage.getItem(k) || '[]');
+          const filtered = arr.filter(x => (x.path || x) !== filePath);
+          localStorage.setItem(k, JSON.stringify(filtered));
+          // Also clear any back-photo mapping that pointed to or from
+          // this image so the FRONT/BACK bar doesn't show a ghost.
+          const bk = _backKey(projectName);
+          const bm = JSON.parse(localStorage.getItem(bk) || '{}');
+          let changed = false;
+          if (bm[filePath]) { delete bm[filePath]; changed = true; }
+          for (const k2 of Object.keys(bm)) {
+            if (bm[k2] === filePath) { delete bm[k2]; changed = true; }
+          }
+          if (changed) localStorage.setItem(bk, JSON.stringify(bm));
+        }
+        return { ok: true, success: true, cloud: true };
+      } catch (e) {
+        return { ok: false, error: String(e) };
+      }
     },
 
     /* ── thumbnails (localStorage) ──────────────────────────────── */
