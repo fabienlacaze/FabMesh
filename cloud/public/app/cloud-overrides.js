@@ -407,27 +407,36 @@
    * ────────────────────────────────────────────────────────────────── */
   function installMeshCostMeter() {
     const preset = document.getElementById('ws-trellis2-preset');
-    const valueEl = document.getElementById('ws-mesh-cost-value');
-    if (!preset || !valueEl) return;
+    if (!preset) return;
     const optionIds = [
       'ws-trellis2-multiref', 'ws-trellis2-refine', 'ws-trellis2-rectify',
       'ws-trellis2-smooth',   'ws-trellis2-quality-plus',
       'ws-trellis2-ultra-q',  'ws-trellis2-ultra-hd', 'ws-trellis2-face-fix',
     ];
 
+    // Re-query #ws-mesh-cost-value on every tick — refreshButtonLabelsAndHiding
+    // rewrites the Generate button's innerHTML when the project gains a
+    // mesh, replacing the span we'd otherwise cache here. Without this
+    // lookup, the cost meter writes to a detached node and the user
+    // sees a frozen "12 credits" no matter which option they toggle.
     function recompute() {
       let total = parseInt(preset.selectedOptions[0]?.dataset?.credits || '1', 10);
       for (const id of optionIds) {
         const el = document.getElementById(id);
         if (el?.checked) total += parseInt(el.dataset.credits || '0', 10);
       }
-      valueEl.textContent = String(total);
+      const valueEl = document.getElementById('ws-mesh-cost-value');
+      if (valueEl) valueEl.textContent = String(total);
     }
 
     preset.addEventListener('change', recompute);
     for (const id of optionIds) {
       document.getElementById(id)?.addEventListener('change', recompute);
     }
+    // Also refresh whenever the renderer swaps the Generate button label
+    // (which rebuilds the pill). Watching the button itself is cheap.
+    const btn = document.getElementById('ws-generate-mesh');
+    if (btn) new MutationObserver(recompute).observe(btn, { childList: true });
     recompute();
   }
 
