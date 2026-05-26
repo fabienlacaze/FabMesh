@@ -14,8 +14,64 @@ different face / outfit even if you only painted a small mask in one
 corner (user report: "add a bazooka on the right shoulder" redrew
 the entire orc with a bald head).
 """
+import re
 import numpy as np
 from PIL import Image, ImageFilter
+
+
+def _enrich_prompt(raw: str) -> tuple[str, str]:
+    """Turn a user instruction into a description SDXL Inpaint can
+    actually paint. SDXL Inpaint replaces masked pixels by what the
+    prompt DESCRIBES, not by what the prompt INSTRUCTS — so "add a
+    bazooka" just continues the existing texture, while "a bazooka
+    rocket launcher weapon, military, highly detailed" actually
+    produces a bazooka in the masked zone.
+
+    Strategy:
+      - "add a/an X" / "put a/an X" / "place a/an X" → drop the verb,
+        keep "X" as a noun phrase + detail-booster suffix
+      - "remove X" / "delete X" → describe what would naturally be
+        behind it (clothing, skin, background) — pass to a generic
+        "continuation of surrounding area" prompt
+      - Anything else → use as-is + detail-booster prefix
+
+    Returns (positive_prompt, negative_prompt).
+    """
+    p = (raw or '').strip()
+    if not p:
+        return ('continuation of the surrounding area, seamless',
+                'object, item, weapon, blurry, distorted')
+
+    low = p.lower()
+    add_m = re.match(r'^(?:add|put|place|insert|paint|draw)\s+(?:a|an|the|some)?\s*(.+)$',
+                     low, flags=re.IGNORECASE)
+    rem_m = re.match(r'^(?:remove|delete|erase|hide|clear)\s+(?:the|a|an)?\s*(.+)$',
+                     low, flags=re.IGNORECASE)
+
+    if rem_m:
+        target = rem_m.group(1).strip()
+        positive = (
+            f'continuation of the surrounding area, same background, '
+            f'no {target}, seamless, natural extension of the scene'
+        )
+        negative = f'{target}, any object, duplicate, artifact, blurry, distorted'
+        return (positive, negative)
+
+    if add_m:
+        obj = add_m.group(1).strip()
+    else:
+        obj = p
+
+    positive = (
+        f'{obj}, highly detailed, photorealistic, intricate details, '
+        f'sharp focus, professional photography, masterpiece, 8k, '
+        f'natural integration into the scene, perfect composition'
+    )
+    negative = (
+        'blurry, distorted, low quality, ugly, deformed, '
+        'extra limbs, duplicate, artifact, watermark, signature, text'
+    )
+    return (positive, negative)
 
 
 def generate(
@@ -50,13 +106,22 @@ def generate(
     # too much blur and the user's painted boundary becomes loose.
     msk_work_soft = msk_work.filter(ImageFilter.GaussianBlur(3))
 
+    # Transform "add a bazooka" → descriptive prompt that actually
+    # tells SDXL Inpaint what to paint inside the mask. See
+    # _enrich_prompt docstring.
+    pos_prompt, neg_prompt = _enrich_prompt(prompt)
+    print(f'[mask-inpaint] enriched: "{pos_prompt[:120]}..."', flush=True)
+
     result = inpaint_pipe(
-        prompt=prompt,
-        negative_prompt='blurry, distorted, duplicate, artifact',
+        prompt=pos_prompt,
+        negative_prompt=neg_prompt,
         image=img_work,
         mask_image=msk_work_soft,
         num_inference_steps=40,
-        guidance_scale=8.5,
+        # Bumped 8.5 → 11.0 — SDXL Inpaint without IP-Adapter / ControlNet
+        # needs a strong push to actually conjure the requested object
+        # in the mask rather than blend back to the surrounding texture.
+        guidance_scale=11.0,
         strength=0.99,
         height=work_h, width=work_w,
     ).images[0]
