@@ -325,17 +325,20 @@
                     inset 0 1px 0 rgba(255, 255, 255, 0.4);
         text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
       }
-      /* Inline SVG bolt — dark gold fill with white outline + drop
-         shadow. Much higher contrast than the emoji ⚡ which renders
-         pale yellow against the gold badge background. */
+      /* Same yellow bolt as the credits pill (emoji ⚡). Outlined in
+         dark + drop-shadow so it stays readable against the gold
+         badge background. */
       .cloud-cost-badge::before {
-        content: '';
+        content: '\\26A1';
         display: inline-block;
-        width: 11px; height: 16px;
-        margin-right: 4px;
-        background: no-repeat center/contain
-          url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32"><path d="M14 0 L0 18 L9 18 L7 32 L24 12 L14 12 Z" fill="%231a1a1a" stroke="%23ffffff" stroke-width="1.5" stroke-linejoin="round"/></svg>');
-        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+        margin-right: 3px;
+        font-size: 13px;
+        line-height: 1;
+        color: #ffe066;
+        text-shadow:
+          -1px -1px 0 #1a1a1a, 1px -1px 0 #1a1a1a,
+          -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
+          0 1px 2px rgba(0,0,0,0.5);
       }
     `;
     document.head.appendChild(style);
