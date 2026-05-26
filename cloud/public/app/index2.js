@@ -9091,6 +9091,10 @@ window.fabmeshJobs = {
   complete: (id, success, errorMessage) => completeJob(id, success, errorMessage),
   render: () => renderJobs(),
 };
+// index2.js is loaded as a module so top-level declarations don't
+// auto-attach to window. Expose the bits the cloud's pending-job
+// resume needs (see meshyAPI-cloud.js:resumePendingJobs).
+window.reloadCurrentProject = reloadCurrentProject;
 
 async function cancelJob(id) {
   const j = state.jobs.find(j => j.id === id);

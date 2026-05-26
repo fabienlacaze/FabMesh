@@ -116,26 +116,41 @@
     _writePendingJobs(_readPendingJobs().filter((j) => j.jobId !== jobId));
   }
 
+  let _resumeRetries = 0;
   async function resumePendingJobs() {
     const list = _readPendingJobs();
     if (!list.length) return;
-    // Drop entries older than 30 min — server-side they timed out
-    // anyway. Cleans up after crashes that left the marker behind.
     const now = Date.now();
     const fresh = list.filter((e) => now - (e.ts || 0) < 30 * 60_000);
     if (fresh.length !== list.length) _writePendingJobs(fresh);
+    // index2.js is type="module" so top-level decls aren't on window.
+    // Renderer exposes window.fabmeshJobs (.push/.complete) and a
+    // patched window.reloadCurrentProject. If still missing, retry up
+    // to 10 times (10 s) — needed because module evaluation order is
+    // non-deterministic relative to this classic script.
+    const jobs = window.fabmeshJobs;
+    if (!jobs || typeof jobs.push !== 'function') {
+      if (_resumeRetries++ < 10) {
+        console.warn('[cloud] fabmeshJobs not ready, retry', _resumeRetries);
+        setTimeout(resumePendingJobs, 1000);
+        return;
+      }
+      console.error('[cloud] fabmeshJobs never appeared — pending jobs will still poll silently');
+      // Fall through: pollPrediction still runs in the background, the
+      // popup just won't show. Better than aborting the resume entirely.
+    }
     for (const entry of fresh) {
-      const job = (typeof window.pushJob === 'function')
-        ? window.pushJob(entry.name || `Generate 3D: ${entry.projectName || ''}`,
-                         null,
-                         { ...(entry.params || {}), Resumed: 'after page reload' },
-                         entry.expectedMs || 150_000)
-        : null;
+      const job = jobs ? jobs.push(
+        entry.name || `Generate 3D: ${entry.projectName || ''}`,
+        null,
+        { ...(entry.params || {}), Resumed: 'after page reload' },
+        entry.expectedMs || 150_000,
+      ) : null;
       // Don't await — let all resumed jobs run in parallel.
       (async () => {
         try {
-          const result = await pollPrediction(entry.jobId);
-          if (job && typeof window.completeJob === 'function') window.completeJob(job.id, true);
+          await pollPrediction(entry.jobId);
+          if (job && jobs && jobs.complete) jobs.complete(job.id, true);
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
           if (typeof window.reloadCurrentProject === 'function') {
             try { await window.reloadCurrentProject(); } catch {}
@@ -143,7 +158,7 @@
           _removePendingJob(entry.jobId);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          if (job && typeof window.completeJob === 'function') window.completeJob(job.id, false, msg);
+          if (job && jobs && jobs.complete) jobs.complete(job.id, false, msg);
           _removePendingJob(entry.jobId);
         }
       })();
