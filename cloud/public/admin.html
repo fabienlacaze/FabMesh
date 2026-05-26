@@ -196,6 +196,7 @@
       <button class="tab" data-tab="bytype">📊 Par type</button>
       <button class="tab" data-tab="active">🛑 Active jobs <span class="tab-badge" id="badge-active">0</span></button>
       <button class="tab" data-tab="users">🧑 Users</button>
+      <button class="tab" data-tab="services">🚨 Services <span id="services-badge" class="tab-badge" style="display:none;">!</span></button>
     </div>
 
     <!-- Tab: Overview — compact summary of all sections -->
@@ -309,6 +310,31 @@
         </thead>
         <tbody><tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr></tbody>
       </table>
+    </div>
+
+    <!-- Tab: Services kill-switches (password-gated) -->
+    <div class="tab-panel" data-panel="services">
+      <!-- Password prompt — shown until the admin unlocks the panel. -->
+      <div id="services-lock" style="background:var(--bg-1); border:1px solid var(--err); border-radius:12px; padding:24px; max-width:480px;">
+        <h3 style="margin:0 0 8px; color:var(--err);">🚨 Service kill switches</h3>
+        <p style="color:var(--text-2); font-size:13px; margin:0 0 14px;">
+          Cuts off Modal GPU calls or the entire site if something's on fire.
+          Re-enter your admin password to unlock the toggles.
+        </p>
+        <input id="services-password-input" type="password" placeholder="Admin password"
+               style="width:100%; padding:10px 14px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:14px; margin-bottom:12px;" />
+        <button class="btn btn-accent" id="services-unlock-btn" style="background:var(--err); border-color:var(--err);">Unlock</button>
+        <div id="services-lock-err" style="color:var(--err); font-size:12px; margin-top:10px; display:none;"></div>
+      </div>
+
+      <!-- Unlocked panel — populated by loadServicesPanel(). -->
+      <div id="services-panel" style="display:none;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px;">
+          <span style="color:var(--text-2); font-size:12px;">Flipping a switch takes effect within ~30s for every user.</span>
+          <button class="btn" onclick="loadServicesPanel()">🔄 Reload</button>
+        </div>
+        <div id="services-list" style="display:flex; flex-direction:column; gap:14px;"></div>
+      </div>
     </div>
 
     <!-- Confirm modal (used by stop / ban / info) -->
@@ -922,12 +948,140 @@
       }
     }
 
+    /* ═══════════════════════════════════════════════════════════════
+       SERVICES — password-gated kill switches
+       Password lives in memory only for the session (never sessionStorage
+       or localStorage) so a stolen cookie can't read it back.
+       ═══════════════════════════════════════════════════════════════ */
+    let _killswitchPassword = '';
+    let _servicesState = { modal_enabled: true, site_enabled: true };
+
+    async function unlockServicesPanel() {
+      const input = document.getElementById('services-password-input');
+      const errEl = document.getElementById('services-lock-err');
+      const pw = input.value;
+      errEl.style.display = 'none';
+      // Probe with a no-op toggle that re-applies the current state.
+      // First fetch the current state, then "toggle" modal to its own
+      // value — if the password is wrong we 401, otherwise it's a noop.
+      let cur;
+      try {
+        const r = await fetch('/api/admin/services', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        cur = await r.json();
+      } catch (e) {
+        errEl.textContent = 'Could not load services state: ' + (e?.message || e);
+        errEl.style.display = '';
+        return;
+      }
+      try {
+        const r = await fetch('/api/admin/services', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ service: 'modal', enabled: cur.modal_enabled, password: pw }),
+        });
+        if (r.status === 401) {
+          errEl.textContent = 'Wrong password.';
+          errEl.style.display = '';
+          input.select();
+          return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      } catch (e) {
+        errEl.textContent = 'Server error: ' + (e?.message || e);
+        errEl.style.display = '';
+        return;
+      }
+      // Success — store in memory and reveal the panel.
+      _killswitchPassword = pw;
+      _servicesState = cur;
+      document.getElementById('services-lock').style.display = 'none';
+      document.getElementById('services-panel').style.display = '';
+      loadServicesPanel();
+    }
+
+    async function loadServicesPanel() {
+      const list = document.getElementById('services-list');
+      list.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
+      try {
+        const r = await fetch('/api/admin/services', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _servicesState = await r.json();
+      } catch (e) {
+        list.innerHTML = `<div style="color:var(--err)">${escapeHtml(e?.message || e)}</div>`;
+        return;
+      }
+      const services = [
+        { id: 'modal', label: 'Modal (GPU backend)',
+          desc: 'Image generation, mesh, all AI tools. Replicate-only calls keep working.' },
+        { id: 'site',  label: 'MyFabmesh.AI site',
+          desc: 'Locks down /api/* for every user except admin endpoints. Total emergency stop.' },
+      ];
+      list.innerHTML = services.map((s) => {
+        const on = !!_servicesState[s.id + '_enabled'];
+        return `
+          <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:16px; display:flex; gap:16px; align-items:center;">
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight:700; font-size:14px;">${escapeHtml(s.label)}</div>
+              <div style="color:var(--text-2); font-size:12px; margin-top:2px;">${escapeHtml(s.desc)}</div>
+              <div style="margin-top:6px; font-size:12px;">Status: <span style="color:${on ? 'var(--ok)' : 'var(--err)'}; font-weight:700;">${on ? 'ENABLED' : 'DISABLED'}</span></div>
+            </div>
+            <label class="switch" style="position:relative; display:inline-block; width:54px; height:30px; flex-shrink:0;">
+              <input type="checkbox" data-service="${s.id}" ${on ? 'checked' : ''}
+                     style="opacity:0; width:0; height:0;"
+                     onchange="toggleService('${s.id}', this.checked)" />
+              <span style="position:absolute; cursor:pointer; inset:0; background:${on ? 'var(--ok)' : 'var(--err)'}; border-radius:999px; transition:.2s;">
+                <span style="position:absolute; height:24px; width:24px; left:${on ? '27px' : '3px'}; top:3px; background:#fff; border-radius:50%; transition:.2s;"></span>
+              </span>
+            </label>
+          </div>
+        `;
+      }).join('');
+      // Show a warning badge on the tab when something's disabled.
+      const allOn = _servicesState.modal_enabled && _servicesState.site_enabled;
+      const badge = document.getElementById('services-badge');
+      if (badge) badge.style.display = allOn ? 'none' : '';
+    }
+
+    async function toggleService(service, enabled) {
+      try {
+        const r = await fetch('/api/admin/services', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ service, enabled, password: _killswitchPassword }),
+        });
+        if (r.status === 401) {
+          // Password got rotated mid-session — lock the panel again.
+          _killswitchPassword = '';
+          document.getElementById('services-lock').style.display = '';
+          document.getElementById('services-panel').style.display = 'none';
+          showAdminInfo('Locked', 'Password no longer valid. Please re-enter.', 'err');
+          return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _servicesState = await r.json();
+        loadServicesPanel();
+      } catch (e) {
+        showAdminInfo('Toggle failed', e?.message || String(e), 'err');
+        loadServicesPanel();  // revert UI to true state
+      }
+    }
+
+    document.getElementById('services-unlock-btn')?.addEventListener('click', unlockServicesPanel);
+    document.getElementById('services-password-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') unlockServicesPanel();
+    });
+
     // Auto-load active jobs + users when their tab opens for the first time.
     document.querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.tab;
         if (t === 'active' && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'users'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+        // Services tab: focus the password input if still locked.
+        if (t === 'services' && !_killswitchPassword) {
+          setTimeout(() => document.getElementById('services-password-input')?.focus(), 50);
+        }
       });
     });
     // Poll active jobs every 5s when that tab is open. Endpoint only
@@ -936,6 +1090,19 @@
       const activeTab = document.querySelector('.tab.active');
       if (activeTab?.dataset?.tab === 'active') loadActiveJobs();
     }, 5_000);
+
+    // Probe services state on every load so the tab badge appears even
+    // before the admin clicks the Services tab.
+    fetch('/api/admin/services', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((s) => {
+        if (!s) return;
+        _servicesState = s;
+        const allOn = s.modal_enabled && s.site_enabled;
+        const badge = document.getElementById('services-badge');
+        if (badge) badge.style.display = allOn ? 'none' : '';
+      })
+      .catch(() => {});
 
     refresh();
   </script>
