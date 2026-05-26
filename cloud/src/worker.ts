@@ -401,6 +401,86 @@ function _invalidateServiceFlagsCache() {
   _serviceFlagsCache = { flags: { modal_enabled: true, site_enabled: true }, ts: 0 };
 }
 
+/* TOTP (RFC 6238) helpers — compatible with Microsoft / Google
+ * Authenticator out of the box. Secrets are base32-encoded random 20
+ * bytes, codes are 6 digits with a 30 s window and ±1 step drift
+ * tolerance. Stored at R2 _meta/admin-totp.json once an admin enrols.
+ */
+const TOTP_KEY = '_meta/admin-totp.json';
+
+function _base32Encode(bytes: Uint8Array): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, value = 0, out = '';
+  for (const b of bytes) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      out += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += alphabet[(value << (5 - bits)) & 31];
+  return out;
+}
+
+function _base32Decode(b32: string): Uint8Array {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = b32.toUpperCase().replace(/=+$/, '').replace(/\s/g, '');
+  let bits = 0, value = 0;
+  const out: number[] = [];
+  for (const c of clean) {
+    const idx = alphabet.indexOf(c);
+    if (idx < 0) throw new Error('invalid base32 char: ' + c);
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(out);
+}
+
+async function _totpAt(secretBase32: string, step: number): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw', _base32Decode(secretBase32),
+    { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'],
+  );
+  // 8-byte big-endian counter. JS bitwise is 32-bit so we divide.
+  const buf = new Uint8Array(8);
+  let n = step;
+  for (let i = 7; i >= 0; i--) {
+    buf[i] = n & 0xff;
+    n = Math.floor(n / 256);
+  }
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, buf));
+  const offset = sig[sig.length - 1] & 0x0f;
+  const code = ((sig[offset] & 0x7f) << 24)
+             | ((sig[offset + 1] & 0xff) << 16)
+             | ((sig[offset + 2] & 0xff) << 8)
+             | (sig[offset + 3] & 0xff);
+  return String(code % 1_000_000).padStart(6, '0');
+}
+
+async function _totpVerify(secretBase32: string, provided: string): Promise<boolean> {
+  const code = String(provided || '').trim().replace(/\s/g, '');
+  if (!/^\d{6}$/.test(code)) return false;
+  const step = Math.floor(Date.now() / 1000 / 30);
+  for (let drift = -1; drift <= 1; drift++) {
+    if (await _totpAt(secretBase32, step + drift) === code) return true;
+  }
+  return false;
+}
+
+async function _getAdminTotpSecret(env: Env): Promise<string | null> {
+  try {
+    const obj = await env.MESHES.get(TOTP_KEY);
+    if (!obj) return null;
+    const j = await obj.json() as { secret?: string };
+    return j.secret || null;
+  } catch { return null; }
+}
+
 async function getSessionUser(req: Request, env: Env): Promise<SessionUser | null> {
   if (isMock(env)) {
     const c = parseCookies(req);
@@ -3242,27 +3322,34 @@ async function _requireAdmin(req: Request, env: Env)
 async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user || !user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
-    // We don't disclose which factor failed — generic 401 keeps the
-    // password attack surface low.
     return err(401, 'unauthorized');
   }
   if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
 
-  let body: { password?: string };
-  try { body = await req.json() as { password?: string }; } catch { return err(400, 'bad json'); }
+  let body: { password?: string; totp?: string };
+  try { body = await req.json() as { password?: string; totp?: string }; } catch { return err(400, 'bad json'); }
   const provided = String(body.password ?? '');
   if (!provided) return err(400, 'password required');
-  // Constant-time compare so a wrong password doesn't leak length.
   if (provided.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
   let diff = 0;
   for (let i = 0; i < provided.length; i++) diff |= provided.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
   if (diff !== 0) return err(401, 'invalid password');
 
+  // TOTP second factor — only enforced after the admin has enrolled.
+  // First-ever login uses password only so the admin can reach the
+  // setup page and enrol; afterwards every login also needs a code.
+  const totpSecret = await _getAdminTotpSecret(env);
+  if (totpSecret) {
+    const code = String(body.totp ?? '').trim();
+    if (!code) return err(401, 'totp_required');
+    if (!(await _totpVerify(totpSecret, code))) return err(401, 'invalid totp');
+  }
+
   const exp = Math.floor(Date.now() / 1000) + ADMIN_TTL_SEC;
   const payload = `${user.email.toLowerCase()}:${exp}`;
   const sig = await _hmacSign(env.ADMIN_PASSWORD, payload);
   const value = `${payload}.${sig}`;
-  return new Response(JSON.stringify({ ok: true, expires_at: exp }), {
+  return new Response(JSON.stringify({ ok: true, expires_at: exp, totp_enrolled: !!totpSecret }), {
     status: 200,
     headers: {
       'content-type': 'application/json',
@@ -3974,6 +4061,79 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   return json({ users: users.map((u) => ({ ...u, banned: banned.has(u.id) })) });
 }
 
+/** GET /api/admin/totp/status — { enrolled: bool, enrolled_at, email }. */
+async function handleAdminTotpStatus(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  try {
+    const obj = await env.MESHES.get(TOTP_KEY);
+    if (!obj) return json({ enrolled: false });
+    const j = await obj.json() as { enrolled_at?: string; enrolled_email?: string };
+    return json({ enrolled: true, enrolled_at: j.enrolled_at, email: j.enrolled_email });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** POST /api/admin/totp/setup — generates a fresh secret + otpauth URI.
+ *  NOT persisted yet — the admin must scan it AND submit a confirming
+ *  code via /api/admin/totp/confirm before we save it. */
+async function handleAdminTotpSetup(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  const secret = _base32Encode(bytes);
+  const issuer = 'MyFabmesh';
+  const account = guard.email || 'admin';
+  const uri = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}`
+            + `?secret=${secret}&issuer=${encodeURIComponent(issuer)}`
+            + `&algorithm=SHA1&digits=6&period=30`;
+  return json({ secret, uri });
+}
+
+/** POST /api/admin/totp/confirm  body: { secret, code }
+ *  Verifies the code against the (un-persisted) secret. On success
+ *  saves it to R2 — every subsequent admin login now requires TOTP. */
+async function handleAdminTotpConfirm(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { secret?: string; code?: string };
+  try { body = await req.json() as { secret?: string; code?: string }; } catch { return err(400, 'bad json'); }
+  const secret = String(body.secret || '').trim();
+  const code = String(body.code || '').trim();
+  if (!secret || !code) return err(400, 'secret + code required');
+  if (!(await _totpVerify(secret, code))) return err(401, 'invalid code');
+  await env.MESHES.put(TOTP_KEY, JSON.stringify({
+    secret,
+    enrolled_email: guard.email,
+    enrolled_at: new Date().toISOString(),
+  }));
+  return json({ ok: true });
+}
+
+/** POST /api/admin/totp/disable  body: { password, code }
+ *  Removes TOTP. Requires both password AND a valid current code so
+ *  even with the admin cookie alone an attacker can't bypass 2FA. */
+async function handleAdminTotpDisable(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  let body: { password?: string; code?: string };
+  try { body = await req.json() as { password?: string; code?: string }; } catch { return err(400, 'bad json'); }
+  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
+  const pw = String(body.password || '');
+  if (pw.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
+  let d = 0;
+  for (let i = 0; i < pw.length; i++) d |= pw.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
+  if (d !== 0) return err(401, 'invalid password');
+  const cur = await _getAdminTotpSecret(env);
+  if (cur) {
+    const code = String(body.code || '').trim();
+    if (!(await _totpVerify(cur, code))) return err(401, 'invalid code');
+  }
+  await env.MESHES.delete(TOTP_KEY);
+  return json({ ok: true });
+}
+
 /** GET /api/admin/services — current state of the kill switches. */
 async function handleAdminServices(req: Request, env: Env): Promise<Response> {
   const guard = await _requireAdmin(req, env);
@@ -4328,6 +4488,10 @@ export default {
         if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
         if (pathname === '/api/admin/services'        && method === 'GET')  return await handleAdminServices(req, env);
         if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
+        if (pathname === '/api/admin/totp/status'     && method === 'GET')  return await handleAdminTotpStatus(req, env);
+        if (pathname === '/api/admin/totp/setup'      && method === 'POST') return await handleAdminTotpSetup(req, env);
+        if (pathname === '/api/admin/totp/confirm'    && method === 'POST') return await handleAdminTotpConfirm(req, env);
+        if (pathname === '/api/admin/totp/disable'    && method === 'POST') return await handleAdminTotpDisable(req, env);
         if (pathname === '/download/track'            && method === 'GET')  return await handleDownloadTrack(req, env);
         if (pathname === '/api/mock-checkout'         && method === 'POST') return await handleMockCheckout(req, env);
         if (pathname === '/api/mock-login'            && method === 'POST') return await handleMockLogin(req, env);

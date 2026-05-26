@@ -151,6 +151,9 @@
        Lets us preview GLBs inline in the admin without sending users
        off to gltf-viewer.donmccurdy.com. -->
   <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+  <!-- QR code generator for TOTP enrolment. ~6 KB. The secret never
+       leaves the browser — the QR is drawn locally, no external service. -->
+  <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
 </head>
 <body>
   <h1>📊 MyFabmesh — Admin</h1>
@@ -171,6 +174,17 @@
       <input id="password-input" type="password" autocomplete="current-password"
              placeholder="Admin password"
              style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:12px;" />
+      <!-- TOTP field shown only after the first login attempt returns
+           "totp_required" — keeps the form clean for the initial
+           (pre-enrolment) login. -->
+      <div id="totp-row" style="display:none; margin-bottom:12px;">
+        <label style="display:block; font-size:12px; color:var(--text-2); margin-bottom:6px;">
+          🔑 Microsoft Authenticator code (6 digits)
+        </label>
+        <input id="totp-input" type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code"
+               placeholder="123 456"
+               style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:16px; letter-spacing:6px; text-align:center; font-family:ui-monospace,monospace;" />
+      </div>
       <div id="password-error" style="color:var(--err); font-size:12px; margin-bottom:12px; display:none"></div>
       <button type="submit" class="btn btn-accent" style="width:100%; justify-content:center;">Unlock dashboard</button>
     </form>
@@ -334,6 +348,63 @@
           <button class="btn" onclick="loadServicesPanel()">🔄 Reload</button>
         </div>
         <div id="services-list" style="display:flex; flex-direction:column; gap:14px;"></div>
+
+        <!-- 2FA / TOTP section — Microsoft Authenticator setup -->
+        <h3 style="margin:32px 0 12px;">🔑 Two-factor authentication</h3>
+        <div id="totp-status-row" style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:16px;">
+          <div id="totp-status-line" style="color:var(--text-2);">Loading…</div>
+          <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-accent" id="totp-enroll-btn" style="display:none;" onclick="startTotpEnroll()">📱 Enroll Microsoft Authenticator</button>
+            <button class="btn" id="totp-disable-btn" style="display:none; background:var(--err); border-color:var(--err);" onclick="startTotpDisable()">Disable 2FA</button>
+          </div>
+        </div>
+
+        <!-- Enrolment modal — QR + secret + confirmation code -->
+        <div id="totp-enroll-overlay"
+             style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1002; align-items:center; justify-content:center;">
+          <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; max-width:480px; width:92%;">
+            <h3 style="margin:0 0 12px;">📱 Enroll authenticator</h3>
+            <ol style="color:var(--text-1); font-size:13px; padding-left:20px; margin:0 0 16px;">
+              <li>Open Microsoft Authenticator → ⊕ Add account → Other.</li>
+              <li>Scan the QR code below or enter the secret manually.</li>
+              <li>Type the 6-digit code Authenticator shows to confirm.</li>
+            </ol>
+            <div id="totp-qr"
+                 style="background:#fff; padding:12px; border-radius:8px; display:flex; justify-content:center; margin-bottom:12px;"></div>
+            <div style="background:var(--bg-0); border:1px solid var(--border); border-radius:6px; padding:10px; font-family:ui-monospace,monospace; font-size:13px; letter-spacing:1px; word-break:break-all; margin-bottom:12px;">
+              <div style="color:var(--text-2); font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Secret (manual entry)</div>
+              <span id="totp-secret-text"></span>
+            </div>
+            <label style="display:block; font-size:12px; color:var(--text-2); margin-bottom:4px;">Confirmation code</label>
+            <input id="totp-confirm-input" type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code"
+                   placeholder="123 456"
+                   style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:18px; letter-spacing:6px; text-align:center; font-family:ui-monospace,monospace; margin-bottom:8px;" />
+            <div id="totp-enroll-err" style="color:var(--err); font-size:12px; margin-bottom:12px; display:none;"></div>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+              <button class="btn" onclick="document.getElementById('totp-enroll-overlay').style.display='none'">Cancel</button>
+              <button class="btn btn-accent" onclick="confirmTotpEnroll()">Confirm</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Disable 2FA modal — needs password + current code -->
+        <div id="totp-disable-overlay"
+             style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1002; align-items:center; justify-content:center;">
+          <div style="background:var(--bg-1); border:1px solid var(--err); border-radius:12px; padding:24px; max-width:420px; width:92%;">
+            <h3 style="margin:0 0 8px; color:var(--err);">⚠️ Disable 2FA</h3>
+            <p style="color:var(--text-2); font-size:13px; margin:0 0 12px;">Requires your admin password and a current Authenticator code so a stolen cookie alone can't strip 2FA.</p>
+            <input id="totp-disable-pw" type="password" placeholder="Admin password"
+                   style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:14px; margin-bottom:8px;" />
+            <input id="totp-disable-code" type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code"
+                   placeholder="6-digit code"
+                   style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:16px; letter-spacing:4px; text-align:center; font-family:ui-monospace,monospace; margin-bottom:8px;" />
+            <div id="totp-disable-err" style="color:var(--err); font-size:12px; margin-bottom:12px; display:none;"></div>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+              <button class="btn" onclick="document.getElementById('totp-disable-overlay').style.display='none'">Cancel</button>
+              <button class="btn btn-accent" style="background:var(--err); border-color:var(--err);" onclick="confirmTotpDisable()">Disable 2FA</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -408,6 +479,8 @@
     async function adminLogin(ev) {
       ev.preventDefault();
       const input = document.getElementById('password-input');
+      const totpInput = document.getElementById('totp-input');
+      const totpRow = document.getElementById('totp-row');
       const errEl = document.getElementById('password-error');
       errEl.style.display = 'none';
       try {
@@ -415,9 +488,28 @@
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ password: input.value }),
+          body: JSON.stringify({
+            password: input.value,
+            totp: totpInput?.value || undefined,
+          }),
         });
         if (r.status === 401) {
+          let detail = '';
+          try { const j = await r.json(); detail = j.error || ''; } catch (_) {}
+          if (/totp_required/i.test(detail)) {
+            // Reveal the TOTP field — password was correct.
+            totpRow.style.display = '';
+            errEl.textContent = 'Enter the 6-digit code from your authenticator.';
+            errEl.style.display = 'block';
+            setTimeout(() => totpInput?.focus(), 50);
+            return false;
+          }
+          if (/invalid totp/i.test(detail)) {
+            errEl.textContent = 'Wrong code, try again.';
+            errEl.style.display = 'block';
+            totpInput?.select();
+            return false;
+          }
           errEl.textContent = 'Invalid password.';
           errEl.style.display = 'block'; input.select();
           return false;
@@ -430,6 +522,8 @@
           return false;
         }
         input.value = '';
+        if (totpInput) totpInput.value = '';
+        if (totpRow) totpRow.style.display = 'none';
         await refresh();
       } catch (e) {
         errEl.textContent = 'Login failed: ' + (e && e.message || e);
@@ -998,6 +1092,7 @@
       document.getElementById('services-lock').style.display = 'none';
       document.getElementById('services-panel').style.display = '';
       loadServicesPanel();
+      refreshTotpStatus();
     }
 
     async function loadServicesPanel() {
@@ -1071,6 +1166,128 @@
     document.getElementById('services-password-input')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') unlockServicesPanel();
     });
+
+    /* ═══════════════════════════════════════════════════════════════
+       TOTP 2FA — Microsoft Authenticator enrolment / disable
+       ═══════════════════════════════════════════════════════════════ */
+    let _totpDraftSecret = null;
+
+    async function refreshTotpStatus() {
+      const line = document.getElementById('totp-status-line');
+      const enrollBtn = document.getElementById('totp-enroll-btn');
+      const disableBtn = document.getElementById('totp-disable-btn');
+      try {
+        const r = await fetch('/api/admin/totp/status', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        if (j.enrolled) {
+          const when = j.enrolled_at ? new Date(j.enrolled_at).toLocaleString() : '?';
+          line.innerHTML = `<span style="color:var(--ok); font-weight:700;">✓ 2FA enabled</span>
+            <span style="color:var(--text-2);"> — enrolled ${escapeHtml(j.email || '')} on ${escapeHtml(when)}</span>`;
+          enrollBtn.style.display = 'none';
+          disableBtn.style.display = '';
+        } else {
+          line.innerHTML = '<span style="color:var(--warn); font-weight:700;">⚠ 2FA not configured</span>'
+            + '<span style="color:var(--text-2);"> — anyone who knows the admin password can reach this dashboard.</span>';
+          enrollBtn.style.display = '';
+          disableBtn.style.display = 'none';
+        }
+      } catch (e) {
+        line.innerHTML = `<span style="color:var(--err)">${escapeHtml(e?.message || e)}</span>`;
+      }
+    }
+
+    async function startTotpEnroll() {
+      const err = document.getElementById('totp-enroll-err');
+      err.style.display = 'none';
+      try {
+        const r = await fetch('/api/admin/totp/setup', { method: 'POST', credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        _totpDraftSecret = j.secret;
+        document.getElementById('totp-secret-text').textContent = j.secret.match(/.{1,4}/g).join(' ');
+        // Render QR locally — qrcode-generator builds an SVG matrix
+        // for the otpauth:// URI. Secret never leaves the browser.
+        const qrEl = document.getElementById('totp-qr');
+        qrEl.innerHTML = '';
+        // eslint-disable-next-line no-undef
+        const qr = qrcode(0, 'M');
+        qr.addData(j.uri);
+        qr.make();
+        qrEl.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 1 });
+        document.getElementById('totp-confirm-input').value = '';
+        document.getElementById('totp-enroll-overlay').style.display = 'flex';
+        setTimeout(() => document.getElementById('totp-confirm-input').focus(), 100);
+      } catch (e) {
+        showAdminInfo('Setup failed', e?.message || String(e), 'err');
+      }
+    }
+
+    async function confirmTotpEnroll() {
+      const err = document.getElementById('totp-enroll-err');
+      const codeInput = document.getElementById('totp-confirm-input');
+      const code = codeInput.value.trim();
+      err.style.display = 'none';
+      if (!/^\d{6}$/.test(code)) {
+        err.textContent = 'Code must be 6 digits.';
+        err.style.display = 'block';
+        return;
+      }
+      try {
+        const r = await fetch('/api/admin/totp/confirm', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ secret: _totpDraftSecret, code }),
+        });
+        if (r.status === 401) {
+          err.textContent = 'Wrong code, try again.';
+          err.style.display = 'block';
+          codeInput.select();
+          return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _totpDraftSecret = null;
+        document.getElementById('totp-enroll-overlay').style.display = 'none';
+        showAdminInfo('2FA enabled', 'From now on every admin login will need your Authenticator code.', 'ok');
+        refreshTotpStatus();
+      } catch (e) {
+        err.textContent = e?.message || String(e);
+        err.style.display = 'block';
+      }
+    }
+
+    function startTotpDisable() {
+      document.getElementById('totp-disable-pw').value = '';
+      document.getElementById('totp-disable-code').value = '';
+      document.getElementById('totp-disable-err').style.display = 'none';
+      document.getElementById('totp-disable-overlay').style.display = 'flex';
+    }
+
+    async function confirmTotpDisable() {
+      const err = document.getElementById('totp-disable-err');
+      const pw = document.getElementById('totp-disable-pw').value;
+      const code = document.getElementById('totp-disable-code').value.trim();
+      err.style.display = 'none';
+      try {
+        const r = await fetch('/api/admin/totp/disable', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: pw, code }),
+        });
+        if (r.status === 401) {
+          err.textContent = 'Wrong password or code.';
+          err.style.display = 'block';
+          return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        document.getElementById('totp-disable-overlay').style.display = 'none';
+        showAdminInfo('2FA disabled', 'Re-enrol whenever you want to turn it back on.', 'ok');
+        refreshTotpStatus();
+      } catch (e) {
+        err.textContent = e?.message || String(e);
+        err.style.display = 'block';
+      }
+    }
 
     // Auto-load active jobs + users when their tab opens for the first time.
     document.querySelectorAll('.tab').forEach((btn) => {
