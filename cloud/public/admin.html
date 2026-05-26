@@ -41,6 +41,26 @@
     h2.section-title:first-of-type { margin-top: 24px; }
 
     /* ─────────── Tabs ─────────── */
+    .kill-switch-summary {
+      display: inline-flex; align-items: center;
+      padding: 8px 14px; border-radius: 999px;
+      background: var(--bg-1); border: 1px solid var(--border);
+      cursor: pointer; font-size: 12px; font-weight: 600;
+      transition: transform .12s, box-shadow .12s;
+    }
+    .kill-switch-summary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .kill-switch-summary.all-ok { border-color: var(--ok); }
+    .kill-switch-summary.all-ok .pill-dot { background: var(--ok); }
+    .kill-switch-summary.degraded { border-color: var(--warn); }
+    .kill-switch-summary.degraded .pill-dot { background: var(--warn); }
+    .kill-switch-summary.down { border-color: var(--err); }
+    .kill-switch-summary.down .pill-dot { background: var(--err); }
+    .pill-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      box-shadow: 0 0 8px currentColor;
+    }
+    .pill-dot.dot-ok   { background: var(--ok); }
+    .pill-dot.dot-err  { background: var(--err); }
     /* Tabs are now organised in 3 colour-coded groups. Each group is a
        rounded card with its own subtle background tint + header label,
        so the eye lands immediately on the category before scanning the
@@ -183,8 +203,16 @@
   <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
 </head>
 <body>
-  <h1>📊 MyFabmesh — Admin</h1>
-  <div class="sub" id="generated_at">Loading…</div>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+    <div>
+      <h1>📊 MyFabmesh — Admin</h1>
+      <div class="sub" id="generated_at">Loading…</div>
+    </div>
+    <!-- Live kill-switch summary, clickable: jumps to the Services tab. -->
+    <div id="kill-switch-summary" class="kill-switch-summary" style="display:none;" title="Click to manage services">
+      <div id="kill-switch-summary-line" style="display:flex; align-items:center; gap:8px;"></div>
+    </div>
+  </div>
 
   <div id="err" class="err-msg" style="display:none"></div>
 
@@ -476,31 +504,43 @@
       </div>
     </div>
 
-    <!-- Tab: Pricing — admin-tunable credit costs per operation -->
+    <!-- Tab: Pricing — admin-tunable credit costs per operation
+         (password-gated like Services to prevent fat-fingered edits) -->
     <div class="tab-panel" data-panel="pricing">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px;">
-        <span style="color:var(--text-2); font-size:12px;">Credit cost per operation. Saves take effect within ~60s for every user. "Reset" reverts a single row to its hardcoded default.</span>
-        <button class="btn" onclick="loadPricing()">🔄 Reload</button>
+      <div id="pricing-lock" style="background:var(--bg-1); border:1px solid var(--warn); border-radius:12px; padding:24px; max-width:480px;">
+        <h3 style="margin:0 0 8px; color:var(--warn);">💰 Pricing</h3>
+        <p style="color:var(--text-2); font-size:13px; margin:0 0 14px;">
+          Live credit costs for every operation. Saves propagate to all users within ~60s. Re-enter your admin password to unlock the editor.
+        </p>
+        <input id="pricing-unlock-input" type="password" placeholder="Admin password"
+               style="width:100%; padding:10px 14px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:14px; margin-bottom:12px;" />
+        <button class="btn btn-accent" id="pricing-unlock-btn" style="background:var(--warn); border-color:var(--warn); color:#0a0a0e;">Unlock</button>
+        <div id="pricing-lock-err" style="color:var(--err); font-size:12px; margin-top:10px; display:none;"></div>
       </div>
-      <table id="pricing-table">
-        <thead>
-          <tr>
-            <th>Operation</th>
-            <th>Description</th>
-            <th class="num">Default</th>
-            <th class="num">Current</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody><tr><td colspan="5" style="color:var(--text-2)">Loading…</td></tr></tbody>
-      </table>
-      <div style="display:flex; gap:12px; align-items:center; margin-top:16px; flex-wrap:wrap;">
-        <input id="pricing-password" type="password" placeholder="Admin password (required to save)"
-               style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:13px;" />
-        <button class="btn btn-accent" id="pricing-save-btn">💾 Save all prices</button>
-        <button class="btn" id="pricing-reset-all-btn">↻ Reset all to defaults</button>
+
+      <div id="pricing-panel" style="display:none;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px;">
+          <span style="color:var(--text-2); font-size:12px;">Credit cost per operation. Saves take effect within ~60s for every user. "Reset" reverts a single row to its hardcoded default.</span>
+          <button class="btn" onclick="loadPricing()">🔄 Reload</button>
+        </div>
+        <table id="pricing-table">
+          <thead>
+            <tr>
+              <th>Operation</th>
+              <th>Description</th>
+              <th class="num">Default</th>
+              <th class="num">Current</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="5" style="color:var(--text-2)">Loading…</td></tr></tbody>
+        </table>
+        <div style="display:flex; gap:12px; align-items:center; margin-top:16px; flex-wrap:wrap;">
+          <button class="btn btn-accent" id="pricing-save-btn">💾 Save all prices</button>
+          <button class="btn" id="pricing-reset-all-btn">↻ Reset all to defaults</button>
+        </div>
+        <div id="pricing-feedback" style="margin-top:10px; font-size:12px; display:none;"></div>
       </div>
-      <div id="pricing-feedback" style="margin-top:10px; font-size:12px; display:none;"></div>
     </div>
 
     <!-- Confirm modal (used by stop / ban / info) -->
@@ -1288,6 +1328,7 @@
         const r = await fetch('/api/admin/services', { credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         _servicesState = await r.json();
+        _renderKillSwitchSummary(_servicesState);
       } catch (e) {
         list.innerHTML = `<div style="color:var(--err)">${escapeHtml(e?.message || e)}</div>`;
         return;
@@ -1636,36 +1677,85 @@
       });
     }
 
-    document.getElementById('pricing-save-btn')?.addEventListener('click', async () => {
-      const pwInput = document.getElementById('pricing-password');
-      const feedback = document.getElementById('pricing-feedback');
-      const pw = pwInput.value;
-      feedback.style.display = 'none';
-      if (!pw) {
-        feedback.textContent = 'Admin password required to save.';
-        feedback.style.color = 'var(--err)';
-        feedback.style.display = '';
-        pwInput.focus();
+    // Password kept in JS memory for the unlocked session — never
+    // sessionStorage / localStorage, same convention as Services.
+    let _pricingPassword = '';
+
+    async function unlockPricing() {
+      const input = document.getElementById('pricing-unlock-input');
+      const errEl = document.getElementById('pricing-lock-err');
+      const pw = input.value;
+      errEl.style.display = 'none';
+      // Probe by issuing a no-op save (re-saves current state). Wrong
+      // password -> 401, right password -> 200 and we reveal the editor.
+      let cur, defaults;
+      try {
+        const r = await fetch('/api/admin/pricing', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        cur = j.current || {};
+        defaults = j.defaults || {};
+      } catch (e) {
+        errEl.textContent = 'Could not fetch pricing: ' + (e?.message || e);
+        errEl.style.display = '';
         return;
       }
       try {
         const r = await fetch('/api/admin/pricing', {
           method: 'POST', credentials: 'include',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prices: _pricingCurrent, password: pw }),
+          body: JSON.stringify({ prices: cur, password: pw }),
         });
         if (r.status === 401) {
-          feedback.textContent = 'Wrong admin password.';
-          feedback.style.color = 'var(--err)';
-          feedback.style.display = '';
-          pwInput.select();
+          errEl.textContent = 'Wrong password.';
+          errEl.style.display = '';
+          input.select();
+          return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      } catch (e) {
+        errEl.textContent = 'Server error: ' + (e?.message || e);
+        errEl.style.display = '';
+        return;
+      }
+      _pricingPassword = pw;
+      _pricingDefaults = defaults;
+      _pricingCurrent = { ...defaults, ...cur };
+      document.getElementById('pricing-lock').style.display = 'none';
+      document.getElementById('pricing-panel').style.display = '';
+      _renderPricingTable();
+    }
+    document.getElementById('pricing-unlock-btn')?.addEventListener('click', unlockPricing);
+    document.getElementById('pricing-unlock-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') unlockPricing();
+    });
+
+    document.getElementById('pricing-save-btn')?.addEventListener('click', async () => {
+      const feedback = document.getElementById('pricing-feedback');
+      feedback.style.display = 'none';
+      if (!_pricingPassword) {
+        // Stale unlock — push the user back to the lock screen.
+        document.getElementById('pricing-lock').style.display = '';
+        document.getElementById('pricing-panel').style.display = 'none';
+        return;
+      }
+      try {
+        const r = await fetch('/api/admin/pricing', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prices: _pricingCurrent, password: _pricingPassword }),
+        });
+        if (r.status === 401) {
+          _pricingPassword = '';
+          document.getElementById('pricing-lock').style.display = '';
+          document.getElementById('pricing-panel').style.display = 'none';
+          showAdminInfo('Locked', 'Password no longer valid. Please re-enter.', 'err');
           return;
         }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         _pricingCurrent = data.current || _pricingCurrent;
         _renderPricingTable();
-        pwInput.value = '';
         feedback.textContent = '✓ Saved — propagates to all users within 60s.';
         feedback.style.color = 'var(--ok)';
         feedback.style.display = '';
@@ -1687,7 +1777,16 @@
         const t = btn.dataset.tab;
         if (t === 'active'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'users'   && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
-        if (t === 'pricing' && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadPricing(); }
+        // Pricing tab is password-gated. Only load the editor once
+        // the user has unlocked it; otherwise just focus the input.
+        if (t === 'pricing') {
+          if (!_pricingPassword) {
+            setTimeout(() => document.getElementById('pricing-unlock-input')?.focus(), 50);
+          } else if (!btn.dataset.loaded) {
+            btn.dataset.loaded = '1';
+            loadPricing();
+          }
+        }
         // Services tab: focus the password input if still locked.
         if (t === 'services' && !_killswitchPassword) {
           setTimeout(() => document.getElementById('services-password-input')?.focus(), 50);
@@ -1702,18 +1801,57 @@
       if (activeTab?.dataset?.tab === 'active') loadActiveJobs(true);
     }, 5_000);
 
-    // Probe services state on every load so the tab badge appears even
-    // before the admin clicks the Services tab.
-    fetch('/api/admin/services', { credentials: 'include' })
-      .then((r) => r.ok ? r.json() : null)
-      .then((s) => {
-        if (!s) return;
+    // Live kill-switch summary at the top — clickable, jumps to the
+    // Services tab. Refreshes every 30s so flipping a switch from
+    // another tab reflects here without a manual reload.
+    function _renderKillSwitchSummary(s) {
+      const box = document.getElementById('kill-switch-summary');
+      const line = document.getElementById('kill-switch-summary-line');
+      if (!box || !line || !s) return;
+      box.style.display = '';
+      const allOn = s.modal_enabled && s.site_enabled && s.stripe_enabled;
+      box.classList.remove('all-ok', 'degraded', 'down');
+      let summary;
+      if (allOn) {
+        box.classList.add('all-ok');
+        summary = '<span class="pill-dot"></span><span>All services OK</span>';
+      } else if (!s.site_enabled) {
+        box.classList.add('down');
+        summary = '<span class="pill-dot"></span><span>⛔ Site is in maintenance mode</span>';
+      } else {
+        box.classList.add('degraded');
+        const off = [
+          !s.modal_enabled  ? 'Modal'  : null,
+          !s.stripe_enabled ? 'Stripe' : null,
+        ].filter(Boolean);
+        summary = `<span class="pill-dot"></span><span>⚠️ ${off.join(' + ')} disabled</span>`;
+      }
+      line.innerHTML = summary + '<span style="margin-left:8px; opacity:0.6;">→</span>';
+    }
+
+    function _activateServicesTab() {
+      // Reuse the click handler so the panel + sub-panels load
+      // correctly. Falls back to a manual class swap if the tab
+      // button can't be found (admin not logged in yet).
+      const btn = document.querySelector('.tab[data-tab="services"]');
+      if (btn) btn.click();
+    }
+    document.getElementById('kill-switch-summary')?.addEventListener('click', _activateServicesTab);
+
+    async function refreshKillSwitchSummary() {
+      try {
+        const r = await fetch('/api/admin/services', { credentials: 'include' });
+        if (!r.ok) return;
+        const s = await r.json();
         _servicesState = s;
         const allOn = s.modal_enabled && s.site_enabled && s.stripe_enabled;
-        const badge = document.getElementById('services-badge');
-        if (badge) badge.style.display = allOn ? 'none' : '';
-      })
-      .catch(() => {});
+        const tabBadge = document.getElementById('services-badge');
+        if (tabBadge) tabBadge.style.display = allOn ? 'none' : '';
+        _renderKillSwitchSummary(s);
+      } catch {}
+    }
+    refreshKillSwitchSummary();
+    setInterval(refreshKillSwitchSummary, 30_000);
 
     refresh();
   </script>
