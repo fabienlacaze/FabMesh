@@ -16,19 +16,37 @@ from PIL import Image
 import torch
 
 
+PRESERVE_PREFIX = (
+    'same character, same outfit, same pose, same composition, '
+    'preserve original subject identity, only change: '
+)
+PRESERVE_NEG = (
+    'different character, changed face, changed outfit, different pose, '
+    'distorted, blurry, low quality, deformed, extra limbs, missing limbs, '
+    'bad anatomy, watermark, multiple subjects'
+)
+
+
 def generate(
     base_pipe,                       # StableDiffusionXLControlNetPipeline on CUDA
     source_img: Image.Image,
     prompt: str,
-    strength: float = 0.55,
+    strength: float = 0.35,
     seed: int = 42,
     steps: int = 30,
     guidance: float = 7.0,
     size: int = 1024,
 ) -> Image.Image:
     """Run RealVisXL img2img on source_img. strength is the SDXL noising
-    amount in [0,1]; 0.55 matches the desktop default for `Modify Image`
-    (just enough denoising to obey the prompt without losing the layout).
+    amount in [0,1]; 0.35 is the new default for `Modify Image` —
+    low enough to preserve the original subject (add/remove details and
+    accessories without redrawing the character). Up to ~0.75 for
+    aggressive restyling.
+
+    The prompt is auto-prefixed with PRESERVE_PREFIX which tells SDXL
+    to keep identity. Without it, even at strength=0.35 the model
+    happily drifts to a different face / outfit (observed: orc lost
+    helmet + swords + bag with strength=0.55 + "add a helmet").
 
     We construct the img2img pipeline lazily and CACHE it on the base
     pipe to avoid rebuilding `from_pipe()` on every call (it's fast
@@ -79,9 +97,20 @@ def generate(
     saved_type = getattr(unet.config, 'encoder_hid_dim_type', None)
     unet.encoder_hid_proj = None
     unet.config.encoder_hid_dim_type = None
+    # Auto-prefix the user prompt with identity-preserving tokens so
+    # SDXL doesn't drift to a different subject. Skip the prefix when
+    # the user is clearly going for a re-style (strength > 0.6) — at
+    # that point they WANT a redraw.
+    final_prompt = prompt
+    final_neg = ''
+    if float(strength) <= 0.6:
+        final_prompt = PRESERVE_PREFIX + prompt
+        final_neg = PRESERVE_NEG
+
     try:
         return cached(
-            prompt=prompt,
+            prompt=final_prompt,
+            negative_prompt=final_neg,
             image=src,
             strength=float(strength),
             num_inference_steps=int(steps),
