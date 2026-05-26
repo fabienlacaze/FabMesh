@@ -536,11 +536,55 @@
     + '-1px 1px 0 #1a1a1a,1px 1px 0 #1a1a1a,0 1px 2px rgba(0,0,0,0.5);'
     + 'margin-right:1px;">⚡</span>';
 
+  let _adminForcedLogoutShown = false;
+  function _showAdminForcedLogoutPopup() {
+    if (_adminForcedLogoutShown) return;
+    _adminForcedLogoutShown = true;
+    // Full-screen overlay with a forced redirect — bypasses every
+    // app modal because the admin needs this to read no matter what
+    // the user was doing.
+    const overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'background:rgba(0,0,0,0.85)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'z-index:99999', 'padding:24px',
+    ].join(';');
+    overlay.innerHTML = `
+      <div style="background:#14141a; border:2px solid #ff5252; border-radius:12px; padding:28px; max-width:480px; width:100%; text-align:center; font:14px system-ui,sans-serif; color:#f0f0f0;">
+        <div style="font-size:42px; margin-bottom:8px;">🔒</div>
+        <h2 style="margin:0 0 12px; color:#ff5252;">Session ended by admin</h2>
+        <p style="color:#c0c0cc; line-height:1.6; margin:0 0 18px;">
+          An administrator has invalidated all active sessions. You'll be redirected to the login page now.
+        </p>
+        <button id="admin-forced-logout-ok"
+                style="background:linear-gradient(135deg,#ffd84a,#f5a623); color:#1a1a1a; border:1px solid rgba(255,255,255,0.3); padding:10px 24px; border-radius:8px; font-weight:700; cursor:pointer; font-size:14px;">
+          Take me to login
+        </button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const goLogin = () => { window.location.href = '/login'; };
+    overlay.querySelector('#admin-forced-logout-ok').addEventListener('click', goLogin);
+    setTimeout(goLogin, 6000);  // auto-redirect after 6 s
+  }
+
   async function refreshCreditsPill() {
     if (!_creditsPillEl) return;
     try {
       const r = await fetch('/api/me', { credentials: 'include' });
       if (!r.ok) {
+        // Distinguish admin-forced logout from a generic 401 so the
+        // user sees a clear "an admin kicked you" popup instead of
+        // a silent "Sign in" link swap.
+        if (r.status === 401) {
+          try {
+            const j = await r.json();
+            if (j?.reason === 'admin_forced_logout') {
+              _showAdminForcedLogoutPopup();
+              return;
+            }
+          } catch {}
+        }
         _creditsPillEl.textContent = 'Sign in';
         _creditsPillEl.href = '/login';
         return;

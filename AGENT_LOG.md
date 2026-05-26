@@ -10,6 +10,28 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-26 (Admin UX — eye toggle + unified Finance/System lock)
+
+- **Eye toggle :** MutationObserver scan tous les
+  `<input type="password">` à boot + à chaque mutation DOM, injecte
+  un bouton 👁 collé à droite qui flip type=password/text. Bénéficie
+  à tous les password fields (login admin, services unlock, pricing
+  unlock, TOTP disable, sensitive lock, etc.) sans modification de
+  chaque modal.
+- **Lock unifié Finance + System :** un seul password unlock
+  (`SENSITIVE_TABS`) couvre les 5 tabs sensibles (Revenus, Par type,
+  Pricing, Users, Services). Le password unlocked est mirroré dans
+  les variables legacy (`_killswitchPassword`, `_pricingPassword`)
+  pour éviter de re-taper sur les anciens lock screens. URL hash
+  restore whitelist : que les Activity tabs (overview/traffic/ops/
+  active) pour éviter un deep-link qui skip l'unlock.
+- **Force logout improvements :** `MIN_SESSION_TTL_MS = 5000` (au
+  lieu de 60_000) + `handleMe` carry un `reason: 'admin_forced_logout'`
+  + `cloud-overrides.js` popup fullscreen "Session ended by admin"
+  avec auto-redirect 6s vers /login.
+
+---
+
 ## 2026-05-26 (Parity audit cloud vs desktop — loadImage error handling)
 
 - **Contexte :** audit complet déclenché par "fais en sorte que tout

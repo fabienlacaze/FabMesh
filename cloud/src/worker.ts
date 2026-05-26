@@ -482,7 +482,10 @@ function _invalidatePricingCache() {
  * Cache 60 s to dodge a R2 read on every request. Bumping the value
  * also bumps the cache invalidation marker. */
 const MIN_SESSION_IAT_KEY = '_meta/min-session-iat.json';
-const MIN_SESSION_TTL_MS = 60_000;
+// Short TTL: when the admin presses "Force logout" they expect users
+// kicked within seconds, not a full minute. 5 s = at most one R2 read
+// per user per 5 s, still cheap.
+const MIN_SESSION_TTL_MS = 5_000;
 let _minSessionIatCache: { iat: number; ts: number } = { iat: 0, ts: 0 };
 
 async function _getMinSessionIat(env: Env): Promise<number> {
@@ -633,7 +636,14 @@ async function getSessionUser(req: Request, env: Env): Promise<SessionUser | nul
   const minIat = await _getMinSessionIat(env);
   if (minIat > 0 && !(me.email && ADMIN_EMAILS.has(me.email.toLowerCase()))) {
     const iat = _decodeJwtIat(token);
-    if (iat !== null && iat < minIat) return null;
+    if (iat !== null && iat < minIat) {
+      // Carry the reason through a side-channel — getSessionUser
+      // returns null normally, but callers can check this flag if
+      // they want to surface "admin forced logout" instead of a
+      // generic 401.
+      (req as Request & { __sessionExpiredReason?: string }).__sessionExpiredReason = 'admin_forced_logout';
+      return null;
+    }
   }
 
   // Ban check — banned users look like "not authenticated" to every
@@ -886,11 +896,13 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 
 async function handleMe(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
-  if (!user) return json({ user: null }, { status: 401 });
-  // Expose `is_admin` so the frontend can show/hide the admin dashboard
-  // button without having to make a second request. The check stays on
-  // the server (frontend just trusts the flag for UI purposes — every
-  // admin endpoint re-checks the email in _requireAdmin).
+  if (!user) {
+    // Side-channel set in getSessionUser when the session was killed
+    // by the admin "Force logout all" button — lets the frontend
+    // show a dedicated popup instead of a generic "please log in".
+    const reason = (req as Request & { __sessionExpiredReason?: string }).__sessionExpiredReason;
+    return json({ user: null, reason: reason ?? null }, { status: 401 });
+  }
   const is_admin = !!(user.email && ADMIN_EMAILS.has(user.email.toLowerCase()));
   return json({ user: { ...user, is_admin } });
 }
