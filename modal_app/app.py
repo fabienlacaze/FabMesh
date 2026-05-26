@@ -482,7 +482,14 @@ class MyFabmeshPredictor:
 @app.cls(
     gpu="L40S",
     timeout=600,
-    scaledown_window=300,  # keep warm 5 min after last call so back-to-back gens stay fast
+    # Bumped 300→600 on 2026-05-26 because cold start of this class
+    # (RealVisXL + ControlNet + IPAdapter + Florence-2 + lazy SDXL
+    # Inpaint = 12-18 GB) takes ~50-90s, which combined with inference
+    # easily crosses Cloudflare's 100s subrequest timeout → HTTP 524
+    # in the Worker. Longer scaledown keeps the container warm across
+    # typical edit sessions (multi-modify cycles) without re-paying
+    # the 90s cold tax. Idle cost: ~$0.16 per 5min extra warm time.
+    scaledown_window=600,
     enable_memory_snapshot=True,
     secrets=[
         modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),

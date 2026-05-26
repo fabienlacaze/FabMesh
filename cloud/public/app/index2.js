@@ -4010,7 +4010,9 @@ function openSymmetrize() {
   const src = symState.imgPath;
   if (/^(?:https?|blob|data):/i.test(src)) {
     if (/^https?:/i.test(src)) {
-      fetch(src, { credentials: 'omit' })
+      // Route via /api/proxy-image — same-origin → no CORS.
+      const proxied = '/api/proxy-image?url=' + encodeURIComponent(src);
+      fetch(proxied, { credentials: 'omit' })
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
         .then(blob => loadFrom(URL.createObjectURL(blob)))
         .catch(e => showToast('symmetrize: fetch failed: ' + (e?.message || e), 'error', 5000));
