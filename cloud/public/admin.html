@@ -196,7 +196,7 @@
       <a class="btn" href="/api/admin/history.csv" download>… or CSV</a>
       <button class="btn" onclick="refresh()">🔄 Refresh</button>
       <div class="spacer"></div>
-      <button class="btn" onclick="adminLogout()">🔓 Lock</button>
+      <button class="btn" onclick="adminLogout()">🚪 Logout</button>
     </div>
 
     <!-- ──────────────────────────────────────────────────────────
@@ -1110,7 +1110,9 @@
         { id: 'modal', label: 'Modal (GPU backend)',
           desc: 'Image generation, mesh, all AI tools. Replicate-only calls keep working.' },
         { id: 'site',  label: 'MyFabmesh.AI site',
-          desc: 'Locks down /api/* for every user except admin endpoints. Total emergency stop.' },
+          desc: 'Locks down /api/* for every user except admin endpoints. The UI shell still loads but every action fails.' },
+        { id: 'total', label: '⛔ Total blackout',
+          desc: 'Nuclear option. Static assets too — users see a maintenance page. /admin still works so you can flip it back.' },
       ];
       list.innerHTML = services.map((s) => {
         const on = !!_servicesState[s.id + '_enabled'];
@@ -1133,7 +1135,7 @@
         `;
       }).join('');
       // Show a warning badge on the tab when something's disabled.
-      const allOn = _servicesState.modal_enabled && _servicesState.site_enabled;
+      const allOn = _servicesState.modal_enabled && _servicesState.site_enabled && _servicesState.total_enabled;
       const badge = document.getElementById('services-badge');
       if (badge) badge.style.display = allOn ? 'none' : '';
     }
@@ -1315,7 +1317,7 @@
       .then((s) => {
         if (!s) return;
         _servicesState = s;
-        const allOn = s.modal_enabled && s.site_enabled;
+        const allOn = s.modal_enabled && s.site_enabled && s.total_enabled;
         const badge = document.getElementById('services-badge');
         if (badge) badge.style.display = allOn ? 'none' : '';
       })
