@@ -1600,8 +1600,12 @@
               <option value="local-sdxl" selected>MyFabmesh.AI Image Engine (local)</option>
               <option value="meshy">Meshy.ai (cloud, needs API key)</option>
             </select>
-            <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
-            <input type="range" id="mod-strength" min="30" max="95" value="55" />
+            <label>Strength <span id="mod-strength-val" class="slider-val">35%</span></label>
+            <input type="range" id="mod-strength" min="15" max="95" value="35" />
+            <div style="font-size:11px;color:var(--text-2);margin-top:2px;line-height:1.4;">
+              Lower = preserves the original (good for adding/removing details).
+              Higher = redraws more aggressively (good for restyling).
+            </div>
           </div>
         </div>
         <div class="modal-actions">
