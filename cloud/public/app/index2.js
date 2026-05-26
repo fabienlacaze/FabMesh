@@ -4422,16 +4422,29 @@ document.getElementById('res-upscale')?.addEventListener('click', async () => {
 });
 document.getElementById('res-downscale')?.addEventListener('click', async () => {
   document.getElementById('modal-resolution')?.classList.add('hidden');
-  const nw = Math.round(_resW / 2), nh = Math.round(_resH / 2);
-  showToast(`Downscaling ${_resW}x${_resH} -> ${nw}x${nh}...`, 'info', 2000);
   const p = state.currentProject;
   const tgt = editTarget(p);
   if (!tgt) return;
+  const nw = Math.round(_resW / 2), nh = Math.round(_resH / 2);
+  const imgName = String(tgt).split(/[\\/]/).pop();
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`Downscale: ${p?.name || ''}`, null, { Image: imgName, From: `${_resW}x${_resH}`, To: `${nw}x${nh}` }, 4000)
+    : null;
   try {
     const r = await API.imageQuickEdit({ imagePath: tgt, operation: 'downscale', params: {} });
-    if (r?.success) { showToast('Downscale done', 'success'); await reloadCurrentProject(); }
-    else showToast('Downscale failed: ' + (r?.error || ''), 'error');
-  } catch (e) { showToast('Downscale error: ' + e.message, 'error'); }
+    if (r?.success) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
+      showToast('Downscale done', 'success');
+      await reloadCurrentProject();
+    } else {
+      const msg = r?.error || 'unknown';
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      showToast('Downscale failed: ' + msg, 'error');
+    }
+  } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
+    showToast('Downscale error: ' + e.message, 'error');
+  }
 });
 function _showResTarget(nw, nh, up) {
   const arrow = document.getElementById('res-arrow');
@@ -5043,13 +5056,26 @@ document.getElementById('blur-save')?.addEventListener('click', async () => {
   const tgt = (modal && modal.dataset.targetPath) || editTarget(p);
   if (!bCanvas || !tgt) return;
   modal?.classList.add('hidden');
-  showToast('Saving...', 'info', 1500);
+  const imgName = String(tgt).split(/[\\/]/).pop();
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`Blur brush: ${p?.name || ''}`, null, { Image: imgName }, 4000)
+    : null;
   try {
     const dataUrl = bCanvas.toDataURL('image/png');
     const r = await API.saveImageDataUrl({ basePath: tgt, dataUrl, suffix: 'blur' });
-    if (r?.success) { showToast('Saved!', 'success'); await reloadCurrentProject(); }
-    else showToast('Save failed: ' + (r?.error || ''), 'error');
-  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    if (r?.success) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
+      showToast('Saved!', 'success');
+      await reloadCurrentProject();
+    } else {
+      const msg = r?.error || 'unknown';
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      showToast('Save failed: ' + msg, 'error');
+    }
+  } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
+    showToast('Error: ' + e.message, 'error');
+  }
 });
 
 // ============================================================
@@ -5633,20 +5659,27 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('paint-save')?.addEventListener('click', async () => {
   if (!paintState.imgPath || !_paintMgr) return;
   const dataUrl = _paintMgr.toDataURL();
+  _closePaint();
+  const p = state.currentProject;
+  const imgName = String(paintState.imgPath).split(/[\\/]/).pop();
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`Paint: ${p?.name || ''}`, null, { Image: imgName }, 4000)
+    : null;
   try {
     const result = await window.meshyAPI.saveImageDataUrl({
       basePath: paintState.imgPath, dataUrl, suffix: 'painted',
     });
     if (result && result.success) {
+      if (job && typeof completeJob === 'function') completeJob(job.id, true);
       showToast('Painted version saved!', 'success');
-      _closePaint();
-      // refreshProjectImages doesn't exist — use reloadCurrentProject
-      // which rebuilds the version strip + previews.
       if (state.currentProject) await reloadCurrentProject();
     } else {
-      showToast('Save failed: ' + ((result && result.error) || 'unknown'), 'error');
+      const msg = (result && result.error) || 'unknown';
+      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
+      showToast('Save failed: ' + msg, 'error');
     }
   } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e.message);
     showToast('Save error: ' + e.message, 'error');
   }
 });
