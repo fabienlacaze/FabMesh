@@ -1772,6 +1772,11 @@ async function callModalImageOp(env: Env, userId: string, input: {
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] image_op op=${input.op} dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  // Tag the container as warm. Used by /api/modal-status so the
+  // renderer knows whether the next op will be fast or paying a
+  // cold-start tax. Fire-and-forget — failure is fine, we just lose
+  // the warmth hint for one cycle.
+  _writeLastWarmMs(env, '_meta/last_warm_image_op.txt').catch(() => {});
 
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const tag = input.op === 'modify' ? 'modified' : 'inpaint';
@@ -2741,6 +2746,48 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
                        { op_type: op, error: e instanceof Error ? e.message : String(e) });
     return err(502, `mesh ${op} failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+// Threshold (ms) above which we consider the Modal MyFabmeshBackview
+// container scaled-down → next call will pay full cold start.
+// scaledown_window in app.py is 600s; we tag anything beyond 9 min as
+// cold (slight buffer for clock skew + the moment Modal kills the
+// container).
+const COLD_THRESHOLD_MS = 9 * 60 * 1000;
+
+async function _readLastWarmMs(env: Env, key: string): Promise<number | null> {
+  const txt = await r2GetText(env, key);
+  if (!txt) return null;
+  const n = parseInt(txt, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function _writeLastWarmMs(env: Env, key: string): Promise<void> {
+  if (!env.MESHES) return;
+  try { await env.MESHES.put(key, String(Date.now())); }
+  catch (e) { console.warn('[warm-track] put failed:', e instanceof Error ? e.message : String(e)); }
+}
+
+/** GET /api/modal-status — returns whether MyFabmeshBackview is
+ *  warm (best-effort, based on the timestamp of our last successful
+ *  call). Used by the renderer to size progress bars and show a
+ *  warm/cold pill in modals. */
+async function handleModalStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const last = await _readLastWarmMs(env, '_meta/last_warm_image_op.txt');
+  const now = Date.now();
+  const secondsSinceLastSuccess = last ? Math.floor((now - last) / 1000) : null;
+  const warm = last != null && (now - last) < COLD_THRESHOLD_MS;
+  return json({
+    image_op: {
+      warm,
+      seconds_since_last_success: secondsSinceLastSuccess,
+      expected_seconds_warm: 30,
+      expected_seconds_cold: 150,
+    },
+    cold_threshold_seconds: Math.floor(COLD_THRESHOLD_MS / 1000),
+  });
 }
 
 /** POST /api/upload-image — body: { dataUrl, suffix? }. Decodes a
@@ -3912,6 +3959,7 @@ export default {
         if (pathname === '/api/upscale-image'         && method === 'POST') return await handleUpscaleImage(req, env);
         if (pathname === '/api/proxy-image'           && method === 'GET')  return await handleProxyImage(req, env);
         if (pathname === '/api/upload-image'          && method === 'POST') return await handleUploadImage(req, env);
+        if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);

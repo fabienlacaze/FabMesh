@@ -4496,14 +4496,17 @@ document.getElementById('ws-facefix-btn')?.addEventListener('click', async () =>
     return;
   }
   // Wrap in pushJob so the user gets the same progress popup the
-  // other AI tools (Modify, Auto Inpaint) show. The Modal cold-start
-  // path can lazy-load CLIPSeg + SDXL Inpaint (~45s first call), then
-  // ~17s/call after — pick a generous expected duration so the bar
-  // doesn't peg at 99% prematurely.
-  const expectedMs = 45000;
+  // other AI tools show. Size the progress bar from the live
+  // warm/cold hint (window.__modalExpectedSeconds, populated by
+  // cloud-overrides.js _pollModalStatus). Falls back to 45s if the
+  // hint hasn't loaded yet.
+  const expectedMs = (window.__modalExpectedSeconds || 45) * 1000;
+  const warmLabel = window.__modalWarm === false
+    ? `Warming up AI (~${Math.round((window.__modalExpectedSeconds || 150) / 60)} min cold start)`
+    : 'Cloud SDXL Inpaint';
   gatedRun('img2img', `Face Fix: ${p.name}`, async () => {
     const job = pushJob(`Face Fix: ${p.name}`, null, {
-      Engine: 'Cloud SDXL Inpaint',
+      Engine: warmLabel,
       Detection: 'OpenCV Haar (face)',
       Cost: '2 credits',
     }, expectedMs);
