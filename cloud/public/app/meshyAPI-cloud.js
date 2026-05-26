@@ -93,6 +93,67 @@
   }
 
   /* ──────────────────────────────────────────────────────────────────
+   * Pending-job persistence — saves any mesh job in localStorage so a
+   * page reload doesn't strand a 2-5 min generation. resumePendingJobs
+   * fires on boot, re-creates the progress popup for each entry, and
+   * resumes polling. Hardcoded to mesh jobs for now (the only ones
+   * that genuinely run for minutes server-side).
+   * ────────────────────────────────────────────────────────────────── */
+  const PENDING_JOBS_KEY = 'myfm:pending-jobs';
+  function _readPendingJobs() {
+    try { return JSON.parse(localStorage.getItem(PENDING_JOBS_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function _writePendingJobs(list) {
+    try { localStorage.setItem(PENDING_JOBS_KEY, JSON.stringify(list)); } catch {}
+  }
+  function _addPendingJob(entry) {
+    const list = _readPendingJobs().filter((j) => j.jobId !== entry.jobId);
+    list.push({ ...entry, ts: Date.now() });
+    _writePendingJobs(list);
+  }
+  function _removePendingJob(jobId) {
+    _writePendingJobs(_readPendingJobs().filter((j) => j.jobId !== jobId));
+  }
+
+  async function resumePendingJobs() {
+    const list = _readPendingJobs();
+    if (!list.length) return;
+    // Drop entries older than 30 min — server-side they timed out
+    // anyway. Cleans up after crashes that left the marker behind.
+    const now = Date.now();
+    const fresh = list.filter((e) => now - (e.ts || 0) < 30 * 60_000);
+    if (fresh.length !== list.length) _writePendingJobs(fresh);
+    for (const entry of fresh) {
+      const job = (typeof window.pushJob === 'function')
+        ? window.pushJob(entry.name || `Generate 3D: ${entry.projectName || ''}`,
+                         null,
+                         { ...(entry.params || {}), Resumed: 'after page reload' },
+                         entry.expectedMs || 150_000)
+        : null;
+      // Don't await — let all resumed jobs run in parallel.
+      (async () => {
+        try {
+          const result = await pollPrediction(entry.jobId);
+          if (job && typeof window.completeJob === 'function') window.completeJob(job.id, true);
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          if (typeof window.reloadCurrentProject === 'function') {
+            try { await window.reloadCurrentProject(); } catch {}
+          }
+          _removePendingJob(entry.jobId);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (job && typeof window.completeJob === 'function') window.completeJob(job.id, false, msg);
+          _removePendingJob(entry.jobId);
+        }
+      })();
+    }
+  }
+  // Expose so other modules (or the UI) can force a cleanup.
+  window.__cloudResumePending = resumePendingJobs;
+  window.__cloudRemovePending = _removePendingJob;
+
+  /* ──────────────────────────────────────────────────────────────────
    * IMPLEMENTED — these are the calls the cloud actually services.
    * ────────────────────────────────────────────────────────────────── */
   const impl = {
@@ -186,14 +247,28 @@
         return { ok: false, success: false, error: created.error };
       }
       window.__meshyEmit('ai3d-progress', { stage: 'queued', jobId: created.jobId });
-      const result = await pollPrediction(created.jobId);
-      // Trigger credit pill refresh — mesh gen costs 1-2 credits.
-      if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-      return {
-        ok: true, success: true,
-        meshPath: result.url, meshUrl: result.url,
-        jobId: created.jobId, duration_s: result.duration_s,
-      };
+      // Survive a page reload: persist this jobId so resumePendingJobs()
+      // can re-create the popup + re-poll after refresh. Removed in the
+      // finally below regardless of outcome.
+      _addPendingJob({
+        jobId: created.jobId,
+        kind: 'mesh',
+        projectName: opts.outputName || opts.projectName || '',
+        name: `Generate 3D: ${opts.outputName || opts.projectName || ''}`,
+        expectedMs: 150_000,
+      });
+      try {
+        const result = await pollPrediction(created.jobId);
+        // Trigger credit pill refresh — mesh gen costs 1-2 credits.
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        return {
+          ok: true, success: true,
+          meshPath: result.url, meshUrl: result.url,
+          jobId: created.jobId, duration_s: result.duration_s,
+        };
+      } finally {
+        _removePendingJob(created.jobId);
+      }
     },
     imageToTrellis: function (opts) { return this.imageTo3D(opts); },
     onAI3DProgress: onChannel('ai3d-progress'),
@@ -1355,4 +1430,8 @@
   window.wizardAPI = wizardAPI;
   window.__isCloud = true;
   log(`mounted — ${Object.keys(meshyAPI).length} methods, ${STUBS.length} stubs`);
+  // Resume any mesh job a previous tab left behind. Delayed so the
+  // renderer has time to wire pushJob / reloadCurrentProject onto
+  // window before we fire pollPrediction.
+  setTimeout(() => { try { resumePendingJobs(); } catch (e) { console.warn('[cloud] resume failed:', e); } }, 1500);
 })();
