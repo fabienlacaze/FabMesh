@@ -61,6 +61,28 @@
     }
     .pill-dot.dot-ok   { background: var(--ok); }
     .pill-dot.dot-err  { background: var(--err); }
+    /* Eye toggle next to every <input type="password"> — wired in JS. */
+    .password-wrap { position: relative; display: block; }
+    .password-eye {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: transparent; border: none; cursor: pointer;
+      color: var(--text-2); font-size: 16px; padding: 4px 6px;
+      line-height: 1; user-select: none;
+    }
+    .password-eye:hover { color: var(--text-0); }
+    .password-wrap > input { padding-right: 36px !important; }
+    /* Sensitive-area lock overlay — shown the first time the admin
+       opens any Finance or System tab. One unlock unlocks them all. */
+    .sensitive-lock-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1500; padding: 24px;
+    }
+    .sensitive-lock-card {
+      background: var(--bg-1); border: 2px solid var(--accent);
+      border-radius: 14px; padding: 28px; max-width: 460px; width: 100%;
+    }
     /* Tabs are now organised in 3 colour-coded groups. Each group is a
        rounded card with its own subtle background tint + header label,
        so the eye lands immediately on the category before scanning the
@@ -543,6 +565,26 @@
       </div>
     </div>
 
+    <!-- Sensitive-areas unlock — gates every Finance and System tab.
+         One password unlocks all of them for the session. -->
+    <div id="sensitive-lock-overlay" class="sensitive-lock-overlay" style="display:none;">
+      <div class="sensitive-lock-card">
+        <h3 style="margin:0 0 8px; color:var(--accent);">🔐 Admin areas locked</h3>
+        <p style="color:var(--text-2); font-size:13px; margin:0 0 16px;">
+          Finance and System tabs are protected. Re-enter your admin password to unlock them all for this session.
+        </p>
+        <label class="password-wrap">
+          <input id="sensitive-lock-input" type="password" placeholder="Admin password"
+                 style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:14px;" />
+        </label>
+        <div id="sensitive-lock-err" style="color:var(--err); font-size:12px; margin-top:8px; display:none;"></div>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
+          <button class="btn" id="sensitive-lock-cancel">Cancel</button>
+          <button class="btn btn-accent" id="sensitive-lock-ok">Unlock</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Confirm modal (used by stop / ban / info) -->
     <div id="confirm-overlay"
          style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
@@ -685,6 +727,11 @@
     // Persists the active tab in the URL hash so reloads keep position.
     (function tabsInit() {
       function activate(name) {
+        // Sensitive (Finance + System) tabs require an unlock.
+        if (typeof SENSITIVE_TABS !== 'undefined' && SENSITIVE_TABS.has(name) && !_sensitiveUnlocked) {
+          _showSensitiveLock(name);
+          return;
+        }
         document.querySelectorAll('.tab').forEach(t =>
           t.classList.toggle('active', t.dataset.tab === name));
         document.querySelectorAll('.tab-panel').forEach(p =>
@@ -696,7 +743,10 @@
       document.querySelectorAll('.tab').forEach(t =>
         t.addEventListener('click', () => activate(t.dataset.tab)));
       // Restore tab from URL hash on load. Whitelist guards against bad hashes.
-      const allow = new Set(['overview', 'traffic', 'ops', 'finance', 'bytype']);
+      // Only Activity tabs are auto-restored — sensitive tabs need an
+      // explicit unlock, so we fall back to Overview to avoid trapping
+      // the admin on a locked panel.
+      const allow = new Set(['overview', 'traffic', 'ops', 'active']);
       const initial = location.hash.slice(1);
       if (allow.has(initial)) activate(initial);
     })();
@@ -1269,6 +1319,148 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════
+       EYE TOGGLE — auto-wired on every <input type="password">
+       Wraps the input in a relative span + injects a 👁 button that
+       toggles type=password / text. Run once on load + on every modal
+       open (MutationObserver) so even popups added later get the eye.
+       ═══════════════════════════════════════════════════════════════ */
+    function _attachPasswordEye(input) {
+      if (input.dataset.eyeAttached) return;
+      input.dataset.eyeAttached = '1';
+      const parent = input.parentNode;
+      // Already inside a .password-wrap label/div? Just add the button.
+      let wrap;
+      if (parent && parent.classList && parent.classList.contains('password-wrap')) {
+        wrap = parent;
+      } else {
+        wrap = document.createElement('span');
+        wrap.className = 'password-wrap';
+        // Inherit the input's flex/width context from its parent.
+        if (input.style.flex) wrap.style.flex = input.style.flex;
+        if (input.style.width) wrap.style.width = input.style.width;
+        if (input.style.minWidth) wrap.style.minWidth = input.style.minWidth;
+        parent.insertBefore(wrap, input);
+        wrap.appendChild(input);
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'password-eye';
+      btn.tabIndex = -1;
+      btn.textContent = '👁';
+      btn.title = 'Show password';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (input.type === 'password') {
+          input.type = 'text';
+          btn.textContent = '🙈';
+          btn.title = 'Hide password';
+        } else {
+          input.type = 'password';
+          btn.textContent = '👁';
+          btn.title = 'Show password';
+        }
+        input.focus();
+      });
+      wrap.appendChild(btn);
+    }
+    function _scanForPasswordInputs() {
+      document.querySelectorAll('input[type="password"]:not([data-eye-attached])').forEach(_attachPasswordEye);
+    }
+    // Initial scan + watch the DOM for late-added password inputs.
+    _scanForPasswordInputs();
+    new MutationObserver(_scanForPasswordInputs).observe(document.body, { childList: true, subtree: true });
+
+    /* ═══════════════════════════════════════════════════════════════
+       SENSITIVE-AREAS LOCK — one password unlocks all Finance + System
+       tabs for the session. Activity tabs stay open since they're
+       read-only dashboards.
+       ═══════════════════════════════════════════════════════════════ */
+    const SENSITIVE_TABS = new Set(['finance', 'bytype', 'pricing', 'users', 'services']);
+    let _sensitiveUnlocked = false;
+    let _sensitivePassword = '';
+    let _sensitivePendingTab = null;
+
+    async function _verifySensitivePassword(pw) {
+      // Cheapest available admin-only endpoint that requires both the
+      // cookie AND ADMIN_PASSWORD on every flip — just probes; we
+      // re-send what's already on R2 so it's a noop on success.
+      try {
+        const cur = await fetch('/api/admin/services', { credentials: 'include' });
+        if (!cur.ok) return false;
+        const state = await cur.json();
+        const r = await fetch('/api/admin/services', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ service: 'modal', enabled: state.modal_enabled, password: pw }),
+        });
+        return r.ok;
+      } catch { return false; }
+    }
+
+    function _showSensitiveLock(pendingTab) {
+      _sensitivePendingTab = pendingTab;
+      const ov = document.getElementById('sensitive-lock-overlay');
+      const input = document.getElementById('sensitive-lock-input');
+      const errEl = document.getElementById('sensitive-lock-err');
+      errEl.style.display = 'none';
+      input.value = '';
+      ov.style.display = 'flex';
+      setTimeout(() => input.focus(), 50);
+    }
+
+    async function _trySensitiveUnlock() {
+      const input = document.getElementById('sensitive-lock-input');
+      const errEl = document.getElementById('sensitive-lock-err');
+      const pw = input.value;
+      errEl.style.display = 'none';
+      if (!pw) {
+        errEl.textContent = 'Password required.';
+        errEl.style.display = '';
+        return;
+      }
+      const ok = await _verifySensitivePassword(pw);
+      if (!ok) {
+        errEl.textContent = 'Wrong password.';
+        errEl.style.display = '';
+        input.select();
+        return;
+      }
+      _sensitiveUnlocked = true;
+      _sensitivePassword = pw;
+      // Mirror into existing per-tab password variables so the
+      // Services + Pricing panels don't ask a second time.
+      _killswitchPassword = pw;
+      _pricingPassword = pw;
+      document.getElementById('sensitive-lock-overlay').style.display = 'none';
+      // Hide the Services and Pricing legacy lock screens.
+      const sLock = document.getElementById('services-lock');
+      const sPanel = document.getElementById('services-panel');
+      if (sLock && sPanel) { sLock.style.display = 'none'; sPanel.style.display = ''; loadServicesPanel(); refreshTotpStatus(); }
+      const pLock = document.getElementById('pricing-lock');
+      const pPanel = document.getElementById('pricing-panel');
+      if (pLock && pPanel) {
+        pLock.style.display = 'none'; pPanel.style.display = '';
+        const tab = document.querySelector('.tab[data-tab="pricing"]');
+        if (tab && !tab.dataset.loaded) { tab.dataset.loaded = '1'; loadPricing(); }
+      }
+      // Now actually switch to the tab the admin clicked.
+      if (_sensitivePendingTab) {
+        const btn = document.querySelector(`.tab[data-tab="${_sensitivePendingTab}"]`);
+        if (btn) btn.click();
+        _sensitivePendingTab = null;
+      }
+    }
+
+    document.getElementById('sensitive-lock-ok')?.addEventListener('click', _trySensitiveUnlock);
+    document.getElementById('sensitive-lock-cancel')?.addEventListener('click', () => {
+      document.getElementById('sensitive-lock-overlay').style.display = 'none';
+      _sensitivePendingTab = null;
+    });
+    document.getElementById('sensitive-lock-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') _trySensitiveUnlock();
+    });
+
+    /* ═══════════════════════════════════════════════════════════════
        SERVICES — password-gated kill switches
        Password lives in memory only for the session (never sessionStorage
        or localStorage) so a stolen cookie can't read it back.
@@ -1454,7 +1646,7 @@
             return;
           }
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          showAdminInfo('Sessions invalidated', 'Every user (except admins) will be logged out within ~60s.', 'ok');
+          showAdminInfo('Sessions invalidated', 'Every user (except admins) will be logged out within ~10s. Their next API call returns 401 and a popup tells them an admin kicked them.', 'ok');
         },
         { okLabel: '🔁 Force logout', okColor: 'var(--err)' },
       );
