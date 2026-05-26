@@ -1201,17 +1201,32 @@ async function openProject(p) {
 // full refreshButtonStates() for that.
 function refreshButtonLabelsAndHiding(p) {
   if (!p) return;
+  // Helper: rewrite the label while preserving the yellow cost pill.
+  // The pill <span> is hardcoded in index.html and read by the live
+  // meter — using textContent here wiped it (the user saw a bare
+  // "Generate new version" with no ⚡ badge).
+  const _setLabelWithImgPill = (btn, label) => {
+    const curVal = document.getElementById('ws-image-cost-value')?.textContent || '2';
+    btn.innerHTML = escapeHtml(label) +
+      ` <span class="generate-cost-pill"><span class="generate-cost-bolt">⚡</span>` +
+      `<span id="ws-image-cost-value">${escapeHtml(curVal)}</span></span>`;
+  };
+  const _setLabelWithMeshPill = (btn, label) => {
+    const curVal = document.getElementById('ws-mesh-cost-value')?.textContent || '8';
+    btn.innerHTML = escapeHtml(label) +
+      ` <span id="ws-mesh-cost-pill" class="generate-cost-pill"><span class="generate-cost-bolt">⚡</span>` +
+      `<span id="ws-mesh-cost-value">${escapeHtml(curVal)}</span></span>`;
+  };
   const btnImg = document.getElementById('ws-generate-image');
-  if (btnImg) btnImg.textContent = p.images.length > 0 ? 'Generate new version' : 'Generate';
+  if (btnImg) _setLabelWithImgPill(btnImg, p.images.length > 0 ? 'Generate new version' : 'Generate');
   const btnMesh = document.getElementById('ws-generate-mesh');
   if (btnMesh) {
     btnMesh.disabled = !p.selectedImagePath;
-    btnMesh.textContent = p.meshes.length > 0 ? 'Generate new 3D version' : 'Generate 3D';
+    _setLabelWithMeshPill(btnMesh, p.meshes.length > 0 ? 'Generate new 3D version' : 'Generate 3D');
   }
-  // Rigging button (unified: engine selected via #ws-rig-engine → UniRig or Meshy).
+  // Rigging button (unified: engine selected via #ws-rig-engine -> UniRig).
   // Allow generation if either a mesh is selected for this project OR the
-  // rig-source viewer is currently showing one (could be from another project
-  // the user dragged in / picked manually).
+  // rig-source viewer is currently showing one.
   const btnRigAI = document.getElementById('ws-generate-rig-ai');
   if (btnRigAI) {
     btnRigAI.disabled = !p.selectedMeshPath && !rigSrcModel;
