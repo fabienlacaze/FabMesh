@@ -347,6 +347,37 @@
           -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
           0 1px 2px rgba(0,0,0,0.5);
       }
+      /* Cost pill embedded in primary "Generate" buttons. Reuses the
+         gold badge look so the price tag matches every other credits
+         display in the app. */
+      .generate-cost-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        margin-left: 8px;
+        padding: 2px 9px;
+        background: linear-gradient(135deg, #ffd84a, #f5a623);
+        color: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+        vertical-align: middle;
+        box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+      }
+      .generate-cost-bolt {
+        font-size: 12px;
+        line-height: 1;
+        color: #ffe066;
+        text-shadow:
+          -1px -1px 0 #1a1a1a, 1px -1px 0 #1a1a1a,
+          -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
+          0 1px 2px rgba(0,0,0,0.5);
+      }
     `;
     document.head.appendChild(style);
   }
