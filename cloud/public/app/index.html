@@ -11,6 +11,8 @@
   <!-- Cloud shim: replaces Electron IPC with HTTP fetch. MUST load before index2.js. -->
   <script src="meshyAPI-cloud.js"></script>
   <script src="cloud-overrides.js"></script>
+  <!-- model-viewer: inline GLB previews used by the home "Meshes" view. -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 </head>
 <body class="advanced-mode">
   <!-- Auto-update toast: hidden by default. Appears when the main
@@ -62,8 +64,19 @@
           <button id="btn-import-image" class="ghost-btn" style="white-space:nowrap;">&#128230; Import</button>
         </div>
       </div>
+      <div id="home-view-toggle" style="display:inline-flex; gap:0; margin:8px 0 16px; background:var(--bg-1); border:1px solid var(--border); border-radius:999px; padding:3px;">
+        <button type="button" class="home-view-btn active" data-view="projects" style="padding:6px 16px; background:var(--accent-grad); color:white; border:none; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer;">📁 Projects</button>
+        <button type="button" class="home-view-btn" data-view="images" style="padding:6px 16px; background:transparent; color:var(--text-1); border:none; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer;">🖼 Images</button>
+        <button type="button" class="home-view-btn" data-view="meshes" style="padding:6px 16px; background:transparent; color:var(--text-1); border:none; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer;">🧊 Meshes</button>
+      </div>
       <div id="projects-grid" class="projects-grid">
         <!-- project cards injected here -->
+      </div>
+      <div id="all-images-grid" class="hidden" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; margin-top:8px;">
+        <!-- all images injected here -->
+      </div>
+      <div id="all-meshes-grid" class="hidden" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; margin-top:8px;">
+        <!-- all meshes injected here -->
       </div>
       <div id="projects-empty" class="empty-state hidden">
         <h3>No projects yet</h3>
