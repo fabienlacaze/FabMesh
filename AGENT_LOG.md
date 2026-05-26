@@ -10,6 +10,29 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-26 (Security audit fixes — 4 critical + #2 v2 self-healing)
+
+- **Audit** lancé via agent général-purpose : identifié 3 fixes
+  critiques + 4-5 importants. Premier batch appliqué :
+  1. Bypass `/api/stripe-webhook` du kill switch Site (sinon Stripe
+     503 pendant 3j, client payé sans crédits).
+  2. Atomicité webhook Stripe : ordre probe → INSERT placeholder
+     credits=0 → addCredits → UPDATE patch.
+  3. `amount_total` → `amount_eur` dans handleAdminStats (KPI
+     gross revenue était à 0 depuis le début).
+  4. `/api/debug-auth` désormais gated par `_requireAdmin`.
+- **Vérification post-fix par 2e agent** : a trouvé que le fix #2
+  v1 ne self-healait PAS — probe retournait `if(existing) return`
+  même sur un placeholder credits=0 mort. → **Fix #2 v2** : probe
+  stratifié (credits>0 = done, credits=0 = resume, absent = full
+  flow) + `addCredits=null` → 500 à Stripe pour retry naturel.
+  Reste un risque résiduel : si UPDATE patch fail après addCredits
+  OK, le retry peut double-créditer. console.warn loggé pour audit
+  post-incident. Future amélioration : RPC Supabase atomique unique.
+- **Backup branch** avant fixes : `backup-before-security-fixes-20260526-211038`.
+
+---
+
 ## 2026-05-26 (Admin UX — eye toggle + unified Finance/System lock)
 
 - **Eye toggle :** MutationObserver scan tous les
