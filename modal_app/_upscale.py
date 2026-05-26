@@ -92,15 +92,27 @@ def generate(
             if (ref_w, ref_h) != (target_w, target_h) else upscaled
 
     gen = torch.Generator('cuda').manual_seed(int(seed))
-    refined = cached(
-        prompt=REFINE_PROMPT,
-        negative_prompt=REFINE_NEG,
-        image=refine_input,
-        strength=float(refine_strength),
-        num_inference_steps=int(steps),
-        guidance_scale=5.0,
-        generator=gen,
-    ).images[0]
+    # Same IP-Adapter neutralization as _modify.py — the UNet's
+    # encoder_hid_dim_type='ip_image_proj' makes img2img crash without
+    # image_embeds. Temporarily detach for the duration of the call.
+    unet = base_pipe.unet
+    saved_proj = getattr(unet, 'encoder_hid_proj', None)
+    saved_type = getattr(unet.config, 'encoder_hid_dim_type', None)
+    unet.encoder_hid_proj = None
+    unet.config.encoder_hid_dim_type = None
+    try:
+        refined = cached(
+            prompt=REFINE_PROMPT,
+            negative_prompt=REFINE_NEG,
+            image=refine_input,
+            strength=float(refine_strength),
+            num_inference_steps=int(steps),
+            guidance_scale=5.0,
+            generator=gen,
+        ).images[0]
+    finally:
+        unet.encoder_hid_proj = saved_proj
+        unet.config.encoder_hid_dim_type = saved_type
 
     # Final output at the target_w/target_h. If we capped, scale the
     # refined image back up; the gain from refine survives the resize.

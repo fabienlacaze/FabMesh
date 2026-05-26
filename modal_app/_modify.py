@@ -65,11 +65,29 @@ def generate(
         pass
 
     gen = torch.Generator('cuda').manual_seed(int(seed))
-    return cached(
-        prompt=prompt,
-        image=src,
-        strength=float(strength),
-        num_inference_steps=int(steps),
-        guidance_scale=guidance,
-        generator=gen,
-    ).images[0]
+    # Once load_ip_adapter has been called on the parent pipeline, the
+    # UNet's config.encoder_hid_dim_type stays 'ip_image_proj' forever
+    # — and the img2img pipeline (which doesn't accept ip_adapter_image
+    # via the call) crashes with:
+    #   "requires the keyword argument `image_embeds` to be passed in
+    #    `added_cond_kwargs`"
+    # set_ip_adapter_scale(0) zeros the contribution but doesn't undo
+    # the config flag. We temporarily detach the projection layer
+    # for the duration of this single call.
+    unet = base_pipe.unet
+    saved_proj = getattr(unet, 'encoder_hid_proj', None)
+    saved_type = getattr(unet.config, 'encoder_hid_dim_type', None)
+    unet.encoder_hid_proj = None
+    unet.config.encoder_hid_dim_type = None
+    try:
+        return cached(
+            prompt=prompt,
+            image=src,
+            strength=float(strength),
+            num_inference_steps=int(steps),
+            guidance_scale=guidance,
+            generator=gen,
+        ).images[0]
+    finally:
+        unet.encoder_hid_proj = saved_proj
+        unet.config.encoder_hid_dim_type = saved_type
