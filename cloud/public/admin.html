@@ -1018,24 +1018,21 @@
       }
     }
 
-    async function viewUserImages(userId, who) {
+    // Images modal: paginate too. Browsers fetch images lazily already
+    // (loading="lazy") but a 500-img user still produces 500 R2 GET
+    // when scrolled — chunking keeps the DOM and network sane.
+    const ADMIN_IMG_PAGE_SIZE = 36;
+    let _adminAllImages = [];
+    let _adminImgPageSize = ADMIN_IMG_PAGE_SIZE;
+
+    function _renderAdminImageGrid() {
       const grid = document.getElementById('meshes-grid');
-      document.getElementById('meshes-title').textContent = 'Images for ' + who;
-      grid.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
-      document.getElementById('meshes-overlay').style.display = 'flex';
-      try {
-        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/images`, { credentials: 'include' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const data = await r.json();
-        const images = data.images || [];
-        if (!images.length) {
-          grid.innerHTML = '<div style="color:var(--text-2);">No images.</div>';
-          return;
-        }
-        grid.innerHTML = images.map((m) => {
-          const name = m.key.split('/').pop();
-          const kb = (m.size / 1024).toFixed(0);
-          return `
+      const visible = _adminAllImages.slice(0, _adminImgPageSize);
+      const remaining = _adminAllImages.length - visible.length;
+      const cards = visible.map((m) => {
+        const name = m.key.split('/').pop();
+        const kb = (m.size / 1024).toFixed(0);
+        return `
           <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
             <img src="${escapeHtml(m.url)}" loading="lazy"
                  style="width:100%; height:200px; object-fit:contain; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;"
@@ -1044,10 +1041,84 @@
             <div style="font-size:10px; color:var(--text-2);">${kb} KB · ${escapeHtml(fmtDate(m.uploaded))}</div>
             <a class="btn" href="${escapeHtml(m.url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download</a>
           </div>`;
-        }).join('');
+      }).join('');
+      const more = remaining > 0
+        ? `<div style="grid-column:1/-1; display:flex; justify-content:center; padding:12px;">
+             <button class="btn btn-accent" id="admin-img-more">Load ${Math.min(ADMIN_IMG_PAGE_SIZE, remaining)} more (${remaining} remaining)</button>
+           </div>`
+        : (_adminAllImages.length > ADMIN_IMG_PAGE_SIZE
+            ? `<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:8px; font-size:12px;">All ${_adminAllImages.length} images loaded.</div>`
+            : '');
+      grid.innerHTML = cards + more;
+      const moreBtn = grid.querySelector('#admin-img-more');
+      if (moreBtn) moreBtn.addEventListener('click', () => {
+        _adminImgPageSize += ADMIN_IMG_PAGE_SIZE;
+        _renderAdminImageGrid();
+      });
+    }
+
+    async function viewUserImages(userId, who) {
+      const grid = document.getElementById('meshes-grid');
+      document.getElementById('meshes-title').textContent = 'Images for ' + who;
+      grid.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
+      document.getElementById('meshes-overlay').style.display = 'flex';
+      _adminAllImages = [];
+      _adminImgPageSize = ADMIN_IMG_PAGE_SIZE;
+      try {
+        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/images`, { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        _adminAllImages = data.images || [];
+        if (!_adminAllImages.length) {
+          grid.innerHTML = '<div style="color:var(--text-2);">No images.</div>';
+          return;
+        }
+        _renderAdminImageGrid();
       } catch (e) {
         grid.innerHTML = `<div style="color:var(--err)">${escapeHtml(e.message || e)}</div>`;
       }
+    }
+
+    // model-viewer instances each spawn a WebGL context. Browsers cap
+    // around 16 — past that older contexts get killed and meshes turn
+    // black. Paginate in chunks of 12 so a 500-mesh user doesn't melt
+    // the renderer when their modal opens.
+    const ADMIN_MESH_PAGE_SIZE = 12;
+    let _adminAllMeshes = [];
+    let _adminMeshPageSize = ADMIN_MESH_PAGE_SIZE;
+
+    function _renderAdminMeshGrid() {
+      const grid = document.getElementById('meshes-grid');
+      const visible = _adminAllMeshes.slice(0, _adminMeshPageSize);
+      const remaining = _adminAllMeshes.length - visible.length;
+      const cards = visible.map((m) => `
+        <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
+          <div style="font-weight:600; font-size:13px;">${escapeHtml(m.project_name || '—')}</div>
+          <div style="color:var(--text-2); font-size:11px;">${escapeHtml(m.asset_type)} · ${escapeHtml(fmtDate(m.created_at))}</div>
+          <model-viewer
+              src="${escapeHtml(m.mesh_url)}"
+              camera-controls
+              touch-action="pan-y"
+              shadow-intensity="1"
+              exposure="1"
+              style="width:100%; height:240px; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;">
+          </model-viewer>
+          <a class="btn" href="${escapeHtml(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download GLB</a>
+        </div>
+      `).join('');
+      const more = remaining > 0
+        ? `<div style="grid-column:1/-1; display:flex; justify-content:center; padding:12px;">
+             <button class="btn btn-accent" id="admin-mesh-more">Load ${Math.min(ADMIN_MESH_PAGE_SIZE, remaining)} more (${remaining} remaining)</button>
+           </div>`
+        : (_adminAllMeshes.length > ADMIN_MESH_PAGE_SIZE
+            ? `<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:8px; font-size:12px;">All ${_adminAllMeshes.length} meshes loaded.</div>`
+            : '');
+      grid.innerHTML = cards + more;
+      const moreBtn = grid.querySelector('#admin-mesh-more');
+      if (moreBtn) moreBtn.addEventListener('click', () => {
+        _adminMeshPageSize += ADMIN_MESH_PAGE_SIZE;
+        _renderAdminMeshGrid();
+      });
     }
 
     async function viewUserMeshes(userId, who) {
@@ -1055,30 +1126,18 @@
       document.getElementById('meshes-title').textContent = 'Meshes for ' + who;
       grid.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
       document.getElementById('meshes-overlay').style.display = 'flex';
+      _adminAllMeshes = [];
+      _adminMeshPageSize = ADMIN_MESH_PAGE_SIZE;
       try {
         const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/meshes`, { credentials: 'include' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
-        const meshes = data.meshes || [];
-        if (!meshes.length) {
+        _adminAllMeshes = data.meshes || [];
+        if (!_adminAllMeshes.length) {
           grid.innerHTML = '<div style="color:var(--text-2);">No succeeded meshes.</div>';
           return;
         }
-        grid.innerHTML = meshes.map((m) => `
-          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
-            <div style="font-weight:600; font-size:13px;">${escapeHtml(m.project_name || '—')}</div>
-            <div style="color:var(--text-2); font-size:11px;">${escapeHtml(m.asset_type)} · ${escapeHtml(fmtDate(m.created_at))}</div>
-            <model-viewer
-                src="${escapeHtml(m.mesh_url)}"
-                camera-controls
-                touch-action="pan-y"
-                shadow-intensity="1"
-                exposure="1"
-                style="width:100%; height:240px; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;">
-            </model-viewer>
-            <a class="btn" href="${escapeHtml(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download GLB</a>
-          </div>
-        `).join('');
+        _renderAdminMeshGrid();
       } catch (e) {
         grid.innerHTML = `<div style="color:var(--err)">${escapeHtml(e.message || e)}</div>`;
       }

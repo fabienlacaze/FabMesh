@@ -443,6 +443,52 @@ Tout ce que Claude (moi) peut faire seul. Priorité décroissante par catégorie
 - Auth + Stripe + Replicate = backend Next.js, transparent pour l'UI
 - Sync : `npm run sync-app` re-copie `src/renderer/*` → `cloud/public/app/*` à chaque évolution UI desktop
 
+### 🎯 Chantiers majeurs identifiés (audit 2026-05-26)
+
+Deux gros chantiers product validés par les audits agents — à attaquer
+après les bugfix UX en cours. Ordre = à décider avec le user.
+
+**Chantier R — Cloud Rigging + UE5 Manny natif (~10 jours)**
+- M1 (2 j) : fix UniRig skin writer segfault Draco dans
+  `scripts/unirig_bridge.py` + paramétrer `swap_skeleton.py` pour
+  accepter `--target-skeleton` (au lieu d'orc_m1 hardcodé)
+- M2 (4 j) : container UniRig dans Modal (`modal_app/_unirig.py`),
+  endpoint Worker `/api/rig`, retirer stubs `autoRig*` de
+  `meshyAPI-cloud.js:1418-1420`, UI cloud non-stub
+- M3 (3 j) : `scripts/rig_templates/skm/ue5_mannequin_v5.json` (Manny
+  strict + IK bones `ik_foot_root` / `ik_hand_root`) + table Supabase
+  `user_skeletons` + endpoint `/api/skeletons/list`
+- M4 (2 j) : retarget anims CC0 baked vers tout skeleton
+- M5 (1 j) : Meshy.ai retiré (✓ fait dans commit 8ade29e)
+
+MVP cloud rigging stable : **6 jours** (M1+M2). MVP UE5 Manny natif :
+**10 jours** (M1+M2+M3). Voie privilégiée par l'audit : UniRig Modal,
+car seul algo gérant humanoid + animal + créature sous un même modèle.
+
+**Chantier S — Sync desktop ↔ cloud par user (~10 jours)**
+- Voie B+C : push manuel desktop→cloud + pull manuel cloud→desktop
+  (pas de sync auto bidir, trop d'edge cases)
+- Auth Phase 1 : Personal Access Token (PAT style GitHub)
+- Auth Phase 2 (plus tard) : deep-link `myfabmesh://callback?token=…`
+  via `app.setAsDefaultProtocolClient`
+
+Plan détaillé :
+1. Jour 1 : schéma SQL `desktop_tokens(token_hash, user_id, last_used)`
+   + RPC `create_desktop_token` + endpoints `/api/account/tokens`
+2. Jour 2 : UI `/account` → section "Desktop access" + PAT one-time
+3. Jour 3 : `getSessionUser` accepte `Authorization: Bearer mfm_…`
+4. Jour 4 : `/api/desktop/upload-project` multipart streaming + sha256
+   dédup (skip re-upload si déjà en R2 sous le même hash)
+5. Jour 5 : `/api/desktop/list-projects` + `/api/desktop/download-project`
+6. Jour 6 : Electron — panneau "Cloud sync" + PAT stocké via
+   `safeStorage` + bouton "Backup to cloud"
+7. Jour 7 : Bouton "Import from cloud"
+8. Jour 8 : Polish (progress, retry, quota free 2 Go visible)
+9-10. QA + tests réseau lent
+
+R2 keying recommandé : `<userId>/desktop/<safeProjectName>/<file>` —
+cohabite avec le keying existant (`<userId>/<id>.glb`, etc.).
+
 ### Plan d'attaque par défaut suggéré (~8h cumulé)
 
 1. GIF animé Twitter (1h) — sans ça les tweets sont moins viraux
