@@ -1210,6 +1210,8 @@
       const services = [
         { id: 'modal', label: 'Modal (GPU backend)',
           desc: 'Image generation, mesh, all AI tools. Replicate-only calls keep working.' },
+        { id: 'stripe', label: '💳 Stripe checkout',
+          desc: 'Blocks new credit purchases (/api/checkout). The Stripe webhook stays live so payments already in flight still credit the user.' },
         { id: 'site',  label: 'MyFabmesh.AI site',
           desc: 'Locks down /api/* for every user except admin endpoints. The UI shell still loads but every action fails.' },
         { id: 'total', label: '⛔ Total blackout',
@@ -1236,8 +1238,10 @@
         `;
       }).join('');
       // Show a warning badge on the tab when something's disabled.
-      const allOn = _servicesState.modal_enabled && _servicesState.site_enabled && _servicesState.total_enabled;
-      const allOff = !_servicesState.modal_enabled && !_servicesState.site_enabled && !_servicesState.total_enabled;
+      const allOn = _servicesState.modal_enabled && _servicesState.site_enabled
+                  && _servicesState.total_enabled && _servicesState.stripe_enabled;
+      const allOff = !_servicesState.modal_enabled && !_servicesState.site_enabled
+                  && !_servicesState.total_enabled && !_servicesState.stripe_enabled;
       const badge = document.getElementById('services-badge');
       if (badge) badge.style.display = allOn ? 'none' : '';
       // Master switch labels — gray out the action that's already
@@ -1257,8 +1261,8 @@
     function masterFlip(enabled) {
       const verb = enabled ? 'Enable everything' : 'Stop everything';
       const detail = enabled
-        ? 'Re-enables Modal + Site + Total blackout in one shot. Every user can use the app again within ~30s.'
-        : 'Disables Modal + Site + Total blackout. Users see the maintenance page; /admin keeps working.';
+        ? 'Re-enables Modal + Stripe + Site + Total blackout in one shot. Every user can use the app again within ~30s.'
+        : 'Disables Modal + Stripe + Site + Total blackout. Users see the maintenance page; /admin keeps working.';
       confirmAction(verb + '?', detail, async () => {
         const r = await fetch('/api/admin/services', {
           method: 'POST', credentials: 'include',
@@ -1457,7 +1461,7 @@
       .then((s) => {
         if (!s) return;
         _servicesState = s;
-        const allOn = s.modal_enabled && s.site_enabled && s.total_enabled;
+        const allOn = s.modal_enabled && s.site_enabled && s.total_enabled && s.stripe_enabled;
         const badge = document.getElementById('services-badge');
         if (badge) badge.style.display = allOn ? 'none' : '';
       })

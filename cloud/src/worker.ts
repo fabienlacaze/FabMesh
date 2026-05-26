@@ -375,10 +375,14 @@ type ServiceFlags = {
   modal_enabled: boolean;
   site_enabled: boolean;
   total_enabled: boolean;
+  stripe_enabled: boolean;
 };
 const SERVICE_FLAGS_KEY = '_meta/service-flags.json';
 const SERVICE_FLAGS_TTL_MS = 30_000;
-const DEFAULT_FLAGS: ServiceFlags = { modal_enabled: true, site_enabled: true, total_enabled: true };
+const DEFAULT_FLAGS: ServiceFlags = {
+  modal_enabled: true, site_enabled: true,
+  total_enabled: true, stripe_enabled: true,
+};
 let _serviceFlagsCache: { flags: ServiceFlags; ts: number } = { flags: DEFAULT_FLAGS, ts: 0 };
 
 async function _getServiceFlags(env: Env): Promise<ServiceFlags> {
@@ -391,6 +395,7 @@ async function _getServiceFlags(env: Env): Promise<ServiceFlags> {
       modal_enabled: raw.modal_enabled !== false,
       site_enabled: raw.site_enabled !== false,
       total_enabled: raw.total_enabled !== false,
+      stripe_enabled: raw.stripe_enabled !== false,
     };
     _serviceFlagsCache = { flags, ts: now };
     return flags;
@@ -4217,7 +4222,9 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   const service = String(body?.service || '').trim();
   const enabled = !!body?.enabled;
   const password = String(body?.password || '');
-  if (!['modal', 'site', 'total', 'all'].includes(service)) return err(400, 'service must be modal|site|total|all');
+  if (!['modal', 'site', 'total', 'stripe', 'all'].includes(service)) {
+    return err(400, 'service must be modal|site|total|stripe|all');
+  }
   if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
   // Constant-time compare.
   if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
@@ -4236,14 +4243,19 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   // the master switch in the admin UI. Useful in panic mode (kill
   // everything in one click) or to fully restore the site after.
   const next: ServiceFlags = service === 'all'
-    ? { modal_enabled: enabled, site_enabled: enabled, total_enabled: enabled }
+    ? {
+        modal_enabled: enabled, site_enabled: enabled,
+        total_enabled: enabled, stripe_enabled: enabled,
+      }
     : {
         modal_enabled: current.modal_enabled !== false,
         site_enabled: current.site_enabled !== false,
         total_enabled: current.total_enabled !== false,
-        ...(service === 'modal' ? { modal_enabled: enabled } : {}),
-        ...(service === 'site'  ? { site_enabled: enabled }  : {}),
-        ...(service === 'total' ? { total_enabled: enabled } : {}),
+        stripe_enabled: current.stripe_enabled !== false,
+        ...(service === 'modal'  ? { modal_enabled: enabled }  : {}),
+        ...(service === 'site'   ? { site_enabled: enabled }   : {}),
+        ...(service === 'total'  ? { total_enabled: enabled }  : {}),
+        ...(service === 'stripe' ? { stripe_enabled: enabled } : {}),
       };
   await env.MESHES.put(SERVICE_FLAGS_KEY, JSON.stringify(next));
   _invalidateServiceFlagsCache();
@@ -4562,6 +4574,12 @@ export default {
           }
           if (!flags.modal_enabled && MODAL_PATHS.has(pathname)) {
             return err(503, 'Modal backend temporarily disabled by admin');
+          }
+          // Stripe kill: block new checkouts but NEVER block the
+          // webhook — Stripe has already charged the card; if we 503
+          // the webhook the user pays and gets zero credits.
+          if (!flags.stripe_enabled && pathname === '/api/checkout') {
+            return err(503, 'purchases temporarily disabled by admin');
           }
         }
       }
