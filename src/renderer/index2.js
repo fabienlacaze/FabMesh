@@ -706,6 +706,30 @@ function _initMeshThumbObserver() {
   }, { rootMargin: '200px' });
 }
 
+// Pagination — 24 meshes per page. Each mesh triggers a WebGL context
+// (one per card via three.js); browsers cap around 16 contexts so we
+// render in chunks instead of all 500 at once. The "Load more" button
+// at the bottom extends the visible window by another 24.
+const MESH_PAGE_SIZE = 24;
+let _meshPageSize = MESH_PAGE_SIZE;
+
+function _renderMeshCardsHtml(items) {
+  return items.map((it) => {
+    const url = it.mesh.url || it.mesh.path || '';
+    const fname = String(it.mesh.filename || url).split(/[\\/]/).pop();
+    const fileUrl = /^(?:https?|file|blob|data):/i.test(url)
+      ? url
+      : 'file:///' + String(url).replace(/\\/g, '/');
+    return `
+      <div class="project-card" style="cursor:pointer; padding:8px;" data-project="${escapeHtml(it.project.name)}" data-mesh-url="${escapeHtml(fileUrl)}">
+        <div style="font-size:13px; font-weight:600; padding:4px 4px 6px;">${escapeHtml(it.project.name)}</div>
+        <div class="mesh-thumb-slot" style="height:200px; background:#0a0a0e; border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:14px;">Loading…</div>
+        <div class="project-card-meta" style="font-size:11px; padding:6px 4px 0;">${escapeHtml(fname)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
 function renderAllMeshesGrid() {
   const grid = document.getElementById('all-meshes-grid');
   if (!grid) return;
@@ -720,26 +744,20 @@ function renderAllMeshesGrid() {
     return;
   }
   _initMeshThumbObserver();
-  grid.innerHTML = items.map((it) => {
-    const url = it.mesh.url || it.mesh.path || '';
-    const fname = String(it.mesh.filename || url).split(/[\\/]/).pop();
-    // Desktop paths come in as Windows backslashes. The <canvas> in
-    // .mesh-thumb-slot gets the real three.js render once visible.
-    const fileUrl = /^(?:https?|file|blob|data):/i.test(url)
-      ? url
-      : 'file:///' + String(url).replace(/\\/g, '/');
-    return `
-      <div class="project-card" style="cursor:pointer; padding:8px;" data-project="${escapeHtml(it.project.name)}" data-mesh-url="${escapeHtml(fileUrl)}">
-        <div style="font-size:13px; font-weight:600; padding:4px 4px 6px;">${escapeHtml(it.project.name)}</div>
-        <div class="mesh-thumb-slot" style="height:200px; background:#0a0a0e; border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:14px;">Loading…</div>
-        <div class="project-card-meta" style="font-size:11px; padding:6px 4px 0;">${escapeHtml(fname)}</div>
-      </div>
-    `;
-  }).join('');
+  // Reset paging whenever the project list changes underneath us.
+  if (_meshPageSize > items.length) _meshPageSize = MESH_PAGE_SIZE;
+  const visible = items.slice(0, _meshPageSize);
+  const remaining = items.length - visible.length;
+  const loadMoreHtml = remaining > 0
+    ? `<div id="mesh-load-more" style="grid-column:1/-1; display:flex; justify-content:center; padding:16px;">
+         <button class="primary-btn" style="padding:10px 24px;">Load ${Math.min(MESH_PAGE_SIZE, remaining)} more (${remaining} remaining)</button>
+       </div>`
+    : (items.length > MESH_PAGE_SIZE
+        ? `<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:12px; font-size:12px;">All ${items.length} meshes loaded.</div>`
+        : '');
+  grid.innerHTML = _renderMeshCardsHtml(visible) + loadMoreHtml;
   grid.querySelectorAll('[data-project]').forEach((el) => {
     el.addEventListener('click', (e) => {
-      // Don't open the project if the user clicked the canvas
-      // (might be wanting to interact with the thumbnail).
       if (e.target.tagName === 'CANVAS') return;
       const name = el.dataset.project;
       const p = (state.projects || []).find((x) => x.name === name);
@@ -747,6 +765,13 @@ function renderAllMeshesGrid() {
     });
     _meshThumbObserver.observe(el);
   });
+  const loadMoreBtn = grid.querySelector('#mesh-load-more button');
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener('click', () => {
+      _meshPageSize += MESH_PAGE_SIZE;
+      renderAllMeshesGrid();
+    });
+  }
 }
 
 async function renderProjectsGrid() {
