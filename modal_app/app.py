@@ -74,11 +74,6 @@ _base_image = (
         # trust_remote_code — without these the @enter(snap=True)
         # crashes with ImportError before the snapshot is even taken.
         "einops>=0.7", "timm>=0.9",
-        # opencv-python-headless ships the Haar Cascade XMLs we need
-        # for face detection in the image_op face_fix op. Pure CPU
-        # (no GPU), runs in ~50ms per image. headless variant avoids
-        # libQt5 — no need for GUI windowing.
-        "opencv-python-headless",
     )
 )
 
@@ -87,6 +82,12 @@ _base_image = (
 # Modal rule: add_local_* must come LAST.
 image = (
     _base_image
+    # opencv-python-headless ships the Haar Cascade XMLs we need for
+    # face detection in image_op face_fix_image. Pure CPU (~50ms per
+    # image). Kept here (NOT in _base_image) so adding it doesn't
+    # invalidate mesh_image — which would re-build CuMesh + the
+    # nvdiffrast + o-voxel CUDA stack for 30-60min for nothing.
+    .pip_install("opencv-python-headless")
     .add_local_python_source("modal_app")
     .add_local_file(
         "modal_app/back_tpose_skeleton.png",
