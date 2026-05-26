@@ -374,14 +374,12 @@ function _invalidateBanCache() {
 type ServiceFlags = {
   modal_enabled: boolean;
   site_enabled: boolean;
-  total_enabled: boolean;
   stripe_enabled: boolean;
 };
 const SERVICE_FLAGS_KEY = '_meta/service-flags.json';
 const SERVICE_FLAGS_TTL_MS = 30_000;
 const DEFAULT_FLAGS: ServiceFlags = {
-  modal_enabled: true, site_enabled: true,
-  total_enabled: true, stripe_enabled: true,
+  modal_enabled: true, site_enabled: true, stripe_enabled: true,
 };
 let _serviceFlagsCache: { flags: ServiceFlags; ts: number } = { flags: DEFAULT_FLAGS, ts: 0 };
 
@@ -394,7 +392,6 @@ async function _getServiceFlags(env: Env): Promise<ServiceFlags> {
     const flags: ServiceFlags = {
       modal_enabled: raw.modal_enabled !== false,
       site_enabled: raw.site_enabled !== false,
-      total_enabled: raw.total_enabled !== false,
       stripe_enabled: raw.stripe_enabled !== false,
     };
     _serviceFlagsCache = { flags, ts: now };
@@ -4222,8 +4219,8 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   const service = String(body?.service || '').trim();
   const enabled = !!body?.enabled;
   const password = String(body?.password || '');
-  if (!['modal', 'site', 'total', 'stripe', 'all'].includes(service)) {
-    return err(400, 'service must be modal|site|total|stripe|all');
+  if (!['modal', 'site', 'stripe', 'all'].includes(service)) {
+    return err(400, 'service must be modal|site|stripe|all');
   }
   if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
   // Constant-time compare.
@@ -4244,17 +4241,14 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   // everything in one click) or to fully restore the site after.
   const next: ServiceFlags = service === 'all'
     ? {
-        modal_enabled: enabled, site_enabled: enabled,
-        total_enabled: enabled, stripe_enabled: enabled,
+        modal_enabled: enabled, site_enabled: enabled, stripe_enabled: enabled,
       }
     : {
         modal_enabled: current.modal_enabled !== false,
         site_enabled: current.site_enabled !== false,
-        total_enabled: current.total_enabled !== false,
         stripe_enabled: current.stripe_enabled !== false,
         ...(service === 'modal'  ? { modal_enabled: enabled }  : {}),
         ...(service === 'site'   ? { site_enabled: enabled }   : {}),
-        ...(service === 'total'  ? { total_enabled: enabled }  : {}),
         ...(service === 'stripe' ? { stripe_enabled: enabled } : {}),
       };
   await env.MESHES.put(SERVICE_FLAGS_KEY, JSON.stringify(next));
@@ -4537,13 +4531,14 @@ export default {
       // Fall through to env.ASSETS.fetch(req) at the bottom of fetch().
 
       // ── kill switches ──────────────────────────────────────────
-      // Three nested levels, weakest -> strongest:
+      // Two nested levels:
       //   modal_enabled=false  -> only Modal-bound /api/* return 503
-      //   site_enabled=false   -> every /api/* (non-admin) returns 503
-      //   total_enabled=false  -> static assets ALSO get a blackout
-      //                           page; only /admin and /api/admin/*
-      //                           keep working so the admin can flip
-      //                           the switch back on.
+      //   stripe_enabled=false -> /api/checkout 503 (webhook stays!)
+      //   site_enabled=false   -> EVERYTHING returns 503 except /admin
+      //                           and /api/admin/*. Static assets get a
+      //                           friendly HTML maintenance page so
+      //                           users see "we're down" instead of a
+      //                           broken UI shell.
       const MODAL_PATHS = new Set([
         '/api/generate', '/api/generate-image', '/api/generate-back-view',
         '/api/rectify-image', '/api/modify-image', '/api/auto-inpaint',
@@ -4553,9 +4548,7 @@ export default {
       const isAdminRoute = pathname.startsWith('/admin') || pathname.startsWith('/api/admin/');
       if (!isAdminRoute) {
         const flags = await _getServiceFlags(env);
-        if (!flags.total_enabled) {
-          // Static assets get a friendly HTML blackout page so users
-          // see what's happening instead of a raw worker error.
+        if (!flags.site_enabled) {
           if (!pathname.startsWith('/api/')) {
             return new Response(
               `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -4566,12 +4559,9 @@ export default {
               { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
             );
           }
-          return err(503, 'site fully disabled by admin');
+          return err(503, 'site temporarily disabled by admin');
         }
         if (pathname.startsWith('/api/')) {
-          if (!flags.site_enabled) {
-            return err(503, 'site temporarily disabled by admin');
-          }
           if (!flags.modal_enabled && MODAL_PATHS.has(pathname)) {
             return err(503, 'Modal backend temporarily disabled by admin');
           }
