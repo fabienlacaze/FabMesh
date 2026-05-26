@@ -605,10 +605,25 @@
     _maskMgr.activate();
     // Wait one frame so the container has its layout dimensions before loading
     requestAnimationFrame(function () {
-      _maskMgr.loadImage('file:///' + imagePath.replace(/\\/g, '/') + '?t=' + Date.now()).then(function () {
+      // Same cloud-vs-desktop URL handling as the clone tool —
+      // file:/// for filesystem paths, untouched http/blob/data URLs
+      // for cloud. Without this fix Mask Tool on cloud silently fails
+      // to load the base image (file:///https:/...) and Apply produces
+      // an empty mask.
+      var src = /^(?:https?|blob|data|file):/i.test(imagePath)
+        ? imagePath
+        : 'file:///' + imagePath.replace(/\\/g, '/');
+      if (/^(?:https?|file):/i.test(src)) {
+        src += (src.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+      }
+      _maskMgr.loadImage(src).then(function () {
         // Clear the overlay after base image loads
         maskOverlayCtx.clearRect(0, 0, _maskMgr.w, _maskMgr.h);
         updateMaskApplyBtn();
+      }).catch(function (e) {
+        console.error('[mask] base image load failed:', e);
+        if (typeof showToast === 'function')
+          showToast('mask: image load failed: ' + (e && e.message || e), 'error', 5000);
       });
     });
   }
