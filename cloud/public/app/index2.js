@@ -4485,20 +4485,42 @@ document.getElementById('bright-apply')?.addEventListener('click', async () => {
 });
 document.getElementById('ws-facefix-btn')?.addEventListener('click', async () => {
   // Cloud-aware: prefer the real faceFixImage API when present (Modal
-  // SDXL inpaint), fall back to the runQuickEdit('facefix') canvas
-  // version on desktop. Desktop never wires faceFixImage.
-  const target = editTarget(state.currentProject);
+  // SDXL inpaint via OpenCV face detection), fall back to the
+  // runQuickEdit('facefix') canvas version on desktop. Desktop never
+  // wires faceFixImage.
+  const p = state.currentProject;
+  const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
-  if (typeof window.meshyAPI?.faceFixImage === 'function') {
-    showToast('Face fix (cloud SDXL)...', 'info', 2000);
-    try {
-      const r = await window.meshyAPI.faceFixImage({ imagePath: target });
-      if (r?.success) { showToast('Face fix done', 'success'); await reloadCurrentProject(); }
-      else            { showToast('Face fix failed: ' + (r?.error || 'unknown'), 'error', 5000); }
-    } catch (e) { showToast('Face fix error: ' + e.message, 'error', 5000); }
+  if (typeof window.meshyAPI?.faceFixImage !== 'function') {
+    runQuickEdit('facefix');
     return;
   }
-  runQuickEdit('facefix');
+  // Wrap in pushJob so the user gets the same progress popup the
+  // other AI tools (Modify, Auto Inpaint) show. The Modal cold-start
+  // path can lazy-load CLIPSeg + SDXL Inpaint (~45s first call), then
+  // ~17s/call after — pick a generous expected duration so the bar
+  // doesn't peg at 99% prematurely.
+  const expectedMs = 45000;
+  gatedRun('img2img', `Face Fix: ${p.name}`, async () => {
+    const job = pushJob(`Face Fix: ${p.name}`, null, {
+      Engine: 'Cloud SDXL Inpaint',
+      Detection: 'OpenCV Haar (face)',
+      Cost: '2 credits',
+    }, expectedMs);
+    try {
+      const r = await window.meshyAPI.faceFixImage({ imagePath: target });
+      if (r?.success) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+      } else {
+        completeJob(job.id, false, r?.error || 'unknown');
+        if (!job.cancelled) reportPipelineError(r?.error, 'Face Fix failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false, e?.error || e?.message || String(e));
+      if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), 'Face Fix error');
+    }
+  });
 });
 document.getElementById('ws-extend-btn')?.addEventListener('click', () => runQuickEdit('extend', { padding: 0.15 }));
 // ============================================================
