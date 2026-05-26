@@ -3899,6 +3899,38 @@ async function handleAdminListUsers(req: Request, env: Env): Promise<Response> {
   return json({ users: users.map((u) => ({ ...u, banned: banned.has(u.id) })) });
 }
 
+/** GET /api/admin/users/<userId>/images — ADMIN ONLY. Lists every PNG
+ *  in R2 under <userId>/* so the admin can preview / moderate. Doesn't
+ *  hit Supabase because logOperation never stored the result URL —
+ *  R2 is the authoritative source. */
+async function handleAdminUserImages(req: Request, env: Env, userId: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return json({ images: [] });
+  type Img = { key: string; url: string; size: number; uploaded: string };
+  const out: Img[] = [];
+  let cursor: string | undefined;
+  do {
+    const result = await env.MESHES.list({
+      prefix: `${userId}/`,
+      limit: 1000,
+      cursor,
+    });
+    for (const obj of result.objects) {
+      if (!/\.(png|jpg|jpeg|webp)$/i.test(obj.key)) continue;
+      out.push({
+        key: obj.key,
+        url: `${env.R2_PUBLIC_URL}/${obj.key}`,
+        size: obj.size,
+        uploaded: obj.uploaded.toISOString(),
+      });
+    }
+    cursor = result.truncated ? result.cursor : undefined;
+  } while (cursor && out.length < 500);
+  out.sort((a, b) => b.uploaded.localeCompare(a.uploaded));
+  return json({ images: out });
+}
+
 /** GET /api/admin/users/<userId>/meshes — ADMIN ONLY. Lists every
  *  succeeded mesh job for a user so the admin can preview / moderate. */
 async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Promise<Response> {
@@ -4160,6 +4192,10 @@ export default {
         // /api/admin/users/<userId>/meshes — dynamic
         const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
         if (adminMeshes && method === 'GET') return await handleAdminUserMeshes(req, env, decodeURIComponent(adminMeshes[1]));
+
+        // /api/admin/users/<userId>/images — dynamic
+        const adminImages = pathname.match(/^\/api\/admin\/users\/([^/]+)\/images\/?$/);
+        if (adminImages && method === 'GET') return await handleAdminUserImages(req, env, decodeURIComponent(adminImages[1]));
 
         return err(404, `no route for ${method} ${pathname}`);
       }

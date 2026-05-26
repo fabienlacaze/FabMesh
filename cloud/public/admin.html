@@ -740,6 +740,7 @@
           <td>${escapeHtml(fmtDate(u.created_at))}</td>
           <td>${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
           <td style="white-space:nowrap;">
+            <button class="btn" onclick="viewUserImages('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}')">🖼 Images</button>
             <button class="btn" onclick="viewUserMeshes('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}')">👁 Meshes</button>
             <button class="btn" style="background:${u.banned ? 'var(--ok)' : 'var(--err)'}; border-color:${u.banned ? 'var(--ok)' : 'var(--err)'};"
                     onclick="toggleBan('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}', ${!u.banned})">
@@ -767,6 +768,38 @@
           loadUsers();
         },
       );
+    }
+
+    async function viewUserImages(userId, who) {
+      const grid = document.getElementById('meshes-grid');
+      document.getElementById('meshes-title').textContent = 'Images for ' + who;
+      grid.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
+      document.getElementById('meshes-overlay').style.display = 'flex';
+      try {
+        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/images`, { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const images = data.images || [];
+        if (!images.length) {
+          grid.innerHTML = '<div style="color:var(--text-2);">No images.</div>';
+          return;
+        }
+        grid.innerHTML = images.map((m) => {
+          const name = m.key.split('/').pop();
+          const kb = (m.size / 1024).toFixed(0);
+          return `
+          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
+            <img src="${escapeHtml(m.url)}" loading="lazy"
+                 style="width:100%; height:200px; object-fit:contain; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;"
+                 onerror="this.style.opacity=0.3; this.alt='Load failed';" />
+            <div style="font-size:11px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(m.key)}">${escapeHtml(name)}</div>
+            <div style="font-size:10px; color:var(--text-2);">${kb} KB · ${escapeHtml(fmtDate(m.uploaded))}</div>
+            <a class="btn" href="${escapeHtml(m.url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download</a>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        grid.innerHTML = `<div style="color:var(--err)">${escapeHtml(e.message || e)}</div>`;
+      }
     }
 
     async function viewUserMeshes(userId, who) {
