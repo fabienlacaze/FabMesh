@@ -514,6 +514,13 @@ async function createReplicatePrediction(env: Env, input: GenerateInput) {
         smooth: input.smooth ?? true,
         face_fix: input.face_fix ?? false,
         ultra_hd: input.ultra_hd ?? false,
+        // Advanced TRELLIS-2 options. Cog will silently drop any key it
+        // doesn't recognise so it's safe to forward all of them.
+        refine: input.refine ?? false,
+        quality_plus: input.quality_plus ?? false,
+        ultra_q: input.ultra_q ?? false,
+        multiref: input.multiref ?? false,
+        ...(input.preset ? { preset: input.preset } : {}),
       }
     : {
         image: input.image, seed: input.seed ?? 42,
@@ -748,6 +755,10 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     ultra_hd: form.get('ultra_hd') === 'true',
     fast: form.get('fast') === 'true',
     multiref: form.get('multiref') === 'true' || !!backImageHttpsUrl,
+    refine: form.get('refine') === 'true',
+    quality_plus: form.get('quality_plus') === 'true',
+    ultra_q: form.get('ultra_q') === 'true',
+    preset: (form.get('preset') as GenerateInput['preset']) || undefined,
   };
 
   const cost = creditCost(input);
@@ -923,27 +934,38 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     // Worker generates the job_id (uuid hex). Modal echoes it back.
     const jobId = 'modal_' + crypto.randomUUID().replace(/-/g, '');
     try {
+      // Resolve TRELLIS-2 mode. ultra_q wins (1536 voxels for the
+       // finest face detail), then quality_plus (cascade), then the
+       // user's coarse mode picker. Without this map, ticking
+       // "Ultra Quality (+~50s, +2 cr)" was a paid no-op — the worker
+       // sent mode=1024 to Modal and the user got the default mesh.
+      const trellisMode = input.ultra_q     ? '1536_cascade'
+                        : input.quality_plus ? '1024_cascade'
+                        : input.mode === 'full' ? '1024_cascade'
+                        : input.mode === 'lite' ? '512'
+                        : '1024';
       await callModalMeshStart(env, {
         jobId,
         frontImageUrl: frontUrl,
-        // Pass the back URL when multiref is on so TRELLIS-2 can
-        // condition on both front + back (better back texture).
-        // Falls through to single-view if backImageHttpsUrl is null.
         backImageUrl: input.multiref ? backImageHttpsUrl : null,
-        mode: input.mode === 'full' ? '1024_cascade'
-            : input.mode === 'lite' ? '512'
-            : '1024',
+        mode: trellisMode,
         seed: input.seed ?? 42,
         decimation_target: input.mode === 'lite' ? 100_000
                          : input.mode === 'full' ? 1_500_000 : 500_000,
-        texture_size: input.mode === 'full' ? 2048 : 1024,
-        // Auto-rectify the source image before mesh — port of
-        // scripts/generate_front_strict.py. Modal mesh class handles
-        // this when `rectify=true` in the payload.
+        // ultra_hd bumps the atlas to 4096 for the Real-ESRGAN x2 pass
+        // downstream. Otherwise 2048 for "full", 1024 elsewhere.
+        texture_size: input.ultra_hd ? 4096
+                    : input.mode === 'full' ? 2048
+                    : 1024,
         rectify: input.rectify,
-        // Face fix toggle — runs an SDXL face inpaint step on the
-        // mesh's texture atlas. Honoured by Modal mesh when `face_fix=true`.
         face_fix: input.face_fix,
+        // Forward all the advanced flags so Modal can act on them.
+        // Modal's mesh class ignores keys it doesn't know yet, so this
+        // is forward-compatible with future _mesh.py improvements.
+        refine: input.refine,
+        smooth: input.smooth,
+        ultra_hd: input.ultra_hd,
+        multiref: input.multiref,
       });
     } catch (e: unknown) {
       await addCredits(env, user.id, cost);
@@ -1916,6 +1938,10 @@ async function callModalMeshStart(env: Env, input: {
   texture_size?: number;
   rectify?: boolean;
   face_fix?: boolean;
+  refine?: boolean;
+  smooth?: boolean;
+  ultra_hd?: boolean;
+  multiref?: boolean;
 }): Promise<{ job_id: string }> {
   const url = env.MODAL_MESH_START_URL;
   const secret = env.MODAL_SHARED_SECRET;
@@ -1936,6 +1962,10 @@ async function callModalMeshStart(env: Env, input: {
       texture_size: input.texture_size,
       rectify: !!input.rectify,
       face_fix: !!input.face_fix,
+      refine:   !!input.refine,
+      smooth:   !!input.smooth,
+      ultra_hd: !!input.ultra_hd,
+      multiref: !!input.multiref,
     }),
     // mesh-start returns instantly (< 1 s) once the lightweight HTTP
     // container is warm, but a COLD container for the start endpoint
