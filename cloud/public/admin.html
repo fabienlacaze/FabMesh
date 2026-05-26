@@ -616,6 +616,15 @@
   </div>
 
   <script>
+    // Sensitive-tab lock state — declared up-front so tabsInit's
+    // synchronous IIFE (~line 730) can reference them without hitting
+    // the const TDZ. The unlock helpers + UI overlay are wired further
+    // down once the rest of the admin script has loaded.
+    const SENSITIVE_TABS = new Set(['finance', 'bytype', 'pricing', 'users', 'services']);
+    let _sensitiveUnlocked = false;
+    let _sensitivePassword = '';
+    let _sensitivePendingTab = null;
+
     async function refresh() {
       const errEl  = document.getElementById('err');
       const main   = document.getElementById('main');
@@ -1375,10 +1384,10 @@
        tabs for the session. Activity tabs stay open since they're
        read-only dashboards.
        ═══════════════════════════════════════════════════════════════ */
-    const SENSITIVE_TABS = new Set(['finance', 'bytype', 'pricing', 'users', 'services']);
-    let _sensitiveUnlocked = false;
-    let _sensitivePassword = '';
-    let _sensitivePendingTab = null;
+    // SENSITIVE_TABS / _sensitiveUnlocked are declared at the top of
+    // the script (before tabsInit) so the IIFE that wires tab clicks
+    // doesn't hit a Temporal Dead Zone when checking them. The rest
+    // of the unlock plumbing follows here.
 
     async function _verifySensitivePassword(pw) {
       // Cheapest available admin-only endpoint that requires both the
