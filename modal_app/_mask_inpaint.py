@@ -74,22 +74,128 @@ def _enrich_prompt(raw: str) -> tuple[str, str]:
     return (positive, negative)
 
 
+def _mask_bbox(msk: Image.Image, threshold: int = 30):
+    """Return (x0, y0, x1, y1) of the painted region, or None if empty."""
+    arr = np.array(msk)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    ys, xs = np.where(arr > threshold)
+    if len(ys) == 0:
+        return None
+    return (int(xs.min()), int(ys.min()),
+            int(xs.max()) + 1, int(ys.max()) + 1)
+
+
 def generate(
     inpaint_pipe,
     source_img: Image.Image,
     mask_img: Image.Image,
     prompt: str,
     max_dim: int = 1024,
+    sdxl_native: int = 1024,
 ) -> Image.Image:
-    """SDXL Inpaint with the caller-provided mask. White = inpaint,
-    black = preserve. Mask is GaussianBlur'd lightly for soft edges
-    (mirrors the desktop UX where painted strokes feather naturally)."""
+    """SDXL Inpaint with caller-provided mask, using the "inpaint only
+    masked" technique (a.k.a. crop-inpaint-paste):
+
+      1. find the bbox of the painted region,
+      2. expand it by 30% padding,
+      3. crop image + mask to that bbox,
+      4. resize the crop to SDXL native (1024²),
+      5. SDXL Inpaint at full resolution on the crop — the model sees
+         the mask filling most of its working area, so the object it
+         paints scales naturally to fit (no "tiny bazooka swallowed
+         by 1024²" failure mode),
+      6. resize the result back, paste into the original image,
+      7. composite-back using the original mask so untouched pixels
+         stay byte-identical.
+
+    Falls back to the whole-image path if the mask is huge (>40% of the
+    image area) or empty.
+    """
     src = source_img.convert('RGB')
     msk = mask_img.convert('L')
 
     orig_w, orig_h = src.size
-    # Down-scale to SDXL native if needed; both image and mask must
-    # match dimensions and be %8-aligned for the inpaint UNet.
+    if msk.size != (orig_w, orig_h):
+        msk = msk.resize((orig_w, orig_h), Image.LANCZOS)
+
+    pos_prompt, neg_prompt = _enrich_prompt(prompt)
+
+    bbox = _mask_bbox(msk)
+    if bbox is None:
+        print('[mask-inpaint] empty mask — passthrough', flush=True)
+        return src
+
+    bx0, by0, bx1, by1 = bbox
+    bw, bh = bx1 - bx0, by1 - by0
+    mask_frac = (bw * bh) / float(orig_w * orig_h)
+    print(f'[mask-inpaint] mask bbox={bbox} frac={mask_frac:.3f} '
+          f'enriched="{pos_prompt[:100]}..."', flush=True)
+
+    # If mask is very large (>40% of the image), the crop path
+    # degenerates to "almost the whole image". Use the global path
+    # instead — less risk of edge artefacts.
+    use_global = mask_frac > 0.40
+
+    if not use_global:
+        # Expand bbox by 30% padding, clamp to image bounds. Make it
+        # square so SDXL gets a 1:1 aspect ratio.
+        cx = (bx0 + bx1) / 2
+        cy = (by0 + by1) / 2
+        side = max(bw, bh) * 1.6  # 30% padding on each side
+        # Minimum crop side — 256 px in the source coord system so the
+        # surrounding context survives the resize-to-1024.
+        side = max(side, max(orig_w, orig_h) * 0.20)
+        side = min(side, min(orig_w, orig_h))  # don't exceed image
+        cx0 = max(0, int(cx - side / 2))
+        cy0 = max(0, int(cy - side / 2))
+        cx1 = min(orig_w, cx0 + int(side))
+        cy1 = min(orig_h, cy0 + int(side))
+        # Re-anchor if we clipped against an edge
+        if cx1 - cx0 < int(side): cx0 = max(0, cx1 - int(side))
+        if cy1 - cy0 < int(side): cy0 = max(0, cy1 - int(side))
+
+        crop_img = src.crop((cx0, cy0, cx1, cy1))
+        crop_msk = msk.crop((cx0, cy0, cx1, cy1))
+        cw, ch = crop_img.size
+
+        # Up-scale crop to SDXL native (typically 1024²).
+        work = (sdxl_native // 8) * 8
+        crop_img_w = crop_img.resize((work, work), Image.LANCZOS)
+        crop_msk_w = crop_msk.resize((work, work), Image.LANCZOS) \
+                              .filter(ImageFilter.GaussianBlur(4))
+
+        result_w = inpaint_pipe(
+            prompt=pos_prompt,
+            negative_prompt=neg_prompt,
+            image=crop_img_w,
+            mask_image=crop_msk_w,
+            num_inference_steps=40,
+            guidance_scale=11.0,
+            strength=0.99,
+            height=work, width=work,
+        ).images[0]
+
+        # Down-scale crop result back to its original crop size, then
+        # paste into a copy of the source.
+        result_crop = result_w.resize((cw, ch), Image.LANCZOS)
+        composed = src.copy()
+        composed.paste(result_crop, (cx0, cy0))
+
+        # Composite-back using the FULL-resolution painted mask, so
+        # only the user-painted pixels actually change (the area we
+        # cropped but didn't paint is preserved). Slight blur on the
+        # final mask for seamless blending.
+        msk_full = msk.filter(ImageFilter.GaussianBlur(3))
+        src_arr = np.array(src, dtype=np.float32)
+        new_arr = np.array(composed, dtype=np.float32)
+        mask_arr = np.array(msk_full, dtype=np.float32) / 255.0
+        if mask_arr.ndim == 2:
+            mask_arr = mask_arr[..., None]
+        blend = src_arr * (1.0 - mask_arr) + new_arr * mask_arr
+        return Image.fromarray(np.clip(blend, 0, 255).astype(np.uint8), 'RGB')
+
+    # ─── Global path (large mask) ──────────────────────────────────
     if max(orig_w, orig_h) > max_dim:
         if orig_w > orig_h:
             work_w, work_h = max_dim, int(orig_h * max_dim / orig_w)
@@ -102,15 +208,7 @@ def generate(
 
     img_work = src.resize((work_w, work_h), Image.LANCZOS)
     msk_work = msk.resize((work_w, work_h), Image.LANCZOS)
-    # Light blur for soft edges so the composite blends. Keep small —
-    # too much blur and the user's painted boundary becomes loose.
     msk_work_soft = msk_work.filter(ImageFilter.GaussianBlur(3))
-
-    # Transform "add a bazooka" → descriptive prompt that actually
-    # tells SDXL Inpaint what to paint inside the mask. See
-    # _enrich_prompt docstring.
-    pos_prompt, neg_prompt = _enrich_prompt(prompt)
-    print(f'[mask-inpaint] enriched: "{pos_prompt[:120]}..."', flush=True)
 
     result = inpaint_pipe(
         prompt=pos_prompt,
@@ -118,25 +216,17 @@ def generate(
         image=img_work,
         mask_image=msk_work_soft,
         num_inference_steps=40,
-        # Bumped 8.5 → 11.0 — SDXL Inpaint without IP-Adapter / ControlNet
-        # needs a strong push to actually conjure the requested object
-        # in the mask rather than blend back to the surrounding texture.
         guidance_scale=11.0,
         strength=0.99,
         height=work_h, width=work_w,
     ).images[0]
 
-    # Upscale result + mask back to original resolution.
     if (work_w, work_h) != (orig_w, orig_h):
         result = result.resize((orig_w, orig_h), Image.LANCZOS)
-        msk_full = msk.resize((orig_w, orig_h), Image.LANCZOS).filter(ImageFilter.GaussianBlur(3))
+        msk_full = msk.filter(ImageFilter.GaussianBlur(3))
     else:
         msk_full = msk_work_soft
 
-    # Manual composite: keep source pixels OUTSIDE the painted mask,
-    # use SDXL output INSIDE the mask. This guarantees the un-masked
-    # area is byte-identical to the source (no face drift, no
-    # accidental redrawing of the rest of the image).
     src_arr = np.array(src, dtype=np.float32)
     new_arr = np.array(result, dtype=np.float32)
     mask_arr = np.array(msk_full, dtype=np.float32) / 255.0
