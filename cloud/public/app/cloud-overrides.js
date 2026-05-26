@@ -191,8 +191,14 @@
     'ws-removebg-btn':      1,   // /api/remove-background
     'ws-multiview-btn':     6,   // generateMultiviews — 6 views generated
     'ws-facefix-btn':       2,   // /api/face-fix-image — OpenCV + SDXL inpaint
-    // Resolution / Sym. Auto / Crop / Brightness stay canvas-only — no
-    // badge so they read as "free" by absence.
+    'ws-resolution-btn':    2,   // /api/upscale-image — LANCZOS + SDXL refine
+    // Manual tools — only Draw Mask actually triggers a Modal call
+    // (mask_inpaint, 3 cr) when the user clicks "Apply" inside the
+    // modal. The dance of painting the mask itself is canvas-only and
+    // free, but the end-to-end action (open → paint → apply) costs 3.
+    'ws-mask-btn':          3,   // /api/mask-inpaint — user-painted mask
+    // Other manual tools (clone, blur, picker, paint, crop, brightness,
+    // symmetrize, color pick) are pure canvas ops — no badge.
   };
 
   function _ensureCostBadgeStyle() {

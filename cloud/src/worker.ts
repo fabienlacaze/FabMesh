@@ -1687,7 +1687,7 @@ async function callModalTpose(env: Env, userId: string, input: {
  *  Returns either the persisted R2 URL or a discriminated mask-empty
  *  shape for the auto_inpaint case (so the Worker can refund). */
 async function callModalImageOp(env: Env, userId: string, input: {
-  op: 'modify' | 'auto_inpaint' | 'mask_inpaint' | 'face_fix_image';
+  op: 'modify' | 'auto_inpaint' | 'mask_inpaint' | 'face_fix_image' | 'upscale';
   imageUrl: string;
   prompt?: string;
   strength?: number;          // modify + face_fix_image
@@ -1696,6 +1696,8 @@ async function callModalImageOp(env: Env, userId: string, input: {
   targetText?: string;        // auto_inpaint only
   dilate?: number;
   maskUrl?: string;           // mask_inpaint only
+  scale?: number;             // upscale only (2 or 4)
+  refineStrength?: number;    // upscale only
 }, folder: string): Promise<{ url: string } | { maskEmpty: true; error: string }> {
   const url = env.MODAL_IMAGE_OP_URL;
   const secret = env.MODAL_SHARED_SECRET;
@@ -1719,6 +1721,11 @@ async function callModalImageOp(env: Env, userId: string, input: {
     body.mask_url = input.maskUrl ?? '';
   } else if (input.op === 'face_fix_image') {
     body.strength = input.strength ?? 0.45;
+  } else if (input.op === 'upscale') {
+    body.scale = input.scale ?? 2;
+    body.refine_strength = input.refineStrength ?? 0.15;
+    body.seed = input.seed;
+    body.steps = input.steps;
   }
 
   const t0 = Date.now();
@@ -2614,6 +2621,57 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
     await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
                        'failed', { op: 'face_fix_image', error: e instanceof Error ? e.message : String(e) });
     return err(502, `face-fix failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** AI upscale endpoint — LANCZOS x2/x4 + SDXL refine pass. Way nicer
+ *  output than the desktop's pure-LANCZOS quick edit. Costs 2 credits. */
+async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_IMAGE_OP_URL) return err(503, 'upscale backend unavailable');
+
+  const { imagePath, imageUrl, scale } = await req.json() as {
+    imagePath?: string; imageUrl?: string; scale?: number;
+  };
+  const src = imageUrl || imagePath;
+  if (!src) return err(400, 'imageUrl or imagePath required');
+  const factor = scale === 4 ? 4 : 2;  // only 2 or 4 supported
+
+  const COST_PER = factor === 4 ? 3 : 2;
+  const estimatedTotal = factor === 4 ? 0.07 : 0.05;
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: 'daily Modal budget reached.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, COST_PER);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — upscale x${factor} costs ${COST_PER}` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    const result = await callModalImageOp(env, user.id, {
+      op: 'upscale', imageUrl: src, scale: factor,
+    }, 'upscale');
+    if ('maskEmpty' in result) throw new Error('unexpected mask_empty from upscale');
+    await logOperation(env, user.id, 'text2image', COST_PER, opStart, Date.now(),
+                       'succeeded', { op: 'upscale', scale: factor });
+    return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
+  } catch (e) {
+    await addCredits(env, user.id, COST_PER);
+    await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                       'failed', { op: 'upscale', error: e instanceof Error ? e.message : String(e) });
+    return err(502, `upscale failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -3638,6 +3696,7 @@ export default {
         if (pathname === '/api/mask-inpaint'          && method === 'POST') return await handleMaskInpaint(req, env);
         if (pathname === '/api/face-fix-image'        && method === 'POST') return await handleFaceFixImage(req, env);
         if (pathname === '/api/copy-mesh-to-project'  && method === 'POST') return await handleCopyMeshToProject(req, env);
+        if (pathname === '/api/upscale-image'         && method === 'POST') return await handleUpscaleImage(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);

@@ -842,6 +842,22 @@
       } catch (e) { return { success: false, error: String(e) }; }
     },
     imageQuickEdit: async ({ imagePath, operation, params } = {}) => {
+      // Cloud override: 'upscale' routes to Modal SDXL refine pass for
+      // a real AI upscale (instead of the desktop's pure-LANCZOS
+      // canvas drawImage). Costs 2 credits at x2, 3 at x4. The
+      // canvas-only operations (downscale, symmetrize, crop, brightness,
+      // extend) stay local — they're instant and don't need GPU.
+      if (operation === 'upscale' && imagePath) {
+        try {
+          const r = await postJSON('/api/upscale-image', { imageUrl: imagePath, scale: (params?.scale === 4 ? 4 : 2) });
+          if (r?.success && (r.newPath || r.path)) {
+            if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+            return { success: true, newPath: r.newPath || r.path };
+          }
+          // Fall through to the canvas path on cloud upscale failure so
+          // the user gets *something* (at worst the desktop's behaviour).
+        } catch (_) { /* fall through */ }
+      }
       try {
         const { canvas, ctx, img } = await _canvasFor(imagePath);
         const w = canvas.width, h = canvas.height;

@@ -859,9 +859,9 @@ class MyFabmeshBackview:
         image_url = (payload.get("image_url") or "").strip()
         if not image_url:
             raise HTTPException(status_code=400, detail="image_url required")
-        if op not in ("modify", "auto_inpaint", "mask_inpaint", "face_fix_image"):
+        if op not in ("modify", "auto_inpaint", "mask_inpaint", "face_fix_image", "upscale"):
             raise HTTPException(status_code=400,
-                detail="op must be 'modify', 'auto_inpaint', 'mask_inpaint' or 'face_fix_image'")
+                detail="op must be 'modify', 'auto_inpaint', 'mask_inpaint', 'face_fix_image' or 'upscale'")
 
         try:
             req = urllib.request.Request(
@@ -924,7 +924,7 @@ class MyFabmeshBackview:
             img = mask_generate(inpaint_pipe, src_img, mask_img, prompt)
             tag = "mask_inpaint"
 
-        else:  # face_fix_image
+        elif op == "face_fix_image":
             # Auto face detection (OpenCV Haar) + SDXL Inpaint on the
             # detected bbox. Mirrors the mesh-level face_fix but applied
             # to a flat 2D image (no GLB atlas).
@@ -939,6 +939,19 @@ class MyFabmeshBackview:
                 # No face detected — caller refunds credits.
                 raise HTTPException(status_code=422, detail=str(e))
             tag = "face_fix_image"
+
+        else:  # upscale
+            from modal_app._upscale import generate as upscale_generate
+            scale = int(payload.get("scale") or 2)
+            if scale not in (2, 4):
+                raise HTTPException(status_code=400, detail="scale must be 2 or 4")
+            img = upscale_generate(
+                self.pipe, src_img, scale=scale,
+                refine_strength=float(payload.get("refine_strength") or 0.15),
+                seed=int(payload.get("seed") or 42),
+                steps=int(payload.get("steps") or 20),
+            )
+            tag = "upscale"
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)
