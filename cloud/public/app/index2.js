@@ -6141,6 +6141,21 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2Steps: t2cfg.steps,
     trellis2TexSize: t2cfg.texSize,
     trellis2ImgRes: t2cfg.imgRes,
+    // Cloud wire names — worker reads these from FormData, then forwards
+    // to the Replicate Cog payload. Without this mapping, the worker's
+    // form.get('quality_plus') reads `null` and every advanced checkbox
+    // becomes a paid no-op.
+    multiref:     trellis2MultiRef,
+    refine:       trellis2Refine,
+    rectify:      trellis2RectifySource,
+    smooth:       trellis2Smooth,
+    quality_plus: trellis2QualityPlus,
+    ultra_q:      trellis2UltraQ,
+    face_fix:     trellis2FaceFix,
+    ultra_hd:     trellis2UltraHD,
+    preset:       trellis2Preset,
+    // Keep the legacy keys around in case the desktop main process or
+    // any other listener reads them. They're harmless on cloud.
     trellis2MultiRef,
     trellis2Refine,
     trellis2RectifySource,
