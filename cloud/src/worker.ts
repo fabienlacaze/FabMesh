@@ -1728,29 +1728,34 @@ async function callModalImageOp(env: Env, userId: string, input: {
     body.steps = input.steps;
   }
 
+  // Two-shot retry on 524. The FIRST call kicks off the cold start
+  // (which CF cuts at 100s); after a 30s wait the container is
+  // typically just past its @enter(snap=False) and ready to accept
+  // the SECOND call without re-paying GPU move time. This makes
+  // cold-start retries invisible to the user — they see a slow first
+  // request (~2-3 min worst case) instead of a hard 524 error.
   const t0 = Date.now();
-  const r = await fetch(url, {
+  const doFetch = () => fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    // auto_inpaint cold-start lazy-loads ~7 GB (CLIPSeg + SDXL inpaint)
-    // so 5 min covers cold + inference + 1 retry. Modify is much faster
-    // but reuses the same budget.
     signal: AbortSignal.timeout(300_000),
   });
+  let r = await doFetch();
+  if (r.status === 524) {
+    console.log(`[modal] image_op 524 — cold start retry after 30s`);
+    await new Promise(res => setTimeout(res, 30_000));
+    r = await doFetch();
+  }
   if (r.status === 422) {
     return { maskEmpty: true, error: (await r.text()).slice(0, 200) };
   }
   if (!r.ok) {
-    // HTTP 524 specifically means Cloudflare's CDN gave up waiting for
-    // the Modal container to respond (100s subrequest timeout). The
-    // user almost always sees this on the FIRST call after the
-    // container scaled down to zero. Surface a friendly hint instead
-    // of "HTTP 524" so they know to just retry.
     if (r.status === 524) {
+      // Still cold after retry — surface the friendly hint.
       throw new Error(
-        `the AI model is warming up (cold start). Please retry in 30-60 seconds — ` +
-        `the next call will be much faster as the container stays warm.`
+        `the AI model is taking longer than usual to warm up. ` +
+        `Please retry in 1-2 minutes — your credits were refunded.`
       );
     }
     throw new Error(`Modal image_op (${input.op}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
