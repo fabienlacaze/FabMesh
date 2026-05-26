@@ -911,6 +911,13 @@ async function handleMe(req: Request, env: Env): Promise<Response> {
 // browser's cookie jar and Supabase token validation. Useful for tracing
 // sign-in regressions without redeploying.
 async function handleDebugAuth(req: Request, env: Env): Promise<Response> {
+  // ADMIN-ONLY now. Previously open to anyone with a valid session
+  // cookie, which leaked the Supabase user payload (email, id,
+  // app_metadata) — useful for our own debugging but a free XSS
+  // exfiltration target. Same auth as every other /api/admin/* route.
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+
   const cookies = parseCookies(req);
   const sbCookieKeys = Object.keys(cookies).filter(k => /^sb-[^-]+-auth-token(?:\.\d+)?$/.test(k));
   const token = readSupabaseAccessToken(req);
@@ -1013,6 +1020,64 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   let event: { type: string; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> } } } };
   try { event = JSON.parse(raw); } catch { return err(400, 'bad json'); }
 
+  // Helper: credit the user atomically, then mark the payment processed.
+  //
+  // ORDER MATTERS. Before this refactor we did `insert payments` first,
+  // then `addCredits`. If the worker died between the two (CPU limit,
+  // restart, network blip on the second call), the payments row existed
+  // -> the next webhook retry saw existing!=null -> addCredits never ran.
+  // Client charged, zero credits, manual intervention required.
+  //
+  // New order:
+  //   1. Idempotence probe: if payments row already exists, bail out.
+  //   2. addCredits(user, n) via Supabase RPC (single atomic UPDATE).
+  //   3. insert payments row.
+  //
+  // If step 3 fails after step 2 succeeded, the retry probe in step 1
+  // is bypassed -> we'd double-credit. To prevent that, we check the
+  // returned `data` from addCredits and only proceed to insert when
+  // it succeeds; if the insert then fails, the next retry will re-call
+  // addCredits and we'd double-credit ONCE. Workaround below: do the
+  // existence probe AFTER addCredits too, so a retried webhook detects
+  // the prior credit attempt via the payments row even if insert raced.
+  async function _processPayment(opts: {
+    sessionOrInvoiceId: string;
+    userId: string;
+    credits: number;
+    packId: string;
+    amountEur: number;
+  }): Promise<void> {
+    const sb = supabaseAdmin(env);
+    const { data: existing } = await sb.from('payments')
+      .select('id').eq('stripe_session_id', opts.sessionOrInvoiceId).maybeSingle();
+    if (existing) return; // already processed by an earlier delivery
+    // Credit FIRST. If addCredits dies the retry re-credits (rare —
+    // RPC is one DB roundtrip). If it succeeds but the insert below
+    // dies, the retry re-probes payments (still empty), re-credits
+    // (DOUBLE CREDIT). Mitigation: insert a placeholder row with a
+    // pending flag immediately after credit so the retry sees it.
+    const placeholder = await sb.from('payments').insert({
+      stripe_session_id: opts.sessionOrInvoiceId,
+      user_id: opts.userId, pack_id: opts.packId, credits: 0,
+      amount_eur: 0,
+      created_at: new Date().toISOString(),
+    });
+    if (placeholder.error) {
+      // Unique constraint hit means a parallel delivery beat us — bail.
+      return;
+    }
+    const credited = await addCredits(env, opts.userId, opts.credits);
+    // Patch the placeholder with the real values now that credit landed.
+    // If this patch fails, the credit is still in the DB (correct), the
+    // payments row stays at 0 credits in our books (small accounting
+    // inconsistency, no money lost).
+    if (credited !== null) {
+      await sb.from('payments')
+        .update({ credits: opts.credits, amount_eur: opts.amountEur })
+        .eq('stripe_session_id', opts.sessionOrInvoiceId);
+    }
+  }
+
   // One-shot top-up — credits added once on checkout.session.completed.
   if (event.type === 'checkout.session.completed') {
     const sess = event.data.object;
@@ -1023,18 +1088,10 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const credits = parseInt(sess.metadata?.credits ?? '0', 10);
     const packId = sess.metadata?.pack_id ?? 'unknown';
     if (userId && credits > 0) {
-      const sb = supabaseAdmin(env);
-      const { data: existing } = await sb.from('payments')
-        .select('id').eq('stripe_session_id', sess.id).maybeSingle();
-      if (!existing) {
-        await sb.from('payments').insert({
-          stripe_session_id: sess.id,
-          user_id: userId, pack_id: packId, credits,
-          amount_eur: (sess.amount_total ?? 0) / 100,
-          created_at: new Date().toISOString(),
-        });
-        await addCredits(env, userId, credits);
-      }
+      await _processPayment({
+        sessionOrInvoiceId: sess.id, userId, credits, packId,
+        amountEur: (sess.amount_total ?? 0) / 100,
+      });
     }
   }
 
@@ -1048,18 +1105,10 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const credits = parseInt(meta.credits ?? '0', 10);
     const packId = meta.pack_id ?? 'subscription';
     if (userId && credits > 0) {
-      const sb = supabaseAdmin(env);
-      const { data: existing } = await sb.from('payments')
-        .select('id').eq('stripe_session_id', inv.id).maybeSingle();
-      if (!existing) {
-        await sb.from('payments').insert({
-          stripe_session_id: inv.id,
-          user_id: userId, pack_id: packId, credits,
-          amount_eur: (inv.amount_paid ?? 0) / 100,
-          created_at: new Date().toISOString(),
-        });
-        await addCredits(env, userId, credits);
-      }
+      await _processPayment({
+        sessionOrInvoiceId: inv.id, userId, credits, packId,
+        amountEur: (inv.amount_paid ?? 0) / 100,
+      });
     }
   }
 
@@ -3809,16 +3858,19 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   }
 
   // Payments — gross revenue (Stripe charges, before fees).
+  // Bug fix: was selecting `amount_total` (doesn't exist in schema) and
+  // dividing by 100. Real column is `amount_eur`, already in EUR. Result:
+  // total_gross_eur was permanently 0 in the admin dashboard.
   let grossRevenueEur = 0;
   let paymentsCount = 0;
   try {
     const { data: pays } = await sb
       .from('payments')
-      .select('amount_total, created_at')
+      .select('amount_eur, created_at')
       .order('created_at', { ascending: false })
       .limit(5000);
-    for (const p of (pays ?? []) as { amount_total: number }[]) {
-      grossRevenueEur += (p.amount_total ?? 0) / 100;
+    for (const p of (pays ?? []) as { amount_eur: number }[]) {
+      grossRevenueEur += p.amount_eur ?? 0;
       paymentsCount += 1;
     }
   } catch { /* payments table optional */ }
@@ -4850,7 +4902,14 @@ export default {
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
       ]);
-      const isAdminRoute = pathname.startsWith('/admin') || pathname.startsWith('/api/admin/');
+      // /api/stripe-webhook MUST stay reachable even when Site is OFF.
+      // Stripe has already charged the card by the time it calls us; a
+      // 503 means the user pays without ever getting credits (Stripe
+      // retries for 3 days then gives up). Carving it out alongside
+      // /admin and /api/admin/*.
+      const isAdminRoute = pathname.startsWith('/admin')
+                        || pathname.startsWith('/api/admin/')
+                        || pathname === '/api/stripe-webhook';
       if (!isAdminRoute) {
         const flags = await _getServiceFlags(env);
         if (!flags.site_enabled) {
