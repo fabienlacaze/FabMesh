@@ -1728,12 +1728,19 @@ async function callModalImageOp(env: Env, userId: string, input: {
     body.steps = input.steps;
   }
 
-  // Two-shot retry on 524. The FIRST call kicks off the cold start
-  // (which CF cuts at 100s); after a 30s wait the container is
-  // typically just past its @enter(snap=False) and ready to accept
-  // the SECOND call without re-paying GPU move time. This makes
-  // cold-start retries invisible to the user — they see a slow first
-  // request (~2-3 min worst case) instead of a hard 524 error.
+  // Multi-shot retry on 524. Cold start for MyFabmeshBackview is
+  // ~90-180s (snap restore + GPU move + lazy load of CLIPSeg + SDXL
+  // Inpaint on first mask_inpaint / auto_inpaint call). Cloudflare
+  // cuts each subrequest at 100s with 524, so we need to retry
+  // multiple times to outlast the slowest cold start.
+  //
+  // Schedule (worst case ~5 min wallclock):
+  //   t=0    1st request → cut at 100s (524)
+  //   wait 60s
+  //   t=160  2nd request → cut at 100s (524 if STILL cold)
+  //   wait 90s
+  //   t=350  3rd request → should land on a warm container
+  // Total Worker time stays under the 15min Workers Paid wallclock.
   const t0 = Date.now();
   const doFetch = () => fetch(url, {
     method: 'POST',
@@ -1742,9 +1749,12 @@ async function callModalImageOp(env: Env, userId: string, input: {
     signal: AbortSignal.timeout(300_000),
   });
   let r = await doFetch();
-  if (r.status === 524) {
-    console.log(`[modal] image_op 524 — cold start retry after 30s`);
-    await new Promise(res => setTimeout(res, 30_000));
+  let waitedMs = 0;
+  for (const delay of [60_000, 90_000]) {
+    if (r.status !== 524) break;
+    waitedMs += delay;
+    console.log(`[modal] image_op 524 — cold start retry after ${delay/1000}s (total wait so far: ${waitedMs/1000}s)`);
+    await new Promise(res => setTimeout(res, delay));
     r = await doFetch();
   }
   if (r.status === 422) {
