@@ -112,7 +112,6 @@
                   <label>Engine</label>
                   <select id="ws-engine">
                     <option value="local-flux" selected>MyFabmesh.AI Image Engine (local)</option>
-                    <option value="meshy">Meshy.ai (cloud, needs API key)</option>
                   </select>
                 </div>
                 <div class="form-row">
@@ -328,8 +327,6 @@
                     <label>Engine</label>
                     <select id="ws-3d-engine">
                       <option value="trellis2_native" selected>MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
-                      <option value="hi3dgen">MyFabmesh.AI Legacy (2-stage geometry + texture)</option>
-                      <option value="meshy">Meshy.ai (cloud, license payante)</option>
                     </select>
                   </div>
                   <!-- Texture resolution (UNUSED by Hi3DGen+TRELLIS-2, only relevant for legacy engines)
@@ -578,7 +575,6 @@
                     <label>Engine</label>
                     <select id="ws-rig-engine">
                       <option value="unirig" selected>UniRig (local)</option>
-                      <option value="meshy">Meshy.ai (cloud, needs API key)</option>
                     </select>
                   </div>
                   <button id="ws-generate-rig-ai" class="primary-btn" disabled>Generate Rig</button>
@@ -1149,20 +1145,6 @@
           <button class="settings-close-x" id="set-close-x" title="Close">&#10005;</button>
         </div>
 
-        <!-- ═══ CLOUD SERVICES ═══ -->
-        <div class="settings-section-header">Cloud Services</div>
-        <div class="settings-box">
-          <div class="settings-box-title">Meshy.ai</div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <span class="settings-field-label">API key</span>
-            <input type="password" id="set-meshy-api-key" placeholder="msy_..." autocomplete="off" style="flex:1;" />
-            <button id="set-meshy-test" class="ghost-btn" style="white-space:nowrap; padding:4px 12px;">Test</button>
-          </div>
-          <div class="settings-box-footer">
-            Free &middot; CC-BY 4.0 &middot; <a href="https://www.meshy.ai/api" target="_blank" rel="noopener">meshy.ai/api</a>
-          </div>
-        </div>
-
         <!-- ═══ AI ASSISTANT ═══ -->
         <div class="settings-section-header">AI Assistant</div>
         <div class="settings-box">
@@ -1613,7 +1595,6 @@
             <label>Engine</label>
             <select id="mod-engine">
               <option value="local-sdxl" selected>MyFabmesh.AI Image Engine (local)</option>
-              <option value="meshy">Meshy.ai (cloud, needs API key)</option>
             </select>
             <label>Strength <span id="mod-strength-val" class="slider-val">35%</span></label>
             <input type="range" id="mod-strength" min="15" max="95" value="35" />

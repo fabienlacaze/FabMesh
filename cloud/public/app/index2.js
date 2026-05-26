@@ -136,7 +136,6 @@ const ENGINE_LABELS = {
   'trellis2_native':'MyFabmesh.AI 3D Native',
   'hi3dgen':        'MyFabmesh.AI Legacy (2-stage)',
   'trellis':        'MyFabmesh.AI 3D Engine',
-  'meshy':          'Cloud provider (Meshy.ai)',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
