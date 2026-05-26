@@ -38,6 +38,34 @@
       border-bottom: 1px solid var(--border);
     }
     h2.section-title:first-of-type { margin-top: 24px; }
+
+    /* ─────────── Tabs ─────────── */
+    .tabs {
+      display: flex; gap: 4px; margin: 24px 0 16px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .tab {
+      background: transparent; color: var(--text-2);
+      border: none; border-bottom: 2px solid transparent;
+      padding: 10px 16px; font-size: 13px; font-weight: 600;
+      letter-spacing: 0.5px; cursor: pointer;
+      transition: color .15s, border-color .15s;
+      margin-bottom: -1px;
+    }
+    .tab:hover { color: var(--text-0); }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .tab-badge {
+      display: inline-block; background: var(--bg-2);
+      color: var(--text-1); padding: 2px 7px; border-radius: 10px;
+      font-size: 10px; margin-left: 6px; font-weight: 500;
+    }
+    .tab.active .tab-badge { background: var(--accent); color: #fff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
     h3 { margin: 0 0 12px; font-size: 16px; }
     .sub { color: var(--text-2); font-size: 13px; margin-bottom: 20px; }
     .grid { display: grid; gap: 12px; }
@@ -153,58 +181,81 @@
     </div>
 
     <!-- ──────────────────────────────────────────────────────────
-         SECTION 1 — TRAFIC / ACQUISITION
+         TABS — Overview / Trafic / Ops / Finances / By type
          ────────────────────────────────────────────────────────── -->
-    <h2 class="section-title">Trafic &amp; acquisition</h2>
-    <div class="grid grid-4" id="cards-traffic"></div>
-
-    <!-- ──────────────────────────────────────────────────────────
-         SECTION 2 — OPÉRATIONS (génération)
-         ────────────────────────────────────────────────────────── -->
-    <h2 class="section-title">Opérations (générations)</h2>
-    <div class="grid grid-4" id="cards-ops"></div>
-
-    <div class="chart-card" style="margin-top:16px;">
-      <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Activity — last 30 days (ops/day)</div>
-      <svg class="chart" id="chart-ops" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="overview">📌 Overview</button>
+      <button class="tab" data-tab="traffic">👥 Trafic</button>
+      <button class="tab" data-tab="ops">⚙️ Opérations <span class="tab-badge" id="badge-ops">0</span></button>
+      <button class="tab" data-tab="finance">💰 Finances</button>
+      <button class="tab" data-tab="bytype">📊 Par type</button>
     </div>
 
-    <!-- ──────────────────────────────────────────────────────────
-         SECTION 3 — FINANCES
-         ────────────────────────────────────────────────────────── -->
-    <h2 class="section-title">Finances</h2>
-    <div class="grid grid-4" id="cards-finance"></div>
-
-    <div class="chart-card" style="margin-top:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px;">
-        <div>
+    <!-- Tab: Overview — compact summary of all sections -->
+    <div class="tab-panel active" data-panel="overview">
+      <div class="grid grid-4" id="cards-overview"></div>
+      <div class="chart-card" style="margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px;">
           <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2);">Revenue vs Cost vs Margin — last 30 days (€/day)</div>
+          <div class="legend">
+            <span><span class="legend-dot" style="background:var(--revenue)"></span>Revenue</span>
+            <span><span class="legend-dot" style="background:var(--cost)"></span>Cost</span>
+            <span><span class="legend-dot" style="background:var(--margin)"></span>Margin</span>
+          </div>
         </div>
-        <div class="legend">
-          <span><span class="legend-dot" style="background:var(--revenue)"></span>Revenue net</span>
-          <span><span class="legend-dot" style="background:var(--cost)"></span>Cost Modal</span>
-          <span><span class="legend-dot" style="background:var(--margin)"></span>Margin</span>
-        </div>
+        <svg class="chart" id="chart-money-overview" viewBox="0 0 600 200" preserveAspectRatio="none" style="margin-top:8px"></svg>
       </div>
-      <svg class="chart" id="chart-money" viewBox="0 0 600 220" preserveAspectRatio="none" style="margin-top:8px"></svg>
     </div>
 
-    <!-- ──────────────────────────────────────────────────────────
-         SECTION 4 — DÉTAIL PAR TYPE
-         ────────────────────────────────────────────────────────── -->
-    <h2 class="section-title">Par type d'opération</h2>
-    <table id="by-type-table">
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th class="num">Count</th>
-          <th class="num">Revenue (€)</th>
-          <th class="num">Cost (€)</th>
-          <th class="num">Margin (€)</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <!-- Tab: Trafic & acquisition -->
+    <div class="tab-panel" data-panel="traffic">
+      <div class="grid grid-4" id="cards-traffic"></div>
+      <div class="chart-card" style="margin-top:16px;">
+        <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Desktop downloads — last 30 days</div>
+        <svg class="chart" id="chart-downloads" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
+    <!-- Tab: Opérations -->
+    <div class="tab-panel" data-panel="ops">
+      <div class="grid grid-4" id="cards-ops"></div>
+      <div class="chart-card" style="margin-top:16px;">
+        <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2); margin-bottom:6px;">Activity — last 30 days (ops/day)</div>
+        <svg class="chart" id="chart-ops" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
+    <!-- Tab: Finances -->
+    <div class="tab-panel" data-panel="finance">
+      <div class="grid grid-4" id="cards-finance"></div>
+      <div class="chart-card" style="margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px;">
+          <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2);">Revenue vs Cost vs Margin — last 30 days (€/day)</div>
+          <div class="legend">
+            <span><span class="legend-dot" style="background:var(--revenue)"></span>Revenue net</span>
+            <span><span class="legend-dot" style="background:var(--cost)"></span>Cost Modal</span>
+            <span><span class="legend-dot" style="background:var(--margin)"></span>Margin</span>
+          </div>
+        </div>
+        <svg class="chart" id="chart-money" viewBox="0 0 600 220" preserveAspectRatio="none" style="margin-top:8px"></svg>
+      </div>
+    </div>
+
+    <!-- Tab: By type -->
+    <div class="tab-panel" data-panel="bytype">
+      <table id="by-type-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th class="num">Count</th>
+            <th class="num">Revenue (€)</th>
+            <th class="num">Cost (€)</th>
+            <th class="num">Margin (€)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <script>
@@ -292,6 +343,26 @@
         </div>`;
     }
 
+    // Tab switching — single-page navigation, no router needed.
+    // Persists the active tab in the URL hash so reloads keep position.
+    (function tabsInit() {
+      function activate(name) {
+        document.querySelectorAll('.tab').forEach(t =>
+          t.classList.toggle('active', t.dataset.tab === name));
+        document.querySelectorAll('.tab-panel').forEach(p =>
+          p.classList.toggle('active', p.dataset.panel === name));
+        if (location.hash.slice(1) !== name) {
+          history.replaceState(null, '', '#' + name);
+        }
+      }
+      document.querySelectorAll('.tab').forEach(t =>
+        t.addEventListener('click', () => activate(t.dataset.tab)));
+      // Restore tab from URL hash on load. Whitelist guards against bad hashes.
+      const allow = new Set(['overview', 'traffic', 'ops', 'finance', 'bytype']);
+      const initial = location.hash.slice(1);
+      if (allow.has(initial)) activate(initial);
+    })();
+
     function renderOpsChart(series) {
       const W = 600, H = 160, P = 22;
       const maxOps = Math.max(1, ...series.map(p => p.ops));
@@ -315,12 +386,34 @@
       document.getElementById('chart-ops').innerHTML = yTicks + bars + xTicks;
     }
 
-    function renderMoneyChart(series) {
-      const W = 600, H = 220, P = 28;
+    function renderDownloadsChart(series) {
+      const W = 600, H = 160, P = 22;
+      const maxDl = Math.max(1, ...series.map(p => p.downloads || 0));
+      const bw = (W - 2 * P) / series.length;
+      const bars = series.map((p, i) => {
+        const n = p.downloads || 0;
+        const x = P + i * bw + 1;
+        const h = ((n / maxDl) * (H - 2 * P)) || 0;
+        const y = H - P - h;
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent)" rx="1"><title>${p.day}: ${n} downloads</title></rect>`;
+      }).join('');
+      const yTicks = [0, maxDl / 2, maxDl].map(v => {
+        const y = H - P - (v / maxDl) * (H - 2 * P);
+        return `<text x="${P - 4}" y="${y + 3}" font-size="9" fill="var(--text-2)" text-anchor="end">${Math.round(v)}</text>` +
+               `<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3"/>`;
+      }).join('');
+      const xTicks = series.map((p, i) => i % 5 === 0
+        ? `<text x="${P + i * bw + bw / 2}" y="${H - 6}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
+        : '').join('');
+      document.getElementById('chart-downloads').innerHTML = yTicks + bars + xTicks;
+    }
+
+    // Reused for both the Finances tab (full 220px) and Overview (200px).
+    function renderMoneyChartInto(elId, series, H) {
+      const W = 600, P = 28;
       const maxVal = Math.max(1, ...series.flatMap(p => [p.revenue_eur, p.cost_eur, Math.max(0, p.margin_eur)]));
       const bw = (W - 2 * P) / series.length;
       const innerBw = (bw - 2) / 3;
-      // Three side-by-side bars per day : revenue (green), cost (orange), margin (purple)
       const bars = series.map((p, i) => {
         const x0 = P + i * bw + 1;
         const bar = (v, color, offset, tooltip) => {
@@ -332,17 +425,15 @@
              + bar(p.cost_eur,    'var(--cost)',    1, `Cost ${p.cost_eur.toFixed(2)}€`)
              + bar(p.margin_eur,  'var(--margin)',  2, `Margin ${p.margin_eur.toFixed(2)}€`);
       }).join('');
-      // Y ticks
       const yTicks = [0, maxVal / 2, maxVal].map(v => {
         const y = H - P - (v / maxVal) * (H - 2 * P);
         return `<text x="${P - 4}" y="${y + 3}" font-size="9" fill="var(--text-2)" text-anchor="end">${v.toFixed(2)}€</text>` +
                `<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3"/>`;
       }).join('');
-      // X labels every 5 days
       const xTicks = series.map((p, i) => i % 5 === 0
         ? `<text x="${P + i * bw + bw / 2}" y="${H - 8}" font-size="9" fill="var(--text-2)" text-anchor="middle">${p.day.slice(5)}</text>`
         : '').join('');
-      document.getElementById('chart-money').innerHTML = yTicks + bars + xTicks;
+      document.getElementById(elId).innerHTML = yTicks + bars + xTicks;
     }
 
     function render(d) {
@@ -358,15 +449,33 @@
         : '—';
       const totalDownloadsLast30 = d.series_30d.reduce((a, p) => a + (p.downloads || 0), 0);
 
-      // ── SECTION 1 : Trafic & acquisition
+      // Badge on Ops tab — show success count quickly.
+      const badge = document.getElementById('badge-ops');
+      if (badge) badge.textContent = d.operations.total;
+
+      // ── Tab: Overview — KPIs from every section in one glance.
+      document.getElementById('cards-overview').innerHTML = [
+        card('Users (total)',       d.users.total,                            '', 'accent'),
+        card('Ops total',           d.operations.total,                       successRate + ' success'),
+        card('Revenue net (€)',     d.revenue.total_net_eur.toFixed(2),       '', 'revenue'),
+        card('Margin (€)',          d.revenue.total_margin_eur.toFixed(2),    marginPct, 'margin'),
+        card('Cost Modal (€)',      d.revenue.total_cost_eur.toFixed(2),      '', 'cost'),
+        card('Paid orders',         d.revenue.payments_count,                 `${d.revenue.total_gross_eur.toFixed(2)}€ gross`),
+        card('Desktop downloads',   d.desktop_downloads_total,                `${totalDownloadsLast30} last 30d`),
+        card('Last 7d margin (€)',  d.last_7d.margin_eur.toFixed(2),          '', 'ok'),
+      ].join('');
+      renderMoneyChartInto('chart-money-overview', d.series_30d, 200);
+
+      // ── Tab: Trafic
       document.getElementById('cards-traffic').innerHTML = [
         card('Users (total)',          d.users.total,                     '', 'accent'),
         card('Desktop downloads',      d.desktop_downloads_total,         `${totalDownloadsLast30} in last 30d`),
         card('Last 7d ops',            d.last_7d.ops),
         card('Paid orders (Stripe)',   d.revenue.payments_count,          `${d.revenue.total_gross_eur.toFixed(2)}€ gross`),
       ].join('');
+      renderDownloadsChart(d.series_30d);
 
-      // ── SECTION 2 : Opérations
+      // ── Tab: Opérations
       document.getElementById('cards-ops').innerHTML = [
         card('Ops total',          d.operations.total),
         card('Ops succeeded',      d.operations.succeeded, '', 'ok'),
@@ -375,16 +484,16 @@
       ].join('');
       renderOpsChart(d.series_30d);
 
-      // ── SECTION 3 : Finances
+      // ── Tab: Finances
       document.getElementById('cards-finance').innerHTML = [
         card('Revenue net (€)',     d.revenue.total_net_eur.toFixed(2),     '', 'revenue'),
         card('Cost Modal (€)',      d.revenue.total_cost_eur.toFixed(2),    '', 'cost'),
         card('Margin (€)',          d.revenue.total_margin_eur.toFixed(2),  marginPct, 'margin'),
         card('Last 7d margin (€)',  d.last_7d.margin_eur.toFixed(2),        '', 'ok'),
       ].join('');
-      renderMoneyChart(d.series_30d);
+      renderMoneyChartInto('chart-money', d.series_30d, 220);
 
-      // ── SECTION 4 : By type table
+      // ── Tab: Par type
       const rows = Object.entries(d.by_type)
         .sort((a, b) => b[1].margin_eur - a[1].margin_eur)
         .map(([type, m]) => `
