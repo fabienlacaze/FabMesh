@@ -4161,7 +4161,7 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   const service = String(body?.service || '').trim();
   const enabled = !!body?.enabled;
   const password = String(body?.password || '');
-  if (!['modal', 'site', 'total'].includes(service)) return err(400, 'service must be modal|site|total');
+  if (!['modal', 'site', 'total', 'all'].includes(service)) return err(400, 'service must be modal|site|total|all');
   if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
   // Constant-time compare.
   if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
@@ -4176,14 +4176,19 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
     const obj = await env.MESHES.get(SERVICE_FLAGS_KEY);
     if (obj) current = await obj.json() as Partial<ServiceFlags>;
   } catch {}
-  const next: ServiceFlags = {
-    modal_enabled: current.modal_enabled !== false,
-    site_enabled: current.site_enabled !== false,
-    total_enabled: current.total_enabled !== false,
-    ...(service === 'modal' ? { modal_enabled: enabled } : {}),
-    ...(service === 'site'  ? { site_enabled: enabled }  : {}),
-    ...(service === 'total' ? { total_enabled: enabled } : {}),
-  };
+  // service='all' forces every flag to the requested value — used by
+  // the master switch in the admin UI. Useful in panic mode (kill
+  // everything in one click) or to fully restore the site after.
+  const next: ServiceFlags = service === 'all'
+    ? { modal_enabled: enabled, site_enabled: enabled, total_enabled: enabled }
+    : {
+        modal_enabled: current.modal_enabled !== false,
+        site_enabled: current.site_enabled !== false,
+        total_enabled: current.total_enabled !== false,
+        ...(service === 'modal' ? { modal_enabled: enabled } : {}),
+        ...(service === 'site'  ? { site_enabled: enabled }  : {}),
+        ...(service === 'total' ? { total_enabled: enabled } : {}),
+      };
   await env.MESHES.put(SERVICE_FLAGS_KEY, JSON.stringify(next));
   _invalidateServiceFlagsCache();
   return json({ ok: true, ...next });
