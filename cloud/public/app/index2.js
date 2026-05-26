@@ -6452,8 +6452,8 @@ const MESH_TOOL_SCHEMAS = {
     build: (vals, ctx) => [ctx.imagePath, String(vals.tex_res)],
   },
   trellis2_retex: {
-    title: 'Re-Texture (TRELLIS-2)',
-    subtitle: 'Native PBR texturing via TRELLIS-2-4B (~90s, GPU).',
+    title: 'Re-Texture (AI native)',
+    subtitle: 'Native PBR re-texturing on cloud GPU (~90s).',
     needsImage: true,
     params: [
       { id: 'preset', label: 'Quality preset', type: 'select', default: 'fast',

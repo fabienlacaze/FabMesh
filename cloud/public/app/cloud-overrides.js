@@ -430,7 +430,7 @@
       // Relabel the lone remaining option so the user sees what the
       // cloud actually does, not the desktop "in one shot, local" copy.
       if (eng3d.options.length === 1) {
-        eng3d.options[0].textContent = 'MyFabmesh.AI 3D Native (cloud GPU · TRELLIS-2 · ~100s · 1 credit)';
+        eng3d.options[0].textContent = 'MyFabmesh.AI 3D Native (cloud GPU · ~100s · 1 credit)';
         eng3d.value = 'trellis2_native';
       }
     }
