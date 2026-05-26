@@ -1158,6 +1158,28 @@
       // Blender (Desktop-only).
       return impl.exportMesh({ sourcePath, targetFormat: 'glb' });
     },
+    // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
+    // Supports: smooth, decimate, center, fix_normals, fill_holes.
+    // Anything else returns Desktop-only (Blender etc.).
+    meshTool: async ({ operation, meshPath, meshUrl, meshId, params } = {}) => {
+      const CLOUD_OPS = new Set(['smooth', 'decimate', 'center', 'fix_normals', 'fill_holes']);
+      if (!CLOUD_OPS.has(operation)) {
+        return { success: false, ok: false,
+          error: `mesh op '${operation}' is Desktop-only on cloud (Blender / UniRig / sculpt required).` };
+      }
+      const url = meshUrl || meshPath;
+      if (!url && !meshId) return { success: false, error: 'meshPath, meshUrl or meshId required' };
+      try {
+        const r = await postJSON('/api/mesh-op', {
+          meshUrl: url, meshId, opType: operation, params: params || {},
+        });
+        if (r?.success && (r.path || r.newPath || r.mesh_url)) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: true, newPath: r.path || r.newPath || r.mesh_url };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
   });
 
   /* ──────────────────────────────────────────────────────────────────
@@ -1174,7 +1196,7 @@
     'getControlApiToken', 'testMeshyKey',
     // Blender pipeline (no Blender in cloud)
     'setBlenderPath', 'runBlenderScript', 'openInBlender',
-    'meshTool', 'materialAdjust', 'alignTexture',
+    'materialAdjust', 'alignTexture',
     // Calibration (Desktop diagnostics tool)
     'calibRun', 'calibLastReport', 'calibOpenReport', 'calibListReports',
     'calibDiagnose', 'calibTiered', 'calibV3', 'calibCancel',
