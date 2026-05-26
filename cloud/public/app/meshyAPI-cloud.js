@@ -1034,7 +1034,24 @@
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
     },
-    autoInpaint: async () => ({ success: false, error: 'Auto inpaint is Desktop-only.' }),
+    autoInpaint: async ({ imagePath, targetText, prompt, dilate } = {}) => {
+      // Cloud port of the desktop /auto-inpaint IPC handler
+      // (main.js:2824). CLIPSeg detects the area + SDXL Inpaint paints
+      // the new content. Returns { success, newPath } so the renderer
+      // can drop the result back into the version strip unchanged.
+      if (!imagePath)  return { success: false, error: 'imagePath required' };
+      if (!targetText) return { success: false, error: 'targetText required' };
+      try {
+        const r = await postJSON('/api/auto-inpaint', {
+          imageUrl: imagePath, targetText, prompt: prompt || '', dilate: dilate || 15,
+        });
+        if (r?.success && (r.newPath || r.path)) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: true, newPath: r.newPath || r.path };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
     maskInpaint: async () => ({ success: false, error: 'Mask inpaint is Desktop-only.' }),
     copyMeshToProject: async () => ({ ok: false, cloud: true, message: 'Copy mesh to project: Desktop-only.' }),
     createProjectFromMesh: async () => ({ ok: false, cloud: true, message: 'Create project from mesh: Desktop-only.' }),

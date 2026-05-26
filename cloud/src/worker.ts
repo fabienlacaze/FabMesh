@@ -68,6 +68,9 @@ export interface Env {
   // SDXL img2img (Modify image) — direct port of the desktop's /img2img
   // endpoint. Reuses RealVisXL via from_pipe so cold start ≈ back-view.
   MODAL_MODIFY_URL?: string;
+  // Auto-inpaint — CLIPSeg + SDXL Inpainting. First call lazy-loads
+  // both models (~45s); subsequent calls reuse the cached pipe (~17s).
+  MODAL_AUTO_INPAINT_URL?: string;
   // Mesh runs through TWO endpoints (async pattern; see callModalMeshStart).
   // Setting BOTH activates Modal-for-mesh; leaving either unset falls back
   // to the Replicate Cog.
@@ -1679,6 +1682,52 @@ async function callModalTpose(env: Env, userId: string, input: {
   throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
 }
 
+/** Auto-inpaint — CLIPSeg picks the area, SDXL Inpaint fills it. */
+async function callModalAutoInpaint(env: Env, userId: string, input: {
+  imageUrl: string;
+  targetText: string;
+  prompt?: string;
+  dilate?: number;
+}, folder: string): Promise<{ url: string } | { maskEmpty: true; error: string }> {
+  const url = env.MODAL_AUTO_INPAINT_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_AUTO_INPAINT_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      image_url: input.imageUrl,
+      target_text: input.targetText,
+      prompt: input.prompt ?? '',
+      dilate: input.dilate ?? 15,
+    }),
+    // 1st call lazy-loads CLIPSeg + SDXL inpaint (~45s) + inference 17s,
+    // so 5 min covers cold + 1 retry.
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (r.status === 422) {
+    // Mask empty — caller should refund credits. Return a discriminated
+    // shape instead of throwing so handleAutoInpaint can refund cleanly.
+    const txt = await r.text();
+    return { maskEmpty: true, error: txt };
+  }
+  if (!r.ok) {
+    throw new Error(`Modal auto_inpaint HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+  const buf = await r.arrayBuffer();
+  console.log(`[modal] auto_inpaint dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  if (env.MESHES && env.R2_PUBLIC_URL) {
+    const key = `${userId}/${folder}/${Date.now()}_inpaint.png`;
+    await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+    return { url: `${env.R2_PUBLIC_URL}/${key}` };
+  }
+  throw new Error('R2 bucket unavailable; cannot persist auto_inpaint output');
+}
+
 /** SDXL img2img — desktop's "Modify image" tool. Sends the source image
  *  URL + prompt + strength to Modal; gets back a re-painted PNG. */
 async function callModalModify(env: Env, userId: string, input: {
@@ -2347,6 +2396,86 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
                      'succeeded', { op: 'modify', strength });
   return json({ ok: true, success: true, path, newPath: path, creditsRemaining: remaining });
+}
+
+/** Auto-inpaint HTTP handler — desktop "Auto Inpaint" tool. NSFW
+ *  pre-filter applied to the user-supplied prompt; credits refunded
+ *  if CLIPSeg can't find target_text. */
+async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_AUTO_INPAINT_URL) {
+    return err(503, 'auto-inpaint backend unavailable');
+  }
+  const { imagePath, imageUrl, targetText, prompt, dilate } = await req.json() as {
+    imagePath?: string;
+    imageUrl?: string;
+    targetText?: string;
+    prompt?: string;
+    dilate?: number;
+  };
+  const src = imageUrl || imagePath;
+  if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!targetText) return err(400, 'targetText required');
+
+  const rawPrompt = (prompt ?? '').toString().trim();
+  if (rawPrompt) {
+    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const safety = checkPromptSafety(rawPrompt, unrestricted);
+    if (!safety.safe) {
+      return json({ ok: false, success: false,
+        error: safety.reason ?? 'prompt blocked by content filter',
+        blocked: safety.blocked }, { status: 400 });
+    }
+  }
+
+  const COST_PER_INPAINT = 3;   // 2 model load + SDXL inpaint heavier than text2image
+  const cost = COST_PER_INPAINT;
+  const estimatedTotal = 0.08;
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: 'daily Modal budget reached. Try again after midnight UTC.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `per-user daily generation limit reached.` }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, cost);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — auto inpaint costs ${cost} credits` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    const result = await callModalAutoInpaint(env, user.id, {
+      imageUrl: src, targetText, prompt: rawPrompt, dilate,
+    }, 'inpaint');
+    if ('maskEmpty' in result) {
+      // Refund — the GPU did NOT do any real work (just CLIPSeg, which
+      // is cheap and we don't bill the user for a missed mask).
+      await addCredits(env, user.id, cost);
+      await refundModalSpend(env, estimatedTotal);
+      await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                         'failed', { op: 'auto_inpaint', reason: 'mask_empty', target: targetText });
+      return json({ ok: false, success: false,
+        error: `auto-inpaint: "${targetText}" not found in the image (credits refunded)` }, { status: 422 });
+    }
+    await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
+                       'succeeded', { op: 'auto_inpaint', target: targetText });
+    return json({ ok: true, success: true, path: result.url, newPath: result.url, creditsRemaining: remaining });
+  } catch (e) {
+    await addCredits(env, user.id, cost);
+    await refundModalSpend(env, estimatedTotal);
+    await logOperation(env, user.id, 'text2image', 0, opStart, Date.now(),
+                       'failed', { op: 'auto_inpaint', error: e instanceof Error ? e.message : String(e) });
+    return err(502, `auto-inpaint failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Auto-rectify endpoint — re-generate an orthographic FRONT (or 3/4 ISO)
@@ -3316,6 +3445,7 @@ export default {
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
         if (pathname === '/api/modify-image'          && method === 'POST') return await handleModifyImage(req, env);
+        if (pathname === '/api/auto-inpaint'          && method === 'POST') return await handleAutoInpaint(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
