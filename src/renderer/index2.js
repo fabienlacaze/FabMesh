@@ -135,7 +135,6 @@ const ENGINE_LABELS = {
   'local':          'MyFabmesh.AI 3D Native (rerouted)',
   'trellis2_native':'MyFabmesh.AI 3D Native',
   'trellis':        'MyFabmesh.AI 3D Engine',
-  'meshy':          'Cloud provider (Meshy.ai)',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
