@@ -29,8 +29,9 @@ export default function BuyPage() {
         No subscription. Credits never expire.
       </p>
 
+      <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>One-shot top-ups</h3>
       <div className="pricing-grid" style={{ padding: 0 }}>
-        {Object.values(PACKS).map((p) => (
+        {Object.values(PACKS).filter(p => p.mode === 'payment').map((p) => (
           <div key={p.id} className={`price-card ${p.id === 'pro' ? 'featured' : ''}`}>
             <div className="name">
               {p.name}
@@ -38,6 +39,25 @@ export default function BuyPage() {
             </div>
             <div className="amount">{p.euros} €</div>
             <div className="unit">{p.credits} credits</div>
+            <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
+            <BuyButton packId={p.id} loggedIn={!!user} />
+          </div>
+        ))}
+      </div>
+
+      <h3 style={{ marginTop: 36, marginBottom: 4, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>Monthly subscriptions</h3>
+      <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16 }}>
+        Credits drop in automatically every month. Cancel anytime from your Stripe customer portal.
+      </p>
+      <div className="pricing-grid" style={{ padding: 0 }}>
+        {Object.values(PACKS).filter(p => p.mode === 'subscription').map((p) => (
+          <div key={p.id} className={`price-card ${p.id === 'sub_pro' ? 'featured' : ''}`}>
+            <div className="name">
+              {p.name}
+              {p.id === 'sub_pro' && <span className="feat-tag">best value</span>}
+            </div>
+            <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>/ month</span></div>
+            <div className="unit">{p.credits} credits / month</div>
             <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
             <BuyButton packId={p.id} loggedIn={!!user} />
           </div>
