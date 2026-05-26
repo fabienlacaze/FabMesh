@@ -51,31 +51,32 @@ def _boost(obj: str) -> str:
 
 
 def _enrich_prompt(raw: str) -> tuple[str, str]:
-    """Turn a user instruction into a description SDXL Inpaint can
-    actually paint. SDXL Inpaint replaces masked pixels by what the
-    prompt DESCRIBES, not by what the prompt INSTRUCTS — so "add a
-    bazooka" just continues the existing texture, while "M1 bazooka
-    shoulder-fired rocket launcher, large green metal tube, military
-    weapon, photorealistic" actually produces a recognizable bazooka.
+    """Light prompt cleanup — match the desktop's behaviour as closely
+    as possible (it just uses the raw prompt), with three small
+    exceptions where a literal-instruction prompt would actively
+    mislead SDXL Inpaint:
 
-    Strategy:
-      - "add a/an X" / "put a/an X" / "place a/an X" → drop the verb,
-        keep "X" as a noun phrase + concept booster + detail suffix
-      - "remove X" / "delete X" → describe what would naturally be
-        behind it ("continuation of the surrounding area, no X")
-      - Anything else → use as-is + concept booster + detail suffix
+      - "add a/an X" / "put a/an X" → keep just "X" (otherwise the
+        word "add" gets diffused as a concept)
+      - "remove X" / "delete X" → "continuation of the surrounding
+        area, no X" (the empty-mask intent)
+      - concept boosters (_CONCEPT_BOOSTERS) for a handful of nouns
+        SDXL Inpaint v1.0 is known to render as generic tubes
+        (bazooka, rocket launcher, sword, …)
 
-    The concept booster table (_CONCEPT_BOOSTERS) hand-rolls synonyms
-    for popular SDXL-weak nouns (bazooka → "M1 bazooka shoulder-fired
-    rocket launcher, large green metal tube") so the result is
-    visually recognizable.
+    Anything else passes through verbatim. The desktop audit
+    (sdxl_server.py) confirmed that piling on "highly detailed,
+    photorealistic, masterpiece, 8k, …" tokens actively HURTS quality
+    on SDXL Inpaint by saturating the prompt budget — the model
+    splits its attention across keywords instead of focusing on the
+    subject.
 
     Returns (positive_prompt, negative_prompt).
     """
     p = (raw or '').strip()
     if not p:
         return ('continuation of the surrounding area, seamless',
-                'object, item, weapon, blurry, distorted')
+                'object, item, blurry, distorted')
 
     low = p.lower()
     add_m = re.match(r'^(?:add|put|place|insert|paint|draw)\s+(?:a|an|the|some)?\s*(.+)$',
@@ -85,30 +86,19 @@ def _enrich_prompt(raw: str) -> tuple[str, str]:
 
     if rem_m:
         target = rem_m.group(1).strip()
-        positive = (
+        return (
             f'continuation of the surrounding area, same background, '
-            f'no {target}, seamless, natural extension of the scene'
+            f'no {target}, seamless',
+            f'{target}, any object, duplicate, artifact, blurry, distorted'
         )
-        negative = f'{target}, any object, duplicate, artifact, blurry, distorted'
-        return (positive, negative)
 
-    if add_m:
-        obj = add_m.group(1).strip()
-    else:
-        obj = p
-
+    obj = add_m.group(1).strip() if add_m else p
     boosted = _boost(obj)
-    positive = (
-        f'{boosted}, highly detailed, photorealistic, intricate details, '
-        f'sharp focus, professional photography, masterpiece, 8k, '
-        f'centered subject, clearly recognizable, '
-        f'naturally integrated into the scene'
-    )
-    negative = (
-        'blurry, distorted, low quality, ugly, deformed, '
-        'extra limbs, duplicate, artifact, watermark, signature, text, '
-        'tube, pipe, cylinder, generic object, abstract'
-    )
+    # Minimal positive prompt — closer to the desktop's "use the raw
+    # prompt" approach. We only add the booster for known-weak nouns
+    # and a tiny detail nudge.
+    positive = f'{boosted}, detailed, photorealistic'
+    negative = 'blurry, distorted, low quality, deformed, watermark, text'
     return (positive, negative)
 
 
@@ -208,8 +198,8 @@ def generate(
             negative_prompt=neg_prompt,
             image=crop_img_w,
             mask_image=crop_msk_w,
-            num_inference_steps=50,
-            guidance_scale=12.0,
+            num_inference_steps=40,
+            guidance_scale=8.5,
             strength=0.99,
             height=work, width=work,
         ).images[0]
@@ -254,7 +244,7 @@ def generate(
         image=img_work,
         mask_image=msk_work_soft,
         num_inference_steps=40,
-        guidance_scale=11.0,
+        guidance_scale=8.5,
         strength=0.99,
         height=work_h, width=work_w,
     ).images[0]
