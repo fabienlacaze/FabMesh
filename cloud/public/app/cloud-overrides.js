@@ -573,7 +573,7 @@
         if (!keep) opt.remove();
       });
       if (engImg.options.length >= 1) {
-        engImg.options[0].textContent = 'MyFabmesh.AI Image Engine (cloud GPU · RealVisXL V4 · 1 credit/image)';
+        engImg.options[0].textContent = 'MyFabmesh.AI Image Engine (cloud GPU · 1 credit/image)';
       }
     }
   }
