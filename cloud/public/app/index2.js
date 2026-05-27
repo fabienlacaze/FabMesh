@@ -6764,30 +6764,49 @@ function _mtLoadMesh(meshPath) {
   }
   mtState.origModel = null;
   mtState.origGeoms = [];
-  const url = 'file:///' + meshPath.replace(/\\/g, '/');
-  fetch(url).then(r => r.arrayBuffer()).then(buffer => {
-    const loader = new GLTFLoader();
-    loader.parse(buffer, '', (gltf) => {
-      mtState.origModel = gltf.scene;
-      mtState.scene.add(mtState.origModel);
-      const box = new THREE.Box3().setFromObject(mtState.origModel);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      mtState.origModel.position.sub(center);
-      mtState.origModel.position.y += size.y / 2;
-      mtState.camera.position.set(0, size.y * 0.5, maxDim * 2);
-      mtState.controls?.target.set(0, size.y * 0.5, 0);
-      mtState.controls?.update();
-      mtState.origModel.traverse(child => {
-        if (child.isMesh && child.geometry) {
-          mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
-        }
+  // meshPath comes in two flavours:
+  //  - desktop: Windows filesystem path (backslashes) → needs file:///
+  //  - cloud:   already a full https://pub-*.r2.dev/... URL → leave alone
+  // The legacy code unconditionally prefixed file:/// which produced
+  // file:///https:/pub-... on cloud and 404'd silently — the modal
+  // viewport stayed empty (just the grid).
+  const url = /^(?:https?|blob|data|file):/i.test(meshPath)
+    ? meshPath
+    : 'file:///' + meshPath.replace(/\\/g, '/');
+  fetch(url, { credentials: 'omit' })
+    .then((r) => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.arrayBuffer();
+    })
+    .then((buffer) => {
+      const loader = new GLTFLoader();
+      loader.parse(buffer, '', (gltf) => {
+        mtState.origModel = gltf.scene;
+        mtState.scene.add(mtState.origModel);
+        const box = new THREE.Box3().setFromObject(mtState.origModel);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        mtState.origModel.position.sub(center);
+        mtState.origModel.position.y += size.y / 2;
+        mtState.camera.position.set(0, size.y * 0.5, maxDim * 2);
+        mtState.controls?.target.set(0, size.y * 0.5, 0);
+        mtState.controls?.update();
+        mtState.origModel.traverse((child) => {
+          if (child.isMesh && child.geometry) {
+            mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
+          }
+        });
+        // Now that geoms are cached, run the initial preview.
+        _mtRunPreview();
       });
-      // Now that geoms are cached, run the initial preview.
-      _mtRunPreview();
+    })
+    .catch((e) => {
+      console.error('[mesh-tool] load failed:', e);
+      if (typeof showToast === 'function') {
+        showToast('Mesh load failed: ' + (e?.message || e), 'error', 5000);
+      }
     });
-  });
 }
 
 function openMeshToolModal(toolName) {
