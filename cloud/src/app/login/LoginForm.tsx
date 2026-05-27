@@ -34,20 +34,29 @@ export function LoginForm() {
     );
   }
 
-  /** Write the session cookie in the exact shape the Worker expects. */
-  function persistSession(session: { access_token: string; refresh_token?: string; expires_in?: number; expires_at?: number; token_type?: string; user?: unknown }) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const ref = url.replace(/^https?:\/\//, '').split('.')[0];
-    const payload = btoa(JSON.stringify({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      expires_in: session.expires_in,
-      expires_at: session.expires_at,
-      token_type: session.token_type,
-      user: session.user,
-    }));
-    const value = encodeURIComponent(`base64-${payload}`);
-    document.cookie = `sb-${ref}-auth-token=${value}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax; Secure`;
+  /** Hand the Supabase session off to the Worker so it can mint an
+   *  HttpOnly cookie. The Worker validates the access_token against
+   *  Supabase /auth/v1/user before setting the cookie, then mirrors
+   *  the access_token in mfm-session (HttpOnly+Secure+SameSite=Strict)
+   *  and the refresh_token in mfm-refresh.
+   *
+   *  This replaces the previous client-side document.cookie write —
+   *  the JWT is now unreachable from any JS context (XSS-safe). */
+  async function persistSession(session: { access_token: string; refresh_token?: string; expires_in?: number; expires_at?: number; token_type?: string; user?: unknown }) {
+    const r = await fetch('/api/auth/install-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        expires_in: session.expires_in,
+      }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error('cookie install failed: ' + ((j as { error?: string }).error || r.status));
+    }
   }
 
   function navigateAfterAuth() {
@@ -71,7 +80,7 @@ export function LoginForm() {
       const { data, error } = await client().auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data.session) throw new Error('Sign-in succeeded but no session was returned.');
-      persistSession(data.session);
+      await persistSession(data.session);
       navigateAfterAuth();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -95,7 +104,7 @@ export function LoginForm() {
       // If email confirmation is required (default in Supabase), we don't
       // get a session — we get a "check your inbox" state instead.
       if (data.session) {
-        persistSession(data.session);
+        await persistSession(data.session);
         navigateAfterAuth();
         return;
       }
@@ -119,7 +128,7 @@ export function LoginForm() {
       }
       if (res.error) throw res.error;
       if (!res.data.session) throw new Error('Verification succeeded but no session was returned.');
-      persistSession(res.data.session);
+      await persistSession(res.data.session);
       navigateAfterAuth();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));

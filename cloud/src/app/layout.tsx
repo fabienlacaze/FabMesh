@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Nav } from '@/components/Nav';
+import { CookieBanner } from '@/components/CookieBanner';
 
 export const metadata: Metadata = {
   title: 'MyFabmesh.AI Cloud — Image to 3D',
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Nav />
         <main>{children}</main>
+        <CookieBanner />
         <footer className="site-footer">
           <div>
             © 2026 Ayros Studio · MyFabmesh.AI <span className="pill" style={{ marginLeft: 6 }}>BETA</span>

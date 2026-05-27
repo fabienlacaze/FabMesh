@@ -91,8 +91,24 @@ export default function ResetPasswordPage() {
     setBusy(true); setError(null); setInfo(null);
     try {
       if (password.length < 6) throw new Error('Password must be at least 6 characters.');
-      const { error } = await client().auth.updateUser({ password });
+      const sb = client();
+      const { error } = await sb.auth.updateUser({ password });
       if (error) throw error;
+      // Pipe the new session through our HttpOnly cookie endpoint so
+      // the JWT stops being readable from JS (matches the login flow).
+      const { data: sessData } = await sb.auth.getSession();
+      if (sessData.session) {
+        await fetch('/api/auth/install-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            access_token: sessData.session.access_token,
+            refresh_token: sessData.session.refresh_token,
+            expires_in: sessData.session.expires_in,
+          }),
+        }).catch(() => {});
+      }
       setInfo('Password updated — redirecting…');
       setTimeout(() => { window.location.replace('/account'); }, 700);
     } catch (e: unknown) {
