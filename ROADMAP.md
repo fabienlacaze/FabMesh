@@ -489,6 +489,47 @@ Plan détaillé :
 R2 keying recommandé : `<userId>/desktop/<safeProjectName>/<file>` —
 cohabite avec le keying existant (`<userId>/<id>.glb`, etc.).
 
+### 🔒 Fixes sécurité restants AVANT launch commercial (audit 2026-05-27)
+
+5 batches de fixes appliqués (commits ed5a816 → 6fd0c81). Reste à
+faire avant d'ouvrir au grand public — ces 4 chantiers ne sont **pas**
+faisables en mode purement code :
+
+**A1 — Cookies Supabase HttpOnly (~2 jours)**
+- Le cookie `sb-<projectRef>-auth-token` est posé via `document.cookie`
+  dans `LoginForm.tsx`, donc accessible en JS = toute XSS future =
+  vol de session.
+- Migration : créer `POST /api/auth/signin` qui appelle Supabase
+  server-side et `Set-Cookie: …; HttpOnly; Secure; SameSite=Strict`.
+- Côté client : retirer le `document.cookie =` ; lire l'état auth
+  uniquement via `/api/me`.
+- Refactor coordonné qui peut casser le login si raté → à faire en
+  feature branch + test complet avant merge.
+
+**Stripe LIVE (5 min)**
+- `wrangler.toml` contient `pk_test_…`. Au launch, créer les Stripe
+  Prices LIVE (`STRIPE_PRICE_SUB_STARTER` / `_SUB_PRO` / `_SUB_STUDIO`),
+  rotater `STRIPE_SECRET_KEY` → `sk_live_…`, mettre à jour
+  `STRIPE_WEBHOOK_SECRET` avec la signature LIVE.
+
+**MFA Supabase obligatoire sur le compte admin (15 min)**
+- Dans le Supabase Dashboard → Authentication → MFA → activer TOTP.
+- Enroller l'admin dans Authy / 1Password / Microsoft Authenticator.
+- Sans ça, si l'email Hotmail tombe, le compte admin tombe (le TOTP
+  du panel /admin n'est qu'un second facteur AU-DESSUS de la session
+  Supabase — il ne protège pas le sign-in lui-même).
+
+**Privacy Policy + Terms + Cookie banner (~4h)**
+- RGPD endpoints `/api/me/export` + `/api/me/delete` déjà livrés
+  (batch 3). Reste à publier Privacy Policy + ToS sur le site.
+- Cookie consent banner pour les utilisateurs UE (utiliser CookieBot
+  ou un component léger maison).
+
+**ADMIN_PASSWORD ≥ 20 chars (1 min)**
+- Le Worker refuse maintenant tout login si `ADMIN_PASSWORD < 20`.
+  Avant le launch : `wrangler secret put ADMIN_PASSWORD` avec une
+  passphrase de 20+ caractères aléatoires.
+
 ### Plan d'attaque par défaut suggéré (~8h cumulé)
 
 1. GIF animé Twitter (1h) — sans ça les tweets sont moins viraux
