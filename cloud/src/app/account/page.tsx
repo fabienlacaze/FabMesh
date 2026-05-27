@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { LogoutButton } from './LogoutButton';
+import { MfaEnrollButton } from './MfaEnrollButton';
 
 interface User { id: string; email: string | null; credits: number; }
 interface Project {
@@ -123,6 +124,10 @@ export default function AccountPage() {
           </table>
         )}
       </div>
+
+      {/* MFA TOTP enrolment — protects the Supabase login itself
+          (separate layer from the /admin TOTP for the admin panel). */}
+      <MfaEnrollButton />
 
       {/* GDPR — Art. 15 (export) + Art. 17 (right to be forgotten).
           Required by EU law if you sell to EU users. */}
