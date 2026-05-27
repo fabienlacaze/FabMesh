@@ -23,8 +23,9 @@ export default function PrivacyPage() {
 
       <h2>1. Data controller</h2>
       <p>
-        MyFabmesh.AI — operated by Fabien Lacaze, France. Contact for any
-        privacy request: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
+        MyFabmesh.AI is operated by <strong>Ayros Studio</strong> (France).
+        Contact for any privacy request:{' '}
+        <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
       </p>
 
       <h2>2. What we collect</h2>

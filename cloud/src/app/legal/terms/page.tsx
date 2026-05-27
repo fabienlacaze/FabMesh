@@ -13,8 +13,10 @@ export default function TermsPage() {
       <p style={{ color: 'var(--text-2)' }}>Last updated: 2026-05-27</p>
 
       <p>
-        By creating an account on MyFabmesh.AI, you accept these terms.
+        By creating an account on MyFabmesh.AI (operated by{' '}
+        <strong>Ayros Studio</strong>, France), you accept these terms.
         If you don&apos;t accept them, don&apos;t create an account.
+        Contact: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
       </p>
 
       <h2>1. The service</h2>
