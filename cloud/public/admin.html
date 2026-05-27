@@ -1067,6 +1067,11 @@
       // Build the new HTML, compare with the current one — skip the
       // DOM swap if nothing changed so we don't lose the user's
       // scroll position or any hover state mid-poll.
+      // SECURITY: NO `onclick="…(${escaped value})"` — escapeHtml turns
+      // ' into &#39; which the HTML parser decodes back to ' BEFORE the
+      // JS engine sees it, so a crafted email like
+      // `foo'+alert(1)+'bar@x.com` would execute. Buttons get a data-
+      // attribute the listener reads via dataset (safe DOM string).
       const newHtml = jobs.length
         ? jobs.map((j) => `
           <tr>
@@ -1077,12 +1082,17 @@
             <td>${escapeHtml(j.mode)}</td>
             <td class="num">${j.credit_cost}</td>
             <td><span style="color:var(--warn)">${escapeHtml(j.status)}</span></td>
-            <td><button class="btn" style="background:var(--err); border-color:var(--err);"
-                       onclick="stopJob('${escapeHtml(j.id)}', '${escapeHtml(j.email || j.user_id)}')">🛑 Stop</button></td>
+            <td><button class="btn btn-stop-job"
+                       data-job-id="${escapeHtml(j.id)}"
+                       data-job-who="${escapeHtml(j.email || j.user_id)}"
+                       style="background:var(--err); border-color:var(--err);">🛑 Stop</button></td>
           </tr>
         `).join('')
         : '<tr><td colspan="8" class="muted">No active jobs.</td></tr>';
       if (tbody.innerHTML !== newHtml) tbody.innerHTML = newHtml;
+      tbody.querySelectorAll('.btn-stop-job').forEach((b) => {
+        b.addEventListener('click', () => stopJob(b.dataset.jobId, b.dataset.jobWho));
+      });
     }
 
     function stopAllJobs() {
@@ -1165,6 +1175,10 @@
         tbody.innerHTML = '<tr><td colspan="6" class="muted">No users.</td></tr>';
         return;
       }
+      // SECURITY: do not inline `onclick="fn('${escapeHtml(email)}')"`
+      // — apostrophes-as-entities get decoded by the HTML parser
+      // BEFORE JS evaluation, allowing email-borne XSS. Use data-*
+      // attributes and a delegated listener instead.
       tbody.innerHTML = list.map((u) => `
         <tr>
           <td>${escapeHtml(u.email || '—')}</td>
@@ -1173,16 +1187,39 @@
           <td>${escapeHtml(fmtDate(u.created_at))}</td>
           <td>${u.banned ? '<span style="color:var(--err); font-weight:700;">BANNED</span>' : '<span style="color:var(--ok)">active</span>'}</td>
           <td style="white-space:nowrap;">
-            <button class="btn" onclick="viewUserProjects('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}')">📁 Projects (${u.projects_count ?? 0})</button>
-            <button class="btn" onclick="viewUserImages('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}')">🖼 Images (${u.images_count ?? 0})</button>
-            <button class="btn" onclick="viewUserMeshes('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}')">🧊 Meshes (${u.meshes_count ?? 0})</button>
-            <button class="btn" style="background:${u.banned ? 'var(--ok)' : 'var(--err)'}; border-color:${u.banned ? 'var(--ok)' : 'var(--err)'};"
-                    onclick="toggleBan('${escapeHtml(u.id)}', '${escapeHtml(u.email || u.id.slice(0,8))}', ${!u.banned})">
+            <button class="btn btn-user-projects"
+                    data-uid="${escapeHtml(u.id)}"
+                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">📁 Projects (${u.projects_count ?? 0})</button>
+            <button class="btn btn-user-images"
+                    data-uid="${escapeHtml(u.id)}"
+                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🖼 Images (${u.images_count ?? 0})</button>
+            <button class="btn btn-user-meshes"
+                    data-uid="${escapeHtml(u.id)}"
+                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🧊 Meshes (${u.meshes_count ?? 0})</button>
+            <button class="btn btn-user-ban"
+                    data-uid="${escapeHtml(u.id)}"
+                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}"
+                    data-uban="${!u.banned}"
+                    style="background:${u.banned ? 'var(--ok)' : 'var(--err)'}; border-color:${u.banned ? 'var(--ok)' : 'var(--err)'};">
               ${u.banned ? '✓ Unban' : '🚫 Ban'}
             </button>
           </td>
         </tr>
       `).join('');
+      // Bind per-row action listeners using dataset values (safe DOM
+      // strings, not interpolated into HTML attributes).
+      tbody.querySelectorAll('.btn-user-projects').forEach((b) => {
+        b.addEventListener('click', () => viewUserProjects(b.dataset.uid, b.dataset.uwho));
+      });
+      tbody.querySelectorAll('.btn-user-images').forEach((b) => {
+        b.addEventListener('click', () => viewUserImages(b.dataset.uid, b.dataset.uwho));
+      });
+      tbody.querySelectorAll('.btn-user-meshes').forEach((b) => {
+        b.addEventListener('click', () => viewUserMeshes(b.dataset.uid, b.dataset.uwho));
+      });
+      tbody.querySelectorAll('.btn-user-ban').forEach((b) => {
+        b.addEventListener('click', () => toggleBan(b.dataset.uid, b.dataset.uwho, b.dataset.uban === 'true'));
+      });
     }
     document.getElementById('user-search')?.addEventListener('input', renderUsers);
 
