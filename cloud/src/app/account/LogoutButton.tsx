@@ -12,7 +12,11 @@ export function LogoutButton() {
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       );
-      await sb.auth.signOut();
+      // Supabase SDK clears its own sb-*-auth-token cookies + revokes
+      // the JWT server-side. Then we ask our Worker to wipe the
+      // HttpOnly mfm-session / mfm-refresh cookies it minted on signin.
+      await sb.auth.signOut().catch(() => {});
+      await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' }).catch(() => {});
     }
     window.location.href = '/';
   }

@@ -52,6 +52,22 @@ export default function AuthCallbackPage() {
           if (!data.session) throw new Error('No session in URL');
         }
 
+        // Pipe the freshly-minted session through our HttpOnly cookie
+        // endpoint so the JWT stops being readable from JS.
+        const { data: sessData } = await sb.auth.getSession();
+        if (sessData.session) {
+          await fetch('/api/auth/install-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              access_token: sessData.session.access_token,
+              refresh_token: sessData.session.refresh_token,
+              expires_in: sessData.session.expires_in,
+            }),
+          }).catch(() => {});
+        }
+
         setStatus('ok');
         setMessage('Signed in — redirecting…');
         // Strip query/hash before navigating so a reload doesn't loop.

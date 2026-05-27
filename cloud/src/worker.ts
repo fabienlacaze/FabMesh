@@ -260,15 +260,27 @@ interface SessionUser {
  *
  * Multi-chunk cookies (`*.0`, `*.1`, …) are concatenated in order.
  */
+// New HttpOnly session cookie. Set by /api/auth/install-session after
+// a successful Supabase signin and read by getSessionUser. Never
+// accessible to JS, so XSS can't exfil the token. Carries just the
+// access_token; refresh_token stays in a separate sibling cookie
+// (mfm-refresh, also HttpOnly) used on token-expired re-issue.
+const MFM_SESSION_COOKIE = 'mfm-session';
+const MFM_REFRESH_COOKIE = 'mfm-refresh';
+
 function readSupabaseAccessToken(req: Request): string | null {
   const cookies = parseCookies(req);
+  // 1. Prefer the new HttpOnly cookie — XSS-safe.
+  if (cookies[MFM_SESSION_COOKIE]) return cookies[MFM_SESSION_COOKIE];
+  // 2. Fallback: the legacy supabase-js cookies (`sb-<ref>-auth-token`)
+  //    set client-side. Kept for backward compat during the rollout;
+  //    can be removed after every active session has migrated.
   const keys = Object.keys(cookies).filter(k => /^sb-[^-]+-auth-token(?:\.\d+)?$/.test(k));
   if (!keys.length) return null;
   keys.sort();
   let raw = keys.map(k => cookies[k]).join('');
   if (raw.startsWith('base64-')) raw = raw.slice(7);
   try {
-    // Some chunks may already be JSON; try direct parse first.
     const direct = (() => { try { return JSON.parse(raw); } catch { return null; } })();
     const obj = direct ?? JSON.parse(atob(raw));
     return obj?.access_token ?? null;
@@ -1054,6 +1066,58 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
     r2_objects_deleted: r2Deleted,
     auth_user_deleted: authDeleted,
   });
+}
+
+/** POST /api/auth/install-session — body { access_token, refresh_token, expires_in? }
+ *  Client just did supabase.auth.signInWithPassword(); this endpoint
+ *  copies the resulting access_token into a HttpOnly cookie so future
+ *  requests can authenticate WITHOUT exposing the JWT to JS.
+ *
+ *  Validates the access_token by calling Supabase /auth/v1/user before
+ *  setting the cookie — a forged token gets a clean 401. */
+async function handleAuthInstallSession(req: Request, env: Env): Promise<Response> {
+  let body: { access_token?: string; refresh_token?: string; expires_in?: number };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const at = String(body.access_token ?? '');
+  const rt = String(body.refresh_token ?? '');
+  if (!at) return err(400, 'access_token required');
+
+  // Verify the access_token is real before we set a cookie with it.
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  if (!supabaseUrl || !anon) return err(500, 'supabase not configured');
+  const probe = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { 'authorization': `Bearer ${at}`, 'apikey': anon },
+  });
+  if (!probe.ok) return err(401, 'invalid access_token');
+
+  // Default Supabase access_token lifetime is 1h. We mirror it on the
+  // cookie so a stolen cookie ages out with the token it carries.
+  const maxAge = typeof body.expires_in === 'number' && body.expires_in > 0
+    ? Math.min(body.expires_in, 60 * 60 * 24)  // cap at 24h
+    : 60 * 60;
+  const sessionCookie = `${MFM_SESSION_COOKIE}=${at}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+  // Refresh cookie has a much longer life (30 days) and is only
+  // ever read server-side to mint a new access_token.
+  const headers = new Headers({
+    'content-type': 'application/json',
+  });
+  headers.append('set-cookie', sessionCookie);
+  if (rt) {
+    headers.append('set-cookie',
+      `${MFM_REFRESH_COOKIE}=${rt}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 60 * 60}`);
+  }
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+}
+
+/** POST /api/auth/signout — clear both HttpOnly cookies. Idempotent. */
+async function handleAuthSignout(_req: Request, _env: Env): Promise<Response> {
+  const headers = new Headers({ 'content-type': 'application/json' });
+  headers.append('set-cookie',
+    `${MFM_SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`);
+  headers.append('set-cookie',
+    `${MFM_REFRESH_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`);
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }
 
 async function handleMe(req: Request, env: Env): Promise<Response> {
@@ -5325,6 +5389,8 @@ export default {
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
         if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
+        if (pathname === '/api/auth/install-session'  && method === 'POST') return await handleAuthInstallSession(req, env);
+        if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
