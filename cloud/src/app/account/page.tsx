@@ -123,6 +123,48 @@ export default function AccountPage() {
           </table>
         )}
       </div>
+
+      {/* GDPR — Art. 15 (export) + Art. 17 (right to be forgotten).
+          Required by EU law if you sell to EU users. */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h3 style={{ marginTop: 0, marginBottom: 12 }}>Privacy &amp; data</h3>
+        <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+          You can download every piece of data we hold about you, or
+          permanently delete your account and all of its data.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <a href="/api/me/export" download className="ghost-btn">⬇ Download my data (JSON)</a>
+          <button
+            type="button"
+            className="ghost-btn"
+            style={{ color: 'var(--err)', borderColor: 'var(--err)' }}
+            onClick={async () => {
+              const ok = window.prompt(
+                'Type DELETE (uppercase) to permanently erase your account, ALL projects, meshes, images and payments history. This cannot be undone.',
+              );
+              if (ok !== 'DELETE') return;
+              try {
+                const r = await fetch('/api/me/delete', {
+                  method: 'POST', credentials: 'include',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ confirm: 'DELETE' }),
+                });
+                if (!r.ok) {
+                  const j = await r.json().catch(() => ({}));
+                  alert('Delete failed: ' + (j.error || r.status));
+                  return;
+                }
+                alert('Account deleted. You will now be logged out.');
+                window.location.href = '/login';
+              } catch (e) {
+                alert('Delete failed: ' + (e instanceof Error ? e.message : String(e)));
+              }
+            }}
+          >
+            🗑 Delete my account
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
