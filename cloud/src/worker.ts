@@ -1104,6 +1104,18 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     return { ok: true };
   }
 
+  // Resolve credits from server-side PACKS rather than trusting the
+  // value Stripe carries in metadata — if our metadata was ever tampered
+  // with (key leak, Stripe Dashboard misuse), a forged "credits":"99999"
+  // would otherwise grant unlimited credits.
+  const _packCredits = (packId: string | undefined, fallback: number): number => {
+    if (packId && (PACKS as Record<string, { credits: number } | undefined>)[packId]) {
+      return (PACKS as Record<string, { credits: number }>)[packId].credits;
+    }
+    // Last-ditch safety: cap raw metadata to a sane upper bound.
+    return Math.min(Math.max(0, fallback), 10_000);
+  };
+
   // One-shot top-up — credits added once on checkout.session.completed.
   if (event.type === 'checkout.session.completed') {
     const sess = event.data.object;
@@ -1111,16 +1123,14 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     // first cycle and every renewal). Skip here to avoid double-credit.
     if (sess.metadata?.is_subscription === 'true') return json({ received: true });
     const userId = sess.metadata?.user_id;
-    const credits = parseInt(sess.metadata?.credits ?? '0', 10);
     const packId = sess.metadata?.pack_id ?? 'unknown';
+    const rawCredits = parseInt(sess.metadata?.credits ?? '0', 10);
+    const credits = _packCredits(packId, rawCredits);
     if (userId && credits > 0) {
       const res = await _processPayment({
         sessionOrInvoiceId: sess.id, userId, credits, packId,
         amountEur: (sess.amount_total ?? 0) / 100,
       });
-      // Tell Stripe to retry if the credit add failed — the placeholder
-      // row stays in payments, so the retry resumes from state-2 and
-      // re-attempts addCredits without double-crediting.
       if (!res.ok && res.retry) return err(500, 'transient credit failure');
     }
   }
@@ -1132,8 +1142,9 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
     const inv = event.data.object;
     const meta = inv.lines?.data?.[0]?.metadata ?? {};
     const userId = meta.user_id;
-    const credits = parseInt(meta.credits ?? '0', 10);
     const packId = meta.pack_id ?? 'subscription';
+    const rawCredits = parseInt(meta.credits ?? '0', 10);
+    const credits = _packCredits(packId, rawCredits);
     if (userId && credits > 0) {
       const res = await _processPayment({
         sessionOrInvoiceId: inv.id, userId, credits, packId,
@@ -1156,29 +1167,67 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   // Modal mesh path can re-use it directly without round-tripping
   // through a File upload (Modal's container fetches the URL on its
   // own; we don't need to re-host the bytes).
+  // SSRF guard: only accept URLs from our known upstreams. Without this
+  // an authenticated user could make the Worker fetch arbitrary internal
+  // / external hosts (large download = DoS, leak internal infra responses
+  // mirrored to R2 public, etc.).
+  const _isTrustedImageHost = (u: string): boolean => {
+    try {
+      const parsed = new URL(u);
+      if (parsed.protocol !== 'https:') return false;
+      const host = parsed.hostname.toLowerCase();
+      if (host.endsWith('.r2.dev')) return true;
+      if (host.endsWith('.r2.cloudflarestorage.com')) return true;
+      if (host === 'replicate.delivery') return true;
+      if (host.endsWith('.replicate.delivery')) return true;
+      if (host === 'image.pollinations.ai') return true;
+      // R2_PUBLIC_URL is set in wrangler.toml; check it explicitly too.
+      if (env.R2_PUBLIC_URL) {
+        try {
+          const pub = new URL(env.R2_PUBLIC_URL).hostname.toLowerCase();
+          if (host === pub) return true;
+        } catch {}
+      }
+      return false;
+    } catch { return false; }
+  };
   let imageHttpsUrl: string | null = null;
   const urlField = form.get('imagePath') || form.get('image_url');
   if (typeof urlField === 'string' && /^https?:\/\//i.test(urlField)) {
+    if (!_isTrustedImageHost(urlField)) {
+      return err(400, 'imagePath host not allowed');
+    }
     imageHttpsUrl = urlField;
   }
-  // Optional back-view URL — when the user enables `multiref` the
-  // renderer sends `imagePathBack`. We forward it to the Modal mesh
-  // endpoint which passes both URLs to TRELLIS-2's get_cond([f, b])
-  // for multi-view conditioning (better back-texture coherence).
   let backImageHttpsUrl: string | null = null;
   const backField = form.get('imagePathBack') || form.get('image_back_url');
   if (typeof backField === 'string' && /^https?:\/\//i.test(backField)) {
+    if (!_isTrustedImageHost(backField)) {
+      return err(400, 'imagePathBack host not allowed');
+    }
     backImageHttpsUrl = backField;
   }
-  // Cloud convenience: accept `imagePath` (a R2/blob URL) and fetch it
-  // server-side. Saves the client from a CORS round-trip through R2.
-  // Still needed for the Replicate Cog path which takes a File input.
+  // Cloud convenience: fetch the URL server-side. Bounded by 20 MB +
+  // Content-Type must start with image/ — Worker has 128 MB RAM and
+  // we don't want an attacker passing a 1 GB url to OOM us.
+  const MAX_FETCH_BYTES = 20 * 1024 * 1024;
   if (!(image instanceof File) && imageHttpsUrl) {
     try {
       const r = await fetch(imageHttpsUrl);
       if (!r.ok) return err(400, `cannot fetch imagePath (HTTP ${r.status})`);
+      const ct = r.headers.get('content-type') ?? '';
+      if (!/^image\//i.test(ct)) {
+        return err(400, `imagePath is not an image (content-type: ${ct})`);
+      }
+      const cl = parseInt(r.headers.get('content-length') ?? '0', 10);
+      if (cl > MAX_FETCH_BYTES) {
+        return err(413, `imagePath too large (${cl} bytes, max ${MAX_FETCH_BYTES})`);
+      }
       const buf = await r.arrayBuffer();
-      image = new File([buf], 'source.png', { type: r.headers.get('content-type') ?? 'image/png' });
+      if (buf.byteLength > MAX_FETCH_BYTES) {
+        return err(413, 'imagePath too large after read');
+      }
+      image = new File([buf], 'source.png', { type: ct || 'image/png' });
     } catch (e) {
       return err(400, `cannot fetch imagePath: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -3282,9 +3331,12 @@ async function handleUploadImage(req: Request, env: Env): Promise<Response> {
   const { dataUrl, suffix } = await req.json() as { dataUrl?: string; suffix?: string };
   if (!dataUrl) return err(400, 'dataUrl required');
 
-  const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
-  if (!m) return err(400, 'invalid dataUrl (expected data:image/...;base64,...)');
-  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  // Strict extension whitelist — SVG is forbidden (active content via
+  // <script>), and the regex ensures the suffix can't be a path traversal.
+  // jpeg is the only valid alias, normalised to jpg below.
+  const m = /^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i.exec(dataUrl);
+  if (!m) return err(400, 'invalid dataUrl (allowed: png/jpeg/webp)');
+  const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
   let bytes: Uint8Array;
   try {
     const bin = atob(m[2]);
@@ -3293,14 +3345,44 @@ async function handleUploadImage(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     return err(400, `base64 decode failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  // Cheap size guard — canvas saves should be <10 MB at 4K.
-  if (bytes.byteLength > 20 * 1024 * 1024) return err(413, 'image too large (20 MB max)');
+  // 5 MB cap — canvas snapshots top out at ~3 MB even at 4K. Anything
+  // larger is suspect (attacker filling our R2 bucket on the free tier).
+  const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) return err(413, 'image too large (5 MB max)');
+
+  // Magic-byte check — confirm the bytes actually match the claimed
+  // format. Prevents an attacker labelling an HTML/SVG payload as
+  // image/png to slip through the extension whitelist.
+  const magicOk =
+    (ext === 'png'  && bytes.byteLength >= 8 &&
+      bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) ||
+    (ext === 'jpg'  && bytes.byteLength >= 3 &&
+      bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) ||
+    (ext === 'webp' && bytes.byteLength >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50);
+  if (!magicOk) return err(400, 'image bytes do not match the claimed format');
+
+  // Per-user daily upload cap — same pattern as the existing budget
+  // counters. Without this an authenticated user can burn our R2
+  // storage allowance in minutes.
+  const MAX_UPLOADS_PER_DAY = 200;
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const cntKey = `_meta/uploads_count/${user.id}/${day}.txt`;
+    const obj = await env.MESHES.get(cntKey);
+    const cur = obj ? parseInt(await obj.text(), 10) || 0 : 0;
+    if (cur >= MAX_UPLOADS_PER_DAY) {
+      return err(429, 'daily upload quota reached');
+    }
+    await env.MESHES.put(cntKey, String(cur + 1));
+  } catch {}
 
   const safeSuf = (suffix ?? 'edit').toString().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 16);
   const key = `${user.id}/canvas/${Date.now()}_${safeSuf}.${ext}`;
   try {
     await env.MESHES.put(key, bytes, {
-      httpMetadata: { contentType: `image/${m[1]}` },
+      httpMetadata: { contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}` },
     });
   } catch (e) {
     return err(502, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -3631,15 +3713,57 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
     return err(401, 'unauthorized');
   }
   if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
+  // Reject obviously weak passwords at runtime — a 12-char admin
+  // password is brute-forceable from the open internet given we have
+  // no captcha or aggressive WAF. Require >=20 chars to push brute force
+  // out of reach.
+  if (env.ADMIN_PASSWORD.length < 20) {
+    return err(500, 'ADMIN_PASSWORD too short: rotate to >=20 chars before allowing logins');
+  }
+
+  // Rate-limit / lockout: track failed attempts per source IP. After
+  // 10 fails in the last hour, return 429. Counters live in R2 so a
+  // Worker restart doesn't wipe them. Successful login resets the
+  // counter for that IP. Cheap (one R2 read+put per attempt).
+  const sourceIp = req.headers.get('cf-connecting-ip')
+                ?? req.headers.get('x-forwarded-for')
+                ?? 'unknown';
+  const _ipSafe = sourceIp.replace(/[^A-Fa-f0-9.:]/g, '_').slice(0, 64);
+  const lockoutKey = `_meta/admin_login_fails/${_ipSafe}.json`;
+  let fails: { count: number; first_ts: number } = { count: 0, first_ts: 0 };
+  try {
+    const obj = await env.MESHES?.get(lockoutKey);
+    if (obj) fails = await obj.json() as typeof fails;
+  } catch {}
+  const HOUR = 60 * 60 * 1000;
+  if (fails.count >= 10 && Date.now() - fails.first_ts < HOUR) {
+    return err(429, 'too many failed attempts; try again in an hour');
+  }
+  // Stale window — reset.
+  if (Date.now() - fails.first_ts > HOUR) fails = { count: 0, first_ts: 0 };
 
   let body: { password?: string; totp?: string };
   try { body = await req.json() as { password?: string; totp?: string }; } catch { return err(400, 'bad json'); }
   const provided = String(body.password ?? '');
   if (!provided) return err(400, 'password required');
-  if (provided.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
+  const _recordFail = async () => {
+    fails.count += 1;
+    if (fails.first_ts === 0) fails.first_ts = Date.now();
+    try { await env.MESHES?.put(lockoutKey, JSON.stringify(fails)); } catch {}
+  };
+  if (provided.length !== env.ADMIN_PASSWORD.length) {
+    await _recordFail();
+    return err(401, 'invalid password');
+  }
   let diff = 0;
   for (let i = 0; i < provided.length; i++) diff |= provided.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
-  if (diff !== 0) return err(401, 'invalid password');
+  if (diff !== 0) {
+    await _recordFail();
+    return err(401, 'invalid password');
+  }
+  // Successful password check — wipe the IP's failure counter so the
+  // admin isn't locked out after a typo + correct retry.
+  try { await env.MESHES?.delete(lockoutKey); } catch {}
 
   // TOTP second factor — only enforced after the admin has enrolled.
   // First-ever login uses password only so the admin can reach the

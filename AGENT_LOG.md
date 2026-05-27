@@ -10,6 +10,33 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-27 (Security audit — batch 1 worker hardening)
+
+Suite à l'audit offensif (Cat A). Batch 1 = les 4 fixes les plus
+exposés côté Worker, en ~2h de travail.
+
+- **A3 SSRF /api/generate** : `imagePath` + `imagePathBack` passent
+  désormais par un host whitelist (R2, replicate.delivery,
+  pollinations.ai). Fetch downstream limité à 20 MB + check
+  Content-Type starts with image/.
+- **A4 /api/upload-image** : extension whitelist strict (png/jpg/webp,
+  SVG banni), magic-byte check sur les bytes décodés, taille cap
+  20→5 MB, quota 200 uploads/jour/user dans R2.
+- **A8 /api/admin/login** : rate-limit IP-keyed (10 fails/heure →
+  429), reset au succès, refus de login si ADMIN_PASSWORD < 20 chars.
+- **A7 Stripe credits bounding** : webhook résout credits depuis
+  `PACKS[packId]` server-side au lieu de trust metadata. Fallback
+  unknown pack capé à 10_000.
+
+Backup branch : `backup-before-security-fixes-batch2-20260527-200559`.
+
+Reste à venir : batch 2 (security headers + mesh_url + Modal auth header),
+batch 3 (RGPD delete/export), batch 4 (admin audit log), batch 5
+(admin.html innerHTML scrub). Cookies HttpOnly = chantier séparé
+(refactor signin server-side).
+
+---
+
 ## 2026-05-26 (Security audit fixes — 4 critical + #2 v2 self-healing)
 
 - **Audit** lancé via agent général-purpose : identifié 3 fixes
