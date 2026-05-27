@@ -10,6 +10,24 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-27 (Mesh-tool modal viewer fix + MFA UI + UI scrub)
+
+- **Bug viewer 3D dans modal mesh tools (Decimate/Smooth/etc.)** :
+  `_mtLoadMesh` faisait `'file:///' + meshPath.replace(/\\/g, '/')`
+  même quand `meshPath` était déjà `https://pub-*.r2.dev/...` côté
+  cloud. Résultat : fetch sur `file:///https:/pub-...` → 404 silencieux,
+  viewport vide (grille seule). Fix : detect scheme existant, garde tel
+  quel si http/https/blob/data/file ; sinon préfixe file:///.
+- **MFA UI** : ajout `MfaEnrollButton.tsx` sur `/account` avec QR
+  Supabase + 6-digit input. Permet à l'utilisateur d'enrôler TOTP
+  une fois Supabase project a TOTP enabled (Auth → Multi-Factor).
+- **UI scrub** : supprimé mentions internes user-visibles ("CLIPSeg
+  + SDXL", "RealVisXL V4") dans admin Pricing tab, dropdown engine,
+  Auto Inpaint modal subtitle (cloud + desktop). HTML comments et
+  IDs internes laissés (jamais affichés).
+
+---
+
 ## 2026-05-27 (Security audit — batch 1 worker hardening)
 
 Suite à l'audit offensif (Cat A). Batch 1 = les 4 fixes les plus
