@@ -704,7 +704,17 @@
    * /login. Any in-memory Supabase client session is dropped at that
    * point too.
    * ────────────────────────────────────────────────────────────────── */
-  function performSignOut() {
+  async function performSignOut() {
+    // Step 1: ask the Worker to wipe the HttpOnly cookies (mfm-session,
+    // mfm-refresh). The legacy sweep below only deletes JS-readable
+    // cookies — without this call the user "logs out" from the
+    // renderer but the Worker still authenticates them via the
+    // HttpOnly cookies on the next request. Big leak on shared machines.
+    try {
+      await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' });
+    } catch { /* network blip, fall through to local cleanup */ }
+    // Step 2: nuke the legacy sb-*-auth-token cookies set by the
+    // Supabase JS SDK + the mock-session cookie used in dev mode.
     try {
       document.cookie.split(';').forEach((c) => {
         const name = c.trim().split('=')[0];

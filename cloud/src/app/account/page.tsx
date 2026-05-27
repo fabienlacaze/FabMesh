@@ -149,12 +149,31 @@ export default function AccountPage() {
                   headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({ confirm: 'DELETE' }),
                 });
+                const j = await r.json().catch(() => ({} as Record<string, unknown>));
                 if (!r.ok) {
-                  const j = await r.json().catch(() => ({}));
-                  alert('Delete failed: ' + (j.error || r.status));
+                  alert('Delete failed: ' + ((j as { error?: string }).error || r.status));
                   return;
                 }
-                alert('Account deleted. You will now be logged out.');
+                // R2 + profile + jobs + payments deletion happens before
+                // the Supabase admin API call. If the auth deletion
+                // failed (Supabase down / network blip) the user can
+                // still log back in even though their data is gone —
+                // we tell them so they can retry instead of being
+                // confused later. Best-effort signout of the HttpOnly
+                // cookies regardless of the auth-delete outcome.
+                await fetch('/api/auth/signout', {
+                  method: 'POST', credentials: 'include',
+                }).catch(() => {});
+                if ((j as { auth_user_deleted?: boolean }).auth_user_deleted === false) {
+                  alert(
+                    'Your projects, images, meshes and payment history were deleted, ' +
+                    'but the Supabase login record could not be removed (transient ' +
+                    'error). Please try again in a minute or contact support — ' +
+                    'fabien65400@hotmail.fr.',
+                  );
+                } else {
+                  alert('Account deleted. You will now be logged out.');
+                }
                 window.location.href = '/login';
               } catch (e) {
                 alert('Delete failed: ' + (e instanceof Error ? e.message : String(e)));
