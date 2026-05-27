@@ -195,10 +195,28 @@ async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<num
 
 /* ─────────────────────────── tiny helpers ──────────────────────────── */
 
+// Security headers applied to every response we mint. HSTS pins HTTPS,
+// X-Frame-Options blocks clickjacking, X-Content-Type-Options stops
+// MIME sniffing, Referrer-Policy keeps URLs out of upstream logs.
+// CSP is set per-route on HTML responses (different needs for /admin
+// vs the app shell) — we don't blanket-apply it on JSON because some
+// admin tools pull cross-origin assets that would otherwise be blocked.
+const SECURITY_HEADERS: Record<string, string> = {
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+};
+
 const json = (data: unknown, init: ResponseInit = {}): Response =>
   new Response(JSON.stringify(data), {
     status: init.status ?? 200,
-    headers: { 'content-type': 'application/json; charset=utf-8', ...(init.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      ...SECURITY_HEADERS,
+      ...(init.headers ?? {}),
+    },
   });
 
 const err = (status: number, message: string): Response => json({ error: message }, { status });
@@ -3533,6 +3551,23 @@ async function handleCopyMeshToProject(req: Request, env: Env): Promise<Response
   }
   if (!finalUrl) return err(400, 'meshUrl or meshId required');
 
+  // Reject any meshUrl that isn't on our trusted upstreams. Without
+  // this check a malicious client could insert javascript: or attacker-
+  // controlled https URLs that the admin model-viewer would then
+  // dereference (XSS / data exfil vector).
+  try {
+    const parsed = new URL(finalUrl);
+    if (parsed.protocol !== 'https:') return err(400, 'meshUrl must be https');
+    const host = parsed.hostname.toLowerCase();
+    const r2Pub = env.R2_PUBLIC_URL ? new URL(env.R2_PUBLIC_URL).hostname.toLowerCase() : '';
+    const ok = host === r2Pub
+            || host.endsWith('.r2.dev')
+            || host.endsWith('.r2.cloudflarestorage.com')
+            || host === 'replicate.delivery'
+            || host.endsWith('.replicate.delivery');
+    if (!ok) return err(400, 'meshUrl host not allowed');
+  } catch { return err(400, 'invalid meshUrl'); }
+
   // Insert a new job row with the same mesh_url but the new project_name.
   // credit_cost = 0 (no GPU work — just a project re-grouping).
   const newId = 'copy_' + crypto.randomUUID().replace(/-/g, '');
@@ -5168,7 +5203,47 @@ export default {
       }
 
       // ── static assets (next export output served via env.ASSETS) ──
-      return await env.ASSETS.fetch(req);
+      // Wrap the response so we can layer the same security headers
+      // as our JSON responses, plus a tight CSP on HTML pages.
+      const assetRes = await env.ASSETS.fetch(req);
+      const ct = assetRes.headers.get('content-type') ?? '';
+      const headers = new Headers(assetRes.headers);
+      for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+      if (/text\/html/i.test(ct)) {
+        // Different CSPs per surface — /admin uses unpkg for model-viewer
+        // + qrcode-generator and inline scripts; the app shell allows
+        // unpkg for model-viewer too. 'unsafe-inline' is unfortunately
+        // still required because both pages have inline <script> blocks
+        // (we'll migrate to nonce-based CSP in a follow-up).
+        const isAdmin = pathname.startsWith('/admin');
+        const r2Host = env.R2_PUBLIC_URL
+          ? (() => { try { return new URL(env.R2_PUBLIC_URL).hostname; } catch { return ''; } })()
+          : '';
+        const r2Origin = r2Host ? `https://${r2Host}` : '';
+        const csp = [
+          `default-src 'self'`,
+          `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com`,
+          `style-src 'self' 'unsafe-inline'`,
+          `img-src 'self' data: blob: https:`,
+          `font-src 'self' data:`,
+          `connect-src 'self' https://*.supabase.co https://api.stripe.com https://*.replicate.delivery https://*.r2.dev https://*.r2.cloudflarestorage.com https://image.pollinations.ai https://unpkg.com${r2Origin ? ' ' + r2Origin : ''}`,
+          `frame-src 'self' https://js.stripe.com https://checkout.stripe.com`,
+          `frame-ancestors 'none'`,
+          `base-uri 'self'`,
+          `form-action 'self' https://checkout.stripe.com`,
+        ].join('; ');
+        headers.set('content-security-policy', csp);
+        // admin.html holds the cookie / killswitch UI — no caching so
+        // a stale page doesn't show outdated state.
+        if (isAdmin) {
+          headers.set('cache-control', 'no-store');
+        }
+      }
+      return new Response(assetRes.body, {
+        status: assetRes.status,
+        statusText: assetRes.statusText,
+        headers,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('Worker error:', msg, e);
