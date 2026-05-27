@@ -912,6 +912,111 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 
 /* ───────────────────────────── routes ──────────────────────────────── */
 
+/** GET /api/me/export — RGPD Art. 15 (Right of access).
+ *  Returns every datapoint we hold for the authenticated user:
+ *  profile, jobs, payments, R2 keys (just the names, not the bytes).
+ *  Stream a JSON blob the user can download and feed to another
+ *  provider if they want. */
+async function handleMeExport(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const sb = supabaseAdmin(env);
+  const [profile, jobs, payments] = await Promise.all([
+    sb.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+    sb.from('jobs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5000),
+    sb.from('payments').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5000),
+  ]);
+  const r2Keys: Array<{ key: string; size: number; uploaded: string }> = [];
+  if (env.MESHES) {
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const list = await env.MESHES.list({ prefix: `${user.id}/`, cursor, limit: 1000 });
+      for (const obj of list.objects) {
+        r2Keys.push({ key: obj.key, size: obj.size, uploaded: obj.uploaded.toISOString() });
+      }
+      cursor = list.truncated ? list.cursor : undefined;
+      pages++;
+    } while (cursor && pages < 20);
+  }
+  const body = {
+    exported_at: new Date().toISOString(),
+    user: { id: user.id, email: user.email },
+    profile: profile.data ?? null,
+    jobs: jobs.data ?? [],
+    payments: payments.data ?? [],
+    r2_keys: r2Keys,
+  };
+  return new Response(JSON.stringify(body, null, 2), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="myfabmesh-export-${user.id}.json"`,
+      ...SECURITY_HEADERS,
+    },
+  });
+}
+
+/** POST /api/me/delete — RGPD Art. 17 (Right to be forgotten).
+ *  Cascades: delete every R2 object under <user.id>/*, delete jobs +
+ *  payments rows, delete the auth.users entry (which cascades to
+ *  profiles via the FK ON DELETE CASCADE in schema.sql). Body must
+ *  carry `confirm: "DELETE"` so a CSRF that hits this endpoint
+ *  without UI consent can't nuke an account in one click.
+ *
+ *  Returns 200 with what was deleted. The client should then clear
+ *  its Supabase cookie locally — there's no auth to keep. */
+async function handleMeDelete(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  let body: { confirm?: string } | null = null;
+  try { body = await req.json() as { confirm?: string }; } catch { return err(400, 'body required'); }
+  if (body?.confirm !== 'DELETE') return err(400, 'confirm field must be "DELETE"');
+
+  const sb = supabaseAdmin(env);
+  // R2 first — heaviest. Even if Supabase fails halfway, the user
+  // can re-call and we'll just skip already-deleted keys.
+  let r2Deleted = 0;
+  if (env.MESHES) {
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const list = await env.MESHES.list({ prefix: `${user.id}/`, cursor, limit: 1000 });
+      const keys = list.objects.map((o) => o.key);
+      if (keys.length) {
+        await Promise.all(keys.map((k) => env.MESHES.delete(k).catch(() => {})));
+        r2Deleted += keys.length;
+      }
+      cursor = list.truncated ? list.cursor : undefined;
+      pages++;
+    } while (cursor && pages < 50);
+  }
+  // Drop rows. payments + jobs cascade via FK on auth.users when we
+  // delete the auth.users row, but doing them explicitly here ensures
+  // a partial-failure state still leaves an empty account.
+  await sb.from('payments').delete().eq('user_id', user.id);
+  await sb.from('jobs').delete().eq('user_id', user.id);
+  await sb.from('profiles').delete().eq('id', user.id);
+  // Finally delete the Supabase auth user — admin API endpoint.
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const serviceRole = env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  let authDeleted = false;
+  if (supabaseUrl && serviceRole) {
+    try {
+      const r = await fetch(`${supabaseUrl}/auth/v1/admin/users/${user.id}`, {
+        method: 'DELETE',
+        headers: { 'apikey': serviceRole, 'authorization': `Bearer ${serviceRole}` },
+      });
+      authDeleted = r.ok;
+    } catch {}
+  }
+  return json({
+    ok: true,
+    r2_objects_deleted: r2Deleted,
+    auth_user_deleted: authDeleted,
+  });
+}
+
 async function handleMe(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) {
@@ -5131,6 +5236,8 @@ export default {
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
         if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
+        if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
+        if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
         if (pathname === '/api/stripe-webhook'        && method === 'POST') return await handleStripeWebhook(req, env);
