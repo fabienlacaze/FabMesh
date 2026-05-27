@@ -525,6 +525,45 @@ function _invalidateMinSessionIatCache() {
   _minSessionIatCache = { iat: 0, ts: 0 };
 }
 
+/** Append a JSON Lines record to today's admin audit log in R2.
+ *  Best-effort — failures are logged but don't block the admin action.
+ *  Keys: _meta/admin_audit/YYYY-MM-DD.log. Each line is a JSON object
+ *  with timestamp, actor email, action, target, ip, optional details. */
+async function _auditLog(env: Env, opts: {
+  req: Request;
+  actorEmail: string | null;
+  action: string;
+  target?: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  if (!env.MESHES) return;
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const key = `_meta/admin_audit/${day}.log`;
+  const ip = opts.req.headers.get('cf-connecting-ip')
+          ?? opts.req.headers.get('x-forwarded-for')
+          ?? 'unknown';
+  const ua = opts.req.headers.get('user-agent') ?? '';
+  const line = JSON.stringify({
+    ts: now.toISOString(),
+    actor: opts.actorEmail,
+    ip: ip.split(',')[0].trim(),
+    ua: ua.slice(0, 200),
+    action: opts.action,
+    target: opts.target ?? null,
+    ...(opts.details ?? {}),
+  }) + '\n';
+  try {
+    // R2 doesn't support append, so we read+concat+put. Cheap because
+    // a day-long admin log stays <100 KB even with active moderation.
+    const existing = await env.MESHES.get(key);
+    const prev = existing ? await existing.text() : '';
+    await env.MESHES.put(key, prev + line);
+  } catch (e) {
+    console.warn('[audit] failed to append log line:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** Decode a JWT payload without verifying — we only need the `iat`
  *  claim and Supabase already verified the signature in the call to
  *  /auth/v1/user that returned the user object. */
@@ -4584,6 +4623,11 @@ async function handleAdminCancelJob(req: Request, env: Env): Promise<Response> {
     error: refund ? 'admin canceled' : 'admin canceled (no refund)',
     finished_at: new Date().toISOString(),
   }).eq('id', jobId);
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: 'cancel_job', target: jobId,
+    details: { user_id: j.user_id, refunded: refund ? j.credit_cost : 0, modalCancelled },
+  });
   return json({
     ok: true,
     refunded: refund ? j.credit_cost : 0,
@@ -4616,6 +4660,11 @@ async function handleAdminBanUser(req: Request, env: Env): Promise<Response> {
   if (ban) set.add(userId); else set.delete(userId);
   await env.MESHES.put(BAN_LIST_KEY, JSON.stringify([...set]));
   _invalidateBanCache();
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: ban ? 'ban_user' : 'unban_user', target: userId,
+    details: { total_banned: set.size },
+  });
   return json({ ok: true, banned: ban, total: set.size });
 }
 
@@ -4737,6 +4786,7 @@ async function handleAdminTotpConfirm(req: Request, env: Env): Promise<Response>
     enrolled_email: guard.email,
     enrolled_at: new Date().toISOString(),
   }));
+  await _auditLog(env, { req, actorEmail: guard.email, action: 'totp_enroll' });
   return json({ ok: true });
 }
 
@@ -4760,6 +4810,7 @@ async function handleAdminTotpDisable(req: Request, env: Env): Promise<Response>
     if (!(await _totpVerify(cur, code))) return err(401, 'invalid code');
   }
   await env.MESHES.delete(TOTP_KEY);
+  await _auditLog(env, { req, actorEmail: guard.email, action: 'totp_disable' });
   return json({ ok: true });
 }
 
@@ -4784,6 +4835,10 @@ async function handleAdminForceLogoutAll(req: Request, env: Env): Promise<Respon
     iat, stamped_by: guard.email, stamped_at: new Date().toISOString(),
   }));
   _invalidateMinSessionIatCache();
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: 'force_logout_all', details: { min_session_iat: iat },
+  });
   return json({ ok: true, min_session_iat: iat });
 }
 
@@ -4844,6 +4899,10 @@ async function handleAdminSetPricing(req: Request, env: Env): Promise<Response> 
   }
   await env.MESHES.put(PRICING_KEY, JSON.stringify(sanitized));
   _invalidatePricingCache();
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: 'set_pricing', details: { prices: sanitized },
+  });
   return json({ ok: true, current: sanitized });
 }
 
@@ -4905,7 +4964,37 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
       };
   await env.MESHES.put(SERVICE_FLAGS_KEY, JSON.stringify(next));
   _invalidateServiceFlagsCache();
+  await _auditLog(env, {
+    req, actorEmail: guard.email,
+    action: 'toggle_service', target: service,
+    details: { enabled, new_state: next },
+  });
   return json({ ok: true, ...next });
+}
+
+/** GET /api/admin/audit?day=YYYY-MM-DD — returns the day's JSONL log.
+ *  Defaults to today. Capped at 1 MB body size. */
+async function handleAdminAuditLog(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const u = new URL(req.url);
+  const day = (u.searchParams.get('day') || new Date().toISOString().slice(0, 10))
+    .replace(/[^0-9-]/g, '').slice(0, 10);
+  const key = `_meta/admin_audit/${day}.log`;
+  let entries: unknown[] = [];
+  try {
+    const obj = await env.MESHES.get(key);
+    if (obj) {
+      const text = await obj.text();
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        try { entries.push(JSON.parse(line)); } catch {}
+      }
+    }
+  } catch {}
+  // Most-recent first.
+  entries.reverse();
+  return json({ day, entries });
 }
 
 /** GET /api/admin/users/<userId>/images — ADMIN ONLY. Lists every PNG
@@ -5277,6 +5366,7 @@ export default {
         if (pathname === '/api/admin/users/ban'       && method === 'POST') return await handleAdminBanUser(req, env);
         if (pathname === '/api/admin/services'        && method === 'GET')  return await handleAdminServices(req, env);
         if (pathname === '/api/admin/services'        && method === 'POST') return await handleAdminServicesToggle(req, env);
+        if (pathname === '/api/admin/audit'           && method === 'GET')  return await handleAdminAuditLog(req, env);
         if (pathname === '/api/pricing'               && method === 'GET')  return await handlePublicPricing(req, env);
         if (pathname === '/api/admin/pricing'         && method === 'GET')  return await handleAdminGetPricing(req, env);
         if (pathname === '/api/admin/pricing'         && method === 'POST') return await handleAdminSetPricing(req, env);

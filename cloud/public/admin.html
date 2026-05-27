@@ -302,6 +302,7 @@
         <div class="tab-group-items">
           <button class="tab" data-tab="users">🧑 Users</button>
           <button class="tab" data-tab="services">🚨 Services <span id="services-badge" class="tab-badge" style="display:none;">!</span></button>
+          <button class="tab" data-tab="audit">📜 Audit log</button>
         </div>
       </div>
     </div>
@@ -526,6 +527,32 @@
       </div>
     </div>
 
+    <!-- Tab: Audit log — JSONL trail of every admin mutating action.
+         Sensitive-tabs lock already password-gates this view. -->
+    <div class="tab-panel" data-panel="audit">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
+        <span style="color:var(--text-2); font-size:12px;">Every cancel, ban, kill-switch, pricing edit, TOTP enroll/disable, force-logout. R2-backed JSONL, browsable per day.</span>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="date" id="audit-day-input"
+                 style="padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:12px;" />
+          <button class="btn" onclick="loadAuditLog()">🔄 Load</button>
+        </div>
+      </div>
+      <table id="audit-table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Actor</th>
+            <th>IP</th>
+            <th>Action</th>
+            <th>Target</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6" style="color:var(--text-2)">Pick a day and click Load.</td></tr></tbody>
+      </table>
+    </div>
+
     <!-- Tab: Pricing — admin-tunable credit costs per operation
          (password-gated like Services to prevent fat-fingered edits) -->
     <div class="tab-panel" data-panel="pricing">
@@ -620,7 +647,7 @@
     // synchronous IIFE (~line 730) can reference them without hitting
     // the const TDZ. The unlock helpers + UI overlay are wired further
     // down once the rest of the admin script has loaded.
-    const SENSITIVE_TABS = new Set(['finance', 'bytype', 'pricing', 'users', 'services']);
+    const SENSITIVE_TABS = new Set(['finance', 'bytype', 'pricing', 'users', 'services', 'audit']);
     let _sensitiveUnlocked = false;
     let _sensitivePassword = '';
     let _sensitivePendingTab = null;
@@ -1972,12 +1999,49 @@
       _renderPricingTable();
     });
 
+    /* ═══════════════════════════════════════════════════════════════
+       ADMIN AUDIT LOG — per-day JSONL trail of mutating actions
+       ═══════════════════════════════════════════════════════════════ */
+    async function loadAuditLog() {
+      const tbody = document.querySelector('#audit-table tbody');
+      const day = document.getElementById('audit-day-input').value
+                || new Date().toISOString().slice(0, 10);
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr>';
+      try {
+        const r = await fetch('/api/admin/audit?day=' + encodeURIComponent(day), { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const entries = j.entries || [];
+        if (!entries.length) {
+          tbody.innerHTML = '<tr><td colspan="6" class="muted">No admin actions on ' + escapeHtml(day) + '.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = entries.map((e) => `
+          <tr>
+            <td style="font-family:ui-monospace,monospace; font-size:11px;">${escapeHtml(e.ts || '')}</td>
+            <td>${escapeHtml(e.actor || '—')}</td>
+            <td style="font-family:ui-monospace,monospace; font-size:11px;">${escapeHtml(e.ip || '')}</td>
+            <td style="font-weight:600;">${escapeHtml(e.action || '')}</td>
+            <td style="font-family:ui-monospace,monospace; font-size:11px;">${escapeHtml(e.target || '')}</td>
+            <td style="font-family:ui-monospace,monospace; font-size:10px; color:var(--text-2); max-width:480px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(JSON.stringify(e))}">${escapeHtml(JSON.stringify({ ...e, ts: undefined, actor: undefined, ip: undefined, ua: undefined, action: undefined, target: undefined }))}</td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--err)">' + escapeHtml(e?.message || String(e)) + '</td></tr>';
+      }
+    }
+
     // Auto-load active jobs + users when their tab opens for the first time.
     document.querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.tab;
         if (t === 'active'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'users'   && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
+        if (t === 'audit'   && !btn.dataset.loaded) {
+          btn.dataset.loaded = '1';
+          document.getElementById('audit-day-input').value = new Date().toISOString().slice(0, 10);
+          loadAuditLog();
+        }
         // Pricing tab is password-gated. Only load the editor once
         // the user has unlocked it; otherwise just focus the input.
         if (t === 'pricing') {
