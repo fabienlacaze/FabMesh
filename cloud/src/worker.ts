@@ -3471,9 +3471,17 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     }
   }
 
-  const prediction = await replicateClient(env).predictions.get(id);
   const sb = supabaseAdmin(env);
   const { data: job } = await sb.from('jobs').select('*').eq('id', id).maybeSingle();
+  // Short-circuit on terminal Supabase status (admin cancel writes
+  // status='canceled' with error='admin canceled'). Replicate's own
+  // cancel propagates eventually but the row is the source of truth,
+  // so don't waste a round-trip on predictions.get.
+  if (job && (job.status === 'canceled' || job.status === 'failed')) {
+    return json({ status: job.status as string,
+                  error: (job.error as string) || 'cancelled' });
+  }
+  const prediction = await replicateClient(env).predictions.get(id);
 
   const extractGlb = (output: unknown): string | null => {
     if (!output) return null;
