@@ -23,20 +23,60 @@
   // straight to /login with a ?next= so they bounce right back here
   // after re-auth. One hard guard: only redirect once per page load
   // to avoid loops if /login itself happens to 401 somehow.
+  //
+  // On 401, try the silent refresh once before giving up — the user's
+  // mfm-refresh cookie may still be valid (30 days) even though the
+  // mfm-session access token (1 h) just expired. Without this, a tab
+  // left idle past the access-token TTL bounced the user to /login on
+  // their very first action even though refresh would have succeeded.
   let _redirectedFor401 = false;
+  let _refreshInFlight = null;     // shared Promise so concurrent 401s share one refresh
   const _origFetch = window.fetch.bind(window);
+
+  // Run the refresh AT MOST once at a time. Returns true if a refresh
+  // round-trip succeeded (cookies were rotated), false otherwise.
+  async function _tryRefresh() {
+    if (!_refreshInFlight) {
+      _refreshInFlight = (async () => {
+        try {
+          const r = await _origFetch('/api/auth/refresh', {
+            method: 'POST', credentials: 'include',
+          });
+          return r.ok;
+        } catch {
+          return false;
+        } finally {
+          // Clear right after so the NEXT 401 (later in the session)
+          // can start a fresh refresh attempt.
+          setTimeout(() => { _refreshInFlight = null; }, 0);
+        }
+      })();
+    }
+    return _refreshInFlight;
+  }
+
   window.fetch = async function patchedFetch(input, init) {
-    const res = await _origFetch(input, init);
+    let res = await _origFetch(input, init);
     try {
       const url = typeof input === 'string' ? input
                 : input instanceof URL ? input.href
                 : input?.url ?? '';
       const sameOriginApi = url.startsWith('/api/')
         || url.startsWith(window.location.origin + '/api/');
-      if (res.status === 401 && sameOriginApi && !_redirectedFor401) {
-        _redirectedFor401 = true;
-        const next = encodeURIComponent(window.location.pathname + window.location.search);
-        window.location.replace(`/login?next=${next}`);
+      const isAuthRoute = url.includes('/api/auth/');
+      if (res.status === 401 && sameOriginApi && !isAuthRoute && !_redirectedFor401) {
+        // Try to refresh the session ONCE; if it works, replay the
+        // original request with the new cookies (browser attaches them
+        // automatically). Only redirect if refresh + retry both fail.
+        const refreshed = await _tryRefresh();
+        if (refreshed) {
+          res = await _origFetch(input, init);
+        }
+        if (res.status === 401) {
+          _redirectedFor401 = true;
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.replace(`/login?next=${next}`);
+        }
       }
     } catch (_) { /* ignore */ }
     return res;
