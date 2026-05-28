@@ -2010,9 +2010,9 @@
           <button id="paint-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
         </div>
       </div>
-      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
-        <!-- Left panel: tools -->
-        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px; min-height:0;">
+        <!-- Left panel: tools — scrolls when content (incl. Tolerance) exceeds the modal height. -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto; max-height:100%;">
           <!-- Tool buttons -->
           <div style="display:flex; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Select</span>
@@ -2082,9 +2082,9 @@
           <button id="me-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
         </div>
       </div>
-      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
-        <!-- Left panel: tools -->
-        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px; min-height:0;">
+        <!-- Left panel: tools — scrolls when content (incl. Tolerance) exceeds the modal height. -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto; max-height:100%;">
           <div style="display:flex; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Mode</span>
             <button id="me-tool-sculpt" class="secondary-btn tool-btn tool-active" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9997; Sculpt</button>
