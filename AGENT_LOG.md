@@ -10,6 +10,28 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market v4.4 — delete v0 mesh + cloud parallel jobs)
+
+- Delete v0 mesh was silently 404-ing. Root cause from audit: three
+  cumulative bugs in the delete pipeline — `handleCloudProjects`
+  payload missing `id`/`jobId`, `postJSON` not tagging non-OK
+  responses, and `handleMeshesDelete` only accepting strict uuids.
+  Fix: worker now exposes `id`/`jobId` on the `handleCloudProjects`
+  payload (real + mock), `handleMeshesDelete` accepts uuid OR
+  filename slug (scoped by `user_id`), `postJSON` tags non-OK with
+  `ok:false/success:false`, and the index2.js delete handler has a
+  wider fallback chain (`m.id || m.jobId || m.job_id || m.predictionId
+  || m.prediction_id || m.filename`) plus a clear `customError` on
+  404 instead of swallowing silently.
+- Cloud parallel jobs unlocked: `hasVramHeadroomFor` in index2.js now
+  early-returns `{ok:true}` when `document.body` carries the
+  `cloud-mode` class. Modal Labs scales horizontally — each call
+  spawns its own container — so the desktop single-GPU gate
+  (isHeavyJobRunning + VRAM/temp/util/RAM checks) is meaningless on
+  cloud. The Worker enforces per-user daily-call caps separately.
+
+---
+
 ## 2026-05-28 (Delete mesh version — v0 silent 404 fix)
 
 - **Bug** : "Delete mesh v0" (et plus généralement TOUTES les versions
