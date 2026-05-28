@@ -10,6 +10,14 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Admin clickables + Publish button false-positive)
+
+- Admin Users tab: Email column linked to `/market/author?id=<user_id>` (opens public profile in new tab).
+- Admin Marketplace cards: listing title linked to `/market?item=<listing_id>` for approved entries (deep-links the public detail modal). Pending/rejected stay plain text with a small "(not yet visible publicly)" hint.
+- `_syncPublishButtons` now logs the match decision and only disables when matched entry status is in `{pending, approved}`. Stale/deleted/rejected entries no longer freeze the button. Defensive against future R2 cleanup races.
+
+---
+
 ## 2026-05-29 (Market — Publish button stuck disabled on rejected/deleted listings)
 
 - `_syncPublishButtons` in `cloud/public/app/cloud-overrides.js` used to disable the Publish button on ANY index hit (`Map.has`), so stale stub records (admin-deleted listings, job_id collisions on legacy data, etc.) kept the button frozen. Now we only honor the match if its `status` is in `{pending, approved}` — missing/unexpected status falls through to "not published".
