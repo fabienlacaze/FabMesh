@@ -10,6 +10,16 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Drop+Create — fix invisible dropped image)
+
+- Symptom: dropping a PNG/JPG on the home page → "Create" produced a project where the dropped image was invisible (empty version thumb in the strip, broken big preview). Image step still offered "create new".
+- Root cause: the drop handlers correctly store the file as a `blob:` URL in `proj.images`, but the two renderers (`renderImageVersions` thumb HTML at line 1613 and `showStep1Preview` at line 1969) blindly prepended `file:///` to every path. For a `blob:http://…` URL that produces `file:///blob:http://…`, a broken URL → image fails to load and the slot looks empty.
+- Fix: route both sites through the existing `_imgSrc` helper (line 632), which already returns `blob:`/`http:`/`data:` URLs unchanged and only `file:///`-prefixes raw filesystem paths. Skip the `?t=` cache-buster for blob/data URLs (they're immutable in-memory handles, query strings break the handle).
+- Audit also covered the intra-project drop handler (lines 15131-15154) and the np-create handler tail (lines 986-1017) — both already push the blob entry into `proj.images` correctly; `populateWorkspace` is purely local (no server roundtrip overwrites the unshift). No reorder needed.
+- Mesh drops keep the existing "session only — re-import after reload" toast; they go through the mesh viewer's own loader stack and aren't affected by this fix.
+
+---
+
 ## 2026-05-29 (Drop in open project + 🛒 Marketplace topbar button)
 
 - Dropping an image or mesh onto the workspace while a project is open now appends a new version to that project (image strip or mesh strip) instead of opening the New Project modal.
