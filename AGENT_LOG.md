@@ -10,6 +10,33 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Admin cancel — short-circuit handleJob on terminal Supabase status)
+
+- **Bug** : quand un admin cliquait "Stop" sur un job en cours (admin.html
+  → POST `/api/admin/jobs/cancel` → `handleAdminCancelJob` worker.ts:6351),
+  la row Supabase passait bien à `status='canceled'` (worker.ts:6405) et
+  `error='admin canceled'`. Mais le user-side `pollPrediction` continuait
+  à voir `status='processing'` indéfiniment.
+- **Cause** : `handleJob` (worker.ts:3394, GET `/api/jobs/{id}`) lisait
+  la row Supabase mais ignorait son `status`, puis allait taper Modal
+  (`callModalMeshStatus`) ou Replicate (`predictions.get`). Modal/Replicate
+  cancel étant best-effort (~30s pour propager), les deux APIs continuaient
+  à répondre "processing" tant que le container GPU tournait, écrasant
+  l'état "canceled" de la base.
+- **Fix** : court-circuit en tête des deux branches Modal et Replicate
+  de `handleJob`. Si `job.status === 'canceled' || 'failed'` dans Supabase,
+  on retourne immédiatement `{status, error}` sans poll externe. Modal
+  cancel reste best-effort (out of scope), mais le renderer voit l'état
+  terminal au tick suivant (~2.5s) et `pollPrediction` (meshyAPI-cloud.js
+  ligne 119-130) jette l'erreur "Generation cancelled by an administrator".
+- **Canonical status string** : `'canceled'` (US, single-L). Aligné des
+  deux côtés : worker écrit `'canceled'`, poller branche sur `'canceled'`.
+- **Fichiers** : `cloud/src/worker.ts` (deux short-circuits ajoutés
+  vers lignes 3429 et 3474). No renderer change needed — la logique
+  existante de meshyAPI-cloud.js gère déjà ce statut.
+
+---
+
 ## 2026-05-28 (Market v4.2 — killswitch dans Services + cart clic + cold-start hint)
 
 - **Killswitch déplacé** : auparavant dans le tab Marketplace, le user
