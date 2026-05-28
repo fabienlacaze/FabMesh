@@ -284,8 +284,8 @@ function reportPipelineError(errMsg, title) {
 // different code paths (image gen, mesh gen, rigging).
 async function showMeshyKeyMissingError(errorTitle) {
   const wantsOpen = await customErrorWithAction(
-    'Meshy.ai API key not configured.\n\nOpen Settings and paste your key, then try again.\nGet a free key at https://www.meshy.ai/api',
-    errorTitle || 'Meshy.ai API key missing',
+    'MyFabmesh.AI API key not configured.\n\nOpen Settings and paste your key, then try again.\nGet a free key at https://www.meshy.ai/api',
+    errorTitle || 'MyFabmesh.AI API key missing',
     'Open Settings'
   );
   if (wantsOpen) {
@@ -4043,7 +4043,7 @@ function _offerMultiviewRegenerate() {
         <button id="mv-regen-do" class="primary-btn">Regenerate back from front</button>
       </div>
       <p style="color:#777; font-size:11px; margin:10px 0 0;">
-        Regenerates the back view via RealVis + IPAdapter + ControlNet
+        Regenerates the back view via MyFabmesh.AI Photoreal + Identity preservation + Pose guide
         OpenPose using the current front image. Takes ~25 s.
       </p>
     </div>`;
@@ -4983,7 +4983,7 @@ document.getElementById('ws-facefix-btn')?.addEventListener('click', async () =>
   const expectedMs = (window.__modalExpectedSeconds || 45) * 1000;
   const warmLabel = window.__modalWarm === false
     ? `Warming up AI (~${Math.round((window.__modalExpectedSeconds || 150) / 60)} min cold start)`
-    : 'Cloud SDXL Inpaint';
+    : 'Cloud GPU (MyFabmesh.AI Refine)';
   gatedRun('img2img', `Face Fix: ${p.name}`, async () => {
     const job = pushJob(`Face Fix: ${p.name}`, null, {
       Engine: warmLabel,
@@ -12242,7 +12242,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
   const rigEngine = document.getElementById('ws-rig-engine')?.value || 'unirig';
-  const engineLabel = rigEngine === 'meshy' ? 'Meshy.ai (cloud)' : 'UniRig (local, neural)';
+  const engineLabel = rigEngine === 'meshy' ? 'MyFabmesh.AI (cloud)' : 'MyFabmesh.AI Rig (local, neural)';
   const expectedMs = rigEngine === 'meshy' ? 120000 : 90000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {
     const job = pushJob(`Auto-rig AI (${rigEngine}): ${p.name}`, null, {
@@ -13881,7 +13881,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     }
 
     const cards = [
-      stageCardWithThumbs('1. SF3D raw mesh', s1, (d) => {
+      stageCardWithThumbs('1. MyFabmesh.AI 3D Fast raw mesh', s1, (d) => {
         const s = d.score?.score || 0, t = d.score?.total || 6;
         const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
         return { score: `${s}/${t}`, sub: `sim ${(d.score?.avg_similarity || 0).toFixed(2)}`, bg };
@@ -13915,7 +13915,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
   btnCancel?.addEventListener('click', async () => {
     const ok = await fabConfirm({
       title: 'Cancel calibration?',
-      message: 'This will stop the pipeline immediately (SF3D, Zero123++, projection). Any partial output for this run will be discarded.',
+      message: 'This will stop the pipeline immediately (MyFabmesh.AI 3D Fast, Zero123++, projection). Any partial output for this run will be discarded.',
       okLabel: 'Cancel run',
       cancelLabel: 'Keep running',
     });
@@ -14035,7 +14035,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
     _tierTimerId = setInterval(_updateTierTimers, 500);
     diagBody.innerHTML = `
-      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks in ~7s. Stage 4 tests UV projection in isolation (skips SF3D + auto-align), so its ceiling is 2/6 on the GT cube by design. Real pipeline uses the full chain and produces clean textures. Use this view to spot regressions, not as an absolute quality metric.</p>
+      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks in ~7s. Stage 4 tests UV projection in isolation (skips MyFabmesh.AI 3D Fast + auto-align), so its ceiling is 2/6 on the GT cube by design. Real pipeline uses the full chain and produces clean textures. Use this view to spot regressions, not as an absolute quality metric.</p>
       <div id="tiered-footer" style="margin-top:14px; padding:14px; background:#1a1a1a; border-radius:8px; border-left:6px solid #555; color:#aaa;">
         Running...
       </div>`;
@@ -14075,7 +14075,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
           } else if (ev.phase === 'iter_fail') {
             setTierState(t, 'running', `iter ${ev.variant} failed: ${(ev.error || '').slice(0, 60)}`);
           } else if (ev.phase === 'sf3d') {
-            setTierState(t, 'running', ev.message || 'SF3D...');
+            setTierState(t, 'running', ev.message || 'MyFabmesh.AI 3D Fast...');
           } else if (ev.phase === 'done') {
             const ok = ev.passed;
             const detail = t === 2
@@ -14196,7 +14196,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     } else if (ok) {
       verdict = `<b>Perfect score reached.</b> The winning projection config has been persisted and will be used automatically for future runs.`;
     } else {
-      verdict = `<b>Plateau at ${t3.best_score}/${t3.target}.</b> No projection config reached a perfect score — the remaining loss is upstream (SF3D mesh quality or Zero123++ hallucinations), not a projection flag issue.`;
+      verdict = `<b>Plateau at ${t3.best_score}/${t3.target}.</b> No projection config reached a perfect score — the remaining loss is upstream (MyFabmesh.AI 3D Fast mesh quality or Zero123++ hallucinations), not a projection flag issue.`;
     }
     const cfg = t3.best_combo ? `<pre style="margin-top:10px; background:#0a0a0a; padding:10px; border-radius:4px; font-size:11px;">${JSON.stringify(t3.best_combo, null, 2)}</pre>` : '';
     document.getElementById('tiered-footer').outerHTML = `
@@ -14891,7 +14891,7 @@ if (meshyKeyEl) {
 document.getElementById('set-meshy-test')?.addEventListener('click', async () => {
   const btn = document.getElementById('set-meshy-test');
   const key = document.getElementById('set-meshy-api-key').value.trim();
-  if (!key) { alert('Enter your Meshy API key first.'); return; }
+  if (!key) { alert('Enter your MyFabmesh.AI API key first.'); return; }
   const orig = btn.textContent;
   btn.textContent = 'Testing...';
   btn.disabled = true;
@@ -14906,7 +14906,7 @@ document.getElementById('set-meshy-test')?.addEventListener('click', async () =>
     } else {
       btn.textContent = 'Failed';
       btn.style.background = '#7f1d1d';
-      alert('Meshy key test failed: ' + (r?.error || 'unknown error'));
+      alert('MyFabmesh.AI key test failed: ' + (r?.error || 'unknown error'));
       setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 1800);
     }
   } catch (e) {

@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (UI — hide internal stack names from user-facing strings)
+
+- User-facing strings (HTML labels, dropdowns, tooltips, toasts, error messages, About panel) no longer mention UniRig, TRELLIS / TRELLIS-2, IP-Adapter, RealVis, SDXL, MV-Adapter, ControlNet, MeshyMyself, Meshy.ai, Modal, Modal Labs, Replicate, Pollinations, CLIPSeg, u2net, TripoSR.
+- Replacements use the MyFabmesh.AI brand + generic functional names ("AI rigging engine", "MyFabmesh.AI 3D Native", "Identity preservation", "Cloud GPU", etc.).
+- Wire-level identifiers (payload keys, engine: "trellis2" body fields, HTML ids/classes) unchanged. Comments + console.log + AGENT_LOG history untouched.
+- Construction overlay (cleaned by wx8lcjnoa) not re-touched.
+
+---
+
 ## 2026-05-29 (Rig overlay — drop UniRig mention)
 
 - Construction overlay copy reworded to generic "Rigging is being reworked, coming soon". UniRig name removed from user-facing wording (kept everywhere else: engine select, code comments, AGENT_LOG history).

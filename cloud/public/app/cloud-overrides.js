@@ -117,7 +117,7 @@
     }
     window.__expiredReplicatePlaceholder = _EXPIRED_PLACEHOLDER;
     window.__isExpiredReplicateUrl = isExpiredReplicateUrl;
-    const _EXPIRED_TITLE = 'Legacy Replicate asset expired — please regenerate';
+    const _EXPIRED_TITLE = 'Legacy cloud asset expired — please regenerate';
     const proto = HTMLImageElement.prototype;
     const desc = Object.getOwnPropertyDescriptor(proto, 'src');
     if (desc && desc.get && desc.set) {
