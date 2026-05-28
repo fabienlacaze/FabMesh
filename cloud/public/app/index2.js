@@ -2073,6 +2073,117 @@ _ws3dEngineSync();
 // new version (so the original stays clean), (b) generate 6 MVs on
 // that new version's <stem>_multiview/ dir, (c) reload the project
 // so the gallery shows the new version with MV badge.
+// ============================================================
+// ✨ CREATE VARIANT — two tabs in one modal:
+//   - Re-roll seed: re-generate the same prompt N times with new
+//     seeds. Each variant lands as a new image version.
+//   - Img2img strength: feed the current image back into the
+//     generator with a configurable variation strength + optional
+//     extra hint. Useful for "same scene, slightly different mood".
+// ============================================================
+(() => {
+  const open = () => {
+    const p = state.currentProject;
+    if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+    const m = document.getElementById('variant-modal');
+    if (m) m.classList.remove('hidden');
+  };
+  const close = () => document.getElementById('variant-modal')?.classList.add('hidden');
+  document.getElementById('ws-variant-btn')?.addEventListener('click', open);
+  document.getElementById('var-close-x')?.addEventListener('click', close);
+  document.getElementById('var-cancel')?.addEventListener('click', close);
+  // Tab switching.
+  const showTab = (tab) => {
+    const panels = { reroll: document.getElementById('var-panel-reroll'),
+                     strength: document.getElementById('var-panel-strength') };
+    const tabs = { reroll: document.getElementById('var-tab-reroll'),
+                   strength: document.getElementById('var-tab-strength') };
+    Object.entries(panels).forEach(([k, el]) => { if (el) el.style.display = (k === tab) ? 'flex' : 'none'; });
+    Object.entries(tabs).forEach(([k, el]) => {
+      if (!el) return;
+      const on = k === tab;
+      el.classList.toggle('tool-active', on);
+      el.style.borderBottomColor = on ? 'var(--accent, #5a4fcf)' : 'transparent';
+      el.style.color = on ? 'var(--text-1)' : 'var(--text-2)';
+    });
+    document.getElementById('variant-modal').dataset.tab = tab;
+  };
+  document.getElementById('var-tab-reroll')?.addEventListener('click', () => showTab('reroll'));
+  document.getElementById('var-tab-strength')?.addEventListener('click', () => showTab('strength'));
+  showTab('reroll');
+  // Slider live values.
+  const rerollSlider = document.getElementById('var-reroll-count');
+  const rerollVal    = document.getElementById('var-reroll-count-val');
+  const rerollCost   = document.getElementById('var-reroll-cost');
+  const syncReroll = () => {
+    const n = Number(rerollSlider.value);
+    rerollVal.textContent = String(n);
+    rerollCost.innerHTML = `Total cost: <span style="color:var(--accent, #5a4fcf); font-weight:600;">${n} credit${n > 1 ? 's' : ''}</span>`;
+  };
+  rerollSlider?.addEventListener('input', syncReroll);
+  syncReroll();
+  const strengthSlider = document.getElementById('var-strength');
+  const strengthVal    = document.getElementById('var-strength-val');
+  const syncStrength = () => { strengthVal.textContent = Number(strengthSlider.value).toFixed(2); };
+  strengthSlider?.addEventListener('input', syncStrength);
+  syncStrength();
+  // Apply — dispatch to the active tab.
+  document.getElementById('var-apply')?.addEventListener('click', async () => {
+    const p = state.currentProject;
+    if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+    const tab = document.getElementById('variant-modal').dataset.tab || 'reroll';
+    close();
+    if (tab === 'reroll') {
+      // Re-roll N variants of the same prompt. We use the project's
+      // current prompt + style; the generator picks a fresh seed
+      // for each call. Wrapped in a single job that completes once
+      // every variant has come back.
+      const n = Number(document.getElementById('var-reroll-count').value) || 1;
+      const prompt = p.prompt || p.initialPrompt || '';
+      if (!prompt) { showToast('Project has no prompt — generate a base image first.', 'error', 4000); return; }
+      const job = (typeof pushJob === 'function')
+        ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Prompt: prompt }, 60_000 * n)
+        : null;
+      try {
+        for (let i = 0; i < n; i++) {
+          const r = await (window.meshyAPI?.generateImages
+            ? window.meshyAPI.generateImages({ prompt, userPrompt: prompt, engine: 'cloud', numImages: 1, projectName: p.name, seed: Math.floor(Math.random() * 1_000_000) })
+            : { success: false, error: 'generateImages API missing' });
+          if (!r?.success) throw new Error(r?.error || 'generation failed');
+        }
+        if (job && typeof completeJob === 'function') completeJob(job.id, true);
+        if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+        showToast(`✓ ${n} variant${n > 1 ? 's' : ''} generated.`, 'success');
+      } catch (e) {
+        if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
+        showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
+      }
+    } else {
+      // Img2img — keep the current image as a starting frame, render
+      // a varied version with the given strength + optional hint.
+      const strength = Number(document.getElementById('var-strength').value) || 0.4;
+      const hint = document.getElementById('var-strength-hint').value.trim();
+      const basePrompt = p.prompt || p.initialPrompt || '';
+      const prompt = hint ? (basePrompt + ', ' + hint) : (basePrompt || 'variation');
+      const job = (typeof pushJob === 'function')
+        ? pushJob(`Img2img variant: ${p.name}`, null, { Strength: strength.toFixed(2), Hint: hint || '(none)' }, 30_000)
+        : null;
+      try {
+        const r = await window.meshyAPI?.img2img({
+          imagePath: p.selectedImagePath, prompt, strength,
+        });
+        if (!r?.success) throw new Error(r?.error || 'img2img failed');
+        if (job && typeof completeJob === 'function') completeJob(job.id, true);
+        if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+        showToast('✓ Variant generated.', 'success');
+      } catch (e) {
+        if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
+        showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
+      }
+    }
+  });
+})();
+
 document.getElementById('ws-multiview-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
