@@ -9397,3 +9397,22 @@ Heuristique du centroid: marche bien sur formes convexes ou globalement
 "humanoïdes". Pour des formes très concaves (creux, tubes), faux
 positifs possibles — mais l'utilisateur peut toujours regenérer s'il
 voit du flou.
+
+## 2026-05-28 — Fix Normals: rollback du winding-flip (heuristique foireuse)
+
+User screenshot: après Fix Normals avec mon flip-pass, le mesh est
+PIRE qu'avant — le centroïde AABB heuristique a flippé beaucoup trop
+de triangles légitimes (bras, armure, plis) parce que sur une forme
+humanoïde concave, la direction "vers le centroïde" n'est PAS toujours
+opposée à la normale extérieure.
+
+Rollback: retire la pass 1 (winding flip) de `_jsFixNormalsWelded`.
+Garde la pass UV seam normal welding (qui marchait bien isolément).
+Schema subtitle ajusté: "(Black patches → regenerate, real flip is
+TODO with local-coherence heuristic.)"
+
+Solution future: pass de cohérence LOCALE — pour chaque triangle,
+comparer sa face_normal contre la moyenne des face_normals de ses
+voisins (partageant une edge). Si dot < 0 = flippé par rapport au flux
+local. Bien plus robuste que le centroïde global, mais demande
+construction d'une adjacency map. Pas implémenté.
