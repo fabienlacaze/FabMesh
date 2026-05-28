@@ -10,6 +10,12 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market badge extended to workspace version strip)
+
+- Extended the 🛒 published badge from home grids only to the workspace version-strip thumbs (ws-image-versions / ws-mesh-versions). Added smaller-badge CSS variant for the strip thumbs which are narrower than home cards.
+
+---
+
 ## 2026-05-28 (Legal — Marketplace + Stripe Connect clauses)
 
 - Added MARKETPLACE section to /legal/terms (publishing, buying, commission, taxes, disputes).
