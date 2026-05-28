@@ -2471,18 +2471,23 @@
             ${previewInner}
             <button class="market-inspect-btn" data-asset-url="${escapeHtml(assetUrl)}" data-asset-kind="${kind}" title="Inspect fullscreen" style="position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.65); color:#fff; border:1px solid rgba(255,255,255,0.4); border-radius:6px; padding:4px 8px; font-size:13px; cursor:pointer;">🔍</button>
           </div>`;
+        // Admin can revisit any decision: pending offers both,
+        // approved still allows reject, rejected still allows approve.
+        const approveBtn = `<button class="btn" style="background:var(--ok); color:#fff; border-color:var(--ok);" onclick="approveListing('${escapeHtml(l.id)}')">✓ Approve</button>`;
+        const rejectBtn  = `<button class="btn" style="background:var(--warn); color:#000; border-color:var(--warn);" onclick="rejectListing('${escapeHtml(l.id)}')">✗ Reject</button>`;
+        const deleteBtn  = `<button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`;
         const actions = l.status === 'pending'
-          ? `<button class="btn" style="background:var(--ok); color:#fff; border-color:var(--ok);" onclick="approveListing('${escapeHtml(l.id)}')">✓ Approve</button>
-             <button class="btn" style="background:var(--warn); color:#000; border-color:var(--warn);" onclick="rejectListing('${escapeHtml(l.id)}')">✗ Reject</button>
-             <button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`
-          : `<button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`;
+          ? `${approveBtn} ${rejectBtn} ${deleteBtn}`
+          : l.status === 'approved'
+            ? `${rejectBtn} ${deleteBtn}`
+            : `${approveBtn} ${deleteBtn}`;
         return `
           <div data-listing-id="${escapeHtml(l.id)}" style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
               <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${kind === 'image' ? '🖼 ' : '🧊 '}${escapeHtml(l.title)}</div>
               <div style="background:${l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)'}; color:${l.price_cents === 0 ? 'var(--ok)' : '#ffcc66'}; padding:2px 8px; border-radius:9px; font-size:11px; font-weight:700; white-space:nowrap;">${escapeHtml(price)}</div>
             </div>
-            <div style="color:var(--text-2); font-size:11px;">${escapeHtml(l.author_display)} · ${escapeHtml(_MARKET_LIC_LABEL[l.licence] || l.licence)} · ${escapeHtml(dt)}</div>
+            <div style="color:var(--text-2); font-size:11px;">${l.user_id ? `<a href="/market/author?id=${encodeURIComponent(l.user_id)}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none;">${escapeHtml(l.author_display)}</a>` : escapeHtml(l.author_display)} · ${escapeHtml(_MARKET_LIC_LABEL[l.licence] || l.licence)} · ${escapeHtml(dt)}</div>
             ${preview}
             ${l.description ? `<div style="font-size:12px; color:var(--text-1); max-height:60px; overflow:hidden;">${escapeHtml(l.description)}</div>` : ''}
             ${l.rejection_reason ? `<div style="font-size:11px; color:var(--err); padding:6px; background:rgba(244,67,54,0.1); border-radius:4px;">Rejected: ${escapeHtml(l.rejection_reason)}</div>` : ''}
