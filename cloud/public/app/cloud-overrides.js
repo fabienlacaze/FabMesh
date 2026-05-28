@@ -1643,6 +1643,10 @@
       _publishedIndex.byJobId.clear();
       _publishedIndex.byUrl.clear();
       (j.items || []).forEach((it) => {
+        // Skip rejected listings entirely — they should NOT badge a
+        // card. The user already gets the rejection news via the
+        // 📬 Inbox, so a card-level red signal is just noise.
+        if (it.status === 'rejected') return;
         const meta = { status: it.status, listing_id: it.listing_id, kind: it.kind };
         if (it.job_id)   _publishedIndex.byJobId.set(it.job_id, meta);
         if (it.asset_url) _publishedIndex.byUrl.set(it.asset_url, meta);
@@ -1693,13 +1697,34 @@
     document.head.appendChild(s);
   }
   function _badgeCard(card, meta) {
-    if (!card || !meta) return;
-    if (card.querySelector('.published-badge')) {
-      // Refresh status class only.
-      const existing = card.querySelector('.published-badge');
+    if (!card) return;
+    const existing = card.querySelector('.published-badge');
+    // No meta = listing was dropped from the index (rejected, unpublished,
+    // deleted). Remove any stale badge so the card returns to its clean
+    // state.
+    if (!meta) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) {
+      // Compare current status class against the new meta.status. If
+      // identical there's nothing to do — short-circuit so we don't
+      // thrash the DOM. If different, update className + title +
+      // textContent to reflect the new status (pending → approved).
+      const currentStatus = existing.classList.contains('approved') ? 'approved'
+                          : existing.classList.contains('pending')  ? 'pending'
+                          : existing.classList.contains('rejected') ? 'rejected'
+                          : '';
+      if (currentStatus === meta.status) {
+        // Still refresh href if listing_id became known since last pass.
+        if (existing.tagName === 'A' && meta.listing_id && !existing.href) {
+          existing.href = '/market?item=' + encodeURIComponent(meta.listing_id);
+        }
+        return;
+      }
       existing.className = 'published-badge ' + meta.status;
       existing.title = 'Marketplace: ' + meta.status;
-      // Upgrade/refresh href if listing_id is now known.
+      existing.textContent = '🛒';
       if (existing.tagName === 'A' && meta.listing_id) {
         existing.href = '/market?item=' + encodeURIComponent(meta.listing_id);
       }
@@ -1775,6 +1800,35 @@
         const card = el.closest('.all-image-card, .all-mesh-card, .version-thumb') || el;
         _badgeCard(card, meta);
       });
+      // Third walker: sweep existing badges whose underlying asset is
+      // NO LONGER in the index (rejected by admin, unpublished, removed).
+      // For each such badge, hand a null meta to _badgeCard so the badge
+      // is removed cleanly. This is what makes the 60s poll actually
+      // reflect admin-side status changes without a page reload.
+      root.querySelectorAll('.published-badge').forEach((badge) => {
+        const card = badge.closest('.all-image-card, .all-mesh-card, .version-thumb')
+                  || badge.parentElement;
+        if (!card) return;
+        // Re-derive the same lookup keys _badgeAllCards uses above.
+        let stillIndexed = false;
+        const media = card.querySelector('img[src], model-viewer[src]');
+        if (media) {
+          const rawSrc = media.getAttribute('src') || '';
+          const candidates = new Set([rawSrc]);
+          let s = rawSrc.replace(/\?t=\d+$/, '');
+          candidates.add(s);
+          if (s.startsWith('file:///')) candidates.add(s.slice('file:///'.length));
+          for (const k of candidates) {
+            if (_publishedIndex.byUrl.has(k)) { stillIndexed = true; break; }
+          }
+        }
+        if (!stillIndexed) {
+          const jobEl = card.matches('[data-job-id]') ? card : card.querySelector('[data-job-id]');
+          const jid = jobEl?.getAttribute('data-job-id');
+          if (jid && _publishedIndex.byJobId.has(jid)) stillIndexed = true;
+        }
+        if (!stillIndexed) _badgeCard(card, null);
+      });
     });
     // Same tick: refresh publish-button disabled state. This means
     // every grid mutation (project switch, new asset added) also
@@ -1838,18 +1892,29 @@
     _badgeAllCards();
   }
 
+  // Poll the published-index every 60s so badges follow admin status
+  // changes (pending → approved → rejected) and unpublishes without
+  // requiring a page reload. _fetchPublishedIndex calls _badgeAllCards,
+  // which now also sweeps stale badges.
+  function _startPublishedIndexPolling() {
+    if (window.__publishedIndexPollHandle) return;
+    window.__publishedIndexPollHandle = setInterval(_fetchPublishedIndex, 60_000);
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       applyOverrides();
       installMarketplacePublish();
       _fetchPublishedIndex();
       _installPublishedBadgeWatcher();
+      _startPublishedIndexPolling();
     });
   } else {
     applyOverrides();
     installMarketplacePublish();
     _fetchPublishedIndex();
     _installPublishedBadgeWatcher();
+    _startPublishedIndexPolling();
   }
 
   // The Settings / About modals sometimes lazy-inject content; re-apply
