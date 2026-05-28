@@ -10,6 +10,12 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Rig overlay — drop UniRig mention)
+
+- Construction overlay copy reworded to generic "Rigging is being reworked, coming soon". UniRig name removed from user-facing wording (kept everywhere else: engine select, code comments, AGENT_LOG history).
+
+---
+
 ## 2026-05-29 (Cloud — expired Replicate URLs + file:/// cleanup)
 
 - Frontend now detects expired replicate.delivery URLs in <img src> assignments (prototype setter + MutationObserver) and replaces them with a "⚠ Expired" SVG placeholder + tooltip "Legacy Replicate asset expired — please regenerate". Delete still works thanks to the wa8sld95q fix.
