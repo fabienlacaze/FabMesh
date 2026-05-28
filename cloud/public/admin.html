@@ -2829,6 +2829,63 @@
     refreshKillSwitchSummary();
     setInterval(refreshKillSwitchSummary, 30_000);
 
+    /* ═══════════════════════════════════════════════════════════════
+       GLOBAL TAB-BADGE REFRESH — single 30s interval keeps every tab
+       pill (Marketplace pending, Active running, Messages unread) in
+       sync with the backend even when the admin is on a different tab.
+       Belt-and-suspenders next to the per-tab pollers (Messages 60s,
+       Modal credits 60s) which we leave untouched.
+       ═══════════════════════════════════════════════════════════════ */
+    function updateTabBadge(id, count) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const n = Number(count) || 0;
+      if (n > 0) {
+        el.textContent = n > 99 ? '99+' : String(n);
+        el.style.display = '';
+      } else {
+        el.style.display = 'none';
+      }
+    }
+    async function refreshAllTabBadges() {
+      // Marketplace pending — count listings with status==="pending".
+      try {
+        const r = await fetch('/api/admin/market/list', { credentials: 'include' });
+        if (r.ok) {
+          const j = await r.json();
+          const pending = (j.listings || []).filter((l) => l.status === 'pending').length;
+          updateTabBadge('badge-market', pending);
+        }
+      } catch {}
+      // Messages unread — count !read.
+      try {
+        const r = await fetch('/api/admin/contact-messages', { credentials: 'include' });
+        if (r.ok) {
+          const j = await r.json();
+          const unread = (j.messages || []).filter((m) => !m.read).length;
+          updateTabBadge('badge-messages', unread);
+        }
+      } catch {}
+      // Active running — count jobs with status==="running" (fallback:
+      // anything returned by /jobs/active that isn't a terminal state).
+      try {
+        const r = await fetch('/api/admin/jobs/active', { credentials: 'include' });
+        if (r.ok) {
+          const j = await r.json();
+          const jobs = j.jobs || [];
+          const running = jobs.filter((x) => {
+            const s = String(x.status || '').toLowerCase();
+            return s === 'running' || s === 'in_progress' || s === 'queued' || s === 'pending' || s === '';
+          }).length;
+          updateTabBadge('badge-active', running || jobs.length);
+        }
+      } catch {}
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshAllTabBadges();
+      setInterval(refreshAllTabBadges, 30_000);
+    });
+
     refresh();
   </script>
 </body>
