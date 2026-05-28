@@ -1239,7 +1239,7 @@ function _safeId(s: string): string {
  *  newest first. */
 async function handleAdminContactList(req: Request, env: Env): Promise<Response> {
   const adminCheck = await _requireAdmin(req, env);
-  if (adminCheck) return adminCheck;
+  if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   try {
     // Paginate — R2's list cap is 1000 per call and big inboxes will
@@ -1276,7 +1276,7 @@ async function handleAdminContactList(req: Request, env: Env): Promise<Response>
 /** POST /api/admin/contact-messages/<id>/read — flip the read flag. */
 async function handleAdminContactRead(req: Request, env: Env, id: string): Promise<Response> {
   const adminCheck = await _requireAdmin(req, env);
-  if (adminCheck) return adminCheck;
+  if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   const key = `_meta/contact/${_safeId(id)}.json`;
   const txt = await r2GetText(env, key);
@@ -1295,7 +1295,7 @@ async function handleAdminContactRead(req: Request, env: Env, id: string): Promi
 /** DELETE /api/admin/contact-messages/<id> — remove a message. */
 async function handleAdminContactDelete(req: Request, env: Env, id: string): Promise<Response> {
   const adminCheck = await _requireAdmin(req, env);
-  if (adminCheck) return adminCheck;
+  if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   const key = `_meta/contact/${_safeId(id)}.json`;
   await env.MESHES.delete(key);
@@ -1307,7 +1307,7 @@ async function handleAdminContactDelete(req: Request, env: Env, id: string): Pro
  *  budget total, and returns { total, spent, remaining, today }. */
 async function handleAdminModalCredits(req: Request, env: Env): Promise<Response> {
   const adminCheck = await _requireAdmin(req, env);
-  if (adminCheck) return adminCheck;
+  if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   try {
     let cursor: string | undefined = undefined;
@@ -1347,7 +1347,7 @@ async function handleAdminModalCredits(req: Request, env: Env): Promise<Response
  *  Modal dashboard when they top up. */
 async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Response> {
   const adminCheck = await _requireAdmin(req, env);
-  if (adminCheck) return adminCheck;
+  if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   let body: { total?: number };
   try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
