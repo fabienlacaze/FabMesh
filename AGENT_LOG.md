@@ -9170,3 +9170,23 @@ entre les deux quand son appareil le permet, sinon seul le cloud est
 proposé. Modal continue à facturer 1 cr (CPU $0.001 + R2 PUT + audit).
 Device = 0 cr (rien ne tourne côté Modal, le serveur ne fait que valider
 + stocker sur R2).
+
+## 2026-05-28 — Auth: silent session refresh (fix 1h auto-logout)
+
+- Worker: nouvelle route `POST /api/auth/refresh` (`worker.ts`).
+  Lit le cookie `mfm-refresh` (30 jours), appelle Supabase
+  `/auth/v1/token?grant_type=refresh_token`, re-set les 2 cookies
+  HttpOnly avec le nouveau pair access/refresh. Sur rejet (refresh
+  révoqué/expiré/user supprimé): wipe les cookies, retourne 401 →
+  next /api/me redirige proprement vers /login.
+- Renderer (`cloud-overrides.js`):
+  - setInterval refresh toutes les 50 min (< 1h TTL access_token).
+  - + listener visibilitychange/focus: si > 40 min depuis dernier
+    refresh, re-refresh tout de suite (browsers throttle setInterval
+    sur tabs hidden, sinon user revenu après 2h se retrouvait
+    logout).
+
+Pourquoi: le worker ne refreshait jamais l'access_token. Cookie
+`mfm-session` Max-Age=3600s, Supabase JWT exp=1h par défaut → /api/me
+retournait 401 au bout d'1h pile, frontend redirigeait sur /login.
+Maintenant la session vit aussi longtemps que le refresh token (30j).
