@@ -6600,50 +6600,80 @@ function _jsFillHoles(geom, maxHoleSize) {
   const posAttr = geom.attributes.position;
   const indices = geom.index.array;
   const triCount = Math.floor(indices.length / 3);
+  const n = posAttr.count;
+  const arr = posAttr.array;
 
-  // Map directed edge a->b to the triangle that owns it. A boundary
-  // edge appears in exactly one triangle (its opposite never gets
-  // emitted). We use the directed key so we keep the winding for fan
-  // triangulation later.
-  const directedEdge = new Map();   // "a,b" -> true
-  const undirectedCount = new Map(); // "min,max" -> count
+  // GLB meshes split vertices at every UV seam, so the same physical
+  // edge appears with different vertex indices on each side. Counting
+  // boundary edges by raw vertex index → every seam looks like an
+  // open boundary and the user sees the whole mesh painted green.
+  // Fix: weld vertices by quantized position into "groups", then do
+  // edge counting in group space. A seam edge maps to a single group
+  // pair and gets counted twice (once per triangle) → not boundary.
+  const Q = 1e4;
+  const groupKeyToId = new Map();
+  const groupOfVertex = new Int32Array(n);
+  let G = 0;
+  for (let v = 0; v < n; v++) {
+    const kx = Math.round(arr[v*3]   * Q);
+    const ky = Math.round(arr[v*3+1] * Q);
+    const kz = Math.round(arr[v*3+2] * Q);
+    const k = kx + ',' + ky + ',' + kz;
+    let gid = groupKeyToId.get(k);
+    if (gid === undefined) { gid = G++; groupKeyToId.set(k, gid); }
+    groupOfVertex[v] = gid;
+  }
+  // One representative vertex per group — used as the anchor when we
+  // emit fan triangles for filled holes (any vertex in the group has
+  // the same position).
+  const repOfGroup = new Int32Array(G).fill(-1);
+  for (let v = 0; v < n; v++) {
+    const g = groupOfVertex[v];
+    if (repOfGroup[g] === -1) repOfGroup[g] = v;
+  }
+
+  // Edge counting in GROUP space. Map directed edge ga->gb to the
+  // triangle that owns it. A genuine boundary edge appears in exactly
+  // one triangle in group space; seam edges show up in two.
+  const undirectedCount = new Map();   // "min,max" -> count
   for (let t = 0; t < triCount; t++) {
-    const i0 = indices[t * 3], i1 = indices[t * 3 + 1], i2 = indices[t * 3 + 2];
-    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
-      directedEdge.set(`${a},${b}`, true);
-      const key = a < b ? `${a},${b}` : `${b},${a}`;
+    const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
+    const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
+    for (const [ga, gb] of [[g0,g1],[g1,g2],[g2,g0]]) {
+      if (ga === gb) continue;  // degenerate after welding
+      const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
       undirectedCount.set(key, (undirectedCount.get(key) || 0) + 1);
     }
   }
 
-  // boundaryNext[a] = b iff a->b is a boundary edge (kept directed
+  // boundaryNext[ga] = gb iff ga->gb is a boundary edge (kept directed
   // so loop walking respects the original triangle winding).
   const boundaryNext = new Map();
   for (let t = 0; t < triCount; t++) {
-    const i0 = indices[t * 3], i1 = indices[t * 3 + 1], i2 = indices[t * 3 + 2];
-    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
-      const key = a < b ? `${a},${b}` : `${b},${a}`;
-      if (undirectedCount.get(key) === 1) {
-        boundaryNext.set(a, b);
-      }
+    const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
+    const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
+    for (const [ga, gb] of [[g0,g1],[g1,g2],[g2,g0]]) {
+      if (ga === gb) continue;
+      const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
+      if (undirectedCount.get(key) === 1) boundaryNext.set(ga, gb);
     }
   }
 
-  // Walk loops by following boundaryNext until we hit a visited vert.
+  // Walk loops in group space until we hit a visited group.
   const visited = new Set();
   const loops = [];
   for (const start of boundaryNext.keys()) {
     if (visited.has(start)) continue;
     const loop = [];
-    let v = start;
+    let g = start;
     for (let safety = 0; safety < 100000; safety++) {
-      if (visited.has(v)) break;
-      visited.add(v);
-      loop.push(v);
-      const nxt = boundaryNext.get(v);
+      if (visited.has(g)) break;
+      visited.add(g);
+      loop.push(g);
+      const nxt = boundaryNext.get(g);
       if (nxt == null) break;
       if (nxt === start) break;
-      v = nxt;
+      g = nxt;
     }
     if (loop.length >= 3) loops.push(loop);
   }
@@ -6665,8 +6695,8 @@ function _jsFillHoles(geom, maxHoleSize) {
     // we emit each edge as two vertices.
     const sink = willFill ? greenLineVerts : redLineVerts;
     for (let i = 0; i < loop.length; i++) {
-      const va = loop[i];
-      const vb = loop[(i + 1) % loop.length];
+      const va = repOfGroup[loop[i]];
+      const vb = repOfGroup[loop[(i + 1) % loop.length]];
       sink.push(
         newPositions[va * 3], newPositions[va * 3 + 1], newPositions[va * 3 + 2],
         newPositions[vb * 3], newPositions[vb * 3 + 1], newPositions[vb * 3 + 2],
@@ -6676,7 +6706,8 @@ function _jsFillHoles(geom, maxHoleSize) {
 
     // Centroid fan triangulation. Cheap, works on convex-ish holes.
     let cx = 0, cy = 0, cz = 0;
-    for (const v of loop) {
+    for (const g of loop) {
+      const v = repOfGroup[g];
       cx += newPositions[v * 3];
       cy += newPositions[v * 3 + 1];
       cz += newPositions[v * 3 + 2];
@@ -6686,11 +6717,12 @@ function _jsFillHoles(geom, maxHoleSize) {
     newPositions.push(cx, cy, cz);
     if (newUVs) newUVs.push(0, 0);
     // Add triangles fanning out from the centroid. Boundary edges
-    // point a->b with the outside on the right, so we orient
-    // (a, b, center) to keep the fill facing the right way.
+    // point ga->gb with the outside on the right, so we orient
+    // (a, b, center) — using the representative vertex of each group
+    // — to keep the fill facing the right way.
     for (let i = 0; i < loop.length; i++) {
-      const va = loop[i];
-      const vb = loop[(i + 1) % loop.length];
+      const va = repOfGroup[loop[i]];
+      const vb = repOfGroup[loop[(i + 1) % loop.length]];
       newIndices.push(va, vb, centerIdx);
     }
   }
