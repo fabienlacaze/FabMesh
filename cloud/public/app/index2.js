@@ -8385,10 +8385,16 @@ async function _atLoadMesh(meshPath) {
   const status = document.getElementById('at-preview-status');
   if (status) { status.textContent = 'Loading mesh...'; status.style.display = 'block'; }
   try {
-    const { GLTFLoader } = await import('./lib/loaders/GLTFLoader.js');
+    // GLTFLoader is already imported at the top of this file — the
+    // dynamic './lib/loaders/...' path doesn't exist in the cloud
+    // build, which is why Align Texture opened then never loaded the
+    // mesh (the dynamic import would throw and the user saw an empty
+    // modal).
     const loader = new GLTFLoader();
-    // Read file via fs (Electron file:// works via fetch in renderer with full path)
-    const url = 'file:///' + meshPath.replace(/\\/g, '/');
+    // Use the path as-is when it's already an absolute URL (R2 / blob
+    // / data); only the desktop-style raw filesystem path gets the
+    // file:// prefix.
+    const url = _atResolveUrl(meshPath);
     const cacheBuster = '?t=' + Date.now();
     console.log('[align-tex] loading mesh from', url + cacheBuster);
     loader.load(url + cacheBuster, (gltf) => {
@@ -8573,9 +8579,18 @@ function _atUpdateProjectiveUniforms() {
   }
 }
 
+// Resolve a project asset path to a fetchable URL: pass through if it
+// already has a scheme (http/https/blob/data), prepend file:// for raw
+// disk paths. Used by Align Texture's loaders so they work on cloud
+// (R2 URLs) as well as desktop.
+function _atResolveUrl(path) {
+  if (!path) return '';
+  return /^[a-z]+:/i.test(path) ? path : 'file:///' + String(path).replace(/\\/g, '/');
+}
+
 function _atMakeOverlayPlane(imgPath, opacity) {
   const tex = new THREE.TextureLoader().load(
-    'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now()
+    _atResolveUrl(imgPath) + '?t=' + Date.now()
   );
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.MeshBasicMaterial({
@@ -8595,14 +8610,14 @@ function _atUpdateOverlay() {
   // Load textures (shared with projective shader)
   if (!atState.frontTex) {
     atState.frontTex = new THREE.TextureLoader().load(
-      'file:///' + p.selectedImagePath.replace(/\\/g, '/') + '?t=' + Date.now()
+      _atResolveUrl(p.selectedImagePath) + '?t=' + Date.now()
     );
     atState.frontTex.colorSpace = THREE.SRGBColorSpace;
   }
   const backPath = p._backPhotos?.[p.selectedImagePath] || p.backImagePath;
   if (backPath && !atState.backTex) {
     atState.backTex = new THREE.TextureLoader().load(
-      'file:///' + backPath.replace(/\\/g, '/') + '?t=' + Date.now()
+      _atResolveUrl(backPath) + '?t=' + Date.now()
     );
     atState.backTex.colorSpace = THREE.SRGBColorSpace;
   }
@@ -10163,6 +10178,10 @@ function _matWriteSliders(p) {
     const s = document.getElementById(`mat-${k}`);
     if (s) { s.value = p[k]; _matSetSliderLabel(k, p[k]); }
   }
+  // Push the new values through the live PBR preview so Reset visibly
+  // updates the mesh; the slider 'input' listener only fires on user
+  // drags, not on programmatic .value writes.
+  if (typeof _matApplyLivePBR === 'function') _matApplyLivePBR();
 }
 
 // Three.js viewer state for the Material Adjust modal.
