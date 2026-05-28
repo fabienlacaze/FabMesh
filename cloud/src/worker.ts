@@ -5498,6 +5498,25 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   if (op === 'retex_swap' && !(params && (params as Record<string, unknown>).image_url)) {
     return err(400, 'retex_swap needs params.image_url');
   }
+  // target_resolution / tex_res guard — the Modal retex_swap path runs
+  // on the source mesh's existing UV unwrap (currently baked at 2K).
+  // Re-baking at 4096 stretches a 2K layout to 4K and produces heavy
+  // corruption (black patches + bleached areas around UV seams).
+  // Until the upstream pipeline ships a 4K UV unwrap, clamp the
+  // request size to 2048 so direct API callers can't bypass the UI.
+  if (params && typeof params === 'object') {
+    const p = params as Record<string, unknown>;
+    const MAX_TEX_RES = 2048;
+    for (const key of ['target_resolution', 'tex_res', 'texture_size', 'resolution']) {
+      const raw = p[key];
+      if (raw == null) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) continue;
+      if (n > MAX_TEX_RES) {
+        return err(400, `${key} must be <= ${MAX_TEX_RES}; higher resolutions are not yet supported (upstream UV unwrap is baked at 2K — re-baking at 4K corrupts the texture).`);
+      }
+    }
+  }
 
   // Resolve mesh URL — caller can pass URL directly OR a job id.
   let finalUrl = meshUrl ?? '';

@@ -8052,11 +8052,11 @@ const MESH_TOOL_SCHEMAS = {
   },
   retexture: {
     title: 'Resolution',
-    subtitle: 'Re-bake the mesh texture at a different resolution by reprojecting the source photo onto the UVs.',
+    subtitle: 'Re-bake the mesh texture at a different resolution by reprojecting the source photo onto the UVs. Higher resolution (4096+) coming soon — currently capped at 2048 because the upstream UV unwrap is baked at 2K and stretching produces corruption (black patches / bleached areas).',
     needsImage: true,
     params: [
-      { id: 'tex_res', label: 'Texture resolution', type: 'select', default: '2048',
-        options: [['1024','1024 px'],['2048','2048 px'],['4096','4096 px']] },
+      { id: 'tex_res', label: 'Texture resolution (4K coming soon)', type: 'select', default: '2048',
+        options: [['1024','1024 px'],['2048','2048 px (max)']] },
     ],
     build: (vals, ctx) => [ctx.imagePath, String(vals.tex_res)],
   },
