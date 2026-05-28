@@ -6808,6 +6808,7 @@ const MESH_TOOL_SCHEMAS = {
     title: 'Smooth mesh',
     subtitle: 'Laplacian smoothing — live preview.',
     needsImage: false,
+    supportsClientApply: true,
     params: [
       { id: 'iterations', label: 'Iterations', type: 'range', min: 1, max: 20, step: 1, default: 3 },
       { id: 'lambda',     label: 'Lambda',     type: 'range', min: 0.0, max: 1.0, step: 0.05, default: 0.5 },
@@ -6820,6 +6821,7 @@ const MESH_TOOL_SCHEMAS = {
     subtitle: 'Reduce triangle count — drag the slider down to preview the reduction.',
     needsImage: false,
     expensivePreview: true,
+    supportsClientApply: true,
     fitSliderToMeshTris: 'target_faces',
     params: [
       { id: 'target_faces', label: 'Target triangles', type: 'range', min: 200, max: 1_000_000, step: 100, default: 15000 },
@@ -6842,6 +6844,7 @@ const MESH_TOOL_SCHEMAS = {
     title: 'Subdivide mesh',
     subtitle: 'Midpoint subdivision — live preview (×4 triangles per level).',
     needsImage: false,
+    supportsClientApply: true,
     params: [
       { id: 'levels', label: 'Levels', type: 'range', min: 1, max: 3, step: 1, default: 1 },
     ],
@@ -6852,6 +6855,7 @@ const MESH_TOOL_SCHEMAS = {
     title: 'Fix normals',
     subtitle: 'Recompute normals + fix inverted/wrong-winding faces.',
     needsImage: false,
+    supportsClientApply: true,
     params: [],
     build: () => [],
     preview: (geom) => { const g = geom.clone(); g.computeVertexNormals(); return g; },
@@ -6860,6 +6864,7 @@ const MESH_TOOL_SCHEMAS = {
     title: 'Fill holes',
     subtitle: 'Cap mesh holes — green outlines will be filled, red are larger than the cap.',
     needsImage: false,
+    supportsClientApply: true,
     params: [
       { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 5000, step: 1, default: 100 },
     ],
@@ -6870,6 +6875,7 @@ const MESH_TOOL_SCHEMAS = {
     title: 'Center mesh',
     subtitle: 'Recenters on X/Z and puts feet at Y=0 — live preview.',
     needsImage: false,
+    supportsClientApply: true,
     params: [],
     build: () => [],
     preview: (geom) => _jsCenter(geom),
@@ -6915,7 +6921,30 @@ const mtState = {
   schema: null,
   vals: {},
   previewTimer: null,
+  lastPreviewOk: false,   // last _mtRunPreview succeeded → safe to export current state
 };
+
+// Device-side mesh ops are heavy (SimplifyModifier / Laplacian over
+// 100k+ verts can pin a CPU thread for 5–10 s). Mobile and low-spec
+// browsers will freeze or OOM, so we only offer the "free, on device"
+// path when the hardware is realistically able to do the work.
+// Heuristic combines:
+//   - touch-only UA → almost always mobile/tablet
+//   - navigator.deviceMemory (Chromium): < 4 GB → no
+//   - navigator.hardwareConcurrency: < 4 cores → no
+// Conservative on purpose — we'd rather charge a credit than crash
+// the user's browser. The cloud path always works.
+function _deviceCanRunMeshClient() {
+  try {
+    const ua = (navigator.userAgent || '').toLowerCase();
+    if (/iphone|ipad|ipod|android|mobile|tablet/.test(ua)) return false;
+    const mem = navigator.deviceMemory;  // GB, Chromium only
+    if (typeof mem === 'number' && mem < 4) return false;
+    const cores = navigator.hardwareConcurrency;
+    if (typeof cores === 'number' && cores < 4) return false;
+    return true;
+  } catch { return false; }
+}
 
 function _mtCollectVals(body) {
   const vals = {};
@@ -6954,6 +6983,73 @@ function _mtClearHelpers() {
   mtState.helpers = [];
 }
 
+// Export the *current* mtState.origModel (which carries the preview's
+// updated geometries) to a binary GLB, POST it to the server, and
+// attach the resulting R2 URL to the active project as a new mesh
+// version. No credit charge — the server-side route validates auth +
+// magic bytes + size and only stores.
+async function _mtApplyOnDevice(opType) {
+  if (!mtState.origModel) throw new Error('no model loaded');
+  // Temporarily strip our boundary-line / debug overlays from the
+  // model before export — they don't belong in the saved GLB. Also
+  // zero out the centring transform we apply in _mtLoadMesh so the
+  // exported origin matches the source mesh.
+  const detachedHelpers = [];
+  for (const h of (mtState.helpers || [])) {
+    if (h.parent === mtState.origModel) {
+      mtState.origModel.remove(h);
+      detachedHelpers.push(h);
+    }
+  }
+  const savedPos = mtState.origModel.position.clone();
+  mtState.origModel.position.set(0, 0, 0);
+  try {
+    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+    const exporter = new GLTFExporter();
+    const arrayBuffer = await new Promise((resolve, reject) => {
+      exporter.parse(
+        mtState.origModel,
+        (result) => {
+          if (result instanceof ArrayBuffer) resolve(result);
+          else reject(new Error('GLTFExporter returned non-binary output'));
+        },
+        (err) => reject(err),
+        { binary: true, embedImages: true },
+      );
+    });
+    const bytes = new Uint8Array(arrayBuffer);
+    // Chunked base64 to avoid the "Maximum call stack" trap on big buffers.
+    let bin = '';
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    const b64 = btoa(bin);
+    const r = await fetch('/api/mesh-op/client-result', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ opType, glbBase64: b64 }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data?.success) {
+      throw new Error(data?.error || `HTTP ${r.status}`);
+    }
+    const newUrl = data.path || data.newPath || data.mesh_url;
+    showToast(`${opType} done (free, on device)`, 'success');
+    // Same "refresh meshes" path the cloud Apply takes.
+    const p = state.currentProject;
+    if (p && typeof populateWorkspace === 'function') {
+      // Best-effort: nudge the meshes list so the new GLB appears.
+      try { await populateWorkspace(p); } catch {}
+    }
+    return newUrl;
+  } finally {
+    mtState.origModel.position.copy(savedPos);
+    for (const h of detachedHelpers) mtState.origModel.add(h);
+  }
+}
+
 function _mtRunPreview() {
   if (!mtState.schema || !mtState.origModel) return;
   const body = document.getElementById('mt-body');
@@ -6962,6 +7058,7 @@ function _mtRunPreview() {
   mtState.vals = vals;
   const fn = mtState.schema.preview;
   _mtClearHelpers();
+  let allOk = !!fn;
   // Without preview fn, just restore originals (mesh stays static).
   for (const e of mtState.origGeoms) {
     if (!fn) { e.mesh.geometry = e.originalGeom; continue; }
@@ -6979,6 +7076,7 @@ function _mtRunPreview() {
         if (Array.isArray(out.helpers)) nextHelpers = out.helpers;
       }
       if (nextGeom) e.mesh.geometry = nextGeom;
+      else allOk = false;
       if (nextHelpers) {
         // Parent helpers to origModel so they inherit the centring +
         // Y-lift transform applied at load. Without this they sit at
@@ -6992,6 +7090,22 @@ function _mtRunPreview() {
     } catch (err) {
       console.warn('[mesh-tool] preview failed for', mtState.schema.title, err);
       e.mesh.geometry = e.originalGeom;
+      allOk = false;
+    }
+  }
+  mtState.lastPreviewOk = allOk;
+  // Update the "Apply on device" button's availability based on
+  // whether the current preview actually produced new geometry. If the
+  // preview was skipped (Decimate's expensivePreview before slider
+  // move, or removeCount > LIVE_MAX), the user can't apply locally.
+  const devBtn = document.getElementById('mt-apply-device');
+  if (devBtn) {
+    if (allOk) {
+      devBtn.disabled = false;
+      devBtn.title = 'Apply on this device — no credits used.';
+    } else {
+      devBtn.disabled = true;
+      devBtn.title = 'Move a slider to compute a preview before applying on device.';
     }
   }
   const status = document.getElementById('mt-preview-status');
@@ -7212,11 +7326,46 @@ function openMeshToolModal(toolName) {
     });
   }
 
+  // Optional second button: "Apply on this device (free)". Only added
+  // when the schema declares a pure-JS pipeline AND the device looks
+  // capable (mobile/low-RAM → cloud path only, so we don't crash the
+  // user's browser). Inserted left of the existing cloud Apply button.
+  const applyParent = applyBtn.parentElement;
+  let deviceBtn = document.getElementById('mt-apply-device');
+  if (deviceBtn) deviceBtn.remove();
+  const deviceCapable = _deviceCanRunMeshClient();
+  if (schema.supportsClientApply && deviceCapable && applyParent) {
+    deviceBtn = document.createElement('button');
+    deviceBtn.id = 'mt-apply-device';
+    deviceBtn.className = 'secondary-btn';
+    deviceBtn.style.cssText = 'margin:0; padding:8px 18px; width:auto;';
+    deviceBtn.textContent = '⚡ Apply on device (free)';
+    deviceBtn.title = 'Move a slider to compute a preview before applying on device.';
+    deviceBtn.disabled = true;
+    applyParent.insertBefore(deviceBtn, applyBtn);
+  }
+  // Relabel the cloud Apply button to make the trade-off explicit
+  // (clear that it costs 1 credit) when both options are visible.
+  const originalApplyLabel = applyBtn.textContent;
+  if (schema.supportsClientApply && deviceCapable) {
+    applyBtn.textContent = 'Apply on cloud (1 cr)';
+  } else if (schema.supportsClientApply && !deviceCapable) {
+    applyBtn.textContent = 'Apply on cloud (1 cr)';
+    applyBtn.title = 'This device is mobile/low-spec — only the cloud path is available.';
+  } else {
+    applyBtn.textContent = originalApplyLabel || 'Apply';
+  }
+
   const close = () => {
     modal.classList.add('hidden');
     applyBtn.onclick = null;
     cancelBtn.onclick = null;
     if (closeX) closeX.onclick = null;
+    // Reset the cloud Apply button to its original label so the next
+    // tool that doesn't relabel it starts from a clean state.
+    applyBtn.textContent = originalApplyLabel || 'Apply';
+    applyBtn.removeAttribute('title');
+    deviceBtn?.remove();
     // Restore original geoms (memory hygiene) + clear any helper
     // overlays the preview hook added (Fill Holes boundary lines, ...).
     for (const e of mtState.origGeoms) { e.mesh.geometry = e.originalGeom; }
@@ -7232,6 +7381,23 @@ function openMeshToolModal(toolName) {
     close();
     runMeshTool(toolName, params);
   };
+  if (deviceBtn) {
+    deviceBtn.onclick = async () => {
+      if (deviceBtn.disabled) return;
+      if (schema.confirm && !confirm(schema.confirm)) return;
+      const prevText = deviceBtn.textContent;
+      deviceBtn.disabled = true;
+      deviceBtn.textContent = 'Saving…';
+      try {
+        await _mtApplyOnDevice(toolName);
+        close();
+      } catch (e) {
+        showToast(`${toolName} (device) failed: ${e?.message || e}`, 'error', 5000);
+        deviceBtn.textContent = prevText;
+        deviceBtn.disabled = false;
+      }
+    };
+  }
   modal.classList.remove('hidden');
 
   // Init viewport then load mesh; preview kicks off once geoms are cached.

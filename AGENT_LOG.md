@@ -9136,3 +9136,37 @@ Pourquoi: l'utilisateur ouvrait l'onglet Decimate, voyait le slider à 15K
 décimation de plusieurs secondes qui freezait la tab. Maintenant le slider
 s'ouvre au compte réel (no-op), et drag down ne lance le live preview que
 si la réduction est < 20K vertex removals.
+
+## 2026-05-28 — Mesh tools: 2 boutons Apply "device free" / "cloud 1 cr"
+
+- Worker: nouvelle route `POST /api/mesh-op/client-result` (`worker.ts`).
+  Accepte un GLB encodé base64 produit par le browser (export GLTFExporter
+  du résultat preview), valide auth + magic bytes + size cap (100 MB),
+  stocke sur R2 sous `${user.id}/mesh-op/${ts}_${op}_client.glb`, log
+  l'opération avec `client_side: true, credits=0`. Pas d'appel Modal, pas
+  de spendCredits. Per-user call quota toujours appliqué (anti-abuse).
+- Renderer (`index2.js`):
+  - `_deviceCanRunMeshClient()`: détection UA mobile + deviceMemory < 4 GB
+    + hardwareConcurrency < 4 → false (cloud-only). Sinon true.
+  - Schemas Smooth/Decimate/Subdivide/Fix Normals/Fill Holes/Center:
+    flag `supportsClientApply: true`. Re-Texture/Align/Material/TRELLIS-2
+    restent cloud-only.
+  - Dans `openMeshToolModal`, si schema.supportsClientApply &&
+    deviceCapable: insère un 2e bouton "⚡ Apply on device (free)" à gauche
+    du bouton Apply existant. Bouton désactivé tant que le preview JS n'a
+    pas produit de géométrie (mtState.lastPreviewOk).
+  - Le bouton Apply existant est relabel en "Apply on cloud (1 cr)" pour
+    rendre l'arbitrage explicite. Sur appareil incapable, seul le bouton
+    cloud reste (tooltip: "your device is mobile/low-spec").
+  - `_mtApplyOnDevice(opType)`: export binary GLB via GLTFExporter
+    (origModel position réinitialisé à 0,0,0 + helpers détachés le temps
+    de l'export), encode base64 en chunks, POST `/api/mesh-op/client-result`,
+    refresh project meshes.
+
+Pourquoi: SimplifyModifier / Laplacian sur 100K+ verts plante sur mobile
+(OOM, freeze). Le critère "client gratuit / Modal payant" n'est viable
+que si on protège les appareils faibles. Le user choisit explicitement
+entre les deux quand son appareil le permet, sinon seul le cloud est
+proposé. Modal continue à facturer 1 cr (CPU $0.001 + R2 PUT + audit).
+Device = 0 cr (rien ne tourne côté Modal, le serveur ne fait que valider
++ stocker sur R2).
