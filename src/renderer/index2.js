@@ -5037,9 +5037,12 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
     if (!loupeEl || !loupeCanvas) return;
     const lCtx = loupeCanvas.getContext('2d');
     const rect = cpCanvas.getBoundingClientRect();
+    // Width and height need separate scale factors — using sx for cy
+    // skews the loupe by the H/W ratio on non-square images.
     const sx = cpCanvas.width / rect.width;
+    const sy = cpCanvas.height / rect.height;
     const cx = Math.round((e.clientX - rect.left) * sx);
-    const cy = Math.round((e.clientY - rect.top) * sx);
+    const cy = Math.round((e.clientY - rect.top) * sy);
     const srcHalf = 20;
     lCtx.clearRect(0, 0, 120, 120);
     lCtx.save();
