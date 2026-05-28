@@ -4853,9 +4853,11 @@ async function handleAdminActiveJobs(req: Request, env: Env): Promise<Response> 
   const guard = await _requireAdmin(req, env);
   if (guard instanceof Response) return guard;
   const sb = supabaseAdmin(env);
+  // Include 'running' for Modal-path jobs that flip past 'processing'
+  // mid-pipeline; without it those slip out of the Active list early.
   const { data, error } = await sb.from('jobs')
     .select('id, user_id, asset_type, mode, status, credit_cost, created_at, options, project_name')
-    .in('status', ['starting', 'processing', 'queued'])
+    .in('status', ['starting', 'processing', 'queued', 'running'])
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) return err(500, error.message);

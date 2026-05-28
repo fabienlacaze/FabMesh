@@ -5075,9 +5075,15 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
     if (!loupeEl || !loupeCanvas) return;
     const lCtx = loupeCanvas.getContext('2d');
     const rect = cpCanvas.getBoundingClientRect();
+    // The image can be non-square AND fit-letterboxed inside the
+    // container, so width and height need their own scale factors.
+    // Using sx for cy (the previous bug) skewed the loupe down by
+    // the H/W ratio — visible as "the loupe shows the gloves when
+    // I'm hovering the hand".
     const sx = cpCanvas.width / rect.width;
+    const sy = cpCanvas.height / rect.height;
     const cx = Math.round((e.clientX - rect.left) * sx);
-    const cy = Math.round((e.clientY - rect.top) * sx);
+    const cy = Math.round((e.clientY - rect.top) * sy);
     const srcHalf = 20;  // ~6× zoom (120 / 20)
     lCtx.clearRect(0, 0, 120, 120);
     lCtx.save();

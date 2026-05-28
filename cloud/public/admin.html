@@ -2171,6 +2171,10 @@
     document.querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.tab;
+        // Active is special: reload on EVERY click (not just the first
+        // one) so the user gets a fresh list immediately on tab switch
+        // instead of waiting for the 3 s polling interval.
+        if (t === 'active') { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'active'  && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadActiveJobs(); }
         if (t === 'users'   && !btn.dataset.loaded) { btn.dataset.loaded = '1'; loadUsers(); }
         if (t === 'audit'   && !btn.dataset.loaded) {
@@ -2194,13 +2198,15 @@
         }
       });
     });
-    // Poll active jobs every 5s when that tab is open. Endpoint only
-    // hits Supabase (no Modal, no Replicate), so 12 reqs/min is fine.
-    // silent=true so the table doesn't flash "Loading…" every cycle.
+    // Poll active jobs every 3s when that tab is open (was 5s — felt
+    // too slow when waiting for a freshly-started job to surface).
+    // Endpoint only hits Supabase (no Modal, no Replicate), so 20
+    // reqs/min is fine. silent=true so the table doesn't flash
+    // "Loading…" every cycle.
     setInterval(() => {
       const activeTab = document.querySelector('.tab.active');
       if (activeTab?.dataset?.tab === 'active') loadActiveJobs(true);
-    }, 5_000);
+    }, 3_000);
 
     // Live kill-switch summary at the top — clickable, jumps to the
     // Services tab. Refreshes every 30s so flipping a switch from
