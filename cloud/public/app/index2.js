@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { Viewer3D } from './lib/Viewer3D.js';
 
@@ -6570,6 +6571,33 @@ function _jsLaplacianSmooth(geom, iter, lambda) {
   return result;
 }
 
+// Edge-collapse decimation via three.js SimplifyModifier. Quadric
+// metric — keeps silhouette and important features. The modifier
+// counts VERTICES to remove, not triangles, so we estimate the
+// target vertex count from the target triangle count assuming a
+// closed manifold (Euler: F ≈ 2V → V ≈ F/2). Conservative: never
+// upscale, and bail early if the mesh is already smaller than target.
+const _decimator = new SimplifyModifier();
+function _jsDecimate(geom, targetFaces) {
+  const currentFaces = geom.index
+    ? Math.floor(geom.index.count / 3)
+    : Math.floor(geom.attributes.position.count / 3);
+  if (targetFaces >= currentFaces) return geom.clone();
+  const currentVerts = geom.attributes.position.count;
+  const targetVerts = Math.max(4, Math.ceil(targetFaces / 2));
+  const removeCount = Math.max(0, currentVerts - targetVerts);
+  if (removeCount === 0) return geom.clone();
+  // SimplifyModifier needs a non-indexed BufferGeometry. Returning
+  // the original on failure (e.g. unsupported attribute mix) so the
+  // preview just shows the source rather than going blank.
+  try {
+    return _decimator.modify(geom, removeCount);
+  } catch (e) {
+    console.warn('[decimate] preview failed:', e);
+    return geom.clone();
+  }
+}
+
 // Midpoint subdivision: 1 triangle → 4 triangles. Single-pass; recurse for levels.
 function _jsMidpointSubdivide(geom, levels) {
   let g = geom.clone();
@@ -6645,12 +6673,13 @@ const MESH_TOOL_SCHEMAS = {
   },
   decimate: {
     title: 'Decimate mesh',
-    subtitle: 'Reduce triangle count (Python only — no live preview).',
+    subtitle: 'Reduce triangle count — live preview (edge collapse, may pause briefly at high reduction).',
     needsImage: false,
     params: [
-      { id: 'target_faces', label: 'Target triangles', type: 'range', min: 100, max: 100000, step: 100, default: 5000 },
+      { id: 'target_faces', label: 'Target triangles', type: 'range', min: 200, max: 1_000_000, step: 100, default: 15000 },
     ],
     build: (vals) => [String(vals.target_faces)],
+    preview: (geom, vals) => _jsDecimate(geom, Math.max(200, vals.target_faces | 0)),
   },
   subdivide: {
     title: 'Subdivide mesh',
