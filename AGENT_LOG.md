@@ -9465,3 +9465,45 @@ Changes:
 
 Le slider est maintenant fluide (< 16ms par tick) et le reset est en
 1 clic.
+
+## 2026-05-28 — Set pivot point: Unreal-style draggable gizmo
+
+User: "j'aimerais pouvoir décaler le pivot point en dragant le logo du
+pivot point, il faut que ca fasse comme dans unreal (si je click sur
+les axes = déplacement orthonormé, si je click sur la boule
+déplacement perpendiculaire à l'écran)".
+
+Implementation: three.js `TransformControls` from
+`three/addons/controls/TransformControls.js`. Lazy-loaded the first
+time a schema sets `useTransformGizmo: true`. Provides exactly the
+Unreal Modeling Mode widget: 3 colored axis arrows + center sphere.
+Click axis = constrained to that axis; click sphere = free-move in
+view plane.
+
+Plumbing:
+- `_mtEnsureTransformGizmo()`: lazy import + dummy Object3D + drag
+  handler. dragging-changed disables OrbitControls to prevent the
+  camera from orbiting while the user holds the gizmo.
+- `change` event: reads dummy.position - basePivot → writes into the
+  X/Y/Z offset sliders → triggers _mtSchedulePreview. Only acts when
+  `tc.dragging === true` so our own programmatic moves (each tick)
+  don't loop back.
+- `_mtRunPreview` ensures the dummy is parented to origModel
+  (mesh-local space matches the schema's offset coords) and the TC
+  is in the scene; sets basePivot from preset-only, dummy position
+  from preset+offset.
+- The custom AxesHelper gizmo (`_makePivotGizmo`) is now suppressed
+  when the schema declares useTransformGizmo (avoid duplicate
+  visualization fighting with the TC overlay).
+- Modal close + _mtApplyOnDevice both detach the dummy/TC to avoid
+  leaking them into the exported GLB.
+
+Side report (Fill Holes deep-dive, for future port): Unreal uses
+FMinimalHoleFiller — iterative remesh pipeline (fan → remesh →
+collapse/flip/flatten/curvature passes), NOT Liepa 2003 directly.
+Critical pre-pass missing in our JS: FMergeCoincidentMeshEdges with
+escalating tolerance (bbox*1e-6 → 1e-3) matching by midpoint +
+opposite orientation. Bowtie handling uses tangent-plane smallest-
+loop turn. Liepa DP with lexicographic (max-dihedral, area) weight
+remains canonical for moderate loops (≤200 verts). Reference source:
+geometry3Sharp (C# precursor, Ryan Schmidt → Epic). On the TODO.
