@@ -7321,6 +7321,363 @@ function _atSetCameraView(view) {
 document.getElementById('ws-mesh-aligntex-btn')?.addEventListener('click', openAlignTexture);
 
 // ============================================================
+// PAINT EMISSIVE TOOL (desktop) — raycast-driven painting onto a
+// separate T_emissive texture. Mirrors the cloud build verbatim
+// except the Apply path: cloud uploads to R2 via the worker, desktop
+// saves locally via API.saveBuffer next to the source mesh.
+// ============================================================
+const PE_TEX_SIZE = 1024;
+
+const peState = {
+  renderer: null, scene: null, camera: null, controls: null,
+  rafId: null,
+  origModel: null,
+  meshes: [],
+  raycaster: null,
+  pointer: null,
+  canvas2d: null,
+  ctx2d: null,
+  texture: null,
+  brushColor: '#ffaa33',
+  brushSize: 40,
+  brushOpacity: 1.0,
+  brushFalloff: 0.5,
+  brushMode: 'paint',
+  intensity: 3.0,
+  isPainting: false,
+};
+
+async function _peInitViewport() {
+  if (peState.renderer) return;
+  const canvas = document.getElementById('pe-canvas');
+  const wrap = document.getElementById('pe-viewport-wrap');
+  if (!canvas || !wrap) return;
+  const w = wrap.clientWidth || 800;
+  const h = wrap.clientHeight || 560;
+  peState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  peState.renderer.setSize(w, h, false);
+  peState.renderer.setPixelRatio(window.devicePixelRatio);
+  peState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  peState.renderer.toneMappingExposure = 1.0;
+  peState.scene = new THREE.Scene();
+  peState.scene.background = new THREE.Color(0x0b0b14);
+  peState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+  peState.camera.position.set(0, 0.5, 2);
+  try {
+    peState.controls = new OrbitControls(peState.camera, canvas);
+    peState.controls.enableDamping = true;
+    peState.controls.mouseButtons = {
+      LEFT: null,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.ROTATE,
+    };
+  } catch (e) { console.error('[paint-emissive] OrbitControls error:', e); }
+  peState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(5, 8, 5);
+  peState.scene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+  fill.position.set(-5, 3, -5);
+  peState.scene.add(fill);
+  peState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  peState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
+  peState.raycaster = new THREE.Raycaster();
+  peState.pointer = new THREE.Vector2();
+  const tick = () => {
+    if (!document.getElementById('modal-paint-emissive')?.classList.contains('hidden')) {
+      peState.controls?.update();
+      peState.renderer.render(peState.scene, peState.camera);
+    }
+    peState.rafId = requestAnimationFrame(tick);
+  };
+  tick();
+  new ResizeObserver(() => {
+    const cw = wrap.clientWidth, ch = wrap.clientHeight;
+    if (cw > 0 && ch > 0) {
+      peState.renderer.setSize(cw, ch, false);
+      peState.camera.aspect = cw / ch;
+      peState.camera.updateProjectionMatrix();
+    }
+  }).observe(wrap);
+}
+
+function _peSetupCanvasAndBind() {
+  peState.canvas2d = document.createElement('canvas');
+  peState.canvas2d.width = PE_TEX_SIZE;
+  peState.canvas2d.height = PE_TEX_SIZE;
+  peState.ctx2d = peState.canvas2d.getContext('2d');
+  peState.ctx2d.fillStyle = '#000000';
+  peState.ctx2d.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
+  peState.texture = new THREE.CanvasTexture(peState.canvas2d);
+  peState.texture.colorSpace = THREE.SRGBColorSpace;
+  peState.texture.flipY = false;
+  peState.texture.name = 'T_emissive';
+  peState.texture.needsUpdate = true;
+  peState.meshes.forEach((entry) => {
+    const m = entry.mesh.material;
+    const mats = Array.isArray(m) ? m : [m];
+    entry.prev = mats.map((mat) => ({
+      mat,
+      emissiveMap: mat.emissiveMap,
+      emissiveIntensity: mat.emissiveIntensity,
+      emissive: mat.emissive?.clone(),
+    }));
+    mats.forEach((mat) => {
+      mat.emissiveMap = peState.texture;
+      mat.emissive = new THREE.Color(0xffffff);
+      mat.emissiveIntensity = peState.intensity;
+      mat.needsUpdate = true;
+    });
+  });
+}
+
+function _peRestoreMaterials() {
+  peState.meshes.forEach((entry) => {
+    if (!entry.prev) return;
+    entry.prev.forEach(({ mat, emissiveMap, emissiveIntensity, emissive }) => {
+      mat.emissiveMap = emissiveMap;
+      mat.emissiveIntensity = emissiveIntensity;
+      if (emissive) mat.emissive = emissive;
+      mat.needsUpdate = true;
+    });
+  });
+}
+
+async function _peLoadMesh(meshPath) {
+  if (peState.origModel) {
+    peState.scene.remove(peState.origModel);
+    peState.origModel = null;
+  }
+  peState.meshes = [];
+  // Desktop uses API.readMeshFile to bypass file:// CORS rules.
+  let buffer;
+  try {
+    buffer = await API.readMeshFile(meshPath);
+  } catch (e) {
+    console.error('[paint-emissive] readMeshFile failed:', e);
+    showToast('Mesh load failed: ' + (e?.message || e), 'error', 5000);
+    return;
+  }
+  if (!buffer) {
+    showToast('Mesh load returned empty buffer.', 'error', 5000);
+    return;
+  }
+  const loader = new GLTFLoader();
+  loader.parse(buffer, '', (gltf) => {
+    peState.origModel = gltf.scene;
+    peState.scene.add(peState.origModel);
+    const box = new THREE.Box3().setFromObject(peState.origModel);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    peState.origModel.position.sub(center);
+    peState.origModel.position.y += size.y / 2;
+    peState.camera.position.set(0, size.y * 0.5, maxDim * 2);
+    peState.controls?.target.set(0, size.y * 0.5, 0);
+    peState.controls?.update();
+    peState.origModel.traverse((child) => {
+      if (child.isMesh && child.geometry && child.material) {
+        peState.meshes.push({ mesh: child });
+      }
+    });
+    _peSetupCanvasAndBind();
+  });
+}
+
+function _peStampAtPointer(clientX, clientY) {
+  if (!peState.origModel || !peState.canvas2d || !peState.raycaster) return;
+  const canvas = peState.renderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width)  *  2 - 1;
+  const y = ((clientY - rect.top)  / rect.height) * -2 + 1;
+  peState.pointer.set(x, y);
+  peState.raycaster.setFromCamera(peState.pointer, peState.camera);
+  const hits = peState.raycaster.intersectObject(peState.origModel, true);
+  if (!hits.length) return;
+  const hit = hits[0];
+  if (!hit.uv) return;
+  const ctx = peState.ctx2d;
+  const px = hit.uv.x * PE_TEX_SIZE;
+  const py = (1 - hit.uv.y) * PE_TEX_SIZE;
+  const r = Math.max(1, peState.brushSize * 0.5);
+  const fall = Math.max(0, Math.min(1, peState.brushFalloff));
+  const innerColor = peState.brushMode === 'erase'
+    ? `rgba(0, 0, 0, ${peState.brushOpacity})`
+    : _peHexToRgba(peState.brushColor, peState.brushOpacity);
+  const edgeColor = peState.brushMode === 'erase'
+    ? 'rgba(0, 0, 0, 0)'
+    : _peHexToRgba(peState.brushColor, 0);
+  const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
+  grad.addColorStop(0, innerColor);
+  grad.addColorStop(1 - fall, innerColor);
+  grad.addColorStop(1, edgeColor);
+  ctx.globalCompositeOperation = peState.brushMode === 'erase' ? 'destination-out' : 'source-over';
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  peState.texture.needsUpdate = true;
+}
+
+function _peHexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function openPaintEmissive() {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  const modal = document.getElementById('modal-paint-emissive');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+
+  const $ = (id) => document.getElementById(id);
+  $('pe-color').oninput = (e) => { peState.brushColor = e.target.value; };
+  peState.brushColor = $('pe-color').value;
+  $('pe-intensity').oninput = (e) => {
+    const v = Number(e.target.value);
+    peState.intensity = v;
+    $('pe-intensity-val').textContent = String(v);
+    peState.meshes.forEach((entry) => {
+      const mats = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material];
+      mats.forEach((m) => { m.emissiveIntensity = v; m.needsUpdate = true; });
+    });
+  };
+  $('pe-brush-size').oninput = (e) => {
+    peState.brushSize = Number(e.target.value);
+    $('pe-brush-size-val').textContent = e.target.value;
+  };
+  $('pe-brush-opacity').oninput = (e) => {
+    peState.brushOpacity = Number(e.target.value) / 100;
+    $('pe-brush-opacity-val').textContent = e.target.value + '%';
+  };
+  $('pe-brush-falloff').oninput = (e) => {
+    peState.brushFalloff = Number(e.target.value) / 100;
+    $('pe-brush-falloff-val').textContent = e.target.value + '%';
+  };
+  const paintBtn = $('pe-mode-paint');
+  const eraseBtn = $('pe-mode-erase');
+  const setMode = (mode) => {
+    peState.brushMode = mode;
+    paintBtn.style.background = mode === 'paint' ? 'var(--accent, #5a4fcf)' : '';
+    paintBtn.style.color      = mode === 'paint' ? '#fff' : '';
+    eraseBtn.style.background = mode === 'erase' ? 'var(--accent, #5a4fcf)' : '';
+    eraseBtn.style.color      = mode === 'erase' ? '#fff' : '';
+  };
+  paintBtn.onclick = () => setMode('paint');
+  eraseBtn.onclick = () => setMode('erase');
+  $('pe-clear').onclick = () => {
+    if (!peState.ctx2d) return;
+    peState.ctx2d.fillStyle = '#000000';
+    peState.ctx2d.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
+    peState.texture.needsUpdate = true;
+  };
+
+  requestAnimationFrame(async () => {
+    await _peInitViewport();
+    const cv = peState.renderer.domElement;
+    const down = (e) => {
+      if (e.button !== 0) return;
+      peState.isPainting = true;
+      cv.setPointerCapture(e.pointerId);
+      _peStampAtPointer(e.clientX, e.clientY);
+    };
+    const move = (e) => {
+      if (!peState.isPainting) return;
+      _peStampAtPointer(e.clientX, e.clientY);
+    };
+    const up = (e) => {
+      peState.isPainting = false;
+      try { cv.releasePointerCapture(e.pointerId); } catch {}
+    };
+    cv.onpointerdown = down;
+    cv.onpointermove = move;
+    cv.onpointerup = up;
+    cv.onpointercancel = up;
+    _peLoadMesh(p.selectedMeshPath);
+  });
+
+  const close = (restore) => {
+    modal.classList.add('hidden');
+    if (restore) _peRestoreMaterials();
+  };
+  $('pe-cancel').onclick = () => close(true);
+  $('pe-apply-device').onclick = async () => {
+    const btn = $('pe-apply-device');
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await _peApplyOnDevice();
+      close(false);
+    } catch (e) {
+      showToast(`Paint Emissive failed: ${e?.message || e}`, 'error', 5000);
+      btn.textContent = orig;
+      btn.disabled = false;
+    }
+  };
+}
+
+async function _peApplyOnDevice() {
+  if (!peState.origModel) throw new Error('no model loaded');
+  const savedPos = peState.origModel.position.clone();
+  peState.origModel.position.set(0, 0, 0);
+  try {
+    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+    const exporter = new GLTFExporter();
+    const arrayBuffer = await new Promise((resolve, reject) => {
+      exporter.parse(
+        peState.origModel,
+        (result) => (result instanceof ArrayBuffer)
+          ? resolve(result)
+          : reject(new Error('GLTFExporter returned non-binary output')),
+        (err) => reject(err),
+        { binary: true, embedImages: true },
+      );
+    });
+    const bytes = new Uint8Array(arrayBuffer);
+    let bin = '';
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    const b64 = btoa(bin);
+    // Desktop: write the new GLB next to the source with an _emissive
+    // suffix + timestamp, then push the local path into project.meshes.
+    const p = state.currentProject;
+    const srcPath = (p?.selectedMeshPath || 'mesh.glb').replace(/\\/g, '/');
+    const meshDir = srcPath.split('/').slice(0, -1).join('/');
+    const origName = (srcPath.split('/').pop() || 'mesh.glb').replace(/\.[^.]+$/, '');
+    const newPath = (meshDir ? meshDir + '/' : '') + origName + '_emissive_' + Date.now() + '.glb';
+    const r = await API.saveBuffer({ path: newPath, base64: b64 });
+    if (!r || !r.success) {
+      throw new Error((r && r.error) || 'saveBuffer returned no success');
+    }
+    showToast('Paint Emissive saved!', 'success');
+    if (p) {
+      const filename = newPath.split('/').pop();
+      let size = 0;
+      try { const info = await API.getFileInfo(newPath); size = info?.size || 0; } catch {}
+      p.meshes = p.meshes || [];
+      p.meshes.unshift({ path: newPath, filename, size, mtime: Date.now() });
+      p.selectedMeshPath = newPath;
+      p.previewMeshPath = newPath;
+      if (typeof populateWorkspace === 'function') {
+        try { await populateWorkspace(p); } catch {}
+      }
+    }
+  } finally {
+    peState.origModel.position.copy(savedPos);
+  }
+}
+
+document.getElementById('ws-mesh-paint-emissive-btn')?.addEventListener('click', openPaintEmissive);
+
+// ============================================================
 // MATERIAL ADJUST MODAL
 // Sliders for brightness / saturation / contrast / emissive /
 // metallic / roughness on the selected mesh. Wraps
