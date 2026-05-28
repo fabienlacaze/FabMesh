@@ -9565,5 +9565,19 @@ Architecture (`cloud/public/app/index2.js`):
 
 Toolbar button added under Manual Tools: 💡 Paint Emissive.
 
-TODO: mirror to desktop renderer (src/renderer/) — feature must
-also exist on the Electron app per user request.
+## 2026-05-28 — Paint Emissive: desktop port
+
+User: "il faut aussi que le desktop le fasse". Mirrored the cloud
+implementation verbatim to `src/renderer/index2.html` (button + modal)
+and `src/renderer/index2.js` (peState + painting + GLTFExporter).
+
+Difference vs cloud build:
+- `_peLoadMesh` uses `API.readMeshFile()` instead of `fetch()` to
+  bypass file:// CORS on Electron.
+- `_peApplyOnDevice` writes via `API.saveBuffer({ path, base64 })`
+  to a sibling file `<orig>_emissive_<timestamp>.glb` next to the
+  source mesh, then pushes that local path into `p.meshes`.
+
+The painted T_emissive texture is embedded in the GLB on both
+builds, so the saved file is portable between desktop and cloud
+viewers.
