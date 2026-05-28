@@ -9213,3 +9213,25 @@ remplit pas. Causes possibles: (1) ce sont des artefacts texture/back-face
 pas de la géométrie (cas le plus probable sur sortie Trellis2), ou
 (2) les trous sont plus grands que les 100 edges du default. Le status
 permet maintenant de distinguer les deux cas sans deviner.
+
+## 2026-05-28 — Fill Holes: weld-by-position avant détection boundary
+
+User montre Fill Holes sur l'orc — le mesh entier apparaît en vert
+(=tous les edges sont marqués comme boundary). Cause: les GLB sortis
+de Trellis2 splittent les vertices à chaque seam UV → la même edge
+physique apparaît avec des indices DIFFÉRENTS de chaque côté du seam
+→ `undirectedCount[key] === 1` pour chacun de ces edges → boundary.
+
+Fix (`_jsFillHoles`):
+- Quantize positions (1e-4) en "groups" comme le smooth tool.
+- Edge counting fait en GROUP space (pas en vertex space). Une edge
+  seam = 1 paire de groups partagée par 2 triangles → count=2 →
+  non-boundary. Une vraie edge boundary = 1 paire avec count=1.
+- Boundary loop walking dans group space.
+- Triangulation: chaque group de la loop a un "représentant" (le
+  premier vertex qu'on a vu dans ce group). Le centroid + les
+  triangles utilisent ces représentants.
+
+Pourquoi: identique au bug de Smooth (résolu mois dernier). On
+généralise la stratégie weld-groups à tous les algos qui se basent
+sur la topologie locale.
