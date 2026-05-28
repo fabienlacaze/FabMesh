@@ -10,6 +10,12 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Admin tabs — auto-refresh badge counts)
+
+- Single 30s interval refreshes every admin tab badge (Marketplace pending, Active running, Messages unread) so the pill numbers stay in sync with the backend without the admin needing to F5 or click the tab.
+- Errors are swallowed; badges > 99 display "99+".
+- Existing per-tab polling (Messages 60s, Modal credits 60s) is kept as-is.
+
 ## 2026-05-29 (Home — drop image/mesh creates project pre-filled with asset)
 
 - Dropping an image (.png/.jpg/.webp) or a mesh (.glb/.obj/.fbx/.stl/.ply) on the home "Drop image or mesh file to import" zone now opens the New Project modal pre-filled with the filename stem as the project name.
