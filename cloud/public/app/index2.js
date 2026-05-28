@@ -5949,6 +5949,10 @@ document.getElementById('paint-emissive-toggle')?.addEventListener('click', () =
   }
 });
 
+// Recenter (fit-to-view): reset zoom + pan via CanvasManager.
+document.getElementById('paint-recenter')?.addEventListener('click', () => {
+  if (_paintMgr && typeof _paintMgr.recenter === 'function') _paintMgr.recenter();
+});
 // Close / Cancel
 document.getElementById('paint-close-x')?.addEventListener('click', _closePaint);
 document.getElementById('paint-cancel')?.addEventListener('click', _closePaint);

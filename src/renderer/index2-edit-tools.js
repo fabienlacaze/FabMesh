@@ -302,6 +302,9 @@
 
     cloneModal.classList.remove('hidden');
     _cloneMgr.activate();
+    // Wire the recenter button (idempotent — re-assigning onclick is fine).
+    var rcBtn = document.getElementById('clone-recenter');
+    if (rcBtn) rcBtn.onclick = function () { if (_cloneMgr && _cloneMgr.recenter) _cloneMgr.recenter(); };
     // Reset clone-specific state
     cloneState.sourcePoint = null;
     cloneState.offset = null;
@@ -315,7 +318,20 @@
     if (sm) sm.style.display = 'none';
 
     requestAnimationFrame(function () {
-      _cloneMgr.loadImage('file:///' + imagePath.replace(/\\/g, '/') + '?t=' + Date.now()).then(function () {
+      // imagePath is either a desktop filesystem path (needs file:///
+      // prefix + slash conversion) OR a cloud URL (http://, https://,
+      // blob:, data:). The legacy code assumed desktop only; on cloud
+      // that produced file:///https:/... which fails to load → empty
+      // sourceImageData → "no clone happens when I paint" symptom.
+      var srcUrl = /^(?:https?|blob|data|file):/i.test(imagePath)
+        ? imagePath
+        : 'file:///' + imagePath.replace(/\\/g, '/');
+      // Cache-bust only for filesystem URLs — blob: / data: don't accept
+      // query strings.
+      if (/^(?:https?|file):/i.test(srcUrl)) {
+        srcUrl += (srcUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+      }
+      _cloneMgr.loadImage(srcUrl).then(function () {
         cloneState.sourceImageData = _cloneMgr.ctx.getImageData(0, 0, _cloneMgr.w, _cloneMgr.h);
       }).catch(function (e) {
         console.error('[clone] source image load failed:', e);
@@ -590,16 +606,29 @@
 
     maskModal.classList.remove('hidden');
     _maskMgr.activate();
+    var mrcBtn = document.getElementById('mask-recenter');
+    if (mrcBtn) mrcBtn.onclick = function () { if (_maskMgr && _maskMgr.recenter) _maskMgr.recenter(); };
     // Wait one frame so the container has its layout dimensions before loading
     requestAnimationFrame(function () {
-      _maskMgr.loadImage('file:///' + imagePath.replace(/\\/g, '/') + '?t=' + Date.now()).then(function () {
+      // Same cloud-vs-desktop URL handling as the clone tool —
+      // file:/// for filesystem paths, untouched http/blob/data URLs
+      // for cloud. Without this fix Mask Tool on cloud silently fails
+      // to load the base image (file:///https:/...) and Apply produces
+      // an empty mask.
+      var src = /^(?:https?|blob|data|file):/i.test(imagePath)
+        ? imagePath
+        : 'file:///' + imagePath.replace(/\\/g, '/');
+      if (/^(?:https?|file):/i.test(src)) {
+        src += (src.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+      }
+      _maskMgr.loadImage(src).then(function () {
         // Clear the overlay after base image loads
         maskOverlayCtx.clearRect(0, 0, _maskMgr.w, _maskMgr.h);
         updateMaskApplyBtn();
       }).catch(function (e) {
         console.error('[mask] base image load failed:', e);
         if (typeof showToast === 'function')
-          showToast('Mask tool: image load failed', 'error', 4000);
+          showToast('mask: image load failed: ' + (e && e.message || e), 'error', 5000);
       });
     });
   }
