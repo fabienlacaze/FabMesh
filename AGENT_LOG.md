@@ -9235,3 +9235,23 @@ Fix (`_jsFillHoles`):
 Pourquoi: identique au bug de Smooth (résolu mois dernier). On
 généralise la stratégie weld-groups à tous les algos qui se basent
 sur la topologie locale.
+
+## 2026-05-28 — Auth: refresh-on-401 dans patchedFetch (idle-tab fix)
+
+User toujours déconnecté malgré le setInterval refresh — parce que :
+- Browsers throttle `setInterval` sur tabs hidden (1 fire/min max,
+  parfois moins). Un onglet idle 1h+ ne refresh PAS toutes les 50 min.
+- Au retour de l'utilisateur, le mfm-session cookie est expiré, la
+  première requête API retourne 401, et le patchedFetch existant
+  redirigeait IMMÉDIATEMENT vers /login sans tenter refresh.
+
+Fix (`cloud-overrides.js`):
+- Sur 401 same-origin /api/* (sauf /api/auth/* pour éviter les boucles):
+  appelle /api/auth/refresh, puis REPLAY la requête originale. Ne
+  redirige sur /login que si refresh+retry échouent tous les deux.
+- Promise `_refreshInFlight` partagée: si 5 requêtes hit 401 en même
+  temps, on ne fait qu'un seul refresh, pas 5.
+
+Combiné avec le setInterval (le "happy path" pour tabs actifs), le
+refresh-on-401 couvre le cas "tab idle puis retour" qui était le
+trou dans le filet.
