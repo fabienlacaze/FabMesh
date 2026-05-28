@@ -9581,3 +9581,34 @@ Difference vs cloud build:
 The painted T_emissive texture is embedded in the GLB on both
 builds, so the saved file is portable between desktop and cloud
 viewers.
+
+## 2026-05-28 — Fill Holes v5: degenerate strip + MergeCoincidentEdges
+
+User: "fill hole ne marche pas même après fix normal" — Fill Holes
+still reports "No boundary edges found" on the orc with visible black
+patches.
+
+Following the Unreal/geometry3Sharp report from the earlier agent
+run, ported the two critical pre-passes our v4 was missing:
+
+1. **Strip degenerate triangles** before counting. Trellis2 marching
+   cubes emits many zero-area triangles (cross product magnitude
+   < bbox*1e-12). They show up as false count===1 edges that pollute
+   the boundary candidate set.
+
+2. **MergeCoincidentEdges with midpoint + opposite orientation
+   matching**. After the position-quantize weld (Step 3), some seam
+   edges still slip past as count===1 because their endpoints
+   missed the weld tolerance. For each candidate boundary edge,
+   spatial-hash search a generous tolerance (bbox/2000 = 0.05% of
+   mesh) for a candidate with REVERSED orientation whose endpoints
+   match in position space. If found, mark BOTH as matched — they
+   were a seam pair, not a real boundary. This is UE's
+   FMergeCoincidentMeshEdges in essence (single tolerance level for
+   now; escalating 1e-6 → 1e-3 deferred).
+
+Only the surviving (unmatched) candidates feed boundarySuccessors
+for loop walking. Logic from Step 7 onward unchanged.
+
+Desktop renderer is untouched — it uses the Python pipeline for
+fill_holes; only cloud has the JS detector.
