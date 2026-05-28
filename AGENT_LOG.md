@@ -9528,3 +9528,42 @@ Fix in `_mtRunPreview` and `_mtDisableTransformGizmo`:
 Also renamed the workspace toolbar button "Center" → "Pivot" per user
 request (the schema-side title was already "Set pivot point", the
 toolbar label was the legacy one).
+
+## 2026-05-28 — Paint Emissive tool (web cloud version)
+
+User wants to paint emissive zones (lamps, windows, runes) on a mesh,
+following the same convention as their apovivor BuildingSlicer
+plugin: dedicated `T_emissive` texture + color tint + intensity
+scalar, all wired to `material.emissiveMap` + `emissiveIntensity` on
+MeshStandardMaterial.
+
+Sub-agent confirmed that BuildingSlicer doesn't do interactive
+painting itself (it auto-detects an externally-authored mask). So
+the brush + raycast → UV → canvas pipeline is brand new for us.
+
+Architecture (`cloud/public/app/index2.js`):
+- New modal `modal-paint-emissive` with a 3D viewport + brush
+  controls (color picker, intensity 0.1..20, size 2..200 px, opacity
+  0..100%, soft falloff 0..100%, paint/erase mode, clear all).
+- Dedicated viewport state `peState` (separate from mesh-tool modal
+  to avoid coupling), own OrbitControls with LEFT=null (reserved
+  for painting), RIGHT=rotate, MIDDLE=pan.
+- `_peSetupCanvasAndBind`: builds a 1024×1024 black canvas, wraps it
+  in CanvasTexture (name `T_emissive`, flipY=false for glTF), binds
+  to every material's emissiveMap. Saves previous emissive state so
+  Cancel restores cleanly.
+- `_peStampAtPointer`: raycaster.intersectObject → hit.uv → draw a
+  radial-gradient circle at uv × 1024 on the canvas, mode='source-over'
+  for paint, 'destination-out' for erase. Falloff slider controls
+  how much of the brush radius is gradient vs solid.
+- Color picker output goes into the canvas pixel; emissiveIntensity
+  slider drives the material scalar (matches BuildingSlicer's
+  EmissiveColor × EmissiveStrength split).
+- Apply (free, device-only): GLTFExporter binary export including
+  embedded T_emissive PNG → POST to /api/mesh-op/client-result →
+  push new URL into project meshes.
+
+Toolbar button added under Manual Tools: 💡 Paint Emissive.
+
+TODO: mirror to desktop renderer (src/renderer/) — feature must
+also exist on the Electron app per user request.
