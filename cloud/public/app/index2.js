@@ -6888,76 +6888,22 @@ function _jsMidpointSubdivide(geom, levels) {
 }
 
 // Center: translate vertices so X/Z centroid = 0, min Y = 0.
-// Recompute vertex normals, weld them across UV seams, AND flip any
-// triangle whose face normal points INWARD (toward the centroid of
-// the mesh). Reversed-winding triangles are what causes the "black
-// patches" on a closed mesh — geometry IS there, just facing the
-// wrong way → back-face culling renders them as voids.
+// Recompute vertex normals AND weld them across position-welded
+// groups. Without this, vertices duplicated at UV seams (every island
+// in a Trellis2 GLB) get independent normals → each side of the seam
+// gets normals averaged over its own incident faces → lighting cracks
+// visibly at every seam. Welding flattens those discontinuities while
+// keeping the UV split intact (positions/UVs are untouched, only the
+// normal attribute is rewritten).
 //
-// Welding: vertices duplicated at UV seams (every island in a Trellis2
-// GLB) used to get independent normals → lighting cracks at seams.
-// Welding normals across position-welded groups kills those cracks.
-//
-// Positions and UVs are not touched; only the normal attribute is
-// rewritten and the index array gets its winding flipped on offending
-// triangles.
+// Note: an earlier version of this function also tried to flip
+// inward-facing triangles via an AABB-centroid heuristic, but that
+// caught too many false positives on concave/articulated meshes (orc
+// arms, armour plates, etc.) and visibly broke the rendering. Until
+// we have a real local-coherence flip pass (compare each triangle
+// normal against its neighbors' average), we leave winding alone.
 function _jsFixNormalsWelded(geom) {
   const result = geom.clone();
-
-  // ── Pass 1: flip triangles whose face normal points toward the
-  // mesh centroid. We compare each triangle normal against the
-  // direction from the triangle to the centroid; if they're in the
-  // same hemisphere (dot > 0), the triangle is inward-facing and we
-  // swap two of its indices to reverse the winding.
-  if (result.index) {
-    const pos = result.attributes.position;
-    const arr = pos.array;
-    const idx = result.index.array;
-    // Centroid of the mesh's AABB — close enough for convex-ish
-    // characters; for very concave shapes the heuristic is weaker
-    // but still right for most surface triangles.
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let i = 0; i < pos.count; i++) {
-      const x = arr[i*3], y = arr[i*3+1], z = arr[i*3+2];
-      if (x < minX) minX = x; if (x > maxX) maxX = x;
-      if (y < minY) minY = y; if (y > maxY) maxY = y;
-      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-    }
-    const ccx = (minX + maxX) / 2;
-    const ccy = (minY + maxY) / 2;
-    const ccz = (minZ + maxZ) / 2;
-    // Mutate the index in place — we own the clone.
-    const tri = Math.floor(idx.length / 3);
-    let flipped = 0;
-    for (let t = 0; t < tri; t++) {
-      const i0 = idx[t*3], i1 = idx[t*3+1], i2 = idx[t*3+2];
-      const ax = arr[i0*3], ay = arr[i0*3+1], az = arr[i0*3+2];
-      const bx = arr[i1*3], by = arr[i1*3+1], bz = arr[i1*3+2];
-      const cx = arr[i2*3], cy = arr[i2*3+1], cz = arr[i2*3+2];
-      // Triangle face normal = (B-A) × (C-A).
-      const ex = bx - ax, ey = by - ay, ez = bz - az;
-      const fx = cx - ax, fy = cy - ay, fz = cz - az;
-      const nx = ey * fz - ez * fy;
-      const ny = ez * fx - ex * fz;
-      const nz = ex * fy - ey * fx;
-      // Direction from triangle centroid → mesh centroid.
-      const tcx = (ax + bx + cx) / 3;
-      const tcy = (ay + by + cy) / 3;
-      const tcz = (az + bz + cz) / 3;
-      const dx = ccx - tcx, dy = ccy - tcy, dz = ccz - tcz;
-      // If the face normal points toward the mesh centroid, swap
-      // indices 1 and 2 to flip the winding.
-      if (nx * dx + ny * dy + nz * dz > 0) {
-        idx[t*3+1] = i2;
-        idx[t*3+2] = i1;
-        flipped++;
-      }
-    }
-    if (flipped) result.index.needsUpdate = true;
-  }
-
-  // ── Pass 2: standard normal recompute (now using corrected winding).
   result.computeVertexNormals();
   const pos = result.attributes.position;
   const norm = result.attributes.normal;
@@ -7149,8 +7095,8 @@ const MESH_TOOL_SCHEMAS = {
     preview: (geom, vals) => _jsMidpointSubdivide(geom, Math.max(1, vals.levels | 0)),
   },
   fix_normals: {
-    title: 'Fix normals',
-    subtitle: 'Flip inward-facing triangles (= black patches on a "closed" mesh) + recompute and weld vertex normals across UV seams (= criss-cross plate shading). Run this first when a fresh Trellis2 mesh has dark voids or shading cracks.',
+    title: 'Fix normals (weld UV seams)',
+    subtitle: 'Recompute vertex normals + weld them across UV seams — kills the criss-cross / cracked-plate shading on a fresh Trellis2 mesh. (Black patches that look like voids are usually triangles with reversed winding — a flip pass is on the todo list; for now regenerate the mesh if you see large dark voids.)',
     needsImage: false,
     supportsClientApply: true,
     params: [],
