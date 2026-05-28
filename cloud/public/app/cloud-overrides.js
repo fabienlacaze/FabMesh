@@ -1048,10 +1048,91 @@
     firstHeader.parentNode.insertBefore(box, firstHeader);
   }
 
+  /* ──────────────────────────────────────────────────────────────────
+   * Marketplace publish flow — wires the "Publish to marketplace"
+   * button in the mesh step to a small modal collecting title,
+   * description, price, licence. POSTs to /api/market/publish and
+   * tells the user the listing is pending admin review.
+   * ────────────────────────────────────────────────────────────────── */
+  function installMarketplacePublish() {
+    const btn = document.getElementById('ws-mesh-publish-btn');
+    const modal = document.getElementById('modal-publish-mesh');
+    const cancel = document.getElementById('pub-cancel');
+    const go = document.getElementById('pub-go');
+    if (!btn || !modal) return;
+    // Close helper — clears form so the next open starts fresh.
+    const close = () => modal.classList.add('hidden');
+    cancel?.addEventListener('click', close);
+    modal.addEventListener('click', (ev) => { if (ev.target === modal) close(); });
+    btn.addEventListener('click', () => {
+      const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
+      if (!m) {
+        if (typeof showToast === 'function') showToast('Pick a mesh first.', 'error');
+        return;
+      }
+      // Pre-fill the title from the project name for convenience.
+      const p = (typeof state !== 'undefined') ? state?.currentProject : null;
+      const titleInput = document.getElementById('pub-title');
+      if (titleInput && !titleInput.value) titleInput.value = p?.name || '';
+      modal.classList.remove('hidden');
+    });
+    go?.addEventListener('click', async () => {
+      const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
+      if (!m) return;
+      const title       = document.getElementById('pub-title')?.value.trim() || '';
+      const description = document.getElementById('pub-description')?.value.trim() || '';
+      const priceUSD    = Math.max(0, Number(document.getElementById('pub-price')?.value) || 0);
+      const licence     = document.getElementById('pub-licence')?.value || 'personal';
+      if (!title) {
+        if (typeof showToast === 'function') showToast('Title is required.', 'error');
+        return;
+      }
+      // m.id is the Supabase jobs.id (we set it in handleProjects).
+      const jobId = m.id || m.jobId;
+      if (!jobId) {
+        if (typeof showToast === 'function') showToast('This mesh has no job ID — cannot publish.', 'error', 4000);
+        return;
+      }
+      go.disabled = true;
+      go.textContent = 'Submitting…';
+      try {
+        const r = await fetch('/api/market/publish', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            jobId, title, description,
+            price_cents: Math.round(priceUSD * 100),
+            currency: 'USD', licence,
+          }),
+        });
+        if (!r.ok) {
+          let body = '';
+          try { body = await r.text(); } catch {}
+          throw new Error('HTTP ' + r.status + (body ? ' — ' + body.slice(0, 200) : ''));
+        }
+        close();
+        if (typeof showToast === 'function') {
+          showToast('✓ Submitted for review — an admin will approve it shortly.', 'success', 5000);
+        }
+      } catch (e) {
+        if (typeof showToast === 'function') {
+          showToast('Publish failed: ' + (e?.message || e), 'error', 6000);
+        }
+      } finally {
+        go.disabled = false;
+        go.textContent = 'Submit for review';
+      }
+    });
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyOverrides);
+    document.addEventListener('DOMContentLoaded', () => {
+      applyOverrides();
+      installMarketplacePublish();
+    });
   } else {
     applyOverrides();
+    installMarketplacePublish();
   }
 
   // The Settings / About modals sometimes lazy-inject content; re-apply

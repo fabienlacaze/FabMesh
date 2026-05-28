@@ -18,10 +18,15 @@ interface Project {
   id: string; asset_type: string; mode: string; status: string;
   mesh_url: string | null; createdAt: string;
 }
+interface Reply {
+  id: string; subject: string; message: string;
+  reply_body: string; replied_at: string; created_at: string;
+}
 
 export default function AccountPage() {
   const [user, setUser] = useState<User | null>(null);
   const [jobs, setJobs] = useState<Project[]>([]);
+  const [replies, setReplies] = useState<Reply[]>([]);
   const [loading, setLoading] = useState(true);
   const [paidBanner, setPaidBanner] = useState(false);
 
@@ -35,6 +40,15 @@ export default function AccountPage() {
       const pjRes = await fetch('/api/projects');
       const pj = pjRes.ok ? await pjRes.json() : { projects: [] };
       setJobs((pj.projects ?? []).slice(0, 20));
+      // Replies from support — silent failure if endpoint missing
+      // (older deploys), the rest of the page still renders.
+      try {
+        const rpRes = await fetch('/api/me/replies');
+        if (rpRes.ok) {
+          const rp = await rpRes.json();
+          setReplies(rp.replies ?? []);
+        }
+      } catch {}
       setLoading(false);
     })();
   }, []);
@@ -109,6 +123,33 @@ export default function AccountPage() {
           </table>
         )}
       </div>
+
+      {/* Replies from support — the admin's response to any contact-form
+          message you sent. Stored on the platform, never delivered to
+          email, so the admin's perso address stays private. */}
+      {replies.length > 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 12 }}>Replies from support</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {replies.map((r) => (
+              <div key={r.id} style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{r.subject}</div>
+                <div style={{ color: 'var(--text-2)', fontSize: 11, marginBottom: 10 }}>
+                  You wrote on {new Date(r.created_at).toLocaleString('fr')} · replied {new Date(r.replied_at).toLocaleString('fr')}
+                </div>
+                <details>
+                  <summary style={{ cursor: 'pointer', color: 'var(--text-2)', fontSize: 12, marginBottom: 8 }}>Your message</summary>
+                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--bg-1)', padding: 10, borderRadius: 6, fontSize: 12, fontFamily: 'inherit', margin: '8px 0 0' }}>{r.message}</pre>
+                </details>
+                <div style={{ marginTop: 10, padding: 10, background: 'rgba(76,175,80,0.1)', borderLeft: '3px solid var(--ok)', borderRadius: '0 6px 6px 0' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 4 }}>Reply</div>
+                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13, fontFamily: 'inherit', margin: 0 }}>{r.reply_body}</pre>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* MFA TOTP enrolment — protects the Supabase login itself
           (separate layer from the /admin TOTP for the admin panel). */}
