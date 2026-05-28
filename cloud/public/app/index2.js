@@ -322,6 +322,8 @@ function showToast(message, type = 'info', durationMs = 3000) {
     setTimeout(() => toast.remove(), 300);
   }, durationMs);
 }
+// expose for cloud-overrides.js (classic script, no module scope)
+window.showToast = showToast;
 
 function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
   return new Promise((resolve) => {
@@ -6926,6 +6928,8 @@ function getCurrentMeshObj() {
   if (!path_) return null;
   return p.meshes.find(m => m.path === path_) || null;
 }
+// expose for cloud-overrides.js (classic script, no module scope)
+window.getCurrentMeshObj = getCurrentMeshObj;
 
 document.getElementById('ws-mesh-blender-btn')?.addEventListener('click', async () => {
   const m = getCurrentMeshObj();

@@ -1349,6 +1349,87 @@ async function handleMePublishedAssets(req: Request, env: Env): Promise<Response
   return json({ ok: true, items });
 }
 
+/** GET /api/me/earnings — totals + recent sales for the seller. Walks
+ *  _market/sales/, filters by seller_user_id, sums payout_credits and
+ *  amount_cents per currency. Returns the 10 most recent sales hydrated
+ *  with the listing title. */
+async function handleMeEarnings(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return json({ ok: true, total_credits_paid: 0, sales_count: 0, by_currency: {}, recent: [] });
+
+  let totalCredits = 0;
+  let salesCount = 0;
+  const byCurrency: Record<string, number> = {};
+  const all: Array<{
+    sale_id: string;
+    listing_id: string;
+    amount_cents: number;
+    currency: string;
+    payout_credits: number;
+    paid_at: string;
+  }> = [];
+
+  let cursor: string | undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_market/sales/', limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const s = JSON.parse(txt) as Record<string, unknown>;
+        if (s?.seller_user_id !== user.id) continue;
+        salesCount += 1;
+        const credits = Number(s.payout_credits || 0);
+        totalCredits += credits;
+        const cur = String(s.currency || 'USD').toUpperCase();
+        byCurrency[cur] = (byCurrency[cur] || 0) + Number(s.amount_cents || 0);
+        all.push({
+          sale_id: String(s.id || ''),
+          listing_id: String(s.listing_id || ''),
+          amount_cents: Number(s.amount_cents || 0),
+          currency: cur,
+          payout_credits: credits,
+          paid_at: String(s.paid_at || s.created_at || ''),
+        });
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  all.sort((a, b) => b.paid_at.localeCompare(a.paid_at));
+  const top = all.slice(0, 10);
+  const recent: Array<Record<string, unknown>> = [];
+  for (const r of top) {
+    let title = '';
+    try {
+      const lTxt = await r2GetText(env, `_market/listings/${r.listing_id}.json`);
+      if (lTxt) {
+        const l = JSON.parse(lTxt) as Record<string, unknown>;
+        title = String(l.title || '');
+      }
+    } catch {}
+    recent.push({
+      sale_id: r.sale_id,
+      listing_id: r.listing_id,
+      listing_title: title,
+      amount_cents: r.amount_cents,
+      currency: r.currency,
+      payout_credits: r.payout_credits,
+      paid_at: r.paid_at,
+    });
+  }
+
+  return json({
+    ok: true,
+    total_credits_paid: totalCredits,
+    sales_count: salesCount,
+    by_currency: byCurrency,
+    recent,
+  });
+}
+
 /** GET /api/me/replies — current user only. Returns every contact
  *  message they sent that has an admin reply attached, so they can
  *  read the response on /account without us emailing them. */
@@ -1597,7 +1678,7 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
   // Reject duplicate listings for the same asset.
   const existing = await _loadAllListings(env);
   if (existing.some((l) => l.asset_url === assetUrl && l.status !== 'rejected')) {
-    return err(409, 'this asset is already listed');
+    return err(409, 'You already published this asset. View it on /market or remove it from /admin to re-list.');
   }
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const listing: MarketListing = {
@@ -1761,6 +1842,16 @@ async function handleAdminMarketReject(req: Request, env: Env, id: string): Prom
 
 const MARKET_COMMISSION_PCT = 30;  // platform fee, see comment above
 
+// Seller payout ratio: mirrors the best buyer pack (studio = 50EUR -> 350
+// credits = 7 credits/EUR) so a sale always gives the seller at least
+// what they would have bought for the same cash, plus a +20% retention
+// bonus to keep them publishing on the platform instead of cashing out.
+const SELLER_CREDITS_PER_EUR = 7;
+const SELLER_CREDIT_BONUS_PCT = 20;
+function _sellerPayoutCredits(sellerCents: number): number {
+  return Math.round(sellerCents * SELLER_CREDITS_PER_EUR * (100 + SELLER_CREDIT_BONUS_PCT) / 10000);
+}
+
 function _stripeCheckoutSessionsUrl(): string {
   return 'https://api.stripe.com/v1/checkout/sessions';
 }
@@ -1907,6 +1998,19 @@ async function _processMarketPurchase(env: Env, sess: {
     };
     await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
                          { httpMetadata: { contentType: 'application/json' } });
+    // Seller payout: credit the seller's balance. Idempotence is already
+    // guaranteed by the seenKey HEAD check at the top of this function,
+    // so we won't double-pay on a retried webhook delivery.
+    const payoutCredits = _sellerPayoutCredits(sellerNet);
+    if (payoutCredits > 0 && listing.user_id) {
+      const newBal = await addCredits(env, listing.user_id, payoutCredits);
+      const saleAny = sale as Record<string, unknown>;
+      saleAny.payout_status = newBal == null ? 'failed' : 'paid_credits';
+      saleAny.payout_credits = payoutCredits;
+      saleAny.payout_at = new Date().toISOString();
+      await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
+                           { httpMetadata: { contentType: 'application/json' } });
+    }
     // Ownership index — one object per (buyer, listing). Quick HEAD
     // check in /api/market/owned and /api/market/download.
     await env.MESHES.put(`_market/owners/${listingId}/${userId}.json`,
@@ -6444,6 +6548,7 @@ export default {
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/published-assets'   && method === 'GET')  return await handleMePublishedAssets(req, env);
+        if (pathname === '/api/me/earnings'           && method === 'GET')  return await handleMeEarnings(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);

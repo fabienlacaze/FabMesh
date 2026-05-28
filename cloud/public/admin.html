@@ -2395,9 +2395,27 @@
         loadMarketListings();
       } catch (e) { alert('Approve failed: ' + (e?.message || e)); }
     }
-    async function rejectListing(id) {
-      const reason = window.prompt('Reason for rejection (optional, shown to author):');
-      if (reason === null) return;
+    function rejectListing(id) {
+      const existing = document.getElementById('reject-modal-' + id);
+      if (existing) { existing.remove(); return; }
+      const overlay = document.createElement('div');
+      overlay.id = 'reject-modal-' + id;
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:9999; padding:20px;';
+      overlay.innerHTML = `
+        <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:10px; padding:20px; max-width:520px; width:100%; display:flex; flex-direction:column; gap:12px;">
+          <h3 style="margin:0;">Reject listing</h3>
+          <p style="margin:0; font-size:12px; color:var(--text-2);">Reason is optional and will be shown to the author.</p>
+          <textarea id="reject-body-${id}" rows="5" placeholder="e.g. Image violates guidelines…" style="padding:10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:13px; resize:vertical;"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button class="btn" onclick="document.getElementById('reject-modal-${id}').remove()">Cancel</button>
+            <button class="btn" style="background:var(--warn); color:#000; border-color:var(--warn);" onclick="submitReject('${id}')">Reject</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      setTimeout(() => document.getElementById('reject-body-' + id)?.focus(), 50);
+    }
+    async function submitReject(id) {
+      const reason = document.getElementById('reject-body-' + id)?.value.trim() || '';
       try {
         const r = await fetch('/api/admin/market/' + encodeURIComponent(id) + '/reject', {
           method: 'POST', credentials: 'include',
@@ -2405,6 +2423,7 @@
           body: JSON.stringify({ reason }),
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
+        document.getElementById('reject-modal-' + id)?.remove();
         loadMarketListings();
       } catch (e) { alert('Reject failed: ' + (e?.message || e)); }
     }
