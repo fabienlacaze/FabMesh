@@ -181,6 +181,41 @@
     // Re-sync every 5 min in case the admin changed a price mid-session.
     setInterval(syncLivePricing, 5 * 60_000);
 
+    // Keep the HttpOnly session alive. The mfm-session cookie carries a
+    // Supabase access_token that expires after 1 h; without refresh
+    // the user got silently kicked out mid-work. We ping /api/auth/refresh
+    // every 50 min — well before expiry — to swap in a new pair using
+    // the mfm-refresh cookie (30 days). On 401 we let the next API call
+    // route the user to /login naturally.
+    const _refreshSession = async () => {
+      try {
+        const r = await fetch('/api/auth/refresh', {
+          method: 'POST', credentials: 'include',
+        });
+        if (!r.ok && r.status !== 401) {
+          console.warn('[auth] session refresh got', r.status);
+        }
+      } catch (e) {
+        console.warn('[auth] session refresh failed:', e?.message || e);
+      }
+    };
+    // First refresh after 50 min, then every 50 min.
+    setInterval(_refreshSession, 50 * 60_000);
+    // Also refresh on tab focus if the last refresh was > 40 min ago —
+    // browsers throttle setInterval on background tabs, so a user who
+    // left the tab idle for 2 h would otherwise come back to a dead
+    // session even though our timer "fired".
+    let _lastRefreshAt = Date.now();
+    const _refreshIfStale = () => {
+      if (document.visibilityState === 'visible' &&
+          Date.now() - _lastRefreshAt > 40 * 60_000) {
+        _lastRefreshAt = Date.now();
+        _refreshSession();
+      }
+    };
+    document.addEventListener('visibilitychange', _refreshIfStale);
+    window.addEventListener('focus', _refreshIfStale);
+
     // Hide buttons that need a Three.js sculpting/selection editor in
     // the browser (Sculpt, Paint vertex, Select) — not feasible to
     // port in cloud without a major UI effort. Same for Re-Texture

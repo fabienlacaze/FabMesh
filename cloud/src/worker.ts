@@ -1110,6 +1110,59 @@ async function handleAuthInstallSession(req: Request, env: Env): Promise<Respons
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }
 
+/** POST /api/auth/refresh — exchange the long-lived refresh cookie for
+ *  a new access_token + refresh_token pair and re-set both HttpOnly
+ *  cookies. The renderer pings this every ~50 min (before the 1-hour
+ *  access_token TTL) so a user keeps their session as long as the
+ *  refresh token (30 days) is alive.
+ *
+ *  Without this the user was getting silently logged out after 1 h
+ *  even though their refresh cookie was still valid. */
+async function handleAuthRefresh(req: Request, env: Env): Promise<Response> {
+  const cookies = parseCookies(req);
+  const rt = cookies[MFM_REFRESH_COOKIE];
+  if (!rt) return err(401, 'no refresh cookie');
+
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  if (!supabaseUrl || !anon) return err(500, 'supabase not configured');
+
+  const r = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'apikey': anon },
+    body: JSON.stringify({ refresh_token: rt }),
+  });
+  if (!r.ok) {
+    // Refresh failed (revoked, expired, user deleted) — wipe cookies
+    // so the next /api/me cleanly returns 401 and the renderer can
+    // route to /login without a stale session sticking around.
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.append('set-cookie',
+      `${MFM_SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`);
+    headers.append('set-cookie',
+      `${MFM_REFRESH_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`);
+    return new Response(JSON.stringify({ ok: false, error: 'refresh rejected' }),
+      { status: 401, headers });
+  }
+  const data = await r.json() as {
+    access_token?: string; refresh_token?: string; expires_in?: number;
+  };
+  if (!data.access_token) return err(502, 'supabase did not return access_token');
+
+  const maxAge = typeof data.expires_in === 'number' && data.expires_in > 0
+    ? Math.min(data.expires_in, 60 * 60 * 24)
+    : 60 * 60;
+  const headers = new Headers({ 'content-type': 'application/json' });
+  headers.append('set-cookie',
+    `${MFM_SESSION_COOKIE}=${data.access_token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
+  if (data.refresh_token) {
+    headers.append('set-cookie',
+      `${MFM_REFRESH_COOKIE}=${data.refresh_token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 60 * 60}`);
+  }
+  return new Response(JSON.stringify({ ok: true, expires_in: maxAge }),
+    { status: 200, headers });
+}
+
 /** POST /api/auth/signout — clear both HttpOnly cookies. Idempotent. */
 async function handleAuthSignout(_req: Request, _env: Env): Promise<Response> {
   const headers = new Headers({ 'content-type': 'application/json' });
@@ -5451,6 +5504,7 @@ export default {
       if (pathname.startsWith('/api/')) {
         if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
         if (pathname === '/api/auth/install-session'  && method === 'POST') return await handleAuthInstallSession(req, env);
+        if (pathname === '/api/auth/refresh'          && method === 'POST') return await handleAuthRefresh(req, env);
         if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
