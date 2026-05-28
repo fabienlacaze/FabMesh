@@ -5975,6 +5975,10 @@ function _applyMeshTextureFilter(root) {
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const mat of mats) {
       if (!mat) continue;
+      // Force DoubleSide rendering so reversed-winding triangles
+      // (Trellis2 sometimes emits them) don't show up as black voids.
+      // Carries through to GLTFExporter as doubleSided:true on save.
+      mat.side = THREE.DoubleSide;
       const slots = [mat.map, mat.normalMap, mat.roughnessMap,
                      mat.metalnessMap, mat.aoMap, mat.emissiveMap];
       for (const tex of slots) {
@@ -7538,6 +7542,16 @@ function _mtLoadMesh(meshPath) {
         mtState.origModel.traverse((child) => {
           if (child.isMesh && child.geometry) {
             mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
+            // Force DoubleSide rendering in the modal viewer. Trellis2
+            // sometimes emits triangles with reversed winding — under
+            // single-sided rendering they appear as black voids
+            // ("trous"). DoubleSide makes both faces visible so the
+            // user sees their mesh as it actually is, and a future
+            // Apply that re-exports preserves doubleSided=true in the
+            // GLB (GLTFExporter writes the side property through).
+            const setDoubleSide = (m) => { if (m) m.side = THREE.DoubleSide; };
+            if (Array.isArray(child.material)) child.material.forEach(setDoubleSide);
+            else setDoubleSide(child.material);
           }
         });
         // Total triangle count across all submeshes — used by tools
