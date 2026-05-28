@@ -7563,7 +7563,7 @@ const MESH_TOOL_SCHEMAS = {
     preview: (geom, vals) => _jsLaplacianSmooth(geom, Math.max(1, vals.iterations | 0), vals.lambda),
   },
   decimate: {
-    title: 'Decimate mesh',
+    title: 'Triangle count',
     subtitle: 'Reduce triangle count — drag the slider down to preview the reduction.',
     needsImage: false,
     expensivePreview: true,

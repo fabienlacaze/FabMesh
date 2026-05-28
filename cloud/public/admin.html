@@ -344,6 +344,28 @@
 
     <!-- Tab: Finances -->
     <div class="tab-panel" data-panel="finance">
+      <!-- Modal credit balance — admin-managed (top up budget on Modal,
+           paste the new total here, the worker sums every daily spend
+           file under _meta/modal_spend/ to give remaining). -->
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div class="label" style="text-transform:uppercase; letter-spacing:1px; font-size:11px; color:var(--text-2);">💰 Modal credits</div>
+          <button class="btn" onclick="loadModalCredits()">🔄 Refresh</button>
+        </div>
+        <div id="modal-credits-grid" class="grid grid-4" style="margin-top:10px;">
+          <div class="metric-card"><div class="metric-label">Total budget</div><div class="metric-value" id="mc-total">—</div></div>
+          <div class="metric-card"><div class="metric-label">Total spent</div><div class="metric-value" id="mc-spent">—</div></div>
+          <div class="metric-card"><div class="metric-label">Remaining</div><div class="metric-value" id="mc-remaining">—</div></div>
+          <div class="metric-card"><div class="metric-label">Today</div><div class="metric-value" id="mc-today">—</div></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+          <label style="font-size:12px; color:var(--text-2);">Update total budget ($):</label>
+          <input type="number" id="mc-budget-input" step="0.01" min="0"
+                 style="width:140px; padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:12px;" />
+          <button class="btn" onclick="saveModalBudget()">Save</button>
+          <span style="font-size:11px; color:var(--text-2);">Set this to your current Modal workspace balance after a top-up; remaining is computed as budget − cumulative spend.</span>
+        </div>
+      </div>
       <div class="grid grid-4" id="cards-finance"></div>
       <div class="chart-card" style="margin-top:16px;">
         <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px;">
@@ -2138,6 +2160,48 @@
       }, 60_000);
     });
 
+    async function loadModalCredits() {
+      try {
+        const r = await fetch('/api/admin/modal-credits', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const fmt = (n) => '$' + (Number(n) || 0).toFixed(2);
+        document.getElementById('mc-total').textContent     = fmt(j.total_budget);
+        document.getElementById('mc-spent').textContent     = fmt(j.total_spent);
+        document.getElementById('mc-remaining').textContent = fmt(j.remaining);
+        document.getElementById('mc-today').textContent     = fmt(j.today_spent);
+        const input = document.getElementById('mc-budget-input');
+        if (input && !input.value) input.value = (Number(j.total_budget) || 0).toFixed(2);
+      } catch (e) {
+        ['mc-total', 'mc-spent', 'mc-remaining', 'mc-today'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = '!';
+        });
+        console.warn('[admin] modal credits load failed:', e);
+      }
+    }
+    async function saveModalBudget() {
+      const v = parseFloat(document.getElementById('mc-budget-input').value);
+      if (!isFinite(v) || v < 0) { alert('Enter a non-negative number'); return; }
+      try {
+        const r = await fetch('/api/admin/modal-credits/total', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ total: v }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        loadModalCredits();
+      } catch (e) { alert('Save failed: ' + (e?.message || e)); }
+    }
+    // Auto-load when Finance tab opens + refresh every 60 s while it's open.
+    document.addEventListener('DOMContentLoaded', () => {
+      const tab = document.querySelector('.tab[data-tab="finance"]');
+      tab?.addEventListener('click', loadModalCredits);
+      setInterval(() => {
+        const active = document.querySelector('.tab.active');
+        if (active?.dataset?.tab === 'finance') loadModalCredits();
+      }, 60_000);
+    });
     async function loadAuditLog() {
       const tbody = document.querySelector('#audit-table tbody');
       const day = document.getElementById('audit-day-input').value
