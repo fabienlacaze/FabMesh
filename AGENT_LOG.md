@@ -9190,3 +9190,26 @@ Pourquoi: le worker ne refreshait jamais l'access_token. Cookie
 `mfm-session` Max-Age=3600s, Supabase JWT exp=1h par défaut → /api/me
 retournait 401 au bout d'1h pile, frontend redirigeait sur /login.
 Maintenant la session vit aussi longtemps que le refresh token (30j).
+
+## 2026-05-28 — Fill Holes: diagnostic + bump default size
+
+- `_jsFillHoles` retourne maintenant `{ geometry, helpers, stats }` avec
+  `stats: { loops, filled, tooBig, biggest }`.
+- `_mtRunPreview`: stocke `out.stats` dans `mtState.lastStats` pour que
+  `previewStatus()` puisse l'afficher.
+- Schema `fill_holes`:
+  - default 100 edges → **2000**, max 5000 → **20000** (les trous sur les
+    meshes Trellis2 font souvent 500-3000 edges, le default 100 était
+    trop bas et tout passait en "rouge - too big" silencieusement).
+  - subtitle mentionne "If nothing highlights, the dark patches are
+    texture/back-faces, not geometry holes" — explicite que Fill Holes
+    ne sait traiter QUE des trous géométriques.
+  - `previewStatus()`: rend "X holes found · Y filled (green) · Z too big
+    (red, biggest N edges). Raise the slider to fill more." OU "No
+    boundary edges found" si le mesh est closed.
+
+Pourquoi: user montre un orc avec des "trous" visuels que Fill Holes ne
+remplit pas. Causes possibles: (1) ce sont des artefacts texture/back-face
+pas de la géométrie (cas le plus probable sur sortie Trellis2), ou
+(2) les trous sont plus grands que les 100 edges du default. Le status
+permet maintenant de distinguer les deux cas sans deviner.
