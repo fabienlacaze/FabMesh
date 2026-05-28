@@ -8482,12 +8482,10 @@ const peState = {
   renderer: null, scene: null, camera: null, controls: null,
   rafId: null,
   origModel: null,
-  meshes: [],                  // array of { mesh, prevEmissiveMap, prevEmissiveIntensity, prevEmissive }
+  meshes: [],                  // array of { mesh, prev: [{ mat, emissiveMap, ... }] }
   raycaster: null,
   pointer: null,
-  canvas2d: null,              // HTMLCanvasElement holding the painted layer
-  ctx2d: null,
-  texture: null,               // THREE.CanvasTexture wrapping canvas2d
+  canvases: null,              // Map<Mesh, { canvas, ctx, texture }>
   brushColor: '#ffaa33',
   brushSize: 40,
   brushOpacity: 1.0,
@@ -8495,7 +8493,6 @@ const peState = {
   brushMode: 'paint',          // 'paint' | 'erase'
   intensity: 3.0,
   isPainting: false,
-  lastUv: null,
 };
 
 async function _peInitViewport() {
@@ -8553,25 +8550,27 @@ async function _peInitViewport() {
   }).observe(wrap);
 }
 
-// Build (or reset) the 1024×1024 paint canvas + bind it as emissiveMap
-// on every material of the loaded mesh. The canvas starts BLACK
-// (no emission anywhere) and we paint colored pixels into it.
+// Build ONE 1024×1024 paint canvas PER submesh + bind each as its
+// material's emissiveMap. Per-submesh canvases are critical when the
+// mesh has overlapping UV layouts across submeshes (the common case
+// for Trellis2 output) — a single shared canvas would mean painting
+// one spot lit up unrelated geometry that shared the same UV region.
 function _peSetupCanvasAndBind() {
-  peState.canvas2d = document.createElement('canvas');
-  peState.canvas2d.width = PE_TEX_SIZE;
-  peState.canvas2d.height = PE_TEX_SIZE;
-  peState.ctx2d = peState.canvas2d.getContext('2d');
-  // Black = no emission anywhere by default.
-  peState.ctx2d.fillStyle = '#000000';
-  peState.ctx2d.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
-  peState.texture = new THREE.CanvasTexture(peState.canvas2d);
-  peState.texture.colorSpace = THREE.SRGBColorSpace;
-  peState.texture.flipY = false;       // glTF UV convention
-  peState.texture.name = 'T_emissive';  // shows up in the GLB metadata
-  peState.texture.needsUpdate = true;
-  // Bind to every mesh material + remember previous state so Cancel
-  // restores cleanly.
+  peState.canvases = new Map();   // mesh → { canvas, ctx, texture }
   peState.meshes.forEach((entry) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = PE_TEX_SIZE;
+    canvas.height = PE_TEX_SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;             // glTF UV convention
+    texture.name = 'T_emissive';        // surfaces in the GLB metadata
+    texture.needsUpdate = true;
+    peState.canvases.set(entry.mesh, { canvas, ctx, texture });
+
     const m = entry.mesh.material;
     const mats = Array.isArray(m) ? m : [m];
     entry.prev = mats.map((mat) => ({
@@ -8581,7 +8580,7 @@ function _peSetupCanvasAndBind() {
       emissive: mat.emissive?.clone(),
     }));
     mats.forEach((mat) => {
-      mat.emissiveMap = peState.texture;
+      mat.emissiveMap = texture;
       mat.emissive = new THREE.Color(0xffffff);  // white tint, the canvas carries the per-pixel color
       mat.emissiveIntensity = peState.intensity;
       mat.needsUpdate = true;
@@ -8643,27 +8642,41 @@ function _peLoadMesh(meshPath) {
     });
 }
 
-// Raycast at the current pointer position, find UV at hit, draw a
-// soft circle on the 2D canvas at uv × canvasSize. Brush parameters
-// (color, size, opacity, falloff) all come from the modal sliders.
-function _peStampAtPointer(clientX, clientY) {
-  if (!peState.origModel || !peState.canvas2d || !peState.raycaster) return;
+// Raycast at the current pointer position. Returns the hit { object,
+// uv } or null. Only considers the loaded mesh's submeshes (NOT the
+// grid or any helper) so painting can't be confused by background
+// geometry.
+function _peRaycast(clientX, clientY) {
+  if (!peState.origModel || !peState.raycaster) return null;
   const canvas = peState.renderer.domElement;
   const rect = canvas.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width)  *  2 - 1;
   const y = ((clientY - rect.top)  / rect.height) * -2 + 1;
   peState.pointer.set(x, y);
   peState.raycaster.setFromCamera(peState.pointer, peState.camera);
-  const hits = peState.raycaster.intersectObject(peState.origModel, true);
-  if (!hits.length) return;
-  const hit = hits[0];
-  if (!hit.uv) return;
-  const ctx = peState.ctx2d;
-  // glTF v-flip convention — three.js gives us UVs with V going up,
-  // but our canvas has Y going down. flipY=false on the texture so we
-  // flip it manually when stamping.
-  const px = hit.uv.x * PE_TEX_SIZE;
-  const py = (1 - hit.uv.y) * PE_TEX_SIZE;
+  const meshes = peState.meshes.map((e) => e.mesh);
+  const hits = peState.raycaster.intersectObjects(meshes, false);
+  if (!hits.length || !hits[0].uv) return null;
+  return hits[0];
+}
+
+// Paint a soft circle into the canvas that owns the hit submesh, at
+// uv × canvasSize. Brush parameters all come from the modal sliders.
+// Painting goes ONLY into the hit mesh's own canvas — never to other
+// submeshes that share the same UV region.
+function _peStampAtPointer(clientX, clientY) {
+  const hit = _peRaycast(clientX, clientY);
+  if (!hit) return;
+  const entry = peState.canvases?.get(hit.object);
+  if (!entry) return;
+  const ctx = entry.ctx;
+  // Clamp UVs to [0,1] in case a stray hit lands on a UV with tiling.
+  const uvX = Math.max(0, Math.min(1, hit.uv.x));
+  const uvY = Math.max(0, Math.min(1, hit.uv.y));
+  // glTF v-flip convention — three.js gives V going up but canvas Y
+  // goes down. flipY=false on the texture so we flip manually here.
+  const px = uvX * PE_TEX_SIZE;
+  const py = (1 - uvY) * PE_TEX_SIZE;
   const r = Math.max(1, peState.brushSize * 0.5);
   const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
   // Falloff: 0 = hard edge, 1 = full gradient.
@@ -8683,7 +8696,7 @@ function _peStampAtPointer(clientX, clientY) {
   ctx.arc(px, py, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
-  peState.texture.needsUpdate = true;
+  entry.texture.needsUpdate = true;
 }
 
 function _peHexToRgba(hex, alpha) {
@@ -8744,18 +8757,39 @@ function openPaintEmissive() {
   paintBtn.onclick = () => setMode('paint');
   eraseBtn.onclick = () => setMode('erase');
   $('pe-clear').onclick = () => {
-    if (!peState.ctx2d) return;
-    peState.ctx2d.fillStyle = '#000000';
-    peState.ctx2d.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
-    peState.texture.needsUpdate = true;
+    if (!peState.canvases) return;
+    peState.canvases.forEach((entry) => {
+      entry.ctx.fillStyle = '#000000';
+      entry.ctx.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
+      entry.texture.needsUpdate = true;
+    });
   };
 
   // Init viewport then load mesh.
   requestAnimationFrame(async () => {
     await _peInitViewport();
-    // Pointer handlers on the canvas — left-click starts a stroke,
-    // pointermove paints if down, pointerup ends.
+    // Set up a CSS brush preview that follows the cursor over the
+    // viewport. It's an unscaled CSS-pixel circle (size = brushSize)
+    // — not pixel-perfect against the UV footprint, but a clear
+    // indicator of "where the brush is" + "how big it roughly is".
+    const wrap = document.getElementById('pe-viewport-wrap');
+    let preview = document.getElementById('pe-brush-preview');
+    if (!preview) {
+      preview = document.createElement('div');
+      preview.id = 'pe-brush-preview';
+      preview.style.cssText = 'position:absolute; border:2px solid #ffe066; border-radius:50%; pointer-events:none; transform:translate(-50%,-50%); box-shadow:0 0 4px rgba(0,0,0,0.5); display:none; z-index:10;';
+      wrap.appendChild(preview);
+    }
     const cv = peState.renderer.domElement;
+    const updateBrushPreview = (e) => {
+      const rect = wrap.getBoundingClientRect();
+      preview.style.left = `${e.clientX - rect.left}px`;
+      preview.style.top  = `${e.clientY - rect.top}px`;
+      preview.style.width  = `${peState.brushSize}px`;
+      preview.style.height = `${peState.brushSize}px`;
+      preview.style.borderColor = peState.brushMode === 'erase' ? '#ff4466' : peState.brushColor;
+      preview.style.display = 'block';
+    };
     const down = (e) => {
       if (e.button !== 0) return;  // only left click
       peState.isPainting = true;
@@ -8763,6 +8797,7 @@ function openPaintEmissive() {
       _peStampAtPointer(e.clientX, e.clientY);
     };
     const move = (e) => {
+      updateBrushPreview(e);
       if (!peState.isPainting) return;
       _peStampAtPointer(e.clientX, e.clientY);
     };
@@ -8770,16 +8805,20 @@ function openPaintEmissive() {
       peState.isPainting = false;
       try { cv.releasePointerCapture(e.pointerId); } catch {}
     };
+    const leave = () => { preview.style.display = 'none'; };
     cv.onpointerdown = down;
     cv.onpointermove = move;
     cv.onpointerup = up;
     cv.onpointercancel = up;
+    cv.onpointerleave = leave;
     _peLoadMesh(p.selectedMeshPath);
   });
 
   const close = (restore) => {
     modal.classList.add('hidden');
     if (restore) _peRestoreMaterials();
+    const preview = document.getElementById('pe-brush-preview');
+    if (preview) preview.style.display = 'none';
   };
   $('pe-cancel').onclick = () => close(true);
   $('pe-apply-device').onclick = async () => {
