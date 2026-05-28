@@ -1264,9 +1264,15 @@
       // — apostrophes-as-entities get decoded by the HTML parser
       // BEFORE JS evaluation, allowing email-borne XSS. Use data-*
       // attributes and a delegated listener instead.
-      tbody.innerHTML = list.map((u) => `
+      tbody.innerHTML = list.map((u) => {
+        const emailText = u.email || '—';
+        // Defensive: legacy rows may be missing id — fall back to plain text.
+        const emailCell = u.id
+          ? `<a href="/market/author?id=${encodeURIComponent(u.id)}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none;" title="Open public profile">${escapeHtml(emailText)}</a>`
+          : escapeHtml(emailText);
+        return `
         <tr>
-          <td>${escapeHtml(u.email || '—')}</td>
+          <td>${emailCell}</td>
           <td style="font-family:ui-monospace,monospace; font-size:11px;">${escapeHtml(u.id.slice(0,8))}…</td>
           <td class="num"><span class="credit-badge">${u.credits ?? 0}</span></td>
           <td>${escapeHtml(fmtDate(u.created_at))}</td>
@@ -1290,7 +1296,8 @@
             </button>
           </td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
       // Bind per-row action listeners using dataset values (safe DOM
       // strings, not interpolated into HTML attributes).
       tbody.querySelectorAll('.btn-user-projects').forEach((b) => {
@@ -2484,7 +2491,9 @@
         return `
           <div data-listing-id="${escapeHtml(l.id)}" style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
-              <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${kind === 'image' ? '🖼 ' : '🧊 '}${escapeHtml(l.title)}</div>
+              <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${kind === 'image' ? '🖼 ' : '🧊 '}${l.status === 'approved'
+                ? `<a href="/market?item=${encodeURIComponent(l.id)}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none;" title="Open in marketplace">${escapeHtml(l.title)}</a>`
+                : `${escapeHtml(l.title)} <span style="color:var(--text-2); font-weight:400; font-size:11px;">(not yet visible publicly)</span>`}</div>
               <div style="background:${l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)'}; color:${l.price_cents === 0 ? 'var(--ok)' : '#ffcc66'}; padding:2px 8px; border-radius:9px; font-size:11px; font-weight:700; white-space:nowrap;">${escapeHtml(price)}</div>
             </div>
             <div style="color:var(--text-2); font-size:11px;">${l.user_id ? `<a href="/market/author?id=${encodeURIComponent(l.user_id)}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none;">${escapeHtml(l.author_display)}</a>` : escapeHtml(l.author_display)} · ${escapeHtml(_MARKET_LIC_LABEL[l.licence] || l.licence)} · ${escapeHtml(dt)}</div>
