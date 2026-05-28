@@ -6603,25 +6603,12 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     return { geometry: geom.clone(), helpers: [], stats: { loops: 0, filled: 0, tooBig: 0, tooSmall: 0, biggest: 0, smallest: 0 } };
   }
   const posAttr = geom.attributes.position;
-  const indices = geom.index.array;
-  const triCount = Math.floor(indices.length / 3);
+  const rawIndices = geom.index.array;
+  const rawTriCount = Math.floor(rawIndices.length / 3);
   const n = posAttr.count;
   const arr = posAttr.array;
 
-  // GLB meshes split vertices at every UV seam, so the same physical
-  // edge appears with different vertex indices on each side. Counting
-  // boundary edges by raw vertex index → every seam looks like an
-  // open boundary and the user sees the whole mesh painted green.
-  // Fix: weld vertices by quantized position into "groups", then do
-  // edge counting in group space. A seam edge maps to a single group
-  // pair and gets counted twice (once per triangle) → not boundary.
-  //
-  // Quantization is ADAPTIVE — for a mesh of bbox diagonal D, we weld
-  // at a tolerance of D / 100_000 (so 0.001% of the mesh). On a unit
-  // mesh that's 1e-5; on a tiny prop (0.01u diagonal) it's 1e-7. This
-  // prevents over-welding small meshes (which would close real holes
-  // and was the cause of the "No boundary edges found" miss on small
-  // Trellis2 outputs).
+  // ── Step 1: Bbox + adaptive scales.
   let bbMinX = Infinity, bbMinY = Infinity, bbMinZ = Infinity;
   let bbMaxX = -Infinity, bbMaxY = -Infinity, bbMaxZ = -Infinity;
   for (let i = 0; i < n; i++) {
@@ -6631,7 +6618,31 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     if (z < bbMinZ) bbMinZ = z; if (z > bbMaxZ) bbMaxZ = z;
   }
   const bbDiag = Math.hypot(bbMaxX-bbMinX, bbMaxY-bbMinY, bbMaxZ-bbMinZ) || 1;
-  const tol = bbDiag / 1e5;        // weld tolerance in mesh units
+
+  // ── Step 2: Strip degenerate triangles (zero-area, duplicate index).
+  // Trellis2 marching cubes emits a lot of these and they show up as
+  // false boundary edges later. Mirror of UE's MeshAutoRepair early
+  // cleanup.
+  const indices = [];
+  const areaEps = bbDiag * 1e-12;
+  for (let t = 0; t < rawTriCount; t++) {
+    const i0 = rawIndices[t*3], i1 = rawIndices[t*3+1], i2 = rawIndices[t*3+2];
+    if (i0 === i1 || i1 === i2 || i2 === i0) continue;
+    const ax = arr[i0*3], ay = arr[i0*3+1], az = arr[i0*3+2];
+    const bx = arr[i1*3], by = arr[i1*3+1], bz = arr[i1*3+2];
+    const cx = arr[i2*3], cy = arr[i2*3+1], cz = arr[i2*3+2];
+    const ex = bx-ax, ey = by-ay, ez = bz-az;
+    const fx = cx-ax, fy = cy-ay, fz = cz-az;
+    const cross = Math.hypot(ey*fz-ez*fy, ez*fx-ex*fz, ex*fy-ey*fx);
+    if (cross * 0.5 < areaEps) continue;
+    indices.push(i0, i1, i2);
+  }
+  const triCount = Math.floor(indices.length / 3);
+
+  // ── Step 3: Weld vertices by quantized position (tolerance =
+  // bbox/1e5) so identical positions land in one group. UV seams
+  // become count===2 interior edges; isolated boundaries stay count===1.
+  const tol = bbDiag / 1e5;
   const Q = 1 / tol;
   const groupKeyToId = new Map();
   const groupOfVertex = new Int32Array(n);
@@ -6645,26 +6656,14 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     if (gid === undefined) { gid = G++; groupKeyToId.set(k, gid); }
     groupOfVertex[v] = gid;
   }
-  // One representative vertex per group — used as the anchor when we
-  // emit fan triangles for filled holes (any vertex in the group has
-  // the same position).
   const repOfGroup = new Int32Array(G).fill(-1);
   for (let v = 0; v < n; v++) {
     const g = groupOfVertex[v];
     if (repOfGroup[g] === -1) repOfGroup[g] = v;
   }
 
-  // Count undirected edges in group space.
-  //
-  //   undirectedCount = 1 → genuine boundary (visible hole)
-  //   undirectedCount = 2 → manifold interior edge (most edges)
-  //   undirectedCount ≥ 3 → non-manifold T-junction (Trellis2 marching-
-  //                          cubes leaves a flood of these; treating
-  //                          them as boundaries floods the preview
-  //                          with green noise and drowns the real
-  //                          holes — so we IGNORE them and let Fix
-  //                          Normals handle T-junction shading).
-  const undirectedCount = new Map();    // "min,max" -> count
+  // ── Step 4: Count undirected edges in group space.
+  const undirectedCount = new Map();
   for (let t = 0; t < triCount; t++) {
     const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
     const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
@@ -6675,10 +6674,9 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     }
   }
 
-  // Build a multi-map ga -> [gb1, gb2, ...] of REAL boundary
-  // successors (count === 1 only). Multi-successor design lets us
-  // discover every loop at T-junction vertices without overwriting.
-  const boundarySuccessors = new Map();   // ga -> [gb, gb, ...]
+  // ── Step 5: Collect directed boundary candidates (count === 1).
+  //   { ga, gb, mx, my, mz }
+  const candidates = [];
   for (let t = 0; t < triCount; t++) {
     const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
     const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
@@ -6686,9 +6684,79 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
       if (ga === gb) continue;
       const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
       if (undirectedCount.get(key) !== 1) continue;
-      if (!boundarySuccessors.has(ga)) boundarySuccessors.set(ga, []);
-      boundarySuccessors.get(ga).push(gb);
+      const vA = repOfGroup[ga], vB = repOfGroup[gb];
+      const mx = (arr[vA*3]   + arr[vB*3])   * 0.5;
+      const my = (arr[vA*3+1] + arr[vB*3+1]) * 0.5;
+      const mz = (arr[vA*3+2] + arr[vB*3+2]) * 0.5;
+      candidates.push({ ga, gb, mx, my, mz, matched: false });
     }
+  }
+
+  // ── Step 6: MergeCoincidentEdges — for each boundary candidate,
+  // search nearby candidates (spatial hash on midpoint) and match if
+  // there's one with OPPOSITE orientation AND midpoint distance < a
+  // generous tolerance (bbox/2000). This rescues seam edges whose
+  // endpoint positions slipped past the vertex weld in Step 3 — same
+  // logic as UE's FMergeCoincidentMeshEdges escalating tolerance.
+  const mergeTol = bbDiag / 2000;
+  const mergeTolSq = mergeTol * mergeTol;
+  const cellSize = mergeTol;
+  const cellQ = 1 / cellSize;
+  const spatial = new Map();
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    const cx = Math.floor(c.mx * cellQ);
+    const cy = Math.floor(c.my * cellQ);
+    const cz = Math.floor(c.mz * cellQ);
+    const k = cx + ',' + cy + ',' + cz;
+    let bucket = spatial.get(k);
+    if (!bucket) { bucket = []; spatial.set(k, bucket); }
+    bucket.push(i);
+  }
+  for (let i = 0; i < candidates.length; i++) {
+    const c1 = candidates[i];
+    if (c1.matched) continue;
+    const cx = Math.floor(c1.mx * cellQ);
+    const cy = Math.floor(c1.my * cellQ);
+    const cz = Math.floor(c1.mz * cellQ);
+    let matched = false;
+    for (let dx = -1; dx <= 1 && !matched; dx++) {
+      for (let dy = -1; dy <= 1 && !matched; dy++) {
+        for (let dz = -1; dz <= 1 && !matched; dz++) {
+          const k = (cx+dx) + ',' + (cy+dy) + ',' + (cz+dz);
+          const bucket = spatial.get(k);
+          if (!bucket) continue;
+          for (const j of bucket) {
+            if (j === i) continue;
+            const c2 = candidates[j];
+            if (c2.matched) continue;
+            // Opposite orientation: c2.ga's POSITION ≈ c1.gb's POSITION
+            // (and vice-versa). We compare positions, not groups, so a
+            // welding miss in Step 3 still gets caught here.
+            const v1a = repOfGroup[c1.ga], v1b = repOfGroup[c1.gb];
+            const v2a = repOfGroup[c2.ga], v2b = repOfGroup[c2.gb];
+            const dA = (arr[v1a*3]-arr[v2b*3])**2 + (arr[v1a*3+1]-arr[v2b*3+1])**2 + (arr[v1a*3+2]-arr[v2b*3+2])**2;
+            const dB = (arr[v1b*3]-arr[v2a*3])**2 + (arr[v1b*3+1]-arr[v2a*3+1])**2 + (arr[v1b*3+2]-arr[v2a*3+2])**2;
+            if (dA > mergeTolSq || dB > mergeTolSq) continue;
+            const dM = (c1.mx-c2.mx)**2 + (c1.my-c2.my)**2 + (c1.mz-c2.mz)**2;
+            if (dM > mergeTolSq) continue;
+            c1.matched = true;
+            c2.matched = true;
+            matched = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // ── Step 7: Build boundarySuccessors from the SURVIVING candidates
+  // (still unmatched after the merge pass).
+  const boundarySuccessors = new Map();
+  for (const c of candidates) {
+    if (c.matched) continue;
+    if (!boundarySuccessors.has(c.ga)) boundarySuccessors.set(c.ga, []);
+    boundarySuccessors.get(c.ga).push(c.gb);
   }
 
   // Walk loops by popping successors. Each successor is consumed once;
