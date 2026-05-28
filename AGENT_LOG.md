@@ -9314,3 +9314,25 @@ Fill Holes v3 (`_jsFillHoles`):
 
 Tests à faire: re-ouvrir Fill Holes sur l'orc qui montrait "No
 boundary edges found" — devrait maintenant détecter les patches noirs.
+
+## 2026-05-28 — Fix Normals: weld across UV seams (kill criss-cross shading)
+
+User montre un mesh Trellis2 où la surface des muscles est cassée
+par des "traits de jonction" — pattern criss-cross / plaques d'écailles
+qui suit la topologie. Ces lignes correspondent aux UV seams: à chaque
+island boundary, Trellis2 duplique le vertex (positions identiques, UVs
+différentes). `computeVertexNormals()` calcule chaque duplicate à partir
+de SES faces incidentes uniquement → les normales des deux copies
+divergent légèrement → discontinuité d'éclairage visible.
+
+Fix (`_jsFixNormalsWelded`):
+- Run `computeVertexNormals` comme avant
+- Quantize positions (adaptive Q = 1e5 / bbox_diag)
+- Group vertices par position
+- Somme les normales par group, normalise
+- Copy back à tous les members du group → tous les duplicates partagent
+  la même normale moyenne
+
+Positions et UVs intacts (on ne touche que l'attribut normal). Seam
+visible disparaît. Schema `fix_normals` retitled "Fix normals (weld UV
+seams)" + subtitle explicative.
