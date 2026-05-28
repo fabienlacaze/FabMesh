@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Home — drop image/mesh creates project pre-filled with asset)
+
+- Dropping an image (.png/.jpg/.webp) or a mesh (.glb/.obj/.fbx/.stl/.ply) on the home "Drop image or mesh file to import" zone now opens the New Project modal pre-filled with the filename stem as the project name.
+- On Create, the dropped asset is automatically uploaded into the matching step (image step for images, mesh step for meshes) of the freshly-created project.
+- The file is stashed at window.__pendingDroppedFile until either Create or Cancel clears it. Existing "open modal manually" path is unaffected.
+- Visual highlight added to the drop zone on dragover.
+
+---
+
 ## 2026-05-29 (Market badge — refresh + hide rejected)
 
 - `_publishedIndex` now filters out rejected listings so they don't badge anything (user already informed via 📬 Inbox).
