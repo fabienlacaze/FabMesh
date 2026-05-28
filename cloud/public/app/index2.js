@@ -6571,6 +6571,141 @@ function _jsLaplacianSmooth(geom, iter, lambda) {
   return result;
 }
 
+// Fill Holes — Unreal-Modeling-Mode-style preview.
+// Highlights every detected hole boundary with a coloured line loop:
+//   green  → the hole is small enough (size ≤ maxHoleSize) and gets
+//             filled with a centroid-fan triangulation in the preview.
+//   red    → the hole is bigger than the cap, left untouched.
+// Caller decides via the live max_hole_size slider, so dragging it
+// shifts loops between red and green in real time.
+function _jsFillHoles(geom, maxHoleSize) {
+  if (!geom.index) {
+    return { geometry: geom.clone(), helpers: [] };
+  }
+  const posAttr = geom.attributes.position;
+  const indices = geom.index.array;
+  const triCount = Math.floor(indices.length / 3);
+
+  // Map directed edge a->b to the triangle that owns it. A boundary
+  // edge appears in exactly one triangle (its opposite never gets
+  // emitted). We use the directed key so we keep the winding for fan
+  // triangulation later.
+  const directedEdge = new Map();   // "a,b" -> true
+  const undirectedCount = new Map(); // "min,max" -> count
+  for (let t = 0; t < triCount; t++) {
+    const i0 = indices[t * 3], i1 = indices[t * 3 + 1], i2 = indices[t * 3 + 2];
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+      directedEdge.set(`${a},${b}`, true);
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      undirectedCount.set(key, (undirectedCount.get(key) || 0) + 1);
+    }
+  }
+
+  // boundaryNext[a] = b iff a->b is a boundary edge (kept directed
+  // so loop walking respects the original triangle winding).
+  const boundaryNext = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const i0 = indices[t * 3], i1 = indices[t * 3 + 1], i2 = indices[t * 3 + 2];
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      if (undirectedCount.get(key) === 1) {
+        boundaryNext.set(a, b);
+      }
+    }
+  }
+
+  // Walk loops by following boundaryNext until we hit a visited vert.
+  const visited = new Set();
+  const loops = [];
+  for (const start of boundaryNext.keys()) {
+    if (visited.has(start)) continue;
+    const loop = [];
+    let v = start;
+    for (let safety = 0; safety < 100000; safety++) {
+      if (visited.has(v)) break;
+      visited.add(v);
+      loop.push(v);
+      const nxt = boundaryNext.get(v);
+      if (nxt == null) break;
+      if (nxt === start) break;
+      v = nxt;
+    }
+    if (loop.length >= 3) loops.push(loop);
+  }
+
+  // Build the new geometry: copy of original + fan triangles for
+  // loops within budget. UVs on new center vertices = (0, 0).
+  const newPositions = Array.from(posAttr.array);
+  const newIndices = Array.from(indices);
+  const hasUV = !!geom.attributes.uv;
+  const newUVs = hasUV ? Array.from(geom.attributes.uv.array) : null;
+
+  // Pre-collect line vertices for the helpers (green = fillable, red = too big).
+  const greenLineVerts = [];
+  const redLineVerts = [];
+
+  for (const loop of loops) {
+    const willFill = loop.length <= maxHoleSize;
+    // Build the loop line geometry — LineSegments expects pairs, so
+    // we emit each edge as two vertices.
+    const sink = willFill ? greenLineVerts : redLineVerts;
+    for (let i = 0; i < loop.length; i++) {
+      const va = loop[i];
+      const vb = loop[(i + 1) % loop.length];
+      sink.push(
+        newPositions[va * 3], newPositions[va * 3 + 1], newPositions[va * 3 + 2],
+        newPositions[vb * 3], newPositions[vb * 3 + 1], newPositions[vb * 3 + 2],
+      );
+    }
+    if (!willFill) continue;
+
+    // Centroid fan triangulation. Cheap, works on convex-ish holes.
+    let cx = 0, cy = 0, cz = 0;
+    for (const v of loop) {
+      cx += newPositions[v * 3];
+      cy += newPositions[v * 3 + 1];
+      cz += newPositions[v * 3 + 2];
+    }
+    cx /= loop.length; cy /= loop.length; cz /= loop.length;
+    const centerIdx = newPositions.length / 3;
+    newPositions.push(cx, cy, cz);
+    if (newUVs) newUVs.push(0, 0);
+    // Add triangles fanning out from the centroid. Boundary edges
+    // point a->b with the outside on the right, so we orient
+    // (a, b, center) to keep the fill facing the right way.
+    for (let i = 0; i < loop.length; i++) {
+      const va = loop[i];
+      const vb = loop[(i + 1) % loop.length];
+      newIndices.push(va, vb, centerIdx);
+    }
+  }
+
+  const result = new THREE.BufferGeometry();
+  result.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3));
+  if (newUVs) result.setAttribute('uv', new THREE.Float32BufferAttribute(newUVs, 2));
+  result.setIndex(newIndices);
+  result.computeVertexNormals();
+
+  const helpers = [];
+  if (greenLineVerts.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(greenLineVerts, 3));
+    helpers.push(new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+      color: 0x22cc66, depthTest: false, transparent: true, opacity: 0.95,
+    })));
+  }
+  if (redLineVerts.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(redLineVerts, 3));
+    helpers.push(new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+      color: 0xff3344, depthTest: false, transparent: true, opacity: 0.95,
+    })));
+  }
+  // Render the lines on top of the mesh so they're not z-buried.
+  for (const h of helpers) h.renderOrder = 999;
+  return { geometry: result, helpers };
+}
+
 // Edge-collapse decimation via three.js SimplifyModifier. Quadric
 // metric — keeps silhouette and important features. The modifier
 // counts VERTICES to remove, not triangles, so we estimate the
@@ -6701,12 +6836,13 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Cap mesh holes (Python only — no live preview).',
+    subtitle: 'Cap mesh holes — green outlines will be filled, red are larger than the cap.',
     needsImage: false,
     params: [
-      { id: 'max_hole_size', label: 'Max hole size', type: 'range', min: 1, max: 5000, step: 10, default: 100 },
+      { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 5000, step: 1, default: 100 },
     ],
     build: (vals) => [String(vals.max_hole_size)],
+    preview: (geom, vals) => _jsFillHoles(geom, Math.max(3, vals.max_hole_size | 0)),
   },
   center: {
     title: 'Center mesh',
@@ -6753,6 +6889,7 @@ const mtState = {
   rafId: null,
   origModel: null,        // the GLTF scene loaded — we mutate its geometries on preview
   origGeoms: [],          // [{ mesh, originalGeom }] — to restore on params change
+  helpers: [],            // Object3D overlays added by the preview hook (Fill Holes boundary lines etc.)
   schema: null,
   vals: {},
   previewTimer: null,
@@ -6775,6 +6912,20 @@ function _mtSchedulePreview() {
   mtState.previewTimer = setTimeout(_mtRunPreview, 80);
 }
 
+// Remove every helper Object3D we added on a previous preview tick.
+function _mtClearHelpers() {
+  if (!mtState.helpers || !mtState.scene) return;
+  for (const h of mtState.helpers) {
+    mtState.scene.remove(h);
+    if (h.geometry) h.geometry.dispose?.();
+    if (h.material) {
+      if (Array.isArray(h.material)) h.material.forEach((m) => m.dispose?.());
+      else h.material.dispose?.();
+    }
+  }
+  mtState.helpers = [];
+}
+
 function _mtRunPreview() {
   if (!mtState.schema || !mtState.origModel) return;
   const body = document.getElementById('mt-body');
@@ -6782,12 +6933,30 @@ function _mtRunPreview() {
   const vals = _mtCollectVals(body);
   mtState.vals = vals;
   const fn = mtState.schema.preview;
+  _mtClearHelpers();
   // Without preview fn, just restore originals (mesh stays static).
   for (const e of mtState.origGeoms) {
     if (!fn) { e.mesh.geometry = e.originalGeom; continue; }
     try {
       const out = fn(e.originalGeom, vals);
-      if (out && out.attributes && out.attributes.position) e.mesh.geometry = out;
+      // Preview hooks can return either a BufferGeometry directly, or
+      // { geometry, helpers: [Object3D] } when the tool wants to draw
+      // extra overlays (boundary lines on Fill Holes, etc.).
+      let nextGeom = null;
+      let nextHelpers = null;
+      if (out && out.attributes && out.attributes.position) {
+        nextGeom = out;
+      } else if (out && out.geometry && out.geometry.attributes && out.geometry.attributes.position) {
+        nextGeom = out.geometry;
+        if (Array.isArray(out.helpers)) nextHelpers = out.helpers;
+      }
+      if (nextGeom) e.mesh.geometry = nextGeom;
+      if (nextHelpers) {
+        for (const h of nextHelpers) {
+          mtState.scene.add(h);
+          mtState.helpers.push(h);
+        }
+      }
     } catch (err) {
       console.warn('[mesh-tool] preview failed for', mtState.schema.title, err);
       e.mesh.geometry = e.originalGeom;
@@ -6977,8 +7146,10 @@ function openMeshToolModal(toolName) {
     applyBtn.onclick = null;
     cancelBtn.onclick = null;
     if (closeX) closeX.onclick = null;
-    // Restore original geoms (memory hygiene).
+    // Restore original geoms (memory hygiene) + clear any helper
+    // overlays the preview hook added (Fill Holes boundary lines, ...).
     for (const e of mtState.origGeoms) { e.mesh.geometry = e.originalGeom; }
+    _mtClearHelpers();
   };
   cancelBtn.onclick = close;
   if (closeX) closeX.onclick = close;
