@@ -4169,7 +4169,28 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
       url = (out as { url: () => string }).url();
     }
     if (!url) return err(502, 'background-remover returned no url');
-    return json({ ok: true, success: true, url, newPath: url });
+
+    // Mirror the Replicate output into R2 so the URL doesn't expire (~1h TTL on
+    // replicate.delivery would otherwise trip the renderer's Expired-hostname guard).
+    if (env.MESHES && env.R2_PUBLIC_URL) {
+      try {
+        const upstream = await fetch(url);
+        if (upstream.ok) {
+          const buf = await upstream.arrayBuffer();
+          const key = `${user.id}/removebg/${Date.now()}_${Math.floor(Math.random() * 1e9)}_nobg.png`;
+          await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
+          url = `${env.R2_PUBLIC_URL}/${key}`;
+        } else {
+          console.warn('[remove-bg] upstream fetch failed, returning raw Replicate URL', upstream.status);
+        }
+      } catch (e) {
+        console.warn('[remove-bg] R2 mirror failed, returning raw Replicate URL', e);
+      }
+    } else {
+      console.warn('[remove-bg] MESHES/R2_PUBLIC_URL unset, returning raw Replicate URL (will expire ~1h)');
+    }
+
+    return json({ ok: true, success: true, url, path: url, newPath: url });
   } catch (e: unknown) {
     return err(502, 'background-remover failed: ' + (e instanceof Error ? e.message : String(e)));
   }
