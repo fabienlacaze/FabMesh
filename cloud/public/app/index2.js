@@ -15124,6 +15124,36 @@ window.addEventListener('drop', async (e) => {
     catch (_) { alert('Unsupported file type.'); }
     return;
   }
+  // If a project is currently open in the workspace, route the dropped
+  // file as a new version into that project instead of opening the
+  // New Project modal.
+  const proj = state.currentProject;
+  if (proj && state.page === 'workspace') {
+    try {
+      const blobURL = URL.createObjectURL(f);
+      const ts = Date.now();
+      window.__cloudImportedFiles = window.__cloudImportedFiles || {};
+      window.__cloudImportedFiles[blobURL] = f;
+      if (kind === 'image') {
+        proj.images = proj.images || [];
+        proj.images.unshift({ path: blobURL, kind: 'front', mtime: ts });
+        try { window.__cloudImg?.append?.(proj.name, [blobURL], 'front'); } catch (_) {}
+        await populateWorkspace(proj);
+        try { showToast('✓ Imported as new image version', 'success'); } catch (_) {}
+      } else if (kind === 'mesh') {
+        proj.meshes = proj.meshes || [];
+        proj.meshes.unshift({ path: blobURL, filename: f.name, size: f.size, mtime: ts });
+        proj.selectedMeshPath = blobURL;
+        proj.previewMeshPath = blobURL;
+        await populateWorkspace(proj);
+        try { showToast('✓ Imported as new mesh version (session only — re-import after reload)', 'info', 6000); } catch (_) {}
+      }
+    } catch (err) {
+      try { showToast('Import failed: ' + (err?.message || err), 'error', 5000); } catch (_) { alert('Import failed: ' + err); }
+    }
+    return;
+  }
+  // No project open — fall back to the New Project modal flow.
   // Stash for the modal's Create handler to pick up.
   window.__pendingDroppedFile = { file: f, kind, name: f.name };
   // Open the New Project modal pre-filled with the file's stem.
