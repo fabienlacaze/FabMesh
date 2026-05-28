@@ -545,6 +545,7 @@
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
                         <button id="ws-mesh-paint-emissive-btn" class="ghost-btn tool-btn" title="Paint glowing emissive areas (lamps, windows, runes)">&#128161; Paint Emissive</button>
+                        <button id="ws-mesh-paint-mesh-btn" class="ghost-btn tool-btn" title="Paint directly onto the mesh's diffuse texture">&#127912; Paint Mesh</button>
                         <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material properties (brightness, saturation, emissive, roughness)">&#127912; Material</button>
                       </div>
                     </div>
@@ -1132,6 +1133,71 @@
           <button class="ghost-btn" id="at-reset">Reset defaults</button>
           <button class="ghost-btn" id="at-cancel">Cancel</button>
           <button class="primary-btn" id="at-reproject">&#127919; Re-project</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         PAINT MESH MODAL — paint directly onto the mesh's diffuse
+         texture (material.map). Same brush/UV pipeline as Paint
+         Emissive but the canvas is initialised from the current
+         diffuse map, not a black overlay, and writes go to
+         material.map. UI is patterned on the 2D Paint Tools sidebar.
+         ============================================================ -->
+    <div id="modal-paint-mesh" class="modal-overlay hidden">
+      <div class="modal-card modal-card-wide" style="max-width:1400px; width:95vw;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <h2 id="pm-title" style="margin:0;">🎨 Paint Mesh</h2>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <button id="pm-toggle-emissive" class="secondary-btn tool-btn" style="padding:4px 10px; font-size:11px;" title="Toggle the emissive layer (paint glow on top of the diffuse)">💡 Emissive</button>
+            <button id="pm-close-x" class="small-btn" style="font-size:18px;">✕</button>
+          </div>
+        </div>
+        <p id="pm-subtitle" class="modal-subtitle" style="margin-bottom:8px;">Paint directly on the mesh's diffuse texture. Left-click + drag to paint, right-click to orbit.</p>
+        <div style="display:flex; flex:1 1 0; gap:12px; min-height:560px;">
+          <!-- Left: brush tools (Paint Tools-style sidebar) -->
+          <div style="display:flex; flex-direction:column; gap:10px; width:140px; flex-shrink:0; padding:8px 0;">
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Draw</span>
+              <button id="pm-tool-pen"    class="secondary-btn tool-btn tool-active" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">✎ Pen</button>
+              <button id="pm-tool-spray"  class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">💨 Spray</button>
+              <button id="pm-tool-ink"    class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">🖋 Ink</button>
+              <button id="pm-tool-eraser" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; text-align:left; width:100%;">⌫ Eraser</button>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
+              <input type="color" id="pm-color" value="#ff0000" style="width:100%; height:36px; cursor:pointer; background:var(--bg-2); border:1px solid var(--border); border-radius:6px;" />
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;"><span>Brush</span><span id="pm-brush-val">20</span></div>
+              <input type="range" id="pm-brush-size" min="1" max="200" value="20" style="width:100%;" />
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;"><span>Opacity</span><span id="pm-opacity-val">100%</span></div>
+              <input type="range" id="pm-opacity" min="5" max="100" value="100" style="width:100%;" />
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;"><span>Falloff</span><span id="pm-falloff-val">30%</span></div>
+              <input type="range" id="pm-falloff" min="0" max="100" value="30" style="width:100%;" />
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button id="pm-undo" class="secondary-btn tool-btn" disabled title="Undo (Ctrl+Z)" style="flex:1; padding:4px;">↶</button>
+              <button id="pm-redo" class="secondary-btn tool-btn" disabled title="Redo (Ctrl+Y)" style="flex:1; padding:4px;">↷</button>
+            </div>
+            <button id="pm-reset" class="secondary-btn tool-btn" title="Restore the original texture" style="padding:6px; font-size:11px;">↺ Reset texture</button>
+            <div style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
+              Painted onto the current map at its native resolution.
+            </div>
+          </div>
+          <!-- Right: 3D viewer -->
+          <div id="pm-viewport-wrap" style="flex:1 1 0; position:relative; background:#0b0b14; border-radius:6px; overflow:hidden; min-height:560px;">
+            <canvas id="pm-canvas" style="width:100%; height:100%; display:block; cursor:crosshair;"></canvas>
+            <div id="pm-status" style="position:absolute; bottom:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc;">Loading mesh…</div>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+          <button class="ghost-btn" id="pm-cancel">Cancel</button>
+          <button class="primary-btn" id="pm-save" style="margin:0; padding:8px 24px; width:auto;">Save new version</button>
         </div>
       </div>
     </div>
@@ -2026,9 +2092,9 @@
           <button id="paint-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
         </div>
       </div>
-      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
-        <!-- Left panel: tools -->
-        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px; min-height:0;">
+        <!-- Left panel: tools — scrolls when content (incl. Tolerance) exceeds the modal height. -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto; max-height:100%;">
           <!-- Tool buttons -->
           <div style="display:flex; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Select</span>
@@ -2100,9 +2166,9 @@
           <button id="me-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
         </div>
       </div>
-      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
-        <!-- Left panel: tools -->
-        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 0;">
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px; min-height:0;">
+        <!-- Left panel: tools — scrolls when content (incl. Tolerance) exceeds the modal height. -->
+        <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto; max-height:100%;">
           <div style="display:flex; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Mode</span>
             <button id="me-tool-sculpt" class="secondary-btn tool-btn tool-active" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9997; Sculpt</button>

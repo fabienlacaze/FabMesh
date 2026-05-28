@@ -9557,7 +9557,569 @@ async function _peApplyOnDevice() {
   }
 }
 
-document.getElementById('ws-mesh-paint-emissive-btn')?.addEventListener('click', openPaintEmissive);
+// Both Manual Tools buttons funnel into the unified Paint Mesh modal —
+// "Paint Emissive" just pre-toggles the emissive layer so the user
+// lands directly on the glow workflow without an extra click.
+document.getElementById('ws-mesh-paint-emissive-btn')?.addEventListener('click', () => openPaintMesh({ emissiveMode: true }));
+
+// ============================================================
+// PAINT MESH TOOL — paint directly on the diffuse texture
+// (material.map) via the same raycast-to-UV pipeline used by Paint
+// Emissive. UI is patterned on the 2D Paint Tools sidebar (Pen /
+// Spray / Ink / Eraser + color + brush / opacity / falloff sliders).
+// Canvas is initialised from each submesh's current map so the
+// user paints on top of the existing texture.
+// ============================================================
+const pmState = {
+  renderer: null, scene: null, camera: null, controls: null,
+  rafId: null,
+  origModel: null,
+  meshes: [],                  // [{ mesh, prev: [{mat, mapWas, emissiveMapWas, emissiveWas, emissiveIntensityWas}] }]
+  raycaster: null,
+  pointer: null,
+  // Map<Mesh, {
+  //   diffuse:  { canvas, ctx, texture, w, h },
+  //   emissive: { canvas, ctx, texture, w, h }  ← created lazily
+  // }>
+  canvases: null,
+  tool: 'pen',                 // 'pen' | 'spray' | 'ink' | 'eraser'
+  color: '#ff0000',
+  brushSize: 20,
+  opacity: 1.0,
+  falloff: 0.3,
+  emissiveMode: false,         // false = paint diffuse map, true = paint emissive map
+  isPainting: false,
+  history: [],
+  historyIndex: -1,
+};
+const PM_HISTORY_MAX = 20;
+
+// Pick the active layer (diffuse vs emissive) for the current
+// emissiveMode. Used by stamp, history snapshot, restore.
+function _pmActiveLayer(entry) {
+  return pmState.emissiveMode ? entry.emissive : entry.diffuse;
+}
+function _pmSnapshotAll() {
+  if (!pmState.canvases) return null;
+  const snap = new Map();
+  pmState.canvases.forEach((entry, mesh) => {
+    const L = _pmActiveLayer(entry);
+    if (!L) return;
+    snap.set(mesh, { mode: pmState.emissiveMode, img: L.ctx.getImageData(0, 0, L.w, L.h) });
+  });
+  return snap;
+}
+function _pmApplySnapshot(snap) {
+  if (!snap) return;
+  pmState.canvases?.forEach((entry, mesh) => {
+    const s = snap.get(mesh);
+    if (!s) return;
+    const L = s.mode ? entry.emissive : entry.diffuse;
+    if (!L) return;
+    L.ctx.putImageData(s.img, 0, 0);
+    L.texture.needsUpdate = true;
+  });
+}
+function _pmHistoryPush() {
+  const snap = _pmSnapshotAll();
+  if (!snap) return;
+  pmState.history.length = pmState.historyIndex + 1;
+  pmState.history.push(snap);
+  if (pmState.history.length > PM_HISTORY_MAX) pmState.history.shift();
+  pmState.historyIndex = pmState.history.length - 1;
+  _pmUpdateUndoRedo();
+}
+function _pmUndo() {
+  if (pmState.historyIndex <= 0) return;
+  pmState.historyIndex--;
+  _pmApplySnapshot(pmState.history[pmState.historyIndex]);
+  _pmUpdateUndoRedo();
+}
+function _pmRedo() {
+  if (pmState.historyIndex >= pmState.history.length - 1) return;
+  pmState.historyIndex++;
+  _pmApplySnapshot(pmState.history[pmState.historyIndex]);
+  _pmUpdateUndoRedo();
+}
+function _pmUpdateUndoRedo() {
+  const u = document.getElementById('pm-undo');
+  const r = document.getElementById('pm-redo');
+  if (u) u.disabled = pmState.historyIndex <= 0;
+  if (r) r.disabled = pmState.historyIndex >= pmState.history.length - 1;
+}
+
+async function _pmInitViewport() {
+  if (pmState.renderer) return;
+  const canvas = document.getElementById('pm-canvas');
+  const wrap = document.getElementById('pm-viewport-wrap');
+  if (!canvas || !wrap) return;
+  const w = wrap.clientWidth || 800;
+  const h = wrap.clientHeight || 560;
+  pmState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  pmState.renderer.setSize(w, h, false);
+  pmState.renderer.setPixelRatio(window.devicePixelRatio);
+  pmState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  pmState.renderer.toneMappingExposure = 1.0;
+  pmState.scene = new THREE.Scene();
+  pmState.scene.background = new THREE.Color(0x0b0b14);
+  pmState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+  pmState.camera.position.set(0, 0.5, 2);
+  try {
+    pmState.controls = new OrbitControls(pmState.camera, canvas);
+    pmState.controls.enableDamping = true;
+    pmState.controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+  } catch (e) { console.error('[paint-mesh] OrbitControls:', e); }
+  pmState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(5, 8, 5); pmState.scene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+  fill.position.set(-5, 3, -5); pmState.scene.add(fill);
+  pmState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  pmState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
+  pmState.raycaster = new THREE.Raycaster();
+  pmState.pointer = new THREE.Vector2();
+  const tick = () => {
+    if (!document.getElementById('modal-paint-mesh')?.classList.contains('hidden')) {
+      pmState.controls?.update();
+      pmState.renderer.render(pmState.scene, pmState.camera);
+    }
+    pmState.rafId = requestAnimationFrame(tick);
+  };
+  tick();
+  new ResizeObserver(() => {
+    const cw = wrap.clientWidth, ch = wrap.clientHeight;
+    if (cw > 0 && ch > 0) {
+      pmState.renderer.setSize(cw, ch, false);
+      pmState.camera.aspect = cw / ch;
+      pmState.camera.updateProjectionMatrix();
+    }
+  }).observe(wrap);
+}
+
+// For each submesh, create a 2D canvas the size of its current diffuse
+// map (cap 2048 for memory), prime it with the existing texture content,
+// and bind it as material.map. Saves the previous map so Cancel can
+// restore.
+async function _pmSetupCanvasAndBind() {
+  pmState.canvases = new Map();
+  for (const entry of pmState.meshes) {
+    const m = entry.mesh.material;
+    const mats = Array.isArray(m) ? m : [m];
+    entry.prev = mats.map((mat) => ({
+      mat,
+      mapWas: mat.map,
+      emissiveMapWas: mat.emissiveMap,
+      emissiveWas: mat.emissive?.clone(),
+      emissiveIntensityWas: mat.emissiveIntensity,
+    }));
+    // Diffuse canvas: starts from current map content.
+    const baseTex = mats[0]?.map;
+    const baseImg = baseTex?.image;
+    let w = 1024, h = 1024;
+    if (baseImg && baseImg.width && baseImg.height) {
+      w = Math.min(2048, baseImg.width);
+      h = Math.min(2048, baseImg.height);
+    }
+    const dCanvas = document.createElement('canvas');
+    dCanvas.width = w; dCanvas.height = h;
+    const dCtx = dCanvas.getContext('2d');
+    if (baseImg && baseImg.width && baseImg.height) {
+      try { dCtx.drawImage(baseImg, 0, 0, w, h); }
+      catch { dCtx.fillStyle = '#ffffff'; dCtx.fillRect(0, 0, w, h); }
+    } else { dCtx.fillStyle = '#ffffff'; dCtx.fillRect(0, 0, w, h); }
+    const dTex = new THREE.CanvasTexture(dCanvas);
+    dTex.colorSpace = THREE.SRGBColorSpace;
+    dTex.flipY = baseTex ? baseTex.flipY : false;
+    dTex.wrapS = THREE.RepeatWrapping;
+    dTex.wrapT = THREE.RepeatWrapping;
+    dTex.name = baseTex?.name || 'T_diffuse';
+    dTex.needsUpdate = true;
+    // Emissive canvas: black, same size, same flipY.
+    const eCanvas = document.createElement('canvas');
+    eCanvas.width = w; eCanvas.height = h;
+    const eCtx = eCanvas.getContext('2d');
+    eCtx.fillStyle = '#000000'; eCtx.fillRect(0, 0, w, h);
+    const eTex = new THREE.CanvasTexture(eCanvas);
+    eTex.colorSpace = THREE.SRGBColorSpace;
+    eTex.flipY = dTex.flipY;
+    eTex.wrapS = THREE.RepeatWrapping;
+    eTex.wrapT = THREE.RepeatWrapping;
+    eTex.name = 'T_emissive';
+    eTex.needsUpdate = true;
+    pmState.canvases.set(entry.mesh, {
+      diffuse:  { canvas: dCanvas, ctx: dCtx, texture: dTex, w, h },
+      emissive: { canvas: eCanvas, ctx: eCtx, texture: eTex, w, h },
+    });
+    mats.forEach((mat) => {
+      mat.map = dTex;
+      mat.emissiveMap = eTex;
+      mat.emissive = new THREE.Color(0xffffff);
+      mat.emissiveIntensity = 1.0;
+      mat.needsUpdate = true;
+    });
+  }
+  pmState.history = [];
+  pmState.historyIndex = -1;
+  _pmHistoryPush();
+}
+
+function _pmRestoreMaterials() {
+  pmState.meshes.forEach((entry) => {
+    if (!entry.prev) return;
+    entry.prev.forEach(({ mat, mapWas, emissiveMapWas, emissiveWas, emissiveIntensityWas }) => {
+      mat.map = mapWas;
+      mat.emissiveMap = emissiveMapWas;
+      if (emissiveWas) mat.emissive = emissiveWas;
+      if (typeof emissiveIntensityWas === 'number') mat.emissiveIntensity = emissiveIntensityWas;
+      mat.needsUpdate = true;
+    });
+  });
+}
+
+async function _pmLoadMesh(meshPath) {
+  if (pmState.origModel) {
+    pmState.scene.remove(pmState.origModel);
+    pmState.origModel = null;
+  }
+  pmState.meshes = [];
+  const url = (typeof meshPath === 'string' && /^[a-z]+:/i.test(meshPath))
+    ? meshPath
+    : 'file:///' + String(meshPath).replace(/\\/g, '/');
+  try {
+    const r = await fetch(url, { credentials: 'omit' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const buf = await r.arrayBuffer();
+    const loader = new GLTFLoader();
+    loader.parse(buf, '', async (gltf) => {
+      pmState.origModel = gltf.scene;
+      pmState.scene.add(pmState.origModel);
+      const box = new THREE.Box3().setFromObject(pmState.origModel);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      pmState.origModel.position.sub(center);
+      pmState.origModel.position.y += size.y / 2;
+      pmState.camera.position.set(0, size.y * 0.5, maxDim * 2);
+      pmState.controls?.target.set(0, size.y * 0.5, 0);
+      pmState.controls?.update();
+      pmState.origModel.traverse((child) => {
+        if (child.isMesh && child.geometry && child.material) {
+          pmState.meshes.push({ mesh: child });
+        }
+      });
+      await _pmSetupCanvasAndBind();
+      const status = document.getElementById('pm-status');
+      if (status) status.textContent = 'Ready — left-click to paint, right-click to orbit.';
+    });
+  } catch (e) {
+    console.error('[paint-mesh] load failed:', e);
+    if (typeof showToast === 'function') showToast('Mesh load failed: ' + (e?.message || e), 'error', 5000);
+  }
+}
+
+function _pmHexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  return `rgba(${parseInt(h.slice(0,2),16)||0}, ${parseInt(h.slice(2,4),16)||0}, ${parseInt(h.slice(4,6),16)||0}, ${alpha})`;
+}
+
+function _pmRaycast(clientX, clientY) {
+  if (!pmState.origModel || !pmState.raycaster) return null;
+  const cv = pmState.renderer.domElement;
+  const rect = cv.getBoundingClientRect();
+  pmState.pointer.set(
+    ((clientX - rect.left) / rect.width)  *  2 - 1,
+    ((clientY - rect.top)  / rect.height) * -2 + 1,
+  );
+  pmState.raycaster.setFromCamera(pmState.pointer, pmState.camera);
+  const meshes = pmState.meshes.map((e) => e.mesh);
+  const hits = pmState.raycaster.intersectObjects(meshes, false);
+  if (!hits.length || !hits[0].uv) return null;
+  return hits[0];
+}
+
+// Stamp a brush dab on the hit submesh's canvas using the active tool
+// (pen / spray / ink / eraser). Same 3D-distance filter as Paint
+// Emissive to avoid bleed across overlapping UV islands.
+function _pmStampAtPointer(clientX, clientY) {
+  const hit = _pmRaycast(clientX, clientY);
+  if (!hit) return;
+  const entryAll = pmState.canvases?.get(hit.object);
+  if (!entryAll) return;
+  const entry = _pmActiveLayer(entryAll);
+  if (!entry) return;
+  const ctx = entry.ctx;
+  const W = entry.w, H = entry.h;
+  let uvX = Math.max(0, Math.min(1, hit.uv.x));
+  let uvY = Math.max(0, Math.min(1, hit.uv.y));
+  if (entry.texture.flipY) uvY = 1 - uvY;
+  const px = uvX * W;
+  const py = uvY * H;
+  const r = Math.max(1, pmState.brushSize * 0.5);
+  const fall = Math.max(0, Math.min(1, pmState.falloff));
+  ctx.save();
+  const mesh = hit.object;
+  const geom = mesh.geometry;
+  const posAttr = geom.attributes.position;
+  const uvAttr = geom.attributes.uv;
+  const idx = geom.index?.array;
+  // 3D-distance clip: same logic as Paint Emissive.
+  if (uvAttr && posAttr) {
+    const localHit = mesh.worldToLocal(hit.point.clone());
+    const cam = pmState.camera;
+    const camDist = cam.position.distanceTo(hit.point);
+    const viewH = pmState.renderer.domElement.clientHeight || 600;
+    const heightAtDist = 2 * camDist * Math.tan((cam.fov * Math.PI / 180) / 2);
+    const unitsPerPx = heightAtDist / viewH;
+    const R3D = pmState.brushSize * 0.5 * unitsPerPx * 1.2;
+    const R3DSq = R3D * R3D;
+    const posArr = posAttr.array;
+    const uvArr = uvAttr.array;
+    const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(posAttr.count / 3);
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.clip();
+    const inner = pmState.tool === 'eraser'
+      ? `rgba(255, 255, 255, ${pmState.opacity})`
+      : _pmHexToRgba(pmState.color, pmState.opacity);
+    const edge  = pmState.tool === 'eraser'
+      ? 'rgba(255, 255, 255, 0)'
+      : _pmHexToRgba(pmState.color, 0);
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
+    grad.addColorStop(0, inner);
+    grad.addColorStop(1 - fall, inner);
+    grad.addColorStop(1, edge);
+    ctx.fillStyle = grad;
+    for (let t = 0; t < triCount; t++) {
+      const i0 = idx ? idx[t*3]   : t*3;
+      const i1 = idx ? idx[t*3+1] : t*3+1;
+      const i2 = idx ? idx[t*3+2] : t*3+2;
+      const p0x = posArr[i0*3], p0y = posArr[i0*3+1], p0z = posArr[i0*3+2];
+      const p1x = posArr[i1*3], p1y = posArr[i1*3+1], p1z = posArr[i1*3+2];
+      const p2x = posArr[i2*3], p2y = posArr[i2*3+1], p2z = posArr[i2*3+2];
+      const d0 = (p0x-localHit.x)**2 + (p0y-localHit.y)**2 + (p0z-localHit.z)**2;
+      if (d0 >= R3DSq) {
+        const d1 = (p1x-localHit.x)**2 + (p1y-localHit.y)**2 + (p1z-localHit.z)**2;
+        if (d1 >= R3DSq) {
+          const d2 = (p2x-localHit.x)**2 + (p2y-localHit.y)**2 + (p2z-localHit.z)**2;
+          if (d2 >= R3DSq) continue;
+        }
+      }
+      let u0y = uvArr[i0*2+1], u1y = uvArr[i1*2+1], u2y = uvArr[i2*2+1];
+      if (entry.texture.flipY) { u0y = 1 - u0y; u1y = 1 - u1y; u2y = 1 - u2y; }
+      ctx.beginPath();
+      ctx.moveTo(uvArr[i0*2] * W, u0y * H);
+      ctx.lineTo(uvArr[i1*2] * W, u1y * H);
+      ctx.lineTo(uvArr[i2*2] * W, u2y * H);
+      ctx.closePath();
+      // Tool-specific stamp behaviour. Pen/Ink: gradient fill.
+      // Spray: random pixel-sprinkle inside the triangle. Eraser uses
+      // destination-out on top of the gradient fill.
+      if (pmState.tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      } else if (pmState.tool === 'spray') {
+        // For spray we approximate by re-filling with random small
+        // squares — gradient + clip already shape it to the brush
+        // and triangle. Re-fill with low alpha is the cheap option.
+        ctx.globalAlpha = 0.4 * pmState.opacity;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fill();
+      }
+    }
+  } else {
+    // No UVs / fallback: simple disc stamp.
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
+    grad.addColorStop(0, _pmHexToRgba(pmState.color, pmState.opacity));
+    grad.addColorStop(1, _pmHexToRgba(pmState.color, 0));
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+  ctx.restore();
+  entry.texture.needsUpdate = true;
+}
+
+function openPaintMesh(opts = {}) {
+  const p = state.currentProject;
+  if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
+  const modal = document.getElementById('modal-paint-mesh');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  // Pre-set the layer mode from caller (Paint Emissive alias passes
+  // emissiveMode: true so the user lands directly on the glow layer).
+  pmState.emissiveMode = !!opts.emissiveMode;
+  const $ = (id) => document.getElementById(id);
+  // Wire tool selection.
+  const toolBtns = ['pen', 'spray', 'ink', 'eraser'];
+  const setTool = (t) => {
+    pmState.tool = t;
+    toolBtns.forEach((nm) => {
+      $('pm-tool-' + nm)?.classList.toggle('tool-active', nm === t);
+    });
+  };
+  toolBtns.forEach((nm) => { $('pm-tool-' + nm).onclick = () => setTool(nm); });
+  setTool('pen');
+  $('pm-color').oninput = (e) => { pmState.color = e.target.value; };
+  pmState.color = $('pm-color').value;
+  $('pm-brush-size').oninput = (e) => {
+    pmState.brushSize = Number(e.target.value); $('pm-brush-val').textContent = e.target.value;
+  };
+  $('pm-opacity').oninput = (e) => {
+    pmState.opacity = Number(e.target.value) / 100; $('pm-opacity-val').textContent = e.target.value + '%';
+  };
+  $('pm-falloff').oninput = (e) => {
+    pmState.falloff = Number(e.target.value) / 100; $('pm-falloff-val').textContent = e.target.value + '%';
+  };
+  $('pm-undo').onclick = _pmUndo;
+  $('pm-redo').onclick = _pmRedo;
+  // Apply the title/subtitle/button-state for the current mode.
+  const refreshModeUI = () => {
+    const title = $('pm-title');
+    const subtitle = $('pm-subtitle');
+    const tBtn = $('pm-toggle-emissive');
+    if (pmState.emissiveMode) {
+      if (title)    title.textContent = '💡 Paint Mesh — Emissive layer';
+      if (subtitle) subtitle.textContent = 'Strokes go on the emissive map (T_emissive). Toggle off to paint the diffuse instead.';
+    } else {
+      if (title)    title.textContent = '🎨 Paint Mesh';
+      if (subtitle) subtitle.textContent = "Paint directly on the mesh's diffuse texture. Left-click + drag to paint, right-click to orbit.";
+    }
+    tBtn?.classList.toggle('tool-active', pmState.emissiveMode);
+    if (tBtn) {
+      tBtn.style.background = pmState.emissiveMode ? 'var(--accent, #5a4fcf)' : '';
+      tBtn.style.color      = pmState.emissiveMode ? '#fff' : '';
+    }
+  };
+  refreshModeUI();
+  $('pm-toggle-emissive').onclick = () => {
+    pmState.emissiveMode = !pmState.emissiveMode;
+    refreshModeUI();
+  };
+  // Reset clears the ACTIVE layer back to its base state (diffuse →
+  // original texture, emissive → black). Leaves the other layer alone.
+  $('pm-reset').onclick = () => {
+    if (!pmState.canvases) return;
+    pmState.canvases.forEach((entryAll, mesh) => {
+      if (pmState.emissiveMode) {
+        const L = entryAll.emissive;
+        L.ctx.fillStyle = '#000000';
+        L.ctx.fillRect(0, 0, L.w, L.h);
+        L.texture.needsUpdate = true;
+      } else {
+        const L = entryAll.diffuse;
+        const orig = entryAll.diffuse && pmState.meshes.find((e) => e.mesh === mesh)?.prev?.[0]?.mapWas?.image;
+        L.ctx.clearRect(0, 0, L.w, L.h);
+        if (orig) {
+          try { L.ctx.drawImage(orig, 0, 0, L.w, L.h); }
+          catch { L.ctx.fillStyle = '#ffffff'; L.ctx.fillRect(0, 0, L.w, L.h); }
+        } else { L.ctx.fillStyle = '#ffffff'; L.ctx.fillRect(0, 0, L.w, L.h); }
+        L.texture.needsUpdate = true;
+      }
+    });
+    _pmHistoryPush();
+  };
+  const onKey = (e) => {
+    if (modal.classList.contains('hidden')) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault(); if (e.shiftKey) _pmRedo(); else _pmUndo();
+    } else if (e.key === 'y' || e.key === 'Y') {
+      e.preventDefault(); _pmRedo();
+    }
+  };
+  document.addEventListener('keydown', onKey);
+
+  requestAnimationFrame(async () => {
+    await _pmInitViewport();
+    const cv = pmState.renderer.domElement;
+    cv.onpointerdown = (e) => {
+      if (e.button !== 0) return;
+      pmState.isPainting = true;
+      cv.setPointerCapture(e.pointerId);
+      _pmStampAtPointer(e.clientX, e.clientY);
+    };
+    cv.onpointermove = (e) => {
+      if (!pmState.isPainting) return;
+      _pmStampAtPointer(e.clientX, e.clientY);
+    };
+    const up = (e) => {
+      if (pmState.isPainting) { pmState.isPainting = false; _pmHistoryPush(); }
+      try { cv.releasePointerCapture(e.pointerId); } catch {}
+    };
+    cv.onpointerup = up;
+    cv.onpointercancel = up;
+    _pmLoadMesh(p.selectedMeshPath);
+  });
+
+  const close = (restore) => {
+    modal.classList.add('hidden');
+    if (restore) _pmRestoreMaterials();
+  };
+  $('pm-cancel').onclick = () => close(true);
+  $('pm-close-x').onclick = () => close(true);
+  $('pm-save').onclick = async () => {
+    const btn = $('pm-save'); const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try { await _pmApplyOnDevice(); close(false); }
+    catch (e) {
+      showToast('Paint Mesh failed: ' + (e?.message || e), 'error', 5000);
+      btn.textContent = orig; btn.disabled = false;
+    }
+  };
+}
+
+async function _pmApplyOnDevice() {
+  if (!pmState.origModel) throw new Error('no model loaded');
+  const savedPos = pmState.origModel.position.clone();
+  pmState.origModel.position.set(0, 0, 0);
+  try {
+    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+    const exporter = new GLTFExporter();
+    const buf = await new Promise((resolve, reject) => {
+      exporter.parse(pmState.origModel,
+        (r) => r instanceof ArrayBuffer ? resolve(r) : reject(new Error('non-binary export')),
+        (err) => reject(err),
+        { binary: true, embedImages: true },
+      );
+    });
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    const b64 = btoa(bin);
+    const r = await fetch('/api/mesh-op/client-result', {
+      method: 'POST', credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ opType: 'center', glbBase64: b64 }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
+    const newUrl = data.path || data.newPath || data.mesh_url;
+    showToast('Paint Mesh saved!', 'success');
+    const p = state.currentProject;
+    if (p && newUrl) {
+      const filename = String(newUrl).split('/').pop() || 'paint_mesh.glb';
+      p.meshes = p.meshes || [];
+      p.meshes.unshift({ path: newUrl, filename, size: 0, mtime: Date.now() });
+      p.selectedMeshPath = newUrl;
+      p.previewMeshPath = newUrl;
+      if (typeof populateWorkspace === 'function') {
+        try { await populateWorkspace(p); } catch {}
+      }
+    }
+  } finally {
+    pmState.origModel.position.copy(savedPos);
+  }
+}
+
+document.getElementById('ws-mesh-paint-mesh-btn')?.addEventListener('click', openPaintMesh);
 
 // ============================================================
 // MATERIAL ADJUST MODAL
