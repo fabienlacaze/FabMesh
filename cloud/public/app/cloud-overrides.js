@@ -387,6 +387,13 @@
     'ws-mesh-paintvert-btn',
     'ws-mesh-selectface-btn',
     'ws-mesh-trellis2-btn',  // full TRELLIS-2 retexture — explained in shim error
+    // "Open in Blender" / "Show in folder" only work on Desktop where
+    // we can spawn `blender` and reveal the file on the user's FS.
+    // In the browser they'd 404; just hide them on cloud.
+    'ws-mesh-blender-btn',
+    'ws-mesh-folder-btn',
+    'ws-rig-blender-btn',
+    'ws-rig-folder-btn',
   ];
   function _hideDesktopOnlyButtons() {
     for (const id of CLOUD_HIDE_BUTTONS) {
@@ -801,11 +808,15 @@
     // in the browser, so always "--". Just hide it.
     hideById('job-gpu-monitor');
 
-    // Rewrite the bottom credit line so it doesn't claim Sentry crash
-    // reporting that we haven't wired up yet on Cloud.
+    // Slim the credit line down to just the studio name. The licence
+    // list + infra mention were too much detail for the contact panel
+    // and don't help end-users — keep that info for the legal pages.
     document.querySelectorAll('.about-card p').forEach((p) => {
-      if (p.textContent && p.textContent.includes('Crash reports sent anonymously via Sentry')) {
-        p.textContent = 'An Ayros Studio production · MIT / Apache / BSD / OpenRAIL++-M models · runs on Cloudflare Workers + Replicate GPU.';
+      if (!p.textContent) return;
+      if (p.textContent.includes('Crash reports sent anonymously via Sentry')
+       || p.textContent.includes('OpenRAIL')
+       || p.textContent.includes('MIT / Apache')) {
+        p.textContent = 'An Ayros Studio production.';
       }
     });
   }

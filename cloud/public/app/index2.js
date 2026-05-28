@@ -11310,11 +11310,55 @@ document.getElementById('exp-browse')?.addEventListener('click', async () => {
   const picked = await API.pickExportPath({ defaultName, format });
   if (picked) document.getElementById('exp-path').value = picked;
 });
+// Licence options chosen by the user in the Export modal. Keys
+// match the <select id="exp-licence"> value attributes; bodies are
+// shipped as a sibling LICENSE.txt next to the exported mesh.
+const EXPORT_LICENCES = {
+  personal: {
+    label: 'Personal use only',
+    body: 'This 3D asset is licensed for personal, non-commercial use by the original purchaser only. Redistribution, resale, sublicensing, or use in commercial products is not permitted without explicit written permission.',
+  },
+  cc0: {
+    label: 'Public domain (CC0 1.0)',
+    body: 'This 3D asset is released into the public domain under Creative Commons CC0 1.0 Universal. You may copy, modify, distribute, and use it freely, including for commercial purposes, without asking permission. See https://creativecommons.org/publicdomain/zero/1.0/',
+  },
+  'cc-by': {
+    label: 'Attribution required (CC-BY 4.0)',
+    body: 'This 3D asset is licensed under Creative Commons Attribution 4.0 International (CC-BY 4.0). You may share and adapt it for any purpose, including commercial, provided you give appropriate credit to the original author. See https://creativecommons.org/licenses/by/4.0/',
+  },
+  'cc-by-nc': {
+    label: 'Non-commercial only (CC-BY-NC 4.0)',
+    body: 'This 3D asset is licensed under Creative Commons Attribution-NonCommercial 4.0 International (CC-BY-NC 4.0). You may share and adapt it for non-commercial purposes only, with attribution. Commercial use is not permitted. See https://creativecommons.org/licenses/by-nc/4.0/',
+  },
+  commercial: {
+    label: 'Royalty-free commercial',
+    body: 'This 3D asset is licensed for royalty-free commercial use by the original purchaser. You may use it in unlimited commercial projects, but redistribution or resale of the asset itself (standalone or as part of a marketplace pack) is not permitted.',
+  },
+};
+
+// Live licence hint — rewrites the small grey description under the
+// licence dropdown so the user sees what they're committing to before
+// they hit Export.
+(function _wireLicenceHint() {
+  const sel = document.getElementById('exp-licence');
+  const hint = document.getElementById('exp-licence-hint');
+  if (!sel || !hint) return;
+  const sync = () => {
+    const lic = EXPORT_LICENCES[sel.value];
+    if (!lic) return;
+    const short = lic.body.length > 180 ? lic.body.slice(0, 175) + '…' : lic.body;
+    hint.textContent = short + ' (Saved as a sibling LICENSE.txt next to your mesh.)';
+  };
+  sel.addEventListener('change', sync);
+  sync();
+})();
+
 document.getElementById('exp-go')?.addEventListener('click', async () => {
   const m = getCurrentMeshObj();
   if (!m) return;
   const format = document.getElementById('exp-format').value;
   const outputPath = document.getElementById('exp-path').value.trim() || null;
+  const licenceKey = document.getElementById('exp-licence')?.value || 'personal';
   document.getElementById('modal-export-mesh').classList.add('hidden');
   // Prefer the original GLB as the source whenever possible. If the user
   // selected a previously-exported FBX version (which may have broken texture
@@ -11331,12 +11375,34 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
       sourcePath = glbSibling.path;
     }
   }
-  const job = pushJob(`Export ${format}: ${m.filename}`);
+  const licence = EXPORT_LICENCES[licenceKey] || EXPORT_LICENCES.personal;
+  const job = pushJob(`Export ${format}: ${m.filename}`, null, { Licence: licence.label });
   try {
-    const r = await API.exportMesh({ sourcePath, targetFormat: format, outputPath });
+    const r = await API.exportMesh({ sourcePath, targetFormat: format, outputPath, licence: licenceKey });
     const outPath = r?.outputPath || r?.path;
     if (outPath) {
       completeJob(job.id, true);
+      // Drop a sibling LICENSE.txt next to the mesh so the licence
+      // travels with the asset. On cloud this triggers a second
+      // browser download; on desktop the IPC handler writes it on
+      // disk via fs.writeFile.
+      try {
+        const baseName = String(m.filename || 'mesh').replace(/\.[^.]+$/, '');
+        const txt = `${licence.label}\n\n${licence.body}\n\nExported ${new Date().toISOString()} via MyFabmesh.AI.`;
+        if (API.writeLicenceFile) {
+          await API.writeLicenceFile({ outputPath: outPath, content: txt });
+        } else {
+          // Cloud fallback — trigger a client download.
+          const blob = new Blob([txt], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = baseName + '_LICENSE.txt';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+        }
+      } catch (licErr) {
+        console.warn('[export] LICENSE sidecar failed:', licErr);
+      }
       try { await API.showInExplorer(outPath); } catch (e) {}
     } else {
       completeJob(job.id, false);

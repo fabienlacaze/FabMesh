@@ -1616,6 +1616,17 @@
           <option value="ply">PLY (point cloud)</option>
           <option value="fbx_unreal">FBX for Unreal Engine (cm + Y-up)</option>
         </select>
+        <label>Licence</label>
+        <select id="exp-licence">
+          <option value="personal" selected>Personal use only</option>
+          <option value="cc0">Public domain (CC0)</option>
+          <option value="cc-by">Attribution required (CC-BY 4.0)</option>
+          <option value="cc-by-nc">Non-commercial only (CC-BY-NC 4.0)</option>
+          <option value="commercial">Royalty-free commercial</option>
+        </select>
+        <div style="font-size:11px; color:var(--text-2); margin-top:-4px; line-height:1.4;" id="exp-licence-hint">
+          Embedded as metadata in the file and written to a sibling LICENSE.txt.
+        </div>
         <label>Output path</label>
         <div style="display:flex; gap:8px;">
           <input type="text" id="exp-path" placeholder="(default: meshes/my_mesh.glb)" style="flex:1;" />
@@ -2352,11 +2363,11 @@
       <h2 class="about-title">Contact us</h2>
       <div class="about-version">We read every message · usually reply within 48&nbsp;h</div>
       <div class="about-section">
-        <p style="font-size:13px; color:var(--text-2);">For bug reports, feature requests, billing questions, or anything else. Leave an email if you want a reply.</p>
+        <p style="font-size:13px; color:var(--text-2);">For bug reports, feature requests, billing questions, or anything else. We'll reply to the email you provide.</p>
         <form id="contact-form" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
-          <input type="text" id="contact-name" placeholder="Name (optional)" maxlength="80"
+          <input type="text" id="contact-name" placeholder="Name" required maxlength="80"
                  style="padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-2); color:var(--text-0); font-size:13px;" />
-          <input type="email" id="contact-email" placeholder="Email (optional, for a reply)" maxlength="120"
+          <input type="email" id="contact-email" placeholder="Email" required maxlength="120"
                  style="padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-2); color:var(--text-0); font-size:13px;" />
           <input type="text" id="contact-subject" placeholder="Subject" required maxlength="120"
                  style="padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-2); color:var(--text-0); font-size:13px;" />

@@ -10,6 +10,34 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (worker — Admin handlers HTTP 500 fix + UI cleanup)
+
+- **HTTP 500 sur Admin Messages + Modal credits** (cap. user) :
+  cause = `_requireAdmin` retourne `{user} | Response`. Le pattern
+  `if (adminCheck) return adminCheck;` était truthy dans LES DEUX
+  cas → quand l'admin réussit l'auth, on renvoyait l'objet user
+  comme Response → exception runtime → page HTML 500 de Cloudflare.
+  Fix : remplacer par `if (adminCheck instanceof Response) return
+  adminCheck;` dans les 5 handlers concernés
+  (handleAdminContactList, handleAdminContactRead,
+  handleAdminContactDelete, handleAdminModalCredits,
+  handleAdminModalSetBudget).
+  Les routes étaient broken depuis leur création — le user voyait "!"
+  partout puis "HTTP 500 — <!DOCTYPE…" depuis mon fix d'erreur précédent.
+- **UI ménage** : contact form Name + Email passés en required (le
+  user a clarifié "rien n'est optional"). About panel : retiré la
+  ligne licences MIT/Apache/BSD/OpenRAIL + mention "Cloudflare
+  Workers + Replicate GPU" (trop de détails techniques pour les
+  end-users). Boutons "Open in Blender" + "Show in folder" cachés
+  sur cloud (mesh step + rig step).
+- **Export modal — nouveau dropdown Licence** : 5 options
+  (Personal use, CC0, CC-BY 4.0, CC-BY-NC 4.0, royalty-free
+  commercial). À l'export, un sibling `LICENSE.txt` est généré ; sur
+  desktop via API.writeLicenceFile (à wirer ultérieurement), sur
+  cloud via download client-side du blob.
+
+---
+
 ## 2026-05-28 (UI — Modal credit affordance pattern)
 
 - **Demande user** : tous les modaux d'outils qui consomment des
