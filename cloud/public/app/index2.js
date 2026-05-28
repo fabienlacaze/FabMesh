@@ -6660,10 +6660,20 @@ async function renderMeshVersions(p) {
       // (filename strips down to e.g. "orc_soldier_trellis2_xxxxx"
       // which never matches a uuid → silent 404). Desktop accepts
       // either — passing m.id when available keeps both paths happy.
-      const r = await API.deleteMesh(m.id || m.jobId || m.filename);
-      if (r && r.success === false && r.error) {
-        if (typeof customError === 'function') customError(r.error, 'Delete failed');
-        else console.error('[deleteMesh] failed:', r.error);
+      // Fallback chain also covers in-session unshifted meshes (refine /
+      // decimate paths) that lack `id` but may carry `jobId`/`job_id`.
+      const deleteKey = m.id || m.jobId || m.job_id || m.predictionId || m.prediction_id || m.filename;
+      console.log('[deleteMesh] sending id=', deleteKey, 'from mesh=', m);
+      const r = await API.deleteMesh(deleteKey);
+      console.log('[deleteMesh] response=', r);
+      const failed = r && (r.success === false || r.ok === false || r.error);
+      if (failed) {
+        const msg = (r && r.error) ? String(r.error) : 'Unknown error';
+        const detail = /404|not found/i.test(msg)
+          ? `${msg} — this mesh may belong to an older account or have already been removed.`
+          : msg;
+        if (typeof customError === 'function') customError(detail, 'Delete failed');
+        else { console.error('[deleteMesh] failed:', detail); alert('Delete failed: ' + detail); }
         return;
       }
       await reloadCurrentProject();
@@ -13201,6 +13211,15 @@ async function hasVramHeadroomFor(kind) {
   // compare against the user's slider limit. This correctly blocks a job that
   // would push VRAM from 85% → 98% when the slider is at 92%, which the old
   // AND-based logic missed because it only looked at current usage.
+
+  // Cloud (Modal Labs) scales horizontally — each call spawns its
+  // own container, so the local-GPU "one heavy job at a time"
+  // guard from the desktop build is dead weight here. Skip every
+  // VRAM/temperature/util check; the Worker enforces per-user
+  // daily-call caps separately if needed.
+  if (document.body.classList.contains("cloud-mode")) {
+    return { ok: true };
+  }
   if (isHeavyJobRunning() && kind !== 'bg') {
     return { ok: false, reason: "Un autre job lourd est en cours d'exécution." };
   }
