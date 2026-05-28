@@ -9416,3 +9416,27 @@ comparer sa face_normal contre la moyenne des face_normals de ses
 voisins (partageant une edge). Si dot < 0 = flippé par rapport au flux
 local. Bien plus robuste que le centroïde global, mais demande
 construction d'une adjacency map. Pas implémenté.
+
+## 2026-05-28 — Mesh viewers: force DoubleSide everywhere
+
+Approche pragmatique pour les "trous noirs" qui ne sont pas vraiment
+des trous topologiques: force `material.side = THREE.DoubleSide` sur
+tous les meshes chargés, à 2 endroits:
+- `_mtLoadMesh` (modal viewer pour les mesh tools)
+- `_applyMeshTextureFilter` (workspace viewer — appelé par tous les
+  chargements GLTF)
+
+Effet: les triangles à winding inversé qui se rendaient en noir
+(back-face culling) sont maintenant visibles des deux côtés → les
+"trous" disparaissent visuellement.
+
+Bonus: GLTFExporter écrit `doubleSided: true` dans le GLB exporté
+quand `material.side === DoubleSide`. Donc Apply on device sauvegarde
+le mesh avec ce flag → Unreal/Unity importera aussi en double-sided.
+
+Limites:
+- C'est un workaround visuel, pas une correction topologique. Les
+  triangles à winding inversé restent dans le mesh.
+- Coût léger de rendering (les deux faces sont dessinées).
+- L'export Apply on device propage le flag; l'export via Modal mesh-op
+  pourrait ne pas le faire (à vérifier si problème).
