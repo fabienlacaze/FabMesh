@@ -199,7 +199,15 @@ interface EditingDraft {
   licence: string;
 }
 
-export default function MarketPage() {
+export default function MarketPageWrapper() {
+  return (
+    <MarketErrorBoundary>
+      <MarketPageInner />
+    </MarketErrorBoundary>
+  );
+}
+
+function MarketPageInner() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [owned, setOwned] = useState<OwnedItem[]>([]);
   const [myListings, setMyListings] = useState<MineItem[]>([]);
@@ -220,6 +228,11 @@ export default function MarketPage() {
   const [marketDisabled, setMarketDisabled] = useState(false);
   const [marketDisabledReason, setMarketDisabledReason] = useState<string | null>(null);
   const [flashListingId, setFlashListingId] = useState<string | null>(null);
+  // Gate <model-viewer> behind a mount flag to avoid SSR/static-export
+  // hydration mismatch on the custom element (the script loads
+  // afterInteractive, so the element is unknown at first paint).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   // First load
   useEffect(() => {
@@ -653,6 +666,8 @@ export default function MarketPage() {
                 {kind === 'image' ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={url} alt={l.title} style={{ width: '100%', height: 200, objectFit: 'cover', background: '#0a0a0e', display: 'block' }} />
+                ) : !mounted || !url ? (
+                  <div style={{ width: '100%', height: 200, background: '#0a0a0e' }} />
                 ) : (
                   // @ts-expect-error model-viewer is a custom element
                   <model-viewer src={url} camera-controls auto-rotate shadow-intensity="1" exposure="1" style={{ width: '100%', height: 200, background: '#0a0a0e' }} />
@@ -803,6 +818,8 @@ export default function MarketPage() {
               return kind === 'image' ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={url} alt={selected.title} style={{ width: '100%', maxHeight: 480, objectFit: 'contain', background: '#0a0a0e', borderRadius: 8 }} />
+              ) : !mounted || !url ? (
+                <div style={{ width: '100%', height: 420, background: '#0a0a0e', borderRadius: 8 }} />
               ) : (
                 // @ts-expect-error model-viewer is a custom element
                 <model-viewer src={url} camera-controls auto-rotate shadow-intensity="1" exposure="1" style={{ width: '100%', height: 420, background: '#0a0a0e', borderRadius: 8 }} />
@@ -814,9 +831,9 @@ export default function MarketPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Stars value={selected.rating_avg ?? 0} count={selected.rating_count ?? 0} size={18} />
-                {typeof selected.rating_avg === 'number' && selected.rating_count ? (
+                {selected.rating_avg != null && selected.rating_count ? (
                   <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
-                    {selected.rating_avg.toFixed(1)} / 5
+                    {Number(selected.rating_avg).toFixed(1)} / 5
                   </span>
                 ) : (
                   <span style={{ color: 'var(--text-3)', fontSize: 12 }}>No ratings yet</span>
