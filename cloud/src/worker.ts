@@ -1725,6 +1725,49 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, success: true, id, status: 'pending' });
 }
 
+/** PATCH /api/market/listing/<id>  body { title?, description?, price_cents?, licence? } —
+ *  author edits one of their own listings. Resets status to pending so an
+ *  admin re-reviews the changes. */
+async function handleMarketUpdate(req: Request, env: Env, id: string): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  let body: { title?: string; description?: string; price_cents?: number; licence?: string };
+  try { body = await req.json() as typeof body; } catch { body = {}; }
+  try {
+    const parsed = JSON.parse(txt);
+    if (parsed.user_id !== user.id) return err(403, 'not your listing');
+    if (typeof body.title === 'string') {
+      const t = body.title.trim().slice(0, 120);
+      if (!t) return err(400, 'title required');
+      parsed.title = t;
+    }
+    if (typeof body.description === 'string') {
+      parsed.description = body.description.trim().slice(0, 2000);
+    }
+    if (typeof body.price_cents === 'number' && Number.isFinite(body.price_cents)) {
+      parsed.price_cents = Math.max(0, Math.floor(body.price_cents));
+    }
+    if (typeof body.licence === 'string') {
+      const allowed = ['personal', 'cc0', 'cc-by', 'cc-by-nc', 'commercial'];
+      if (!allowed.includes(body.licence)) return err(400, 'invalid licence');
+      parsed.licence = body.licence;
+    }
+    // Any edit resets to pending so the admin re-reviews.
+    parsed.status = 'pending';
+    parsed.updated_at = new Date().toISOString();
+    delete parsed.rejection_reason;
+    await env.MESHES.put(key, JSON.stringify(parsed),
+                         { httpMetadata: { contentType: 'application/json' } });
+    return json({ ok: true, success: true, status: 'pending' });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** POST /api/market/unpublish/<id>  — author retracts a listing. */
 async function handleMarketUnpublish(req: Request, env: Env, id: string): Promise<Response> {
   const user = await getSessionUser(req, env);
@@ -6871,6 +6914,10 @@ export default {
         }
         {
           const m = pathname.match(/^\/api\/market\/listing\/([A-Za-z0-9_]+)$/);
+          if (m && method === 'PATCH') return await handleMarketUpdate(req, env, m[1]);
+        }
+        {
+          const m = pathname.match(/^\/api\/market\/listing\/([A-Za-z0-9_]+)$/);
           if (m && method === 'PATCH') return await handleMarketListingUpdate(req, env, m[1]);
         }
         {
@@ -6963,10 +7010,6 @@ export default {
         // /api/admin/users/<userId>/meshes — dynamic
         const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
         if (adminMeshes && method === 'GET') return await handleAdminUserMeshes(req, env, decodeURIComponent(adminMeshes[1]));
-
-        // /api/admin/users/<userId>/listings — dynamic
-        const adminListings = pathname.match(/^\/api\/admin\/users\/([^/]+)\/listings\/?$/);
-        if (adminListings && method === 'GET') return await handleAdminUserListings(req, env, decodeURIComponent(adminListings[1]));
 
         // /api/admin/users/<userId>/meshes/<jobId> — delete one mesh
         const adminMeshDel = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/([^/]+)\/?$/);
