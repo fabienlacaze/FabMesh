@@ -11402,7 +11402,10 @@ function _renderLicenceSellable(spanId, licence) {
   const el = document.getElementById(spanId);
   if (!el) return;
   const sellable = SELLABLE_LICENCES[licence];
-  el.textContent = sellable ? '✓ Sellable' : '✗ Not sellable';
+  // "by users" makes it explicit that this is about end-users
+  // monetising the asset they exported / publish, not about the
+  // platform's right to sell.
+  el.textContent = sellable ? '✓ Sellable by users' : '✗ Not sellable by users';
   const colorMain = sellable ? 'var(--ok, #4caf50)' : 'var(--err, #f44336)';
   const colorBg   = sellable ? 'rgba(76,175,80,0.15)' : 'rgba(244,67,54,0.15)';
   const colorBd   = sellable ? 'rgba(76,175,80,0.4)'  : 'rgba(244,67,54,0.4)';
