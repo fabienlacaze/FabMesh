@@ -2186,7 +2186,11 @@
     async function loadModalCredits() {
       try {
         const r = await fetch('/api/admin/modal-credits', { credentials: 'include' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) {
+          let body = '';
+          try { body = await r.text(); } catch {}
+          throw new Error('HTTP ' + r.status + (body ? ' — ' + body.slice(0, 120) : ''));
+        }
         const j = await r.json();
         const fmt = (n) => '$' + (Number(n) || 0).toFixed(2);
         document.getElementById('mc-total').textContent     = fmt(j.total_budget);
@@ -2196,9 +2200,19 @@
         const input = document.getElementById('mc-budget-input');
         if (input && !input.value) input.value = (Number(j.total_budget) || 0).toFixed(2);
       } catch (e) {
+        // Replace the cryptic "!" with the real reason (HTTP code +
+        // body snippet) so the admin can act on it (401 → log back in,
+        // 500 → check Worker logs, etc.).
+        const msg = String(e?.message || e || 'error');
+        const short = msg.length > 22 ? msg.slice(0, 20) + '…' : msg;
         ['mc-total', 'mc-spent', 'mc-remaining', 'mc-today'].forEach((id) => {
           const el = document.getElementById(id);
-          if (el) el.textContent = '!';
+          if (el) {
+            el.textContent = short;
+            el.title = msg;
+            el.style.color = 'var(--err)';
+            el.style.fontSize = '13px';
+          }
         });
         console.warn('[admin] modal credits load failed:', e);
       }

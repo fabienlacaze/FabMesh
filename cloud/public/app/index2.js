@@ -2087,6 +2087,19 @@ _ws3dEngineSync();
     if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
     const m = document.getElementById('variant-modal');
     if (m) m.classList.remove('hidden');
+    // If the project has no prompt, switch to the Img2img tab on open
+    // (the re-roll path falls back to img2img anyway). Also surface a
+    // small "no prompt — re-roll will use img2img" note inline.
+    const hasPrompt = !!(p.prompt || p.initialPrompt);
+    const noPromptNote = document.getElementById('var-no-prompt-note');
+    if (noPromptNote) noPromptNote.style.display = hasPrompt ? 'none' : 'flex';
+    if (!hasPrompt) {
+      // Defer to next tick so showTab is defined.
+      queueMicrotask(() => {
+        const strengthTab = document.getElementById('var-tab-strength');
+        if (strengthTab) strengthTab.click();
+      });
+    }
   };
   const close = () => document.getElementById('variant-modal')?.classList.add('hidden');
   document.getElementById('ws-variant-btn')?.addEventListener('click', open);
@@ -2156,7 +2169,32 @@ _ws3dEngineSync();
       // every variant has come back.
       const n = Number(document.getElementById('var-reroll-count').value) || 1;
       const prompt = p.prompt || p.initialPrompt || '';
-      if (!prompt) { showToast('Project has no prompt — generate a base image first.', 'error', 4000); return; }
+      // No prompt available (imported image, or project predates the
+      // prompt-saving fix) — silently fall back to N img2img variants
+      // of the current image so the user isn't blocked. Strength 0.6
+      // is a sweet spot: clearly different takes without losing the
+      // composition entirely.
+      if (!prompt) {
+        showToast('No prompt on project — using img2img variation of current image instead.', 'info', 4000);
+        const job = (typeof pushJob === 'function')
+          ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Mode: 'img2img-fallback' }, 30_000 * n)
+          : null;
+        try {
+          for (let i = 0; i < n; i++) {
+            const r = await window.meshyAPI?.img2img({
+              imagePath: p.selectedImagePath, prompt: 'variation', strength: 0.6,
+            });
+            if (!r?.success) throw new Error(r?.error || 'img2img failed');
+          }
+          if (job && typeof completeJob === 'function') completeJob(job.id, true);
+          if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+          showToast(`✓ ${n} variant${n > 1 ? 's' : ''} generated.`, 'success');
+        } catch (e) {
+          if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
+          showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
+        }
+        return;
+      }
       const job = (typeof pushJob === 'function')
         ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Prompt: prompt }, 60_000 * n)
         : null;
