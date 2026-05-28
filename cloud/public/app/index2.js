@@ -6903,6 +6903,69 @@ function _jsMidpointSubdivide(geom, levels) {
 }
 
 // Center: translate vertices so X/Z centroid = 0, min Y = 0.
+// Recompute vertex normals AND average them across position-welded
+// groups. Without this, vertices duplicated at UV seams (every island
+// in a Trellis2 GLB) get independent normals — each side of the seam
+// gets normals averaged over its own incident faces — and the lighting
+// shows a visible crack at every seam. Welding normals across the
+// duplicates flattens out those discontinuities while keeping the UV
+// split intact (positions are not touched, only the normal attribute).
+function _jsFixNormalsWelded(geom) {
+  const result = geom.clone();
+  result.computeVertexNormals();
+  const pos = result.attributes.position;
+  const norm = result.attributes.normal;
+  if (!pos || !norm) return result;
+  const arr = pos.array;
+  const narr = norm.array;
+  const n = pos.count;
+  // Adaptive weld tolerance — same trick as fill_holes, so a tiny prop
+  // doesn't over-weld and a huge character doesn't under-weld.
+  let bbMinX = Infinity, bbMinY = Infinity, bbMinZ = Infinity;
+  let bbMaxX = -Infinity, bbMaxY = -Infinity, bbMaxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = arr[i*3], y = arr[i*3+1], z = arr[i*3+2];
+    if (x < bbMinX) bbMinX = x; if (x > bbMaxX) bbMaxX = x;
+    if (y < bbMinY) bbMinY = y; if (y > bbMaxY) bbMaxY = y;
+    if (z < bbMinZ) bbMinZ = z; if (z > bbMaxZ) bbMaxZ = z;
+  }
+  const diag = Math.hypot(bbMaxX-bbMinX, bbMaxY-bbMinY, bbMaxZ-bbMinZ) || 1;
+  const Q = 1e5 / diag;
+  const groupKey = new Map();
+  const groupOfVertex = new Int32Array(n);
+  let G = 0;
+  for (let v = 0; v < n; v++) {
+    const k = Math.round(arr[v*3]*Q) + ',' + Math.round(arr[v*3+1]*Q) + ',' + Math.round(arr[v*3+2]*Q);
+    let g = groupKey.get(k);
+    if (g === undefined) { g = G++; groupKey.set(k, g); }
+    groupOfVertex[v] = g;
+  }
+  // Sum the per-vertex normals into a per-group accumulator, then
+  // copy the normalized group normal back to every member.
+  const groupN = new Float32Array(G * 3);
+  for (let v = 0; v < n; v++) {
+    const g = groupOfVertex[v];
+    groupN[g*3]   += narr[v*3];
+    groupN[g*3+1] += narr[v*3+1];
+    groupN[g*3+2] += narr[v*3+2];
+  }
+  for (let g = 0; g < G; g++) {
+    const x = groupN[g*3], y = groupN[g*3+1], z = groupN[g*3+2];
+    const len = Math.hypot(x, y, z) || 1;
+    groupN[g*3]   = x / len;
+    groupN[g*3+1] = y / len;
+    groupN[g*3+2] = z / len;
+  }
+  for (let v = 0; v < n; v++) {
+    const g = groupOfVertex[v];
+    narr[v*3]   = groupN[g*3];
+    narr[v*3+1] = groupN[g*3+1];
+    narr[v*3+2] = groupN[g*3+2];
+  }
+  norm.needsUpdate = true;
+  return result;
+}
+
 function _jsCenter(geom) {
   return _jsSetPivot(geom, 'bottom').geometry;
 }
@@ -7022,13 +7085,13 @@ const MESH_TOOL_SCHEMAS = {
     preview: (geom, vals) => _jsMidpointSubdivide(geom, Math.max(1, vals.levels | 0)),
   },
   fix_normals: {
-    title: 'Fix normals',
-    subtitle: 'Recompute normals + fix inverted/wrong-winding faces.',
+    title: 'Fix normals (weld UV seams)',
+    subtitle: 'Recompute vertex normals AND weld them across UV seams — kills the "criss-cross" / "cracked plate" shading on Trellis2 output where the texture islands made the lighting break.',
     needsImage: false,
     supportsClientApply: true,
     params: [],
     build: () => [],
-    preview: (geom) => { const g = geom.clone(); g.computeVertexNormals(); return g; },
+    preview: (geom) => _jsFixNormalsWelded(geom),
   },
   fill_holes: {
     title: 'Fill holes',
