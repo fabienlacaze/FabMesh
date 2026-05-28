@@ -7584,8 +7584,8 @@ const MESH_TOOL_SCHEMAS = {
     useTransformGizmo: true,
   },
   retexture: {
-    title: 'Re-Texture (quick)',
-    subtitle: 'Reprojects the selected source photo onto the mesh UVs.',
+    title: 'Resolution',
+    subtitle: 'Re-bake the mesh texture at a different resolution by reprojecting the source photo onto the UVs.',
     needsImage: true,
     params: [
       { id: 'tex_res', label: 'Texture resolution', type: 'select', default: '2048',
@@ -9857,8 +9857,14 @@ async function _pmSetupCanvasAndBind() {
     eTex.wrapT = THREE.RepeatWrapping;
     eTex.name = 'T_emissive';
     eTex.needsUpdate = true;
+    // Snapshot the diffuse canvas so the Eraser tool can restore the
+    // ORIGINAL texture pixel instead of wiping to transparent. We
+    // only snapshot diffuse — emissive baseline is "all black" which
+    // a plain fill handles cheaper than a putImageData.
+    let dBaseline = null;
+    try { dBaseline = dCtx.getImageData(0, 0, w, h); } catch {}
     pmState.canvases.set(entry.mesh, {
-      diffuse:  { canvas: dCanvas, ctx: dCtx, texture: dTex, w, h },
+      diffuse:  { canvas: dCanvas, ctx: dCtx, texture: dTex, w, h, baseline: dBaseline },
       emissive: { canvas: eCanvas, ctx: eCtx, texture: eTex, w, h },
     });
     mats.forEach((mat) => {
@@ -9965,6 +9971,24 @@ function _pmStampAtPointer(clientX, clientY) {
   if (entry.texture.flipY) uvY = 1 - uvY;
   const px = uvX * W;
   const py = uvY * H;
+  // Pipette mode: sample the canvas at the hit UV, write the colour
+  // back into the color picker, and auto-switch to Pen.
+  if (pmState.tool === 'pipette') {
+    try {
+      const ix = Math.max(0, Math.min(W - 1, Math.round(px)));
+      const iy = Math.max(0, Math.min(H - 1, Math.round(py)));
+      const px4 = ctx.getImageData(ix, iy, 1, 1).data;
+      const hex = '#' + [px4[0], px4[1], px4[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+      pmState.color = hex;
+      const colorEl = document.getElementById('pm-color');
+      if (colorEl) colorEl.value = hex;
+      // Snap back to Pen so the next click starts painting with the
+      // freshly picked colour.
+      const penBtn = document.getElementById('pm-tool-pen');
+      penBtn?.click();
+    } catch {}
+    return;
+  }
   const r = Math.max(1, pmState.brushSize * 0.5);
   const fall = Math.max(0, Math.min(1, pmState.falloff));
   ctx.save();
@@ -10026,9 +10050,29 @@ function _pmStampAtPointer(clientX, clientY) {
       // Spray: random pixel-sprinkle inside the triangle. Eraser uses
       // destination-out on top of the gradient fill.
       if (pmState.tool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
+        // Eraser should only undo the user's own strokes, NOT punch
+        // a hole in the baseline texture. In diffuse mode we paint
+        // the baseline pixels under the brush back. In emissive mode
+        // black IS the baseline, so destination-out works fine.
+        if (pmState.emissiveMode || !entry.baseline) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.fill();
+          ctx.globalCompositeOperation = 'source-over';
+        } else {
+          // Build a temporary canvas with the baseline pixels and
+          // use it as the fillStyle pattern, then clip-fill the
+          // brush triangle with it.
+          if (!entry._baselineCanvas) {
+            const bc = document.createElement('canvas');
+            bc.width = entry.w; bc.height = entry.h;
+            bc.getContext('2d').putImageData(entry.baseline, 0, 0);
+            entry._baselineCanvas = bc;
+          }
+          const prev = ctx.fillStyle;
+          ctx.fillStyle = ctx.createPattern(entry._baselineCanvas, 'no-repeat');
+          ctx.fill();
+          ctx.fillStyle = prev;
+        }
       } else if (pmState.tool === 'spray') {
         // For spray we approximate by re-filling with random small
         // squares — gradient + clip already shape it to the brush
@@ -10065,7 +10109,7 @@ function openPaintMesh(opts = {}) {
   pmState.emissiveMode = !!opts.emissiveMode;
   const $ = (id) => document.getElementById(id);
   // Wire tool selection.
-  const toolBtns = ['pen', 'spray', 'ink', 'eraser'];
+  const toolBtns = ['pen', 'spray', 'ink', 'eraser', 'pipette'];
   const setTool = (t) => {
     pmState.tool = t;
     toolBtns.forEach((nm) => {
