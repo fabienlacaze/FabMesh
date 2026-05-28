@@ -547,7 +547,14 @@
         </article>
 
         <!-- STEP 3: RIG -->
-        <article class="step-card disabled" id="step-card-rig">
+        <article class="step-card disabled" id="step-card-rig" style="position:relative;">
+          <div id="rig-construction-overlay" style="position:absolute;inset:0;z-index:50;pointer-events:auto;display:flex;align-items:center;justify-content:center;border:4px solid transparent;border-image:repeating-linear-gradient(45deg,#ffd54f 0 14px,#000 14px 28px) 4;background:linear-gradient(rgba(0,0,0,0.55),rgba(0,0,0,0.55)),repeating-linear-gradient(45deg,#ffd54f 0 14px,#000 14px 28px);border-radius:8px;">
+            <div style="background:rgba(20,20,20,0.92);color:#fff;padding:24px 32px;border-radius:10px;text-align:center;max-width:80%;box-shadow:0 6px 24px rgba(0,0,0,0.5);">
+              <div style="font-size:56px;line-height:1;margin-bottom:12px;">&#128679;</div>
+              <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;margin-bottom:8px;color:#ffd54f;">Under construction &mdash; UniRig integration rolling out soon</div>
+              <div style="font-size:14px;opacity:0.85;">Mesh + image generation continue to work normally.</div>
+            </div>
+          </div>
           <header class="step-card-header">
             <span class="step-badge" data-step="3">3</span>
             <h3>Rig</h3>
@@ -640,22 +647,22 @@
                     <div class="step-tools-group">
                       <div class="step-tools-label">File</div>
                       <div class="step-tools-grid">
-                        <button id="ws-rig-unreal-btn" class="ghost-btn tool-btn">&#127918; Export to Unreal</button>
-                        <button id="ws-rig-blender-btn" class="ghost-btn tool-btn">&#129704; Edit in Blender</button>
-                        <button id="ws-rig-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
+                        <button id="ws-rig-unreal-btn" class="ghost-btn tool-btn" disabled>&#127918; Export to Unreal</button>
+                        <button id="ws-rig-blender-btn" class="ghost-btn tool-btn" disabled>&#129704; Edit in Blender</button>
+                        <button id="ws-rig-folder-btn" class="ghost-btn tool-btn" disabled>&#128193; Show in folder</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
                       <div class="step-tools-label">AI tools</div>
                       <div class="step-tools-grid">
-                        <button id="ws-rig-reskin-btn" class="ghost-btn tool-btn">&#127814; Re-skin only</button>
+                        <button id="ws-rig-reskin-btn" class="ghost-btn tool-btn" disabled>&#127814; Re-skin only</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
                       <div class="step-tools-label">Manual tools</div>
                       <div class="step-tools-grid">
-                        <button id="ws-lm-manual" class="ghost-btn tool-btn">&#9999; Landmarks</button>
-                        <button id="ws-rig-test-btn" class="ghost-btn tool-btn">&#9654; Test animation</button>
+                        <button id="ws-lm-manual" class="ghost-btn tool-btn" disabled>&#9999; Landmarks</button>
+                        <button id="ws-rig-test-btn" class="ghost-btn tool-btn" disabled>&#9654; Test animation</button>
                       </div>
                     </div>
                   </div>

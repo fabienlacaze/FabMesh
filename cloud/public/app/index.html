@@ -559,7 +559,20 @@
         </article>
 
         <!-- STEP 3: RIG -->
-        <article class="step-card disabled" id="step-card-rig">
+        <article class="step-card disabled" id="step-card-rig" style="position:relative;">
+          <!-- ===== UNDER CONSTRUCTION OVERLAY (Rig step) ===== -->
+          <div class="rig-construction-overlay" style="position:absolute; inset:0; z-index:10; background:rgba(0,0,0,0.65); display:flex; align-items:center; justify-content:center; pointer-events:auto; border-radius:inherit;">
+            <div style="background:#1a1a1a; border-radius:10px; max-width:540px; width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.6); overflow:hidden; text-align:center;">
+              <div style="height:14px; background:repeating-linear-gradient(45deg, #ffd54f 0 12px, #1a1a1a 12px 24px);"></div>
+              <div style="padding:28px 32px 24px 32px;">
+                <div style="font-size:56px; line-height:1;">&#128679;</div>
+                <h2 style="color:#ffd54f; font-weight:800; margin:14px 0 10px 0; font-size:22px; letter-spacing:0.5px;">Under construction &mdash; UniRig integration rolling out soon</h2>
+                <p style="color:#ddd; max-width:480px; margin:0 auto 14px auto; font-size:14px; line-height:1.5;">Mesh + image generation continue to work normally.</p>
+                <p style="color:#888; font-size:12px; margin:0;">Need this now? Contact support.</p>
+              </div>
+              <div style="height:14px; background:repeating-linear-gradient(45deg, #ffd54f 0 12px, #1a1a1a 12px 24px);"></div>
+            </div>
+          </div>
           <header class="step-card-header">
             <span class="step-badge" data-step="3">3</span>
             <h3>Rig</h3>
@@ -652,22 +665,22 @@
                     <div class="step-tools-group">
                       <div class="step-tools-label">File</div>
                       <div class="step-tools-grid">
-                        <button id="ws-rig-unreal-btn" class="ghost-btn tool-btn">&#127918; Export to Unreal</button>
-                        <button id="ws-rig-blender-btn" class="ghost-btn tool-btn">&#129704; Edit in Blender</button>
-                        <button id="ws-rig-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
+                        <button id="ws-rig-unreal-btn" class="ghost-btn tool-btn" disabled style="opacity:0.5; cursor:not-allowed;">&#127918; Export to Unreal</button>
+                        <button id="ws-rig-blender-btn" class="ghost-btn tool-btn" disabled style="opacity:0.5; cursor:not-allowed;">&#129704; Edit in Blender</button>
+                        <button id="ws-rig-folder-btn" class="ghost-btn tool-btn" disabled style="opacity:0.5; cursor:not-allowed;">&#128193; Show in folder</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
                       <div class="step-tools-label">AI tools</div>
                       <div class="step-tools-grid">
-                        <button id="ws-rig-reskin-btn" class="ghost-btn tool-btn">&#127814; Re-skin only</button>
+                        <button id="ws-rig-reskin-btn" class="ghost-btn tool-btn" disabled style="opacity:0.5; cursor:not-allowed;">&#127814; Re-skin only</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
                       <div class="step-tools-label">Manual tools</div>
                       <div class="step-tools-grid">
-                        <button id="ws-lm-manual" class="ghost-btn tool-btn">&#9999; Landmarks</button>
-                        <button id="ws-rig-test-btn" class="ghost-btn tool-btn">&#9654; Test animation</button>
+                        <button id="ws-lm-manual" class="ghost-btn tool-btn" disabled style="opacity:0.5; cursor:not-allowed;">&#9999; Landmarks</button>
+                        <button id="ws-rig-test-btn" class="ghost-btn tool-btn" disabled style="opacity:0.5; cursor:not-allowed;">&#9654; Test animation</button>
                       </div>
                     </div>
                   </div>

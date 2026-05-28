@@ -10,6 +10,14 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Rig step disabled — under construction overlay desktop + cloud)
+
+- Visual under-construction overlay added over the Rig step on both cloud (cloud/public/app/index.html) and desktop (src/renderer/index2.html). Yellow/black hazard-tape stripes + 🚧 sign + "Under construction — UniRig integration rolling out soon".
+- Overlay absorbs clicks (pointer-events:auto, z-index:10) and underlying buttons are explicitly disabled as a defensive belt-and-suspenders.
+- No backend guard yet: relying on the UI overlay since the Rig backend isn't wired in cloud. Add later if needed.
+
+---
+
 ## 2026-05-28 (Market v4.4 — delete v0 mesh + cloud parallel jobs)
 
 - Delete v0 mesh was silently 404-ing. Root cause from audit: three
