@@ -1982,6 +1982,13 @@
   // currently-selected mesh/image is already in _publishedIndex. Saves
   // the original textContent in dataset.originalLabel on first touch so
   // we can restore it when selection changes to an unpublished asset.
+  //
+  // Defensive guard: only treat as "already published" when the matched
+  // entry has status pending or approved. Stale stub records (e.g. a
+  // listing that was approved then deleted by admin, or a job_id collision
+  // from legacy data) where status is missing or unexpected fall through
+  // to "not published" so the user can re-publish.
+  const _ACTIVE_PUBLISHED_STATUSES = new Set(['pending', 'approved']);
   function _syncPublishButtons() {
     const meshBtn  = document.getElementById('ws-mesh-publish-btn');
     const imageBtn = document.getElementById('ws-image-publish-btn');
@@ -2002,24 +2009,33 @@
     };
     // Mesh button — check current mesh by job_id, fall back to URL.
     let meshAlready = false;
+    let meshDiag = { jobId: null, url: null, matchByJobId: null, matchByUrl: null };
     try {
       const fn = window.getCurrentMeshObj;
       const m = (typeof fn === 'function') ? fn() : null;
       if (m) {
-        const jobId = m.id || m.jobId;
+        const jobId = m.id || m.jobId || null;
         const url   = m.path || m.url || '';
-        if (jobId && _publishedIndex.byJobId.has(jobId)) meshAlready = true;
-        else if (url && _publishedIndex.byUrl.has(url)) meshAlready = true;
+        const matchByJobId = jobId ? (_publishedIndex.byJobId.get(jobId) || null) : null;
+        const matchByUrl   = url   ? (_publishedIndex.byUrl.get(url)   || null) : null;
+        meshDiag = { jobId, url, matchByJobId, matchByUrl };
+        const match = matchByJobId || matchByUrl;
+        if (match && _ACTIVE_PUBLISHED_STATUSES.has(match.status)) meshAlready = true;
       }
     } catch { /* selection unavailable — leave button enabled */ }
+    console.log('[syncPublishButtons] mesh', { ...meshDiag, disabled: meshAlready });
     apply(meshBtn, meshAlready);
     // Image button — check current image URL.
     let imageAlready = false;
+    let imageDiag = { jobId: null, url: null, matchByJobId: null, matchByUrl: null };
     try {
       const p = (typeof state !== 'undefined') ? state?.currentProject : null;
-      const url = p?.selectedImagePath;
-      if (url && _publishedIndex.byUrl.has(url)) imageAlready = true;
+      const url = p?.selectedImagePath || '';
+      const matchByUrl = url ? (_publishedIndex.byUrl.get(url) || null) : null;
+      imageDiag = { jobId: null, url, matchByJobId: null, matchByUrl };
+      if (matchByUrl && _ACTIVE_PUBLISHED_STATUSES.has(matchByUrl.status)) imageAlready = true;
     } catch { /* same */ }
+    console.log('[syncPublishButtons] image', { ...imageDiag, disabled: imageAlready });
     apply(imageBtn, imageAlready);
   }
   function _installPublishedBadgeWatcher() {
@@ -2044,6 +2060,34 @@
     window.__publishedIndexPollHandle = setInterval(_fetchPublishedIndex, 60_000);
   }
 
+  // Force a fresh fetch of the published-asset index whenever the user
+  // navigates to the mesh step or touches a mesh/publish control, so the
+  // disabled state of the Publish button reflects reality at click time
+  // (not whatever the 60s tick last saw). Throttled to 5s to avoid
+  // hammering the endpoint on rapid UI interactions.
+  let _lastPublishedRefreshAt = 0;
+  function _maybeRefreshPublishedIndex() {
+    const now = Date.now();
+    if (now - _lastPublishedRefreshAt < 5000) return;
+    _lastPublishedRefreshAt = now;
+    _fetchPublishedIndex();
+  }
+  function _installPublishedRefreshTriggers() {
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      // Mesh step tab / publish buttons / any mesh tool button.
+      if (t.closest('#ws-mesh-publish-btn') ||
+          t.closest('#ws-image-publish-btn') ||
+          t.closest('[data-step="mesh"]') ||
+          t.closest('#step2-card') ||
+          t.closest('#ws-mesh-versions') ||
+          (t.closest('.tool-btn') && t.closest('.tool-btn').id?.startsWith('ws-mesh-'))) {
+        _maybeRefreshPublishedIndex();
+      }
+    }, true);
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       applyOverrides();
@@ -2051,6 +2095,7 @@
       _fetchPublishedIndex();
       _installPublishedBadgeWatcher();
       _startPublishedIndexPolling();
+      _installPublishedRefreshTriggers();
     });
   } else {
     applyOverrides();
@@ -2058,6 +2103,7 @@
     _fetchPublishedIndex();
     _installPublishedBadgeWatcher();
     _startPublishedIndexPolling();
+    _installPublishedRefreshTriggers();
   }
 
   // The Settings / About modals sometimes lazy-inject content; re-apply

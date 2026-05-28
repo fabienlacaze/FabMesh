@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Market — Publish button stuck disabled on rejected/deleted listings)
+
+- `_syncPublishButtons` in `cloud/public/app/cloud-overrides.js` used to disable the Publish button on ANY index hit (`Map.has`), so stale stub records (admin-deleted listings, job_id collisions on legacy data, etc.) kept the button frozen. Now we only honor the match if its `status` is in `{pending, approved}` — missing/unexpected status falls through to "not published".
+- Added diagnostic `console.log("[syncPublishButtons]", { jobId, url, matchByJobId, matchByUrl, disabled })` for both mesh + image paths so future false positives have a paper trail.
+- Added throttled (5s) refresh trigger: clicking the mesh step, a mesh tool, or either Publish button now forces `_fetchPublishedIndex` so button state is fresh at click time rather than up to 60s stale.
+- Confirmed post-publish hook already invalidates the index via `window.__publishedRefresh = _fetchPublishedIndex` (clears + repopulates the Maps); no change needed there.
+
+---
+
 ## 2026-05-29 (Admin Marketplace — status re-flip + clickable author)
 
 - Admin can now flip a listing's status from any state: approved → reject, rejected → approve, on top of the existing pending workflow. The worker handlers `handleAdminMarketApprove` / `handleAdminMarketReject` already set status unconditionally, so this was purely a UI gate (`_renderMarketListings` in `cloud/public/admin.html`).
