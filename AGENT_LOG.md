@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (appx: fix blank Store tile icons — 10.1.1.11 cert)
+- Microsoft Store certification 10.1.1.11 ("On Device Tiles") failed because the
+  generated .appx contained transparent placeholder tiles instead of the custom
+  MyFabmesh F logo. Root cause: electron-builder 26.x reads appx tile assets
+  from `build/appx/` (constant `APPX_ASSETS_DIR_NAME = "appx"` in
+  `node_modules/app-builder-lib/out/targets/AppxTarget.js:12`), not `build/` root.
+  The previous commit 205bd09 misdiagnosed the v26 change and put them at
+  `build/` root, where they were silently ignored — electron-builder fell back
+  to its vendored `SampleAppx.*.png` blanks.
+- Moved 7 tile PNGs from `build/` → `build/appx/`: StoreLogo, Square44/71/150/310,
+  Wide310x150, SplashScreen.
+- Rebuilt 1.0.1 — verified tiles in the new appx now show the F logo
+  (Square150 = 1276 B custom, was 12034 B blank default).
+
 ## 2026-05-29 (UX: asset-type dropdown grouped)
 - Asset-type dropdown options now grouped with <optgroup>: Living (Character/Creature/Animal), Vehicles (Vehicle/Avion/Bateau), Built (Building/Environment), Items (Weapon/Prop/Icon), Other (Custom). Same option values, no behaviour change.
 
