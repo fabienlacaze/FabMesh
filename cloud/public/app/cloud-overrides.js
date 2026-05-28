@@ -1088,8 +1088,21 @@
         payload = { kind: 'mesh', jobId };
         previewUrl = m.path || m.url || '';
       } else {
-        // Image: use the currently selected image of the project.
-        const url = p?.selectedImagePath;
+        // Image: prefer the image actually shown in the big viewer
+        // (previewImagePath — updated by version-thumb clicks). Fall
+        // back to selectedImagePath (the last "Use this for 3D" choice)
+        // or the <img id="step1-preview"> src as a last resort, so we
+        // never publish a stale URL the user hasn't seen.
+        let url = p?.previewImagePath || p?.selectedImagePath || '';
+        if (!url) {
+          const previewEl = document.getElementById('step1-preview');
+          if (previewEl && previewEl.getAttribute('src')) {
+            url = previewEl.getAttribute('src');
+          }
+        }
+        console.log('[market.publish.openFor] image URL=', url,
+          '(previewImagePath=', p?.previewImagePath,
+          ', selectedImagePath=', p?.selectedImagePath, ')');
         if (!url) {
           if (typeof window.showToast === 'function') window.showToast('Pick an image first.', 'error');
           return;
