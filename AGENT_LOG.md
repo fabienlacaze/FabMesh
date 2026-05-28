@@ -10,6 +10,30 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Microsoft Store cert 10.1.1.11 — APPX tile icons)
+
+- **Refus cert MS Store** : Product ID 9PH6GT8XKQDW renvoyé en
+  "Attention needed" sous la policy *10.1.1.11 On Device Tiles* :
+  *"The available product tile icons include a default image. Tile
+  icons must uniquely represent product."*
+- **Cause** : `package.json > build.appx` n'avait pas d'`assetsDir`.
+  electron-builder utilisait donc ses placeholders génériques (X
+  gris) au lieu des logos custom "F" qui vivent déjà dans
+  `build/store_assets/`.
+- **Fix** :
+  1. Nouveau script `scripts/build_appx_assets.py` qui prend
+     `build/store_assets/icon_1080x1080.png` (master 1080×1080) +
+     `promo_2400x1200.png` et génère les 7 tile assets requis dans
+     `build/appx/` : StoreLogo (50), Square44, Square71,
+     Square150, Square310, Wide310x150 (logo centré sur fond
+     brand #0b0b14), SplashScreen (620×300 depuis le promo).
+  2. Ajouté `"assetsDir": "build/appx"` à `appx` config.
+- **À faire côté user** : lancer `npm run build:msix`, soumettre la
+  nouvelle version au Partner Center en référençant le Product ID
+  9PH6GT8XKQDW + le rapport de cert précédent.
+
+---
+
 ## 2026-05-28 (Marketplace v1.1 — images + sellable indicator + export UX)
 
 - **Contact form** : 4 champs maintenant required (name + email +
