@@ -6454,7 +6454,18 @@ async function runMeshTool(operation, params = []) {
     if (result && result.success) {
       showToast(`${operation} done!`, 'success');
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
-      // Refresh mesh list
+      // populateWorkspace re-renders from p.meshes — it doesn't refetch
+      // from the server, so the new R2 URL has to be pushed into the
+      // project's mesh list explicitly before we re-render. Without
+      // this the version strip stayed frozen on the old mesh.
+      const newUrl = result.newPath || result.path || result.mesh_url;
+      if (newUrl) {
+        const filename = String(newUrl).split('/').pop() || `${operation}.glb`;
+        p.meshes = p.meshes || [];
+        p.meshes.unshift({ path: newUrl, filename, size: 0, mtime: Date.now() });
+        p.selectedMeshPath = newUrl;
+        p.previewMeshPath = newUrl;
+      }
       populateWorkspace(p);
     } else {
       const msg = (result && result.error) || 'unknown';
@@ -7037,11 +7048,19 @@ async function _mtApplyOnDevice(opType) {
     }
     const newUrl = data.path || data.newPath || data.mesh_url;
     showToast(`${opType} done (free, on device)`, 'success');
-    // Same "refresh meshes" path the cloud Apply takes.
+    // populateWorkspace re-renders from p.meshes — push the new URL
+    // into the list (same as the cloud Apply path does) so the
+    // version strip shows it instead of staying on the old mesh.
     const p = state.currentProject;
-    if (p && typeof populateWorkspace === 'function') {
-      // Best-effort: nudge the meshes list so the new GLB appears.
-      try { await populateWorkspace(p); } catch {}
+    if (p && newUrl) {
+      const filename = String(newUrl).split('/').pop() || `${opType}.glb`;
+      p.meshes = p.meshes || [];
+      p.meshes.unshift({ path: newUrl, filename, size: 0, mtime: Date.now() });
+      p.selectedMeshPath = newUrl;
+      p.previewMeshPath = newUrl;
+      if (typeof populateWorkspace === 'function') {
+        try { await populateWorkspace(p); } catch {}
+      }
     }
     return newUrl;
   } finally {
