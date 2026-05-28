@@ -9150,9 +9150,14 @@ async function _peProjectImageLayer(imgPath) {
   const layerDataUrl = _emissiveLayerGet(imgPath);
   if (!layerDataUrl) return false;
   if (!peState.origModel || !peState.canvases) return false;
-  // Re-entry guard: a single projection running at a time.
   if (peState.projecting) return false;
   peState.projecting = true;
+  // GPU-baked projection: instead of N image_pixels × M triangles
+  // raycasts (the old loop took 10-30 s on a 1024² × 100k-tri mesh),
+  // we render each submesh once with a UV-encoding shader (R=u, G=v,
+  // B=hit-mask), read the pixels back, and then for every painted
+  // image pixel look up the canvas write position from that buffer.
+  // ~100 ms total on a typical mesh.
 
   // Decode the image emissive layer into an off-screen canvas we can
   // sample pixel-by-pixel.
@@ -9211,63 +9216,80 @@ async function _peProjectImageLayer(imgPath) {
   orthoCam.lookAt(center.x, center.y, center.z);
   orthoCam.updateMatrixWorld();
 
-  const raycaster = new THREE.Raycaster();
-  const ndc = new THREE.Vector2();
-  const meshArr = peState.meshes.map((e) => e.mesh);
   const TEX = PE_TEX_SIZE;
-
-  // Walk the image layer at a stride proportional to its size — we
-  // don't need every pixel; one sample per ~2px is plenty for a 1024×.
-  // For very large images we step further to keep the raycast count
-  // reasonable (target ~250K rays max).
-  const totalPixels = srcW * srcH;
-  const stride = Math.max(1, Math.ceil(Math.sqrt(totalPixels / 250000)));
-
-  let painted = 0;
-  // Chunked: yield to the browser every CHUNK_ROWS so the page stays
-  // responsive (the freeze on a 1024² took several seconds of unblocked
-  // raycasts). Status text reflects progress.
-  const CHUNK_ROWS = Math.max(8, Math.floor(srcH / 16));
   const status = document.getElementById('pe-status');
+  const RT_W = Math.min(srcW, 2048);
+  const RT_H = Math.min(srcH, 2048);
+  const renderTarget = new THREE.WebGLRenderTarget(RT_W, RT_H, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  const uvMat = new THREE.ShaderMaterial({
+    vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: 'varying vec2 vUv; void main(){gl_FragColor=vec4(vUv.x,vUv.y,1.0,1.0);}',
+    side: THREE.DoubleSide,
+  });
+  const uvBuffer = new Uint8Array(RT_W * RT_H * 4);
+  const origRT = peState.renderer.getRenderTarget();
+  let painted = 0;
   try {
-    for (let yStart = bbYmin; yStart < bbYmax; yStart += stride * CHUNK_ROWS) {
-      const yEnd = Math.min(yStart + stride * CHUNK_ROWS, bbYmax);
-      for (let y = yStart; y < yEnd; y += stride) {
-        for (let x = bbXmin; x < bbXmax; x += stride) {
-          const a = srcData[(y * srcW + x) * 4 + 3];
+    let submeshIdx = 0;
+    for (const entry of peState.meshes) {
+      submeshIdx++;
+      const targetMesh = entry.mesh;
+      const canvasEntry = peState.canvases.get(targetMesh);
+      if (!canvasEntry) continue;
+      // Render JUST this submesh by hiding the others.
+      const visStates = peState.meshes.map((e) => ({ m: e.mesh, v: e.mesh.visible }));
+      peState.meshes.forEach((e) => { e.mesh.visible = (e.mesh === targetMesh); });
+      const origMat = targetMesh.material;
+      targetMesh.material = uvMat;
+      peState.renderer.setRenderTarget(renderTarget);
+      peState.renderer.setClearColor(0x000000, 0);
+      peState.renderer.clear();
+      peState.renderer.render(peState.origModel, orthoCam);
+      peState.renderer.readRenderTargetPixels(renderTarget, 0, 0, RT_W, RT_H, uvBuffer);
+      targetMesh.material = origMat;
+      visStates.forEach(({ m, v }) => { m.visible = v; });
+      if (status) {
+        status.textContent = `Projecting image emissive layer onto mesh… ${submeshIdx}/${peState.meshes.length}`;
+      }
+      await new Promise((r) => requestAnimationFrame(r));
+      const ctx = canvasEntry.ctx;
+      // Iterate painted pixels inside the bbox; look up the matching
+      // entry in the UV buffer (Y flipped: image is top-down, ReadPixels
+      // is bottom-up).
+      for (let y = bbYmin; y <= bbYmax; y++) {
+        const ry = RT_H - 1 - Math.round((y / srcH) * RT_H);
+        if (ry < 0 || ry >= RT_H) continue;
+        const ryRow = ry * RT_W * 4;
+        const srcRow = y * srcW * 4;
+        for (let x = bbXmin; x <= bbXmax; x++) {
+          const si = srcRow + x * 4;
+          const a = srcData[si + 3];
           if (a < 8) continue;
-          const r = srcData[(y * srcW + x) * 4];
-          const g = srcData[(y * srcW + x) * 4 + 1];
-          const b = srcData[(y * srcW + x) * 4 + 2];
-          ndc.x = (x / srcW) * 2 - 1;
-          ndc.y = -((y / srcH) * 2 - 1);
-          raycaster.setFromCamera(ndc, orthoCam);
-          const hits = raycaster.intersectObjects(meshArr, false);
-          if (!hits.length || !hits[0].uv) continue;
-          const entry = peState.canvases.get(hits[0].object);
-          if (!entry) continue;
-          const uvx = Math.max(0, Math.min(1, hits[0].uv.x)) * TEX;
-          const uvy = Math.max(0, Math.min(1, hits[0].uv.y)) * TEX;
-          entry.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-          const splat = Math.max(2, stride * 2);
-          entry.ctx.fillRect(uvx - splat * 0.5, uvy - splat * 0.5, splat, splat);
+          const rx = Math.round((x / srcW) * RT_W);
+          if (rx < 0 || rx >= RT_W) continue;
+          const ri = ryRow + rx * 4;
+          if (uvBuffer[ri + 2] < 200) continue;  // no mesh at this pixel
+          const px = (uvBuffer[ri] / 255) * TEX;
+          const py = (uvBuffer[ri + 1] / 255) * TEX;
+          ctx.fillStyle = `rgba(${srcData[si]}, ${srcData[si+1]}, ${srcData[si+2]}, ${a / 255})`;
+          // 4×4 splat fills the gaps left by the 256-level UV encoding.
+          ctx.fillRect(px - 2, py - 2, 4, 4);
           painted++;
         }
       }
-      // Push the partial canvas to the GPU so the user sees progressive
-      // fill, then yield until the next frame.
-      peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
-      if (status) {
-        const span = Math.max(1, bbYmax - bbYmin);
-        const pct = Math.min(100, Math.round(((yEnd - bbYmin) / span) * 100));
-        status.textContent = `Projecting image emissive layer onto mesh… ${pct}%`;
-      }
-      await new Promise((r) => requestAnimationFrame(r));
+      canvasEntry.texture.needsUpdate = true;
     }
   } finally {
+    peState.renderer.setRenderTarget(origRT);
+    renderTarget.dispose();
+    uvMat.dispose();
     peState.projecting = false;
   }
-  peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
   return painted > 0;
 }
 

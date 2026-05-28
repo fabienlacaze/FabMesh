@@ -7743,51 +7743,75 @@ async function _peProjectImageLayer(imgPath) {
   orthoCam.position.set(center.x, center.y, center.z + size.z * 2 + 1);
   orthoCam.lookAt(center.x, center.y, center.z);
   orthoCam.updateMatrixWorld();
-  const raycaster = new THREE.Raycaster();
-  const ndc = new THREE.Vector2();
-  const meshArr = peState.meshes.map((e) => e.mesh);
   const TEX = PE_TEX_SIZE;
-  const stride = Math.max(1, Math.ceil(Math.sqrt((srcW * srcH) / 250000)));
-  let painted = 0;
-  const CHUNK_ROWS = Math.max(8, Math.floor(srcH / 16));
   const status = document.getElementById('pe-status');
+  const RT_W = Math.min(srcW, 2048);
+  const RT_H = Math.min(srcH, 2048);
+  const renderTarget = new THREE.WebGLRenderTarget(RT_W, RT_H, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  const uvMat = new THREE.ShaderMaterial({
+    vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: 'varying vec2 vUv; void main(){gl_FragColor=vec4(vUv.x,vUv.y,1.0,1.0);}',
+    side: THREE.DoubleSide,
+  });
+  const uvBuffer = new Uint8Array(RT_W * RT_H * 4);
+  const origRT = peState.renderer.getRenderTarget();
+  let painted = 0;
   try {
-    for (let yStart = bbYmin; yStart < bbYmax; yStart += stride * CHUNK_ROWS) {
-      const yEnd = Math.min(yStart + stride * CHUNK_ROWS, bbYmax);
-      for (let y = yStart; y < yEnd; y += stride) {
-        for (let x = bbXmin; x < bbXmax; x += stride) {
-          const a = srcData[(y * srcW + x) * 4 + 3];
+    let submeshIdx = 0;
+    for (const entry of peState.meshes) {
+      submeshIdx++;
+      const targetMesh = entry.mesh;
+      const canvasEntry = peState.canvases.get(targetMesh);
+      if (!canvasEntry) continue;
+      const visStates = peState.meshes.map((e) => ({ m: e.mesh, v: e.mesh.visible }));
+      peState.meshes.forEach((e) => { e.mesh.visible = (e.mesh === targetMesh); });
+      const origMat = targetMesh.material;
+      targetMesh.material = uvMat;
+      peState.renderer.setRenderTarget(renderTarget);
+      peState.renderer.setClearColor(0x000000, 0);
+      peState.renderer.clear();
+      peState.renderer.render(peState.origModel, orthoCam);
+      peState.renderer.readRenderTargetPixels(renderTarget, 0, 0, RT_W, RT_H, uvBuffer);
+      targetMesh.material = origMat;
+      visStates.forEach(({ m, v }) => { m.visible = v; });
+      if (status) {
+        status.textContent = `Projecting image emissive layer onto mesh… ${submeshIdx}/${peState.meshes.length}`;
+      }
+      await new Promise((r) => requestAnimationFrame(r));
+      const ctx = canvasEntry.ctx;
+      for (let y = bbYmin; y <= bbYmax; y++) {
+        const ry = RT_H - 1 - Math.round((y / srcH) * RT_H);
+        if (ry < 0 || ry >= RT_H) continue;
+        const ryRow = ry * RT_W * 4;
+        const srcRow = y * srcW * 4;
+        for (let x = bbXmin; x <= bbXmax; x++) {
+          const si = srcRow + x * 4;
+          const a = srcData[si + 3];
           if (a < 8) continue;
-          const r = srcData[(y * srcW + x) * 4];
-          const g = srcData[(y * srcW + x) * 4 + 1];
-          const b = srcData[(y * srcW + x) * 4 + 2];
-          ndc.x = (x / srcW) * 2 - 1;
-          ndc.y = -((y / srcH) * 2 - 1);
-          raycaster.setFromCamera(ndc, orthoCam);
-          const hits = raycaster.intersectObjects(meshArr, false);
-          if (!hits.length || !hits[0].uv) continue;
-          const entry = peState.canvases.get(hits[0].object);
-          if (!entry) continue;
-          const uvx = Math.max(0, Math.min(1, hits[0].uv.x)) * TEX;
-          const uvy = Math.max(0, Math.min(1, hits[0].uv.y)) * TEX;
-          entry.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-          const splat = Math.max(2, stride * 2);
-          entry.ctx.fillRect(uvx - splat * 0.5, uvy - splat * 0.5, splat, splat);
+          const rx = Math.round((x / srcW) * RT_W);
+          if (rx < 0 || rx >= RT_W) continue;
+          const ri = ryRow + rx * 4;
+          if (uvBuffer[ri + 2] < 200) continue;
+          const px = (uvBuffer[ri] / 255) * TEX;
+          const py = (uvBuffer[ri + 1] / 255) * TEX;
+          ctx.fillStyle = `rgba(${srcData[si]}, ${srcData[si+1]}, ${srcData[si+2]}, ${a / 255})`;
+          ctx.fillRect(px - 2, py - 2, 4, 4);
           painted++;
         }
       }
-      peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
-      if (status) {
-        const span = Math.max(1, bbYmax - bbYmin);
-        const pct = Math.min(100, Math.round(((yEnd - bbYmin) / span) * 100));
-        status.textContent = `Projecting image emissive layer onto mesh… ${pct}%`;
-      }
-      await new Promise((r) => requestAnimationFrame(r));
+      canvasEntry.texture.needsUpdate = true;
     }
   } finally {
+    peState.renderer.setRenderTarget(origRT);
+    renderTarget.dispose();
+    uvMat.dispose();
     peState.projecting = false;
   }
-  peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
   return painted > 0;
 }
 
