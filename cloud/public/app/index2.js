@@ -7184,6 +7184,10 @@ const MESH_TOOL_SCHEMAS = {
     // Adds a "↺ Reset offsets" button under the params that snaps
     // every numeric/range slider back to its default value.
     resetButton: 'Reset offsets',
+    // Drag the pivot directly with an Unreal-style gizmo (3 axes +
+    // center sphere). Axis arrow = constrained to that axis; sphere
+    // = free-move in the view plane. Sliders update live as you drag.
+    useTransformGizmo: true,
   },
   retexture: {
     title: 'Re-Texture (quick)',
@@ -7227,6 +7231,13 @@ const mtState = {
   vals: {},
   previewTimer: null,
   lastPreviewOk: false,   // last _mtRunPreview succeeded → safe to export current state
+  // TransformControls integration (Unreal-style draggable pivot gizmo).
+  // Lazy-loaded the first time a schema declares `useTransformGizmo`.
+  // dummy is the Object3D that TC moves around; the modal reads its
+  // position back into the schema's offset sliders.
+  transformControls: null,
+  dummy: null,
+  basePivot: null,        // preset-only pivot position (Vector3, local space)
 };
 
 // Device-side mesh ops are heavy (SimplifyModifier / Laplacian over
@@ -7307,6 +7318,11 @@ async function _mtApplyOnDevice(opType) {
       detachedHelpers.push(h);
     }
   }
+  // Also detach the TransformControls dummy if it's parented to the
+  // model — exporting an empty Object3D inside the GLB would leak the
+  // pivot widget into the saved mesh.
+  const dummyWasAttached = mtState.dummy && mtState.dummy.parent === mtState.origModel;
+  if (dummyWasAttached) mtState.origModel.remove(mtState.dummy);
   const savedPos = mtState.origModel.position.clone();
   mtState.origModel.position.set(0, 0, 0);
   // Some schemas (Set pivot point) keep the preview cheap by only
@@ -7383,6 +7399,7 @@ async function _mtApplyOnDevice(opType) {
     for (const s of swappedGeoms) s.mesh.geometry = s.prev;
     mtState.origModel.position.copy(savedPos);
     for (const h of detachedHelpers) mtState.origModel.add(h);
+    if (dummyWasAttached && mtState.dummy) mtState.origModel.add(mtState.dummy);
   }
 }
 
@@ -7417,7 +7434,11 @@ function _mtRunPreview() {
       }
       if (nextGeom) e.mesh.geometry = nextGeom;
       else allOk = false;
-      if (nextHelpers) {
+      // When the schema drives an interactive TransformControls gizmo,
+      // skip the custom Object3D helpers — TC has its own overlay
+      // (3 axes + center sphere) and a second gizmo on top looks
+      // duplicate / fights the drag interaction.
+      if (nextHelpers && !mtState.schema.useTransformGizmo) {
         // Parent helpers to origModel so they inherit the centring +
         // Y-lift transform applied at load. Without this they sit at
         // world origin and visibly offset from the mesh.
@@ -7434,6 +7455,40 @@ function _mtRunPreview() {
     }
   }
   mtState.lastPreviewOk = allOk;
+  // Drive TransformControls for schemas that opt in. We position
+  // - the dummy (= what TC drags) at the CURRENT pivot (preset + offset)
+  // - the basePivot reference at the preset-only pivot, so the change
+  //   handler can derive `offset = dummy.position - basePivot`.
+  // Skip the position write while the user is mid-drag (would fight them).
+  if (mtState.schema?.useTransformGizmo && mtState.origGeoms.length) {
+    _mtEnsureTransformGizmo().then(() => {
+      const tc = mtState.transformControls;
+      if (!tc || !mtState.dummy || !mtState.origModel) return;
+      // Attach to scene + origModel on first activation so the dummy
+      // moves in MESH-local space (pivot offsets are local-space).
+      if (!tc.parent) mtState.scene.add(tc);
+      if (mtState.dummy.parent !== mtState.origModel) {
+        mtState.origModel.add(mtState.dummy);
+      }
+      const firstGeom = mtState.origGeoms[0]?.originalGeom;
+      if (!firstGeom) return;
+      const mode = vals.pivot || 'bottom';
+      const ox = Number(vals.offset_x) || 0;
+      const oy = Number(vals.offset_y) || 0;
+      const oz = Number(vals.offset_z) || 0;
+      const base = _computePivotPoint(firstGeom, mode, 0, 0, 0);
+      const cur  = _computePivotPoint(firstGeom, mode, ox, oy, oz);
+      mtState.basePivot = new THREE.Vector3(base.pivot[0], base.pivot[1], base.pivot[2]);
+      if (!tc.dragging) {
+        mtState.dummy.position.set(cur.pivot[0], cur.pivot[1], cur.pivot[2]);
+      }
+      // Size the gizmo against the mesh so it stays readable on tiny
+      // props and big characters alike.
+      tc.setSize(Math.max(0.4, Math.min(1.5, base.diag * 0.08 / 0.1)));
+    });
+  } else if (mtState.transformControls) {
+    _mtDisableTransformGizmo();
+  }
   // Update the "Apply on device" button's availability based on
   // whether the current preview actually produced new geometry. If the
   // preview was skipped (Decimate's expensivePreview before slider
@@ -7458,6 +7513,71 @@ function _mtRunPreview() {
         : 'No live preview for this op · click Apply to run.';
     }
   }
+}
+
+// Lazy-load TransformControls and wire the drag → slider feedback loop.
+// Called from _mtRunPreview the first time a schema with
+// `useTransformGizmo` is active. After this, the user can grab the
+// gizmo (3 colored axes + center sphere) in the viewer:
+//   - axis arrow  → translate along that axis only (orthonormal)
+//   - center sphere → translate in the view plane (free move)
+// matching the Unreal Modeling Mode pivot widget.
+async function _mtEnsureTransformGizmo() {
+  if (mtState.transformControls) return;
+  if (!mtState.scene || !mtState.camera || !mtState.renderer) return;
+  const { TransformControls } = await import('three/addons/controls/TransformControls.js');
+  mtState.dummy = new THREE.Object3D();
+  const tc = new TransformControls(mtState.camera, mtState.renderer.domElement);
+  tc.setMode('translate');
+  tc.setSize(0.8);
+  tc.attach(mtState.dummy);
+  mtState.transformControls = tc;
+  // While the user holds the gizmo, suspend the orbit camera so panning
+  // doesn't fight the drag.
+  tc.addEventListener('dragging-changed', (e) => {
+    if (mtState.controls) mtState.controls.enabled = !e.value;
+  });
+  // Live-update the X/Y/Z offset sliders so they reflect the dragged
+  // position, then re-trigger preview for any side effects.
+  tc.addEventListener('change', () => {
+    if (!tc.dragging) return;  // ignore our own programmatic position writes
+    const base = mtState.basePivot;
+    if (!base || !mtState.dummy) return;
+    const newOffX = mtState.dummy.position.x - base.x;
+    const newOffY = mtState.dummy.position.y - base.y;
+    const newOffZ = mtState.dummy.position.z - base.z;
+    const body = document.getElementById('mt-body');
+    if (!body) return;
+    const map = { offset_x: newOffX, offset_y: newOffY, offset_z: newOffZ };
+    for (const [id, val] of Object.entries(map)) {
+      const el = body.querySelector(`[data-param-id="${id}"]`);
+      if (!el) continue;
+      const min = Number(el.min); const max = Number(el.max);
+      const clamped = Math.max(
+        Number.isFinite(min) ? min : -Infinity,
+        Math.min(Number.isFinite(max) ? max : Infinity, val),
+      );
+      el.value = clamped.toFixed(2);
+      const lab = el.previousElementSibling;
+      const labVal = lab && lab.lastElementChild;
+      if (labVal) labVal.textContent = el.value;
+    }
+    _mtSchedulePreview();
+  });
+  // Render TC inside the modal's tick loop (it draws its own
+  // overlay-on-top gizmo helpers).
+}
+
+// Detach the gizmo + dummy from the scene tree when switching to a
+// schema that doesn't use it (or when closing the modal).
+function _mtDisableTransformGizmo() {
+  const tc = mtState.transformControls;
+  if (!tc) return;
+  tc.detach();
+  if (tc.parent) tc.parent.remove(tc);
+  if (mtState.dummy?.parent) mtState.dummy.parent.remove(mtState.dummy);
+  if (mtState.controls) mtState.controls.enabled = true;
+  mtState.basePivot = null;
 }
 
 async function _mtInitViewport() {
@@ -7794,6 +7914,9 @@ function openMeshToolModal(toolName) {
     // overlays the preview hook added (Fill Holes boundary lines, ...).
     for (const e of mtState.origGeoms) { e.mesh.geometry = e.originalGeom; }
     _mtClearHelpers();
+    // Tear down the draggable pivot widget so the next tool's modal
+    // doesn't see a stale gizmo (and OrbitControls regains focus).
+    if (mtState.transformControls) _mtDisableTransformGizmo();
   };
   cancelBtn.onclick = close;
   if (closeX) closeX.onclick = close;
