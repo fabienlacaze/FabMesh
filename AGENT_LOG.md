@@ -9274,3 +9274,43 @@ Note importante pour le user: si le mesh est topologiquement clos
 (status "No boundary edges found"), les patches sombres visibles à
 l'écran ne sont PAS des trous géométriques — c'est du texture/back-face.
 Fill Holes ne peut rien y faire; il faut Fix Normals ou Re-Texture.
+
+## 2026-05-28 — Center → "Set pivot point" + Fill Holes detection v3
+
+User feedback: (1) "Center doit permettre de modifier le pivot point
+du mesh" — UI inspirée d'Unreal Modeling Mode (boutons toggle Center
+/Bottom/Top/Left/Right/Front/Back/World Origin + gizmo dans le viewer).
+(2) "Le mesh a des trous (peints en rouge via paint)" — mon weld
+Q=1e4 ratait les vrais trous sur ce mesh.
+
+Changes:
+- `_jsSetPivot(geom, mode)`: translate les vertices pour placer le
+  landmark AABB choisi à local (0,0,0). Retourne `{ geometry, helpers:
+  [pivotGizmo] }` avec AxesHelper + sphère jaune.
+- `_makePivotGizmo(size)`: gizmo rendu avec depthTest:false + renderOrder
+  999 pour rester visible même à l'intérieur du mesh.
+- Type d'input `toggle-group`: row de boutons, un seul actif à la fois,
+  stocke la valeur dans dataset.value, déclenche _mtSchedulePreview au
+  click. Lu par _mtCollectVals.
+- Schema `center`: titre "Set pivot point", params toggle-group avec
+  les 8 modes.
+- `_jsCenter(geom)` devient wrapper sur `_jsSetPivot(geom, 'bottom')
+  .geometry` pour compat avec Modal-side `center` (qui ne connait que
+  bottom).
+
+Fill Holes v3 (`_jsFillHoles`):
+- **Welding ADAPTATIF**: tolerance = bbox_diagonal / 1e5 au lieu d'un
+  Q=1e4 absolu. Sur un mesh tiny (< 1 unité) le Q=1e4 fixe mergait des
+  vertices distants de 0.1mm qui étaient des vrais bords de trou.
+  Maintenant le tolerance est relatif à la taille du mesh.
+- **Multi-successor**: `boundarySuccessors` est un Map<group, group[]>
+  au lieu de Map<group, group>. Une vertex partagée entre 2 trous (T-
+  junction) garde TOUS ses successeurs au lieu d'écraser. Le loop
+  walker pop chaque successor une fois → découvre tous les loops.
+- **Non-manifold edges**: count !== 2 = candidat. Avant on ne prenait
+  que count===1. Les edges count>=3 (Trellis2 marching-cubes laisse
+  beaucoup d'intersections T-junction) sont maintenant détectées
+  comme trous candidats.
+
+Tests à faire: re-ouvrir Fill Holes sur l'orc qui montrait "No
+boundary edges found" — devrait maintenant détecter les patches noirs.
