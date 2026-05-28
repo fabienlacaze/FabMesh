@@ -113,7 +113,15 @@
     const _EXPIRED_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%231a1a1a\"/><text x=\"100\" y=\"95\" text-anchor=\"middle\" fill=\"%23ff9800\" font-size=\"24\" font-family=\"sans-serif\">⚠</text><text x=\"100\" y=\"125\" text-anchor=\"middle\" fill=\"%23ff9800\" font-size=\"14\" font-family=\"sans-serif\">Expired</text></svg>";
     function isExpiredReplicateUrl(u) {
       if (typeof u !== "string") return false;
-      return /\breplicate\.delivery\b/i.test(u);
+      // Strip a leading file:/// prefix that may precede the real URL
+      // (the Electron-era cache-buster).
+      let stripped = u.replace(/^file:\/{2,3}(?=https?:|blob:|data:)/i, '');
+      try {
+        const parsed = new URL(stripped);
+        return /(^|\.)replicate\.delivery$/i.test(parsed.hostname);
+      } catch (_) {
+        return false;
+      }
     }
     window.__expiredReplicatePlaceholder = _EXPIRED_PLACEHOLDER;
     window.__isExpiredReplicateUrl = isExpiredReplicateUrl;
@@ -133,6 +141,16 @@
             desc.set.call(this, _EXPIRED_PLACEHOLDER);
             return;
           }
+          // Non-expired URL: if this element had been previously marked
+          // expired (false-positive recovery), clear the flag + title so
+          // the UI doesn't keep showing the stale "Legacy cloud asset
+          // expired" tooltip.
+          try {
+            if (this.dataset && this.dataset.expiredReplicate) {
+              delete this.dataset.expiredReplicate;
+              if (this.title === _EXPIRED_TITLE) this.title = '';
+            }
+          } catch (_) { /* ignore */ }
           desc.set.call(this, stripped);
         },
         configurable: true,
@@ -149,6 +167,14 @@
         i.setAttribute('title', _EXPIRED_TITLE);
         i.setAttribute('src', _EXPIRED_PLACEHOLDER);
         return;
+      }
+      // Non-expired URL: clear any stale "expired" flag/title from a
+      // previous false-positive run.
+      if (i.dataset && i.dataset.expiredReplicate) {
+        delete i.dataset.expiredReplicate;
+        if (i.getAttribute('title') === _EXPIRED_TITLE) {
+          i.removeAttribute('title');
+        }
       }
       if (/^file:\/{2,3}(?=https?:|blob:|data:)/i.test(raw)) {
         i.setAttribute('src', stripped);
@@ -249,6 +275,10 @@
     // Inject the credits pill into the topbar (Cloud-only — desktop has
     // unlimited local GPU and doesn't need this).
     installCreditsPill();
+
+    // 📬 Inbox button immediately to the LEFT of the credits pill.
+    // Polls /api/me/inbox every 30 s and shows an unread-count badge.
+    installInboxButton();
 
     // Sign-out button next to the credits pill. Sessions are stored in
     // non-httpOnly `sb-<ref>-auth-token` cookies (set by LoginForm.tsx
@@ -1060,6 +1090,231 @@
     window.location.href = '/login';
   }
 
+  /* ──────────────────────────────────────────────────────────────────
+   * Inbox button — 📬 icon in the topbar with an unread-count badge.
+   * Mirrors installCreditsPill (inserted into #topbar .topbar-right
+   * BEFORE the credits pill). Polled every 30 s. Clicking opens a
+   * modal that lists marketplace approvals/rejections, sale alerts,
+   * and support replies. Visible unread items are marked read on open.
+   * ────────────────────────────────────────────────────────────────── */
+  let _inboxBtnEl = null;
+  let _inboxBadgeEl = null;
+  let _inboxPollTimer = null;
+  let _inboxItems = [];
+
+  function _ensureInboxStyle() {
+    if (document.getElementById('cloud-inbox-style')) return;
+    const s = document.createElement('style');
+    s.id = 'cloud-inbox-style';
+    s.textContent = `
+      #cloud-inbox-btn {
+        position: relative;
+        width: 32px; height: 32px;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.05);
+        color: #eee;
+        font-size: 16px; line-height: 1;
+        display: inline-flex; align-items: center; justify-content: center;
+        cursor: pointer;
+        transition: background 0.15s ease;
+        margin-right: 8px;
+      }
+      #cloud-inbox-btn:hover { background: rgba(255,255,255,0.12); }
+      #cloud-inbox-badge {
+        position: absolute; top: -4px; right: -4px;
+        min-width: 16px; height: 16px; padding: 0 4px;
+        border-radius: 8px;
+        background: #f44336; color: #fff;
+        font-size: 10px; font-weight: 700; line-height: 16px;
+        text-align: center;
+        border: 1px solid #1a1a1a;
+        display: none;
+      }
+      .cloud-inbox-overlay {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.65);
+        z-index: 9999;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .cloud-inbox-card {
+        max-width: 640px; width: calc(100% - 40px);
+        max-height: 80vh; overflow: auto;
+        background: var(--bg-1, #1a1a1a);
+        color: #eee;
+        border-radius: 10px;
+        padding: 24px;
+        border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      }
+      .cloud-inbox-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 16px;
+      }
+      .cloud-inbox-header h2 { margin: 0; font-size: 18px; }
+      .cloud-inbox-close {
+        background: none; border: none; color: #aaa;
+        font-size: 22px; cursor: pointer; padding: 0 8px;
+      }
+      .cloud-inbox-close:hover { color: #fff; }
+      .cloud-inbox-item {
+        display: flex; gap: 12px;
+        padding: 12px;
+        border-radius: 8px;
+        background: rgba(255,255,255,0.04);
+        margin-bottom: 8px;
+        position: relative;
+      }
+      .cloud-inbox-item .icon { font-size: 22px; flex: 0 0 28px; line-height: 1.2; }
+      .cloud-inbox-item .body { flex: 1; min-width: 0; }
+      .cloud-inbox-item .title { font-weight: 600; margin-bottom: 4px; }
+      .cloud-inbox-item .msg   { font-size: 13px; color: #bbb; word-wrap: break-word; }
+      .cloud-inbox-item .date  { font-size: 11px; color: #888; margin-top: 6px; }
+      .cloud-inbox-item .new-pill {
+        position: absolute; top: 8px; right: 8px;
+        background: #4caf50; color: #fff;
+        font-size: 10px; font-weight: 700;
+        padding: 2px 6px; border-radius: 4px;
+      }
+      .cloud-inbox-empty {
+        text-align: center; color: #888; padding: 32px 16px;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function installInboxButton() {
+    if (_inboxBtnEl) return;
+    const right = document.querySelector('#topbar .topbar-right');
+    if (!right) return;
+    _ensureInboxStyle();
+
+    const btn = document.createElement('button');
+    btn.id = 'cloud-inbox-btn';
+    btn.type = 'button';
+    btn.title = 'Inbox';
+    btn.innerHTML = '📬<span id="cloud-inbox-badge">0</span>';
+    // Place BEFORE the credits pill (which itself sits at firstChild
+    // thanks to installCreditsPill's insertBefore).
+    const credits = right.querySelector('#cloud-credits-pill');
+    if (credits) right.insertBefore(btn, credits);
+    else         right.insertBefore(btn, right.firstChild);
+
+    btn.addEventListener('click', openInboxPopup);
+    _inboxBtnEl = btn;
+    _inboxBadgeEl = btn.querySelector('#cloud-inbox-badge');
+
+    refreshInbox();
+    if (_inboxPollTimer) clearInterval(_inboxPollTimer);
+    _inboxPollTimer = setInterval(refreshInbox, 30_000);
+  }
+
+  async function refreshInbox() {
+    if (!_inboxBadgeEl) return;
+    try {
+      const r = await fetch('/api/me/inbox', { credentials: 'include' });
+      if (!r.ok) return;
+      const j = await r.json();
+      _inboxItems = Array.isArray(j.items) ? j.items : [];
+      const unread = _inboxItems.filter((it) => !it.read).length;
+      if (unread > 0) {
+        _inboxBadgeEl.textContent = unread > 99 ? '99+' : String(unread);
+        _inboxBadgeEl.style.display = 'block';
+      } else {
+        _inboxBadgeEl.style.display = 'none';
+      }
+    } catch { /* network blip — keep previous count */ }
+  }
+  window.__inboxRefresh = refreshInbox;
+
+  function _inboxIconFor(kind) {
+    switch (kind) {
+      case 'sale':
+      case 'approved':  return '🛒';
+      case 'rejected':  return '⚠';
+      case 'reply':     return '💬';
+      default:          return '📬';
+    }
+  }
+
+  function _formatInboxDate(iso) {
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleString();
+    } catch { return ''; }
+  }
+
+  function openInboxPopup() {
+    _ensureInboxStyle();
+    // Close any existing instance first.
+    document.querySelectorAll('.cloud-inbox-overlay').forEach((n) => n.remove());
+
+    const overlay = document.createElement('div');
+    overlay.className = 'cloud-inbox-overlay';
+    const card = document.createElement('div');
+    card.className = 'cloud-inbox-card';
+
+    const header = document.createElement('div');
+    header.className = 'cloud-inbox-header';
+    header.innerHTML = `
+      <h2>📬 Inbox</h2>
+      <button class="cloud-inbox-close" type="button" aria-label="Close">×</button>
+    `;
+    card.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'cloud-inbox-list';
+    if (!_inboxItems.length) {
+      const empty = document.createElement('div');
+      empty.className = 'cloud-inbox-empty';
+      empty.textContent = 'No messages yet. Marketplace approvals + support replies will land here.';
+      list.appendChild(empty);
+    } else {
+      _inboxItems.forEach((it) => {
+        const row = document.createElement('div');
+        row.className = 'cloud-inbox-item';
+        const isUnread = !it.read;
+        row.innerHTML = `
+          <div class="icon">${_inboxIconFor(it.kind)}</div>
+          <div class="body">
+            <div class="title"></div>
+            <div class="msg"></div>
+            <div class="date"></div>
+          </div>
+          ${isUnread ? '<span class="new-pill">NEW</span>' : ''}
+        `;
+        row.querySelector('.title').textContent = it.title || it.subject || '(no subject)';
+        row.querySelector('.msg').textContent   = it.message || it.body || it.reply_body || '';
+        row.querySelector('.date').textContent  = _formatInboxDate(it.created_at || it.replied_at || '');
+        list.appendChild(row);
+      });
+    }
+    card.appendChild(list);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    header.querySelector('.cloud-inbox-close').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    // Mark all currently-visible unread items as read.
+    const unreadIds = _inboxItems.filter((it) => !it.read && it.id != null).map((it) => it.id);
+    if (unreadIds.length) {
+      fetch('/api/me/inbox/read', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: unreadIds }),
+      }).then(() => {
+        // Optimistic local update so the badge clears without waiting
+        // for the next 30 s poll.
+        _inboxItems.forEach((it) => { if (unreadIds.includes(it.id)) it.read = true; });
+        if (_inboxBadgeEl) _inboxBadgeEl.style.display = 'none';
+      }).catch(() => { /* will reconcile on next refreshInbox */ });
+    }
+  }
+
   function installLogoutButton() {
     if (document.querySelector('#cloud-account-section')) return;
 
@@ -1505,6 +1760,20 @@
         const card = media.closest('.all-image-card, .all-mesh-card, .version-thumb')
                    || media.parentElement;
         if (card) _badgeCard(card, meta);
+      });
+      // Second walker: any element carrying data-job-id (set by
+      // renderImageVersions / renderMeshVersions on version-thumb).
+      // URL-based matching misses these when the thumb file path on
+      // disk diverges from the canonical asset_url (e.g. .png vs .webp,
+      // local cache vs replicate.delivery). _badgeCard is idempotent so
+      // double-walks don't double-badge.
+      root.querySelectorAll('[data-job-id]').forEach((el) => {
+        const jid = el.getAttribute('data-job-id');
+        if (!jid) return;
+        const meta = _publishedIndex.byJobId.get(jid);
+        if (!meta) return;
+        const card = el.closest('.all-image-card, .all-mesh-card, .version-thumb') || el;
+        _badgeCard(card, meta);
       });
     });
     // Same tick: refresh publish-button disabled state. This means
