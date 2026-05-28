@@ -6808,8 +6808,9 @@ const MESH_TOOL_SCHEMAS = {
   },
   decimate: {
     title: 'Decimate mesh',
-    subtitle: 'Reduce triangle count — live preview (edge collapse, may pause briefly at high reduction).',
+    subtitle: 'Reduce triangle count — move the slider to preview (may pause a few seconds at high reduction).',
     needsImage: false,
+    expensivePreview: true,
     params: [
       { id: 'target_faces', label: 'Target triangles', type: 'range', min: 200, max: 1_000_000, step: 100, default: 15000 },
     ],
@@ -6909,7 +6910,11 @@ function _mtCollectVals(body) {
 
 function _mtSchedulePreview() {
   if (mtState.previewTimer) clearTimeout(mtState.previewTimer);
-  mtState.previewTimer = setTimeout(_mtRunPreview, 80);
+  // Expensive preview (Decimate's quadric edge collapse) can take a
+  // few seconds on 200K+ tris; use a longer debounce so a drag
+  // doesn't fire ten compute passes back-to-back.
+  const delay = mtState.schema?.expensivePreview ? 400 : 80;
+  mtState.previewTimer = setTimeout(_mtRunPreview, delay);
 }
 
 // Remove every helper Object3D we added on a previous preview tick.
@@ -7052,8 +7057,16 @@ function _mtLoadMesh(meshPath) {
             mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
           }
         });
-        // Now that geoms are cached, run the initial preview.
-        _mtRunPreview();
+        // Run the initial preview. Skip for `expensivePreview` tools
+        // (Decimate) so the modal opens instantly and the heavy
+        // SimplifyModifier compute only kicks in once the user
+        // actually moves the slider.
+        if (!mtState.schema?.expensivePreview) {
+          _mtRunPreview();
+        } else {
+          const status = document.getElementById('mt-preview-status');
+          if (status) status.textContent = 'Move the slider to preview the reduction.';
+        }
       });
     })
     .catch((e) => {
