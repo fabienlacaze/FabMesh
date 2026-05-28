@@ -58,7 +58,7 @@ let html = readFileSync(htmlPath, 'utf-8');
 // 1. CSP: allow connects to api routes + CDN
 html = html.replace(
   /<meta http-equiv="Content-Security-Policy"[^>]*>/,
-  `<meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: https://replicate.delivery https://*.r2.cloudflarestorage.com https://*.r2.dev https://unpkg.com; media-src 'self' blob: https:">`
+  `<meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob: https://replicate.delivery https://*.r2.cloudflarestorage.com https://*.r2.dev https://unpkg.com; media-src 'self' blob: https:; frame-src 'self' blob:">`
 );
 
 // 2. Title: brand as Cloud
