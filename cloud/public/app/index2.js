@@ -2315,8 +2315,11 @@ _ws3dEngineSync();
       // composition entirely.
       if (!prompt) {
         showToast('No prompt on project — using img2img variation of current image instead.', 'info', 4000);
+        const rerollSource = p.selectedImagePath;
         const job = (typeof pushJob === 'function')
-          ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Mode: 'img2img-fallback' }, 30_000 * n)
+          ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Mode: 'img2img-fallback' }, 30_000 * n, undefined, {
+              sourceImageUrl: rerollSource, projectName: p.name,
+            })
           : null;
         try {
           for (let i = 0; i < n; i++) {
@@ -2358,8 +2361,11 @@ _ws3dEngineSync();
       const hint = document.getElementById('var-strength-hint').value.trim();
       const basePrompt = p.prompt || p.initialPrompt || '';
       const prompt = hint ? (basePrompt + ', ' + hint) : (basePrompt || 'variation');
+      const variantSource = p.selectedImagePath;
       const job = (typeof pushJob === 'function')
-        ? pushJob(`Img2img variant: ${p.name}`, null, { Strength: strength.toFixed(2), Hint: hint || '(none)' }, 30_000)
+        ? pushJob(`Img2img variant: ${p.name}`, null, { Strength: strength.toFixed(2), Hint: hint || '(none)' }, 30_000, undefined, {
+            sourceImageUrl: variantSource, projectName: p.name,
+          })
         : null;
       try {
         const r = await window.meshyAPI?.img2img({
@@ -2430,7 +2436,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
     const job = pushJob(`2-view back photo: ${p.name}`, null, {
       Image: (mvImagePath || '').split(/[\\/]/).pop(),
       Mode: '2-view (back photo)',
-    }, expectedMs);
+    }, expectedMs, undefined, { sourceImageUrl: mvImagePath, projectName: p.name });
     showToast('Generating back photo...', 'info', 5000);
     try {
       const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
@@ -2464,7 +2470,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
     Mode: '6 views',
     Harmonize: harmonize ? 'yes' : 'no',
     Upscale: upscale ? 'yes' : 'no',
-  }, expectedMs);
+  }, expectedMs, undefined, { sourceImageUrl: mvImagePath, projectName: p.name });
   showToast('Generating 6 multi-views...', 'info', 5000);
   try {
     const result = await API.generateMultiview({
@@ -4255,12 +4261,14 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
   modifyModal.classList.add('hidden');
   // img2img is fast: ~5s on SDXL Turbo, ~20s on cloud
   const modifyExpected = engine === 'pollinations' ? 30000 : 15000;
+  const modifySource = target;
+  const modifyProject = p.name;
   gatedRun('img2img', `Modify image: ${p.name}`, async () => {
     const job = pushJob(`Modify image: ${p.name}`, null, {
       Engine: engineLabel(engine),
       Strength: `${Math.round(strength * 100)}%`,
       Prompt: prompt,
-    }, modifyExpected);
+    }, modifyExpected, undefined, { sourceImageUrl: modifySource, projectName: modifyProject });
     try {
       const r = await API.img2img({ imagePath: target, prompt, strength, engine, jobId: job.id });
       if (r?.success) {
@@ -4393,8 +4401,12 @@ document.getElementById('ws-removebg-btn').addEventListener('click', async () =>
   const p = state.currentProject;
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
+  const removeBgSource = target;
+  const removeBgProject = p.name;
   gatedRun('bg', `Remove background: ${p.name}`, async () => {
-    const job = pushJob(`Remove background: ${p.name}`);
+    const job = pushJob(`Remove background: ${p.name}`, null, null, undefined, undefined, {
+      sourceImageUrl: removeBgSource, projectName: removeBgProject,
+    });
     try {
       const r = await API.removeBackground(target);
       if (r?.success) {
@@ -5121,12 +5133,14 @@ document.getElementById('ws-facefix-btn')?.addEventListener('click', async () =>
   const warmLabel = window.__modalWarm === false
     ? `Warming up AI (~${Math.round((window.__modalExpectedSeconds || 150) / 60)} min cold start)`
     : 'Cloud GPU (MyFabmesh.AI Refine)';
+  const faceFixSource = target;
+  const faceFixProject = p.name;
   gatedRun('img2img', `Face Fix: ${p.name}`, async () => {
     const job = pushJob(`Face Fix: ${p.name}`, null, {
       Engine: warmLabel,
       Detection: 'OpenCV Haar (face)',
       Cost: '2 credits',
-    }, expectedMs);
+    }, expectedMs, undefined, { sourceImageUrl: faceFixSource, projectName: faceFixProject });
     try {
       const r = await window.meshyAPI.faceFixImage({ imagePath: target });
       if (r?.success) {
@@ -5425,8 +5439,12 @@ document.getElementById('ws-style-menu')?.addEventListener('click', async (e) =>
   const tgt = editTarget(p);
   if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   showToast(`Applying style: ${style.split(',')[0]}...`, 'info', 2000);
+  const styleSource = tgt;
+  const styleProject = p.name;
   gatedRun('img2img', `Style: ${style.split(',')[0]}`, async () => {
-    const job = pushJob(`Style Transfer: ${p.name}`, null, { Style: style.split(',')[0] }, 30000);
+    const job = pushJob(`Style Transfer: ${p.name}`, null, { Style: style.split(',')[0] }, 30000, undefined, {
+      sourceImageUrl: styleSource, projectName: styleProject,
+    });
     try {
       const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'local-sdxl' });
       if (r?.success) {
@@ -7054,8 +7072,18 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     'Target triangles': triPreset.label,
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   };
+  // SNAPSHOT the source image NOW (before gatedRun queues) so the Job
+  // Details modal can never show a different version the user clicks
+  // while the job is running.
+  const meshSourceImage = p.selectedImagePath || p.previewImagePath || null;
+  const meshProjectName = p.name;
+  const meshAssetKind = document.getElementById('ws-asset-type')?.value || null;
   gatedRun('mesh', `Generate 3D: ${p.name}`, async () => {
-    const job = pushJob(`Generate 3D: ${p.name}`, null, jobParams, expectedMs);
+    const job = pushJob(`Generate 3D: ${p.name}`, null, jobParams, expectedMs, undefined, {
+      sourceImageUrl: meshSourceImage,
+      projectName: meshProjectName,
+      assetKind: meshAssetKind,
+    });
     try {
       const r = await API.imageTo3D(params);
       if (r?.success) {
@@ -12606,7 +12634,7 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
 // can push/complete jobs in the same queue the rest of the app uses.
 // Because index2.js is an ES module, plain `function foo()` declarations
 // don't land on `window`; we wire them up explicitly below after definition.
-function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride) {
+function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride, opts) {
   const id = ++state.jobIdCounter;
   const kind = inferKind(name);
   const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
@@ -12622,6 +12650,12 @@ function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride) 
   // the time already spent (capped at 90, leaves room for the bridge).
   const elapsedNow = Math.max(0, Date.now() - startedAt);
   const initialProgress = Math.min(90, Math.max(5, 5 + (elapsedNow / expected) * 85));
+  // SNAPSHOT the source image at launch time. Without this, the Job
+  // Details modal reads state.currentProject.thumb at RENDER time, which
+  // may have changed if the user clicked another version thumbnail
+  // between launch and the modal refresh (bug: "Generate 3D: porte-avion"
+  // showed a knight thumb because the user switched versions mid-job).
+  const o = opts || {};
   const job = {
     id,
     name,
@@ -12633,6 +12667,9 @@ function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride) 
     onCancel: onCancel || null,
     tickTimer: null,
     params: params || null,
+    sourceImageUrl: o.sourceImageUrl || null,
+    projectName: o.projectName || (state.currentProject ? state.currentProject.name : null),
+    assetKind: o.assetKind || null,
   };
   // Smoothly climb from 5 to 90% over expected duration UNTIL the bridge
   // starts emitting real progress events. After that, the bridge is the
@@ -12685,7 +12722,7 @@ function completeJob(id, success, errorMessage) {
 // - complete: mark a job done/error + optional error message
 // - render: force a UI redraw of the jobs panel
 window.fabmeshJobs = {
-  push: (name, onCancel, params, expectedMs, startedAt) => pushJob(name, onCancel, params, expectedMs, startedAt),
+  push: (name, onCancel, params, expectedMs, startedAt, opts) => pushJob(name, onCancel, params, expectedMs, startedAt, opts),
   enqueue: (kind, name, runFn) => enqueueJob(kind, name, runFn),
   complete: (id, success, errorMessage) => completeJob(id, success, errorMessage),
   render: () => renderJobs(),
@@ -12911,6 +12948,12 @@ async function refreshJobDetailsModal(id) {
   // (`Generate images: ...`) there is no source asset yet — showing the
   // project's previously-selected image is misleading ("looks like the new
   // gen has the old image"), so we hide the thumb in that case.
+  //
+  // PRIORITY: job.sourceImageUrl (the SNAPSHOT taken at pushJob time) wins
+  // over state.currentProject.* — because the user can click another
+  // version thumb between launch and the modal refresh, which would swap
+  // the displayed source image to a completely different asset (the
+  // "knight thumb for porte-avion" bug).
   const refImg = document.getElementById('jd-ref-img');
   const p = state.currentProject;
   const isRigJob = /rig/i.test(j.name || '');
@@ -12920,20 +12963,46 @@ async function refreshJobDetailsModal(id) {
   // regex and reveal the stale thumb mid-generation.
   const isImageGenJob = /^(generate images?|generating (back|6) views|generate back views|multi-views)\b/i.test(j.name || '');
   let thumbUrl = null;
-  if (isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
+  let thumbSource = null;
+  // 1) Snapshot wins — set at launch time, immune to UI state mutations.
+  if (j.sourceImageUrl && !isImageGenJob) {
+    const u = j.sourceImageUrl;
+    if (/^https?:|^file:|^data:|^blob:/i.test(u)) {
+      thumbUrl = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now();
+    } else {
+      thumbUrl = 'file:///' + String(u).replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+    thumbSource = 'job.sourceImageUrl';
+  }
+  // 2) Rig jobs: show the source mesh thumbnail (not an image).
+  if (!thumbUrl && isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
     try {
       const t = await API.getThumbnail(p.selectedMeshPath);
-      if (t) thumbUrl = t + '?t=' + Date.now();
+      if (t) { thumbUrl = t + '?t=' + Date.now(); thumbSource = 'mesh.thumbnail'; }
     } catch (_) {}
   }
+  // 3) Fallback to the current project's image path (legacy behaviour).
+  //    NOTE: this is what was buggy — it reads LIVE state.
   if (!thumbUrl && p && !isImageGenJob) {
     const imgPath = p.selectedImagePath || p.previewImagePath || p.thumb;
-    if (imgPath) thumbUrl = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+    if (imgPath) {
+      thumbUrl = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+      thumbSource = 'state.currentProject (fallback)';
+    }
+  }
+  // Log once per refresh tick — helps diagnose future "wrong thumb" reports.
+  // Only log when the resolved URL CHANGES to avoid spamming the console
+  // (refreshJobDetailsModal runs every 1s while the modal is open).
+  if (refImg && refImg.dataset._lastResolvedUrl !== (thumbUrl || '')) {
+    refImg.dataset._lastResolvedUrl = thumbUrl || '';
+    try { console.log('[jobDetails] thumb resolved from', thumbSource, 'url=', thumbUrl); } catch(_) {}
   }
   if (thumbUrl && refImg) {
     refImg.src = thumbUrl;
     refImg.style.display = '';
   } else if (refImg) {
+    // Defensive: if no snapshot AND no project thumb, HIDE rather than
+    // show a stale image from a different asset.
     refImg.removeAttribute('src');
     refImg.style.display = 'none';
   }
@@ -13077,12 +13146,14 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
   const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
   document.getElementById('modal-auto-inpaint').classList.add('hidden');
   // Auto-inpaint: CLIPSeg detection + SDXL inpaint, ~3 min on RTX 5080
+  const inpaintSource = imagePath;
+  const inpaintProject = p.name;
   gatedRun('inpaint', `Auto inpaint: ${p.name}`, async () => {
     const job = pushJob(`Auto inpaint: ${p.name}`, null, {
       Target: target,
       Replace: replace || '(remove)',
       Padding: dilate + 'px',
-    }, 180000);
+    }, 180000, undefined, { sourceImageUrl: inpaintSource, projectName: inpaintProject });
     try {
       const r = await API.autoInpaint({ imagePath, targetText: target, prompt: replace, dilate, jobId: job.id });
       if (r?.success) {
