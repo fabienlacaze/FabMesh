@@ -1074,14 +1074,15 @@
       let payload = null;
       let previewUrl = '';
       if (kind === 'mesh') {
-        const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
+        const fn = window.getCurrentMeshObj;
+        const m = (typeof fn === 'function') ? fn() : null;
         if (!m) {
-          if (typeof showToast === 'function') showToast('Pick a mesh first.', 'error');
+          if (typeof window.showToast === 'function') window.showToast('Pick a mesh first.', 'error');
           return;
         }
         const jobId = m.id || m.jobId;
         if (!jobId) {
-          if (typeof showToast === 'function') showToast('This mesh has no job ID — cannot publish.', 'error', 4000);
+          if (typeof window.showToast === 'function') window.showToast('This mesh has no job ID — cannot publish.', 'error', 4000);
           return;
         }
         payload = { kind: 'mesh', jobId };
@@ -1090,7 +1091,7 @@
         // Image: use the currently selected image of the project.
         const url = p?.selectedImagePath;
         if (!url) {
-          if (typeof showToast === 'function') showToast('Pick an image first.', 'error');
+          if (typeof window.showToast === 'function') window.showToast('Pick an image first.', 'error');
           return;
         }
         payload = { kind: 'image', imageUrl: url };
@@ -1122,6 +1123,30 @@
           thumb.innerHTML = '';
         }
       }
+      // Wire the live payout hint. Formula:
+      //   sellerNet (USD) = priceUSD * (1 - 0.30 platform fee)  = priceUSD * 0.70
+      //   credits         = sellerNet * 7 credits/EUR * 1.20 bonus
+      //                   = priceUSD * 5.88
+      // Guard against double-wiring across openFor() invocations.
+      const priceInput = document.getElementById('pub-price');
+      const hint = document.getElementById('pub-payout-hint');
+      if (priceInput && hint) {
+        const syncPayoutHint = () => {
+          const p = Math.max(0, Number(priceInput.value) || 0);
+          const credits = Math.round(p * 5.88);
+          if (p === 0) {
+            hint.textContent = 'Free listing — no credit payout.';
+          } else {
+            hint.textContent = 'You’ll earn ~' + credits +
+              ' credits per sale (after 30% platform fee, +20% bonus paid in credits).';
+          }
+        };
+        if (priceInput.dataset.payoutWired !== '1') {
+          priceInput.addEventListener('input', syncPayoutHint);
+          priceInput.dataset.payoutWired = '1';
+        }
+        syncPayoutHint();
+      }
       modal.classList.remove('hidden');
     }
     meshBtn?.addEventListener('click',  () => openFor('mesh'));
@@ -1134,8 +1159,8 @@
     // next debugging round has something to read.
     const notify = (msg, type) => {
       console[type === 'error' ? 'error' : 'log']('[market.publish]', msg);
-      if (typeof showToast === 'function') {
-        showToast(msg, type || 'info', 5000);
+      if (typeof window.showToast === 'function') {
+        window.showToast(msg, type || 'info', 5000);
       } else {
         // Fallback: at least alert errors so the user gets feedback.
         if (type === 'error') alert(msg);
@@ -1237,6 +1262,7 @@
         if (it.asset_url) _publishedIndex.byUrl.set(it.asset_url, meta);
       });
       _badgeAllCards();
+      _syncPublishButtons();
     } catch { /* network blip — leave previous index */ }
   }
   window.__publishedRefresh = _fetchPublishedIndex;
@@ -1262,7 +1288,7 @@
       .published-badge.rejected { background:#f44336; color:#fff; }
       /* Cards are usually static-positioned; we need relative so the
          badge can absolute-position against the card. */
-      .project-card, .all-image-card, .all-mesh-card { position: relative; }
+      .all-image-card, .all-mesh-card { position: relative; }
     `;
     document.head.appendChild(s);
   }
@@ -1288,7 +1314,6 @@
   function _badgeAllCards() {
     _ensurePublishedBadgeStyle();
     const containers = [
-      document.getElementById('projects-grid'),
       document.getElementById('all-images-grid'),
       document.getElementById('all-meshes-grid'),
     ].filter(Boolean);
@@ -1299,16 +1324,63 @@
         const meta = _publishedIndex.byUrl.get(src);
         if (!meta) return;
         // Find the closest card-like ancestor. The renderer uses
-        // .project-card / .all-image-card / .all-mesh-card / .card.
-        const card = media.closest('.project-card, .all-image-card, .all-mesh-card, .card, [class*="-card"]')
+        // .all-image-card / .all-mesh-card.
+        const card = media.closest('.all-image-card, .all-mesh-card')
                    || media.parentElement;
         if (card) _badgeCard(card, meta);
       });
     });
+    // Same tick: refresh publish-button disabled state. This means
+    // every grid mutation (project switch, new asset added) also
+    // re-evaluates whether the current selection is already published.
+    _syncPublishButtons();
+  }
+  // Disable the workspace "Publish to marketplace" buttons when the
+  // currently-selected mesh/image is already in _publishedIndex. Saves
+  // the original textContent in dataset.originalLabel on first touch so
+  // we can restore it when selection changes to an unpublished asset.
+  function _syncPublishButtons() {
+    const meshBtn  = document.getElementById('ws-mesh-publish-btn');
+    const imageBtn = document.getElementById('ws-image-publish-btn');
+    const apply = (btn, already) => {
+      if (!btn) return;
+      if (!btn.dataset.originalLabel) {
+        btn.dataset.originalLabel = btn.textContent || '';
+      }
+      if (already) {
+        btn.disabled = true;
+        btn.title = 'Already published';
+        btn.textContent = '✓ ' + btn.dataset.originalLabel.replace(/^✓\s*/, '');
+      } else {
+        btn.disabled = false;
+        btn.title = '';
+        btn.textContent = btn.dataset.originalLabel;
+      }
+    };
+    // Mesh button — check current mesh by job_id, fall back to URL.
+    let meshAlready = false;
+    try {
+      const fn = window.getCurrentMeshObj;
+      const m = (typeof fn === 'function') ? fn() : null;
+      if (m) {
+        const jobId = m.id || m.jobId;
+        const url   = m.path || m.url || '';
+        if (jobId && _publishedIndex.byJobId.has(jobId)) meshAlready = true;
+        else if (url && _publishedIndex.byUrl.has(url)) meshAlready = true;
+      }
+    } catch { /* selection unavailable — leave button enabled */ }
+    apply(meshBtn, meshAlready);
+    // Image button — check current image URL.
+    let imageAlready = false;
+    try {
+      const p = (typeof state !== 'undefined') ? state?.currentProject : null;
+      const url = p?.selectedImagePath;
+      if (url && _publishedIndex.byUrl.has(url)) imageAlready = true;
+    } catch { /* same */ }
+    apply(imageBtn, imageAlready);
   }
   function _installPublishedBadgeWatcher() {
     const targets = [
-      document.getElementById('projects-grid'),
       document.getElementById('all-images-grid'),
       document.getElementById('all-meshes-grid'),
     ].filter(Boolean);

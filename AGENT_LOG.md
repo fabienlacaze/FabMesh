@@ -10,6 +10,42 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace v2.1 — bugfixes + seller credit payout)
+
+- **Bug**: mesh "Publish to marketplace" button was silent. Root cause:
+  `index2.js` is loaded as `<script type="module">`, so
+  `getCurrentMeshObj` and `showToast` were module-scoped and invisible
+  to the classic-script `cloud-overrides.js`. Fix: expose both on
+  `window.*` in `index2.js` + read from `window` in
+  `cloud-overrides.js`.
+- **Bug**: home grid 🛒 badge appeared on the PROJECT card (which
+  shows the published image as its thumb). Fix: removed
+  `#projects-grid` from the badge walker; restricted `closest()`
+  selector to `.all-image-card, .all-mesh-card`.
+- **Bug**: native `window.prompt` for reject reason — ugly. Replaced
+  by inline overlay modal mirroring `openReplyForm`.
+- **New**: seller credit payout. `SELLER_CREDITS_PER_EUR=7` (mirrors
+  best buyer pack: studio = 50EUR → 350 credits) +
+  `SELLER_CREDIT_BONUS_PCT=20` (retention bonus).
+  `_processMarketPurchase` calls `addCredits(seller, payoutCredits)`
+  after writing the sale record. Sale JSON gets `payout_status` /
+  `payout_credits` / `payout_at` fields.
+- **New**: `GET /api/me/earnings` endpoint walks `_market/sales/`,
+  filters `seller_user_id === user.id`, returns `total_credits_paid`,
+  `sales_count`, `by_currency`, top 10 recent sales hydrated with
+  `listing_title`.
+- **New**: dynamic payout hint in publish modal — as the user types a
+  price, "You will earn ~N credits per sale" updates live. Formula:
+  `round(priceUSD * 5.88)`.
+- **New**: 409 message rewritten — "You already published this asset.
+  View it on /market or remove it from /admin to re-list."
+- **New**: Publish-to-marketplace buttons disabled (with ✓ prefix +
+  tooltip "Already published") when the current mesh/image is in
+  `_publishedIndex`.
+- **Constraint note**: pipeline scripts unchanged.
+
+---
+
 ## 2026-05-28 (Marketplace v2 — cart + Stripe checkout + ownership + Owned tab)
 
 - **Modèle commission** : 30 % plateforme (industry standard
