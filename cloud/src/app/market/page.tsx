@@ -63,18 +63,47 @@ function saveCart(ids: string[]) {
   if (typeof window !== 'undefined') localStorage.setItem(CART_KEY, JSON.stringify(ids));
 }
 
+interface MineItem {
+  listing_id: string;
+  kind: 'mesh' | 'image';
+  job_id: string | null;
+  asset_url: string;
+  mesh_url: string;
+  status: string;
+  price_cents: number;
+  currency: string;
+  title: string;
+  description: string;
+  licence: string;
+  asset_type: string | null;
+  author_display: string;
+  created_at: string;
+  rejection_reason?: string;
+}
+
+interface EditingDraft {
+  listing_id: string;
+  title: string;
+  description: string;
+  price_cents: number;
+  licence: string;
+}
+
 export default function MarketPage() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [owned, setOwned] = useState<OwnedItem[]>([]);
+  const [myListings, setMyListings] = useState<MineItem[]>([]);
   const [filtered, setFiltered] = useState<Listing[]>([]);
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'all' | 'free' | 'paid' | 'owned'>('all');
+  const [tab, setTab] = useState<'all' | 'free' | 'paid' | 'owned' | 'mine'>('all');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Listing | null>(null);
   const [cart, setCart] = useState<string[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [paidBanner, setPaidBanner] = useState(false);
+  const [editing, setEditing] = useState<EditingDraft | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // First load
   useEffect(() => {
@@ -105,9 +134,28 @@ export default function MarketPage() {
           setOwned(j.items ?? []);
         }
       } catch {}
+      // My listings (every status the user has published). Silent 401.
+      try {
+        const r = await fetch('/api/me/published-assets');
+        if (r.ok) {
+          const j = await r.json();
+          setMyListings(j.items ?? []);
+        }
+      } catch {}
       setLoading(false);
     })();
   }, []);
+
+  // Re-fetchable helper for after edit/remove on the "Mine" tab.
+  async function refreshMyListings() {
+    try {
+      const r = await fetch('/api/me/published-assets');
+      if (r.ok) {
+        const j = await r.json();
+        setMyListings(j.items ?? []);
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     const q = search.trim().toLowerCase();
@@ -168,7 +216,8 @@ export default function MarketPage() {
   const ownedIds = new Set(owned.map((o) => o.id));
 
   // Display list = filtered listings for All/Free/Paid, or `owned`
-  // mapped into the same shape for the "Owned" tab.
+  // mapped into the same shape for the "Owned" tab, or `myListings`
+  // mapped into the same shape for the "Mine" tab.
   const displayItems: Listing[] = tab === 'owned'
     ? owned.map((o) => ({
         id: o.id, title: o.title, description: o.description,
@@ -179,7 +228,75 @@ export default function MarketPage() {
         author_display: o.author_display, created_at: o.created_at,
         downloads: 0,
       }))
+    : tab === 'mine'
+    ? myListings.map((m) => ({
+        id: m.listing_id, title: m.title, description: m.description,
+        price_cents: m.price_cents, currency: m.currency, licence: m.licence,
+        asset_kind: m.kind, asset_type: m.asset_type,
+        asset_url: m.asset_url, mesh_url: m.mesh_url,
+        author_display: m.author_display, created_at: m.created_at,
+        downloads: 0,
+      }))
     : filtered;
+
+  // Quick lookup for status badges on the "Mine" tab.
+  const mineById = new Map(myListings.map((m) => [m.listing_id, m]));
+
+  async function handleRemoveMine(id: string) {
+    if (!confirm('Remove this listing from the marketplace?')) return;
+    try {
+      const r = await fetch(`/api/market/unpublish/${id}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+      await refreshMyListings();
+    } catch (e: unknown) {
+      alert('Remove failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  function openEdit(m: MineItem) {
+    setEditing({
+      listing_id: m.listing_id,
+      title: m.title,
+      description: m.description,
+      price_cents: m.price_cents,
+      licence: m.licence || 'personal',
+    });
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    if (!editing.title.trim()) { alert('Title is required.'); return; }
+    setSavingEdit(true);
+    try {
+      const r = await fetch(`/api/market/listing/${editing.listing_id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          title: editing.title,
+          description: editing.description,
+          price_cents: editing.price_cents,
+          licence: editing.licence,
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+      setEditing(null);
+      await refreshMyListings();
+    } catch (e: unknown) {
+      alert('Save failed: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   return (
     <div className="page">
@@ -223,17 +340,26 @@ export default function MarketPage() {
       )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
-        {(['all', 'free', 'paid', 'owned'] as const).map((p) => (
+        {(['all', 'free', 'paid', 'owned', 'mine'] as const).map((p) => (
           <button
             key={p}
             onClick={() => setTab(p)}
             className={tab === p ? 'primary-btn' : 'ghost-btn'}
             style={{ padding: '6px 16px', fontSize: 13, textTransform: 'capitalize', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            {p === 'all' ? 'All' : p === 'free' ? 'Free' : p === 'paid' ? 'Paid' : '✓ Owned'}
+            {p === 'all' ? 'All'
+              : p === 'free' ? 'Free'
+              : p === 'paid' ? 'Paid'
+              : p === 'owned' ? '✓ Owned'
+              : '📝 Mine'}
             {p === 'owned' && owned.length > 0 && (
               <span style={{ background: 'var(--ok)', color: '#fff', borderRadius: 999, padding: '0 7px', fontSize: 11, fontWeight: 700 }}>
                 {owned.length}
+              </span>
+            )}
+            {p === 'mine' && myListings.length > 0 && (
+              <span style={{ background: 'var(--accent)', color: '#fff', borderRadius: 999, padding: '0 7px', fontSize: 11, fontWeight: 700 }}>
+                {myListings.length}
               </span>
             )}
           </button>
@@ -247,6 +373,8 @@ export default function MarketPage() {
         <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-2)' }}>
           {tab === 'owned'
             ? <>No purchases yet. Browse <a onClick={() => setTab('all')} style={{ color: 'var(--accent)', cursor: 'pointer' }}>All listings →</a></>
+            : tab === 'mine'
+            ? <>You haven&apos;t published anything yet. <a href="/app/" style={{ color: 'var(--accent)' }}>Open the app to publish a mesh →</a></>
             : <>No listings match your filters yet. <a href="/app/" style={{ color: 'var(--accent)' }}>Publish your first mesh →</a></>}
         </div>
       ) : (
@@ -283,7 +411,46 @@ export default function MarketPage() {
                   <div style={{ color: 'var(--text-3)', fontSize: 10 }}>
                     {LICENCE_LABELS[l.licence] || l.licence}
                   </div>
-                  {owns ? (
+                  {tab === 'mine' ? (() => {
+                    const m = mineById.get(l.id);
+                    const status = m?.status || 'pending';
+                    const statusColor =
+                      status === 'approved' ? 'var(--ok)'
+                      : status === 'rejected' ? 'var(--err)'
+                      : '#ffcc66';
+                    const statusBg =
+                      status === 'approved' ? 'rgba(76,175,80,0.18)'
+                      : status === 'rejected' ? 'rgba(244,67,54,0.18)'
+                      : 'rgba(255,200,80,0.18)';
+                    return (
+                      <>
+                        <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: statusBg, color: statusColor, padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, textTransform: 'capitalize' }}>
+                          {status}
+                        </div>
+                        {status === 'rejected' && m?.rejection_reason && (
+                          <div style={{ color: 'var(--err)', fontSize: 10, fontStyle: 'italic' }}>
+                            {m.rejection_reason}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); if (m) openEdit(m); }}
+                            className="ghost-btn"
+                            style={{ flex: 1, padding: '6px 8px', fontSize: 12 }}
+                          >
+                            ✏ Edit
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRemoveMine(l.id); }}
+                            className="ghost-btn"
+                            style={{ flex: 1, padding: '6px 8px', fontSize: 12, color: 'var(--err)' }}
+                          >
+                            ✗ Remove
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })() : owns ? (
                     <a
                       href={`/api/market/download/${l.id}`}
                       onClick={(e) => e.stopPropagation()}
@@ -413,6 +580,72 @@ export default function MarketPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit modal for "Mine" listings */}
+      {editing && (
+        <div onClick={() => !savingEdit && setEditing(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 102 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, maxWidth: 540, width: '100%', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>✏ Edit listing</h2>
+              <button onClick={() => setEditing(null)} disabled={savingEdit} className="ghost-btn" style={{ padding: '4px 12px' }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              Saving changes resets the listing to <strong>pending</strong> so an admin can re-review it.
+            </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-2)' }}>
+              Title
+              <input
+                value={editing.title}
+                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                maxLength={120}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', fontSize: 14 }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-2)' }}>
+              Description
+              <textarea
+                value={editing.description}
+                onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+                maxLength={2000}
+                rows={5}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-2)' }}>
+              Price (cents — set 0 for free)
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={editing.price_cents}
+                onChange={(e) => setEditing({ ...editing, price_cents: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', fontSize: 14 }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                Preview: {formatPrice(editing.price_cents, 'USD')}
+              </div>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-2)' }}>
+              Licence
+              <select
+                value={editing.licence}
+                onChange={(e) => setEditing({ ...editing, licence: e.target.value })}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', fontSize: 14 }}
+              >
+                {Object.entries(LICENCE_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </label>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <button onClick={() => setEditing(null)} disabled={savingEdit} className="ghost-btn" style={{ padding: '8px 16px' }}>Cancel</button>
+              <button onClick={saveEdit} disabled={savingEdit} className="primary-btn" style={{ padding: '8px 20px' }}>
+                {savingEdit ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
           </div>
         </div>
       )}
