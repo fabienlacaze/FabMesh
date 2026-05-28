@@ -1072,6 +1072,7 @@
     function openFor(kind) {
       const p = (typeof state !== 'undefined') ? state?.currentProject : null;
       let payload = null;
+      let previewUrl = '';
       if (kind === 'mesh') {
         const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
         if (!m) {
@@ -1084,6 +1085,7 @@
           return;
         }
         payload = { kind: 'mesh', jobId };
+        previewUrl = m.path || m.url || '';
       } else {
         // Image: use the currently selected image of the project.
         const url = p?.selectedImagePath;
@@ -1092,6 +1094,7 @@
           return;
         }
         payload = { kind: 'image', imageUrl: url };
+        previewUrl = url;
       }
       modal.dataset.assetKind = kind;
       modal.dataset.publishPayload = JSON.stringify(payload);
@@ -1103,21 +1106,65 @@
         : '\u{1F6D2} Publish 3D mesh to marketplace';
       const titleInput = document.getElementById('pub-title');
       if (titleInput && !titleInput.value) titleInput.value = p?.name || '';
+      // Populate top-right thumbnail. <img> for images, <model-viewer>
+      // for meshes (works because the model-viewer script is loaded
+      // for the rest of the app).
+      const thumb = document.getElementById('pub-thumb');
+      if (thumb) {
+        if (previewUrl) {
+          thumb.style.display = '';
+          thumb.innerHTML = kind === 'image'
+            ? `<img src="${previewUrl}" style="width:100%; height:100%; object-fit:cover;" />`
+            : `<model-viewer src="${previewUrl}" camera-controls auto-rotate
+                  style="width:100%; height:100%; background:#0a0a0e;"></model-viewer>`;
+        } else {
+          thumb.style.display = 'none';
+          thumb.innerHTML = '';
+        }
+      }
       modal.classList.remove('hidden');
     }
     meshBtn?.addEventListener('click',  () => openFor('mesh'));
     imageBtn?.addEventListener('click', () => openFor('image'));
 
-    go?.addEventListener('click', async () => {
+    // showToast may not exist (timing / scope) — wrap so failures are
+    // never silent. The user reported clicking Submit and seeing
+    // "nothing happen", which is the worst possible feedback. We
+    // surface every code path via console + alert fallback so the
+    // next debugging round has something to read.
+    const notify = (msg, type) => {
+      console[type === 'error' ? 'error' : 'log']('[market.publish]', msg);
+      if (typeof showToast === 'function') {
+        showToast(msg, type || 'info', 5000);
+      } else {
+        // Fallback: at least alert errors so the user gets feedback.
+        if (type === 'error') alert(msg);
+      }
+    };
+    go?.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      console.log('[market.publish] Submit clicked');
       const kind = modal.dataset.assetKind || 'mesh';
       let payload = null;
-      try { payload = JSON.parse(modal.dataset.publishPayload || '{}'); } catch {}
+      try { payload = JSON.parse(modal.dataset.publishPayload || '{}'); } catch (e) {
+        console.warn('[market.publish] payload parse failed:', e);
+      }
       const title       = document.getElementById('pub-title')?.value.trim() || '';
       const description = document.getElementById('pub-description')?.value.trim() || '';
       const priceUSD    = Math.max(0, Number(document.getElementById('pub-price')?.value) || 0);
       const licence     = document.getElementById('pub-licence')?.value || 'personal';
+      console.log('[market.publish] payload=', { kind, payload, title, priceUSD, licence });
       if (!title) {
-        if (typeof showToast === 'function') showToast('Title is required.', 'error');
+        notify('Title is required.', 'error');
+        return;
+      }
+      // Validate that we have the right id for the kind.
+      if (kind === 'mesh' && !payload?.jobId) {
+        notify('No mesh selected — close and pick a mesh first.', 'error');
+        return;
+      }
+      if (kind === 'image' && !payload?.imageUrl) {
+        notify('No image selected — close and pick an image first.', 'error');
         return;
       }
       go.disabled = true;
@@ -1129,26 +1176,25 @@
           currency: 'USD', licence,
           asset_kind: kind,
         };
-        if (kind === 'mesh')  body.jobId    = payload?.jobId;
-        if (kind === 'image') body.imageUrl = payload?.imageUrl;
+        if (kind === 'mesh')  body.jobId    = payload.jobId;
+        if (kind === 'image') body.imageUrl = payload.imageUrl;
+        console.log('[market.publish] POST body=', body);
         const r = await fetch('/api/market/publish', {
           method: 'POST', credentials: 'include',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
         });
+        console.log('[market.publish] response status=', r.status);
         if (!r.ok) {
           let errBody = '';
           try { errBody = await r.text(); } catch {}
           throw new Error('HTTP ' + r.status + (errBody ? ' — ' + errBody.slice(0, 200) : ''));
         }
         close();
-        if (typeof showToast === 'function') {
-          showToast('✓ Submitted for review — an admin will approve it shortly.', 'success', 5000);
-        }
+        notify('✓ Submitted for review — an admin will approve it shortly.', 'success');
       } catch (e) {
-        if (typeof showToast === 'function') {
-          showToast('Publish failed: ' + (e?.message || e), 'error', 6000);
-        }
+        console.error('[market.publish] failed:', e);
+        notify('Publish failed: ' + (e?.message || e), 'error');
       } finally {
         go.disabled = false;
         go.textContent = 'Submit for review';

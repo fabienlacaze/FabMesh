@@ -1688,6 +1688,10 @@
       <div class="modal-card modal-card-wide">
         <h2 id="pub-title-h2">&#128722; Publish to marketplace</h2>
         <p class="modal-subtitle">Share this asset with the community. Free or with a price tag — your choice. An admin will review your listing before it goes live.</p>
+        <!-- Thumbnail of the asset being published, pinned top-right.
+             Populated by openFor() in cloud-overrides.js: <img> for
+             images, model-viewer for meshes. -->
+        <div id="pub-thumb" style="position:absolute; top:18px; right:60px; width:96px; height:96px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#0a0a0e; display:none;"></div>
         <label>Title</label>
         <input type="text" id="pub-title" maxlength="120" placeholder="Orc soldier — battle-ready"
                style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px;" />
