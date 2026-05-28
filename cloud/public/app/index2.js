@@ -7207,6 +7207,17 @@ async function runMeshTool(operation, params = []) {
   const meshPath = p.selectedMeshPath;
   const meshName = meshPath.split(/[\\/]/).pop();
   const expectedMs = MESH_TOOL_EXPECTED_MS[operation] || 10000;
+  // For texture ops (retexture/trellis2_retex) the cloud worker needs
+  // an explicit imagePath — without it /api/mesh-op 400s with
+  // "imagePath required for retexture". Prefer the mesh's own
+  // sourceImage (so resolution-rebake stays bound to the mesh's actual
+  // source, not whatever happens to be selected in the image step),
+  // then fall back to the project's currently selected/preview image.
+  const selectedMesh = (p.meshes || []).find(m => m && m.path === meshPath);
+  const meshImagePath = (selectedMesh && selectedMesh.sourceImage)
+    || p.selectedImagePath
+    || p.previewImagePath
+    || null;
   // Show the full "Running task" popup (same component as 3D generation,
   // image ops, etc.) so the user sees ETA + cancel button + progress bar
   // instead of just a toast.
@@ -7218,7 +7229,7 @@ async function runMeshTool(operation, params = []) {
       }, expectedMs)
     : null;
   try {
-    const result = await API.meshTool({ operation, meshPath, params });
+    const result = await API.meshTool({ operation, meshPath, imagePath: meshImagePath, params });
     if (result && result.success) {
       showToast(`${operation} done!`, 'success');
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
@@ -13030,7 +13041,23 @@ async function refreshJobDetailsModal(id) {
     // the local-GPU VRAM blurb. Visible for the whole cold start, not
     // just the first 15s — the user needs to know why nothing's
     // happening yet.
-    const isCloudCold = isRunning && (window.__modalWarm === false || /warming up/i.test(j.params?.Engine || ''));
+    //
+    // IMPORTANT: rely ONLY on the live window.__modalWarm flag. An older
+    // regex fallback matched "warming up" inside j.params.Engine, but
+    // that string is FROZEN at job launch time — once Modal becomes
+    // warm seconds later, the regex kept matching and the hint stayed
+    // up for the whole run, misleading the user on warm jobs.
+    // Default to NOT cold when __modalWarm has never been polled (i.e.
+    // strictly === false), so warm/unknown both hide the hint.
+    const isCloudCold = isRunning && window.__modalWarm === false;
+    try {
+      console.log('[coldstart-hint]', {
+        __modalWarm: window.__modalWarm,
+        kind: j.kind,
+        status: j.status,
+        decision: isCloudCold,
+      });
+    } catch (_e) { /* console may be locked down in some embed contexts */ }
     const isLocalEarly = isRunning && isLocalGpu && elapsed < 15000;
     const showHint = isCloudCold || isLocalEarly;
     hintEl.classList.toggle('hidden', !showHint);

@@ -10,6 +10,13 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Fix cold-start hint + retexture imagePath)
+
+- Cold-start hint now only shows when window.__modalWarm === false at render time. The regex fallback on the frozen Engine label was producing false positives for warm runs (the label is captured at job launch and never updates, so once "Warming up" appeared it stuck the hint on for the whole job).
+- Mesh Resolution / Retexture now passes imagePath (sourced from mesh.sourceImage / project.selectedImagePath / previewImagePath) so the worker no longer rejects with "imagePath required for retexture".
+
+---
+
 ## 2026-05-29 (Job thumb snapshot + hide unconfigured subscriptions)
 
 - Job Details modal now reads the source-image URL captured at pushJob() time instead of state.currentProject.thumb. Fixes the wrong-thumbnail bug when the user clicks another version thumb between launch and modal render.
