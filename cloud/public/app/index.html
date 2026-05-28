@@ -1894,6 +1894,19 @@
 
   <!-- Brightness/Contrast modal -->
   <div id="modal-brightness" class="modal-overlay hidden">
+    <!-- SVG filter used for the live Sharpness preview. CSS has no
+         native sharpen, so we expose an feConvolveMatrix whose kernel
+         we mutate from JS as the user drags the slider. Identity at
+         100 %, mild unsharp-mask at higher values, blur kernel at
+         lower. preserveAlpha so the cutout edge of the image stays
+         crisp. -->
+    <svg width="0" height="0" style="position:absolute; pointer-events:none;">
+      <filter id="bright-sharpen-filter">
+        <feConvolveMatrix id="bright-sharpen-matrix" order="3"
+                          kernelMatrix="0 0 0 0 1 0 0 0 0"
+                          preserveAlpha="true" />
+      </filter>
+    </svg>
     <div class="modal-card" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Brightness / Contrast</h3>

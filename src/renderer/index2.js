@@ -4653,7 +4653,21 @@ document.getElementById('ws-brightness-btn')?.addEventListener('click', () => {
     const b = document.getElementById('bright-brightness').value / 100;
     const c = document.getElementById('bright-contrast').value / 100;
     const s = document.getElementById('bright-saturation').value / 100;
-    preview.style.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+    const shPct = parseInt(document.getElementById('bright-sharpness').value, 10);
+    const matEl = document.getElementById('bright-sharpen-matrix');
+    if (matEl) {
+      if (shPct >= 100) {
+        const k = (shPct - 100) / 200;
+        const side = -k, center = 1 + 4 * k;
+        matEl.setAttribute('kernelMatrix', `0 ${side} 0 ${side} ${center} ${side} 0 ${side} 0`);
+      } else {
+        const k = (100 - shPct) / 100;
+        const boxW = (1 / 9) * k;
+        const center = 1 - k + boxW;
+        matEl.setAttribute('kernelMatrix', `${boxW} ${boxW} ${boxW} ${boxW} ${center} ${boxW} ${boxW} ${boxW} ${boxW}`);
+      }
+    }
+    preview.style.filter = `brightness(${b}) contrast(${c}) saturate(${s}) url(#bright-sharpen-filter)`;
     document.getElementById('bright-brightness-val').textContent = document.getElementById('bright-brightness').value + '%';
     document.getElementById('bright-contrast-val').textContent = document.getElementById('bright-contrast').value + '%';
     document.getElementById('bright-saturation-val').textContent = document.getElementById('bright-saturation').value + '%';
@@ -4673,6 +4687,8 @@ document.getElementById('bright-reset')?.addEventListener('click', () => {
   });
   const preview = document.getElementById('bright-preview');
   if (preview) preview.style.filter = '';
+  const matEl = document.getElementById('bright-sharpen-matrix');
+  if (matEl) matEl.setAttribute('kernelMatrix', '0 0 0 0 1 0 0 0 0');
 });
 document.getElementById('bright-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-brightness')?.classList.add('hidden');
