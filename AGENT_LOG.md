@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Mesh delete v4.5 — modal_ R2 path + UUID reconstruction)
+
+- Delete mesh kept 404-ing for meshes stored at mesh/modal_<32hex>.glb (Modal Labs R2 layout). The id on the wire was "modal_<32-hex-no-hyphens>" which never matched supabase jobs.id (uuid WITH hyphens).
+- worker.ts: new _reconstructUuidFromSlug() helper strips "modal_" prefix, validates 32 hex, reinserts hyphens at 8/12/16/20 to get the canonical uuid.
+- handleMeshesDelete now derives the R2 object key from job.mesh_url (parsing the pathname after R2_PUBLIC_URL) instead of hardcoding <user_id>/<id>.glb. Falls back to the legacy layout if mesh_url is missing.
+- Error messages clarified: 404 with "this row may have been deleted by an admin", 400 with "unrecognised mesh id format".
+
+---
+
 ## 2026-05-29 (Rig step disabled — under construction overlay desktop + cloud)
 
 - Visual under-construction overlay added over the Rig step on both cloud (cloud/public/app/index.html) and desktop (src/renderer/index2.html). Yellow/black hazard-tape stripes + 🚧 sign + "Under construction — UniRig integration rolling out soon".

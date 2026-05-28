@@ -3768,6 +3768,21 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
  * Delete a generated mesh: removes the R2 object and the jobs row.
  * Only the owning user can delete their own mesh.
  */
+/**
+ * Reconstruct a uuid from a "slug" form the renderer may send.
+ *  - "cad84d29-140a-4fd8-b5a9-32a13e0e673f"  → returned as-is
+ *  - "modal_cad84d29140a4fd8b5a932a13e0e673f" → strip "modal_", re-hyphenate
+ *  - "cad84d29140a4fd8b5a932a13e0e673f"      → re-hyphenate
+ * Returns null if the string can't be coerced to a uuid.
+ */
+function _reconstructUuidFromSlug(slug: string): string | null {
+  if (!slug) return null;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug)) return slug;
+  const hex = slug.replace(/^modal_/i, '');
+  if (!/^[0-9a-f]{32}$/i.test(hex)) return null;
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
 async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -3785,8 +3800,10 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
   //   (b) filename like "<safe_project>_trellis2_<last10>.glb" — strip
   //       extension and match the 10-char tail against id LIKE.
   //   (c) bare "<id>.glb" (legacy cosmetic filename, stripped above).
-  // We try in turn so renderer fallbacks (m.id || m.jobId || m.filename)
-  // still resolve a row instead of silently 404ing.
+  //   (d) "modal_<32hex>" or "<32hex>" — R2 path stem for Modal-pipeline
+  //       meshes; reconstruct the uuid then lookup directly.
+  // We try in turn so renderer fallbacks (m.id || m.jobId || m.filename
+  // || m.path-stem) still resolve a row instead of silently 404ing.
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   let job: { id: string; user_id: string; mesh_url: string | null } | null = null;
   if (isUuid) {
@@ -3806,13 +3823,46 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
       job = data ?? null;
     }
   }
-  if (!job) return err(404, 'not found');
+  let reconstructedUuid: string | null = null;
+  if (!job) {
+    // Try "modal_<hex>" or bare-32-hex slug (R2 path stem for Modal meshes).
+    reconstructedUuid = _reconstructUuidFromSlug(id);
+    if (reconstructedUuid) {
+      const { data } = await sb.from('jobs').select('id, user_id, mesh_url')
+        .eq('id', reconstructedUuid).eq('user_id', user.id).maybeSingle();
+      job = data ?? null;
+    }
+  }
+  if (!job) {
+    if (reconstructedUuid) {
+      console.warn(`[meshes/delete] uuid ${reconstructedUuid} reconstructed from slug "${id}" but no row for user ${user.id}`);
+      return err(404, 'no such mesh under your account (this row may have been deleted by an admin)');
+    }
+    if (!isUuid && !id.match(/_trellis2_/i) && !_reconstructUuidFromSlug(id)) {
+      console.warn(`[meshes/delete] unrecognised slug "${id}" from user ${user.id}`);
+      return err(400, 'unrecognised mesh id format');
+    }
+    console.warn(`[meshes/delete] no row for id "${id}" / user ${user.id}`);
+    return err(404, 'not found');
+  }
   const realId = job.id;
 
-  // Best-effort R2 cleanup. We store under "<user_id>/<id>.glb" (see
-  // uploadGlbToR2). delete() never throws on a missing key.
+  // Best-effort R2 cleanup. The R2 key layout differs by pipeline:
+  //   - Replicate/Trellis: "<user_id>/<id>.glb" (uploadGlbToR2)
+  //   - Modal:             "mesh/modal_<hex>.glb" (persistModalGlb)
+  // Derive the actual key from job.mesh_url when possible; fall back to
+  // the legacy layout. delete() never throws on a missing key.
   if (env.MESHES) {
-    try { await env.MESHES.delete(`${user.id}/${realId}.glb`); } catch (_) { /* ignore */ }
+    let r2Key: string | null = null;
+    const pub = env.R2_PUBLIC_URL;
+    if (job.mesh_url && pub && job.mesh_url.startsWith(pub)) {
+      try {
+        const u = new URL(job.mesh_url);
+        r2Key = u.pathname.replace(/^\/+/, '');
+      } catch (_) { /* fall through */ }
+    }
+    if (!r2Key) r2Key = `${user.id}/${realId}.glb`;
+    try { await env.MESHES.delete(r2Key); } catch (_) { /* ignore */ }
   }
 
   const { error } = await sb.from('jobs').delete().eq('id', realId).eq('user_id', user.id);
