@@ -659,7 +659,7 @@
     // synchronous IIFE (~line 730) can reference them without hitting
     // the const TDZ. The unlock helpers + UI overlay are wired further
     // down once the rest of the admin script has loaded.
-    const SENSITIVE_TABS = new Set(['finance', 'bytype', 'pricing', 'users', 'services', 'audit']);
+    const SENSITIVE_TABS = new Set(['active', 'messages', 'finance', 'bytype', 'pricing', 'users', 'services', 'audit']);
     let _sensitiveUnlocked = false;
     let _sensitivePassword = '';
     let _sensitivePendingTab = null;
