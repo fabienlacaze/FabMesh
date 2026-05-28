@@ -10,6 +10,22 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Hotfix — /market/author crash on empty profile)
+
+- /market/author?id=<uuid> crashed with `Cannot read properties of undefined (reading length)` when the author had no listings or no sales. Defensive normalisation added (Array.isArray fallback to []). Worker also hardened to always emit empty arrays.
+
+---
+
+## 2026-05-29 (Market v4.6 — notifs system + inbox topbar + bug fixes)
+
+- Fix false-positive expired badge: isExpiredReplicateUrl uses strict hostname parse instead of substring. dataset cleared on src reassignment to a valid URL.
+- Fix marketplace badge missing on mesh version-thumb: each .version-thumb now carries data-job-id; _badgeAllCards walks data-job-id and matches against _publishedIndex.byJobId.
+- New notifications system: R2 _notifications/<user_id>/<id>.json. Hooks fired from handleAdminMarketApprove (approved), handleAdminMarketReject (rejected with reason), _processMarketPurchase (sale with credits earned).
+- New routes: GET /api/me/inbox aggregates notifications + support replies, returns unread_count. POST /api/me/inbox/read marks ids as read.
+- New topbar button: 📬 Inbox with red unread badge, polled every 30s. Click opens a centered modal listing all messages chronologically; visible unread are marked read on open.
+
+---
+
 ## 2026-05-29 (UI — hide internal stack names from user-facing strings)
 
 - User-facing strings (HTML labels, dropdowns, tooltips, toasts, error messages, About panel) no longer mention UniRig, TRELLIS / TRELLIS-2, IP-Adapter, RealVis, SDXL, MV-Adapter, ControlNet, MeshyMyself, Meshy.ai, Modal, Modal Labs, Replicate, Pollinations, CLIPSeg, u2net, TripoSR.

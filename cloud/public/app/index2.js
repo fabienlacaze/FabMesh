@@ -1556,6 +1556,10 @@ async function renderImageVersions(p) {
   images.forEach((img, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
+    // Stable id so marketplace badge walker (_badgeAllCards) can match by
+    // jobId — url matching alone fails when the thumb shows a cache-busted
+    // local path that doesn't appear in _publishedIndex.byUrl.
+    t.dataset.jobId = img.jobId || img.job_id || img.id || '';
     if (img.path === p.previewImagePath) t.classList.add('selected');
     if (img.path === p.selectedImagePath) t.classList.add('used-for-3d');
     // Cache-bust so Electron/Chromium re-reads ref_0.png after a new
@@ -6611,6 +6615,10 @@ async function renderMeshVersions(p) {
   meshes.forEach((m, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
+    // Stable id so marketplace badge walker (_badgeAllCards) can match by
+    // jobId — the thumb's <img> shows the source image PNG, not the GLB
+    // URL, so url-only matching against _publishedIndex.byUrl always fails.
+    t.dataset.jobId = m.jobId || m.job_id || m.id || '';
     if (m.path === p.previewMeshPath) t.classList.add('selected');
     if (m.path === p.selectedMeshPath) t.classList.add('used-for-3d'); // reuse same green check style
     // Resolve a thumbnail: prefer the mesh's own thumb (if main process generated one),

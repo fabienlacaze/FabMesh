@@ -1492,6 +1492,119 @@ async function handleMeReplies(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, replies: items });
 }
 
+/** GET /api/me/inbox — unified inbox: in-app notifications + admin
+ *  contact replies. Auth required. */
+async function handleMeInbox(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const items: Array<Record<string, unknown>> = [];
+
+  // 1) Notifications under _notifications/<user.id>/
+  let cursorN: string | undefined = undefined;
+  do {
+    const page = await env.MESHES.list({
+      prefix: `_notifications/${user.id}/`, limit: 1000, cursor: cursorN,
+    });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const text = await r2GetText(env, obj.key);
+        if (!text) continue;
+        const n = JSON.parse(text) as UserNotification;
+        const item: Record<string, unknown> = {
+          id: n.id,
+          source: 'notification',
+          kind: n.kind,
+          title: '',
+          message: n.message,
+          read: !!n.read,
+          created_at: n.created_at,
+        };
+        if (n.listing_id) item.listing_id = n.listing_id;
+        items.push(item);
+      } catch {}
+    }
+    cursorN = page.truncated ? page.cursor : undefined;
+  } while (cursorN);
+
+  // 2) Admin replies — reuse the iteration pattern of handleMeReplies.
+  let cursorR: string | undefined = undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_meta/contact/', limit: 1000, cursor: cursorR });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const text = await r2GetText(env, obj.key);
+        if (!text) continue;
+        const m = JSON.parse(text);
+        if (m && m.user_id === user.id && m.reply_body) {
+          items.push({
+            id: m.id,
+            source: 'reply',
+            title: m.subject || '',
+            message: m.reply_body,
+            read: !!m.replied_read,
+            created_at: m.replied_at || m.created_at,
+          });
+        }
+      } catch {}
+    }
+    cursorR = page.truncated ? page.cursor : undefined;
+  } while (cursorR);
+
+  items.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const unread_count = items.reduce((n, it) => n + (it.read ? 0 : 1), 0);
+  return json({ ok: true, items, unread_count });
+}
+
+/** POST /api/me/inbox/read  body { ids: string[] } — mark items as
+ *  read. Idempotent; missing ids are skipped silently. */
+async function handleMeInboxRead(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { ids?: unknown };
+  try { body = await req.json() as typeof body; } catch { body = {}; }
+  const ids = Array.isArray(body.ids)
+    ? body.ids.map(v => String(v)).filter(Boolean)
+    : [];
+  let updated = 0;
+  for (const rawId of ids) {
+    const id = _safeId(rawId);
+    if (!id) continue;
+    // Try notification first.
+    const nKey = `_notifications/${user.id}/${id}.json`;
+    const nTxt = await r2GetText(env, nKey);
+    if (nTxt) {
+      try {
+        const n = JSON.parse(nTxt) as UserNotification;
+        if (!n.read) {
+          n.read = true;
+          await env.MESHES.put(nKey, JSON.stringify(n),
+                               { httpMetadata: { contentType: 'application/json' } });
+          updated++;
+        }
+      } catch {}
+      continue;
+    }
+    // Fall back to admin contact reply.
+    const cKey = `_meta/contact/${id}.json`;
+    const cTxt = await r2GetText(env, cKey);
+    if (!cTxt) continue;
+    try {
+      const m = JSON.parse(cTxt);
+      if (m && m.user_id === user.id && !m.replied_read) {
+        m.replied_read = true;
+        await env.MESHES.put(cKey, JSON.stringify(m),
+                             { httpMetadata: { contentType: 'application/json' } });
+        updated++;
+      }
+    } catch {}
+  }
+  return json({ ok: true, updated });
+}
+
 /** POST /api/admin/contact-messages/<id>/reply  body { body: string }
  *  — store the admin's reply on the message JSON. The user reads it on
  *  /account. Keeps the admin's perso email private (no mailto). */
@@ -2106,8 +2219,23 @@ async function handleMarketAuthorPage(_req: Request, env: Env, authorId: string)
     };
   });
 
+  // Emit a flat shape matching the page contract (AuthorProfile).
+  // Always emit arrays — never null/undefined — so the client can map
+  // safely even when the author has no listings and no sales.
+  const earnings = Object.entries(salesByCurrency).map(([currency, total_cents]) => ({
+    currency,
+    total_cents,
+  }));
   return json({
     ok: true,
+    user_id: authorId,
+    display,
+    member_since: memberSince ?? new Date(0).toISOString(),
+    listings_count: approved.length,
+    total_sales: salesCount,
+    earnings,            // always [] when no sales
+    listings: listings,  // always [] when no approved listings
+    // Legacy nested shape kept for any older caller that may still read it.
     author: {
       user_id: authorId,
       display,
@@ -2116,7 +2244,6 @@ async function handleMarketAuthorPage(_req: Request, env: Env, authorId: string)
       sales_count: salesCount,
       sales_amount_by_currency: salesByCurrency,
     },
-    listings,
   });
 }
 
@@ -2169,10 +2296,15 @@ async function handleAdminMarketApprove(req: Request, env: Env, id: string): Pro
   try {
     const parsed = JSON.parse(txt);
     parsed.status = 'approved';
-    parsed.approved_at = new Date().toISOString();
+    parsed.approved_at = _isoNow();
     delete parsed.rejection_reason;
     await env.MESHES.put(key, JSON.stringify(parsed),
                          { httpMetadata: { contentType: 'application/json' } });
+    await _addUserNotification(env, parsed.user_id, {
+      kind: 'market_approved',
+      message: `Your listing "${parsed.title}" was approved and is now live on /market.`,
+      listing_id: id,
+    });
     return json({ ok: true, success: true });
   } catch (e) {
     return err(500, e instanceof Error ? e.message : String(e));
@@ -2196,6 +2328,12 @@ async function handleAdminMarketReject(req: Request, env: Env, id: string): Prom
     parsed.rejection_reason = reason || 'No reason provided';
     await env.MESHES.put(key, JSON.stringify(parsed),
                          { httpMetadata: { contentType: 'application/json' } });
+    const reasonSuffix = reason ? ` Reason: ${reason}` : '';
+    await _addUserNotification(env, parsed.user_id, {
+      kind: 'market_rejected',
+      message: `Your listing "${parsed.title}" was rejected.${reasonSuffix}`,
+      listing_id: id,
+    });
     return json({ ok: true, success: true });
   } catch (e) {
     return err(500, e instanceof Error ? e.message : String(e));
@@ -2292,6 +2430,59 @@ type SellerRecord = {
 function _isoNow(): string {
   const d = Reflect.construct(Date, []) as Date;
   return d.toISOString();
+}
+
+// =============================================================
+// USER NOTIFICATIONS (in-app inbox for marketplace events)
+// -------------------------------------------------------------
+// Stored at `_notifications/<userId>/<id>.json`. Read by the
+// /api/me/inbox aggregator (combined with admin contact replies).
+// Hooks: market_approved, market_rejected, market_sale, and
+// (future) market_unpublished. Best-effort — never throws into
+// the caller's path; if MESHES is unset we silently no-op.
+// =============================================================
+type UserNotificationKind =
+  | 'market_approved'
+  | 'market_rejected'
+  | 'market_sale'
+  | 'market_unpublished';
+
+type UserNotification = {
+  id: string;
+  kind: UserNotificationKind;
+  message: string;
+  listing_id?: string;
+  read: boolean;
+  created_at: string;
+};
+
+async function _addUserNotification(
+  env: Env,
+  userId: string,
+  partial: { kind: UserNotificationKind; message: string; listing_id?: string },
+): Promise<void> {
+  if (!env.MESHES || !userId) return;
+  try {
+    const ts = _isoNow();
+    const tail = ts.replace(/[^0-9]/g, '');
+    const rand = Math.random().toString(36).replace(/[^a-z0-9]/g, '').slice(0, 6).padEnd(6, '0');
+    const id = `${tail}.${rand}`;
+    const rec: UserNotification = {
+      id,
+      kind: partial.kind,
+      message: partial.message,
+      read: false,
+      created_at: ts,
+    };
+    if (partial.listing_id) rec.listing_id = partial.listing_id;
+    await env.MESHES.put(
+      `_notifications/${userId}/${id}.json`,
+      JSON.stringify(rec),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+  } catch (e) {
+    console.warn('[notify] add failed:', (e as Error).message);
+  }
 }
 
 async function _getSeller(env: Env, userId: string): Promise<SellerRecord | null> {
@@ -2656,9 +2847,22 @@ async function _processMarketPurchase(env: Env, sess: {
       const saleAny = sale as Record<string, unknown>;
       saleAny.payout_status = newBal == null ? 'failed' : 'paid_credits';
       saleAny.payout_credits = payoutCredits;
-      saleAny.payout_at = new Date().toISOString();
+      saleAny.payout_at = _isoNow();
       await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
                            { httpMetadata: { contentType: 'application/json' } });
+    }
+    // Notify the seller of the sale (covers both cash and credits branches).
+    if (listing.user_id) {
+      try {
+        const priceMajor = (listing.price_cents / 100).toFixed(2);
+        const currency = (listing.currency || 'USD').toUpperCase();
+        const formattedPrice = `${priceMajor} ${currency}`;
+        await _addUserNotification(env, listing.user_id, {
+          kind: 'market_sale',
+          message: `You sold "${listing.title}" for ${formattedPrice} (+${payoutCredits} credits earned).`,
+          listing_id: listing.id,
+        });
+      } catch {}
     }
     // Ownership index — one object per (buyer, listing). Quick HEAD
     // check in /api/market/owned and /api/market/download.
@@ -7362,6 +7566,8 @@ export default {
         if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
+        if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);
+        if (pathname === '/api/me/inbox/read'         && method === 'POST') return await handleMeInboxRead(req, env);
         if (pathname === '/api/me/published-assets'   && method === 'GET')  return await handleMePublishedAssets(req, env);
         if (pathname === '/api/me/earnings'           && method === 'GET')  return await handleMeEarnings(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
