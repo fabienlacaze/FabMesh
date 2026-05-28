@@ -10,6 +10,14 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Drop in open project + 🛒 Marketplace topbar button)
+
+- Dropping an image or mesh onto the workspace while a project is open now appends a new version to that project (image strip or mesh strip) instead of opening the New Project modal.
+- Dropping outside any project (or on the home page) still opens the New Project modal pre-filled as before.
+- New 🛒 Marketplace pill in the topbar (purple gradient, next to Inbox + Credits) jumps to /market in one click.
+
+---
+
 ## 2026-05-29 (Topbar — 🛒 Marketplace quick-jump button)
 
 - Added `installMarketplaceButton()` in `cloud/public/app/cloud-overrides.js` mirroring `installCreditsPill`. Inserts a purple pill `<a href="/market">🛒 Marketplace</a>` into `#topbar .topbar-right`, slotted to the LEFT of the inbox so the order reads: Marketplace · Inbox · Credits.
