@@ -2424,7 +2424,8 @@ function _normPath(p) { return (p || '').replace(/\\/g, '/'); }
 
 async function _checkMultiviewForCurrentImage() {
   const p = state.currentProject;
-  console.log('[mv-check] previewImagePath:', p?.previewImagePath, 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none', 'backphotos:', p?._backPhotos ? Object.keys(p._backPhotos) : 'none');
+  const _strip = (window.__stripFilePrefix || ((s) => s));
+  console.log('[mv-check] previewImagePath:', _strip(p?.previewImagePath), 'multiviews keys:', p?._multiviews ? Object.keys(p._multiviews) : 'none', 'backphotos:', p?._backPhotos ? Object.keys(p._backPhotos) : 'none');
   if (!p || !p.previewImagePath) { _hideMultiviewBar(); return; }
   const key = _normPath(p.previewImagePath);
   // 2-view mode: if a back photo was generated for this image, show the
