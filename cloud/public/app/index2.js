@@ -4137,17 +4137,115 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
   });
 });
 
-document.getElementById('ws-export-img-btn')?.addEventListener('click', async () => {
+// Image-side LICENCE bodies — mirror EXPORT_LICENCES (defined later
+// for the mesh modal). Repeated here so the image export can ship
+// the LICENSE.txt sidecar with the right text per licence.
+const EXPORT_LICENCES_IMAGE = {
+  personal:   'This image is licensed for personal, non-commercial use by the original purchaser only. Redistribution, resale, sublicensing, or use in commercial products is not permitted without explicit written permission.',
+  cc0:        'This image is released into the public domain under Creative Commons CC0 1.0 Universal. You may copy, modify, distribute, and use it freely, including for commercial purposes, without asking permission. See https://creativecommons.org/publicdomain/zero/1.0/',
+  'cc-by':    'This image is licensed under Creative Commons Attribution 4.0 International (CC-BY 4.0). You may share and adapt it for any purpose, including commercial, provided you give appropriate credit to the original author. See https://creativecommons.org/licenses/by/4.0/',
+  'cc-by-nc': 'This image is licensed under Creative Commons Attribution-NonCommercial 4.0 International (CC-BY-NC 4.0). You may share and adapt it for non-commercial purposes only, with attribution. Commercial use is not permitted. See https://creativecommons.org/licenses/by-nc/4.0/',
+  commercial: 'This image is licensed for royalty-free commercial use by the original purchaser. You may use it in unlimited commercial projects, but redistribution or resale of the image itself (standalone or as part of a marketplace pack) is not permitted.',
+};
+const LICENCE_LABELS_IMAGE = {
+  personal: 'Personal use only', cc0: 'Public domain (CC0)',
+  'cc-by': 'CC-BY 4.0', 'cc-by-nc': 'CC-BY-NC 4.0', commercial: 'Royalty-free commercial',
+};
+
+document.getElementById('ws-export-img-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
+  const modal = document.getElementById('modal-export-image');
+  const baseName = (p.name || 'image') + '_' + (target.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
+  document.getElementById('expimg-path').value = '';
+  document.getElementById('expimg-path').placeholder = `Downloads/${baseName}.<ext>`;
+  modal.classList.remove('hidden');
+});
+document.getElementById('expimg-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-export-image').classList.add('hidden');
+});
+// Quality slider only relevant for lossy formats (JPG/WebP).
+(function _wireExpimgFormat() {
+  const fmt = document.getElementById('expimg-format');
+  const qLabel = document.getElementById('expimg-quality-label');
+  const qInput = document.getElementById('expimg-quality');
+  const qVal   = document.getElementById('expimg-quality-val');
+  if (!fmt) return;
+  const sync = () => {
+    const lossy = fmt.value === 'jpg' || fmt.value === 'webp';
+    qLabel.style.display = lossy ? '' : 'none';
+    qInput.style.display = lossy ? '' : 'none';
+  };
+  fmt.addEventListener('change', sync);
+  qInput?.addEventListener('input', () => { qVal.textContent = qInput.value + '%'; });
+  sync();
+})();
+document.getElementById('expimg-browse')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) return;
+  const format = document.getElementById('expimg-format').value;
+  const defaultName = (p.name || 'image') + '_' + (target.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
+  if (!API.pickExportPath) return;
+  const picked = await API.pickExportPath({ defaultName, format });
+  const pickedPath = typeof picked === 'string'
+    ? picked
+    : (picked && typeof picked === 'object' && picked.path) ? picked.path : '';
+  if (pickedPath) document.getElementById('expimg-path').value = pickedPath;
+});
+document.getElementById('expimg-go')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) return;
+  const format = document.getElementById('expimg-format').value;
+  const quality = Math.max(0.5, Math.min(1.0, Number(document.getElementById('expimg-quality').value) / 100));
+  const licenceKey = document.getElementById('expimg-licence')?.value || 'personal';
+  const baseName = (p.name || 'image') + '_' + (target.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
+  document.getElementById('modal-export-image').classList.add('hidden');
+  const job = pushJob(`Export image (${format}): ${p.name}`, null, {
+    Licence: LICENCE_LABELS_IMAGE[licenceKey] || licenceKey,
+  });
   try {
-    const base = (p.name || 'image') + '_' + (target.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
-    const r = await API.exportImage({ srcPath: target, defaultName: base });
-    if (r?.ok) showToast('Image exported: ' + r.path, 'success');
-    else if (!r?.cancelled) showToast('Export failed: ' + (r?.error || 'unknown'), 'error');
+    // Format-transcode via canvas before downloading. PNG keeps
+    // alpha, JPG flattens onto white, WebP uses the same encoder
+    // as Chromium's canvas API.
+    const r = await fetch(target);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = URL.createObjectURL(blob);
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (format === 'jpg') { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(img.src);
+    const mime = format === 'png' ? 'image/png' : format === 'jpg' ? 'image/jpeg' : 'image/webp';
+    const outBlob = await new Promise((res) => canvas.toBlob(res, mime, quality));
+    if (!outBlob) throw new Error('canvas.toBlob returned null');
+    const fileName = baseName + '.' + format;
+    // Trigger download
+    const url = URL.createObjectURL(outBlob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    // Sibling LICENSE.txt
+    const licTxt = `${LICENCE_LABELS_IMAGE[licenceKey] || licenceKey}\n\n${EXPORT_LICENCES_IMAGE[licenceKey] || ''}\n\nExported ${new Date().toISOString()} via MyFabmesh.AI.`;
+    const licBlob = new Blob([licTxt], { type: 'text/plain' });
+    const licUrl = URL.createObjectURL(licBlob);
+    const la = document.createElement('a');
+    la.href = licUrl; la.download = baseName + '_LICENSE.txt';
+    document.body.appendChild(la); la.click(); la.remove();
+    setTimeout(() => URL.revokeObjectURL(licUrl), 1500);
+    completeJob(job.id, true);
+    showToast('✓ Image exported as ' + format.toUpperCase(), 'success');
   } catch (e) {
-    showToast('Export error: ' + e.message, 'error');
+    completeJob(job.id, false);
+    customError(e?.message || String(e), 'Export image failed');
   }
 });
 
@@ -11290,12 +11388,54 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
   }
 });
 
+// Maps each licence to whether it allows commercial sale. Surfaced
+// next to the licence dropdown as a green/red pill so the user knows
+// instantly what they're committing to.
+const SELLABLE_LICENCES = {
+  personal:   false,
+  cc0:        true,
+  'cc-by':    true,
+  'cc-by-nc': false,
+  commercial: true,
+};
+function _renderLicenceSellable(spanId, licence) {
+  const el = document.getElementById(spanId);
+  if (!el) return;
+  const sellable = SELLABLE_LICENCES[licence];
+  el.textContent = sellable ? '✓ Sellable' : '✗ Not sellable';
+  const colorMain = sellable ? 'var(--ok, #4caf50)' : 'var(--err, #f44336)';
+  const colorBg   = sellable ? 'rgba(76,175,80,0.15)' : 'rgba(244,67,54,0.15)';
+  const colorBd   = sellable ? 'rgba(76,175,80,0.4)'  : 'rgba(244,67,54,0.4)';
+  el.style.cssText = 'display:inline-flex; align-items:center; gap:4px; '
+    + 'padding:1px 8px; border-radius:999px; font-size:10px; font-weight:700; '
+    + 'color:' + colorMain + '; '
+    + 'background:' + colorBg + '; '
+    + 'border:1px solid ' + colorBd + ';';
+}
+function _wireLicenceSellable(selectId, spanId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const sync = () => _renderLicenceSellable(spanId, sel.value);
+  sel.addEventListener('change', sync);
+  sync();
+}
+// Wire all three licence dropdowns at boot.
+document.addEventListener('DOMContentLoaded', () => {
+  _wireLicenceSellable('exp-licence',    'exp-licence-sellable');
+  _wireLicenceSellable('expimg-licence', 'expimg-licence-sellable');
+  _wireLicenceSellable('pub-licence',    'pub-licence-sellable');
+});
+
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {
   const m = getCurrentMeshObj();
   if (!m) { showToast('Pick a mesh first.', 'error'); return; }
   const modal = document.getElementById('modal-export-mesh');
+  const baseName = m.filename.replace(/\.[^.]+$/, '');
+  // Output path defaults to the OS Downloads folder. On cloud the
+  // browser writes there by default for any <a download>; on
+  // desktop the IPC handler resolves "Downloads/" via app.getPath.
   document.getElementById('exp-path').value = '';
-  document.getElementById('exp-path').placeholder = '(default: meshes/' + m.filename.replace(/\.[^.]+$/, '') + '.<ext>)';
+  document.getElementById('exp-path').placeholder = `Downloads/${baseName}.<ext>`;
   modal.classList.remove('hidden');
 });
 document.getElementById('exp-cancel')?.addEventListener('click', () => {
@@ -11308,7 +11448,14 @@ document.getElementById('exp-browse')?.addEventListener('click', async () => {
   const defaultName = m.filename.replace(/\.[^.]+$/, '');
   if (!API.pickExportPath) return;
   const picked = await API.pickExportPath({ defaultName, format });
-  if (picked) document.getElementById('exp-path').value = picked;
+  // Desktop returns a plain string ("C:\Users\…"), cloud returns an
+  // object { ok, path, cloud }. Normalise to a string before
+  // writing into the input — without this the cloud path produced
+  // a literal "[object Object]" in the UI.
+  const pickedPath = typeof picked === 'string'
+    ? picked
+    : (picked && typeof picked === 'object' && picked.path) ? picked.path : '';
+  if (pickedPath) document.getElementById('exp-path').value = pickedPath;
 });
 // Licence options chosen by the user in the Export modal. Keys
 // match the <select id="exp-licence"> value attributes; bodies are
@@ -13348,7 +13495,27 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
     const email   = document.getElementById('contact-email').value.trim();
     const subject = document.getElementById('contact-subject').value.trim();
     const body    = document.getElementById('contact-body').value.trim();
-    if (!subject || !body) return;
+    // All four fields are required — surface the first empty one
+    // rather than silently no-op'ing (preventDefault disables the
+    // browser's native required validation, so we redo it manually).
+    const missing = !name ? 'name' : !email ? 'email' : !subject ? 'subject' : !body ? 'message' : null;
+    if (missing) {
+      feedback.style.background = 'rgba(239, 68, 68, 0.15)';
+      feedback.style.color = '#f87171';
+      feedback.textContent = `⚠ The ${missing} field is required.`;
+      feedback.style.display = 'block';
+      document.getElementById('contact-' + (missing === 'message' ? 'body' : missing))?.focus();
+      return;
+    }
+    // Cheap email sanity-check (server re-validates).
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      feedback.style.background = 'rgba(239, 68, 68, 0.15)';
+      feedback.style.color = '#f87171';
+      feedback.textContent = '⚠ Email looks invalid.';
+      feedback.style.display = 'block';
+      document.getElementById('contact-email')?.focus();
+      return;
+    }
     submitBtn.disabled = true;
     submitBtn.textContent = 'Sending…';
     feedback.style.display = 'none';

@@ -2302,6 +2302,11 @@
       list.innerHTML = visible.map((l) => {
         const price = l.price_cents === 0 ? 'Free' : `$${(l.price_cents / 100).toFixed(2)}`;
         const dt = new Date(l.created_at).toLocaleString('fr');
+        const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
+        const assetUrl = l.asset_url || l.mesh_url;
+        const preview = kind === 'image'
+          ? `<img src="${escapeHtml(assetUrl)}" alt="" style="width:100%; height:200px; object-fit:cover; background:#0a0a0e; border-radius:6px;" />`
+          : `<model-viewer src="${escapeHtml(assetUrl)}" camera-controls touch-action="pan-y" shadow-intensity="1" exposure="1" style="width:100%; height:200px; background:#0a0a0e; border-radius:6px;"></model-viewer>`;
         const actions = l.status === 'pending'
           ? `<button class="btn" style="background:var(--ok); color:#fff; border-color:var(--ok);" onclick="approveListing('${escapeHtml(l.id)}')">✓ Approve</button>
              <button class="btn" onclick="rejectListing('${escapeHtml(l.id)}')">✗ Reject</button>
@@ -2310,11 +2315,11 @@
         return `
           <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
-              <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(l.title)}</div>
+              <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${kind === 'image' ? '🖼 ' : '🧊 '}${escapeHtml(l.title)}</div>
               <div style="background:${l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)'}; color:${l.price_cents === 0 ? 'var(--ok)' : '#ffcc66'}; padding:2px 8px; border-radius:9px; font-size:11px; font-weight:700; white-space:nowrap;">${escapeHtml(price)}</div>
             </div>
             <div style="color:var(--text-2); font-size:11px;">${escapeHtml(l.author_display)} · ${escapeHtml(_MARKET_LIC_LABEL[l.licence] || l.licence)} · ${escapeHtml(dt)}</div>
-            <model-viewer src="${escapeHtml(l.mesh_url)}" camera-controls touch-action="pan-y" shadow-intensity="1" exposure="1" style="width:100%; height:200px; background:#0a0a0e; border-radius:6px;"></model-viewer>
+            ${preview}
             ${l.description ? `<div style="font-size:12px; color:var(--text-1); max-height:60px; overflow:hidden;">${escapeHtml(l.description)}</div>` : ''}
             ${l.rejection_reason ? `<div style="font-size:11px; color:var(--err); padding:6px; background:rgba(244,67,54,0.1); border-radius:4px;">Rejected: ${escapeHtml(l.rejection_reason)}</div>` : ''}
             <div style="display:flex; gap:6px; flex-wrap:wrap;">${actions}</div>

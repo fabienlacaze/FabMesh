@@ -255,7 +255,8 @@
                     <div class="step-tools-group">
                       <div class="step-tools-label">File</div>
                       <div class="step-tools-grid">
-                        <button id="ws-export-img-btn" class="ghost-btn tool-btn">&#128190; Export image</button>
+                        <button id="ws-export-img-btn" class="ghost-btn tool-btn">&#128190; Export</button>
+                        <button id="ws-image-publish-btn" class="ghost-btn tool-btn">&#128722; Publish to marketplace</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
@@ -1617,7 +1618,7 @@
           <option value="ply">PLY (point cloud)</option>
           <option value="fbx_unreal">FBX for Unreal Engine (cm + Y-up)</option>
         </select>
-        <label>Licence</label>
+        <label style="display:flex; align-items:center; gap:8px;">Licence <span id="exp-licence-sellable" class="licence-sellable-pill"></span></label>
         <select id="exp-licence">
           <option value="personal" selected>Personal use only</option>
           <option value="cc0">Public domain (CC0)</option>
@@ -1630,7 +1631,7 @@
         </div>
         <label>Output path</label>
         <div style="display:flex; gap:8px;">
-          <input type="text" id="exp-path" placeholder="(default: meshes/my_mesh.glb)" style="flex:1;" />
+          <input type="text" id="exp-path" placeholder="Downloads/my_mesh.glb" style="flex:1;" />
           <button id="exp-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
         </div>
         <div class="modal-actions">
@@ -1641,12 +1642,52 @@
     </div>
 
     <!-- ============================================================
-         PUBLISH TO MARKETPLACE MODAL
+         EXPORT IMAGE MODAL — mirrors modal-export-mesh but with
+         image-specific format choices.
          ============================================================ -->
-    <div id="modal-publish-mesh" class="modal-overlay hidden">
+    <div id="modal-export-image" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>Export image</h2>
+        <p class="modal-subtitle">Pick a format and where to save the file.</p>
+        <label>Format</label>
+        <select id="expimg-format">
+          <option value="png" selected>PNG (lossless, with alpha)</option>
+          <option value="jpg">JPG (smaller, no alpha)</option>
+          <option value="webp">WebP (modern, good compression)</option>
+        </select>
+        <label id="expimg-quality-label" style="display:none;">Quality <span id="expimg-quality-val" class="slider-val">90%</span></label>
+        <input type="range" id="expimg-quality" min="50" max="100" step="1" value="90" style="display:none;" />
+        <label style="display:flex; align-items:center; gap:8px;">Licence <span id="expimg-licence-sellable" class="licence-sellable-pill"></span></label>
+        <select id="expimg-licence">
+          <option value="personal" selected>Personal use only</option>
+          <option value="cc0">Public domain (CC0)</option>
+          <option value="cc-by">Attribution required (CC-BY 4.0)</option>
+          <option value="cc-by-nc">Non-commercial only (CC-BY-NC 4.0)</option>
+          <option value="commercial">Royalty-free commercial</option>
+        </select>
+        <div style="font-size:11px; color:var(--text-2); margin-top:-4px; line-height:1.4;" id="expimg-licence-hint">
+          Saved as a sibling LICENSE.txt next to your image.
+        </div>
+        <label>Output path</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="expimg-path" placeholder="Downloads/my_image.png" style="flex:1;" />
+          <button id="expimg-browse" class="ghost-btn" style="white-space:nowrap;">Browse...</button>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="expimg-cancel">Cancel</button>
+          <button class="primary-btn" id="expimg-go">Export</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         PUBLISH TO MARKETPLACE MODAL — used for both meshes and
+         images. data-asset-kind set by the opener.
+         ============================================================ -->
+    <div id="modal-publish-asset" class="modal-overlay hidden" data-asset-kind="mesh">
       <div class="modal-card modal-card-wide">
-        <h2>&#128722; Publish to marketplace</h2>
-        <p class="modal-subtitle">Share this mesh with the community. Free or with a price tag — your choice. An admin will review your listing before it goes live.</p>
+        <h2 id="pub-title-h2">&#128722; Publish to marketplace</h2>
+        <p class="modal-subtitle">Share this asset with the community. Free or with a price tag — your choice. An admin will review your listing before it goes live.</p>
         <label>Title</label>
         <input type="text" id="pub-title" maxlength="120" placeholder="Orc soldier — battle-ready"
                style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px;" />
@@ -1660,7 +1701,7 @@
                    style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px; width:100%; box-sizing:border-box;" />
           </div>
           <div>
-            <label>Licence</label>
+            <label style="display:flex; align-items:center; gap:8px;">Licence <span id="pub-licence-sellable" class="licence-sellable-pill"></span></label>
             <select id="pub-licence" style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px; width:100%;">
               <option value="personal">Personal use only</option>
               <option value="cc0">Public domain (CC0)</option>
@@ -1670,7 +1711,7 @@
             </select>
           </div>
         </div>
-        <div style="font-size:11px; color:var(--text-2); line-height:1.5;">
+        <div style="font-size:11px; color:var(--text-2); line-height:1.5;" id="pub-price-hint">
           ⚠ Free listings (price = 0) are immediately downloadable by anyone after approval. Paid listings show the price but the buy flow is coming soon (Stripe).
         </div>
         <div class="modal-actions">
