@@ -92,10 +92,18 @@ main { flex: 1; }
   transition: background 0.15s;
 }
 .nav-link:hover { background: var(--bg-3); color: var(--text-0); text-decoration: none; }
+/* ============================================================
+   .credit-badge — canonical yellow lightning chip used everywhere
+   a credit cost or balance is shown. .credits-pill is kept as a
+   legacy alias for the Buy page. Modifiers:
+     .lg        — bigger (topbar + account Balance card)
+     .icon-only — 20px round puck, no text
+   ============================================================ */
+.credit-badge,
 .credits-pill {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 2px 9px;
   border-radius: 999px;
   background: linear-gradient(135deg, #ffd84a, #f5a623);
   border: 1px solid rgba(255,255,255,0.3);
@@ -105,16 +113,27 @@ main { flex: 1; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  text-decoration: none;
 }
+.credits-pill { font-size: 12px; font-weight: 700; padding: 5px 12px; }
+.credit-badge.lg { padding: 6px 16px; font-size: 28px; font-weight: 800; gap: 8px; }
+.credit-badge.icon-only { padding: 0; width: 20px; height: 20px; justify-content: center; gap: 0; }
+.credit-badge::before,
 .credits-pill::before {
   content: "\26A1";
   font-size: 13px;
+  line-height: 1;
   color: #ffe066;
   text-shadow:
     -1px -1px 0 #1a1a1a, 1px -1px 0 #1a1a1a,
     -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
     0 1px 2px rgba(0,0,0,0.5);
 }
+.credit-badge.lg::before { font-size: 26px; }
+.credit-badge.icon-only::before { font-size: 12px; }
 
 /* ============================================================
    BUTTONS

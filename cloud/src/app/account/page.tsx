@@ -60,23 +60,8 @@ export default function AccountPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 24 }}>
         <div className="card">
           <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Balance</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '8px 0 4px' }}>
-            <span style={{
-              fontSize: 32, lineHeight: 1,
-              color: '#ffe066',
-              textShadow:
-                '-2px -2px 0 #1a1a1a, 2px -2px 0 #1a1a1a, ' +
-                '-2px 2px 0 #1a1a1a, 2px 2px 0 #1a1a1a, ' +
-                '0 2px 4px rgba(0,0,0,0.5)',
-              position: 'relative', top: 4,
-            }}>⚡</span>
-            <span style={{
-              fontSize: 42, fontWeight: 800, lineHeight: 1,
-              background: 'linear-gradient(135deg, #ffd84a, #f5a623)',
-              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-            }}>
-              {user.credits}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0 6px' }}>
+            <span className="credit-badge lg">{user.credits}</span>
           </div>
           <div style={{ color: 'var(--text-2)', fontSize: 12, marginBottom: 14 }}>credits</div>
           <Link href="/buy" className="primary-btn">+ Top up</Link>

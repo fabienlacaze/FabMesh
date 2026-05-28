@@ -387,57 +387,34 @@
     const style = document.createElement('style');
     style.id = 'cloud-cost-badge-style';
     style.textContent = `
-      /* The tool buttons use flex with their label in the middle. Force
-         space-between when we attach a badge so the chip is pinned to
-         the right edge (was floating right after the text). */
+      /* Force space-between on any tool button hosting a credit badge so
+         the chip pins to the right edge (was floating right after the
+         text). Matches all legacy class names used as aliases below. */
+      .tool-btn:has(> .credit-badge),
       .tool-btn:has(> .cloud-cost-badge) {
         justify-content: space-between !important;
       }
-      .cloud-cost-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 30px;
-        height: 24px;
-        padding: 0 9px 0 7px;
-        margin-left: auto;
-        background: linear-gradient(135deg, #ffd84a, #f5a623);
-        color: #1a1a1a;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 999px;
-        font-size: 14px;
-        font-weight: 800;
-        line-height: 1;
-        font-variant-numeric: tabular-nums;
-        vertical-align: middle;
-        box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.4);
-        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
-        flex-shrink: 0;
-      }
-      /* Same yellow bolt as the credits pill (emoji ⚡). Outlined in
-         dark + drop-shadow so it stays readable against the gold
-         badge background. */
-      .cloud-cost-badge::before {
-        content: '\\26A1';
-        display: inline-block;
-        margin-right: 3px;
-        font-size: 13px;
-        line-height: 1;
-        color: #ffe066;
-        text-shadow:
-          -1px -1px 0 #1a1a1a, 1px -1px 0 #1a1a1a,
-          -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
-          0 1px 2px rgba(0,0,0,0.5);
-      }
-      /* Cost pill embedded in primary "Generate" buttons. Reuses the
-         gold badge look so the price tag matches every other credits
-         display in the app. */
-      .generate-cost-pill {
+      /* ─────────────────────────────────────────────────────────────
+       * .credit-badge — single canonical class for every credit-cost
+       * chip in the app. Yellow pill, outlined black lightning ⚡
+       * generated via ::before so callers only write the number.
+       *
+       * Modifiers:
+       *   .lg         — bigger pill for the topbar credit balance
+       *   .icon-only  — round 20px puck (no text)
+       *
+       * Legacy aliases kept until every caller migrates:
+       *   .cloud-cost-badge     (tool-btn badges, auto-attached)
+       *   .generate-cost-pill   (Generate button price chip)
+       *   .credits-pill         (Buy page balance)
+       * ───────────────────────────────────────────────────────────── */
+      .credit-badge,
+      .cloud-cost-badge,
+      .generate-cost-pill,
+      .credits-pill {
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        margin-left: 8px;
         padding: 2px 9px;
         background: linear-gradient(135deg, #ffd84a, #f5a623);
         color: #1a1a1a;
@@ -451,9 +428,46 @@
         box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5),
                     inset 0 1px 0 rgba(255, 255, 255, 0.4);
         text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+        flex-shrink: 0;
+        text-decoration: none;
       }
-      .generate-cost-bolt {
+      /* Tool-btn variant: bigger 24px height + auto-left margin so it
+         pins to the right side of the button. */
+      .cloud-cost-badge {
+        min-width: 30px;
+        height: 24px;
+        padding: 0 9px 0 7px;
+        margin-left: auto;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .generate-cost-pill { margin-left: 8px; }
+      /* Topbar balance pill — larger so the balance is the first thing
+         the user sees. */
+      .credit-badge.lg {
+        padding: 5px 12px;
+        margin-right: 8px;
         font-size: 12px;
+        font-weight: 700;
+        gap: 6px;
+      }
+      /* Round icon-only puck (no text). */
+      .credit-badge.icon-only {
+        padding: 0;
+        width: 20px;
+        height: 20px;
+        justify-content: center;
+        gap: 0;
+      }
+      /* Outlined yellow lightning bolt. Lives on ::before of every
+         alias so callers never need to write the emoji manually. */
+      .credit-badge::before,
+      .cloud-cost-badge::before,
+      .generate-cost-pill::before,
+      .credits-pill::before {
+        content: '\\26A1';
+        display: inline-block;
+        font-size: 13px;
         line-height: 1;
         color: #ffe066;
         text-shadow:
@@ -461,6 +475,13 @@
           -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
           0 1px 2px rgba(0,0,0,0.5);
       }
+      .cloud-cost-badge::before { margin-right: 3px; }
+      .credit-badge.lg::before { font-size: 15px; }
+      .credit-badge.icon-only::before { font-size: 12px; }
+      /* Legacy .generate-cost-bolt — the inline ⚡ span used inside
+         .generate-cost-pill before we moved the bolt to ::before.
+         Hidden so existing HTML keeps rendering correctly. */
+      .generate-cost-bolt { display: none; }
     `;
     document.head.appendChild(style);
   }
@@ -670,18 +691,12 @@
     pill.id = 'cloud-credits-pill';
     pill.href = '/buy';
     pill.title = 'Click to buy more credits';
-    pill.textContent = '… credits';
-    pill.style.cssText = [
-      'display:inline-flex', 'align-items:center', 'gap:6px',
-      'padding:5px 12px', 'margin-right:8px',
-      'background:linear-gradient(135deg,#ffd84a,#f5a623)',
-      'color:#1a1a1a', 'border-radius:999px',
-      'border:1px solid rgba(255,255,255,0.3)',
-      'font-size:12px', 'font-weight:700',
-      'text-decoration:none', 'cursor:pointer',
-      'box-shadow:0 2px 6px rgba(245,166,35,0.5),inset 0 1px 0 rgba(255,255,255,0.4)',
-      'text-shadow:0 1px 0 rgba(255,255,255,0.3)',
-    ].join(';');
+    // Uses the unified .credit-badge class (lg modifier = bigger topbar
+    // pill). The bolt comes from ::before, the cursor + text-decoration
+    // are baked into the class — no inline styles needed anymore.
+    pill.className = 'credit-badge lg';
+    pill.style.cursor = 'pointer';
+    pill.textContent = '…';
     right.insertBefore(pill, right.firstChild);
     _creditsPillEl = pill;
 
@@ -691,12 +706,9 @@
     _creditsPollTimer = setInterval(refreshCreditsPill, 30_000);
   }
 
-  // Same outlined-yellow bolt as .cloud-cost-badge::before. Inline so
-  // it survives setting innerHTML on the pill.
-  const _BOLT_HTML = '<span style="font-size:13px;line-height:1;color:#ffe066;'
-    + 'text-shadow:-1px -1px 0 #1a1a1a,1px -1px 0 #1a1a1a,'
-    + '-1px 1px 0 #1a1a1a,1px 1px 0 #1a1a1a,0 1px 2px rgba(0,0,0,0.5);'
-    + 'margin-right:1px;">⚡</span>';
+  // Legacy bolt span kept as fallback for any caller that still uses
+  // it. New code should rely on the .credit-badge::before instead.
+  const _BOLT_HTML = '';
 
   let _adminForcedLogoutShown = false;
   function _showAdminForcedLogoutPopup() {
@@ -754,7 +766,8 @@
       const j = await r.json();
       const credits = j?.user?.credits;
       if (typeof credits === 'number') {
-        _creditsPillEl.innerHTML = `${_BOLT_HTML} ${credits} credit${credits === 1 ? '' : 's'}`;
+        // Bolt comes from .credit-badge::before, so we just set text.
+        _creditsPillEl.textContent = `${credits} credit${credits === 1 ? '' : 's'}`;
         _creditsPillEl.href = '/buy';
       } else {
         _creditsPillEl.textContent = 'Sign in';
