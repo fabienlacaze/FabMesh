@@ -1355,13 +1355,16 @@
         const name = m.key.split('/').pop();
         const kb = (m.size / 1024).toFixed(0);
         return `
-          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
+          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;" data-image-key="${escapeHtml(m.key)}">
             <img src="${escapeHtml(m.url)}" loading="lazy"
                  style="width:100%; height:200px; object-fit:contain; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;"
                  onerror="this.style.opacity=0.3; this.alt='Load failed';" />
             <div style="font-size:11px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(m.key)}">${escapeHtml(name)}</div>
             <div style="font-size:10px; color:var(--text-2);">${kb} KB · ${escapeHtml(fmtDate(m.uploaded))}</div>
-            <a class="btn" href="${escapeHtml(m.url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download</a>
+            <div style="display:flex; gap:6px;">
+              <a class="btn" href="${escapeHtml(m.url)}" target="_blank" rel="noopener" style="flex:1; text-align:center; font-size:12px;">⬇ Download</a>
+              <button class="btn btn-admin-delete-image" style="background:var(--err); border-color:var(--err); color:#fff; font-size:12px; padding:4px 10px;" title="Delete this image from R2">🗑</button>
+            </div>
           </div>`;
       }).join('');
       const more = remaining > 0
@@ -1376,6 +1379,28 @@
       if (moreBtn) moreBtn.addEventListener('click', () => {
         _adminImgPageSize += ADMIN_IMG_PAGE_SIZE;
         _renderAdminImageGrid();
+      });
+      // Delegated delete handler — each card carries data-image-key
+      // = the R2 object key (e.g. "<uid>/<projectslug>/front.png").
+      grid.querySelectorAll('.btn-admin-delete-image').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const card = btn.closest('[data-image-key]');
+          if (!card) return;
+          const key = card.getAttribute('data-image-key');
+          if (!key) return;
+          if (!confirm('Delete this image permanently from R2? Marketplace listings referencing this image will be deleted too.')) return;
+          try {
+            const r = await fetch('/api/admin/images?key=' + encodeURIComponent(key),
+                                  { method: 'DELETE', credentials: 'include' });
+            if (!r.ok) {
+              let body = '';
+              try { body = await r.text(); } catch {}
+              throw new Error('HTTP ' + r.status + (body ? ' — ' + body.slice(0, 200) : ''));
+            }
+            _adminAllImages = _adminAllImages.filter((x) => x.key !== key);
+            _renderAdminImageGrid();
+          } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
+        });
       });
     }
 
