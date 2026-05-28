@@ -6733,8 +6733,8 @@ const MESH_TOOL_SCHEMAS = {
     preview: (geom) => _jsCenter(geom),
   },
   retexture: {
-    title: 'Re-Texture (quick)',
-    subtitle: 'Reprojects the selected source photo onto the mesh UVs.',
+    title: 'Resolution',
+    subtitle: 'Re-bake the mesh texture at a different resolution by reprojecting the source photo onto the UVs.',
     needsImage: true,
     params: [
       { id: 'tex_res', label: 'Texture resolution', type: 'select', default: '2048',
