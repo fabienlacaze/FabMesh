@@ -881,9 +881,18 @@
       } catch (e) { log('readMeshFile failed:', e); return null; }
     },
     deleteMesh: async (filenameOrId) => {
-      // Resolve to a job id. The Worker keys R2 + DB by Replicate
-      // prediction id; we strip the extension if present.
-      const id = String(filenameOrId || '').replace(/\.[^.]+$/, '');
+      // Resolve to a job id. The Worker accepts uuid, "<safe>_trellis2_<tail>"
+      // slug, or "modal_<32hex>" R2 path stem — see _reconstructUuidFromSlug
+      // in worker.ts. We strip any URL prefix, leading path segments, and
+      // the file extension to give the worker the cleanest slug possible.
+      let id = String(filenameOrId || '');
+      // Drop "https://..." / "http://..." / "cloud://..." prefixes.
+      id = id.replace(/^[a-z]+:\/\/[^/]+/i, '');
+      // Drop everything before the last "/" (any leading path).
+      const slash = id.lastIndexOf('/');
+      if (slash >= 0) id = id.slice(slash + 1);
+      // Strip extension.
+      id = id.replace(/\.[^.]+$/, '');
       try { return await postJSON('/api/meshes/delete', { id }); }
       catch (e) { return { ok: false, error: String(e) }; }
     },
