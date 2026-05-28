@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Remove BG — persist result on R2 instead of Replicate URL)
+
+- Remove BG no longer returns a `replicate.delivery` URL (TTL ~1h, would trip the renderer's Expired-hostname guard on the strip thumbs within an hour). The bytes are now downloaded and re-uploaded to R2 immediately after the upstream Replicate call in `handleRemoveBackground` (cloud/src/worker.ts:4142), and the R2 public URL is returned to the renderer instead.
+- Storage key: `${user.id}/removebg/${Date.now()}_${rand}_nobg.png` — timestamp + random suffix guarantees two consecutive calls don't collide.
+- Mirrors the existing pattern used by `callMyfabmeshCog` (worker.ts:4808-4821) and the other generate handlers — guarded by `if (env.MESHES && env.R2_PUBLIC_URL)`, try/catch with `console.warn` fallback to the raw Replicate URL so local mock/dev still works (with the documented Expired caveat).
+- Response shape now also includes `path` alongside `url`/`newPath` for symmetry with other handlers; renderer (`meshyAPI-cloud.js`, `index2.js`) already reads `url`/`newPath` so no client change needed.
+
+---
+
 ## 2026-05-29 (Drop+Create — fix invisible dropped image)
 
 - Symptom: dropping a PNG/JPG on the home page → "Create" produced a project where the dropped image was invisible (empty version thumb in the strip, broken big preview). Image step still offered "create new".
