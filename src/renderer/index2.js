@@ -5024,6 +5024,42 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
 (() => {
   const cpCanvas = document.getElementById('cpick-canvas');
   if (!cpCanvas) return;
+  // Loupe: reuse #clone-loupe (Clone Stamp / Draw Mask share it).
+  // ~6× zoom with crosshair on the sampled pixel + pixel outline.
+  function _cpUpdateLoupe(e) {
+    const loupeEl = document.getElementById('clone-loupe');
+    const loupeCanvas = document.getElementById('clone-loupe-canvas');
+    if (!loupeEl || !loupeCanvas) return;
+    const lCtx = loupeCanvas.getContext('2d');
+    const rect = cpCanvas.getBoundingClientRect();
+    const sx = cpCanvas.width / rect.width;
+    const cx = Math.round((e.clientX - rect.left) * sx);
+    const cy = Math.round((e.clientY - rect.top) * sx);
+    const srcHalf = 20;
+    lCtx.clearRect(0, 0, 120, 120);
+    lCtx.save();
+    lCtx.imageSmoothingEnabled = false;
+    lCtx.beginPath(); lCtx.arc(60, 60, 58, 0, Math.PI * 2); lCtx.clip();
+    lCtx.drawImage(cpCanvas, cx - srcHalf, cy - srcHalf, srcHalf * 2, srcHalf * 2, 0, 0, 120, 120);
+    lCtx.strokeStyle = 'rgba(255,255,255,0.9)'; lCtx.lineWidth = 1;
+    lCtx.beginPath();
+    lCtx.moveTo(60, 50); lCtx.lineTo(60, 70);
+    lCtx.moveTo(50, 60); lCtx.lineTo(70, 60);
+    lCtx.stroke();
+    lCtx.strokeStyle = 'rgba(0,0,0,0.6)';
+    lCtx.strokeRect(57.5, 57.5, 5, 5);
+    lCtx.restore();
+    const container = document.getElementById('cpick-canvas-container');
+    const cRect = (container || cpCanvas.parentElement).getBoundingClientRect();
+    let lx = e.clientX + 20, ly = e.clientY - 140;
+    if (lx + 120 > cRect.right) lx = e.clientX - 140;
+    if (ly < cRect.top) ly = e.clientY + 20;
+    if (lx < cRect.left) lx = cRect.left + 4;
+    if (ly + 120 > cRect.bottom) ly = cRect.bottom - 124;
+    loupeEl.style.left = lx + 'px';
+    loupeEl.style.top  = ly + 'px';
+    loupeEl.style.display = 'block';
+  }
   function _cpSample(e) {
     const rect = cpCanvas.getBoundingClientRect();
     const sx = cpCanvas.width / rect.width;
@@ -5037,15 +5073,28 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
     document.getElementById('cpick-rgb').textContent = `rgb(${r}, ${g}, ${b})`;
     const cur = document.getElementById('cpick-cursor');
     if (cur) { cur.style.left = (e.clientX - rect.left) + 'px'; cur.style.top = (e.clientY - rect.top) + 'px'; cur.style.display = 'block'; }
+    _cpUpdateLoupe(e);
     return hex;
   }
   cpCanvas.addEventListener('mousemove', _cpSample);
+  cpCanvas.addEventListener('mouseleave', () => {
+    const cur = document.getElementById('cpick-cursor');
+    if (cur) cur.style.display = 'none';
+    const l = document.getElementById('clone-loupe');
+    if (l) l.style.display = 'none';
+  });
   cpCanvas.addEventListener('click', (e) => {
     const hex = _cpSample(e);
     navigator.clipboard.writeText(hex).catch(() => {});
     showToast(hex + ' copied!', 'success', 1500);
   });
 })();
+['cpick-close', 'cpick-close-x'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('click', () => {
+    const l = document.getElementById('clone-loupe');
+    if (l) l.style.display = 'none';
+  });
+});
 document.getElementById('cpick-copy')?.addEventListener('click', () => {
   const hex = document.getElementById('cpick-hex')?.textContent;
   if (hex) { navigator.clipboard.writeText(hex).catch(() => {}); showToast(hex + ' copied!', 'success', 1500); }
