@@ -12790,11 +12790,38 @@ async function refreshJobDetailsModal(id) {
   const hintEl = document.getElementById('jd-first-run-hint');
   if (hintEl) {
     const elapsed = Date.now() - j.startedAt;
-    const isEarly = j.status === 'running' && elapsed < 15000;
+    const isRunning = j.status === 'running';
     const isLocalGpu = /realvis|sf3d|stable fast|unirig|sdxl|inpaint/i.test(
       (j.params?.Engine || '') + ' ' + (j.name || '')
     );
-    hintEl.classList.toggle('hidden', !(isEarly && isLocalGpu));
+    // Cloud Modal cold-start detection: window.__modalWarm is set to
+    // false by cloud-overrides._pollModalStatus when the container
+    // isn't warm. While cold, we show a dedicated message instead of
+    // the local-GPU VRAM blurb. Visible for the whole cold start, not
+    // just the first 15s — the user needs to know why nothing's
+    // happening yet.
+    const isCloudCold = isRunning && (window.__modalWarm === false || /warming up/i.test(j.params?.Engine || ''));
+    const isLocalEarly = isRunning && isLocalGpu && elapsed < 15000;
+    const showHint = isCloudCold || isLocalEarly;
+    hintEl.classList.toggle('hidden', !showHint);
+    if (showHint) {
+      const dflt = document.getElementById('jd-hint-default');
+      const cold = document.getElementById('jd-hint-coldstart');
+      const etaEl = document.getElementById('jd-hint-coldstart-eta');
+      if (isCloudCold && cold && dflt) {
+        cold.style.display = '';
+        dflt.style.display = 'none';
+        if (etaEl) {
+          const secs = window.__modalExpectedSeconds || 150;
+          etaEl.textContent = secs >= 60
+            ? `${Math.round(secs / 60)} min`
+            : `${secs} s`;
+        }
+      } else if (cold && dflt) {
+        cold.style.display = 'none';
+        dflt.style.display = '';
+      }
+    }
   }
   // Cancel button: only enabled while running
   const cancelBtn = document.getElementById('job-details-cancel');

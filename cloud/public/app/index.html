@@ -1787,10 +1787,17 @@
         </div>
         <div id="jd-first-run-hint" class="jd-first-run-hint hidden">
           <span class="jd-hint-icon">&#9432;</span>
-          <span class="jd-hint-text">
-            First run after idle loads <strong>~7&nbsp;GB</strong> into VRAM (~30&ndash;60&nbsp;s).
-            Subsequent runs are much faster (a few seconds).
-            Models are unloaded after 5&nbsp;min of inactivity to free VRAM.
+          <span class="jd-hint-text" id="jd-hint-text">
+            <span id="jd-hint-default">
+              First run after idle loads <strong>~7&nbsp;GB</strong> into VRAM (~30&ndash;60&nbsp;s).
+              Subsequent runs are much faster (a few seconds).
+              Models are unloaded after 5&nbsp;min of inactivity to free VRAM.
+            </span>
+            <span id="jd-hint-coldstart" style="display:none;">
+              <strong>Warming up cloud AI ❄️</strong> — Modal Labs is loading the model into a GPU container.
+              Cold starts take ~<span id="jd-hint-coldstart-eta">2&nbsp;min</span>. Subsequent generations
+              within 5&nbsp;min run in ~30&nbsp;s. Hang tight.
+            </span>
           </span>
         </div>
         <div id="jd-error-box" class="jd-error-box hidden"></div>

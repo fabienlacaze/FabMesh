@@ -586,18 +586,11 @@
          Sensitive-tabs lock already password-gates this view. -->
     <!-- Tab: Marketplace — community listings (publish + moderation) -->
     <div class="tab-panel" data-panel="market">
-      <!-- Killswitch banner — loaded on tab open. Lets the admin halt
-           ALL marketplace writes (publish, checkout, rate, update,
-           unpublish) instantly in case of fraud / abuse / incident. -->
-      <div id="market-killswitch-banner" style="display:none; padding:12px 14px; border-radius:8px; margin-bottom:12px; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-        <div id="market-killswitch-status" style="font-size:13px; font-weight:600;"></div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <span id="market-killswitch-meta" style="font-size:11px; color:var(--text-2);"></span>
-          <button class="btn" id="market-killswitch-toggle" onclick="toggleMarketKillSwitch()">…</button>
-        </div>
-      </div>
+      <!-- Killswitch lives in the Services tab now (alongside Modal /
+           Stripe / Site toggles). This panel only handles listing
+           moderation. -->
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
-        <span style="color:var(--text-2); font-size:12px;">Community-published meshes. Approve to make them visible on <code>/market</code>. Stored on R2 under <code>_market/listings/</code>.</span>
+        <span style="color:var(--text-2); font-size:12px;">Community-published meshes. Approve to make them visible on <code>/market</code>. Stored on R2 under <code>_market/listings/</code>. <em>Killswitch in Services tab.</em></span>
         <button class="btn" onclick="loadMarketListings()">🔄 Refresh</button>
       </div>
       <div id="market-filters" style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
@@ -1817,9 +1810,23 @@
       const list = document.getElementById('services-list');
       list.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
       try {
-        const r = await fetch('/api/admin/services', { credentials: 'include' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        _servicesState = await r.json();
+        const [svcRes, ksRes] = await Promise.all([
+          fetch('/api/admin/services', { credentials: 'include' }),
+          fetch('/api/admin/market/killswitch', { credentials: 'include' }).catch(() => null),
+        ]);
+        if (!svcRes.ok) throw new Error('HTTP ' + svcRes.status);
+        _servicesState = await svcRes.json();
+        // Marketplace killswitch lives at its own endpoint (R2 record,
+        // not the shared services state). Splice its enabled flag into
+        // _servicesState so the rest of the render code treats it like
+        // the other three. NB: killswitch.enabled=true means KILLED, so
+        // we invert for the "_enabled" semantics this UI uses.
+        if (ksRes && ksRes.ok) {
+          const j = await ksRes.json();
+          _servicesState.market_enabled = !(j.killswitch?.enabled);
+        } else {
+          _servicesState.market_enabled = true;  // default open if endpoint missing
+        }
         _renderKillSwitchSummary(_servicesState);
       } catch (e) {
         list.innerHTML = `<div style="color:var(--err)">${escapeHtml(e?.message || e)}</div>`;
@@ -1832,6 +1839,8 @@
           desc: 'Blocks new credit purchases (/api/checkout). The Stripe webhook stays live so payments already in flight still credit the user.' },
         { id: 'site',  label: '⛔ MyFabmesh.AI site',
           desc: 'Full blackout — every /api/* and the static assets return a maintenance page. Only /admin stays accessible so you can flip it back.' },
+        { id: 'market', label: '🛒 Marketplace',
+          desc: 'Halts publish, checkout, rate, update, unpublish on /market. Browsing keeps working with a red "temporarily disabled" banner. Use this if you spot fraud, abuse, or a legal issue.' },
       ];
       list.innerHTML = services.map((s) => {
         const on = !!_servicesState[s.id + '_enabled'];
@@ -1902,6 +1911,27 @@
 
     async function toggleService(service, enabled) {
       try {
+        // Marketplace killswitch has its own dedicated endpoint and
+        // inverted semantics (enabled=true means KILLED). Route it
+        // separately so the rest of /api/admin/services stays untouched.
+        if (service === 'market') {
+          let reason = '';
+          if (!enabled) {
+            reason = window.prompt('Reason for disabling the marketplace?\n(visible to users on /market, max 400 chars)') || '';
+            if (reason === null || reason.trim() === '') {
+              loadServicesPanel();  // revert UI checkbox
+              return;
+            }
+          }
+          const r = await fetch('/api/admin/market/killswitch', {
+            method: 'POST', credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ enabled: !enabled, reason }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          loadServicesPanel();
+          return;
+        }
         const r = await fetch('/api/admin/services', {
           method: 'POST', credentials: 'include',
           headers: { 'content-type': 'application/json' },
@@ -2390,63 +2420,7 @@
       cc0: 'CC0', 'cc-by': 'CC-BY', 'cc-by-nc': 'CC-BY-NC',
       commercial: 'Commercial',
     };
-    // ── Killswitch helpers ────────────────────────────────────────────
-    async function loadMarketKillSwitch() {
-      const banner = document.getElementById('market-killswitch-banner');
-      if (!banner) return;
-      try {
-        const r = await fetch('/api/admin/market/killswitch', { credentials: 'include' });
-        if (!r.ok) { banner.style.display = 'none'; return; }
-        const j = await r.json();
-        const ks = j.killswitch || { enabled: false };
-        const status = document.getElementById('market-killswitch-status');
-        const meta   = document.getElementById('market-killswitch-meta');
-        const toggle = document.getElementById('market-killswitch-toggle');
-        banner.style.display = 'flex';
-        if (ks.enabled) {
-          banner.style.background = 'rgba(244,67,54,0.15)';
-          banner.style.border = '1px solid var(--err)';
-          status.innerHTML = '🔴 Marketplace is DISABLED' + (ks.reason ? ' — ' + escapeHtml(ks.reason) : '');
-          meta.textContent = ks.set_at ? ('by ' + (ks.set_by || '?') + ' · ' + new Date(ks.set_at).toLocaleString('fr')) : '';
-          toggle.textContent = '🟢 Re-open marketplace';
-          toggle.style.background = 'var(--ok)'; toggle.style.borderColor = 'var(--ok)'; toggle.style.color = '#fff';
-        } else {
-          banner.style.background = 'rgba(76,175,80,0.10)';
-          banner.style.border = '1px solid var(--ok)';
-          status.innerHTML = '🟢 Marketplace is LIVE';
-          meta.textContent = '';
-          toggle.textContent = '🔴 Kill marketplace';
-          toggle.style.background = 'var(--err)'; toggle.style.borderColor = 'var(--err)'; toggle.style.color = '#fff';
-        }
-        toggle.dataset.currentlyEnabled = ks.enabled ? '1' : '0';
-      } catch (e) {
-        banner.style.display = 'none';
-      }
-    }
-    async function toggleMarketKillSwitch() {
-      const toggle = document.getElementById('market-killswitch-toggle');
-      const currentlyKilled = toggle.dataset.currentlyEnabled === '1';
-      let reason = '';
-      if (!currentlyKilled) {
-        reason = window.prompt('Reason for disabling the marketplace?\n(visible to users, max 400 chars)') || '';
-        if (reason === null || reason.trim() === '') return;
-      } else {
-        if (!confirm('Re-open the marketplace?')) return;
-      }
-      try {
-        const r = await fetch('/api/admin/market/killswitch', {
-          method: 'POST', credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ enabled: !currentlyKilled, reason }),
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        await loadMarketKillSwitch();
-      } catch (e) { alert('Killswitch toggle failed: ' + (e?.message || e)); }
-    }
-
     async function loadMarketListings() {
-      // Refresh killswitch state every time the listings reload.
-      loadMarketKillSwitch();
       const list = document.getElementById('market-list');
       list.innerHTML = '<div style="color:var(--text-2); text-align:center; padding:24px; grid-column:1/-1;">Loading…</div>';
       try {
