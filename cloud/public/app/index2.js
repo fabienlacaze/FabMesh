@@ -6918,10 +6918,12 @@ function _mtSchedulePreview() {
 }
 
 // Remove every helper Object3D we added on a previous preview tick.
+// Helpers are parented to origModel (not scene) so they inherit the
+// centring + Y-lift we apply when framing the mesh.
 function _mtClearHelpers() {
-  if (!mtState.helpers || !mtState.scene) return;
+  if (!mtState.helpers) return;
   for (const h of mtState.helpers) {
-    mtState.scene.remove(h);
+    h.parent?.remove(h);
     if (h.geometry) h.geometry.dispose?.();
     if (h.material) {
       if (Array.isArray(h.material)) h.material.forEach((m) => m.dispose?.());
@@ -6957,8 +6959,12 @@ function _mtRunPreview() {
       }
       if (nextGeom) e.mesh.geometry = nextGeom;
       if (nextHelpers) {
+        // Parent helpers to origModel so they inherit the centring +
+        // Y-lift transform applied at load. Without this they sit at
+        // world origin and visibly offset from the mesh.
+        const parent = mtState.origModel || mtState.scene;
         for (const h of nextHelpers) {
-          mtState.scene.add(h);
+          parent.add(h);
           mtState.helpers.push(h);
         }
       }
