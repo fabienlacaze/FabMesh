@@ -8559,7 +8559,7 @@ const peState = {
   brushOpacity: 1.0,
   brushFalloff: 0.5,
   brushMode: 'paint',          // 'paint' | 'erase'
-  intensity: 3.0,
+  intensity: 1.0,              // 1.0 = canvas color is the emissive 1:1; >1 boosts brightness (HDR)
   isPainting: false,
 };
 
@@ -8741,10 +8741,11 @@ function _peStampAtPointer(clientX, clientY) {
   // Clamp UVs to [0,1] in case a stray hit lands on a UV with tiling.
   const uvX = Math.max(0, Math.min(1, hit.uv.x));
   const uvY = Math.max(0, Math.min(1, hit.uv.y));
-  // glTF v-flip convention — three.js gives V going up but canvas Y
-  // goes down. flipY=false on the texture so we flip manually here.
+  // glTF stores UVs with V=0 at the top of the texture image; we also
+  // set `flipY = false` so the CanvasTexture is uploaded "as-is". Net
+  // result: canvas Y matches uv.v 1:1, no extra flip needed.
   const px = uvX * PE_TEX_SIZE;
-  const py = (1 - uvY) * PE_TEX_SIZE;
+  const py = uvY * PE_TEX_SIZE;
   const r = Math.max(1, peState.brushSize * 0.5);
   const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
   // Falloff: 0 = hard edge, 1 = full gradient.
@@ -11665,20 +11666,35 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
   const versEl    = document.getElementById('about-version-num');
   const checkBtn  = document.getElementById('about-check-update');
   const statusEl  = document.getElementById('about-update-status');
-  const linkSite  = document.getElementById('about-link-site');
-  const linkGH    = document.getElementById('about-link-github');
-  const linkFAQ   = document.getElementById('about-link-faq');
+  const linkSite     = document.getElementById('about-link-site');
+  const linkPrivacy  = document.getElementById('about-link-privacy');
+  const linkTerms    = document.getElementById('about-link-terms');
+  const linkContact  = document.getElementById('about-link-contact');
   if (!btn || !modal) return;
 
-  // Wire the "Website" / "GitHub" / "FAQ" links to open externally
-  // (use the IPC because the allowed-host list lives there).
-  const open = (url) => {
+  // Site link opens externally (desktop uses an IPC because the
+  // allowed-host list lives there). Privacy/Terms are in-app routes.
+  const openExt = (url) => {
     if (window.wizardAPI?.openExternal) window.wizardAPI.openExternal(url);
     else window.open(url, '_blank');
   };
-  linkSite?.addEventListener('click', (e) => { e.preventDefault(); open('https://fabienlacaze.github.io/MyFabmesh/'); });
-  linkGH?.addEventListener('click',   (e) => { e.preventDefault(); open('https://github.com/fabienlacaze/MyFabmesh'); });
-  linkFAQ?.addEventListener('click',  (e) => { e.preventDefault(); open('https://fabienlacaze.github.io/MyFabmesh/#faq'); });
+  linkSite?.addEventListener('click', (e) => {
+    // On cloud we ARE on the site already; keep default behaviour (load /).
+    if (!window.wizardAPI?.openExternal) return;
+    e.preventDefault();
+    openExt('https://fabienlacaze.github.io/MyFabmesh/');
+  });
+  // Privacy / Terms — let the browser follow the in-app href.
+  // (No extra wiring; they're real anchors to /legal/* pages.)
+
+  // Contact link opens the contact modal.
+  linkContact?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const cm = document.getElementById('contact-modal');
+    if (!cm) return;
+    modal.classList.add('hidden');
+    cm.classList.remove('hidden');
+  });
 
   const show = async () => {
     modal.classList.remove('hidden');
@@ -11719,6 +11735,65 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
       statusEl.textContent = 'Update check failed: ' + e.message;
     } finally {
       checkBtn.disabled = false;
+    }
+  });
+})();
+
+// Contact modal — POSTs to /api/contact which stores the message in
+// R2 so the admin can read it under /admin > Messages.
+(() => {
+  const modal     = document.getElementById('contact-modal');
+  const closeBtn  = document.getElementById('contact-close');
+  const cancelBtn = document.getElementById('contact-cancel');
+  const backdrop  = document.getElementById('contact-backdrop');
+  const form      = document.getElementById('contact-form');
+  const submitBtn = document.getElementById('contact-submit');
+  const feedback  = document.getElementById('contact-feedback');
+  if (!modal || !form) return;
+  const hide = () => {
+    modal.classList.add('hidden');
+    feedback.style.display = 'none';
+    feedback.textContent = '';
+  };
+  closeBtn?.addEventListener('click', hide);
+  cancelBtn?.addEventListener('click', hide);
+  backdrop?.addEventListener('click', hide);
+  document.addEventListener('keydown', (e) => {
+    if (!modal.classList.contains('hidden') && e.key === 'Escape') hide();
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name    = document.getElementById('contact-name').value.trim();
+    const email   = document.getElementById('contact-email').value.trim();
+    const subject = document.getElementById('contact-subject').value.trim();
+    const body    = document.getElementById('contact-body').value.trim();
+    if (!subject || !body) return;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending…';
+    feedback.style.display = 'none';
+    try {
+      const r = await fetch('/api/contact', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, email, subject, message: body }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
+      feedback.style.background = 'rgba(34, 197, 94, 0.15)';
+      feedback.style.color = '#4ade80';
+      feedback.textContent = '✓ Message sent. Thanks — we read everything that lands in the inbox.';
+      feedback.style.display = 'block';
+      form.reset();
+      setTimeout(hide, 3000);
+    } catch (err) {
+      feedback.style.background = 'rgba(239, 68, 68, 0.15)';
+      feedback.style.color = '#f87171';
+      feedback.textContent = '⚠ Could not send: ' + (err?.message || err);
+      feedback.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send';
     }
   });
 })();

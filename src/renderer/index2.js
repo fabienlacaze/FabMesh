@@ -7341,7 +7341,7 @@ const peState = {
   brushOpacity: 1.0,
   brushFalloff: 0.5,
   brushMode: 'paint',
-  intensity: 3.0,
+  intensity: 1.0,
   isPainting: false,
 };
 
@@ -7506,8 +7506,10 @@ function _peStampAtPointer(clientX, clientY) {
   const ctx = entry.ctx;
   const uvX = Math.max(0, Math.min(1, hit.uv.x));
   const uvY = Math.max(0, Math.min(1, hit.uv.y));
+  // flipY=false on the texture → canvas Y matches uv.v 1:1 (glTF
+  // convention has V=0 at the top of the image).
   const px = uvX * PE_TEX_SIZE;
-  const py = (1 - uvY) * PE_TEX_SIZE;
+  const py = uvY * PE_TEX_SIZE;
   const r = Math.max(1, peState.brushSize * 0.5);
   const fall = Math.max(0, Math.min(1, peState.brushFalloff));
   const innerColor = peState.brushMode === 'erase'

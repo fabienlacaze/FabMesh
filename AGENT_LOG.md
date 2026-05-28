@@ -9612,3 +9612,39 @@ for loop walking. Logic from Step 7 onward unchanged.
 
 Desktop renderer is untouched — it uses the Python pipeline for
 fill_holes; only cloud has the JS detector.
+
+## 2026-05-28 — Contact form + admin Messages tab
+
+Wired the About → "Contact us" link to a real form:
+- New `contact-modal` HTML in index.html (name/email/subject/message).
+- POST /api/contact (no auth) handler in worker.ts. Stores under
+  `_meta/contact/<id>.json`. Anti-spam: max 5 messages/IP/day +
+  200 global/day, counters in R2 `_meta/contact_count/YYYY-MM-DD/`.
+- Attaches authenticated user_id + user_email if present.
+- GET /api/admin/contact-messages → list (newest first).
+- POST /api/admin/contact-messages/<id>/read → flip `read` flag.
+- DELETE /api/admin/contact-messages/<id> → remove.
+- New Activity tab "✉️ Messages" in admin.html with unread badge.
+  Auto-polls every 60s for new messages. Mail-to-reply link uses
+  the reply-to email or the signed-in user email.
+
+Also relabeled the About modal links: kept "Website" but added
+"Privacy" + "Terms" (real anchors to /legal/*) and replaced FAQ with
+the Contact link. GitHub link removed.
+
+## 2026-05-28 — Paint Emissive: UV flip + intensity defaults
+
+User: "l'emissive texture ne marche pas correctement" — paint was
+landing at the WRONG location on the mesh (offset by the V axis)
+and the building looked over-saturated.
+
+Two fixes (cloud + desktop):
+- **flipY mismatch**: I set `texture.flipY = false` (correct for
+  glTF v-down convention) AND was doing `py = (1 - uv.y) * size`
+  manually. That's a double-flip → painted spot mirrored vertically
+  from where the user clicked. Removed the manual flip; canvas Y
+  now matches uv.v 1:1.
+- **Intensity default 3.0 → 1.0**: at 3.0 the canvas RGB got
+  multiplied 3× → channels clipped to 1.0 → orange/blue paint
+  rendered as white. With 1.0 the canvas color shows up faithfully;
+  >1.0 still works as HDR boost for users who want hot glow.
