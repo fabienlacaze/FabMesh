@@ -1686,12 +1686,20 @@
          ============================================================ -->
     <div id="modal-publish-asset" class="modal-overlay hidden" data-asset-kind="mesh">
       <div class="modal-card modal-card-wide">
-        <h2 id="pub-title-h2">&#128722; Publish to marketplace</h2>
-        <p class="modal-subtitle">Share this asset with the community. Free or with a price tag — your choice. An admin will review your listing before it goes live.</p>
-        <!-- Thumbnail of the asset being published, pinned top-right.
-             Populated by openFor() in cloud-overrides.js: <img> for
-             images, model-viewer for meshes. -->
-        <div id="pub-thumb" style="position:absolute; top:18px; right:60px; width:96px; height:96px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#0a0a0e; display:none;"></div>
+        <!-- Header row: title + subtitle on the left, thumbnail on
+             the right. Flex layout so the thumbnail never overlaps
+             the text (previous absolute positioning ate the subtitle
+             on narrower modals). -->
+        <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:6px;">
+          <div style="flex:1; min-width:0;">
+            <h2 id="pub-title-h2" style="margin:0 0 4px;">&#128722; Publish to marketplace</h2>
+            <p class="modal-subtitle" style="margin:0;">Share this asset with the community. Free or with a price tag — your choice. An admin will review your listing before it goes live.</p>
+          </div>
+          <!-- Thumbnail of the asset being published — populated by
+               openFor() in cloud-overrides.js: <img> for images,
+               model-viewer for meshes. -->
+          <div id="pub-thumb" style="width:84px; height:84px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#0a0a0e; flex-shrink:0; display:none;"></div>
+        </div>
         <label>Title</label>
         <input type="text" id="pub-title" maxlength="120" placeholder="Orc soldier — battle-ready"
                style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px;" />

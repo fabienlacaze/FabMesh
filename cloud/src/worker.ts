@@ -1307,6 +1307,48 @@ async function handleAdminContactDelete(req: Request, env: Env, id: string): Pro
   return json({ ok: true, success: true });
 }
 
+/** GET /api/me/published-assets — list every marketplace listing the
+ *  current user owns. The renderer uses this to badge home grid cards
+ *  that are already on the marketplace (pending / approved / rejected),
+ *  so the user doesn't have to remember what they published. */
+async function handleMePublishedAssets(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return json({ items: [] });
+  const items: Array<{
+    listing_id: string;
+    kind: 'mesh' | 'image';
+    job_id: string | null;
+    asset_url: string;
+    status: string;
+    price_cents: number;
+  }> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_market/listings/', limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const parsed = JSON.parse(txt);
+        if (parsed?.user_id === user.id) {
+          items.push({
+            listing_id: parsed.id,
+            kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
+            job_id: parsed.job_id || null,
+            asset_url: parsed.asset_url || parsed.mesh_url || '',
+            status: parsed.status || 'pending',
+            price_cents: parsed.price_cents || 0,
+          });
+        }
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return json({ ok: true, items });
+}
+
 /** GET /api/me/replies — current user only. Returns every contact
  *  message they sent that has an admin reply attached, so they can
  *  read the response on /account without us emailing them. */
@@ -6151,6 +6193,7 @@ export default {
         if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
+        if (pathname === '/api/me/published-assets'   && method === 'GET')  return await handleMePublishedAssets(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);

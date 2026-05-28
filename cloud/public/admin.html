@@ -2329,12 +2329,21 @@
         const dt = new Date(l.created_at).toLocaleString('fr');
         const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
         const assetUrl = l.asset_url || l.mesh_url;
-        const preview = kind === 'image'
+        // For images the whole tile is clickable (no orbit to preserve);
+        // for meshes we keep the model-viewer interactive (orbit/zoom)
+        // and overlay a top-right "🔍 Inspect" button so the admin can
+        // still pop a fullscreen preview without breaking orbit.
+        const previewInner = kind === 'image'
           ? `<img src="${escapeHtml(assetUrl)}" alt="" style="width:100%; height:200px; object-fit:cover; background:#0a0a0e; border-radius:6px;" />`
           : `<model-viewer src="${escapeHtml(assetUrl)}" camera-controls touch-action="pan-y" shadow-intensity="1" exposure="1" style="width:100%; height:200px; background:#0a0a0e; border-radius:6px;"></model-viewer>`;
+        const preview = `
+          <div class="market-preview" style="position:relative;">
+            ${previewInner}
+            <button class="market-inspect-btn" data-asset-url="${escapeHtml(assetUrl)}" data-asset-kind="${kind}" title="Inspect fullscreen" style="position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.65); color:#fff; border:1px solid rgba(255,255,255,0.4); border-radius:6px; padding:4px 8px; font-size:13px; cursor:pointer;">🔍</button>
+          </div>`;
         const actions = l.status === 'pending'
           ? `<button class="btn" style="background:var(--ok); color:#fff; border-color:var(--ok);" onclick="approveListing('${escapeHtml(l.id)}')">✓ Approve</button>
-             <button class="btn" onclick="rejectListing('${escapeHtml(l.id)}')">✗ Reject</button>
+             <button class="btn" style="background:var(--warn); color:#000; border-color:var(--warn);" onclick="rejectListing('${escapeHtml(l.id)}')">✗ Reject</button>
              <button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`
           : `<button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`;
         return `
@@ -2352,6 +2361,32 @@
         `;
       }).join('');
     }
+    // Fullscreen lightbox for admin Marketplace cards. Image: <img>
+    // covering 90vh; mesh: <model-viewer> orbital. Click outside or X
+    // to close.
+    function openMarketLightbox(url, kind) {
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.92); display:flex; align-items:center; justify-content:center; z-index:9999; padding:40px;';
+      const close = () => ov.remove();
+      ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+      const content = kind === 'image'
+        ? `<img src="${escapeHtml(url)}" alt="" style="max-width:90vw; max-height:90vh; object-fit:contain; box-shadow:0 0 60px rgba(0,0,0,0.6); border-radius:8px;" />`
+        : `<model-viewer src="${escapeHtml(url)}" camera-controls auto-rotate touch-action="pan-y" shadow-intensity="1" exposure="1" style="width:90vw; height:90vh; background:#0a0a0e; border-radius:10px;"></model-viewer>`;
+      ov.innerHTML = content
+        + `<button id="market-lb-close" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.85); color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:50%; width:42px; height:42px; font-size:18px; cursor:pointer; z-index:1;" title="Close">✕</button>`;
+      document.body.appendChild(ov);
+      document.getElementById('market-lb-close')?.addEventListener('click', close);
+      const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+      document.addEventListener('keydown', onKey);
+    }
+    // Delegated click on the admin market grid — listens once.
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest?.('.market-inspect-btn');
+      if (!btn) return;
+      const url = btn.getAttribute('data-asset-url');
+      const kind = btn.getAttribute('data-asset-kind');
+      if (url) openMarketLightbox(url, kind || 'mesh');
+    });
     async function approveListing(id) {
       try {
         const r = await fetch('/api/admin/market/' + encodeURIComponent(id) + '/approve',
