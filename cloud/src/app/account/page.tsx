@@ -126,10 +126,17 @@ export default function AccountPage() {
 
       {/* Replies from support — the admin's response to any contact-form
           message you sent. Stored on the platform, never delivered to
-          email, so the admin's perso address stays private. */}
-      {replies.length > 0 && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <h3 style={{ marginTop: 0, marginBottom: 12 }}>Replies from support</h3>
+          email, so the admin's perso address stays private. Always
+          rendered so the user can see the section exists even before
+          any reply lands. */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h3 style={{ marginTop: 0, marginBottom: 12 }}>Replies from support</h3>
+        {replies.length === 0 ? (
+          <p style={{ color: 'var(--text-2)', fontSize: 13, margin: 0 }}>
+            No replies yet. When the support team responds to a message you sent via the in-app
+            <strong> About → Contact us</strong> form, their reply will appear here.
+          </p>
+        ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {replies.map((r) => (
               <div key={r.id} style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
@@ -148,8 +155,8 @@ export default function AccountPage() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* MFA TOTP enrolment — protects the Supabase login itself
           (separate layer from the /admin TOTP for the admin panel). */}

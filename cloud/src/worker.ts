@@ -5799,6 +5799,41 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
   return json({ meshes: data || [] });
 }
 
+/** DELETE /api/admin/images?key=<r2key> — ADMIN ONLY. Removes the
+ *  R2 object directly. Cascades into _market/listings/ to drop any
+ *  listing referencing this image's URL. Used by the admin Images
+ *  modal to moderate user-uploaded / generated images. */
+async function handleAdminDeleteImage(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const url = new URL(req.url);
+  const key = url.searchParams.get('key');
+  if (!key) return err(400, 'key required');
+  // Reject keys outside the user-content namespace — these shouldn't
+  // be deletable through the image endpoint (use the contact/market
+  // endpoints instead).
+  if (key.startsWith('_meta/') || key.startsWith('_market/')) {
+    return err(400, 'protected key — use the proper endpoint');
+  }
+  try { await env.MESHES.delete(key); } catch {}
+  // Cascade: any market listing whose asset_url ends with this key
+  // becomes invalid — delete the listing JSON.
+  try {
+    const page = await env.MESHES.list({ prefix: '_market/listings/', limit: 1000 });
+    for (const obj of page.objects) {
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const parsed = JSON.parse(txt);
+        const url = String(parsed?.asset_url || parsed?.mesh_url || '');
+        if (url && url.endsWith('/' + key)) await env.MESHES.delete(obj.key);
+      } catch {}
+    }
+  } catch {}
+  return json({ ok: true, success: true });
+}
+
 /** DELETE /api/admin/users/<userId>/meshes/<jobId> — ADMIN ONLY.
  *  Removes the R2 GLB + the Supabase jobs row. Also unpublishes any
  *  marketplace listing tied to that mesh. */
@@ -6174,6 +6209,11 @@ export default {
         // /api/jobs/[id] — dynamic
         const jobMatch = pathname.match(/^\/api\/jobs\/([^/]+)\/?$/);
         if (jobMatch && method === 'GET') return await handleJob(req, env, decodeURIComponent(jobMatch[1]));
+
+        // /api/admin/images — delete a single image by R2 key
+        if (pathname === '/api/admin/images' && method === 'DELETE') {
+          return await handleAdminDeleteImage(req, env);
+        }
 
         // /api/admin/users/<userId>/meshes — dynamic
         const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
