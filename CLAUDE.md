@@ -42,6 +42,19 @@ git checkout -b backup-<short-desc>-$(date +%Y%m%d-%H%M%S)
 git checkout master
 ```
 
+## Deploy cloud — TOUJOURS rebuild avant wrangler deploy
+Le worker Cloudflare est servi depuis `cloud/wrangler.toml > [assets]
+directory = "out"`. Modifier `cloud/public/app/*.js` ne SUFFIT PAS —
+il faut `cd cloud && npm run build` pour que les changements soient
+copiés dans `out/`, ENSUITE `npx wrangler deploy`.
+
+Sinon `wrangler deploy` upload bien le worker (src/worker.ts) mais
+l'ancien `out/` est re-publié et les changements UI ne sortent pas.
+Symptôme: `curl https://…/app/index2.js | wc -c` montre une taille
+< que le fichier source.
+
+Pattern: `cd cloud && npm run build && npx wrangler deploy`.
+
 ## Commits sûrs / risqués
 - **Sûr (commit auto OK)**: fix bug ciblé, ajout d'un slider/bouton,
   ajustement de paramètres (ip_scale, prompt, etc.), update doc.
