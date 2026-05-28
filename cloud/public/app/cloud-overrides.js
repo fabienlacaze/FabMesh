@@ -1361,7 +1361,14 @@
       .published-badge.rejected { background:#f44336; color:#fff; }
       /* Cards are usually static-positioned; we need relative so the
          badge can absolute-position against the card. */
-      .all-image-card, .all-mesh-card { position: relative; }
+      .all-image-card, .all-mesh-card, .version-thumb { position: relative; }
+      /* Version-strip thumbs are ~70-90px wide — shrink the badge so it
+         doesn't dwarf the thumbnail. */
+      #ws-image-versions .published-badge,
+      #ws-mesh-versions  .published-badge {
+        width: 18px; height: 18px; font-size: 11px;
+        bottom: 4px; left: 4px;
+      }
     `;
     document.head.appendChild(s);
   }
@@ -1389,16 +1396,30 @@
     const containers = [
       document.getElementById('all-images-grid'),
       document.getElementById('all-meshes-grid'),
+      document.getElementById('ws-image-versions'),
+      document.getElementById('ws-mesh-versions'),
     ].filter(Boolean);
     containers.forEach((root) => {
       root.querySelectorAll('img[src], model-viewer[src]').forEach((media) => {
-        const src = media.getAttribute('src');
-        if (!src) return;
-        const meta = _publishedIndex.byUrl.get(src);
+        const rawSrc = media.getAttribute('src') || '';
+        if (!rawSrc) return;
+        // Version-strip thumbs use `file:///<path>?t=<mtime>` (cache-busted,
+        // slashes normalized). Strip the file:/// prefix and ?t=... query so
+        // the lookup matches the canonical asset URL the index was keyed by.
+        const candidates = new Set([rawSrc]);
+        let s = rawSrc.replace(/\?t=\d+$/, '');
+        candidates.add(s);
+        if (s.startsWith('file:///')) candidates.add(s.slice('file:///'.length));
+        let meta = null;
+        for (const k of candidates) {
+          meta = _publishedIndex.byUrl.get(k);
+          if (meta) break;
+        }
         if (!meta) return;
-        // Find the closest card-like ancestor. The renderer uses
-        // .all-image-card / .all-mesh-card.
-        const card = media.closest('.all-image-card, .all-mesh-card')
+        // Find the closest card-like ancestor. Home grids use
+        // .all-image-card / .all-mesh-card; the workspace version
+        // strips use .version-thumb.
+        const card = media.closest('.all-image-card, .all-mesh-card, .version-thumb')
                    || media.parentElement;
         if (card) _badgeCard(card, meta);
       });
@@ -1456,6 +1477,8 @@
     const targets = [
       document.getElementById('all-images-grid'),
       document.getElementById('all-meshes-grid'),
+      document.getElementById('ws-image-versions'),
+      document.getElementById('ws-mesh-versions'),
     ].filter(Boolean);
     if (!targets.length) return;
     const obs = new MutationObserver(() => _badgeAllCards());
