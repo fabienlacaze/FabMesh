@@ -302,6 +302,9 @@
 
     cloneModal.classList.remove('hidden');
     _cloneMgr.activate();
+    // Wire the recenter button (idempotent — re-assigning onclick is fine).
+    var rcBtn = document.getElementById('clone-recenter');
+    if (rcBtn) rcBtn.onclick = function () { if (_cloneMgr && _cloneMgr.recenter) _cloneMgr.recenter(); };
     // Reset clone-specific state
     cloneState.sourcePoint = null;
     cloneState.offset = null;
@@ -603,6 +606,8 @@
 
     maskModal.classList.remove('hidden');
     _maskMgr.activate();
+    var mrcBtn = document.getElementById('mask-recenter');
+    if (mrcBtn) mrcBtn.onclick = function () { if (_maskMgr && _maskMgr.recenter) _maskMgr.recenter(); };
     // Wait one frame so the container has its layout dimensions before loading
     requestAnimationFrame(function () {
       // Same cloud-vs-desktop URL handling as the clone tool —

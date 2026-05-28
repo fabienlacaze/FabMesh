@@ -1663,7 +1663,7 @@
          DRAW MASK MODAL (ported from legacy)
          ============================================================ -->
     <div id="mask-modal" class="modal hidden">
-      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+      <div class="modal-content" style="width:95vw; height:95vh; max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <h3 style="margin:0;">Draw Mask (paint to remove)</h3>
           <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
@@ -1685,6 +1685,7 @@
             <button id="mask-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
             <button id="mask-brush-mode" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Paint mode (B)">&#128396;&#65039;</button>
             <button id="mask-eraser-mode" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Eraser mode (E) — radius follows brush size">&#129529;</button>
+            <button id="mask-recenter" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Recenter image (fit to view)">&#9678;</button>
             <button id="mask-undo" class="secondary-btn tool-btn" disabled title="Undo (Z)">&#8630;</button>
             <button id="mask-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
             <button id="mask-clear" class="secondary-btn tool-btn" title="Clear whole mask">&#8634;</button>
@@ -1712,7 +1713,7 @@
          CLONE STAMP MODAL (ported from legacy)
          ============================================================ -->
     <div id="clone-modal" class="modal hidden">
-      <div class="modal-content" style="max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
+      <div class="modal-content" style="width:95vw; height:95vh; max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <h3 style="margin:0;">Clone Stamp</h3>
           <button id="clone-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
@@ -1736,6 +1737,7 @@
           <div style="display:flex; gap:4px; flex-shrink:0;">
             <button id="clone-flip-toggle" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px;" title="Flip mode">Flip: Off</button>
             <button id="clone-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+            <button id="clone-recenter" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Recenter image (fit to view)">&#9678;</button>
             <button id="clone-undo" class="secondary-btn tool-btn" disabled title="Undo (Z)">&#8630;</button>
             <button id="clone-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
             <button id="clone-reset" class="secondary-btn tool-btn" title="Clear all paint">&#129529; Clear</button>
@@ -1997,12 +1999,13 @@
 
   <!-- Paint Tools modal -->
   <div id="modal-paint" class="modal hidden">
-    <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
+    <div class="modal-content" style="width:95vw; height:95vh; max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
         <h3 style="margin:0; white-space:nowrap;">Paint Tools</h3>
         <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
           <button id="paint-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
           <button id="paint-emissive-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Paint on a separate emissive layer (stored as T_emissive on the generated mesh)">&#128161; Emissive</button>
+          <button id="paint-recenter" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Recenter image (fit to view)">&#9678;</button>
           <button id="paint-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
           <button id="paint-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
           <button id="paint-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>

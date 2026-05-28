@@ -63,6 +63,15 @@ class CanvasManager {
     if (this.loupeBtn) this.loupeBtn.classList.add('tool-active');
   }
 
+  /** Reset zoom to 1 + pan to 0 and re-fit the canvas inside the container.
+   *  Used by the toolbar "recenter / fit to view" button + on first load. */
+  recenter() {
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this._applyTransform();
+  }
+
   loadImage(src) {
     // For http(s) sources we fetch first and turn the response into a
     // blob: URL. Two reasons:

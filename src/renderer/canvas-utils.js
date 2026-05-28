@@ -63,8 +63,24 @@ class CanvasManager {
     if (this.loupeBtn) this.loupeBtn.classList.add('tool-active');
   }
 
+  /** Reset zoom to 1 + pan to 0 and re-fit the canvas inside the container.
+   *  Used by the toolbar "recenter / fit to view" button + on first load. */
+  recenter() {
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this._applyTransform();
+  }
+
   loadImage(src) {
-    return new Promise((resolve, reject) => {
+    // For http(s) sources we fetch first and turn the response into a
+    // blob: URL. Two reasons:
+    //   1. Without it the <img> would either taint the canvas (no
+    //      crossOrigin attr → getImageData throws), or silently fail
+    //      to load if the R2 CORS doesn't allow the bare Origin.
+    //   2. We get a real Promise rejection on network failure instead
+    //      of a forever-pending Promise (no onerror in the old code).
+    const setupImg = (finalSrc) => new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         this.w = img.width;
@@ -82,9 +98,25 @@ class CanvasManager {
         this._updateBtns();
         resolve();
       };
-      img.onerror = () => reject(new Error('image decode failed: ' + src));
-      img.src = src;
+      img.onerror = () => reject(new Error('image decode failed: ' + finalSrc));
+      img.src = finalSrc;
     });
+    if (/^https?:/i.test(src)) {
+      // Same-origin proxy on the Worker so CORS doesn't bite and
+      // canvas getImageData() works on any whitelisted upstream
+      // (R2 public, Replicate, Pollinations).
+      const proxied = '/api/proxy-image?url=' + encodeURIComponent(src);
+      return fetch(proxied, { credentials: 'omit' })
+        .then(r => {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.blob();
+        })
+        .then(blob => setupImg(URL.createObjectURL(blob)))
+        .catch(e => {
+          throw new Error('image fetch failed: ' + (e?.message || e));
+        });
+    }
+    return setupImg(src);
   }
 
   _applyTransform() {

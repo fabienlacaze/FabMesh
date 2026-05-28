@@ -9672,3 +9672,13 @@ full PBR set + new emissive PNG pushed the Trellis2 output past
 the worker's 100MB cap. Bumped /api/mesh-op/client-result to
 250MB (335M base64 chars). Removed the ⚡ glyph from the Paint
 Emissive apply button.
+
+## 2026-05-28 — Edit modals: full-screen + Recenter button
+
+User complained the Paint Tools / Draw Mask / Clone Stamp popups
+were too small (image microscopic after wheel-zoom-out) and asked
+for a recenter button. Forced width:95vw + height:95vh on all 3
+modal-content divs (cloud + desktop). Added CanvasManager.recenter()
+(zoom=1 + pan=0 + re-apply transform) and a ⊚ button on each modal
+toolbar that calls it. canvas-utils.js + index2-edit-tools.js synced
+cloud→desktop so the helper is identical on both.
