@@ -10,6 +10,16 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace v2.2 — publish points at the wrong image version)
+
+- Bug: clicking a version thumb in the image strip changed the visible image but the Publish modal kept submitting the same URL — 409 "already listed".
+- Root cause: state.currentProject.selectedImagePath is the "Use for 3D" choice, NOT the currently-displayed image. The version-thumb click handler at index2.js:1581 only mutates previewImagePath. The viewer (#step1-preview) reads previewImagePath; the publish flow was reading selectedImagePath.
+- Fix: cloud-overrides.js openFor("image") now reads `p.previewImagePath || p.selectedImagePath` with #step1-preview img.src as a final fallback. Matches the precedence used by editTarget() and the export-image flow elsewhere in index2.js.
+- Added console.log of which path field was picked for future debugging.
+- No backend change (PNGs already have unique R2 keys, the 409 was triggered correctly on a stale-but-real URL).
+
+---
+
 ## 2026-05-28 (Marketplace v2.1 — bugfixes + seller credit payout)
 
 - **Bug**: mesh "Publish to marketplace" button was silent. Root cause:
