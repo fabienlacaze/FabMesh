@@ -591,7 +591,7 @@
     },
 
     /* hardware checks — cloud always "OK" */
-    checkGPU: async () => ({ ok: true, name: 'Cloud GPU (Replicate)', vram: 48, cloud: true }),
+    checkGPU: async () => ({ ok: true, name: 'Cloud GPU', vram: 48, cloud: true }),
     checkRAM: async () => ({ ok: true, total: 'cloud', free: 'cloud', cloud: true }),
     countPython: async () => ({ count: 0, cloud: true }),
     setRamLimit: async () => ({ ok: true, cloud: true }),
@@ -1433,11 +1433,11 @@
       // that explicit redirect here so the button isn't a stub.
       if (operation === 'trellis2_retex') {
         return { success: false, ok: false,
-          error: 'Re-Texture (TRELLIS-2) on cloud uses the standard "Generate 3D" path — please use the Image step\'s Modify/Style tool to change the source, then click Generate 3D to re-bake.' };
+          error: 'Re-Texture (MyFabmesh.AI 3D Native) on cloud uses the standard "Generate 3D" path — please use the Image step\'s Modify/Style tool to change the source, then click Generate 3D to re-bake.' };
       }
       if (!CLOUD_OPS.has(realOp)) {
         return { success: false, ok: false,
-          error: `mesh op '${operation}' is Desktop-only on cloud (Blender / UniRig / sculpt required).` };
+          error: `mesh op '${operation}' is Desktop-only on cloud (advanced mesh editor / Auto-rig / sculpt required).` };
       }
       const url = meshUrl || meshPath;
       if (!url && !meshId) return { success: false, error: 'meshPath, meshUrl or meshId required' };

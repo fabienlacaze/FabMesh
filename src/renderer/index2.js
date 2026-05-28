@@ -135,6 +135,9 @@ const ENGINE_LABELS = {
   'local':          'MyFabmesh.AI 3D Native (rerouted)',
   'trellis2_native':'MyFabmesh.AI 3D Native',
   'trellis':        'MyFabmesh.AI 3D Engine',
+  // Rigging engine labels (user-visible in job details)
+  'unirig':         'MyFabmesh.AI Rig (local)',
+  'meshy':          'MyFabmesh.AI Rig (cloud)',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
@@ -282,8 +285,8 @@ function reportPipelineError(errMsg, title) {
 // different code paths (image gen, mesh gen, rigging).
 async function showMeshyKeyMissingError(errorTitle) {
   const wantsOpen = await customErrorWithAction(
-    'Meshy.ai API key not configured.\n\nOpen Settings and paste your key, then try again.\nGet a free key at https://www.meshy.ai/api',
-    errorTitle || 'Meshy.ai API key missing',
+    'MyFabmesh.AI cloud API key not configured.\n\nOpen Settings and paste your key, then try again.',
+    errorTitle || 'MyFabmesh.AI cloud API key missing',
     'Open Settings'
   );
   if (wantsOpen) {
@@ -6743,8 +6746,8 @@ const MESH_TOOL_SCHEMAS = {
     build: (vals, ctx) => [ctx.imagePath, String(vals.tex_res)],
   },
   trellis2_retex: {
-    title: 'Re-Texture (TRELLIS-2)',
-    subtitle: 'Native PBR texturing via TRELLIS-2-4B (~90s, GPU).',
+    title: 'Re-Texture (MyFabmesh.AI 3D Native)',
+    subtitle: 'Native PBR texturing via MyFabmesh.AI 3D Native (~90s, GPU).',
     needsImage: true,
     params: [
       { id: 'preset', label: 'Quality preset', type: 'select', default: 'fast',
@@ -9723,10 +9726,10 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
   const rigEngine = document.getElementById('ws-rig-engine')?.value || 'unirig';
-  const engineLabel = rigEngine === 'meshy' ? 'Meshy.ai (cloud)' : 'UniRig (local, neural)';
+  const engineLabel = rigEngine === 'meshy' ? 'MyFabmesh.AI Rig (cloud)' : 'MyFabmesh.AI Rig (local, neural)';
   const expectedMs = rigEngine === 'meshy' ? 120000 : 90000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {
-    const job = pushJob(`Auto-rig AI (${rigEngine}): ${p.name}`, null, {
+    const job = pushJob(`Auto-rig AI (${rigEngine === 'meshy' ? 'cloud' : 'local'}): ${p.name}`, null, {
       Engine: engineLabel,
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
     }, expectedMs);
@@ -11218,12 +11221,12 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     }
 
     const cards = [
-      stageCardWithThumbs('1. SF3D raw mesh', s1, (d) => {
+      stageCardWithThumbs('1. Raw mesh', s1, (d) => {
         const s = d.score?.score || 0, t = d.score?.total || 6;
         const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
         return { score: `${s}/${t}`, sub: `sim ${(d.score?.avg_similarity || 0).toFixed(2)}`, bg };
       }, 'axes'),
-      stageCardWithThumbs('2. Zero123++ views', s2, (d) => {
+      stageCardWithThumbs('2. Multi-view generation', s2, (d) => {
         const s = d.good_views || 0, t = d.total || 6;
         const bg = s >= 4 ? '#1a5c1a' : s >= 2 ? '#8a6a1a' : '#8a1a1a';
         return { score: `${s}/${t}`, sub: `avg sim ${(d.avg_similarity || 0).toFixed(2)}`, bg };
@@ -11252,7 +11255,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
   btnCancel?.addEventListener('click', async () => {
     const ok = await fabConfirm({
       title: 'Cancel calibration?',
-      message: 'This will stop the pipeline immediately (SF3D, Zero123++, projection). Any partial output for this run will be discarded.',
+      message: 'This will stop the pipeline immediately (mesh, multi-view, projection). Any partial output for this run will be discarded.',
       okLabel: 'Cancel run',
       cancelLabel: 'Keep running',
     });
@@ -11264,7 +11267,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
 
   async function runDiagnose(engine) {
     diagModal.classList.remove('hidden');
-    diagBody.innerHTML = `<p style="color:#aaa">Running ${engine.toUpperCase()} pipeline — ~4-5 min (${engine} + Zero123++ + projection)...</p>`;
+    diagBody.innerHTML = `<p style="color:#aaa">Running ${engine.toUpperCase()} pipeline — ~4-5 min (${engine} + multi-view + projection)...</p>`;
     btnDiagnose.disabled = true;
     if (btnCompare) btnCompare.disabled = true;
     if (btnCancel) {
@@ -11372,7 +11375,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     if (_tierTimerId) { clearInterval(_tierTimerId); _tierTimerId = null; }
     _tierTimerId = setInterval(_updateTierTimers, 500);
     diagBody.innerHTML = `
-      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks in ~7s. Stage 4 tests UV projection in isolation (skips SF3D + auto-align), so its ceiling is 2/6 on the GT cube by design. Real pipeline uses the full chain and produces clean textures. Use this view to spot regressions, not as an absolute quality metric.</p>
+      <p style="color:#aaa; margin-top:0;">Calibration v3 — 5 independent per-stage checks in ~7s. Stage 4 tests UV projection in isolation (skips mesh + auto-align), so its ceiling is 2/6 on the GT cube by design. Real pipeline uses the full chain and produces clean textures. Use this view to spot regressions, not as an absolute quality metric.</p>
       <div id="tiered-footer" style="margin-top:14px; padding:14px; background:#1a1a1a; border-radius:8px; border-left:6px solid #555; color:#aaa;">
         Running...
       </div>`;
@@ -11412,7 +11415,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
           } else if (ev.phase === 'iter_fail') {
             setTierState(t, 'running', `iter ${ev.variant} failed: ${(ev.error || '').slice(0, 60)}`);
           } else if (ev.phase === 'sf3d') {
-            setTierState(t, 'running', ev.message || 'SF3D...');
+            setTierState(t, 'running', ev.message || 'Mesh...');
           } else if (ev.phase === 'done') {
             const ok = ev.passed;
             const detail = t === 2
@@ -11533,7 +11536,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     } else if (ok) {
       verdict = `<b>Perfect score reached.</b> The winning projection config has been persisted and will be used automatically for future runs.`;
     } else {
-      verdict = `<b>Plateau at ${t3.best_score}/${t3.target}.</b> No projection config reached a perfect score — the remaining loss is upstream (SF3D mesh quality or Zero123++ hallucinations), not a projection flag issue.`;
+      verdict = `<b>Plateau at ${t3.best_score}/${t3.target}.</b> No projection config reached a perfect score — the remaining loss is upstream (mesh quality or multi-view hallucinations), not a projection flag issue.`;
     }
     const cfg = t3.best_combo ? `<pre style="margin-top:10px; background:#0a0a0a; padding:10px; border-radius:4px; font-size:11px;">${JSON.stringify(t3.best_combo, null, 2)}</pre>` : '';
     document.getElementById('tiered-footer').outerHTML = `
@@ -12228,7 +12231,7 @@ if (meshyKeyEl) {
 document.getElementById('set-meshy-test')?.addEventListener('click', async () => {
   const btn = document.getElementById('set-meshy-test');
   const key = document.getElementById('set-meshy-api-key').value.trim();
-  if (!key) { alert('Enter your Meshy API key first.'); return; }
+  if (!key) { alert('Enter your MyFabmesh.AI cloud API key first.'); return; }
   const orig = btn.textContent;
   btn.textContent = 'Testing...';
   btn.disabled = true;
@@ -12243,7 +12246,7 @@ document.getElementById('set-meshy-test')?.addEventListener('click', async () =>
     } else {
       btn.textContent = 'Failed';
       btn.style.background = '#7f1d1d';
-      alert('Meshy key test failed: ' + (r?.error || 'unknown error'));
+      alert('MyFabmesh.AI cloud key test failed: ' + (r?.error || 'unknown error'));
       setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 1800);
     }
   } catch (e) {

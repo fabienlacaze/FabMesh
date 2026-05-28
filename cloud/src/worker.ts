@@ -3151,7 +3151,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     ? await checkAndIncrementModalSpend(env, ESTIMATED_USD_MESH)
     : await checkAndIncrementDailySpend(env, ESTIMATED_USD_MESH);
   if (remainingBudget == null) {
-    const provider = useModalMesh ? 'Modal' : 'Replicate';
+    const provider = 'Cloud GPU';
     return err(429, `daily ${provider} budget reached. Try again after midnight UTC, or raise MAX_DAILY_${useModalMesh ? 'MODAL_' : ''}SPEND_USD.`);
   }
   const refundMeshSpend = async () => {
@@ -3208,7 +3208,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     if (!frontUrl) {
       if (!env.MESHES || !env.R2_PUBLIC_URL) {
         await addCredits(env, user.id, cost);
-        return err(500, 'modal mesh path needs R2 (no imagePath URL provided)');
+        return err(500, 'cloud GPU mesh path needs R2 (no imagePath URL provided)');
       }
       const fileBytes = new Uint8Array(await input.image.arrayBuffer());
       const key = `${user.id}/source/${Date.now()}_${input.seed ?? 42}.png`;
@@ -3370,7 +3370,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       await supabaseAdmin(env).from('jobs').update({
         status: 'failed', error: msg, finished_at: new Date().toISOString(),
       }).eq('id', jobId);
-      return err(502, 'modal mesh-start failed: ' + msg);
+      return err(502, 'cloud GPU mesh-start failed: ' + msg);
     }
     return json({ jobId, creditsRemaining: remaining });
   }
@@ -3380,7 +3380,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     prediction = await createReplicatePrediction(env, input);
   } catch (e: unknown) {
     await addCredits(env, user.id, cost);
-    return err(502, 'replicate failed: ' + (e instanceof Error ? e.message : String(e)));
+    return err(502, 'cloud GPU failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 
   await supabaseAdmin(env).from('jobs').insert({
@@ -4689,7 +4689,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     ? await checkAndIncrementModalSpend(env, estimatedTotal)
     : await checkAndIncrementDailySpend(env, estimatedTotal);
   if (remainingBudget == null) {
-    const provider = useModal ? 'Modal' : 'Replicate';
+    const provider = 'Cloud GPU';
     return json({ ok: false, success: false,
       error: `daily ${provider} budget reached. Try again after midnight UTC, or raise MAX_DAILY_${useModal ? 'MODAL_' : ''}SPEND_USD.` }, { status: 429 });
   }
@@ -4798,7 +4798,7 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     ? await checkAndIncrementModalSpend(env, estimatedTotal)
     : await checkAndIncrementDailySpend(env, estimatedTotal);
   if (remainingBudget == null) {
-    const provider = useModal ? 'Modal' : 'Replicate';
+    const provider = 'Cloud GPU';
     return json({ ok: false, success: false,
       error: `daily ${provider} budget reached. Try again after midnight UTC.` }, { status: 429 });
   }
@@ -4859,7 +4859,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_IMAGE_OP_URL) {
-    return err(503, 'modify backend unavailable (MODAL_IMAGE_OP_URL not configured)');
+    return err(503, 'modify backend unavailable (cloud GPU not configured)');
   }
   const { imageUrl, prompt, strength, seed, steps } = await req.json() as {
     imageUrl?: string;
@@ -4890,7 +4890,7 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
-      error: `daily Modal budget reached. Try again after midnight UTC.` }, { status: 429 });
+      error: `daily Cloud GPU budget reached. Try again after midnight UTC.` }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -4971,7 +4971,7 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
-      error: 'daily Modal budget reached. Try again after midnight UTC.' }, { status: 429 });
+      error: 'daily Cloud GPU budget reached. Try again after midnight UTC.' }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -5069,7 +5069,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
-      error: 'daily Modal budget reached. Try again after midnight UTC.' }, { status: 429 });
+      error: 'daily Cloud GPU budget reached. Try again after midnight UTC.' }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -5126,7 +5126,7 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
-      error: 'daily Modal budget reached.' }, { status: 429 });
+      error: 'daily Cloud GPU budget reached.' }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -5207,7 +5207,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   const estimatedTotal = 0.005;
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
-    return json({ ok: false, success: false, error: 'daily Modal budget reached.' }, { status: 429 });
+    return json({ ok: false, success: false, error: 'daily Cloud GPU budget reached.' }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -5514,7 +5514,7 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
-      error: 'daily Modal budget reached.' }, { status: 429 });
+      error: 'daily Cloud GPU budget reached.' }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -5621,7 +5621,7 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_RECTIFY_URL) {
-    return err(503, 'rectify backend unavailable (MODAL_RECTIFY_URL not configured)');
+    return err(503, 'rectify backend unavailable (cloud GPU not configured)');
   }
   const { prompt, refImageUrl, mode, seeds, steps, guidance, ip_scale } =
     await req.json() as {
@@ -5657,7 +5657,7 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {
     return json({ ok: false, success: false,
-      error: `daily Modal budget reached. Try again after midnight UTC.` }, { status: 429 });
+      error: `daily Cloud GPU budget reached. Try again after midnight UTC.` }, { status: 429 });
   }
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
   if (remainingUserCalls == null) {
@@ -7279,7 +7279,7 @@ export default {
         }
         if (pathname.startsWith('/api/')) {
           if (!flags.modal_enabled && MODAL_PATHS.has(pathname)) {
-            return err(503, 'Modal backend temporarily disabled by admin');
+            return err(503, 'Cloud GPU backend temporarily disabled by admin');
           }
           // Stripe kill: block new checkouts but NEVER block the
           // webhook — Stripe has already charged the card; if we 503
