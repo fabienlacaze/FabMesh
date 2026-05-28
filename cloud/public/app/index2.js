@@ -5292,6 +5292,12 @@ const paintState = {
   lineStart: null,
   linePreviewData: null,
   smudgeLastColor: null,
+  // Emissive layer mode: when true, every paint stroke is drawn on a
+  // separate overlay canvas (paint-emissive-overlay) instead of the
+  // main image. The overlay is persisted per source image so we can
+  // project it onto the generated mesh's T_emissive map later.
+  emissiveMode: false,
+  emissiveOverlayInited: false,
   // Selection state
   selection: null,        // Uint8Array (w*h), 255=selected, 0=not — null means no selection (= all selected)
   selUndoStack: [],
@@ -5301,6 +5307,51 @@ const paintState = {
   selPreviewData: null,   // ImageData snapshot for rect select preview
   lassoPoints: null,      // [{x,y}, ...] for lasso
 };
+
+// Sync the emissive overlay canvas size to match the main paint
+// canvas, returning its 2D context. If a per-image stored layer
+// exists on the current project, load it the first time we touch
+// the overlay for this image.
+function _paintGetEmissiveCtx(mgr) {
+  const overlay = document.getElementById('paint-emissive-overlay');
+  if (!overlay) return null;
+  const main = document.getElementById('paint-canvas');
+  if (overlay.width !== main.width || overlay.height !== main.height) {
+    overlay.width = main.width;
+    overlay.height = main.height;
+    overlay.style.width = main.style.width;
+    overlay.style.height = main.style.height;
+  }
+  const ctx = overlay.getContext('2d');
+  // Pre-load saved emissive layer for this image (once per session per
+  // image). Stored under project._emissiveLayerByImage[imgPath] as a
+  // dataURL (kept in-memory; persisted to R2/local in Step 2).
+  if (!paintState.emissiveOverlayInited) {
+    paintState.emissiveOverlayInited = true;
+    const p = state.currentProject;
+    const saved = p?._emissiveLayerByImage?.[paintState.imgPath];
+    if (saved) {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          ctx.drawImage(img, 0, 0, overlay.width, overlay.height);
+        } catch {}
+      };
+      img.src = saved;
+    }
+  }
+  return ctx;
+}
+
+// Show/hide the emissive overlay above the main image. Hidden when
+// emissive mode is OFF so the user only sees their image; visible (with
+// lighten blend) when ON so they can see what they're painting.
+function _paintApplyEmissiveVisibility() {
+  const overlay = document.getElementById('paint-emissive-overlay');
+  if (!overlay) return;
+  overlay.style.display = paintState.emissiveMode ? 'block' : 'none';
+}
 
 function _paintHasSelection() {
   return paintState.selection !== null;
@@ -5667,7 +5718,14 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
         return undefined;
       },
-      onPaint: _paintStroke,
+      onPaint: (ctx, x, y, lastPt, mgr) => {
+        // Redirect to the emissive overlay when in Emissive layer mode.
+        // The overlay is initialised lazily on the first stroke; CanvasManager
+        // ignores it for undo so we keep our own emissive-undo logic in step 2.
+        const useEmissive = paintState.emissiveMode;
+        const targetCtx = useEmissive ? _paintGetEmissiveCtx(mgr) : ctx;
+        _paintStroke(targetCtx, x, y, lastPt, mgr);
+      },
       onBrushResize: (delta, mgr) => {
         paintState.brushSize = Math.max(1, Math.min(200, paintState.brushSize + delta));
         document.getElementById('paint-brush-size').value = paintState.brushSize;
@@ -5807,6 +5865,22 @@ document.getElementById('paint-eyedropper')?.addEventListener('click', () => {
   if (canvas) canvas.style.cursor = paintState.eyedropping ? 'crosshair' : 'none';
 });
 
+// 💡 Emissive layer mode — paint a separate layer that becomes the
+// T_emissive map of the generated mesh (see Step 3, projection).
+document.getElementById('paint-emissive-toggle')?.addEventListener('click', () => {
+  paintState.emissiveMode = !paintState.emissiveMode;
+  const btn = document.getElementById('paint-emissive-toggle');
+  btn?.classList.toggle('tool-active', paintState.emissiveMode);
+  // Pre-init the overlay so it picks up any saved layer for this image.
+  if (paintState.emissiveMode && _paintMgr) _paintGetEmissiveCtx(_paintMgr);
+  _paintApplyEmissiveVisibility();
+  if (typeof showToast === 'function') {
+    showToast(paintState.emissiveMode
+      ? '💡 Emissive layer ON — strokes paint the T_emissive map'
+      : 'Emissive layer OFF — back to image painting', 'info', 1800);
+  }
+});
+
 // Close / Cancel
 document.getElementById('paint-close-x')?.addEventListener('click', _closePaint);
 document.getElementById('paint-cancel')?.addEventListener('click', _closePaint);
@@ -5857,6 +5931,30 @@ document.addEventListener('keydown', (e) => {
 // Save
 document.getElementById('paint-save')?.addEventListener('click', async () => {
   if (!paintState.imgPath || !_paintMgr) return;
+  // Capture the emissive overlay BEFORE the modal closes (close()
+  // hides the overlay and we'd otherwise lose access to its pixels).
+  // Stored on the project keyed by source image path; Step 3 projects
+  // this layer onto the generated mesh's T_emissive map.
+  const overlay = document.getElementById('paint-emissive-overlay');
+  if (overlay && overlay.width && overlay.height) {
+    const p = state.currentProject;
+    if (p) {
+      // Only persist if the overlay actually has content (any non-zero
+      // alpha pixel). Cheap stride sample to avoid full pixel scan.
+      try {
+        const ctx = overlay.getContext('2d');
+        const samp = ctx.getImageData(0, 0, overlay.width, overlay.height).data;
+        let hasInk = false;
+        for (let i = 3; i < samp.length; i += 4 * 64) {
+          if (samp[i] > 0) { hasInk = true; break; }
+        }
+        if (hasInk) {
+          p._emissiveLayerByImage = p._emissiveLayerByImage || {};
+          p._emissiveLayerByImage[paintState.imgPath] = overlay.toDataURL('image/png');
+        }
+      } catch {}
+    }
+  }
   const dataUrl = _paintMgr.toDataURL();
   _closePaint();
   const p = state.currentProject;
@@ -8830,6 +8928,10 @@ function _peLoadMesh(meshPath) {
           }
         });
         _peSetupCanvasAndBind();
+        // Auto-project the image emissive layer (if the project has
+        // one for the source image) onto the mesh's T_emissive canvas.
+        // Asynchronous; shows a toast when done.
+        _peTryProjectFromImageLayer();
       });
     })
     .catch((e) => {
@@ -8979,6 +9081,118 @@ function _peHexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// Project a saved image emissive layer onto each submesh's T_emissive
+// canvas via front-view raycast. For every non-transparent pixel of
+// the image layer, cast a ray from an orthographic front camera
+// through that pixel into the mesh; the hit triangle's UV becomes
+// the write target on its submesh's canvas.
+//
+// Returns true if the projection ran (a layer existed for the source
+// image), false otherwise.
+async function _peProjectImageLayer(imgPath) {
+  const p = state.currentProject;
+  const layerDataUrl = p?._emissiveLayerByImage?.[imgPath];
+  if (!layerDataUrl) return false;
+  if (!peState.origModel || !peState.canvases) return false;
+
+  // Decode the image emissive layer into an off-screen canvas we can
+  // sample pixel-by-pixel.
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = layerDataUrl;
+  });
+  const srcW = img.width, srcH = img.height;
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = srcW; srcCanvas.height = srcH;
+  const srcCtx = srcCanvas.getContext('2d');
+  srcCtx.drawImage(img, 0, 0);
+  const srcData = srcCtx.getImageData(0, 0, srcW, srcH).data;
+
+  // Set up an orthographic camera positioned at +Z, looking down -Z,
+  // sized to encompass the model's XY footprint. This matches how the
+  // user views their image-side painting (camera-facing view).
+  const box = new THREE.Box3().setFromObject(peState.origModel);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  // Account for the framing lift we applied in _peLoadMesh
+  // (origModel.position) so the camera is in WORLD space relative to
+  // the actual displayed bounds.
+  const halfW = size.x * 0.5 + 1e-4;
+  const halfH = size.y * 0.5 + 1e-4;
+  const orthoCam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.01, size.z * 4 + 10);
+  orthoCam.position.set(center.x, center.y, center.z + size.z * 2 + 1);
+  orthoCam.lookAt(center.x, center.y, center.z);
+  orthoCam.updateMatrixWorld();
+
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const meshArr = peState.meshes.map((e) => e.mesh);
+  const TEX = PE_TEX_SIZE;
+
+  // Walk the image layer at a stride proportional to its size — we
+  // don't need every pixel; one sample per ~2px is plenty for a 1024×.
+  // For very large images we step further to keep the raycast count
+  // reasonable (target ~250K rays max).
+  const totalPixels = srcW * srcH;
+  const stride = Math.max(1, Math.ceil(Math.sqrt(totalPixels / 250000)));
+
+  let painted = 0;
+  for (let y = 0; y < srcH; y += stride) {
+    for (let x = 0; x < srcW; x += stride) {
+      const a = srcData[(y * srcW + x) * 4 + 3];
+      if (a < 8) continue;
+      const r = srcData[(y * srcW + x) * 4];
+      const g = srcData[(y * srcW + x) * 4 + 1];
+      const b = srcData[(y * srcW + x) * 4 + 2];
+      ndc.x = (x / srcW) * 2 - 1;
+      ndc.y = -((y / srcH) * 2 - 1);
+      raycaster.setFromCamera(ndc, orthoCam);
+      const hits = raycaster.intersectObjects(meshArr, false);
+      if (!hits.length || !hits[0].uv) continue;
+      const entry = peState.canvases.get(hits[0].object);
+      if (!entry) continue;
+      const uvx = Math.max(0, Math.min(1, hits[0].uv.x)) * TEX;
+      const uvy = Math.max(0, Math.min(1, hits[0].uv.y)) * TEX;
+      entry.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+      // Small splat scaled by stride so we cover the canvas evenly.
+      const splat = Math.max(2, stride * 2);
+      entry.ctx.fillRect(uvx - splat * 0.5, uvy - splat * 0.5, splat, splat);
+      painted++;
+    }
+  }
+  peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
+  return painted > 0;
+}
+
+async function _peTryProjectFromImageLayer() {
+  const p = state.currentProject;
+  if (!p) return;
+  // Pick the source image associated with the current mesh. We default
+  // to the project's currently-selected image.
+  const imgPath = p.selectedImagePath || p.previewImagePath;
+  if (!imgPath) return;
+  if (!p._emissiveLayerByImage || !p._emissiveLayerByImage[imgPath]) return;
+  try {
+    if (typeof showToast === 'function') {
+      showToast('Projecting image emissive layer onto mesh…', 'info', 1800);
+    }
+    const ok = await _peProjectImageLayer(imgPath);
+    if (ok) {
+      // Reset history so undo doesn't go past the projection state.
+      peState.history = [];
+      peState.historyIndex = -1;
+      _peHistoryPush();
+      if (typeof showToast === 'function') {
+        showToast('Image emissive layer projected onto T_emissive', 'success', 2000);
+      }
+    }
+  } catch (e) {
+    console.warn('[paint-emissive] image-layer projection failed:', e);
+  }
+}
+
 function openPaintEmissive() {
   const p = state.currentProject;
   if (!p || !p.selectedMeshPath) { showToast('Pick a mesh first.', 'error'); return; }
@@ -9039,6 +9253,16 @@ function openPaintEmissive() {
   };
   $('pe-undo').onclick = () => _peUndo();
   $('pe-redo').onclick = () => _peRedo();
+  $('pe-load-image-layer').onclick = async () => {
+    const btn = $('pe-load-image-layer');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Projecting…';
+    try {
+      await _peTryProjectFromImageLayer();
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
   // Toggle the emissive texture on/off — flips material.emissiveMap
   // between our canvas and null on every submesh, leaving the painted
   // canvas data intact so the user can flip back and forth without

@@ -5242,6 +5242,8 @@ const paintState = {
   lineStart: null,
   linePreviewData: null,
   smudgeLastColor: null,
+  emissiveMode: false,
+  emissiveOverlayInited: false,
   // Selection state
   selection: null,        // Uint8Array (w*h), 255=selected, 0=not — null means no selection (= all selected)
   selUndoStack: [],
@@ -5251,6 +5253,40 @@ const paintState = {
   selPreviewData: null,   // ImageData snapshot for rect select preview
   lassoPoints: null,      // [{x,y}, ...] for lasso
 };
+
+function _paintGetEmissiveCtx(mgr) {
+  const overlay = document.getElementById('paint-emissive-overlay');
+  if (!overlay) return null;
+  const main = document.getElementById('paint-canvas');
+  if (overlay.width !== main.width || overlay.height !== main.height) {
+    overlay.width = main.width;
+    overlay.height = main.height;
+    overlay.style.width = main.style.width;
+    overlay.style.height = main.style.height;
+  }
+  const ctx = overlay.getContext('2d');
+  if (!paintState.emissiveOverlayInited) {
+    paintState.emissiveOverlayInited = true;
+    const p = state.currentProject;
+    const saved = p?._emissiveLayerByImage?.[paintState.imgPath];
+    if (saved) {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          ctx.drawImage(img, 0, 0, overlay.width, overlay.height);
+        } catch {}
+      };
+      img.src = saved;
+    }
+  }
+  return ctx;
+}
+function _paintApplyEmissiveVisibility() {
+  const overlay = document.getElementById('paint-emissive-overlay');
+  if (!overlay) return;
+  overlay.style.display = paintState.emissiveMode ? 'block' : 'none';
+}
 
 function _paintHasSelection() {
   return paintState.selection !== null;
@@ -5617,7 +5653,10 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         // Don't paint here — let CanvasManager pushUndo first, then onPaint handles the first dab
         return undefined;
       },
-      onPaint: _paintStroke,
+      onPaint: (ctx, x, y, lastPt, mgr) => {
+        const targetCtx = paintState.emissiveMode ? _paintGetEmissiveCtx(mgr) : ctx;
+        _paintStroke(targetCtx, x, y, lastPt, mgr);
+      },
       onBrushResize: (delta, mgr) => {
         paintState.brushSize = Math.max(1, Math.min(200, paintState.brushSize + delta));
         document.getElementById('paint-brush-size').value = paintState.brushSize;
@@ -5752,6 +5791,19 @@ document.getElementById('paint-eyedropper')?.addEventListener('click', () => {
   if (canvas) canvas.style.cursor = paintState.eyedropping ? 'crosshair' : 'none';
 });
 
+document.getElementById('paint-emissive-toggle')?.addEventListener('click', () => {
+  paintState.emissiveMode = !paintState.emissiveMode;
+  const btn = document.getElementById('paint-emissive-toggle');
+  btn?.classList.toggle('tool-active', paintState.emissiveMode);
+  if (paintState.emissiveMode && _paintMgr) _paintGetEmissiveCtx(_paintMgr);
+  _paintApplyEmissiveVisibility();
+  if (typeof showToast === 'function') {
+    showToast(paintState.emissiveMode
+      ? '💡 Emissive layer ON — strokes paint the T_emissive map'
+      : 'Emissive layer OFF — back to image painting', 'info', 1800);
+  }
+});
+
 // Close / Cancel
 document.getElementById('paint-close-x')?.addEventListener('click', _closePaint);
 document.getElementById('paint-cancel')?.addEventListener('click', _closePaint);
@@ -5802,6 +5854,24 @@ document.addEventListener('keydown', (e) => {
 // Save
 document.getElementById('paint-save')?.addEventListener('click', async () => {
   if (!paintState.imgPath || !_paintMgr) return;
+  const overlay = document.getElementById('paint-emissive-overlay');
+  if (overlay && overlay.width && overlay.height) {
+    const p = state.currentProject;
+    if (p) {
+      try {
+        const ctx = overlay.getContext('2d');
+        const samp = ctx.getImageData(0, 0, overlay.width, overlay.height).data;
+        let hasInk = false;
+        for (let i = 3; i < samp.length; i += 4 * 64) {
+          if (samp[i] > 0) { hasInk = true; break; }
+        }
+        if (hasInk) {
+          p._emissiveLayerByImage = p._emissiveLayerByImage || {};
+          p._emissiveLayerByImage[paintState.imgPath] = overlay.toDataURL('image/png');
+        }
+      } catch {}
+    }
+  }
   const dataUrl = _paintMgr.toDataURL();
   _closePaint();
   const p = state.currentProject;
@@ -7580,7 +7650,90 @@ async function _peLoadMesh(meshPath) {
       }
     });
     _peSetupCanvasAndBind();
+    _peTryProjectFromImageLayer();
   });
+}
+
+async function _peProjectImageLayer(imgPath) {
+  const p = state.currentProject;
+  const layerDataUrl = p?._emissiveLayerByImage?.[imgPath];
+  if (!layerDataUrl) return false;
+  if (!peState.origModel || !peState.canvases) return false;
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = layerDataUrl;
+  });
+  const srcW = img.width, srcH = img.height;
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = srcW; srcCanvas.height = srcH;
+  const srcCtx = srcCanvas.getContext('2d');
+  srcCtx.drawImage(img, 0, 0);
+  const srcData = srcCtx.getImageData(0, 0, srcW, srcH).data;
+  const box = new THREE.Box3().setFromObject(peState.origModel);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const halfW = size.x * 0.5 + 1e-4;
+  const halfH = size.y * 0.5 + 1e-4;
+  const orthoCam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.01, size.z * 4 + 10);
+  orthoCam.position.set(center.x, center.y, center.z + size.z * 2 + 1);
+  orthoCam.lookAt(center.x, center.y, center.z);
+  orthoCam.updateMatrixWorld();
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const meshArr = peState.meshes.map((e) => e.mesh);
+  const TEX = PE_TEX_SIZE;
+  const stride = Math.max(1, Math.ceil(Math.sqrt((srcW * srcH) / 250000)));
+  let painted = 0;
+  for (let y = 0; y < srcH; y += stride) {
+    for (let x = 0; x < srcW; x += stride) {
+      const a = srcData[(y * srcW + x) * 4 + 3];
+      if (a < 8) continue;
+      const r = srcData[(y * srcW + x) * 4];
+      const g = srcData[(y * srcW + x) * 4 + 1];
+      const b = srcData[(y * srcW + x) * 4 + 2];
+      ndc.x = (x / srcW) * 2 - 1;
+      ndc.y = -((y / srcH) * 2 - 1);
+      raycaster.setFromCamera(ndc, orthoCam);
+      const hits = raycaster.intersectObjects(meshArr, false);
+      if (!hits.length || !hits[0].uv) continue;
+      const entry = peState.canvases.get(hits[0].object);
+      if (!entry) continue;
+      const uvx = Math.max(0, Math.min(1, hits[0].uv.x)) * TEX;
+      const uvy = Math.max(0, Math.min(1, hits[0].uv.y)) * TEX;
+      entry.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+      const splat = Math.max(2, stride * 2);
+      entry.ctx.fillRect(uvx - splat * 0.5, uvy - splat * 0.5, splat, splat);
+      painted++;
+    }
+  }
+  peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
+  return painted > 0;
+}
+
+async function _peTryProjectFromImageLayer() {
+  const p = state.currentProject;
+  if (!p) return;
+  const imgPath = p.selectedImagePath || p.previewImagePath;
+  if (!imgPath) return;
+  if (!p._emissiveLayerByImage || !p._emissiveLayerByImage[imgPath]) return;
+  try {
+    if (typeof showToast === 'function') {
+      showToast('Projecting image emissive layer onto mesh…', 'info', 1800);
+    }
+    const ok = await _peProjectImageLayer(imgPath);
+    if (ok) {
+      peState.history = [];
+      peState.historyIndex = -1;
+      _peHistoryPush();
+      if (typeof showToast === 'function') {
+        showToast('Image emissive layer projected onto T_emissive', 'success', 2000);
+      }
+    }
+  } catch (e) {
+    console.warn('[paint-emissive] image-layer projection failed:', e);
+  }
 }
 
 function _peRaycast(clientX, clientY) {
@@ -7744,6 +7897,13 @@ function openPaintEmissive() {
   };
   $('pe-undo').onclick = () => _peUndo();
   $('pe-redo').onclick = () => _peRedo();
+  $('pe-load-image-layer').onclick = async () => {
+    const btn = $('pe-load-image-layer');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Projecting…';
+    try { await _peTryProjectFromImageLayer(); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  };
   let emissiveOn = true;
   $('pe-toggle-emissive').onclick = () => {
     if (!peState.canvases) return;
