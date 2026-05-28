@@ -1,5 +1,9 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (admin: Users table alignment)
+- Admin Users table columns now align consistently across rows (Email flex; ID/Credits/Joined/Status/Actions hugged with table-layout rules). Empty Actions header replaced with visible "Actions" label.
+
+
 **RULE: I MUST read this file at the start of any session that touches
 mesh quality, texture projection, or multi-view generation. I MUST append
 to it after every experiment — success or failure. This prevents running
