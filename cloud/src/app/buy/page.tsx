@@ -11,6 +11,11 @@ interface User { id: string; email: string | null; credits: number; }
 
 export default function BuyPage() {
   const [user, setUser] = useState<User | null>(null);
+  // Per-pack availability map from /api/pricing/availability. Subscription
+  // packs without a Stripe Price ID configured come back as false; we hide
+  // those cards so the user doesn't get a 503 mid-checkout. null = still
+  // loading; missing key = treat as available (fail-open on fetch error).
+  const [availability, setAvailability] = useState<Record<string, boolean> | null>(null);
 
   useEffect(() => {
     fetch('/api/me')
@@ -18,6 +23,20 @@ export default function BuyPage() {
       .then(j => setUser(j.user ?? null))
       .catch(() => setUser(null));
   }, []);
+
+  useEffect(() => {
+    fetch('/api/pricing/availability')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (j && j.available) setAvailability(j.available);
+        else setAvailability({}); // fail-open: missing keys default to true below
+      })
+      .catch(() => setAvailability({}));
+  }, []);
+
+  const visibleSubs = Object.values(PACKS).filter(
+    p => p.mode === 'subscription' && (availability?.[p.id] ?? true),
+  );
 
   return (
     <div className="page">
@@ -31,7 +50,7 @@ export default function BuyPage() {
 
       <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-2)' }}>One-shot top-ups</h3>
       <div className="pricing-grid" style={{ padding: 0 }}>
-        {Object.values(PACKS).filter(p => p.mode === 'payment').map((p) => (
+        {Object.values(PACKS).filter(p => p.mode === 'payment' && (availability?.[p.id] ?? true)).map((p) => (
           <div key={p.id} className={`price-card ${p.id === 'pro' ? 'featured' : ''}`}>
             <div className="name">
               {p.name}
@@ -49,20 +68,26 @@ export default function BuyPage() {
       <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16 }}>
         Credits drop in automatically every month. Cancel anytime from your Stripe customer portal.
       </p>
-      <div className="pricing-grid" style={{ padding: 0 }}>
-        {Object.values(PACKS).filter(p => p.mode === 'subscription').map((p) => (
-          <div key={p.id} className={`price-card ${p.id === 'sub_pro' ? 'featured' : ''}`}>
-            <div className="name">
-              {p.name}
-              {p.id === 'sub_pro' && <span className="feat-tag">best value</span>}
+      {visibleSubs.length === 0 ? (
+        <p style={{ color: 'var(--text-2)', fontSize: 13, fontStyle: 'italic' }}>
+          Monthly subscription plans coming soon — top-ups available above.
+        </p>
+      ) : (
+        <div className="pricing-grid" style={{ padding: 0 }}>
+          {visibleSubs.map((p) => (
+            <div key={p.id} className={`price-card ${p.id === 'sub_pro' ? 'featured' : ''}`}>
+              <div className="name">
+                {p.name}
+                {p.id === 'sub_pro' && <span className="feat-tag">best value</span>}
+              </div>
+              <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>/ month</span></div>
+              <div className="unit">{p.credits} credits / month</div>
+              <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
+              <BuyButton packId={p.id} loggedIn={!!user} />
             </div>
-            <div className="amount">{p.euros} € <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-2)' }}>/ month</span></div>
-            <div className="unit">{p.credits} credits / month</div>
-            <div className="per-mesh">≈ {(p.euros / p.credits).toFixed(2)} € / credit</div>
-            <BuyButton packId={p.id} loggedIn={!!user} />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div className="card" style={{ marginTop: 32 }}>
         <h3 style={{ marginBottom: 12 }}>How credits convert to meshes</h3>

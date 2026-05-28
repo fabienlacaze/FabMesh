@@ -10,6 +10,13 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Job thumb snapshot + hide unconfigured subscriptions)
+
+- Job Details modal now reads the source-image URL captured at pushJob() time instead of state.currentProject.thumb. Fixes the wrong-thumbnail bug when the user clicks another version thumb between launch and modal render.
+- /buy page hides subscription tiers whose Stripe Price ID secret is unset. New endpoint GET /api/pricing/availability returns the per-pack availability; the page fetches it on mount and filters the subscription section. Friendly placeholder shown when no subscription is available.
+
+---
+
 ## 2026-05-29 (Inbox — thumbnails + clickable title navigates to asset)
 
 - Notification payload now carries subject + asset_url + asset_kind + job_id when emitted from marketplace approve/reject/sale hooks. Replies are unchanged (subject already set by the contact form).
