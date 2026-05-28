@@ -9362,3 +9362,38 @@ Plomberie:
 
 Set pivot point devient donc: gratuit, visuellement stable, et
 manuellement ajustable.
+
+## 2026-05-28 — Fix Normals: flip reversed-winding triangles + revert
+##                fill_holes non-manifold detection
+
+User montre Fill Holes v3 → plein de clusters verts partout (non-
+manifold T-junctions de Trellis2 marching-cubes) mais les VRAIS gros
+trous noirs visibles ne sont toujours pas détectés en boundary. C'est
+parce qu'ils ne sont PAS topologiquement des holes — ce sont des
+triangles à winding inversé qui font du back-face culling visible.
+
+Changes:
+
+1. **Fill Holes** revert au filter strict `count === 1` (vraie
+   boundary uniquement). Garde le multi-successor + welding adaptatif,
+   mais ne traite plus les count≥3 (T-junctions). Sans ce filtre, le
+   preview noyait l'écran de bruit non-manifold et masquait les vrais
+   boundaries.
+
+2. **Fix Normals** étendu:
+   - Pass 1: pour chaque triangle, calcule face_normal × direction vers
+     le mesh centroid (AABB). Si dot > 0 = triangle pointe vers
+     l'intérieur = winding inversé → swap indices 1 et 2 pour flipper.
+   - Pass 2: computeVertexNormals (avec winding corrigé).
+   - Pass 3: weld normals across UV seam groups (déjà existant).
+
+Pourquoi: les "trous noirs" visibles sur le mesh Trellis2 sont
+généralement des triangles présents mais à winding inversé (le
+marching-cubes/PBR baking laisse ça parfois). Avec back-face culling,
+ils rendent noir et donnent l'illusion d'un trou. Le flip + recompute
+les rend visibles.
+
+Heuristique du centroid: marche bien sur formes convexes ou globalement
+"humanoïdes". Pour des formes très concaves (creux, tubes), faux
+positifs possibles — mais l'utilisateur peut toujours regenérer s'il
+voit du flou.
