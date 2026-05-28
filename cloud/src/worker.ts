@@ -1743,6 +1743,243 @@ async function handleAdminMarketReject(req: Request, env: Env, id: string): Prom
   }
 }
 
+// =============================================================
+// MARKETPLACE — PURCHASE FLOW (cart → Stripe → ownership)
+// -------------------------------------------------------------
+// Commission model: hardcoded 30 % platform fee on every sale,
+// industry standard (Unity Asset Store, CGTrader). Stripe fees
+// (~2.9% + $0.30) come out of the platform share. Sellers get a
+// `sale_record` per purchase; payouts are manual for now (no
+// Stripe Connect yet). Sales records carry both the gross amount,
+// the platform fee, and the seller's net so we have a clean trail
+// the day we wire payouts.
+//
+// Ownership is recorded as one R2 object per (buyer_user_id,
+// listing_id), so "does this user own this listing" is a single
+// HEAD — no need to scan _market/sales/.
+// =============================================================
+
+const MARKET_COMMISSION_PCT = 30;  // platform fee, see comment above
+
+function _stripeCheckoutSessionsUrl(): string {
+  return 'https://api.stripe.com/v1/checkout/sessions';
+}
+
+/** Form-encode a (possibly nested) object for the Stripe REST API.
+ *  Arrays become `key[idx][subkey]` etc. We hand-roll this because
+ *  the Stripe SDK doesn't ship a body builder for nested line_items
+ *  with metadata, and we want zero deps. */
+function _stripeForm(obj: Record<string, unknown>): URLSearchParams {
+  const out = new URLSearchParams();
+  function walk(prefix: string, val: unknown) {
+    if (val === null || val === undefined) return;
+    if (Array.isArray(val)) {
+      val.forEach((item, i) => walk(`${prefix}[${i}]`, item));
+    } else if (typeof val === 'object') {
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+        walk(prefix ? `${prefix}[${k}]` : k, v);
+      }
+    } else {
+      out.append(prefix, String(val));
+    }
+  }
+  walk('', obj);
+  return out;
+}
+
+/** POST /api/market/checkout  body { listing_ids: string[] } — create
+ *  a Stripe Checkout Session bundling every paid listing in the user's
+ *  cart. Returns { url } for the client to redirect to. Free listings
+ *  are filtered out server-side (downloads via /api/market/download). */
+async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
+  if (!env.MESHES) return err(500, 'storage not configured');
+
+  let body: { listing_ids?: string[] };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const ids = (body.listing_ids ?? []).filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return err(400, 'no listings in cart');
+
+  // Load every requested listing + keep only the approved + priced ones.
+  const listings: MarketListing[] = [];
+  for (const id of ids) {
+    const txt = await r2GetText(env, `_market/listings/${id}.json`);
+    if (!txt) continue;
+    try {
+      const parsed = JSON.parse(txt) as MarketListing;
+      if (parsed.status !== 'approved') continue;
+      if (parsed.price_cents <= 0) continue;
+      // Skip listings the user already owns — Stripe would happily
+      // charge twice otherwise.
+      const owns = await env.MESHES.head(`_market/owners/${id}/${user.id}.json`);
+      if (owns) continue;
+      listings.push(parsed);
+    } catch {}
+  }
+  if (!listings.length) return err(400, 'no purchasable listings (free or already owned)');
+
+  const SITE = siteUrl(env, 'http://localhost:3030');
+  const lineItems = listings.map((l) => ({
+    quantity: 1,
+    price_data: {
+      currency: l.currency.toLowerCase() || 'usd',
+      product_data: {
+        name: l.title.slice(0, 120),
+        description: `Marketplace · ${l.asset_kind} · licence: ${l.licence}`.slice(0, 200),
+      },
+      unit_amount: l.price_cents,
+    },
+  }));
+
+  const params = _stripeForm({
+    mode: 'payment',
+    payment_method_types: ['card'],
+    customer_email: user.email ?? undefined,
+    line_items: lineItems,
+    metadata: {
+      kind: 'market_purchase',
+      user_id: user.id,
+      listing_ids: listings.map((l) => l.id).join(','),
+    },
+    success_url: `${SITE}/market?paid=1`,
+    cancel_url: `${SITE}/market?canceled=1`,
+  });
+
+  const r = await fetch(_stripeCheckoutSessionsUrl(), {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params.toString(),
+  });
+  if (!r.ok) {
+    const errBody = await r.text().catch(() => '');
+    return err(502, 'stripe checkout failed: ' + errBody.slice(0, 200));
+  }
+  const session = await r.json() as { id: string; url: string };
+  return json({ ok: true, url: session.url, session_id: session.id });
+}
+
+/** Webhook helper: persist ownership + sale records for a paid
+ *  Stripe session whose metadata.kind === 'market_purchase'. Called
+ *  from handleStripeWebhook. Idempotent — keyed on session.id. */
+async function _processMarketPurchase(env: Env, sess: {
+  id: string;
+  metadata?: Record<string, string>;
+  amount_total?: number;
+}): Promise<void> {
+  if (!env.MESHES) return;
+  const userId = sess.metadata?.user_id;
+  const idsCsv = sess.metadata?.listing_ids;
+  if (!userId || !idsCsv) return;
+  const ids = idsCsv.split(',').filter(Boolean);
+  // Idempotence: if we already wrote a sale for this session, skip.
+  const seenKey = `_market/sales_by_session/${sess.id}.txt`;
+  const seen = await env.MESHES.head(seenKey);
+  if (seen) return;
+
+  for (const listingId of ids) {
+    const lTxt = await r2GetText(env, `_market/listings/${listingId}.json`);
+    if (!lTxt) continue;
+    let listing: MarketListing;
+    try { listing = JSON.parse(lTxt) as MarketListing; } catch { continue; }
+
+    const platformFee = Math.round(listing.price_cents * MARKET_COMMISSION_PCT / 100);
+    const sellerNet   = listing.price_cents - platformFee;
+    const saleId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sale = {
+      id: saleId,
+      listing_id: listingId,
+      buyer_user_id: userId,
+      seller_user_id: listing.user_id,
+      amount_cents: listing.price_cents,
+      platform_fee_cents: platformFee,
+      seller_amount_cents: sellerNet,
+      currency: listing.currency,
+      stripe_session_id: sess.id,
+      created_at: new Date().toISOString(),
+      paid_at: new Date().toISOString(),
+      status: 'paid',
+      payout_status: 'pending',
+    };
+    await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
+                         { httpMetadata: { contentType: 'application/json' } });
+    // Ownership index — one object per (buyer, listing). Quick HEAD
+    // check in /api/market/owned and /api/market/download.
+    await env.MESHES.put(`_market/owners/${listingId}/${userId}.json`,
+                         JSON.stringify({ sale_id: saleId, at: sale.paid_at }),
+                         { httpMetadata: { contentType: 'application/json' } });
+    // Bump downloads counter on the listing.
+    try {
+      listing.downloads = (listing.downloads || 0) + 1;
+      await env.MESHES.put(`_market/listings/${listingId}.json`, JSON.stringify(listing),
+                           { httpMetadata: { contentType: 'application/json' } });
+    } catch {}
+  }
+  await env.MESHES.put(seenKey, new Date().toISOString());
+}
+
+/** GET /api/market/owned — listings the current user has bought.
+ *  Lists every `_market/owners/<listing_id>/<user_id>.json` for this
+ *  user and hydrates the listing. */
+async function handleMarketOwned(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return json({ items: [] });
+
+  // R2 list doesn't support glob — we walk every listing and HEAD-check
+  // the owner record. Cheap enough below ~1000 listings; revisit when
+  // the marketplace grows.
+  const all = await _loadAllListings(env);
+  const items: Array<{
+    id: string; title: string; description: string;
+    price_cents: number; currency: string; licence: string;
+    asset_kind: string; asset_url: string; mesh_url: string;
+    author_display: string; created_at: string;
+  }> = [];
+  for (const l of all) {
+    const head = await env.MESHES.head(`_market/owners/${l.id}/${user.id}.json`);
+    if (!head) continue;
+    items.push({
+      id: l.id, title: l.title, description: l.description,
+      price_cents: l.price_cents, currency: l.currency, licence: l.licence,
+      asset_kind: l.asset_kind || (l.mesh_url ? 'mesh' : 'image'),
+      asset_url: l.asset_url || l.mesh_url || '',
+      mesh_url: l.mesh_url || '',
+      author_display: l.author_display,
+      created_at: l.created_at,
+    });
+  }
+  return json({ ok: true, items });
+}
+
+/** GET /api/market/download/<listing_id> — must own. We don't proxy
+ *  the file (would waste worker CPU on multi-MB GLBs); we just sign a
+ *  short-lived redirect to the R2 public URL. The asset URL itself is
+ *  public so this is "soft DRM" — good enough for MVP. */
+async function handleMarketDownload(req: Request, env: Env, listingId: string): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  // Free listings are downloadable by anyone — skip ownership check.
+  const lTxt = await r2GetText(env, `_market/listings/${listingId}.json`);
+  if (!lTxt) return err(404, 'listing not found');
+  let listing: MarketListing;
+  try { listing = JSON.parse(lTxt); } catch { return err(500, 'listing parse failed'); }
+  if (listing.status !== 'approved') return err(404, 'listing not visible');
+  if (listing.price_cents > 0) {
+    const head = await env.MESHES.head(`_market/owners/${listingId}/${user.id}.json`);
+    if (!head) return err(402, 'purchase required');
+  }
+  const url = listing.asset_url || listing.mesh_url;
+  if (!url) return err(404, 'asset URL missing');
+  // Redirect — browser handles the file download.
+  return new Response(null, { status: 302, headers: { Location: url } });
+}
+
 /** DELETE /api/admin/market/<id> — ADMIN. Hard-remove a listing. */
 async function handleAdminMarketDelete(req: Request, env: Env, id: string): Promise<Response> {
   const guard = await _requireAdmin(req, env);
@@ -1977,6 +2214,13 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   // One-shot top-up — credits added once on checkout.session.completed.
   if (event.type === 'checkout.session.completed') {
     const sess = event.data.object;
+    // Marketplace purchase — different flow: no credits, instead we
+    // record ownership + a sale entry. Detect via metadata.kind set
+    // by handleMarketCheckout.
+    if (sess.metadata?.kind === 'market_purchase') {
+      await _processMarketPurchase(env, sess);
+      return json({ received: true });
+    }
     // Subscriptions handled by invoice.paid below (covers both the
     // first cycle and every renewal). Skip here to avoid double-credit.
     if (sess.metadata?.is_subscription === 'true') return json({ received: true });
@@ -6163,7 +6407,13 @@ export default {
         // ── Marketplace ──
         if (pathname === '/api/market/list'                 && method === 'GET')  return await handleMarketList(req, env);
         if (pathname === '/api/market/publish'              && method === 'POST') return await handleMarketPublish(req, env);
+        if (pathname === '/api/market/checkout'             && method === 'POST') return await handleMarketCheckout(req, env);
+        if (pathname === '/api/market/owned'                && method === 'GET')  return await handleMarketOwned(req, env);
         if (pathname === '/api/admin/market/list'           && method === 'GET')  return await handleAdminMarketList(req, env);
+        {
+          const m = pathname.match(/^\/api\/market\/download\/([A-Za-z0-9_]+)$/);
+          if (m && method === 'GET') return await handleMarketDownload(req, env, m[1]);
+        }
         {
           const m = pathname.match(/^\/api\/market\/([A-Za-z0-9_]+)$/);
           if (m && method === 'GET') return await handleMarketGet(req, env, m[1]);
