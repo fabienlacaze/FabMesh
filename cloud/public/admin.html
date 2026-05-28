@@ -179,6 +179,17 @@
       text-transform: uppercase; font-size: 10px; letter-spacing: 1px;
     }
     th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    /* Users table — fixed column sizing so Status doesn't gap into Actions */
+    #users-table { width:100%; table-layout:auto; border-collapse:collapse; }
+    #users-table th, #users-table td { padding:10px 12px; vertical-align:middle; border-bottom:1px solid var(--border); white-space:nowrap; }
+    /* Email column expands; everything else hugs its content */
+    #users-table th:nth-child(1), #users-table td:nth-child(1) { width:auto; white-space:normal; word-break:break-all; }
+    #users-table th:nth-child(2), #users-table td:nth-child(2) { width:1%; }   /* ID */
+    #users-table th:nth-child(3), #users-table td:nth-child(3) { width:1%; text-align:right; }   /* Credits */
+    #users-table th:nth-child(4), #users-table td:nth-child(4) { width:1%; }   /* Joined */
+    #users-table th:nth-child(5), #users-table td:nth-child(5) { width:1%; text-align:center; }  /* Status */
+    #users-table th:nth-child(6), #users-table td:nth-child(6) { width:1%; text-align:right; }   /* Actions */
+    #users-table td:nth-child(6) .btn { margin-left:6px; }
     .actions {
       display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
       align-items: center;
@@ -468,7 +479,7 @@
             <th class="num">Credits</th>
             <th>Joined</th>
             <th>Status</th>
-            <th></th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody><tr><td colspan="6" style="color:var(--text-2)">Loading…</td></tr></tbody>
