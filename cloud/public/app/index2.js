@@ -6481,31 +6481,88 @@ function _jsLaplacianSmooth(geom, iter, lambda) {
   const pos = result.attributes.position;
   const idx = result.index.array;
   const n = pos.count;
-  // Build adjacency.
-  const neigh = Array.from({ length: n }, () => new Set());
-  for (let i = 0; i < idx.length; i += 3) {
-    const a = idx[i], b = idx[i + 1], c = idx[i + 2];
-    neigh[a].add(b); neigh[a].add(c);
-    neigh[b].add(a); neigh[b].add(c);
-    neigh[c].add(a); neigh[c].add(b);
-  }
+
+  // Mesh-coming-out-of-TRELLIS-2 has UV seams: at every island
+  // boundary the geometry vertex is duplicated so each side can carry
+  // its own UV/normal. If we smooth each duplicate independently the
+  // two copies drift apart and a black gap appears along every seam.
+  // Solution: weld duplicates by 3D position into "groups", smooth at
+  // the group level, then copy the result back into all member
+  // vertices so the seams stay watertight.
   const arr = new Float32Array(pos.array);
+  // Position quantization key — 1e-4 unit precision is finer than any
+  // float drift inside one frame; collisions for genuinely-distinct
+  // vertices are impossibly rare at this scale.
+  const Q = 1e4;
+  const groupOfVertex = new Int32Array(n);
+  const groupKeyToId = new Map();
+  const groupVertices = []; // groupId -> array of vertex indices
+  for (let v = 0; v < n; v++) {
+    const k = (Math.round(arr[v * 3]     * Q) | 0) + ',' +
+              (Math.round(arr[v * 3 + 1] * Q) | 0) + ',' +
+              (Math.round(arr[v * 3 + 2] * Q) | 0);
+    let gid = groupKeyToId.get(k);
+    if (gid === undefined) {
+      gid = groupVertices.length;
+      groupKeyToId.set(k, gid);
+      groupVertices.push([]);
+    }
+    groupOfVertex[v] = gid;
+    groupVertices[gid].push(v);
+  }
+  const G = groupVertices.length;
+
+  // Adjacency at the group level — connects edges across seams.
+  const groupNeigh = Array.from({ length: G }, () => new Set());
+  for (let i = 0; i < idx.length; i += 3) {
+    const ga = groupOfVertex[idx[i]];
+    const gb = groupOfVertex[idx[i + 1]];
+    const gc = groupOfVertex[idx[i + 2]];
+    if (ga !== gb) { groupNeigh[ga].add(gb); groupNeigh[gb].add(ga); }
+    if (gb !== gc) { groupNeigh[gb].add(gc); groupNeigh[gc].add(gb); }
+    if (ga !== gc) { groupNeigh[ga].add(gc); groupNeigh[gc].add(ga); }
+  }
+
+  // One position per group (initial = the position of any member —
+  // they all share it by construction).
+  const groupPos = new Float32Array(G * 3);
+  for (let g = 0; g < G; g++) {
+    const v0 = groupVertices[g][0];
+    groupPos[g * 3]     = arr[v0 * 3];
+    groupPos[g * 3 + 1] = arr[v0 * 3 + 1];
+    groupPos[g * 3 + 2] = arr[v0 * 3 + 2];
+  }
+
+  // Laplacian iterations at the group level.
   for (let it = 0; it < iter; it++) {
-    const next = new Float32Array(arr);
-    for (let v = 0; v < n; v++) {
-      const ns = neigh[v];
+    const next = new Float32Array(groupPos);
+    for (let g = 0; g < G; g++) {
+      const ns = groupNeigh[g];
       if (ns.size === 0) continue;
       let sx = 0, sy = 0, sz = 0;
-      ns.forEach(nb => {
-        sx += arr[nb * 3]; sy += arr[nb * 3 + 1]; sz += arr[nb * 3 + 2];
+      ns.forEach((nb) => {
+        sx += groupPos[nb * 3];
+        sy += groupPos[nb * 3 + 1];
+        sz += groupPos[nb * 3 + 2];
       });
       const k = 1 / ns.size;
-      const ax = sx * k, ay = sy * k, az = sz * k;
-      next[v * 3]     = arr[v * 3]     + lambda * (ax - arr[v * 3]);
-      next[v * 3 + 1] = arr[v * 3 + 1] + lambda * (ay - arr[v * 3 + 1]);
-      next[v * 3 + 2] = arr[v * 3 + 2] + lambda * (az - arr[v * 3 + 2]);
+      next[g * 3]     = groupPos[g * 3]     + lambda * (sx * k - groupPos[g * 3]);
+      next[g * 3 + 1] = groupPos[g * 3 + 1] + lambda * (sy * k - groupPos[g * 3 + 1]);
+      next[g * 3 + 2] = groupPos[g * 3 + 2] + lambda * (sz * k - groupPos[g * 3 + 2]);
     }
-    arr.set(next);
+    groupPos.set(next);
+  }
+
+  // Spread the new positions back to every vertex that belongs to the
+  // group — both sides of every seam now share the same coordinate.
+  for (let g = 0; g < G; g++) {
+    const members = groupVertices[g];
+    const gx = groupPos[g * 3], gy = groupPos[g * 3 + 1], gz = groupPos[g * 3 + 2];
+    for (const v of members) {
+      arr[v * 3] = gx;
+      arr[v * 3 + 1] = gy;
+      arr[v * 3 + 2] = gz;
+    }
   }
   pos.array.set(arr);
   pos.needsUpdate = true;

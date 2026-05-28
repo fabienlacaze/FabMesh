@@ -10,6 +10,22 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-27 (Mesh — Smooth tool : artefacts UV seam)
+
+- **Problème** : user signalait des stries noires le long de toutes
+  les arêtes UV après l'outil Smooth (orc soldier, preview live).
+- **Cause** : TRELLIS-2 duplique chaque vertex à chaque seam UV
+  (chaque côté garde ses UVs/normales). Le Laplacian original les
+  smoothait indépendamment → après quelques itérations les 2 copies
+  divergent légèrement → gap sub-pixel rendu en noir.
+- **Fix `_jsLaplacianSmooth`** : opère désormais au niveau "weld
+  group" (vertices partageant la même position 3D à 1e-4 près).
+  Adjacence construite au niveau group, smoothing au niveau group,
+  position finale écrite à TOUS les membres du group. UVs / normales
+  des duplicates restent intacts.
+
+---
+
 ## 2026-05-27 (Mesh-tool modal viewer fix + MFA UI + UI scrub)
 
 - **Bug viewer 3D dans modal mesh tools (Decimate/Smooth/etc.)** :
