@@ -186,6 +186,8 @@ export default function MarketPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [meUserId, setMeUserId] = useState<string | null>(null);
   const [ratingBusy, setRatingBusy] = useState(false);
+  const [marketDisabled, setMarketDisabled] = useState(false);
+  const [marketDisabledReason, setMarketDisabledReason] = useState<string | null>(null);
 
   // First load
   useEffect(() => {
@@ -208,6 +210,10 @@ export default function MarketPage() {
         if (r.ok) {
           const j = await r.json();
           setListings(j.listings ?? []);
+          if (j.marketplace_disabled) {
+            setMarketDisabled(true);
+            setMarketDisabledReason(j.marketplace_reason || null);
+          }
         }
       } catch {}
       // Owned needs auth; silently 401 for anonymous users.
@@ -493,6 +499,11 @@ export default function MarketPage() {
         </button>
       </div>
 
+      {marketDisabled && (
+        <div style={{ background: 'rgba(244,67,54,0.15)', border: '1px solid var(--err)', color: '#ff6b6b', padding: '10px 14px', borderRadius: 8, marginBottom: 18, fontSize: 13 }}>
+          🔴 <strong>Marketplace temporarily disabled.</strong>{marketDisabledReason ? ` Reason: ${marketDisabledReason}` : ''} Browsing only — purchasing and publishing are paused.
+        </div>
+      )}
       {paidBanner && (
         <div style={{ background: 'rgba(76,175,80,0.15)', border: '1px solid var(--ok)', color: 'var(--ok)', padding: '10px 14px', borderRadius: 8, marginBottom: 18, fontSize: 13 }}>
           ✓ Payment received — your purchase is in the <strong>Owned</strong> tab below.
@@ -583,7 +594,7 @@ export default function MarketPage() {
                   <div style={{ color: 'var(--text-2)', fontSize: 11 }}>
                     {l.user_id ? (
                       <a
-                        href={`/market/author/${l.user_id}`}
+                        href={`/market/author?id=${encodeURIComponent(l.user_id)}`}
                         onClick={(e) => e.stopPropagation()}
                         style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'none' }}
                       >
@@ -684,7 +695,7 @@ export default function MarketPage() {
                 <div style={{ color: 'var(--text-2)', fontSize: 13, marginTop: 4 }}>
                   {selected.user_id ? (
                     <a
-                      href={`/market/author/${selected.user_id}`}
+                      href={`/market/author?id=${encodeURIComponent(selected.user_id)}`}
                       onClick={(e) => e.stopPropagation()}
                       style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'none' }}
                     >
