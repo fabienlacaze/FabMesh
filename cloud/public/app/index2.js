@@ -6589,9 +6589,13 @@ function _jsLaplacianSmooth(geom, iter, lambda) {
 //   red    → the hole is bigger than the cap, left untouched.
 // Caller decides via the live max_hole_size slider, so dragging it
 // shifts loops between red and green in real time.
+//
+// Returns { geometry, helpers, stats: { loops, filled, tooBig, biggest } }
+// so the modal's status line can tell the user exactly what's going on
+// ("0 loops found" = the dark patches are probably texture, not holes).
 function _jsFillHoles(geom, maxHoleSize) {
   if (!geom.index) {
-    return { geometry: geom.clone(), helpers: [] };
+    return { geometry: geom.clone(), helpers: [], stats: { loops: 0, filled: 0, tooBig: 0, biggest: 0 } };
   }
   const posAttr = geom.attributes.position;
   const indices = geom.index.array;
@@ -6714,7 +6718,14 @@ function _jsFillHoles(geom, maxHoleSize) {
   }
   // Render the lines on top of the mesh so they're not z-buried.
   for (const h of helpers) h.renderOrder = 999;
-  return { geometry: result, helpers };
+  // Stats so the modal can surface "0 loops found" (probably texture,
+  // not geometry) vs "5 loops, 2 filled, 3 too big — raise the slider".
+  let filled = 0, tooBig = 0, biggest = 0;
+  for (const loop of loops) {
+    if (loop.length > biggest) biggest = loop.length;
+    if (loop.length <= maxHoleSize) filled++; else tooBig++;
+  }
+  return { geometry: result, helpers, stats: { loops: loops.length, filled, tooBig, biggest } };
 }
 
 // Edge-collapse decimation via three.js SimplifyModifier. Quadric
@@ -6873,14 +6884,25 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Cap mesh holes — green outlines will be filled, red are larger than the cap.',
+    subtitle: 'Cap mesh holes — green outlines will be filled, red are larger than the cap. If nothing highlights, the dark patches are texture/back-faces, not geometry holes.',
     needsImage: false,
     supportsClientApply: true,
     params: [
-      { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 5000, step: 1, default: 100 },
+      { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 20000, step: 10, default: 2000 },
     ],
     build: (vals) => [String(vals.max_hole_size)],
     preview: (geom, vals) => _jsFillHoles(geom, Math.max(3, vals.max_hole_size | 0)),
+    previewStatus: (vals, st) => {
+      const s = st.lastStats;
+      if (!s) return 'Computing…';
+      if (s.loops === 0) {
+        return 'No boundary edges found — the mesh is closed (the dark patches are probably texture or back-faces, not geometry holes).';
+      }
+      if (s.filled === s.loops) {
+        return `Filled ${s.filled} hole${s.filled > 1 ? 's' : ''} (biggest ${s.biggest} edges).`;
+      }
+      return `${s.loops} hole${s.loops > 1 ? 's' : ''} found · ${s.filled} filled (green) · ${s.tooBig} too big (red, biggest ${s.biggest} edges). Raise the slider to fill more.`;
+    },
   },
   center: {
     title: 'Center mesh',
@@ -7077,6 +7099,7 @@ function _mtRunPreview() {
   mtState.vals = vals;
   const fn = mtState.schema.preview;
   _mtClearHelpers();
+  mtState.lastStats = null;
   let allOk = !!fn;
   // Without preview fn, just restore originals (mesh stays static).
   for (const e of mtState.origGeoms) {
@@ -7093,6 +7116,9 @@ function _mtRunPreview() {
       } else if (out && out.geometry && out.geometry.attributes && out.geometry.attributes.position) {
         nextGeom = out.geometry;
         if (Array.isArray(out.helpers)) nextHelpers = out.helpers;
+        // Surface tool-specific stats (e.g. Fill Holes loop count) so
+        // previewStatus() can render them in the status bar.
+        if (out.stats) mtState.lastStats = out.stats;
       }
       if (nextGeom) e.mesh.geometry = nextGeom;
       else allOk = false;
