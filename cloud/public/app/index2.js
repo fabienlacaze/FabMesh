@@ -6266,10 +6266,16 @@ async function renderMeshVersions(p) {
     } else if (p.thumb) {
       thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
     }
-    // Same emissive badge logic as image thumbs: show 💡 when the
-    // mesh's source image has a saved emissive layer in the cache.
-    const meshHasEmissive = (typeof _emissiveLayerHas === 'function')
-      && m.sourceImage && _emissiveLayerHas(m.sourceImage);
+    // Show 💡 when the mesh's source image (or, if missing on cloud,
+    // ANY project image) has a saved emissive layer in the cache. The
+    // fallback chain handles cloud meshes that don't carry a
+    // sourceImage field but were generated from an image with a
+    // saved layer.
+    const meshHasEmissive = (typeof _emissiveLayerHas === 'function') && (
+      (m.sourceImage && _emissiveLayerHas(m.sourceImage))
+      || (p.selectedImagePath && _emissiveLayerHas(p.selectedImagePath))
+      || (p.images || []).some((im) => _emissiveLayerHas(im.path))
+    );
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
@@ -9162,6 +9168,32 @@ async function _peProjectImageLayer(imgPath) {
   const srcCtx = srcCanvas.getContext('2d');
   srcCtx.drawImage(img, 0, 0);
   const srcData = srcCtx.getImageData(0, 0, srcW, srcH).data;
+  // Pre-compute the bbox of non-transparent pixels — for a typical
+  // user, only a small portion of the image carries strokes, so
+  // iterating the WHOLE image was mostly wasted raycasts. We sample
+  // every Nth row/col to find min/max, then only project within that
+  // rectangle (with a small padding).
+  let bbXmin = srcW, bbXmax = 0, bbYmin = srcH, bbYmax = 0;
+  const scanStride = Math.max(1, Math.floor(Math.min(srcW, srcH) / 256));
+  for (let y = 0; y < srcH; y += scanStride) {
+    for (let x = 0; x < srcW; x += scanStride) {
+      if (srcData[(y * srcW + x) * 4 + 3] >= 8) {
+        if (x < bbXmin) bbXmin = x;
+        if (x > bbXmax) bbXmax = x;
+        if (y < bbYmin) bbYmin = y;
+        if (y > bbYmax) bbYmax = y;
+      }
+    }
+  }
+  if (bbXmax < bbXmin || bbYmax < bbYmin) {
+    peState.projecting = false;
+    return false;  // nothing painted
+  }
+  const pad = scanStride * 2;
+  bbXmin = Math.max(0, bbXmin - pad);
+  bbYmin = Math.max(0, bbYmin - pad);
+  bbXmax = Math.min(srcW - 1, bbXmax + pad);
+  bbYmax = Math.min(srcH - 1, bbYmax + pad);
 
   // Set up an orthographic camera positioned at +Z, looking down -Z,
   // sized to encompass the model's XY footprint. This matches how the
@@ -9198,10 +9230,10 @@ async function _peProjectImageLayer(imgPath) {
   const CHUNK_ROWS = Math.max(8, Math.floor(srcH / 16));
   const status = document.getElementById('pe-status');
   try {
-    for (let yStart = 0; yStart < srcH; yStart += stride * CHUNK_ROWS) {
-      const yEnd = Math.min(yStart + stride * CHUNK_ROWS, srcH);
+    for (let yStart = bbYmin; yStart < bbYmax; yStart += stride * CHUNK_ROWS) {
+      const yEnd = Math.min(yStart + stride * CHUNK_ROWS, bbYmax);
       for (let y = yStart; y < yEnd; y += stride) {
-        for (let x = 0; x < srcW; x += stride) {
+        for (let x = bbXmin; x < bbXmax; x += stride) {
           const a = srcData[(y * srcW + x) * 4 + 3];
           if (a < 8) continue;
           const r = srcData[(y * srcW + x) * 4];
@@ -9226,7 +9258,8 @@ async function _peProjectImageLayer(imgPath) {
       // fill, then yield until the next frame.
       peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
       if (status) {
-        const pct = Math.min(100, Math.round((yEnd / srcH) * 100));
+        const span = Math.max(1, bbYmax - bbYmin);
+        const pct = Math.min(100, Math.round(((yEnd - bbYmin) / span) * 100));
         status.textContent = `Projecting image emissive layer onto mesh… ${pct}%`;
       }
       await new Promise((r) => requestAnimationFrame(r));
