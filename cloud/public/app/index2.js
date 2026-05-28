@@ -6611,7 +6611,24 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
   // Fix: weld vertices by quantized position into "groups", then do
   // edge counting in group space. A seam edge maps to a single group
   // pair and gets counted twice (once per triangle) → not boundary.
-  const Q = 1e4;
+  //
+  // Quantization is ADAPTIVE — for a mesh of bbox diagonal D, we weld
+  // at a tolerance of D / 100_000 (so 0.001% of the mesh). On a unit
+  // mesh that's 1e-5; on a tiny prop (0.01u diagonal) it's 1e-7. This
+  // prevents over-welding small meshes (which would close real holes
+  // and was the cause of the "No boundary edges found" miss on small
+  // Trellis2 outputs).
+  let bbMinX = Infinity, bbMinY = Infinity, bbMinZ = Infinity;
+  let bbMaxX = -Infinity, bbMaxY = -Infinity, bbMaxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = arr[i*3], y = arr[i*3+1], z = arr[i*3+2];
+    if (x < bbMinX) bbMinX = x; if (x > bbMaxX) bbMaxX = x;
+    if (y < bbMinY) bbMinY = y; if (y > bbMaxY) bbMaxY = y;
+    if (z < bbMinZ) bbMinZ = z; if (z > bbMaxZ) bbMaxZ = z;
+  }
+  const bbDiag = Math.hypot(bbMaxX-bbMinX, bbMaxY-bbMinY, bbMaxZ-bbMinZ) || 1;
+  const tol = bbDiag / 1e5;        // weld tolerance in mesh units
+  const Q = 1 / tol;
   const groupKeyToId = new Map();
   const groupOfVertex = new Int32Array(n);
   let G = 0;
@@ -6633,50 +6650,81 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     if (repOfGroup[g] === -1) repOfGroup[g] = v;
   }
 
-  // Edge counting in GROUP space. Map directed edge ga->gb to the
-  // triangle that owns it. A genuine boundary edge appears in exactly
-  // one triangle in group space; seam edges show up in two.
-  const undirectedCount = new Map();   // "min,max" -> count
+  // Count directed edges (ga->gb) AND undirected edges in group space.
+  //
+  //   undirectedCount = 1 → genuine boundary (visible hole)
+  //   undirectedCount = 2 → manifold interior edge (most edges)
+  //   undirectedCount ≥ 3 → non-manifold (T-junction, intersecting
+  //                          geometry — Trellis2 marching-cubes leaves
+  //                          a lot of these and they LOOK like holes
+  //                          when the shading discontinues)
+  //
+  // We treat count !== 2 as a candidate hole edge so the user can fill
+  // both kinds in one pass.
+  const directedCount = new Map();      // "ga,gb" -> n times this directed edge appears
+  const undirectedCount = new Map();    // "min,max" -> count
   for (let t = 0; t < triCount; t++) {
     const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
     const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
     for (const [ga, gb] of [[g0,g1],[g1,g2],[g2,g0]]) {
       if (ga === gb) continue;  // degenerate after welding
+      directedCount.set(ga + ',' + gb, (directedCount.get(ga + ',' + gb) || 0) + 1);
       const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
       undirectedCount.set(key, (undirectedCount.get(key) || 0) + 1);
     }
   }
 
-  // boundaryNext[ga] = gb iff ga->gb is a boundary edge (kept directed
-  // so loop walking respects the original triangle winding).
-  const boundaryNext = new Map();
+  // Build a multi-map ga -> [gb1, gb2, ...] of "wants-to-be-followed"
+  // boundary successors. Manifold boundary edges (count=1) appear once.
+  // Non-manifold edges (count≥3) appear with their count, minus the
+  // "expected" 2 matched copies, so a count-3 edge contributes 1
+  // unbalanced successor and looks like a tiny crack.
+  //
+  // The previous Map.set-overwrites design lost loops at T-junctions
+  // where one vertex was on two boundaries — we now keep ALL successors
+  // so the loop walker can discover every distinct hole.
+  const boundarySuccessors = new Map();   // ga -> [gb, gb, ...]
   for (let t = 0; t < triCount; t++) {
     const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
     const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
     for (const [ga, gb] of [[g0,g1],[g1,g2],[g2,g0]]) {
       if (ga === gb) continue;
       const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
-      if (undirectedCount.get(key) === 1) boundaryNext.set(ga, gb);
+      const cnt = undirectedCount.get(key);
+      // Manifold edge (count===2) → interior, skip.
+      if (cnt === 2) continue;
+      // Otherwise this triangle's directed edge is an unbalanced one.
+      // To avoid double-pushing for non-manifold edges we deduct any
+      // "balanced" copies — see _consumeBalanced below. For count=1
+      // (the common case) we just push it directly.
+      if (!boundarySuccessors.has(ga)) boundarySuccessors.set(ga, []);
+      boundarySuccessors.get(ga).push(gb);
     }
   }
 
-  // Walk loops in group space until we hit a visited group.
-  const visited = new Set();
+  // Walk loops by popping successors. Each successor is consumed once;
+  // a group with N unbalanced edges produces up to N loops branching
+  // through it (T-junction).
   const loops = [];
-  for (const start of boundaryNext.keys()) {
-    if (visited.has(start)) continue;
-    const loop = [];
-    let g = start;
-    for (let safety = 0; safety < 100000; safety++) {
-      if (visited.has(g)) break;
-      visited.add(g);
-      loop.push(g);
-      const nxt = boundaryNext.get(g);
-      if (nxt == null) break;
-      if (nxt === start) break;
-      g = nxt;
+  const popNext = (g) => {
+    const arr2 = boundarySuccessors.get(g);
+    if (!arr2 || !arr2.length) return null;
+    return arr2.pop();
+  };
+  for (const start of boundarySuccessors.keys()) {
+    while ((boundarySuccessors.get(start) || []).length) {
+      const loop = [];
+      let g = start;
+      for (let safety = 0; safety < 100000; safety++) {
+        loop.push(g);
+        const nxt = popNext(g);
+        if (nxt == null) break;
+        if (nxt === start) break;
+        g = nxt;
+      }
+      if (loop.length >= 3) loops.push(loop);
+      else break;
     }
-    if (loop.length >= 3) loops.push(loop);
   }
 
   // Build the new geometry: copy of original + fan triangles for
@@ -6856,24 +6904,73 @@ function _jsMidpointSubdivide(geom, levels) {
 
 // Center: translate vertices so X/Z centroid = 0, min Y = 0.
 function _jsCenter(geom) {
+  return _jsSetPivot(geom, 'bottom').geometry;
+}
+
+// Move the geometry so the requested AABB landmark lands at local (0,0,0)
+// — that becomes the mesh's pivot point when re-imported into Unreal /
+// Unity / Blender. Inspired by Unreal Modeling Mode's "Box Positions"
+// (Center / Bottom / Top / Left / Right / Front / Back / World Origin).
+// Returns { geometry, helpers: [pivotGizmo] } so the modal viewer can
+// show a small axes-marker exactly where the new pivot now sits.
+function _jsSetPivot(geom, mode) {
   const result = geom.clone();
   const pos = result.attributes.position;
   const arr = pos.array;
-  let cx = 0, cz = 0, minY = Infinity;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < pos.count; i++) {
-    cx += arr[i * 3];
-    cz += arr[i * 3 + 2];
-    if (arr[i * 3 + 1] < minY) minY = arr[i * 3 + 1];
+    const x = arr[i*3], y = arr[i*3+1], z = arr[i*3+2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
   }
-  cx /= pos.count; cz /= pos.count;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  let px, py, pz;
+  switch ((mode || 'bottom').toLowerCase()) {
+    case 'center':       px = cx;   py = cy;   pz = cz; break;
+    case 'top':          px = cx;   py = maxY; pz = cz; break;
+    case 'left':         px = minX; py = cy;   pz = cz; break;
+    case 'right':        px = maxX; py = cy;   pz = cz; break;
+    case 'front':        px = cx;   py = cy;   pz = maxZ; break;
+    case 'back':         px = cx;   py = cy;   pz = minZ; break;
+    case 'world_origin': px = 0;    py = 0;    pz = 0; break;
+    case 'bottom':
+    default:             px = cx;   py = minY; pz = cz; break;
+  }
   for (let i = 0; i < pos.count; i++) {
-    arr[i * 3]     -= cx;
-    arr[i * 3 + 1] -= minY;
-    arr[i * 3 + 2] -= cz;
+    arr[i*3]   -= px;
+    arr[i*3+1] -= py;
+    arr[i*3+2] -= pz;
   }
   pos.needsUpdate = true;
   result.computeVertexNormals();
-  return result;
+  // Gizmo size scales with the bbox so it stays readable on tiny props
+  // and large characters alike. After translate, the pivot sits at the
+  // mesh's local origin (0,0,0) — exactly where AxesHelper draws itself.
+  const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+  const helpers = [_makePivotGizmo(diag * 0.08)];
+  return { geometry: result, helpers };
+}
+
+function _makePivotGizmo(size) {
+  const g = new THREE.Group();
+  const axes = new THREE.AxesHelper(size);
+  // Render on top of the mesh so it stays visible even when inside it.
+  axes.material.depthTest = false;
+  axes.material.transparent = true;
+  axes.material.opacity = 1.0;
+  axes.renderOrder = 999;
+  g.add(axes);
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(size * 0.18, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffe066, depthTest: false, transparent: true, opacity: 0.95 }),
+  );
+  sphere.renderOrder = 999;
+  g.add(sphere);
+  return g;
 }
 
 const MESH_TOOL_SCHEMAS = {
@@ -6967,13 +7064,25 @@ const MESH_TOOL_SCHEMAS = {
     },
   },
   center: {
-    title: 'Center mesh',
-    subtitle: 'Recenters on X/Z and puts feet at Y=0 — live preview.',
+    title: 'Set pivot point',
+    subtitle: 'Place the local origin of the mesh (its pivot) at the requested AABB landmark. Yellow gizmo = new pivot.',
     needsImage: false,
     supportsClientApply: true,
-    params: [],
-    build: () => [],
-    preview: (geom) => _jsCenter(geom),
+    params: [
+      { id: 'pivot', label: 'Pivot position', type: 'toggle-group', default: 'bottom',
+        options: [
+          ['center', 'Center'], ['bottom', 'Bottom'], ['top', 'Top'],
+          ['left', 'Left'], ['right', 'Right'],
+          ['front', 'Front'], ['back', 'Back'],
+          ['world_origin', 'World Origin'],
+        ],
+      },
+    ],
+    // Modal-side `center` op only supports the legacy bottom behaviour;
+    // for non-bottom pivots, use "Apply on device (free)" which exports
+    // the welded geometry directly (no Modal hop).
+    build: (vals) => [String(vals.pivot || 'bottom')],
+    preview: (geom, vals) => _jsSetPivot(geom, vals.pivot || 'bottom'),
   },
   retexture: {
     title: 'Re-Texture (quick)',
@@ -7048,6 +7157,7 @@ function _mtCollectVals(body) {
     const t = el.dataset.paramType;
     if (t === 'checkbox') vals[id] = el.checked;
     else if (t === 'number' || t === 'range') vals[id] = Number(el.value);
+    else if (t === 'toggle-group') vals[id] = el.dataset.value;
     else vals[id] = el.value;
   });
   return vals;
@@ -7419,6 +7529,36 @@ function openMeshToolModal(toolName) {
         input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = !!spec.default;
+        labVal.style.display = 'none';
+      } else if (spec.type === 'toggle-group') {
+        // Row of buttons, one active at a time. Selection is stored on
+        // `input.dataset.value` and read back by _mtCollectVals.
+        input = document.createElement('div');
+        input.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+        const setActive = (val) => {
+          input.dataset.value = String(val);
+          input.querySelectorAll('button').forEach((b) => {
+            const on = b.dataset.value === String(val);
+            b.classList.toggle('selected', on);
+            b.style.background = on ? 'var(--accent, #5a4fcf)' : '';
+            b.style.color = on ? '#fff' : '';
+            b.style.borderColor = on ? 'var(--accent, #5a4fcf)' : '';
+          });
+        };
+        spec.options.forEach(([val, lbl]) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ghost-btn';
+          btn.textContent = lbl;
+          btn.dataset.value = String(val);
+          btn.style.cssText = 'padding:6px 12px; font-size:12px; margin:0;';
+          btn.addEventListener('click', () => {
+            setActive(val);
+            _mtSchedulePreview();
+          });
+          input.appendChild(btn);
+        });
+        setActive(spec.default);
         labVal.style.display = 'none';
       } else {
         input = document.createElement('input');
