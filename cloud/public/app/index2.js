@@ -7005,13 +7005,16 @@ function _computePivotPoint(geom, mode, ox, oy, oz) {
 // will land without the mesh "jumping" each time they change the
 // preset or drag a slider. The actual translate is deferred to
 // `applyClient` (run by _mtApplyOnDevice at Apply time).
+//
+// We return `geom` (the SAME reference) instead of a clone so the
+// slider feedback is instant — on a 6-submesh mesh, cloning each one
+// on every tick was costing 30-100 ms per drag and produced visible
+// lag between dragging the slider and the gizmo moving.
 function _jsSetPivotPreview(geom, mode, ox, oy, oz) {
   const { pivot, diag } = _computePivotPoint(geom, mode, ox, oy, oz);
   const gizmo = _makePivotGizmo(diag * 0.08);
   gizmo.position.set(pivot[0], pivot[1], pivot[2]);
-  // Return the original geometry untouched + the gizmo at the pivot
-  // location in local space.
-  return { geometry: geom.clone(), helpers: [gizmo] };
+  return { geometry: geom, helpers: [gizmo] };
 }
 
 // APPLY path — actually translate the vertices so the chosen pivot
@@ -7178,6 +7181,9 @@ const MESH_TOOL_SCHEMAS = {
       Number(vals.offset_y) || 0,
       Number(vals.offset_z) || 0,
     ),
+    // Adds a "↺ Reset offsets" button under the params that snaps
+    // every numeric/range slider back to its default value.
+    resetButton: 'Reset offsets',
   },
   retexture: {
     title: 'Re-Texture (quick)',
@@ -7706,6 +7712,30 @@ function openMeshToolModal(toolName) {
       wrap.appendChild(input);
       body.appendChild(wrap);
     });
+  }
+
+  // Optional reset button — snaps every numeric/range param back to
+  // its default. Useful for tools where the user dials in offsets and
+  // wants to clear them in one click.
+  if (schema.resetButton) {
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'ghost-btn';
+    resetBtn.textContent = '↺ ' + schema.resetButton;
+    resetBtn.style.cssText = 'padding:6px 12px; font-size:11px; margin-top:6px; width:auto; align-self:flex-start;';
+    resetBtn.addEventListener('click', () => {
+      schema.params.forEach((spec) => {
+        if (spec.type !== 'range' && spec.type !== 'number') return;
+        const el = body.querySelector(`[data-param-id="${spec.id}"]`);
+        if (!el || spec.default === undefined) return;
+        el.value = String(spec.default);
+        const lab = el.previousElementSibling;
+        const labVal = lab && lab.lastElementChild;
+        if (labVal) labVal.textContent = String(spec.default);
+      });
+      _mtSchedulePreview();
+    });
+    body.appendChild(resetBtn);
   }
 
   // Optional second button: "Apply on this device (free)". Only added
