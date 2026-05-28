@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Feature — Home drag&drop now routes through New Project modal)
+
+- Previous behavior: dropping an image on the app called `API.importImageFile(blobURL)` which silently spawned a project named after the filename stem with no asset type / style / prompt; dropping a mesh called `API.importMesh()` which opened a second file picker and discarded the result. Effectively a UX dead-end for meshes and a confusing one for images.
+- New behavior: a drop stashes the file on `window.__pendingDroppedFile`, opens the New Project modal pre-filled with the filename stem (and a generic prompt). After Create, the file is attached to the freshly-created project: images go through `window.__cloudImg.append(name, [blobURL], 'front')`, meshes get pushed into `proj.meshes` and selected. Cancel clears the pending file.
+- Caveat: dropped meshes use a `blob:` URL — lost on reload. Toast warns the user. A real `/api/upload-mesh` endpoint is still missing.
+- Touched: `cloud/public/app/index2.js` (drop handler, `closeNewProjectModal`, `np-create` handler), `cloud/public/app/styles/index2.css` (`.drop-overlay-active` highlight).
+
+---
+
 ## 2026-05-29 (Hotfix — /market/author crash on empty profile)
 
 - /market/author?id=<uuid> crashed with `Cannot read properties of undefined (reading length)` when the author had no listings or no sales. Defensive normalisation added (Array.isArray fallback to []). Worker also hardened to always emit empty arrays.
