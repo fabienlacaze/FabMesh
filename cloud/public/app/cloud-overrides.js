@@ -213,6 +213,19 @@
     // show by hand.
     installActionCostBadges();
 
+    // For every credit-spending tool modal, inject (1) a credit
+    // balance pill in the top-right corner of the modal card, and
+    // (2) a cost badge inside the primary action button. Centralises
+    // the pattern instead of editing each modal HTML by hand.
+    installModalCreditBadges();
+    // Chain: a spend (handled by the topbar refresh) now also kicks
+    // the modal pills.
+    _wrapTopbarRefresh();
+    // Refresh modal balance pills the first time any tool modal opens
+    // (cheaper than polling) — picks up balance changes from other
+    // tabs/devices the user might have running.
+    _watchModalOpens();
+
     // Pull the live prices set by the admin via /admin > Pricing and
     // overwrite the HTML data-credits attributes + the per-button
     // badges. Without this the UI keeps showing the hardcoded defaults
@@ -502,6 +515,167 @@
     for (const [id, cost] of Object.entries(ACTION_COSTS)) {
       _attachCostBadge(document.getElementById(id), cost);
     }
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Per-tool-modal credit affordances. Every modal that triggers a
+   * paid action gets:
+   *   1. A live "N credits" balance pill anchored in its top-right
+   *      corner (refreshed on open + after any spend via the
+   *      __cloudCreditsRefresh hook).
+   *   2. A cost badge inside its primary action button so the user
+   *      sees the exact price on the action they're about to click.
+   *
+   * Modals already handled by their own JS (variant-modal has a
+   * dynamic per-tab cost, modal-mesh-tool is rebuilt every open) get
+   * the balance pill only — their cost badge is injected by the
+   * existing code path.
+   *
+   * Keep MODAL_CREDIT_CONFIG narrow: only modals whose action spends
+   * a fixed number of credits go here. One-off flows (Face fix,
+   * Remove BG, etc.) keep their pre-existing badge handling.
+   * ────────────────────────────────────────────────────────────── */
+  const MODAL_CREDIT_CONFIG = {
+    'modal-modify-image':      { cost: 'modify',       applyBtn: 'mod-apply' },
+    'modal-multiview-options': { cost: 'multi_view',   applyBtn: 'mv-opt-start' },
+    'modal-auto-inpaint':      { cost: 'auto_inpaint', applyBtn: 'ai-go' },
+    'mask-modal':              { cost: 'mask_inpaint', applyBtn: 'mask-apply' },
+    'modal-resolution':        { cost: 'upscale_image', applyBtn: 'res-upscale', extraBtns: ['res-downscale'] },
+    // variant-modal: dynamic cost handled in index2.js (var-apply-cost-badge).
+    'variant-modal':           { skipCost: true },
+    // modal-mesh-tool: cost badge injected per-tool by index2.js.
+    'modal-mesh-tool':         { skipCost: true },
+    'modal-material-adjust':   { skipCost: true },
+  };
+
+  // Pricing key → numeric default. Lives here so the modal balance/cost
+  // helpers don't have to wait for /api/pricing — they can render
+  // immediately with the default and syncLivePricing rewrites later.
+  const _COST_DEFAULTS = {
+    modify: 2, multi_view: 6, auto_inpaint: 3,
+    mask_inpaint: 3, upscale_image: 2,
+  };
+
+  function _ensureModalBalanceStyle() {
+    if (document.getElementById('cloud-modal-credit-style')) return;
+    const s = document.createElement('style');
+    s.id = 'cloud-modal-credit-style';
+    // .modal-card needs position:relative so the balance pill can
+    // anchor to its top-right corner. We scope the rule so other
+    // .modal-card uses elsewhere aren't affected.
+    s.textContent = `
+      /* Need a positioning context for the absolute balance pill. */
+      .modal-card, .modal-card-wide,
+      #mask-modal > .modal-content,
+      #modal-mesh-tool > .modal-content { position: relative; }
+      .modal-balance-badge {
+        position: absolute;
+        top: 16px;
+        right: 56px;
+        z-index: 2;
+        pointer-events: none;
+      }
+      /* Make primary-btn flex-align so the injected cost badge sits
+         in line with the label (otherwise the badge wraps below). */
+      .modal-actions .primary-btn:has(> .credit-badge),
+      .primary-btn:has(> .credit-badge) {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function _injectModalBalanceBadge(modal) {
+    if (!modal) return;
+    if (modal.querySelector('.modal-balance-badge')) return;
+    // .modal-card / .modal-card-wide is the standard wrapper. Some
+    // older modals (mask-modal, modal-mesh-tool) use .modal-content
+    // instead — falling back to firstElementChild covers both.
+    const card = modal.querySelector('.modal-card, .modal-card-wide, .modal-content')
+              || modal.firstElementChild;
+    if (!card) return;
+    const pill = document.createElement('span');
+    pill.className = 'credit-badge lg modal-balance-badge';
+    pill.textContent = '…';
+    pill.title = 'Your current credit balance';
+    card.appendChild(pill);
+  }
+
+  function _injectModalCostBadge(btnId, cost) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    if (btn.querySelector('.credit-badge')) return;
+    const badge = document.createElement('span');
+    badge.className = 'credit-badge';
+    badge.dataset.cost = String(cost);
+    badge.textContent = String(cost);
+    btn.appendChild(document.createTextNode(' '));
+    btn.appendChild(badge);
+  }
+
+  function installModalCreditBadges() {
+    _ensureCostBadgeStyle();
+    _ensureModalBalanceStyle();
+    for (const [modalId, conf] of Object.entries(MODAL_CREDIT_CONFIG)) {
+      const modal = document.getElementById(modalId);
+      if (!modal) continue;
+      _injectModalBalanceBadge(modal);
+      if (conf.skipCost) continue;
+      const cost = _COST_DEFAULTS[conf.cost] ?? 1;
+      if (conf.applyBtn) _injectModalCostBadge(conf.applyBtn, cost);
+      (conf.extraBtns || []).forEach((id) => _injectModalCostBadge(id, cost));
+    }
+    // First refresh — fills the "…" with the actual balance. The
+    // refresh function is exported on window so the existing topbar
+    // refresh updates the modal pills too.
+    _refreshModalBalances();
+  }
+
+  // Re-applies modal balance pills to any new value. Called from
+  // __cloudCreditsRefresh so spending a credit updates topbar AND
+  // every visible modal pill at once.
+  let _lastKnownBalance = null;
+  async function _refreshModalBalances() {
+    try {
+      const r = await fetch('/api/me', { credentials: 'include' });
+      if (!r.ok) return;
+      const j = await r.json();
+      const credits = j?.user?.credits;
+      if (typeof credits !== 'number') return;
+      _lastKnownBalance = credits;
+      document.querySelectorAll('.modal-balance-badge').forEach((el) => {
+        el.textContent = `${credits} credit${credits === 1 ? '' : 's'}`;
+      });
+    } catch { /* network blip — leave previous values visible */ }
+  }
+  // Lazy hook: any code that mutates the topbar pill should also kick
+  // the modal balances. Wraps the existing refresh function so we
+  // don't lose the original behaviour.
+  function _wrapTopbarRefresh() {
+    const existing = window.__cloudCreditsRefresh;
+    window.__cloudCreditsRefresh = async function () {
+      if (typeof existing === 'function') await existing();
+      _refreshModalBalances();
+    };
+  }
+
+  // Watch all configured modals for hidden→visible transitions and
+  // refresh the balance pill at that moment. Cheap (single class
+  // attribute observer per modal) and matches user expectation —
+  // they see a fresh number every time they open a paid tool.
+  function _watchModalOpens() {
+    const modalIds = Object.keys(MODAL_CREDIT_CONFIG);
+    modalIds.forEach((id) => {
+      const modal = document.getElementById(id);
+      if (!modal) return;
+      const obs = new MutationObserver(() => {
+        if (!modal.classList.contains('hidden')) _refreshModalBalances();
+      });
+      obs.observe(modal, { attributes: true, attributeFilter: ['class'] });
+    });
   }
 
   /* ──────────────────────────────────────────────────────────────────
