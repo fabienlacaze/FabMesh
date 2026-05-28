@@ -6656,7 +6656,16 @@ async function renderMeshVersions(p) {
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!await customConfirm(`Delete mesh v${p.meshes.length - 1 - i}? This cannot be undone.`, 'Delete mesh version')) return;
-      await API.deleteMesh(m.filename);
+      // Cloud needs the Supabase job UUID, not the cosmetic filename
+      // (filename strips down to e.g. "orc_soldier_trellis2_xxxxx"
+      // which never matches a uuid → silent 404). Desktop accepts
+      // either — passing m.id when available keeps both paths happy.
+      const r = await API.deleteMesh(m.id || m.jobId || m.filename);
+      if (r && r.success === false && r.error) {
+        if (typeof customError === 'function') customError(r.error, 'Delete failed');
+        else console.error('[deleteMesh] failed:', r.error);
+        return;
+      }
       await reloadCurrentProject();
     });
     strip.appendChild(t);
