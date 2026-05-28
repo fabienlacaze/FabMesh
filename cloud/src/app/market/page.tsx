@@ -431,17 +431,25 @@ function MarketPageInner() {
         rating_avg: o.rating_avg, rating_count: o.rating_count,
       }))
     : tab === 'mine'
-    ? myListings.filter((m) => kindMatch(m.kind)).map((m) => ({
-        id: m.listing_id, title: m.title, description: m.description,
-        price_cents: m.price_cents, currency: m.currency, licence: m.licence,
-        asset_kind: m.kind, asset_type: m.asset_type,
-        asset_url: m.asset_url, mesh_url: m.mesh_url,
-        author_display: m.author_display, user_id: m.user_id,
-        created_at: m.created_at,
-        downloads: 0,
-        rating_avg: m.rating_avg, rating_count: m.rating_count,
-      }))
+    ? myListings
+        .filter((m) => m.status !== 'rejected')
+        .filter((m) => kindMatch(m.kind))
+        .map((m) => ({
+          id: m.listing_id, title: m.title, description: m.description,
+          price_cents: m.price_cents, currency: m.currency, licence: m.licence,
+          asset_kind: m.kind, asset_type: m.asset_type,
+          asset_url: m.asset_url, mesh_url: m.mesh_url,
+          author_display: m.author_display, user_id: m.user_id,
+          created_at: m.created_at,
+          downloads: 0,
+          rating_avg: m.rating_avg, rating_count: m.rating_count,
+        }))
     : filtered;
+
+  // Visible "Mine" count excludes rejected listings — the rejection reason
+  // is already delivered via the 📬 Inbox, so the visible Rejected card is
+  // redundant. Used for both the Mine pill badge and the count summary.
+  const visibleMineCount = myListings.filter((m) => m.status !== 'rejected').length;
 
   // Quick lookup for status badges on the "Mine" tab.
   const mineById = new Map(myListings.map((m) => [m.listing_id, m]));
@@ -620,9 +628,9 @@ function MarketPageInner() {
                 {owned.length}
               </span>
             )}
-            {p === 'mine' && myListings.length > 0 && (
+            {p === 'mine' && visibleMineCount > 0 && (
               <span style={{ background: 'var(--accent)', color: '#fff', borderRadius: 999, padding: '0 7px', fontSize: 11, fontWeight: 700 }}>
-                {myListings.length}
+                {visibleMineCount}
               </span>
             )}
           </button>
