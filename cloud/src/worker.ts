@@ -1241,17 +1241,36 @@ async function handleAdminContactList(req: Request, env: Env): Promise<Response>
   const adminCheck = await _requireAdmin(req, env);
   if (adminCheck) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
-  const list = await env.MESHES.list({ prefix: '_meta/contact/', limit: 1000 });
-  const items: Array<Record<string, unknown>> = [];
-  for (const obj of list.objects) {
-    try {
-      const text = await r2GetText(env, obj.key);
-      if (!text) continue;
-      items.push(JSON.parse(text));
-    } catch {}
+  try {
+    // Paginate — R2's list cap is 1000 per call and big inboxes will
+    // hit that; loop with cursor until done. Also: exclude the
+    // counter folder which shares the prefix _meta/contact_count/.
+    const items: Array<Record<string, unknown>> = [];
+    let cursor: string | undefined = undefined;
+    do {
+      const page = await env.MESHES.list({ prefix: '_meta/contact/', limit: 1000, cursor });
+      for (const obj of page.objects) {
+        // Skip anything that isn't a JSON message file under the
+        // exact prefix (R2 can list pseudo-folders too).
+        if (!obj.key.startsWith('_meta/contact/') || !obj.key.endsWith('.json')) continue;
+        try {
+          const text = await r2GetText(env, obj.key);
+          if (!text) continue;
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object') items.push(parsed);
+        } catch (parseErr) {
+          // Log but don't 500 — one corrupt file shouldn't break the list.
+          console.warn('[admin/contact] parse failed for', obj.key, parseErr);
+        }
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    items.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return json({ ok: true, messages: items });
+  } catch (e) {
+    console.error('[admin/contact] list failed:', e);
+    return err(500, 'contact list failed: ' + (e instanceof Error ? e.message : String(e)));
   }
-  items.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  return json({ ok: true, messages: items });
 }
 
 /** POST /api/admin/contact-messages/<id>/read — flip the read flag. */
