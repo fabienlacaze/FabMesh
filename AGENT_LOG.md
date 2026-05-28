@@ -10,6 +10,25 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Market — hide rejected listings from author Mine tab)
+
+- /market Mine tab no longer displays rejected listings. The rejection reason is already delivered via 📬 Inbox at the moment of rejection.
+- The Mine pill count + "N listings" summary also exclude rejected.
+- Worker side untouched — /api/me/published-assets still returns every status; filter is purely UI.
+
+---
+
+## 2026-05-29 (Mesh Resolution — cap 4096 until upstream supports it cleanly)
+
+- 4096 produces heavy corruption (large black patches + bleached areas — typical UV stretching artifact). Root cause: the source mesh's UV unwrap is baked at 2K, so re-baking the texture at 4K stretches a 2K layout to 4K and the model invents detail along UV seams. Even a perfect retex backend cannot fix it without re-unwrapping at 4K resolution.
+- Capped the Resolution tool dropdown at 2048 on both cloud (`cloud/public/app/index2.js` MESH_TOOL_SCHEMAS.retexture) and desktop (`src/renderer/index2.js` same schema). 2048 is now the max option.
+- Also removed the 4096 option from the legacy `ws-3d-quality` dropdown in `cloud/public/app/index.html` + `src/renderer/index2.html` (hidden row used by non-Trellis2 engines — kept consistent so the user never sees a 4K option that corrupts).
+- Worker (`cloud/src/worker.ts handleMeshOp`) now rejects any `target_resolution`/`tex_res`/`texture_size`/`resolution` > 2048 with a clear 400 message — protects against direct API calls bypassing the UI.
+- Tooltip on the select labels it "Texture resolution (4K coming soon)" and the subtitle explicitly says higher resolution is capped because of the 2K UV unwrap, so users understand why.
+- **To re-enable 4096 in the future**: restore the dropdown options AND raise `MAX_TEX_RES` in `handleMeshOp` AND ensure the Modal `retex_swap` backend (or the upstream Trellis2 mesh generator) writes the UV unwrap at a 4K-friendly resolution. Without that the corruption returns.
+
+---
+
 ## 2026-05-29 (Marketplace — download forces attachment via worker proxy)
 
 - Marketplace download buttons now hit /api/market/download/<id> which proxies the asset bytes through the worker with Content-Disposition: attachment. Browser downloads instead of opening inline (the cross-origin R2 URL stripped the HTML `download` attribute and the previous 302 redirect kept the same cross-origin problem).
