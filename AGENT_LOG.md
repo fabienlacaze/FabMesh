@@ -10,6 +10,16 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market v4.3 — self-purchase block + cancel propagation + landing nav + crash fix)
+
+- Self-purchase blocked. Frontend hides Add to cart / detail-modal Buy for the seller of a listing and shows a "Your listing" pill instead. addToCart is also no-op for own listings. Backend handleMarketCheckout rejects 400 if listing.user_id === user.id.
+- /api/me parsing fix: meUserId now reads j.user.id (correct shape per handleMe) with fallback to j.id / j.user_id.
+- Admin cancel really propagates: align supabase status name between admin handler and user-side poller; poller branches on the canonical status and completes the local job entry with "Cancelled by admin" so the modal stops spinning.
+- Landing page: removed "Check my PC" from header; added "Marketplace" link pointing to /market.
+- Fixed client-side exception on /market. (Top cause from audit + defensive fix applied.)
+
+---
+
 ## 2026-05-28 (Admin cancel — short-circuit handleJob on terminal Supabase status)
 
 - **Bug** : quand un admin cliquait "Stop" sur un job en cours (admin.html
