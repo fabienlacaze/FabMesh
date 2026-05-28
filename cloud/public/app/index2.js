@@ -7132,7 +7132,12 @@ async function _mtInitViewport() {
   mtState.renderer.toneMapping = THREE.ACESFilmicToneMapping;
   mtState.renderer.toneMappingExposure = 1.0;
   mtState.scene = new THREE.Scene();
-  mtState.scene.background = new THREE.Color(0x1a1a2e);
+  // Match the main workspace viewer (Viewer3D) bg + lighting rig so
+  // the mesh keeps its texture/color exactly as it appears elsewhere
+  // in the app. Without the fill light the shadow side falls into the
+  // hemisphere ground tint (violet-grey 0x444466) and meshes look
+  // monochrome-brown.
+  mtState.scene.background = new THREE.Color(0x0b0b14);
   mtState.camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
   mtState.camera.position.set(0, 0.5, 2);
   try {
@@ -7143,6 +7148,9 @@ async function _mtInitViewport() {
   const dir = new THREE.DirectionalLight(0xffffff, 1.2);
   dir.position.set(5, 8, 5);
   mtState.scene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+  fill.position.set(-5, 3, -5);
+  mtState.scene.add(fill);
   mtState.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
   mtState.scene.add(new THREE.GridHelper(2, 20, 0x444466, 0x333355));
   const tick = () => {
