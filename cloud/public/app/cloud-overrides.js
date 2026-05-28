@@ -392,7 +392,19 @@
   async function _pollModalStatus() {
     try {
       const r = await fetch('/api/modal-status', { credentials: 'include' });
-      if (!r.ok) return;
+      if (!r.ok) {
+        // Fail-safe: status endpoint unreachable/erroring → assume warm
+        // so the cold-start hint doesn't get stuck on forever.
+        window.__modalWarm = true;
+        try {
+          console.log('[modalStatus]', {
+            warm: window.__modalWarm,
+            expectedSeconds: window.__modalExpectedSeconds,
+            responseOk: r.ok,
+          });
+        } catch (_) {}
+        return;
+      }
       const d = await r.json();
       const io = d?.image_op || {};
       window.__modalWarm = !!io.warm;
@@ -400,10 +412,27 @@
         ? (io.expected_seconds_warm || 30)
         : (io.expected_seconds_cold || 150);
       window.__modalSecondsSinceLastSuccess = io.seconds_since_last_success;
+      try {
+        console.log('[modalStatus]', {
+          warm: window.__modalWarm,
+          expectedSeconds: window.__modalExpectedSeconds,
+          responseOk: r.ok,
+        });
+      } catch (_) {}
       // Notify any listener (AI tool modals can update their pill).
       try { window.dispatchEvent(new CustomEvent('modal-status', { detail: io })); }
       catch (_) {}
-    } catch (_) { /* ignore */ }
+    } catch (_) {
+      // Network/parse failure → same fail-safe as non-OK.
+      window.__modalWarm = true;
+      try {
+        console.log('[modalStatus]', {
+          warm: window.__modalWarm,
+          expectedSeconds: window.__modalExpectedSeconds,
+          responseOk: false,
+        });
+      } catch (_e) {}
+    }
   }
 
   function installModalStatusPoll() {

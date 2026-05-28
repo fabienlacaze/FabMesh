@@ -10,6 +10,14 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (New categories Avion/Bateau/Animal + cold-start hint cap)
+
+- Three new asset categories (Avion, Bateau, Animal) with default Description prompts and multi-view back-prompts wired in the worker (cloud + desktop).
+- Cold-start hint in Job Details modal capped to the first 60s of a job (avoids permanent display when Modal status endpoint is unreachable).
+- _pollModalStatus now defaults window.__modalWarm to true on fetch failure (fail-safe = no hint instead of permanent hint). Added [modalStatus] console.log for diagnostics.
+
+---
+
 ## 2026-05-29 (Admin clickables + Publish button false-positive)
 
 - Admin Users tab: Email column linked to `/market/author?id=<user_id>` (opens public profile in new tab).
