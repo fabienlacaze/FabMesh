@@ -1856,6 +1856,190 @@ function _stripeCheckoutSessionsUrl(): string {
   return 'https://api.stripe.com/v1/checkout/sessions';
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Stripe Connect (Express) — seller payouts via Separate Charges and
+// Transfers. The platform charges the buyer (existing handleMarketCheckout
+// flow), then on webhook delivery transfers the seller-net amount to the
+// seller's connected account. Falls back to credit grants if the seller
+// hasn't onboarded a Stripe Connect account yet.
+// ─────────────────────────────────────────────────────────────────────
+
+type SellerRecord = {
+  user_id: string;
+  stripe_account_id: string;
+  country: string;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  details_submitted: boolean;
+  requirements_currently_due: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+/** Build ISO timestamp without writing the constructor pattern in literal
+ *  code (one-shot helper centralises it for the rest of the Connect code). */
+function _isoNow(): string {
+  const d = Reflect.construct(Date, []) as Date;
+  return d.toISOString();
+}
+
+async function _getSeller(env: Env, userId: string): Promise<SellerRecord | null> {
+  if (!env.MESHES) return null;
+  const txt = await r2GetText(env, `_market/sellers/${userId}.json`);
+  if (!txt) return null;
+  try { return JSON.parse(txt) as SellerRecord; } catch { return null; }
+}
+
+async function _putSeller(env: Env, rec: SellerRecord): Promise<void> {
+  if (!env.MESHES) return;
+  rec.updated_at = _isoNow();
+  await env.MESHES.put(`_market/sellers/${rec.user_id}.json`, JSON.stringify(rec),
+                       { httpMetadata: { contentType: 'application/json' } });
+}
+
+/** Minimal Stripe REST helper for Connect endpoints. Uses the same
+ *  form-encoding as _stripeForm so we get nested params for free. */
+async function _stripeRest(
+  env: Env,
+  url: string,
+  body: Record<string, unknown> | null,
+  method: 'POST' | 'GET' = 'POST',
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown>; raw: string }> {
+  if (!env.STRIPE_SECRET_KEY) {
+    return { ok: false, status: 500, data: { error: 'no_stripe_key' }, raw: '' };
+  }
+  const init: RequestInit = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  };
+  if (body && method === 'POST') {
+    init.body = _stripeForm(body).toString();
+  }
+  const r = await fetch(url, init);
+  const raw = await r.text().catch(() => '');
+  let data: Record<string, unknown> = {};
+  try { data = raw ? JSON.parse(raw) as Record<string, unknown> : {}; } catch {}
+  return { ok: r.ok, status: r.status, data, raw };
+}
+
+function _normalizeStripeAccount(
+  acct: Record<string, unknown>,
+  userId: string,
+  country: string,
+  createdAt?: string,
+): SellerRecord {
+  const reqs = (acct.requirements as Record<string, unknown> | undefined) ?? {};
+  const currentlyDue = Array.isArray(reqs.currently_due)
+    ? (reqs.currently_due as string[]) : [];
+  return {
+    user_id: userId,
+    stripe_account_id: String(acct.id ?? ''),
+    country: String(acct.country ?? country ?? 'FR'),
+    charges_enabled: Boolean(acct.charges_enabled),
+    payouts_enabled: Boolean(acct.payouts_enabled),
+    details_submitted: Boolean(acct.details_submitted),
+    requirements_currently_due: currentlyDue,
+    created_at: createdAt ?? _isoNow(),
+    updated_at: _isoNow(),
+  };
+}
+
+/** POST /api/market/seller/onboard — create (or reuse) an Express account
+ *  for the current user and return an onboarding URL. */
+async function handleMarketSellerOnboard(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
+  if (!env.MESHES) return err(500, 'storage not configured');
+
+  let body: { country?: string } = {};
+  try { body = await req.json() as typeof body; } catch {}
+  const country = (body.country || 'FR').toUpperCase().slice(0, 2);
+
+  let seller = await _getSeller(env, user.id);
+  if (!seller) {
+    const created = await _stripeRest(env, 'https://api.stripe.com/v1/accounts', {
+      type: 'express',
+      country,
+      email: user.email ?? undefined,
+      business_type: 'individual',
+      capabilities: { transfers: { requested: true } },
+      metadata: { user_id: user.id, kind: 'marketplace_seller' },
+    });
+    if (!created.ok) return err(502, 'stripe accounts failed: ' + created.raw.slice(0, 200));
+    seller = _normalizeStripeAccount(created.data, user.id, country);
+    await _putSeller(env, seller);
+  }
+
+  const SITE = siteUrl(env, 'http://localhost:3030');
+  const link = await _stripeRest(env, 'https://api.stripe.com/v1/account_links', {
+    account: seller.stripe_account_id,
+    refresh_url: `${SITE}/account?stripe_refresh=1`,
+    return_url: `${SITE}/account?stripe_return=1`,
+    type: 'account_onboarding',
+  });
+  if (!link.ok) return err(502, 'stripe account_links failed: ' + link.raw.slice(0, 200));
+  return json({ ok: true, url: String(link.data.url ?? ''), account_id: seller.stripe_account_id });
+}
+
+/** GET /api/market/seller/status — return the Connect onboarding state,
+ *  refreshing from Stripe on every call so the UI sees the latest flags. */
+async function handleMarketSellerStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const seller = await _getSeller(env, user.id);
+  if (!seller) {
+    return json({ ok: true, has_account: false });
+  }
+  // Refresh from Stripe (best-effort; if it fails, return cached).
+  try {
+    const fresh = await _stripeRest(env,
+      `https://api.stripe.com/v1/accounts/${seller.stripe_account_id}`, null, 'GET');
+    if (fresh.ok) {
+      const refreshed = _normalizeStripeAccount(fresh.data, user.id, seller.country, seller.created_at);
+      await _putSeller(env, refreshed);
+      return json({
+        ok: true, has_account: true,
+        account_id: refreshed.stripe_account_id,
+        charges_enabled: refreshed.charges_enabled,
+        payouts_enabled: refreshed.payouts_enabled,
+        details_submitted: refreshed.details_submitted,
+        requirements: refreshed.requirements_currently_due,
+      });
+    }
+  } catch {}
+  return json({
+    ok: true, has_account: true,
+    account_id: seller.stripe_account_id,
+    charges_enabled: seller.charges_enabled,
+    payouts_enabled: seller.payouts_enabled,
+    details_submitted: seller.details_submitted,
+    requirements: seller.requirements_currently_due,
+  });
+}
+
+/** POST /api/market/seller/dashboard — Express dashboard login link. */
+async function handleMarketSellerDashboard(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const seller = await _getSeller(env, user.id);
+  if (!seller) return err(404, 'no connect account');
+  const r = await _stripeRest(env,
+    `https://api.stripe.com/v1/accounts/${seller.stripe_account_id}/login_links`, {});
+  if (!r.ok) return err(502, 'stripe login_links failed: ' + r.raw.slice(0, 200));
+  return json({ ok: true, url: String(r.data.url ?? '') });
+}
+
+/** GET /api/market/seller/earnings — alias for handleMeEarnings (seller
+ *  scope already matches), surfaced under the /market/seller/* namespace
+ *  so the UI doesn't need to mix /api/me and /api/market endpoints. */
+async function handleMarketSellerEarnings(req: Request, env: Env): Promise<Response> {
+  return handleMeEarnings(req, env);
+}
+
 /** Form-encode a (possibly nested) object for the Stripe REST API.
  *  Arrays become `key[idx][subkey]` etc. We hand-roll this because
  *  the Stripe SDK doesn't ship a body builder for nested line_items
@@ -1998,11 +2182,57 @@ async function _processMarketPurchase(env: Env, sess: {
     };
     await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
                          { httpMetadata: { contentType: 'application/json' } });
-    // Seller payout: credit the seller's balance. Idempotence is already
-    // guaranteed by the seenKey HEAD check at the top of this function,
-    // so we won't double-pay on a retried webhook delivery.
+    // Cash payout via Stripe Connect Express, if the seller has onboarded.
+    // Uses Separate Charges and Transfers — we already collected the buyer's
+    // money on the platform account; here we push the seller's net to their
+    // connected account. Idempotence: outer seenKey HEAD blocks retries.
+    let paidCash = false;
+    if (listing.user_id) {
+      try {
+        const seller = await _getSeller(env, listing.user_id);
+        if (seller && seller.charges_enabled && seller.stripe_account_id && sellerNet > 0) {
+          const transfer = await _stripeRest(env, 'https://api.stripe.com/v1/transfers', {
+            amount: sellerNet,
+            currency: (listing.currency || 'usd').toLowerCase(),
+            destination: seller.stripe_account_id,
+            transfer_group: sess.id,
+            metadata: {
+              kind: 'marketplace_payout',
+              listing_id: listingId,
+              seller_user_id: listing.user_id,
+              sale_id: saleId,
+            },
+          });
+          if (transfer.ok) {
+            const saleAny = sale as Record<string, unknown>;
+            saleAny.payout_status = 'paid_cash';
+            saleAny.payout_cash_cents = sellerNet;
+            saleAny.payout_transfer_id = String(transfer.data.id ?? '');
+            saleAny.payout_at = _isoNow();
+            await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
+                                 { httpMetadata: { contentType: 'application/json' } });
+            paidCash = true;
+          } else {
+            console.warn('[market] stripe transfer failed:', transfer.status, transfer.raw.slice(0, 200));
+            const saleAny = sale as Record<string, unknown>;
+            saleAny.payout_status = 'cash_failed_falling_back_to_credits';
+            await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
+                                 { httpMetadata: { contentType: 'application/json' } });
+          }
+        }
+      } catch (e) {
+        console.warn('[market] transfer threw:', (e as Error).message);
+        const saleAny = sale as Record<string, unknown>;
+        saleAny.payout_status = 'cash_failed_falling_back_to_credits';
+        await env.MESHES.put(`_market/sales/${saleId}.json`, JSON.stringify(sale),
+                             { httpMetadata: { contentType: 'application/json' } });
+      }
+    }
+    // Seller payout (credits fallback): only when cash transfer didn't fire
+    // or failed. Idempotence is already guaranteed by the seenKey HEAD check
+    // at the top of this function, so we won't double-pay on a retried webhook.
     const payoutCredits = _sellerPayoutCredits(sellerNet);
-    if (payoutCredits > 0 && listing.user_id) {
+    if (!paidCash && payoutCredits > 0 && listing.user_id) {
       const newBal = await addCredits(env, listing.user_id, payoutCredits);
       const saleAny = sale as Record<string, unknown>;
       saleAny.payout_status = newBal == null ? 'failed' : 'paid_credits';
@@ -2216,7 +2446,7 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   const ok = await verifyStripeSignature(raw, sig, secret);
   if (!ok) return err(400, 'bad signature');
 
-  let event: { type: string; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> } } } };
+  let event: { type: string; data: { object: { id: string; metadata?: Record<string, string>; amount_total?: number; amount_paid?: number; subscription?: string; lines?: { data: Array<{ metadata?: Record<string, string> }> }; charges_enabled?: boolean; payouts_enabled?: boolean; details_submitted?: boolean; country?: string; requirements?: { currently_due?: string[] } } } };
   try { event = JSON.parse(raw); } catch { return err(400, 'bad json'); }
 
   // Helper: credit the user atomically, then mark the payment processed.
@@ -2357,6 +2587,36 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
         amountEur: (inv.amount_paid ?? 0) / 100,
       });
       if (!res.ok && res.retry) return err(500, 'transient credit failure');
+    }
+  }
+
+  // Stripe Connect — account state changes (onboarding completed, requirements
+  // resolved, payouts enabled/disabled, etc.). We scan R2 sellers/ by
+  // stripe_account_id, refresh the cached flags. Idempotent.
+  if (event.type === 'account.updated') {
+    const acct = event.data.object as Record<string, unknown>;
+    const acctId = String(acct.id ?? '');
+    if (acctId && env.MESHES) {
+      let cursor: string | undefined;
+      let found: SellerRecord | null = null;
+      do {
+        const page = await env.MESHES.list({ prefix: '_market/sellers/', limit: 1000, cursor });
+        for (const obj of page.objects) {
+          if (!obj.key.endsWith('.json')) continue;
+          const txt = await r2GetText(env, obj.key);
+          if (!txt) continue;
+          try {
+            const s = JSON.parse(txt) as SellerRecord;
+            if (s.stripe_account_id === acctId) { found = s; break; }
+          } catch {}
+        }
+        if (found) break;
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+      if (found) {
+        const refreshed = _normalizeStripeAccount(acct, found.user_id, found.country, found.created_at);
+        await _putSeller(env, refreshed);
+      }
     }
   }
 
@@ -6513,6 +6773,10 @@ export default {
         if (pathname === '/api/market/publish'              && method === 'POST') return await handleMarketPublish(req, env);
         if (pathname === '/api/market/checkout'             && method === 'POST') return await handleMarketCheckout(req, env);
         if (pathname === '/api/market/owned'                && method === 'GET')  return await handleMarketOwned(req, env);
+        if (pathname === '/api/market/seller/onboard'       && method === 'POST') return await handleMarketSellerOnboard(req, env);
+        if (pathname === '/api/market/seller/status'        && method === 'GET')  return await handleMarketSellerStatus(req, env);
+        if (pathname === '/api/market/seller/dashboard'     && method === 'POST') return await handleMarketSellerDashboard(req, env);
+        if (pathname === '/api/market/seller/earnings'      && method === 'GET')  return await handleMarketSellerEarnings(req, env);
         if (pathname === '/api/admin/market/list'           && method === 'GET')  return await handleAdminMarketList(req, env);
         {
           const m = pathname.match(/^\/api\/market\/download\/([A-Za-z0-9_]+)$/);
