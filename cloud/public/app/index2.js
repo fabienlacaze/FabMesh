@@ -922,6 +922,10 @@ function openNewProjectModal() {
 }
 function closeNewProjectModal() {
   document.getElementById('modal-new-project').classList.add('hidden');
+  // If the modal was opened by a file drop and the user cancels, drop the
+  // pending file so a later manual "New project" click does not silently
+  // pull it in.
+  if (window.__pendingDroppedFile) window.__pendingDroppedFile = null;
 }
 document.getElementById('btn-new-project').addEventListener('click', openNewProjectModal);
 document.getElementById('project-search')?.addEventListener('input', () => renderProjectsGrid());
@@ -979,6 +983,38 @@ document.getElementById('np-create').addEventListener('click', async () => {
   if (atSel) { atSel.value = assetType; atSel.dispatchEvent(new Event('change')); }
   const asSel = document.getElementById('ws-asset-style');
   if (asSel) asSel.value = assetStyle;
+
+  // If the modal was opened by a drag&drop, attach the dropped file to
+  // the freshly-created project so it appears immediately in the right
+  // step. Blob URLs do not survive a reload — warn the user for mesh
+  // drops (no upload endpoint yet).
+  const pending = window.__pendingDroppedFile;
+  window.__pendingDroppedFile = null;
+  if (pending && pending.file) {
+    try {
+      const blobURL = URL.createObjectURL(pending.file);
+      if (pending.kind === 'image') {
+        try {
+          window.__cloudImportedFiles = window.__cloudImportedFiles || {};
+          window.__cloudImportedFiles[blobURL] = pending.file;
+        } catch (_) {}
+        try { window.__cloudImg?.append?.(proj.name, [blobURL], 'front'); } catch (_) {}
+        proj.images = proj.images || [];
+        proj.images.unshift({ path: blobURL, kind: 'front', mtime: Date.now() });
+        try { await populateWorkspace(proj); } catch (_) {}
+        try { showToast(`Imported "${pending.name}"`, 'success'); } catch (_) {}
+      } else if (pending.kind === 'mesh') {
+        proj.meshes = proj.meshes || [];
+        proj.meshes.unshift({ path: blobURL, filename: pending.name, size: pending.file.size, mtime: Date.now() });
+        proj.selectedMeshPath = blobURL;
+        proj.previewMeshPath = blobURL;
+        try { await populateWorkspace(proj); } catch (_) {}
+        try { showToast(`Imported "${pending.name}" (session only — re-import after reload).`, 'info', 6000); } catch (_) {}
+      }
+    } catch (err) {
+      try { showToast('Import failed: ' + (err?.message || err), 'error', 5000); } catch (_) { alert('Import failed: ' + err); }
+    }
+  }
 });
 
 // ===========================================================
@@ -15038,13 +15074,30 @@ document.getElementById('ws-rig-reskin-btn')?.addEventListener('click', async ()
 
 // ============================================================
 // DRAG & DROP (image / mesh files)
+// ----------------------------------------------------------
+// Dropping a file onto the window opens the New Project modal
+// pre-filled with the file's stem. After the user confirms,
+// the file is attached to the freshly created project.
+// __pendingDroppedFile carries the file across the modal.
 // ============================================================
 const dropOverlay = document.getElementById('drop-overlay');
 let dragCounter = 0;
+window.__pendingDroppedFile = null;
+
+function _detectDroppedKind(file) {
+  if (!file) return null;
+  const name = file.name || '';
+  const mime = file.type || '';
+  if (mime.startsWith('image/') || /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(name)) return 'image';
+  if (/\.(glb|gltf|obj|stl|ply|fbx)$/i.test(name)) return 'mesh';
+  return null;
+}
+
 window.addEventListener('dragenter', (e) => {
   if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
     dragCounter++;
     dropOverlay.classList.remove('hidden');
+    dropOverlay.classList.add('drop-overlay-active');
   }
 });
 window.addEventListener('dragleave', (e) => {
@@ -15052,31 +15105,36 @@ window.addEventListener('dragleave', (e) => {
   if (dragCounter <= 0) {
     dragCounter = 0;
     dropOverlay.classList.add('hidden');
+    dropOverlay.classList.remove('drop-overlay-active');
   }
 });
 window.addEventListener('dragover', (e) => { e.preventDefault(); });
 window.addEventListener('drop', async (e) => {
   e.preventDefault();
+  e.stopPropagation();
   dragCounter = 0;
   dropOverlay.classList.add('hidden');
+  dropOverlay.classList.remove('drop-overlay-active');
   const files = Array.from(e.dataTransfer?.files || []);
   if (files.length === 0) return;
   const f = files[0];
-  const path_ = f.path || '';
-  const isImage = /\.(png|jpg|jpeg|webp)$/i.test(f.name);
-  const isMesh = /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f.name);
-  if (!isImage && !isMesh) {
-    alert('Unsupported file type. Drop a .png, .jpg, .glb, .fbx, .obj, .stl or .ply');
+  const kind = _detectDroppedKind(f);
+  if (!kind) {
+    try { showToast('Unsupported file. Drop a .png/.jpg/.webp image or a .glb/.gltf/.obj/.stl/.ply/.fbx mesh.', 'error', 5000); }
+    catch (_) { alert('Unsupported file type.'); }
     return;
   }
+  // Stash for the modal's Create handler to pick up.
+  window.__pendingDroppedFile = { file: f, kind, name: f.name };
+  // Open the New Project modal pre-filled with the file's stem.
+  try { openNewProjectModal(); } catch (_) {}
   try {
-    if (isImage && API.importImageFile) {
-      await API.importImageFile(path_);
-    } else if (isMesh && API.importMesh) {
-      await API.importMesh();
-    }
-    await refreshProjectsPage();
-  } catch (err) { alert('Import failed: ' + err.message); }
+    const stem = String(f.name || '').replace(/\.[^.]+$/, '') || 'project';
+    const nameInput = document.getElementById('np-name');
+    if (nameInput) nameInput.value = stem;
+    const promptInput = document.getElementById('np-prompt');
+    if (promptInput && !promptInput.value) promptInput.value = `Imported from ${f.name}.`;
+  } catch (_) {}
 });
 
 // ============================================================
