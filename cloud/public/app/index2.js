@@ -5727,7 +5727,18 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         }
         if (paintState.tool === 'fill') {
           mgr.pushUndo();
-          _paintFloodFill(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance);
+          // paint.net-style live re-fill: snapshot the canvas BEFORE
+          // we splat colour, store the click point + active mgr. While
+          // the user stays in Fill mode, dragging the Tolerance /
+          // Color / Opacity sliders restores the snapshot and re-runs
+          // the fill at the same point so they can dial in the value.
+          const rx = Math.round(x), ry = Math.round(y);
+          paintState.lastFill = {
+            x: rx, y: ry,
+            mgr,
+            snap: ctx.getImageData(0, 0, mgr.w, mgr.h),
+          };
+          _paintFloodFill(ctx, rx, ry, paintState.color, paintState.tolerance);
           return false;
         }
         if (paintState.tool === 'wand') {
@@ -5856,6 +5867,9 @@ const _paintTools = ['sel-rect', 'sel-lasso', 'wand', 'pen', 'spray', 'ink', 'li
 const _selectionTools = ['sel-rect', 'sel-lasso', 'wand'];
 _paintTools.forEach(tool => {
   document.getElementById('paint-tool-' + tool)?.addEventListener('click', () => {
+    // Switching away from Fill commits the last fill — clear the
+    // snapshot so changing sliders later doesn't try to live-refill.
+    if (paintState.tool === 'fill' && tool !== 'fill') paintState.lastFill = null;
     paintState.tool = tool;
     _paintTools.forEach(t => {
       document.getElementById('paint-tool-' + t)?.classList.toggle('tool-active', t === tool);
@@ -5881,7 +5895,20 @@ document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
   document.getElementById('paint-opacity-val').textContent = e.target.value + '%';
 });
 
-// Tolerance (for Fill / Wand) — re-run wand selection live
+// Restore the snapshot we took before the last flood-fill and re-run
+// the fill at the same point with the current tolerance/color/opacity.
+// paint.net-style live tuning — works as long as the user stays in
+// the Fill tool. Moving to a different tool clears `lastFill` and the
+// previous fill becomes committed.
+function _paintLiveRefillIfFill() {
+  const lf = paintState.lastFill;
+  if (!lf || paintState.tool !== 'fill' || !_paintMgr) return;
+  _paintMgr.ctx.putImageData(lf.snap, 0, 0);
+  _paintFloodFill(_paintMgr.ctx, lf.x, lf.y, paintState.color, paintState.tolerance);
+}
+
+// Tolerance (for Fill / Wand) — re-run wand selection live OR re-run
+// the last flood-fill if the Fill tool is active.
 document.getElementById('paint-tolerance')?.addEventListener('input', (e) => {
   paintState.tolerance = parseInt(e.target.value);
   document.getElementById('paint-tolerance-val').textContent = e.target.value;
@@ -5889,11 +5916,13 @@ document.getElementById('paint-tolerance')?.addEventListener('input', (e) => {
     _paintWandSelect(_paintMgr.ctx, paintState.wandLastPoint.x, paintState.wandLastPoint.y, paintState.tolerance);
     _paintShowSelection();
   }
+  _paintLiveRefillIfFill();
 });
 
-// Color picker
+// Color picker — also re-runs the last Fill with the new colour.
 document.getElementById('paint-color')?.addEventListener('input', (e) => {
   paintState.color = e.target.value;
+  _paintLiveRefillIfFill();
 });
 
 // Eyedropper (pick from image)
@@ -11898,19 +11927,29 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
 // can push/complete jobs in the same queue the rest of the app uses.
 // Because index2.js is an ES module, plain `function foo()` declarations
 // don't land on `window`; we wire them up explicitly below after definition.
-function pushJob(name, onCancel, params, expectedMsOverride) {
+function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride) {
   const id = ++state.jobIdCounter;
   const kind = inferKind(name);
   const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
     ? expectedMsOverride
     : (JOB_EXPECTED_MS[kind] || 60000);
+  // startedAt can be overridden when resuming a job that began before a
+  // page reload — lets the popup show ELAPSED measured from the real
+  // start instead of "0s" right after refresh.
+  const startedAt = (typeof startedAtOverride === 'number' && startedAtOverride > 0)
+    ? startedAtOverride
+    : Date.now();
+  // Seed the initial progress higher when resuming so the bar reflects
+  // the time already spent (capped at 90, leaves room for the bridge).
+  const elapsedNow = Math.max(0, Date.now() - startedAt);
+  const initialProgress = Math.min(90, Math.max(5, 5 + (elapsedNow / expected) * 85));
   const job = {
     id,
     name,
     kind,
-    progress: 5,
+    progress: initialProgress,
     status: 'running',
-    startedAt: Date.now(),
+    startedAt,
     expectedMs: expected,
     onCancel: onCancel || null,
     tickTimer: null,
@@ -11967,7 +12006,7 @@ function completeJob(id, success, errorMessage) {
 // - complete: mark a job done/error + optional error message
 // - render: force a UI redraw of the jobs panel
 window.fabmeshJobs = {
-  push: (name, onCancel, params, expectedMs) => pushJob(name, onCancel, params, expectedMs),
+  push: (name, onCancel, params, expectedMs, startedAt) => pushJob(name, onCancel, params, expectedMs, startedAt),
   enqueue: (kind, name, runFn) => enqueueJob(kind, name, runFn),
   complete: (id, success, errorMessage) => completeJob(id, success, errorMessage),
   render: () => renderJobs(),

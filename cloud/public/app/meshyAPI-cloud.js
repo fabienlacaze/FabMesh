@@ -181,11 +181,15 @@
       // popup just won't show. Better than aborting the resume entirely.
     }
     for (const entry of fresh) {
+      // Pass entry.ts as the 5th arg so the popup's ELAPSED counter
+      // reflects the time since the REAL job start (not just the time
+      // since the page reload).
       const job = jobs ? jobs.push(
         entry.name || `Generate 3D: ${entry.projectName || ''}`,
         null,
         { ...(entry.params || {}), Resumed: 'after page reload' },
         entry.expectedMs || 150_000,
+        entry.ts,
       ) : null;
       // Don't await — let all resumed jobs run in parallel.
       (async () => {
