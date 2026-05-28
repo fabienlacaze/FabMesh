@@ -1230,9 +1230,24 @@
         margin-bottom: 8px;
         position: relative;
       }
-      .cloud-inbox-item .icon { font-size: 22px; flex: 0 0 28px; line-height: 1.2; }
+      .cloud-inbox-item .thumb-box {
+        flex: 0 0 60px; width: 60px; height: 60px;
+        border-radius: 6px; overflow: hidden;
+        background: rgba(0,0,0,0.35);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 28px; line-height: 1;
+      }
+      .cloud-inbox-item .thumb-box img,
+      .cloud-inbox-item .thumb-box model-viewer {
+        width: 100%; height: 100%; object-fit: cover;
+        display: block;
+      }
       .cloud-inbox-item .body { flex: 1; min-width: 0; }
       .cloud-inbox-item .title { font-weight: 600; margin-bottom: 4px; }
+      .cloud-inbox-item .title a {
+        color: var(--accent, #ffc107); text-decoration: none; cursor: pointer;
+      }
+      .cloud-inbox-item .title a:hover { text-decoration: underline; }
       .cloud-inbox-item .msg   { font-size: 13px; color: #bbb; word-wrap: break-word; }
       .cloud-inbox-item .date  { font-size: 11px; color: #888; margin-top: 6px; }
       .cloud-inbox-item .new-pill {
@@ -1295,11 +1310,36 @@
   function _inboxIconFor(kind) {
     switch (kind) {
       case 'sale':
-      case 'approved':  return '🛒';
-      case 'rejected':  return '⚠';
-      case 'reply':     return '💬';
-      default:          return '📬';
+      case 'market_sale':
+      case 'approved':
+      case 'market_approved': return '🛒';
+      case 'rejected':
+      case 'market_rejected': return '⚠';
+      case 'reply':           return '💬';
+      default:                return '📬';
     }
+  }
+
+  function _inboxKindTitle(kind) {
+    switch (kind) {
+      case 'market_approved':
+      case 'approved': return 'Listing approved';
+      case 'market_rejected':
+      case 'rejected': return 'Listing rejected';
+      case 'market_sale':
+      case 'sale':     return 'Sale';
+      case 'reply':    return 'Reply from support';
+      default:         return '';
+    }
+  }
+
+  function _escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function _escAttr(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
   function _formatInboxDate(iso) {
@@ -1340,18 +1380,56 @@
         const row = document.createElement('div');
         row.className = 'cloud-inbox-item';
         const isUnread = !it.read;
+
+        // ── Thumbnail / icon ────────────────────────────────────────
+        // Notifications carrying asset_url + asset_kind render a 60×60
+        // preview (image or <model-viewer>); reply / contextless notifs
+        // fall back to the legacy emoji icon centered in the same box.
+        let thumbHtml = `<div class="thumb-box">${_inboxIconFor(it.kind)}</div>`;
+        if (it.asset_url) {
+          if (it.asset_kind === 'image') {
+            thumbHtml = `<div class="thumb-box"><img src="${_escAttr(it.asset_url)}" alt=""></div>`;
+          } else if (it.asset_kind === 'mesh') {
+            // model-viewer is already loaded globally for the marketplace.
+            thumbHtml = `<div class="thumb-box"><model-viewer src="${_escAttr(it.asset_url)}" camera-controls disable-zoom interaction-prompt="none" auto-rotate ar="false" reveal="auto"></model-viewer></div>`;
+          }
+        }
+
+        // ── Title (clickable when we know which job to open) ────────
+        const kindTitle = _inboxKindTitle(it.kind);
+        const displayTitle = it.subject || it.title || kindTitle || '(no subject)';
+        const navKinds = new Set([
+          'market_approved', 'market_rejected', 'market_sale',
+          // Tolerate legacy short kinds (audit notes some sites emit just
+          // 'approved' / 'rejected' / 'sale').
+          'approved', 'rejected', 'sale',
+        ]);
+        const canNavigate = !!it.job_id && navKinds.has(it.kind);
+        const titleInner = canNavigate
+          ? `<a data-inbox-nav="1" data-job-id="${_escAttr(it.job_id)}" data-asset-kind="${_escAttr(it.asset_kind || '')}">${_escHtml(displayTitle)}</a>`
+          : _escHtml(displayTitle);
+
         row.innerHTML = `
-          <div class="icon">${_inboxIconFor(it.kind)}</div>
+          ${thumbHtml}
           <div class="body">
-            <div class="title"></div>
+            <div class="title">${titleInner}</div>
             <div class="msg"></div>
             <div class="date"></div>
           </div>
           ${isUnread ? '<span class="new-pill">NEW</span>' : ''}
         `;
-        row.querySelector('.title').textContent = it.title || it.subject || '(no subject)';
-        row.querySelector('.msg').textContent   = it.message || it.body || it.reply_body || '';
-        row.querySelector('.date').textContent  = _formatInboxDate(it.created_at || it.replied_at || '');
+        row.querySelector('.msg').textContent  = it.message || it.body || it.reply_body || '';
+        row.querySelector('.date').textContent = _formatInboxDate(it.created_at || it.replied_at || '');
+
+        if (canNavigate) {
+          const a = row.querySelector('a[data-inbox-nav="1"]');
+          if (a) a.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            try { overlay.remove(); } catch {}
+            const fn = window.__navigateToInboxAsset;
+            if (typeof fn === 'function') fn(it.job_id, it.asset_kind);
+          });
+        }
         list.appendChild(row);
       });
     }
