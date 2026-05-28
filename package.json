@@ -109,8 +109,7 @@
       ],
       "showNameOnTiles": true,
       "addAutoLaunchExtension": false,
-      "backgroundColor": "#0b0b14",
-      "assetsDir": "build/appx"
+      "backgroundColor": "#0b0b14"
     },
     "publish": [
       {
