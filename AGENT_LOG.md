@@ -10,6 +10,13 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Admin Marketplace — status re-flip + clickable author)
+
+- Admin can now flip a listing's status from any state: approved → reject, rejected → approve, on top of the existing pending workflow. The worker handlers `handleAdminMarketApprove` / `handleAdminMarketReject` already set status unconditionally, so this was purely a UI gate (`_renderMarketListings` in `cloud/public/admin.html`).
+- Author display name on each admin card is now a link to `/market/author?id=<user_id>` (opens in a new tab). Falls back to plain text if `user_id` is missing on legacy listings.
+
+---
+
 ## 2026-05-29 (Market — hide rejected listings from author Mine tab)
 
 - /market Mine tab no longer displays rejected listings. The rejection reason is already delivered via 📬 Inbox at the moment of rejection.
