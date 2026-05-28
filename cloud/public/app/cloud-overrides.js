@@ -1355,6 +1355,13 @@
         box-shadow: 0 2px 6px rgba(0,0,0,0.5);
         z-index: 4; pointer-events: auto;
         cursor: help;
+        text-decoration: none;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+      }
+      a.published-badge { cursor: pointer; }
+      a.published-badge:hover {
+        transform: scale(1.1);
+        box-shadow: 0 3px 9px rgba(0,0,0,0.6);
       }
       .published-badge.pending  { background:#ffb84d; color:#1a1a1a; }
       .published-badge.approved { background:#4caf50; color:#fff; }
@@ -1379,9 +1386,27 @@
       const existing = card.querySelector('.published-badge');
       existing.className = 'published-badge ' + meta.status;
       existing.title = 'Marketplace: ' + meta.status;
+      // Upgrade/refresh href if listing_id is now known.
+      if (existing.tagName === 'A' && meta.listing_id) {
+        existing.href = '/market?item=' + encodeURIComponent(meta.listing_id);
+      }
       return;
     }
-    const b = document.createElement('span');
+    // If we know the listing_id, make the badge a clickable anchor that
+    // opens the marketplace listing in a new tab. Otherwise fall back to
+    // a non-clickable <span> (defensive — no broken /market?item= link).
+    let b;
+    if (meta.listing_id) {
+      b = document.createElement('a');
+      b.href = '/market?item=' + encodeURIComponent(meta.listing_id);
+      b.target = '_blank';
+      b.rel = 'noopener';
+      // Card grids have their own click handler — stop propagation so
+      // clicking the badge doesn't also select the card behind it.
+      b.addEventListener('click', (e) => { e.stopPropagation(); });
+    } else {
+      b = document.createElement('span');
+    }
     b.className = 'published-badge ' + meta.status;
     b.textContent = '🛒';
     b.title = 'Marketplace: ' + meta.status;

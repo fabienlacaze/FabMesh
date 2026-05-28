@@ -238,6 +238,14 @@
         -1px  1px 0 #1a1a1a, 1px  1px 0 #1a1a1a,
         0 1px 2px rgba(0,0,0,0.5);
     }
+    /* Deep-link flash for /admin#market-<listing_id>: applied for ~2.5s
+       to the matching card so the admin can spot which listing the
+       Images/Meshes badge linked them to. */
+    .market-highlight {
+      outline: 3px solid #ffc107;
+      outline-offset: 4px;
+      transition: outline-color .4s;
+    }
   </style>
   <!-- Google's model-viewer web component (three.js + GLTFLoader bundled).
        Lets us preview GLBs inline in the admin without sending users
@@ -1355,19 +1363,32 @@
     function _marketPillHtml(info) {
       if (!info) return '';
       const status = String(info.status || '').toLowerCase();
-      const base = 'position:absolute; top:8px; right:8px; font-size:11px; padding:3px 8px; border-radius:999px; color:#fff; font-weight:600; pointer-events:none; z-index:2;';
+      // Wrap the pill in an anchor when we know the listing id so the
+      // admin can jump straight from the Images/Meshes modal to the
+      // Marketplace card. The click handler is delegated below.
+      const lid = info.listing_id ? String(info.listing_id) : '';
+      const wrapStart = lid
+        ? `<a href="#market-${escapeHtml(lid)}" class="market-pill-link" data-listing-id="${escapeHtml(lid)}" title="Open in Marketplace" style="position:absolute; top:8px; right:8px; z-index:2; pointer-events:auto; cursor:pointer; text-decoration:none;">`
+        : '';
+      const wrapEnd = lid ? `</a>` : '';
+      // When wrapped, drop the absolute-positioning + pointer-events:none
+      // from the pill itself (the anchor takes care of position) so the
+      // click reaches the <a>.
+      const base = lid
+        ? 'display:inline-block; font-size:11px; padding:3px 8px; border-radius:999px; color:#fff; font-weight:600;'
+        : 'position:absolute; top:8px; right:8px; font-size:11px; padding:3px 8px; border-radius:999px; color:#fff; font-weight:600; pointer-events:none; z-index:2;';
       if (status === 'approved') {
         const cents = Number(info.price_cents || 0);
         const label = cents > 0
           ? ('Live on /market — $' + (cents / 100).toFixed(2))
           : 'Live on /market — Free';
-        return `<span style="${base} background:var(--ok); border:1px solid var(--ok);">🛒 ${escapeHtml(label)}</span>`;
+        return `${wrapStart}<span style="${base} background:var(--ok); border:1px solid var(--ok);">🛒 ${escapeHtml(label)}</span>${wrapEnd}`;
       }
       if (status === 'pending') {
-        return `<span style="${base} background:var(--warn); border:1px solid var(--warn); color:#1a1a1a;">🛒 Pending review</span>`;
+        return `${wrapStart}<span style="${base} background:var(--warn); border:1px solid var(--warn); color:#1a1a1a;">🛒 Pending review</span>${wrapEnd}`;
       }
       if (status === 'rejected') {
-        return `<span style="${base} background:var(--err); border:1px solid var(--err);">🛒 Rejected</span>`;
+        return `${wrapStart}<span style="${base} background:var(--err); border:1px solid var(--err);">🛒 Rejected</span>${wrapEnd}`;
       }
       return '';
     }
@@ -2416,7 +2437,7 @@
              <button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`
           : `<button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`;
         return `
-          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;">
+          <div data-listing-id="${escapeHtml(l.id)}" style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
               <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${kind === 'image' ? '🖼 ' : '🧊 '}${escapeHtml(l.title)}</div>
               <div style="background:${l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)'}; color:${l.price_cents === 0 ? 'var(--ok)' : '#ffcc66'}; padding:2px 8px; border-radius:9px; font-size:11px; font-weight:700; white-space:nowrap;">${escapeHtml(price)}</div>
@@ -2505,6 +2526,33 @@
         loadMarketListings();
       } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
     }
+    // Scroll a market card with the given listing id into view and
+    // flash it. Tries up to ~3 s in case loadMarketListings is still in
+    // flight (model-viewer init is slow on large lists). If the listing
+    // exists but is hidden by the current filter (e.g. user is on
+    // "Pending" tab but card is approved), switch to the matching
+    // filter button before searching.
+    function _scrollFlashMarketCard(listingId) {
+      if (!listingId) return;
+      const want = String(listingId);
+      const target = (_allMarketListings || []).find((l) => String(l.id) === want);
+      if (target && target.status && target.status !== _marketFilter) {
+        const btn = document.querySelector(`.market-filter-btn[data-mf="${target.status}"]`);
+        if (btn) btn.click();
+      }
+      const tStart = Date.now();
+      const tryFind = () => {
+        const card = document.querySelector(`[data-listing-id="${want}"]`);
+        if (card && typeof card.scrollIntoView === 'function') {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.add('market-highlight');
+          setTimeout(() => card.classList.remove('market-highlight'), 2500);
+          return;
+        }
+        if (Date.now() - tStart < 3000) setTimeout(tryFind, 150);
+      };
+      tryFind();
+    }
     document.addEventListener('DOMContentLoaded', () => {
       const tab = document.querySelector('.tab[data-tab="market"]');
       tab?.addEventListener('click', loadMarketListings);
@@ -2516,6 +2564,32 @@
           _renderMarketListings();
         });
       });
+      // Delegated click: any market status pill rendered on an Images
+      // or Meshes admin card. Closes the modal, switches to the
+      // Marketplace tab, and scrolls/flashes the matching listing.
+      document.addEventListener('click', (e) => {
+        const link = e.target.closest?.('a.market-pill-link');
+        if (!link) return;
+        e.preventDefault();
+        const id = link.getAttribute('data-listing-id');
+        if (!id) return;
+        const overlay = document.getElementById('meshes-overlay');
+        if (overlay) overlay.style.display = 'none';
+        const mTab = document.querySelector('.tab[data-tab="market"]');
+        if (mTab) mTab.click();
+        history.replaceState(null, '', '#market-' + id);
+        _scrollFlashMarketCard(id);
+      });
+      // Deep-link from a fresh page load: /admin#market-<listing_id>.
+      // Click the Marketplace tab (which triggers loadMarketListings)
+      // then poll for the card.
+      const h = String(window.location.hash || '');
+      if (h.startsWith('#market-')) {
+        const id = h.slice('#market-'.length);
+        const mTab = document.querySelector('.tab[data-tab="market"]');
+        if (mTab) mTab.click();
+        if (id) _scrollFlashMarketCard(id);
+      }
     });
     // Auto-load when the Messages tab is opened.
     document.addEventListener('DOMContentLoaded', () => {
