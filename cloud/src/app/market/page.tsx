@@ -188,6 +188,7 @@ export default function MarketPage() {
   const [ratingBusy, setRatingBusy] = useState(false);
   const [marketDisabled, setMarketDisabled] = useState(false);
   const [marketDisabledReason, setMarketDisabledReason] = useState<string | null>(null);
+  const [flashListingId, setFlashListingId] = useState<string | null>(null);
 
   // First load
   useEffect(() => {
@@ -299,6 +300,28 @@ export default function MarketPage() {
 
   const cartItems = listings.filter((l) => cart.includes(l.id));
   const cartTotal = cartItems.reduce((sum, l) => sum + l.price_cents, 0);
+
+  // Click a cart row → close the drawer, open the listing detail
+  // modal, and flash the corresponding grid card for 1s. If the
+  // listing isn't on the current tab (e.g. we're in Owned but the
+  // listing is paid-not-owned), still open the detail modal — the
+  // grid flash is best-effort.
+  function openListingFromCart(l: Listing) {
+    setCartOpen(false);
+    setTab('all');           // make sure the card lives in the current view
+    setKindFilter('all');    // and isn't hidden by the kind filter
+    setSelected(l);
+    setFlashListingId(l.id);
+    // Scroll the matching card into view if it exists in the DOM.
+    setTimeout(() => {
+      const el = document.querySelector(`[data-listing-card="${l.id}"]`);
+      if (el && typeof (el as HTMLElement).scrollIntoView === 'function') {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 30);
+    // Auto-clear the flash after 1s.
+    setTimeout(() => setFlashListingId((cur) => cur === l.id ? null : cur), 1000);
+  }
 
   async function checkout() {
     if (!cart.length) return;
@@ -569,13 +592,22 @@ export default function MarketPage() {
             const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
             const url = l.asset_url || l.mesh_url;
             const owns = ownedIds.has(l.id);
+            const isFlashing = flashListingId === l.id;
             return (
               <div
                 key={l.id}
+                data-listing-card={l.id}
                 onClick={() => setSelected(l)}
-                style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', display: 'flex', flexDirection: 'column', transition: 'transform 0.15s, border-color 0.15s' }}
-                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.borderColor = ''; }}
+                style={{
+                  background: 'var(--bg-1)',
+                  border: isFlashing ? '2px solid #ffc107' : '1px solid var(--border)',
+                  boxShadow: isFlashing ? '0 0 0 4px rgba(255,193,7,0.35)' : 'none',
+                  borderRadius: 10, overflow: 'hidden', cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column',
+                  transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.25s',
+                }}
+                onMouseEnter={(e) => { if (!isFlashing) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'var(--accent)'; } }}
+                onMouseLeave={(e) => { if (!isFlashing) { e.currentTarget.style.transform = ''; e.currentTarget.style.borderColor = ''; } }}
               >
                 {kind === 'image' ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -784,7 +816,14 @@ export default function MarketPage() {
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
                   {cartItems.map((l) => (
-                    <div key={l.id} style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <div
+                      key={l.id}
+                      onClick={() => openListingFromCart(l)}
+                      style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+                      title="Click to inspect on the marketplace"
+                    >
                       {l.asset_kind === 'image' ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={l.asset_url || l.mesh_url} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, background: '#0a0a0e' }} />
@@ -796,7 +835,11 @@ export default function MarketPage() {
                         <div style={{ color: 'var(--text-2)', fontSize: 11 }}>{LICENCE_LABELS[l.licence] || l.licence}</div>
                         <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{formatPrice(l.price_cents, l.currency)}</div>
                       </div>
-                      <button onClick={() => removeFromCart(l.id)} className="ghost-btn" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--err)' }}>✕</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeFromCart(l.id); }}
+                        className="ghost-btn"
+                        style={{ padding: '4px 10px', fontSize: 12, color: 'var(--err)' }}
+                      >✕</button>
                     </div>
                   ))}
                 </div>

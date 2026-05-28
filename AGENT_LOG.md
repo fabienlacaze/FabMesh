@@ -10,6 +10,30 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market v4.2 — killswitch dans Services + cart clic + cold-start hint)
+
+- **Killswitch déplacé** : auparavant dans le tab Marketplace, le user
+  l'a déplacé dans le tab **Services** à côté de Modal/Stripe/Site
+  pour cohérence. 4e card "🛒 Marketplace" avec toggle. Route conservée
+  (`/api/admin/market/killswitch`) — `toggleService('market', enabled)`
+  reroute vers cet endpoint avec inversion sémantique (UI enabled=true
+  = service ON ; backend killswitch.enabled=true = service KILLED).
+  Prompt pour la raison au kill.
+- **Cart drawer** : clic sur une ligne d'article → ferme le drawer,
+  ouvre le detail modal du listing, scroll-into-view la card de la
+  grille, et flash 1s en jaune (border 2px #ffc107 + shadow).
+  Bouton ✕ remove garde `stopPropagation` pour ne pas trigger l'open.
+- **Modal cold-start hint** : le texte "First run after idle loads
+  ~7 GB into VRAM" reste pour les jobs local GPU. Pour les jobs cloud
+  Modal en cold start (`window.__modalWarm === false`), un message
+  dédié remplace : "Warming up cloud AI ❄️ — Modal Labs is loading
+  the model... cold starts take ~N min". ETA dynamique depuis
+  `window.__modalExpectedSeconds`. Visible pendant TOUTE la durée du
+  cold start (pas juste les 15 premières secondes comme local).
+- Build clean, Worker 23bab992 deployed.
+
+---
+
 ## 2026-05-28 (Market v4.1 — static-export fix + killswitch)
 
 - **Build fix** : `/market/author/[id]` était une dynamic route mais
