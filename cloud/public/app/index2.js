@@ -120,6 +120,94 @@ try {
   window.openProject = openProject;
 } catch (_) {}
 
+// ────────────────────────────────────────────────────────────────
+// Inbox → project deep-link helper
+// ────────────────────────────────────────────────────────────────
+// Called from cloud-overrides.js openInboxPopup when the user clicks a
+// market_approved / market_rejected / market_sale notification that
+// carries the originating job_id. We:
+//   1. close the inbox overlay (if still in the DOM)
+//   2. scan state.projects for an image / mesh / rig whose id matches
+//   3. open that project and flash the matching version-thumb
+//   4. fall back to a toast if the project isn't loaded yet
+(function installInboxAssetNav() {
+  // One-shot CSS injection for the flash animation.
+  if (!document.getElementById('inbox-flash-style')) {
+    const st = document.createElement('style');
+    st.id = 'inbox-flash-style';
+    st.textContent = `
+      .inbox-flash {
+        outline: 2px solid #ffc107 !important;
+        box-shadow: 0 0 0 4px rgba(255, 193, 7, 0.4) !important;
+        transition: outline 200ms ease, box-shadow 200ms ease;
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function _matchesJobId(item, jobId) {
+    if (!item) return false;
+    const s = String(jobId);
+    return String(item.jobId || '') === s
+        || String(item.job_id || '') === s
+        || String(item.id || '') === s;
+  }
+
+  function _findProjectByJobId(jobId) {
+    const projects = (window.state && Array.isArray(window.state.projects))
+      ? window.state.projects : [];
+    for (const p of projects) {
+      const buckets = [p.images, p.meshes, p.rigs];
+      for (const arr of buckets) {
+        if (!Array.isArray(arr)) continue;
+        for (const it of arr) {
+          if (_matchesJobId(it, jobId)) return p;
+        }
+      }
+    }
+    return null;
+  }
+
+  window.__navigateToInboxAsset = function __navigateToInboxAsset(jobId, _kind) {
+    // 1) Close any lingering inbox overlay (cloud-overrides removes it on
+    // click too, but this is defensive in case the helper is invoked from
+    // elsewhere later).
+    try {
+      document.querySelectorAll('.cloud-inbox-overlay').forEach((n) => n.remove());
+    } catch {}
+
+    if (jobId == null || jobId === '') {
+      if (typeof window.showToast === 'function') {
+        window.showToast('Notification has no asset reference.', 'info', 3000);
+      }
+      return;
+    }
+
+    const proj = _findProjectByJobId(jobId);
+    if (!proj) {
+      if (typeof window.showToast === 'function') {
+        window.showToast('Project not loaded — try refreshing the home page.', 'info', 4000);
+      }
+      return;
+    }
+
+    // 2) Open the project (handles setCurrentProject + showPage + populateWorkspace).
+    try { window.openProject(proj); } catch (_) {}
+
+    // 3) After populateWorkspace finishes, scroll & flash the matching thumb.
+    setTimeout(() => {
+      try {
+        const sel = `[data-job-id="${CSS.escape(String(jobId))}"]`;
+        const el = document.querySelector(sel);
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('inbox-flash');
+        setTimeout(() => { try { el.classList.remove('inbox-flash'); } catch {} }, 1000);
+      } catch (_) {}
+    }, 100);
+  };
+})();
+
 // ============================================================
 // CUSTOM CONFIRM MODAL (replaces window.confirm)
 // ============================================================
