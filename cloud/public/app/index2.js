@@ -6266,10 +6266,18 @@ async function renderMeshVersions(p) {
     } else if (p.thumb) {
       thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
     }
+    // Same emissive badge logic as image thumbs: show 💡 when the
+    // mesh's source image has a saved emissive layer in the cache.
+    const meshHasEmissive = (typeof _emissiveLayerHas === 'function')
+      && m.sourceImage && _emissiveLayerHas(m.sourceImage);
+    const meshEmissiveBadge = meshHasEmissive
+      ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
+      : '';
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
+      ${meshEmissiveBadge}
     `;
     t.title = m.filename;
     t.addEventListener('click', () => {
@@ -9136,6 +9144,9 @@ async function _peProjectImageLayer(imgPath) {
   const layerDataUrl = _emissiveLayerGet(imgPath);
   if (!layerDataUrl) return false;
   if (!peState.origModel || !peState.canvases) return false;
+  // Re-entry guard: a single projection running at a time.
+  if (peState.projecting) return false;
+  peState.projecting = true;
 
   // Decode the image emissive layer into an off-screen canvas we can
   // sample pixel-by-pixel.
@@ -9181,42 +9192,58 @@ async function _peProjectImageLayer(imgPath) {
   const stride = Math.max(1, Math.ceil(Math.sqrt(totalPixels / 250000)));
 
   let painted = 0;
-  for (let y = 0; y < srcH; y += stride) {
-    for (let x = 0; x < srcW; x += stride) {
-      const a = srcData[(y * srcW + x) * 4 + 3];
-      if (a < 8) continue;
-      const r = srcData[(y * srcW + x) * 4];
-      const g = srcData[(y * srcW + x) * 4 + 1];
-      const b = srcData[(y * srcW + x) * 4 + 2];
-      ndc.x = (x / srcW) * 2 - 1;
-      ndc.y = -((y / srcH) * 2 - 1);
-      raycaster.setFromCamera(ndc, orthoCam);
-      const hits = raycaster.intersectObjects(meshArr, false);
-      if (!hits.length || !hits[0].uv) continue;
-      const entry = peState.canvases.get(hits[0].object);
-      if (!entry) continue;
-      const uvx = Math.max(0, Math.min(1, hits[0].uv.x)) * TEX;
-      const uvy = Math.max(0, Math.min(1, hits[0].uv.y)) * TEX;
-      entry.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-      // Small splat scaled by stride so we cover the canvas evenly.
-      const splat = Math.max(2, stride * 2);
-      entry.ctx.fillRect(uvx - splat * 0.5, uvy - splat * 0.5, splat, splat);
-      painted++;
+  // Chunked: yield to the browser every CHUNK_ROWS so the page stays
+  // responsive (the freeze on a 1024² took several seconds of unblocked
+  // raycasts). Status text reflects progress.
+  const CHUNK_ROWS = Math.max(8, Math.floor(srcH / 16));
+  const status = document.getElementById('pe-status');
+  try {
+    for (let yStart = 0; yStart < srcH; yStart += stride * CHUNK_ROWS) {
+      const yEnd = Math.min(yStart + stride * CHUNK_ROWS, srcH);
+      for (let y = yStart; y < yEnd; y += stride) {
+        for (let x = 0; x < srcW; x += stride) {
+          const a = srcData[(y * srcW + x) * 4 + 3];
+          if (a < 8) continue;
+          const r = srcData[(y * srcW + x) * 4];
+          const g = srcData[(y * srcW + x) * 4 + 1];
+          const b = srcData[(y * srcW + x) * 4 + 2];
+          ndc.x = (x / srcW) * 2 - 1;
+          ndc.y = -((y / srcH) * 2 - 1);
+          raycaster.setFromCamera(ndc, orthoCam);
+          const hits = raycaster.intersectObjects(meshArr, false);
+          if (!hits.length || !hits[0].uv) continue;
+          const entry = peState.canvases.get(hits[0].object);
+          if (!entry) continue;
+          const uvx = Math.max(0, Math.min(1, hits[0].uv.x)) * TEX;
+          const uvy = Math.max(0, Math.min(1, hits[0].uv.y)) * TEX;
+          entry.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+          const splat = Math.max(2, stride * 2);
+          entry.ctx.fillRect(uvx - splat * 0.5, uvy - splat * 0.5, splat, splat);
+          painted++;
+        }
+      }
+      // Push the partial canvas to the GPU so the user sees progressive
+      // fill, then yield until the next frame.
+      peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
+      if (status) {
+        const pct = Math.min(100, Math.round((yEnd / srcH) * 100));
+        status.textContent = `Projecting image emissive layer onto mesh… ${pct}%`;
+      }
+      await new Promise((r) => requestAnimationFrame(r));
     }
+  } finally {
+    peState.projecting = false;
   }
   peState.canvases.forEach((entry) => { entry.texture.needsUpdate = true; });
   return painted > 0;
 }
 
 async function _peTryProjectFromImageLayer() {
+  if (peState.projecting) return;  // one projection at a time
   const p = state.currentProject;
   if (!p) return;
-  // Try the currently-selected/preview image; if neither carries a
-  // saved layer, fall back to the most recently-painted layer (any
-  // image of this project for which we have a layer).
   let imgPath = p.selectedImagePath || p.previewImagePath;
   if (!imgPath || !_emissiveLayerHas(imgPath)) {
-    // Look for any image of the project that has a layer.
     const projImgs = (p.images || []).map((im) => im.path);
     imgPath = projImgs.find(_emissiveLayerHas);
     if (!imgPath) return;
