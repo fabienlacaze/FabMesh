@@ -1190,6 +1190,33 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-ultra-hd':     null,   // overkill — icons stay small
     'ws-trellis2-face-fix':     null,
   },
+  avion: {
+    'ws-trellis2-rectify':      true,   // side-view rectify
+    'ws-trellis2-smooth':       true,   // metal panels
+    'ws-trellis2-refine':       null,   // hallucinates wear on smooth fuselage
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  bateau: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,   // hull paint
+    'ws-trellis2-refine':       null,   // hallucinates wear on smooth hull
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  animal: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       false,  // fur, scales
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      true,   // animal faces matter
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     true,
+  },
   custom: {
     'ws-trellis2-rectify':      true,
     'ws-trellis2-smooth':       true,
@@ -3743,6 +3770,9 @@ const ASSET_TYPE_PROMPTS = {
   creature: 'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
   environment: 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
   icon: 'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
+  avion: 'A detailed aircraft, full body, side angle, isolated on a neutral background, photorealistic, even lighting.',
+  bateau: 'A detailed ship or boat, full body, side angle, isolated on a neutral background, photorealistic, even lighting.',
+  animal: 'A detailed animal, full body, side angle, T-pose-equivalent legs apart, isolated on a neutral background, photorealistic, even lighting.',
   custom: '',
 };
 
@@ -13049,7 +13079,12 @@ async function refreshJobDetailsModal(id) {
     // up for the whole run, misleading the user on warm jobs.
     // Default to NOT cold when __modalWarm has never been polled (i.e.
     // strictly === false), so warm/unknown both hide the hint.
-    const isCloudCold = isRunning && window.__modalWarm === false;
+    // Cap the cold-start hint to a 60s window from job start. If Modal
+    // is still flagged cold after 60s it almost certainly means the
+    // status endpoint is stale/unreachable — keep the hint from
+    // sticking around forever. Reuses the `elapsed` value computed
+    // above (L13033) so we don't re-invoke Date.now() here.
+    const isCloudCold = isRunning && window.__modalWarm === false && elapsed < 60000;
     try {
       console.log('[coldstart-hint]', {
         __modalWarm: window.__modalWarm,

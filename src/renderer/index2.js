@@ -3477,6 +3477,9 @@ const ASSET_TYPE_PROMPTS = {
   creature: 'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
   environment: 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
   icon: 'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
+  avion: 'A detailed aircraft, full body, side angle, isolated on a neutral background, photorealistic, even lighting.',
+  bateau: 'A detailed ship or boat, full body, side angle, isolated on a neutral background, photorealistic, even lighting.',
+  animal: 'A detailed animal, full body, side angle, T-pose-equivalent legs apart, isolated on a neutral background, photorealistic, even lighting.',
   custom: '',
 };
 

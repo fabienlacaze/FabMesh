@@ -762,7 +762,8 @@ type PackId = keyof typeof PACKS;
 interface GenerateInput {
   image: Blob | File | string;
   asset_type: 'character' | 'creature' | 'vehicle' | 'building'
-            | 'weapon' | 'prop' | 'environment' | 'icon' | 'custom';
+            | 'weapon' | 'prop' | 'environment' | 'icon'
+            | 'avion' | 'bateau' | 'animal' | 'custom';
   mode: 'lite' | 'standard' | 'full';
   seed?: number;
   rectify?: boolean; back_view?: boolean; smooth?: boolean;
@@ -3555,7 +3556,9 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     const isHardSurface = input.asset_type === 'vehicle'
                        || input.asset_type === 'building'
                        || input.asset_type === 'weapon'
-                       || input.asset_type === 'prop';
+                       || input.asset_type === 'prop'
+                       || input.asset_type === 'avion'
+                       || input.asset_type === 'bateau';
     if (input.back_view !== false && !backImageHttpsUrl
         && input.asset_type !== 'icon') {
       try {
