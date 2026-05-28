@@ -1173,6 +1173,116 @@ async function handleAuthSignout(_req: Request, _env: Env): Promise<Response> {
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }
 
+/** POST /api/contact — public endpoint for messages from the About →
+ *  Contact form. Stores each message as a JSON file under
+ *  `_meta/contact/<timestamp>_<random>.json` so the admin can list
+ *  them from /admin > Messages.
+ *
+ *  No auth required (anonymous visitors should be able to write us).
+ *  Per-IP rate limit + global daily cap stop spam from flooding R2. */
+async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const ip = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'unknown';
+  // Daily anti-spam: max 5 messages per IP/day and 200 messages
+  // globally/day. Both counters live in R2 and reset at UTC midnight.
+  const today = new Date().toISOString().slice(0, 10);
+  const ipKey = `_meta/contact_count/${today}/${_safeId(ip)}.txt`;
+  const globalKey = `_meta/contact_count/${today}/_global.txt`;
+  const ipCur = parseInt((await r2GetText(env, ipKey)) || '0', 10) || 0;
+  const globCur = parseInt((await r2GetText(env, globalKey)) || '0', 10) || 0;
+  if (ipCur >= 5) return err(429, 'Too many messages from this IP today. Try again tomorrow.');
+  if (globCur >= 200) return err(429, 'Contact form is rate-limited today, please try again tomorrow.');
+  let body: { name?: string; email?: string; subject?: string; message?: string };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const name    = String(body.name    ?? '').trim().slice(0, 80);
+  const email   = String(body.email   ?? '').trim().slice(0, 120);
+  const subject = String(body.subject ?? '').trim().slice(0, 120);
+  const message = String(body.message ?? '').trim().slice(0, 4000);
+  if (!subject || !message) return err(400, 'subject + message required');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err(400, 'invalid email');
+  // Try to attach the authenticated user if there is one — helpful
+  // context for replying.
+  let user_id: string | null = null;
+  let user_email: string | null = null;
+  try {
+    const u = await getSessionUser(req, env);
+    if (u) { user_id = u.id; user_email = u.email ?? null; }
+  } catch {}
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const payload = {
+    id,
+    name, email, subject, message,
+    user_id, user_email,
+    ip,
+    user_agent: req.headers.get('user-agent') ?? null,
+    created_at: new Date().toISOString(),
+    read: false,
+  };
+  try {
+    await env.MESHES.put(`_meta/contact/${id}.json`, JSON.stringify(payload),
+                         { httpMetadata: { contentType: 'application/json' } });
+    await env.MESHES.put(ipKey, String(ipCur + 1));
+    await env.MESHES.put(globalKey, String(globCur + 1));
+  } catch (e) {
+    return err(502, `storage write failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ ok: true, success: true, id });
+}
+
+function _safeId(s: string): string {
+  // Collapse anything that isn't [a-z0-9._-] to underscore for use in
+  // R2 key segments (IPs contain ':' for IPv6 etc.).
+  return s.replace(/[^a-z0-9._-]+/gi, '_').slice(0, 64);
+}
+
+/** GET /api/admin/contact-messages — list every stored message,
+ *  newest first. */
+async function handleAdminContactList(req: Request, env: Env): Promise<Response> {
+  const adminCheck = await _requireAdmin(req, env);
+  if (adminCheck) return adminCheck;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const list = await env.MESHES.list({ prefix: '_meta/contact/', limit: 1000 });
+  const items: Array<Record<string, unknown>> = [];
+  for (const obj of list.objects) {
+    try {
+      const text = await r2GetText(env, obj.key);
+      if (!text) continue;
+      items.push(JSON.parse(text));
+    } catch {}
+  }
+  items.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  return json({ ok: true, messages: items });
+}
+
+/** POST /api/admin/contact-messages/<id>/read — flip the read flag. */
+async function handleAdminContactRead(req: Request, env: Env, id: string): Promise<Response> {
+  const adminCheck = await _requireAdmin(req, env);
+  if (adminCheck) return adminCheck;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const key = `_meta/contact/${_safeId(id)}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'message not found');
+  try {
+    const m = JSON.parse(txt);
+    m.read = true;
+    await env.MESHES.put(key, JSON.stringify(m),
+                         { httpMetadata: { contentType: 'application/json' } });
+    return json({ ok: true, success: true });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** DELETE /api/admin/contact-messages/<id> — remove a message. */
+async function handleAdminContactDelete(req: Request, env: Env, id: string): Promise<Response> {
+  const adminCheck = await _requireAdmin(req, env);
+  if (adminCheck) return adminCheck;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const key = `_meta/contact/${_safeId(id)}.json`;
+  await env.MESHES.delete(key);
+  return json({ ok: true, success: true });
+}
+
 async function handleMe(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) {
@@ -5503,6 +5613,15 @@ export default {
       // ── /api/* router ──
       if (pathname.startsWith('/api/')) {
         if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
+        if (pathname === '/api/contact'               && method === 'POST') return await handleContactSubmit(req, env);
+        if (pathname === '/api/admin/contact-messages' && method === 'GET') return await handleAdminContactList(req, env);
+        {
+          const m = pathname.match(/^\/api\/admin\/contact-messages\/([A-Za-z0-9_]+)(?:\/(read))?$/);
+          if (m) {
+            if (m[2] === 'read' && method === 'POST')   return await handleAdminContactRead(req, env, m[1]);
+            if (!m[2]            && method === 'DELETE') return await handleAdminContactDelete(req, env, m[1]);
+          }
+        }
         if (pathname === '/api/auth/install-session'  && method === 'POST') return await handleAuthInstallSession(req, env);
         if (pathname === '/api/auth/refresh'          && method === 'POST') return await handleAuthRefresh(req, env);
         if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
