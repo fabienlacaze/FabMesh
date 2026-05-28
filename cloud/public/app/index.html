@@ -544,6 +544,7 @@
                         <button id="ws-mesh-paintvert-btn" class="ghost-btn tool-btn">&#127912; Paint</button>
                         <button id="ws-mesh-selectface-btn" class="ghost-btn tool-btn">&#9634; Select</button>
                         <button id="ws-mesh-aligntex-btn" class="ghost-btn tool-btn" title="Manually align source photos onto mesh">&#127919; Align Texture</button>
+                        <button id="ws-mesh-paint-emissive-btn" class="ghost-btn tool-btn" title="Paint glowing emissive areas (lamps, windows, runes)">&#128161; Paint Emissive</button>
                         <button id="ws-mesh-material-btn" class="ghost-btn tool-btn" title="Adjust material properties (brightness, saturation, emissive, roughness)">&#127912; Material</button>
                       </div>
                     </div>
@@ -1131,6 +1132,63 @@
           <button class="ghost-btn" id="at-reset">Reset defaults</button>
           <button class="ghost-btn" id="at-cancel">Cancel</button>
           <button class="primary-btn" id="at-reproject">&#127919; Re-project</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         PAINT EMISSIVE MODAL — paint glow areas onto a separate
+         T_emissive texture. Bound to material.emissiveMap with
+         emissiveIntensity slider. Saves the emissive map embedded
+         in the new GLB on Apply.
+         ============================================================ -->
+    <div id="modal-paint-emissive" class="modal-overlay hidden">
+      <div class="modal-card modal-card-wide" style="max-width:1400px; width:95vw;">
+        <h2>💡 Paint Emissive</h2>
+        <p class="modal-subtitle" style="margin-bottom:8px;">Paint glow areas (lamps, windows, runes). The painted areas become a separate <code>T_emissive</code> texture wired to <code>emissiveMap</code> on the material.</p>
+        <div style="display:flex; gap:12px;">
+          <!-- Left: 3D viewer where the user paints -->
+          <div style="flex:1; min-width:0;">
+            <div id="pe-viewport-wrap" style="width:100%; height:560px; background:#0b0b14; border-radius:6px; position:relative;">
+              <canvas id="pe-canvas" style="width:100%; height:100%; display:block; cursor: crosshair;"></canvas>
+              <div id="pe-status" style="position:absolute; bottom:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc;">Left-click + drag on the mesh to paint. Orbit with right-click.</div>
+            </div>
+          </div>
+          <!-- Right: brush controls -->
+          <div style="width:280px; flex-shrink:0; display:flex; flex-direction:column; gap:10px;">
+            <div>
+              <label style="display:block; font-size:11px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Emissive color</label>
+              <input type="color" id="pe-color" value="#ffaa33" style="width:100%; height:36px; cursor:pointer; background:#1a1a2e; border:1px solid #333; border-radius:4px;" />
+            </div>
+            <div>
+              <label style="display:flex; justify-content:space-between; font-size:11px;">Intensity <span id="pe-intensity-val" class="slider-val">3.0</span></label>
+              <input type="range" id="pe-intensity" min="0.1" max="20" step="0.1" value="3.0" style="width:100%;" />
+            </div>
+            <div>
+              <label style="display:flex; justify-content:space-between; font-size:11px;">Brush size (px) <span id="pe-brush-size-val" class="slider-val">40</span></label>
+              <input type="range" id="pe-brush-size" min="2" max="200" step="1" value="40" style="width:100%;" />
+            </div>
+            <div>
+              <label style="display:flex; justify-content:space-between; font-size:11px;">Brush opacity <span id="pe-brush-opacity-val" class="slider-val">100%</span></label>
+              <input type="range" id="pe-brush-opacity" min="5" max="100" step="5" value="100" style="width:100%;" />
+            </div>
+            <div>
+              <label style="display:flex; justify-content:space-between; font-size:11px;">Soft falloff <span id="pe-brush-falloff-val" class="slider-val">50%</span></label>
+              <input type="range" id="pe-brush-falloff" min="0" max="100" step="5" value="50" style="width:100%;" />
+            </div>
+            <div style="display:flex; gap:6px; padding:6px 8px; background:#0a0a0a; border-radius:4px;">
+              <button id="pe-mode-paint" class="ghost-btn" style="flex:1; padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;">🖌 Paint</button>
+              <button id="pe-mode-erase" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;">🧽 Erase</button>
+            </div>
+            <button id="pe-clear" class="ghost-btn" style="padding:6px; font-size:11px;">↺ Clear all</button>
+            <div style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
+              Output: <code>T_emissive</code> 1024×1024 PNG embedded in the GLB.
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:10px;">
+          <button class="ghost-btn" id="pe-cancel">Cancel</button>
+          <button class="secondary-btn" id="pe-apply-device" style="padding:8px 18px;">⚡ Apply (free)</button>
         </div>
       </div>
     </div>
