@@ -9664,3 +9664,11 @@ Fixed "Load from image layer ne fait rien" + added thumbnail badge.
   when _emissiveLayerHas(img.path) is true.
 
 Cloud + desktop renderers in sync.
+
+## 2026-05-28 — Paint Emissive: 250MB cap + cleaner Apply button
+
+User hit HTTP 413 on Apply because GLTFExporter re-embedding the
+full PBR set + new emissive PNG pushed the Trellis2 output past
+the worker's 100MB cap. Bumped /api/mesh-op/client-result to
+250MB (335M base64 chars). Removed the ⚡ glyph from the Paint
+Emissive apply button.

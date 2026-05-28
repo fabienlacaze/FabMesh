@@ -3691,7 +3691,10 @@ async function handleMeshOpClientResult(req: Request, env: Env): Promise<Respons
   if (!glbBase64 || typeof glbBase64 !== 'string') return err(400, 'glbBase64 required');
   // 100 MB max — pathological mesh would never legitimately exceed this
   // and we don't want to host runaway uploads for free.
-  if (glbBase64.length > 140_000_000) return err(413, 'glb too large (>100 MB)');
+  // 250 MB max (~335 M base64 chars). Trellis2 outputs with full PBR
+  // sets + our 1024² emissive texture can easily push past 100 MB
+  // once GLTFExporter re-embeds everything for the saved version.
+  if (glbBase64.length > 335_000_000) return err(413, 'glb too large (>250 MB)');
 
   // Per-user call quota (shared bucket with /api/mesh-op).
   const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
