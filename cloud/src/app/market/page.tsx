@@ -7,8 +7,39 @@
 // /market?paid=1 and sees the item in the "Owned" tab with a
 // Download button.
 //
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Component, type ReactNode } from 'react';
 import Script from 'next/script';
+
+// Defensive error boundary — surfaces the next regression instead of the
+// generic Next.js white screen + "client-side exception" overlay.
+class MarketErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: unknown) {
+    // eslint-disable-next-line no-console
+    console.error('[MarketPage] client error:', error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 32, color: 'var(--text-1)', fontFamily: 'system-ui' }}>
+          <h2>Something went wrong loading the marketplace.</h2>
+          <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
+            {this.state.error?.message || 'Unknown error'}
+          </p>
+          <button
+            onClick={() => { if (typeof window !== 'undefined') window.location.reload(); }}
+            className="primary-btn"
+            style={{ padding: '8px 16px', marginTop: 12 }}
+          >
+            Reload page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface Listing {
   id: string;
@@ -238,7 +269,9 @@ export default function MarketPage() {
         const r = await fetch('/api/me');
         if (r.ok) {
           const j = await r.json();
-          setMeUserId(j?.user_id || j?.id || null);
+          // handleMe returns { user: { id, email, ... } }. Fall back to
+          // top-level id / user_id for older deploys.
+          setMeUserId(j?.user?.id || j?.id || j?.user_id || null);
         }
       } catch {}
       // ?item=<id> deep link → open detail modal, then strip the param.
@@ -288,6 +321,14 @@ export default function MarketPage() {
   const inCart = (id: string) => cart.includes(id);
   const addToCart = (id: string) => {
     if (inCart(id)) return;
+    // Defensive: refuse to add one's own listing to the cart. The UI
+    // should already hide the Add button, but a stale render or a
+    // direct caller could still try.
+    const l = listings.find((x) => x.id === id);
+    if (l && meUserId && l.user_id === meUserId) {
+      console.warn('[market] addToCart blocked: own listing', id);
+      return;
+    }
     const next = [...cart, id];
     setCart(next);
     saveCart(next);
@@ -701,6 +742,21 @@ export default function MarketPage() {
                     >
                       ⬇ Free download
                     </a>
+                  ) : (meUserId && l.user_id === meUserId) ? (
+                    <span
+                      style={{
+                        marginTop: 6,
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        textAlign: 'center',
+                        background: 'var(--bg-2)',
+                        color: 'var(--text-2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                      }}
+                    >
+                      Your listing
+                    </span>
                   ) : (
                     <button
                       onClick={(e) => { e.stopPropagation(); inCart(l.id) ? removeFromCart(l.id) : addToCart(l.id); }}
@@ -788,6 +844,19 @@ export default function MarketPage() {
                 <a href={selected.asset_url || selected.mesh_url} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
                   ⬇ Free download
                 </a>
+              ) : (meUserId && selected.user_id === meUserId) ? (
+                <span
+                  style={{
+                    padding: '10px 24px',
+                    background: 'var(--bg-2)',
+                    color: 'var(--text-2)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    fontSize: 13,
+                  }}
+                >
+                  Your listing
+                </span>
               ) : (
                 <button
                   onClick={() => inCart(selected.id) ? removeFromCart(selected.id) : addToCart(selected.id)}

@@ -2499,6 +2499,12 @@ async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
       const parsed = JSON.parse(txt) as MarketListing;
       if (parsed.status !== 'approved') continue;
       if (parsed.price_cents <= 0) continue;
+      // Hard reject: a user cannot buy their own listing. The UI hides
+      // the Add-to-cart button, but a stale cart or a direct API call
+      // could still reach here — fail loud so it surfaces.
+      if (parsed.user_id && parsed.user_id === user.id) {
+        return err(400, 'cannot purchase your own listing');
+      }
       // Skip listings the user already owns — Stripe would happily
       // charge twice otherwise.
       const owns = await env.MESHES.head(`_market/owners/${id}/${user.id}.json`);
@@ -3424,6 +3430,15 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
       const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
       return json({ status: 'succeeded', url: job.mesh_url as string,
                     duration_s: (Date.now() - start) / 1000 });
+    }
+    // Admin-cancelled (or otherwise terminally-marked) jobs MUST be
+    // surfaced immediately — Modal's FunctionCall.cancel() is best-
+    // effort and the GPU container can keep running for ~30s, during
+    // which callModalMeshStatus would still report "processing" and
+    // the renderer would poll forever. Trust the Supabase row.
+    if (job.status === 'canceled' || job.status === 'failed') {
+      return json({ status: job.status as string,
+                    error: (job.error as string) || 'cancelled' });
     }
     try {
       const status = await callModalMeshStatus(env, id);
