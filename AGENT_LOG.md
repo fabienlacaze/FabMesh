@@ -9648,3 +9648,19 @@ Two fixes (cloud + desktop):
   multiplied 3× → channels clipped to 1.0 → orange/blue paint
   rendered as white. With 1.0 the canvas color shows up faithfully;
   >1.0 still works as HDR boost for users who want hot glow.
+
+## 2026-05-28 — Emissive layer: persistent cache + thumbnail badge
+
+Fixed "Load from image layer ne fait rien" + added thumbnail badge.
+- Migrated layer storage from `project._emissiveLayerByImage` (wiped
+  by reloadCurrentProject after Save) to a module-level Map mirrored
+  to localStorage `fabmesh.emissiveLayers`.
+- Paint Tools Save now also writes the layer under the new "_painted"
+  path returned by saveImageDataUrl, so the lookup at Paint Emissive
+  3D open succeeds whichever painted version was used for 3D gen.
+- _peTryProjectFromImageLayer falls back to any project image that
+  has a layer if the currently-selected one doesn't.
+- New 💡 badge on image version thumbnails (bottom-right, gold ring)
+  when _emissiveLayerHas(img.path) is true.
+
+Cloud + desktop renderers in sync.

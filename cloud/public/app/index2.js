@@ -1560,10 +1560,18 @@ async function renderImageVersions(p) {
     // generation overwrote it. Without this, the thumbnail shows a stale
     // version (previous generation) even though the file on disk is new.
     const _cb = img.mtime || p._reloadTs || Date.now();
+    // Small bottom-right badge when this image has a saved emissive
+    // layer painted on it (Paint Tools → 💡 Emissive). Lets the user
+    // tell at a glance which versions feed T_emissive.
+    const hasEmissive = (typeof _emissiveLayerHas === 'function') && _emissiveLayerHas(img.path);
+    const emissiveBadge = hasEmissive
+      ? '<span class="v-emissive-badge" title="This image has an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
+      : '';
     t.innerHTML = `
       <img src="file:///${img.path.replace(/\\/g, '/')}?t=${_cb}">
       <span class="v-label">v${images.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this version">&#10005;</button>
+      ${emissiveBadge}
     `;
     t.addEventListener('click', () => {
       strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('selected'));
@@ -5308,10 +5316,45 @@ const paintState = {
   lassoPoints: null,      // [{x,y}, ...] for lasso
 };
 
+// Persistent emissive-layer cache keyed by image path. Lives at
+// module scope (NOT on state.currentProject) so reloadCurrentProject
+// after Save can't wipe it. Also persists across full page reloads
+// via localStorage so the user can come back the next day.
+const _emissiveLayerCache = new Map();
+const _EMISSIVE_LS_KEY = 'fabmesh.emissiveLayers';
+(function _loadEmissiveCache() {
+  try {
+    const raw = localStorage.getItem(_EMISSIVE_LS_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') {
+      Object.entries(obj).forEach(([k, v]) => _emissiveLayerCache.set(k, String(v)));
+    }
+  } catch {}
+})();
+function _saveEmissiveCache() {
+  try {
+    const obj = {};
+    _emissiveLayerCache.forEach((v, k) => { obj[k] = v; });
+    localStorage.setItem(_EMISSIVE_LS_KEY, JSON.stringify(obj));
+  } catch (e) {
+    console.warn('[emissive] localStorage save failed:', e?.message || e);
+  }
+}
+function _emissiveLayerSet(imgPath, dataUrl) {
+  _emissiveLayerCache.set(String(imgPath), dataUrl);
+  _saveEmissiveCache();
+}
+function _emissiveLayerGet(imgPath) {
+  return _emissiveLayerCache.get(String(imgPath)) || null;
+}
+function _emissiveLayerHas(imgPath) {
+  return _emissiveLayerCache.has(String(imgPath));
+}
+
 // Sync the emissive overlay canvas size to match the main paint
-// canvas, returning its 2D context. If a per-image stored layer
-// exists on the current project, load it the first time we touch
-// the overlay for this image.
+// canvas, returning its 2D context. If a stored layer exists for
+// this image, load it the first time we touch the overlay.
 function _paintGetEmissiveCtx(mgr) {
   const overlay = document.getElementById('paint-emissive-overlay');
   if (!overlay) return null;
@@ -5323,13 +5366,9 @@ function _paintGetEmissiveCtx(mgr) {
     overlay.style.height = main.style.height;
   }
   const ctx = overlay.getContext('2d');
-  // Pre-load saved emissive layer for this image (once per session per
-  // image). Stored under project._emissiveLayerByImage[imgPath] as a
-  // dataURL (kept in-memory; persisted to R2/local in Step 2).
   if (!paintState.emissiveOverlayInited) {
     paintState.emissiveOverlayInited = true;
-    const p = state.currentProject;
-    const saved = p?._emissiveLayerByImage?.[paintState.imgPath];
+    const saved = _emissiveLayerGet(paintState.imgPath);
     if (saved) {
       const img = new Image();
       img.onload = () => {
@@ -5949,8 +5988,7 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
           if (samp[i] > 0) { hasInk = true; break; }
         }
         if (hasInk) {
-          p._emissiveLayerByImage = p._emissiveLayerByImage || {};
-          p._emissiveLayerByImage[paintState.imgPath] = overlay.toDataURL('image/png');
+          _emissiveLayerSet(paintState.imgPath, overlay.toDataURL('image/png'));
         }
       } catch {}
     }
@@ -5969,6 +6007,11 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
     if (result && result.success) {
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
       showToast('Painted version saved!', 'success');
+      // Propagate the emissive layer to the new painted image path
+      // so a mesh generated from "<img>_painted.png" still finds it.
+      const newPath = result.path || result.newPath || result.url;
+      const srcLayer = _emissiveLayerGet(paintState.imgPath);
+      if (srcLayer && newPath) _emissiveLayerSet(newPath, srcLayer);
       if (state.currentProject) await reloadCurrentProject();
     } else {
       const msg = (result && result.error) || 'unknown';
@@ -9090,8 +9133,7 @@ function _peHexToRgba(hex, alpha) {
 // Returns true if the projection ran (a layer existed for the source
 // image), false otherwise.
 async function _peProjectImageLayer(imgPath) {
-  const p = state.currentProject;
-  const layerDataUrl = p?._emissiveLayerByImage?.[imgPath];
+  const layerDataUrl = _emissiveLayerGet(imgPath);
   if (!layerDataUrl) return false;
   if (!peState.origModel || !peState.canvases) return false;
 
@@ -9169,11 +9211,16 @@ async function _peProjectImageLayer(imgPath) {
 async function _peTryProjectFromImageLayer() {
   const p = state.currentProject;
   if (!p) return;
-  // Pick the source image associated with the current mesh. We default
-  // to the project's currently-selected image.
-  const imgPath = p.selectedImagePath || p.previewImagePath;
-  if (!imgPath) return;
-  if (!p._emissiveLayerByImage || !p._emissiveLayerByImage[imgPath]) return;
+  // Try the currently-selected/preview image; if neither carries a
+  // saved layer, fall back to the most recently-painted layer (any
+  // image of this project for which we have a layer).
+  let imgPath = p.selectedImagePath || p.previewImagePath;
+  if (!imgPath || !_emissiveLayerHas(imgPath)) {
+    // Look for any image of the project that has a layer.
+    const projImgs = (p.images || []).map((im) => im.path);
+    imgPath = projImgs.find(_emissiveLayerHas);
+    if (!imgPath) return;
+  }
   try {
     if (typeof showToast === 'function') {
       showToast('Projecting image emissive layer onto mesh…', 'info', 1800);
