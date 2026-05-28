@@ -10,6 +10,16 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Cloud — expired Replicate URLs + file:/// cleanup)
+
+- Frontend now detects expired replicate.delivery URLs in <img src> assignments (prototype setter + MutationObserver) and replaces them with a "⚠ Expired" SVG placeholder + tooltip "Legacy Replicate asset expired — please regenerate". Delete still works thanks to the wa8sld95q fix.
+- Exposed window.__stripFilePrefix and window.__isExpiredReplicateUrl helpers from cloud-overrides.js for any caller that needs to sanitise URLs before logging or fetching.
+- Patched the [mv-check] previewImagePath log site so it strips the bogus file:/// prefix before logging.
+- THREE.TextureLoader.prototype.load now patched alongside FileLoader.load (textures had their own prototype, missed by the original patch).
+- Fixed the CSP typo: media-src no longer treats "child-src" as a source expression.
+
+---
+
 ## 2026-05-29 (Mesh delete v4.5 — modal_ R2 path + UUID reconstruction)
 
 - Delete mesh kept 404-ing for meshes stored at mesh/modal_<32hex>.glb (Modal Labs R2 layout). The id on the wire was "modal_<32-hex-no-hyphens>" which never matched supabase jobs.id (uuid WITH hyphens).

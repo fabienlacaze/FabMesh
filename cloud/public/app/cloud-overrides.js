@@ -97,33 +97,69 @@
       if (typeof s !== 'string') return s;
       return s.replace(/^file:\/{2,3}(?=https?:|blob:|data:)/i, '');
     };
+    // Expose globally so call sites that log/manipulate raw URL strings
+    // (e.g. debug console.log traces, manual .src assignments that
+    // escape the prototype setter) can normalise the value the same way.
+    // The IIFE would otherwise keep this private.
+    try { window.__stripFilePrefix = stripPrefix; } catch (_) {}
+    // ── Expired Replicate URL guard ────────────────────────────────
+    // replicate.delivery URLs are signed and TTL'd (~1 h). Any legacy
+    // listing/project that captured one will 404 forever once expired.
+    // Rather than render a broken-image icon, swap in a clear "Expired"
+    // placeholder so the user knows the asset is gone and needs a
+    // regenerate. Mesh GLBs go through THREE.FileLoader and we
+    // deliberately let those fail loud (no placeholder), so the loader
+    // surfaces the error and the user can purge the stale entry.
+    const _EXPIRED_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%231a1a1a\"/><text x=\"100\" y=\"95\" text-anchor=\"middle\" fill=\"%23ff9800\" font-size=\"24\" font-family=\"sans-serif\">⚠</text><text x=\"100\" y=\"125\" text-anchor=\"middle\" fill=\"%23ff9800\" font-size=\"14\" font-family=\"sans-serif\">Expired</text></svg>";
+    function isExpiredReplicateUrl(u) {
+      if (typeof u !== "string") return false;
+      return /\breplicate\.delivery\b/i.test(u);
+    }
+    window.__expiredReplicatePlaceholder = _EXPIRED_PLACEHOLDER;
+    window.__isExpiredReplicateUrl = isExpiredReplicateUrl;
+    const _EXPIRED_TITLE = 'Legacy Replicate asset expired — please regenerate';
     const proto = HTMLImageElement.prototype;
     const desc = Object.getOwnPropertyDescriptor(proto, 'src');
     if (desc && desc.get && desc.set) {
       Object.defineProperty(proto, 'src', {
         get() { return desc.get.call(this); },
-        set(v) { desc.set.call(this, stripPrefix(v)); },
+        set(v) {
+          const stripped = stripPrefix(v);
+          if (isExpiredReplicateUrl(stripped)) {
+            try {
+              this.dataset.expiredReplicate = '1';
+              this.title = _EXPIRED_TITLE;
+            } catch (_) { /* ignore */ }
+            desc.set.call(this, _EXPIRED_PLACEHOLDER);
+            return;
+          }
+          desc.set.call(this, stripped);
+        },
         configurable: true,
       });
     }
     // For images injected via innerHTML the setter doesn't fire — patch
     // them after the fact via a MutationObserver.
+    const _guardImgEl = (i) => {
+      const raw = i.getAttribute('src');
+      if (!raw) return;
+      const stripped = stripPrefix(raw);
+      if (isExpiredReplicateUrl(stripped)) {
+        i.dataset.expiredReplicate = '1';
+        i.setAttribute('title', _EXPIRED_TITLE);
+        i.setAttribute('src', _EXPIRED_PLACEHOLDER);
+        return;
+      }
+      if (/^file:\/{2,3}(?=https?:|blob:|data:)/i.test(raw)) {
+        i.setAttribute('src', stripped);
+      }
+    };
     const obs = new MutationObserver((muts) => {
       for (const m of muts) {
         for (const n of m.addedNodes) {
           if (!(n instanceof Element)) continue;
-          if (n.tagName === 'IMG') {
-            const raw = n.getAttribute('src');
-            if (raw && /^file:\/{2,3}(?=https?:|blob:|data:)/i.test(raw)) {
-              n.setAttribute('src', stripPrefix(raw));
-            }
-          }
-          n.querySelectorAll?.('img').forEach((i) => {
-            const raw = i.getAttribute('src');
-            if (raw && /^file:\/{2,3}(?=https?:|blob:|data:)/i.test(raw)) {
-              i.setAttribute('src', stripPrefix(raw));
-            }
-          });
+          if (n.tagName === 'IMG') _guardImgEl(n);
+          n.querySelectorAll?.('img').forEach(_guardImgEl);
         }
       }
     });
@@ -147,6 +183,28 @@
         return origLoad.call(this, stripPrefix(url), onLoad, onProgress, onError);
       };
       fl.__myfmPatched = true;
+      // TextureLoader.load goes through ImageLoader → <img>.src, NOT
+      // through FileLoader, so the prototype-chain patch above doesn't
+      // catch it. Patch its prototype.load directly so .glb textures
+      // referenced with a bogus file:/// prefix still resolve.
+      try {
+        if (T.TextureLoader && !T.TextureLoader.prototype.__myfmPatched) {
+          const tl = T.TextureLoader.prototype;
+          const origTexLoad = tl.load;
+          tl.load = function (url, onLoad, onProgress, onError) {
+            return origTexLoad.call(this, stripPrefix(url), onLoad, onProgress, onError);
+          };
+          tl.__myfmPatched = true;
+        }
+        if (T.ImageLoader && !T.ImageLoader.prototype.__myfmPatched) {
+          const il = T.ImageLoader.prototype;
+          const origImgLoad = il.load;
+          il.load = function (url, onLoad, onProgress, onError) {
+            return origImgLoad.call(this, stripPrefix(url), onLoad, onProgress, onError);
+          };
+          il.__myfmPatched = true;
+        }
+      } catch (_) { /* ignore — older THREE builds */ }
     };
     tryPatchThree();
   })();
