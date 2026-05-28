@@ -10,6 +10,39 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Delete mesh version — v0 silent 404 fix)
+
+- **Bug** : "Delete mesh v0" (et plus généralement TOUTES les versions
+  d'un projet ouvert via `handleCloudProjects`) échouait silencieusement.
+- **Causes** (3 cumulées) :
+  1. `handleCloudProjects` poussait dans `p.meshes` un objet sans `id`
+     (contrairement à `handleListMeshes` qui expose `id: j.id`). Le
+     renderer faisait `API.deleteMesh(m.id || m.jobId || m.filename)` →
+     fallback sur le cosmetic filename `<safe>_trellis2_<last10>.glb`
+     qui ne matche jamais `.eq('id', …)` côté worker → 404.
+  2. `postJSON` (meshyAPI-cloud.js) retournait simplement `r.json()`
+     sans tagger les non-OK responses. Le 404 arrivait au handler
+     comme `{error:"not found"}` sans `ok:false`/`success:false`, et
+     la garde `r.success === false && r.error` ne se déclenchait pas →
+     l'utilisateur voyait "rien".
+  3. `handleMeshesDelete` n'acceptait que des uuid stricts (`.eq('id')`).
+- **Fixes** :
+  - worker.ts:3688 + mock branch : ajout `id: j.id, jobId: j.id` au
+    payload `handleCloudProjects` pour s'aligner sur `handleListMeshes`.
+  - worker.ts:`handleMeshesDelete` : accepte uuid OU filename slug
+    (extrait les 10 derniers chars via regex `_trellis2_(\w+)$` et
+    fait un `ilike '%<tail>'` scoped par `user_id`).
+  - meshyAPI-cloud.js:`postJSON` : sur `!r.ok`, renvoie
+    `{ok:false, success:false, status, error}` pour que les callers
+    détectent les 404/500.
+  - index2.js:6663 : fallback chain élargi
+    (`m.id || m.jobId || m.job_id || m.predictionId || …`),
+    `console.log` du payload envoyé + de la réponse pour diagnostic,
+    `customError`/`alert` clair en cas de 404 ("may belong to an older
+    account or have already been removed").
+
+---
+
 ## 2026-05-28 (Market v4.3 — self-purchase block + cancel propagation + landing nav + crash fix)
 
 - Self-purchase blocked. Frontend hides Add to cart / detail-modal Buy for the seller of a listing and shows a "Your listing" pill instead. addToCart is also no-op for own listings. Backend handleMarketCheckout rejects 400 if listing.user_id === user.id.

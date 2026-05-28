@@ -49,7 +49,17 @@
       body: JSON.stringify(body || {}),
       credentials: 'include',
     });
-    return r.json();
+    // Tag non-OK responses with ok:false so callers (deleteMesh,
+    // etc.) can detect 404/500 without parsing HTTP status separately.
+    // Previously a 404 returned {"error":"not found"} silently — no
+    // success/ok flag — and the delete-version handler treated it as
+    // a no-op.
+    let body_;
+    try { body_ = await r.json(); } catch { body_ = {}; }
+    if (!r.ok) {
+      return { ok: false, success: false, status: r.status, error: (body_ && body_.error) || `HTTP ${r.status}`, ...body_ };
+    }
+    return body_;
   }
   async function postForm(url, formData) {
     const r = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });

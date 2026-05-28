@@ -3637,7 +3637,7 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
     count: number;
     created: string; prompt: string;
     backPhotos: Record<string, string>;
-    meshes: Array<{ filename: string; path: string; url: string; created: string; format: string; sourceImage: string | null }>;
+    meshes: Array<{ filename: string; path: string; url: string; created: string; format: string; sourceImage: string | null; id: string; jobId: string }>;
   };
   function emptyProj(name: string): ProjEntry {
     return {
@@ -3661,6 +3661,9 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
         p.meshes.push({
           filename: `${j.id}.glb`, path: j.mesh_url, url: j.mesh_url,
           created: j.created_at, format: 'GLB', sourceImage: null,
+          // C7: align with handleListMeshes so renderer always has a
+          // real uuid for delete (filename slug never matches .eq('id')).
+          id: j.id, jobId: j.id,
         });
       }
       if (j.created_at > p.created) p.created = j.created_at;
@@ -3689,6 +3692,9 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
         filename: `${j.id}.glb`, path: j.mesh_url, url: j.mesh_url,
         created: j.created_at, format: 'GLB',
         sourceImage: (j.options?.sourceImage as string | undefined) ?? null,
+        // C7: align with handleListMeshes so renderer always has a
+        // real uuid for delete (filename slug never matches .eq('id')).
+        id: j.id, jobId: j.id,
       });
     }
     if (j.created_at > p.created) p.created = j.created_at;
@@ -3774,17 +3780,42 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
   }
 
   const sb = supabaseAdmin(env);
-  const { data: job } = await sb.from('jobs').select('id, user_id, mesh_url')
-    .eq('id', id).eq('user_id', user.id).maybeSingle();
+  // C7: id may arrive as:
+  //   (a) full uuid (preferred path from m.id)
+  //   (b) filename like "<safe_project>_trellis2_<last10>.glb" — strip
+  //       extension and match the 10-char tail against id LIKE.
+  //   (c) bare "<id>.glb" (legacy cosmetic filename, stripped above).
+  // We try in turn so renderer fallbacks (m.id || m.jobId || m.filename)
+  // still resolve a row instead of silently 404ing.
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  let job: { id: string; user_id: string; mesh_url: string | null } | null = null;
+  if (isUuid) {
+    const { data } = await sb.from('jobs').select('id, user_id, mesh_url')
+      .eq('id', id).eq('user_id', user.id).maybeSingle();
+    job = data ?? null;
+  }
+  if (!job) {
+    // Try filename slug. handleListMeshes builds
+    // "<safe>_trellis2_<last10>" so the last 10 chars of id are the
+    // tail. Match with ilike on id.
+    const m = id.match(/_trellis2_([0-9a-z-]{6,12})$/i);
+    const tail = m ? m[1] : null;
+    if (tail) {
+      const { data } = await sb.from('jobs').select('id, user_id, mesh_url')
+        .ilike('id', `%${tail}`).eq('user_id', user.id).limit(1).maybeSingle();
+      job = data ?? null;
+    }
+  }
   if (!job) return err(404, 'not found');
+  const realId = job.id;
 
   // Best-effort R2 cleanup. We store under "<user_id>/<id>.glb" (see
   // uploadGlbToR2). delete() never throws on a missing key.
   if (env.MESHES) {
-    try { await env.MESHES.delete(`${user.id}/${id}.glb`); } catch (_) { /* ignore */ }
+    try { await env.MESHES.delete(`${user.id}/${realId}.glb`); } catch (_) { /* ignore */ }
   }
 
-  const { error } = await sb.from('jobs').delete().eq('id', id).eq('user_id', user.id);
+  const { error } = await sb.from('jobs').delete().eq('id', realId).eq('user_id', user.id);
   if (error) return err(500, error.message);
   return json({ ok: true });
 }
