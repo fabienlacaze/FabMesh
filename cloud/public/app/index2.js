@@ -4630,12 +4630,35 @@ document.getElementById('ws-brightness-btn')?.addEventListener('click', () => {
     if (sl) sl.value = '100';
     if (val) val.textContent = '100%';
   });
-  // Live preview via CSS filter
+  // Live preview via CSS filter + SVG feConvolveMatrix for Sharpness
+  // (CSS has no native sharpen, so we drive an SVG kernel from JS).
   const updatePreview = () => {
     const b = document.getElementById('bright-brightness').value / 100;
     const c = document.getElementById('bright-contrast').value / 100;
     const s = document.getElementById('bright-saturation').value / 100;
-    preview.style.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+    const shPct = parseInt(document.getElementById('bright-sharpness').value, 10);
+    // sharpness: 100 = no change, >100 = unsharp-mask, <100 = blur.
+    // For values >100 we use a standard 4-neighbour sharpen kernel
+    // with strength scaled from the % above 100 (0 → 1.5 strength
+    // at 300 %). For values <100 we use a 3×3 box blur kernel mixed
+    // back with identity by (1-pct).
+    const matEl = document.getElementById('bright-sharpen-matrix');
+    if (matEl) {
+      if (shPct >= 100) {
+        const k = (shPct - 100) / 200;   // 0..1
+        const side = -k;
+        const center = 1 + 4 * k;
+        matEl.setAttribute('kernelMatrix',
+          `0 ${side} 0 ${side} ${center} ${side} 0 ${side} 0`);
+      } else {
+        const k = (100 - shPct) / 100;   // 0..1
+        const boxW = (1 / 9) * k;
+        const center = 1 - k + boxW;
+        matEl.setAttribute('kernelMatrix',
+          `${boxW} ${boxW} ${boxW} ${boxW} ${center} ${boxW} ${boxW} ${boxW} ${boxW}`);
+      }
+    }
+    preview.style.filter = `brightness(${b}) contrast(${c}) saturate(${s}) url(#bright-sharpen-filter)`;
     document.getElementById('bright-brightness-val').textContent = document.getElementById('bright-brightness').value + '%';
     document.getElementById('bright-contrast-val').textContent = document.getElementById('bright-contrast').value + '%';
     document.getElementById('bright-saturation-val').textContent = document.getElementById('bright-saturation').value + '%';
@@ -4655,6 +4678,10 @@ document.getElementById('bright-reset')?.addEventListener('click', () => {
   });
   const preview = document.getElementById('bright-preview');
   if (preview) preview.style.filter = '';
+  // Reset the SVG sharpen kernel to identity too — otherwise the
+  // stale matrix from a previous session would still apply.
+  const matEl = document.getElementById('bright-sharpen-matrix');
+  if (matEl) matEl.setAttribute('kernelMatrix', '0 0 0 0 1 0 0 0 0');
 });
 document.getElementById('bright-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-brightness')?.classList.add('hidden');
@@ -5354,6 +5381,31 @@ function _emissiveLayerSet(imgPath, dataUrl) {
 function _emissiveLayerGet(imgPath) {
   return _emissiveLayerCache.get(String(imgPath)) || null;
 }
+
+// Parallel cache for MESHES that received emissive paint via the 3D
+// Paint Mesh tool (the image-side _emissiveLayerCache wouldn't catch
+// these). Stored as a Set of mesh paths in localStorage so the
+// thumbnail badge survives reloads.
+const _meshEmissivePaintedSet = new Set();
+const _MESH_EMISSIVE_LS_KEY = 'fabmesh.meshEmissivePainted';
+(function _loadMeshEmissiveSet() {
+  try {
+    const raw = localStorage.getItem(_MESH_EMISSIVE_LS_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) arr.forEach((p) => _meshEmissivePaintedSet.add(String(p)));
+  } catch {}
+})();
+function _saveMeshEmissiveSet() {
+  try {
+    localStorage.setItem(_MESH_EMISSIVE_LS_KEY, JSON.stringify([..._meshEmissivePaintedSet]));
+  } catch {}
+}
+function _meshEmissiveMark(meshPath) {
+  _meshEmissivePaintedSet.add(String(meshPath));
+  _saveMeshEmissiveSet();
+}
+function _meshEmissiveHas(meshPath) { return _meshEmissivePaintedSet.has(String(meshPath)); }
 function _emissiveLayerHas(imgPath) {
   return _emissiveLayerCache.has(String(imgPath));
 }
@@ -6310,11 +6362,16 @@ async function renderMeshVersions(p) {
     // fallback chain handles cloud meshes that don't carry a
     // sourceImage field but were generated from an image with a
     // saved layer.
-    const meshHasEmissive = (typeof _emissiveLayerHas === 'function') && (
-      (m.sourceImage && _emissiveLayerHas(m.sourceImage))
-      || (p.selectedImagePath && _emissiveLayerHas(p.selectedImagePath))
-      || (p.images || []).some((im) => _emissiveLayerHas(im.path))
-    );
+    const meshHasEmissive =
+      // Direct: the mesh was painted with emissive via Paint Mesh 3D.
+      (typeof _meshEmissiveHas === 'function' && _meshEmissiveHas(m.path))
+      // Inherited: the source image (or any project image) has a
+      // saved image-side emissive layer.
+      || ((typeof _emissiveLayerHas === 'function') && (
+        (m.sourceImage && _emissiveLayerHas(m.sourceImage))
+        || (p.selectedImagePath && _emissiveLayerHas(p.selectedImagePath))
+        || (p.images || []).some((im) => _emissiveLayerHas(im.path))
+      ));
     const meshEmissiveBadge = meshHasEmissive
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
@@ -10164,6 +10221,21 @@ async function _pmApplyOnDevice() {
       p.meshes.unshift({ path: newUrl, filename, size: 0, mtime: Date.now() });
       p.selectedMeshPath = newUrl;
       p.previewMeshPath = newUrl;
+      // If the user painted on the emissive layer (any non-zero pixel),
+      // tag the new mesh so the 💡 badge shows on its thumbnail.
+      try {
+        let emissivePainted = false;
+        pmState.canvases?.forEach((entryAll) => {
+          if (emissivePainted) return;
+          const eL = entryAll.emissive;
+          if (!eL) return;
+          const samp = eL.ctx.getImageData(0, 0, eL.w, eL.h).data;
+          for (let i = 0; i < samp.length; i += 4 * 64) {
+            if (samp[i] || samp[i+1] || samp[i+2]) { emissivePainted = true; break; }
+          }
+        });
+        if (emissivePainted) _meshEmissiveMark(newUrl);
+      } catch {}
       if (typeof populateWorkspace === 'function') {
         try { await populateWorkspace(p); } catch {}
       }

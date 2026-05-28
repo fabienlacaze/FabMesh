@@ -1812,6 +1812,14 @@
 
   <!-- Brightness/Contrast modal -->
   <div id="modal-brightness" class="modal-overlay hidden">
+    <!-- SVG filter for live Sharpness preview (CSS has no native sharpen). -->
+    <svg width="0" height="0" style="position:absolute; pointer-events:none;">
+      <filter id="bright-sharpen-filter">
+        <feConvolveMatrix id="bright-sharpen-matrix" order="3"
+                          kernelMatrix="0 0 0 0 1 0 0 0 0"
+                          preserveAlpha="true" />
+      </filter>
+    </svg>
     <div class="modal-card" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Brightness / Contrast</h3>
