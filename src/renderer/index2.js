@@ -7744,6 +7744,22 @@ function openPaintEmissive() {
   };
   $('pe-undo').onclick = () => _peUndo();
   $('pe-redo').onclick = () => _peRedo();
+  let emissiveOn = true;
+  $('pe-toggle-emissive').onclick = () => {
+    if (!peState.canvases) return;
+    emissiveOn = !emissiveOn;
+    peState.canvases.forEach((entry, mesh) => {
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      mats.forEach((mat) => {
+        mat.emissiveMap = emissiveOn ? entry.texture : null;
+        mat.needsUpdate = true;
+      });
+    });
+    const btn = $('pe-toggle-emissive');
+    btn.textContent = emissiveOn ? '💡 Emissive ON' : '🌑 Emissive OFF';
+    btn.style.background = emissiveOn ? 'var(--accent, #5a4fcf)' : '';
+    btn.style.color = emissiveOn ? '#fff' : '';
+  };
   const onKey = (e) => {
     if (modal.classList.contains('hidden')) return;
     const mod = e.ctrlKey || e.metaKey;
