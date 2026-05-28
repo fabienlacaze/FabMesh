@@ -107,7 +107,19 @@ function AuthorPageInner() {
           throw new Error(`HTTP ${r.status}`);
         }
         const j = await r.json();
-        setProfile(j as AuthorProfile);
+        // Normalise BEFORE setState so the render path never sees
+        // undefined listings/earnings (worker may legitimately omit
+        // them when the author has no sales / no approved listings,
+        // or under an older response shape).
+        setProfile({
+          user_id: j.user_id ?? "",
+          display: j.display ?? "Anonymous",
+          member_since: j.member_since ?? new Date(0).toISOString(),
+          listings_count: j.listings_count ?? 0,
+          total_sales: j.total_sales ?? 0,
+          earnings: Array.isArray(j.earnings) ? j.earnings : [],
+          listings: Array.isArray(j.listings) ? j.listings : [],
+        });
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -154,7 +166,7 @@ function AuthorPageInner() {
 
       <div className="page-header" style={{ alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 18 }}>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <h2 style={{ marginBottom: 4 }}>👤 {profile.display}</h2>
+          <h2 style={{ marginBottom: 4 }}>👤 {profile.display ?? 'Anonymous'}</h2>
           <div style={{ color: 'var(--text-2)', fontSize: 13 }}>
             Member since {formatDate(profile.member_since)}
           </div>
@@ -165,19 +177,19 @@ function AuthorPageInner() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 28 }}>
         <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
           <div style={{ color: 'var(--text-3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Listings published</div>
-          <div style={{ fontSize: 26, fontWeight: 800, marginTop: 6 }}>{profile.listings_count}</div>
+          <div style={{ fontSize: 26, fontWeight: 800, marginTop: 6 }}>{profile.listings_count ?? 0}</div>
         </div>
         <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
           <div style={{ color: 'var(--text-3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Total sales</div>
-          <div style={{ fontSize: 26, fontWeight: 800, marginTop: 6 }}>{profile.total_sales}</div>
+          <div style={{ fontSize: 26, fontWeight: 800, marginTop: 6 }}>{profile.total_sales ?? 0}</div>
         </div>
         <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
           <div style={{ color: 'var(--text-3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>Total earned</div>
           <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {profile.earnings.length === 0 ? (
+            {(profile.earnings ?? []).length === 0 ? (
               <span style={{ color: 'var(--text-2)', fontSize: 16 }}>—</span>
             ) : (
-              profile.earnings.map((e) => (
+              (profile.earnings ?? []).map((e) => (
                 <span key={e.currency}>{formatPrice(e.total_cents, e.currency)}</span>
               ))
             )}
@@ -187,13 +199,13 @@ function AuthorPageInner() {
 
       <h3 style={{ marginBottom: 14, fontSize: 16 }}>Listings by {profile.display}</h3>
 
-      {profile.listings.length === 0 ? (
+      {(profile.listings ?? []).length === 0 ? (
         <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-2)' }}>
           This creator hasn&apos;t published anything yet.
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-          {profile.listings.map((l) => {
+          {(profile.listings ?? []).map((l) => {
             const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
             const url = l.asset_url || l.mesh_url;
             return (
