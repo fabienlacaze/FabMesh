@@ -1322,6 +1322,15 @@ async function handleMePublishedAssets(req: Request, env: Env): Promise<Response
     asset_url: string;
     status: string;
     price_cents: number;
+    title: string;
+    description: string;
+    licence: string;
+    currency: string;
+    mesh_url: string;
+    asset_type: string | null;
+    author_display: string;
+    created_at: string;
+    rejection_reason?: string;
   }> = [];
   let cursor: string | undefined;
   do {
@@ -1340,6 +1349,15 @@ async function handleMePublishedAssets(req: Request, env: Env): Promise<Response
             asset_url: parsed.asset_url || parsed.mesh_url || '',
             status: parsed.status || 'pending',
             price_cents: parsed.price_cents || 0,
+            title: parsed.title || '',
+            description: parsed.description || '',
+            licence: parsed.licence || parsed.license || '',
+            currency: parsed.currency || 'USD',
+            mesh_url: parsed.mesh_url || '',
+            asset_type: parsed.asset_type ?? null,
+            author_display: parsed.author_display || '',
+            created_at: parsed.created_at || '',
+            rejection_reason: parsed.rejection_reason,
           });
         }
       } catch {}
@@ -1723,6 +1741,55 @@ async function handleMarketUnpublish(req: Request, env: Env, id: string): Promis
   } catch (e) {
     return err(500, e instanceof Error ? e.message : String(e));
   }
+}
+
+/** PATCH /api/market/listing/<id> — author edits their own listing.
+ *  Only title/description/price_cents/licence are mutable. Editing any
+ *  field bumps the listing back to status=pending so admin re-reviews. */
+async function handleMarketListingUpdate(req: Request, env: Env, id: string): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  let listing: MarketListing;
+  try { listing = JSON.parse(txt) as MarketListing; }
+  catch (e) { return err(500, e instanceof Error ? e.message : String(e)); }
+  if (listing.user_id !== user.id) return err(403, 'not your listing');
+
+  let body: any = {};
+  try { body = await req.json(); } catch { body = {}; }
+
+  let changed = false;
+  if (typeof body.title === 'string') {
+    const t = body.title.trim().slice(0, 120);
+    if (!t) return err(400, 'title required');
+    if (t !== listing.title) { listing.title = t; changed = true; }
+  }
+  if (typeof body.description === 'string') {
+    const d = body.description.slice(0, 4000);
+    if (d !== listing.description) { listing.description = d; changed = true; }
+  }
+  if (body.price_cents !== undefined && body.price_cents !== null) {
+    const p = Number(body.price_cents);
+    if (!Number.isFinite(p) || p < 0 || !Number.isInteger(p)) return err(400, 'invalid price_cents');
+    if (p > 0 && p < 50) return err(400, 'price must be free or at least 50 cents');
+    if (p !== listing.price_cents) { listing.price_cents = p; changed = true; }
+  }
+  if (typeof body.licence === 'string') {
+    if (!MARKET_LICENCES.has(body.licence)) return err(400, 'invalid licence');
+    if (body.licence !== listing.licence) { listing.licence = body.licence; changed = true; }
+  }
+
+  if (changed) {
+    listing.status = 'pending';
+    (listing as any).updated_at = new Date().toISOString();
+    delete (listing as any).rejection_reason;
+    await env.MESHES.put(key, JSON.stringify(listing),
+                         { httpMetadata: { contentType: 'application/json' } });
+  }
+  return json({ ok: true, listing });
 }
 
 /** GET /api/market/list — PUBLIC. Approved listings only. Browse-only;
@@ -6449,6 +6516,18 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
   return json({ meshes: data || [] });
 }
 
+/** GET /api/admin/users/<userId>/listings — ADMIN ONLY. Returns every
+ *  marketplace listing (any status) owned by this user. Used by the
+ *  admin Images/Meshes modals to badge cards with their marketplace
+ *  state ("Pending review", "Live on /market", "Rejected"). */
+async function handleAdminUserListings(req: Request, env: Env, userId: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const all = await _loadAllListings(env);
+  const mine = all.filter((l) => String(l.user_id) === String(userId));
+  return json({ ok: true, listings: mine });
+}
+
 /** DELETE /api/admin/images?key=<r2key> — ADMIN ONLY. Removes the
  *  R2 object directly. Cascades into _market/listings/ to drop any
  *  listing referencing this image's URL. Used by the admin Images
@@ -6791,6 +6870,10 @@ export default {
           if (m && method === 'POST') return await handleMarketUnpublish(req, env, m[1]);
         }
         {
+          const m = pathname.match(/^\/api\/market\/listing\/([A-Za-z0-9_]+)$/);
+          if (m && method === 'PATCH') return await handleMarketListingUpdate(req, env, m[1]);
+        }
+        {
           const m = pathname.match(/^\/api\/admin\/market\/([A-Za-z0-9_]+)(?:\/(approve|reject))?$/);
           if (m) {
             if (m[2] === 'approve' && method === 'POST')   return await handleAdminMarketApprove(req, env, m[1]);
@@ -6881,6 +6964,10 @@ export default {
         const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
         if (adminMeshes && method === 'GET') return await handleAdminUserMeshes(req, env, decodeURIComponent(adminMeshes[1]));
 
+        // /api/admin/users/<userId>/listings — dynamic
+        const adminListings = pathname.match(/^\/api\/admin\/users\/([^/]+)\/listings\/?$/);
+        if (adminListings && method === 'GET') return await handleAdminUserListings(req, env, decodeURIComponent(adminListings[1]));
+
         // /api/admin/users/<userId>/meshes/<jobId> — delete one mesh
         const adminMeshDel = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/([^/]+)\/?$/);
         if (adminMeshDel && method === 'DELETE') {
@@ -6896,6 +6983,10 @@ export default {
         // /api/admin/users/<userId>/projects — dynamic
         const adminProj = pathname.match(/^\/api\/admin\/users\/([^/]+)\/projects\/?$/);
         if (adminProj && method === 'GET') return await handleAdminUserProjects(req, env, decodeURIComponent(adminProj[1]));
+
+        // /api/admin/users/<userId>/listings — marketplace state per user
+        const adminListings = pathname.match(/^\/api\/admin\/users\/([^/]+)\/listings\/?$/);
+        if (adminListings && method === 'GET') return await handleAdminUserListings(req, env, decodeURIComponent(adminListings[1]));
 
         return err(404, `no route for ${method} ${pathname}`);
       }
