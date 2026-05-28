@@ -6713,6 +6713,7 @@ function _jsFillHoles(geom, maxHoleSize) {
 // closed manifold (Euler: F ≈ 2V → V ≈ F/2). Conservative: never
 // upscale, and bail early if the mesh is already smaller than target.
 const _decimator = new SimplifyModifier();
+const DECIMATE_LIVE_MAX_REMOVE = 20000;
 function _jsDecimate(geom, targetFaces) {
   const currentFaces = geom.index
     ? Math.floor(geom.index.count / 3)
@@ -6722,11 +6723,19 @@ function _jsDecimate(geom, targetFaces) {
   const targetVerts = Math.max(4, Math.ceil(targetFaces / 2));
   const removeCount = Math.max(0, currentVerts - targetVerts);
   if (removeCount === 0) return geom.clone();
-  // SimplifyModifier needs a non-indexed BufferGeometry. Returning
-  // the original on failure (e.g. unsupported attribute mix) so the
-  // preview just shows the source rather than going blank.
+  // Live preview cap: SimplifyModifier is O(V·logV) and locks the
+  // main thread; >20k vertex removals can freeze the tab for many
+  // seconds. Show the original on big drags — the slider value still
+  // updates, and Apply runs the full server-side decimation.
+  if (removeCount > DECIMATE_LIVE_MAX_REMOVE) return geom.clone();
+  // SimplifyModifier only understands `position` — extra attributes
+  // (uv, normal, color, multi-material groups) make it throw on some
+  // builds. Feed it a stripped-down clone so it can't choke.
+  const stripped = new THREE.BufferGeometry();
+  stripped.setAttribute('position', geom.attributes.position);
+  if (geom.index) stripped.setIndex(geom.index);
   try {
-    return _decimator.modify(geom, removeCount);
+    return _decimator.modify(stripped, removeCount);
   } catch (e) {
     console.warn('[decimate] preview failed:', e);
     return geom.clone();
@@ -6808,14 +6817,26 @@ const MESH_TOOL_SCHEMAS = {
   },
   decimate: {
     title: 'Decimate mesh',
-    subtitle: 'Reduce triangle count — move the slider to preview (may pause a few seconds at high reduction).',
+    subtitle: 'Reduce triangle count — drag the slider down to preview the reduction.',
     needsImage: false,
     expensivePreview: true,
+    fitSliderToMeshTris: 'target_faces',
     params: [
       { id: 'target_faces', label: 'Target triangles', type: 'range', min: 200, max: 1_000_000, step: 100, default: 15000 },
     ],
     build: (vals) => [String(vals.target_faces)],
     preview: (geom, vals) => _jsDecimate(geom, Math.max(200, vals.target_faces | 0)),
+    previewStatus: (vals, st) => {
+      const total = st.totalTris || 0;
+      const target = Math.max(200, (vals.target_faces | 0));
+      if (target >= total) return `Source: ${total.toLocaleString()} triangles · no reduction (drag slider down).`;
+      // V ≈ F/2 → removeCount ≈ totalVerts - targetVerts ≈ (total - target) / 2
+      const removeApprox = Math.max(0, Math.ceil((total - target) / 2));
+      if (removeApprox > DECIMATE_LIVE_MAX_REMOVE) {
+        return `Target: ${target.toLocaleString()} tris · reduction too large for live preview — click Apply to run.`;
+      }
+      return `Live preview · ${target.toLocaleString()} / ${total.toLocaleString()} triangles.`;
+    },
   },
   subdivide: {
     title: 'Subdivide mesh',
@@ -6975,9 +6996,13 @@ function _mtRunPreview() {
   }
   const status = document.getElementById('mt-preview-status');
   if (status) {
-    status.textContent = fn
-      ? `Live preview · ${Object.entries(vals).map(([k,v]) => `${k}=${v}`).join(' · ')}`
-      : 'No live preview for this op · click Apply to run.';
+    if (mtState.schema.previewStatus) {
+      status.textContent = mtState.schema.previewStatus(vals, mtState);
+    } else {
+      status.textContent = fn
+        ? `Live preview · ${Object.entries(vals).map(([k,v]) => `${k}=${v}`).join(' · ')}`
+        : 'No live preview for this op · click Apply to run.';
+    }
   }
 }
 
@@ -7063,15 +7088,42 @@ function _mtLoadMesh(meshPath) {
             mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
           }
         });
+        // Total triangle count across all submeshes — used by tools
+        // that want the slider to default to the actual mesh size
+        // (Decimate) and to report it in the status line.
+        let totalTris = 0;
+        for (const e of mtState.origGeoms) {
+          const g = e.originalGeom;
+          totalTris += g.index
+            ? Math.floor(g.index.count / 3)
+            : Math.floor(g.attributes.position.count / 3);
+        }
+        mtState.totalTris = totalTris;
+        // If the schema asked the slider to fit the mesh, rewrite its
+        // max + value (capped to the schema's hard max) so the user
+        // opens on a no-op decimation rather than 15K-tris.
+        const fitId = mtState.schema?.fitSliderToMeshTris;
+        if (fitId) {
+          const input = document.querySelector(`#mt-body [data-param-id="${fitId}"]`);
+          if (input) {
+            const hardMax = Number(input.max) || totalTris;
+            const hardMin = Number(input.min) || 1;
+            const v = Math.max(hardMin, Math.min(hardMax, totalTris));
+            input.value = String(v);
+            const lab = input.previousElementSibling;
+            const labVal = lab && lab.lastElementChild;
+            if (labVal) labVal.textContent = String(v);
+          }
+        }
         // Run the initial preview. Skip for `expensivePreview` tools
         // (Decimate) so the modal opens instantly and the heavy
         // SimplifyModifier compute only kicks in once the user
         // actually moves the slider.
+        const status = document.getElementById('mt-preview-status');
         if (!mtState.schema?.expensivePreview) {
           _mtRunPreview();
-        } else {
-          const status = document.getElementById('mt-preview-status');
-          if (status) status.textContent = 'Move the slider to preview the reduction.';
+        } else if (status) {
+          status.textContent = `Mesh: ${totalTris.toLocaleString()} triangles · drag the slider down to preview the reduction.`;
         }
       });
     })

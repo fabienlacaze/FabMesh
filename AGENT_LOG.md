@@ -9109,3 +9109,30 @@ Etat final accepte: pipeline = mv_render radius 1.5 + sheet_render_v2
 dual CN ip 0.55 + bake_v3 chart-aware atlas 2048 + (orphan-chart
 fallback global NN ajoute apres - dans le commit suivant).
 
+
+## 2026-05-28 — Decimate: slider défaut = vrai tri-count + anti-crash sur drag
+
+- `cloud/public/app/index2.js`
+  - `_jsDecimate`: ajout cap `DECIMATE_LIVE_MAX_REMOVE = 20000` — au-delà
+    on rend le mesh original pour le live preview (Apply lance la décimation
+    complète côté serveur). SimplifyModifier est O(V·logV) et bloque le
+    main thread; ce cap évite le freeze quand l'utilisateur drag le slider
+    de 200K → 1K sur un mesh lourd.
+  - `_jsDecimate`: strip des attributs autres que `position` avant de passer
+    à SimplifyModifier (sinon il throw sur certains builds avec multi-mat
+    ou UV/normales mal alignés).
+  - Schema `decimate`: ajout `fitSliderToMeshTris: 'target_faces'` — le
+    slider s'ouvre maintenant sur la valeur réelle du mesh (pas 15K en dur).
+  - Schema `decimate`: ajout `previewStatus()` — message clair quand la
+    réduction est trop grosse pour le live preview ("click Apply to run").
+  - `_mtLoadMesh`: calcul de `totalTris` après push des origGeoms,
+    application du flag `fitSliderToMeshTris`, status initial avec le
+    vrai compte de triangles.
+  - `_mtRunPreview`: support du hook optionnel `previewStatus(vals, state)`
+    sur le schéma.
+
+Pourquoi: l'utilisateur ouvrait l'onglet Decimate, voyait le slider à 15K
+(souvent bien en dessous du mesh source), et tout drag déclenchait une
+décimation de plusieurs secondes qui freezait la tab. Maintenant le slider
+s'ouvre au compte réel (no-op), et drag down ne lance le live preview que
+si la réduction est < 20K vertex removals.
