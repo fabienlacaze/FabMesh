@@ -586,6 +586,16 @@
          Sensitive-tabs lock already password-gates this view. -->
     <!-- Tab: Marketplace — community listings (publish + moderation) -->
     <div class="tab-panel" data-panel="market">
+      <!-- Killswitch banner — loaded on tab open. Lets the admin halt
+           ALL marketplace writes (publish, checkout, rate, update,
+           unpublish) instantly in case of fraud / abuse / incident. -->
+      <div id="market-killswitch-banner" style="display:none; padding:12px 14px; border-radius:8px; margin-bottom:12px; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <div id="market-killswitch-status" style="font-size:13px; font-weight:600;"></div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span id="market-killswitch-meta" style="font-size:11px; color:var(--text-2);"></span>
+          <button class="btn" id="market-killswitch-toggle" onclick="toggleMarketKillSwitch()">…</button>
+        </div>
+      </div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
         <span style="color:var(--text-2); font-size:12px;">Community-published meshes. Approve to make them visible on <code>/market</code>. Stored on R2 under <code>_market/listings/</code>.</span>
         <button class="btn" onclick="loadMarketListings()">🔄 Refresh</button>
@@ -2380,7 +2390,63 @@
       cc0: 'CC0', 'cc-by': 'CC-BY', 'cc-by-nc': 'CC-BY-NC',
       commercial: 'Commercial',
     };
+    // ── Killswitch helpers ────────────────────────────────────────────
+    async function loadMarketKillSwitch() {
+      const banner = document.getElementById('market-killswitch-banner');
+      if (!banner) return;
+      try {
+        const r = await fetch('/api/admin/market/killswitch', { credentials: 'include' });
+        if (!r.ok) { banner.style.display = 'none'; return; }
+        const j = await r.json();
+        const ks = j.killswitch || { enabled: false };
+        const status = document.getElementById('market-killswitch-status');
+        const meta   = document.getElementById('market-killswitch-meta');
+        const toggle = document.getElementById('market-killswitch-toggle');
+        banner.style.display = 'flex';
+        if (ks.enabled) {
+          banner.style.background = 'rgba(244,67,54,0.15)';
+          banner.style.border = '1px solid var(--err)';
+          status.innerHTML = '🔴 Marketplace is DISABLED' + (ks.reason ? ' — ' + escapeHtml(ks.reason) : '');
+          meta.textContent = ks.set_at ? ('by ' + (ks.set_by || '?') + ' · ' + new Date(ks.set_at).toLocaleString('fr')) : '';
+          toggle.textContent = '🟢 Re-open marketplace';
+          toggle.style.background = 'var(--ok)'; toggle.style.borderColor = 'var(--ok)'; toggle.style.color = '#fff';
+        } else {
+          banner.style.background = 'rgba(76,175,80,0.10)';
+          banner.style.border = '1px solid var(--ok)';
+          status.innerHTML = '🟢 Marketplace is LIVE';
+          meta.textContent = '';
+          toggle.textContent = '🔴 Kill marketplace';
+          toggle.style.background = 'var(--err)'; toggle.style.borderColor = 'var(--err)'; toggle.style.color = '#fff';
+        }
+        toggle.dataset.currentlyEnabled = ks.enabled ? '1' : '0';
+      } catch (e) {
+        banner.style.display = 'none';
+      }
+    }
+    async function toggleMarketKillSwitch() {
+      const toggle = document.getElementById('market-killswitch-toggle');
+      const currentlyKilled = toggle.dataset.currentlyEnabled === '1';
+      let reason = '';
+      if (!currentlyKilled) {
+        reason = window.prompt('Reason for disabling the marketplace?\n(visible to users, max 400 chars)') || '';
+        if (reason === null || reason.trim() === '') return;
+      } else {
+        if (!confirm('Re-open the marketplace?')) return;
+      }
+      try {
+        const r = await fetch('/api/admin/market/killswitch', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: !currentlyKilled, reason }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        await loadMarketKillSwitch();
+      } catch (e) { alert('Killswitch toggle failed: ' + (e?.message || e)); }
+    }
+
     async function loadMarketListings() {
+      // Refresh killswitch state every time the listings reload.
+      loadMarketKillSwitch();
       const list = document.getElementById('market-list');
       list.innerHTML = '<div style="color:var(--text-2); text-align:center; padding:24px; grid-column:1/-1;">Loading…</div>';
       try {

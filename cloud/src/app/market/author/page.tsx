@@ -1,12 +1,21 @@
 'use client';
 //
-// Public author profile — /market/author/<user_id>. No auth required.
-// Shows the creator's display name, member-since date, headline stats
-// (listings / sales / earnings) and the grid of their approved
-// listings. Clicking a card jumps to /market?item=<id> where the
-// existing public detail modal handles the rest.
+// Public author profile — /market/author?id=<user_id>.
 //
-import { useEffect, useState, use } from 'react';
+// Originally a dynamic route /market/author/<id>, but Next.js static
+// export requires generateStaticParams() and we can't enumerate every
+// possible user_id at build time. Switched to a query-param page that
+// reads useSearchParams() — fully static-exportable with no per-id
+// build entries.
+//
+// No auth required. Shows the creator's display name, member-since
+// date, headline stats (listings / sales / earnings) and the grid of
+// their approved listings. Clicking a card jumps to
+// /market?item=<id> where the existing public detail modal handles
+// the rest.
+//
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Script from 'next/script';
 
 interface AuthorListing {
@@ -77,13 +86,20 @@ function StarRating({ avg, count }: { avg?: number; count?: number }) {
   );
 }
 
-export default function AuthorPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+function AuthorPageInner() {
+  const sp = useSearchParams();
+  const id = sp.get('id') || '';
+
   const [profile, setProfile] = useState<AuthorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!id) {
+      setError('Author id required (e.g. /market/author?id=<user_id>)');
+      setLoading(false);
+      return;
+    }
     (async () => {
       try {
         const r = await fetch(`/api/market/author/${encodeURIComponent(id)}`);
@@ -213,5 +229,22 @@ export default function AuthorPage({ params }: { params: Promise<{ id: string }>
         </div>
       )}
     </div>
+  );
+}
+
+export default function AuthorPage() {
+  // useSearchParams() in Next.js 15 needs a Suspense boundary during
+  // build-time prerender of the empty shell; falls back gracefully on
+  // the first client paint.
+  return (
+    <Suspense fallback={
+      <div className="page">
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-2)' }}>
+          Loading…
+        </div>
+      </div>
+    }>
+      <AuthorPageInner />
+    </Suspense>
   );
 }

@@ -1648,6 +1648,8 @@ async function _loadAllListings(env: Env): Promise<MarketListing[]> {
  *  We snapshot the asset URL at publish time. Status starts as
  *  'pending' so admin can approve before it shows on the public grid. */
 async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
+  const gate = await _marketGate(env);
+  if (gate) return gate;
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
@@ -1738,6 +1740,8 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
  *  author edits one of their own listings. Resets status to pending so an
  *  admin re-reviews the changes. */
 async function handleMarketUpdate(req: Request, env: Env, id: string): Promise<Response> {
+  const gate = await _marketGate(env);
+  if (gate) return gate;
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
@@ -1779,6 +1783,8 @@ async function handleMarketUpdate(req: Request, env: Env, id: string): Promise<R
 
 /** POST /api/market/unpublish/<id>  — author retracts a listing. */
 async function handleMarketUnpublish(req: Request, env: Env, id: string): Promise<Response> {
+  const gate = await _marketGate(env);
+  if (gate) return gate;
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
@@ -1872,7 +1878,15 @@ async function handleMarketList(_req: Request, env: Env): Promise<Response> {
         rating_count: r.count,
       };
     });
-  return json({ ok: true, listings: visible });
+  // Surface the killswitch state so the UI can grey out buy/publish
+  // affordances. Read still returns listings, write routes return 503.
+  const ks = await _getMarketKillSwitch(env);
+  return json({
+    ok: true,
+    listings: visible,
+    marketplace_disabled: ks.enabled,
+    marketplace_reason: ks.enabled ? (ks.reason || null) : null,
+  });
 }
 
 /** GET /api/market/<id> — PUBLIC. Single listing details. */
@@ -1986,6 +2000,8 @@ async function _loadAllRatingsByListing(env: Env):
  *  Buyers/visitors rate an approved listing. One rating per user
  *  (overwrite). Authors cannot rate their own listing. */
 async function handleMarketRate(req: Request, env: Env, id: string): Promise<Response> {
+  const gate = await _marketGate(env);
+  if (gate) return gate;
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
@@ -2113,6 +2129,35 @@ async function handleAdminMarketList(req: Request, env: Env): Promise<Response> 
   return json({ ok: true, listings: all });
 }
 
+/** GET /api/admin/market/killswitch — ADMIN. Read current state. */
+async function handleAdminMarketKillSwitchGet(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const ks = await _getMarketKillSwitch(env);
+  return json({ ok: true, killswitch: ks });
+}
+
+/** POST /api/admin/market/killswitch  body { enabled: boolean, reason: string }
+ *  — ADMIN. Toggle marketplace ON/OFF. `enabled=true` means marketplace
+ *  is KILLED (admin-side intuition). */
+async function handleAdminMarketKillSwitchSet(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { enabled?: unknown; reason?: unknown };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const enabled = !!body.enabled;
+  const reason  = String(body.reason ?? '').trim().slice(0, 400);
+  const rec: MarketKillSwitch = {
+    enabled, reason,
+    set_at: new Date().toISOString(),
+    set_by: guard.email || guard.id,
+  };
+  await env.MESHES.put('_meta/market_killswitch.json', JSON.stringify(rec),
+                       { httpMetadata: { contentType: 'application/json' } });
+  return json({ ok: true, killswitch: rec });
+}
+
 /** POST /api/admin/market/<id>/approve — ADMIN. */
 async function handleAdminMarketApprove(req: Request, env: Env, id: string): Promise<Response> {
   const guard = await _requireAdmin(req, env);
@@ -2174,6 +2219,39 @@ async function handleAdminMarketReject(req: Request, env: Env, id: string): Prom
 // =============================================================
 
 const MARKET_COMMISSION_PCT = 30;  // platform fee, see comment above
+
+// ── Marketplace kill-switch ─────────────────────────────────────────
+// Admin can flip the marketplace OFF in case of fraud, abuse, or
+// legal incident. While OFF, every WRITE route (publish, checkout,
+// update, unpublish, rate) returns 503 with the reason. READ routes
+// (list, get, author) keep working but include a `marketplace_disabled`
+// flag so the UI can grey out buy/publish affordances.
+//
+// Storage: a single R2 record at `_meta/market_killswitch.json`.
+// Default state when missing: OPEN.
+type MarketKillSwitch = {
+  enabled: boolean;   // "true" means marketplace is KILLED (intuitive for admins)
+  reason: string;
+  set_at: string;
+  set_by: string;
+};
+async function _getMarketKillSwitch(env: Env): Promise<MarketKillSwitch> {
+  const empty: MarketKillSwitch = { enabled: false, reason: '', set_at: '', set_by: '' };
+  if (!env.MESHES) return empty;
+  const txt = await r2GetText(env, '_meta/market_killswitch.json');
+  if (!txt) return empty;
+  try { return JSON.parse(txt) as MarketKillSwitch; } catch { return empty; }
+}
+async function _marketGate(env: Env): Promise<Response | null> {
+  const ks = await _getMarketKillSwitch(env);
+  if (!ks.enabled) return null;  // open — let the route proceed
+  return json({
+    ok: false,
+    error: 'Marketplace temporarily disabled',
+    reason: ks.reason || null,
+    marketplace_disabled: true,
+  }, { status: 503 });
+}
 
 // Seller payout ratio: mirrors the best buyer pack (studio = 50EUR -> 350
 // credits = 7 credits/EUR) so a sale always gives the seller at least
@@ -2400,6 +2478,8 @@ function _stripeForm(obj: Record<string, unknown>): URLSearchParams {
  *  cart. Returns { url } for the client to redirect to. Free listings
  *  are filtered out server-side (downloads via /api/market/download). */
 async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
+  const gate = await _marketGate(env);
+  if (gate) return gate;
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
@@ -7123,6 +7203,8 @@ export default {
         if (pathname === '/api/market/seller/dashboard'     && method === 'POST') return await handleMarketSellerDashboard(req, env);
         if (pathname === '/api/market/seller/earnings'      && method === 'GET')  return await handleMarketSellerEarnings(req, env);
         if (pathname === '/api/admin/market/list'           && method === 'GET')  return await handleAdminMarketList(req, env);
+        if (pathname === '/api/admin/market/killswitch'     && method === 'GET')  return await handleAdminMarketKillSwitchGet(req, env);
+        if (pathname === '/api/admin/market/killswitch'     && method === 'POST') return await handleAdminMarketKillSwitchSet(req, env);
         {
           const m = pathname.match(/^\/api\/market\/download\/([A-Za-z0-9_]+)$/);
           if (m && method === 'GET') return await handleMarketDownload(req, env, m[1]);

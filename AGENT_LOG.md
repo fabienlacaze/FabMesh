@@ -10,6 +10,31 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market v4.1 — static-export fix + killswitch)
+
+- **Build fix** : `/market/author/[id]` était une dynamic route mais
+  Next.js `output: export` exige `generateStaticParams()` (impossible
+  pour des UUIDs). Migré en query-param page `/market/author?id=<uid>`
+  utilisant `useSearchParams()` (avec Suspense boundary). Dossier
+  `[id]/` supprimé. Tous les liens dans market/page.tsx updated.
+- **Marketplace killswitch** :
+  - Backend : `_marketGate(env)` helper, R2 record
+    `_meta/market_killswitch.json` = `{ enabled, reason, set_at,
+    set_by }`. Gate appliquée en haut de toutes les routes write
+    (publish, checkout, update, unpublish, rate) → 503 + reason.
+    Read routes (list/get/author) renvoient toujours les données mais
+    avec `marketplace_disabled` + `marketplace_reason` flags.
+  - Admin routes : GET/POST `/api/admin/market/killswitch`. Toggle
+    capture l'email admin + timestamp.
+  - Admin UI : banner 🔴 DISABLED / 🟢 LIVE en haut du tab Marketplace
+    avec bouton toggle (prompt pour la raison au kill, confirm au
+    re-open).
+  - Frontend `/market` : banner rouge si `marketplace_disabled`.
+- Build verified (Next.js export propre, /market/author 2.35 kB,
+  /market 6.41 kB). Worker version 9dc55c65 deployed.
+
+---
+
 ## 2026-05-28 (Market v4 — clickable badges + asset filter + author page + 5★ ratings)
 - Clickable 🛒 badge on workspace + home grids → /market?item=<id> opens the listing detail directly.
 - /market reads ?item= from URL on mount and auto-opens the detail modal.
