@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market — admin badges + My Listings tab)
+
+- Admin: viewing a user's Images/Meshes modal now badges every card with its marketplace status (Pending review / Live on /market $X.XX / Rejected). Indexed by job_id (meshes) and asset_url (images).
+- User: new "📝 Mine" tab on /market shows every listing the user has published, with edit (title, description, price, licence) and remove buttons. Editing resets status to pending for admin re-review.
+- Backend: new GET /api/admin/users/<uid>/listings + PATCH /api/market/listing/<id>. Existing POST /api/market/unpublish/<id> reused for remove.
+- /api/me/published-assets now includes title + description + licence + currency so the My Listings UI renders without extra fetches.
+
+---
+
 ## 2026-05-28 (Market badge extended to workspace version strip)
 
 - Extended the 🛒 published badge from home grids only to the workspace version-strip thumbs (ws-image-versions / ws-mesh-versions). Added smaller-badge CSS variant for the strip thumbs which are narrower than home cards.
