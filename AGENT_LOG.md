@@ -10,6 +10,13 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Legal — Marketplace + Stripe Connect clauses)
+
+- Added MARKETPLACE section to /legal/terms (publishing, buying, commission, taxes, disputes).
+- Added MARKETPLACE & STRIPE CONNECT section to /legal/privacy (KYC data, Stripe data sharing, tax reporting, deletion rights).
+
+---
+
 ## 2026-05-28 (Marketplace v3 — Stripe Connect Express cash payouts)
 
 - New: Stripe Connect Express. Sellers can opt in to cash payouts (IBAN/bank) instead of platform credits. Onboarding via account_links, 5 min KYC handled by Stripe.

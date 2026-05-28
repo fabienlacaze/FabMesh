@@ -140,6 +140,89 @@ export default function PrivacyPage() {
         changes are announced by email to active users.
       </p>
 
+      <h2>10. Marketplace &amp; Stripe Connect</h2>
+      <p>
+        If you list assets on our marketplace, or activate cash payouts as a
+        seller, the following additional terms apply.
+      </p>
+
+      <h3>10.1 Data we collect from marketplace participants</h3>
+      <ul>
+        <li>
+          <strong>Listing metadata</strong> (title, description, price, licence)
+          is stored in our backend and visible to all marketplace visitors once
+          approved.
+        </li>
+        <li>
+          <strong>Author display name</strong> (derived from the part of your
+          email before the <code>@</code>) is shown next to your listings.
+        </li>
+        <li>
+          <strong>Sales records</strong> (buyer ID, seller ID, amount, currency,
+          Stripe session ID, <code>paid_at</code> timestamp, payout details) are
+          stored for accounting and audit purposes.
+        </li>
+      </ul>
+
+      <h3>10.2 Data shared with Stripe (sellers who activate cash payouts)</h3>
+      <ul>
+        <li>
+          When you click &ldquo;Set up cash payouts&rdquo;, you are redirected
+          to <strong>Stripe Connect Express</strong> where you provide
+          identification data (name, address, date of birth, ID document,
+          IBAN / bank account).
+        </li>
+        <li>
+          Stripe performs KYC (&ldquo;Know Your Customer&rdquo;) verification
+          under European AML directives or the US Bank Secrecy Act, as
+          applicable.
+        </li>
+        <li>
+          We do <strong>not</strong> store your ID document, full bank account
+          number, or date of birth. Stripe is the data controller for that
+          data.
+        </li>
+        <li>
+          We do store: Stripe account ID (<code>acct_xxx</code>), country,
+          <code> charges_enabled</code> / <code>payouts_enabled</code> flags,
+          and account creation date.
+        </li>
+        <li>
+          Stripe&apos;s privacy policy applies to that data:{' '}
+          <a href="https://stripe.com/privacy" target="_blank" rel="noopener">stripe.com/privacy</a>.
+        </li>
+      </ul>
+
+      <h3>10.3 Tax reporting</h3>
+      <ul>
+        <li>
+          Where required by law (US IRS 1099-K thresholds, EU DAC7 thresholds),
+          we may share aggregated sales data with tax authorities through
+          Stripe&apos;s reporting tools.
+        </li>
+        <li>
+          Sellers will be notified by Stripe if their activity reaches a
+          reportable threshold.
+        </li>
+      </ul>
+
+      <h3>10.4 Your rights</h3>
+      <ul>
+        <li>
+          You can request deletion of your seller account at any time. Stripe
+          will retain transactional records for the legal minimum (typically
+          7&ndash;10 years for accounting).
+        </li>
+        <li>
+          Active listings are unpublished automatically when the seller account
+          is deleted.
+        </li>
+        <li>
+          Sales records older than 30 days are not deleted, in order to comply
+          with accounting law.
+        </li>
+      </ul>
+
       <p style={{ marginTop: 32, fontSize: 13 }}>
         <a href="/legal/terms">Terms of Service</a> &middot;{' '}
         <a href="/">Home</a>
