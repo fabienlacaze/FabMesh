@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Inbox — thumbnails + clickable title navigates to asset)
+
+- Notification payload now carries subject + asset_url + asset_kind + job_id when emitted from marketplace approve/reject/sale hooks. Replies are unchanged (subject already set by the contact form).
+- Inbox popup rows render a 60x60 thumbnail (img for images, model-viewer for meshes) on the left, with the existing icon as fallback.
+- Title for marketplace notifications becomes clickable; clicking it closes the inbox, opens the matching project, scrolls the version-thumb into view, and flashes it for 1s (yellow border + glow).
+- If the project is not in state.allProjects (e.g. user refreshed and lost local state), a toast suggests refreshing the home page.
+
+---
+
 ## 2026-05-29 (Remove BG — persist result on R2 instead of Replicate URL)
 
 - Remove BG no longer returns a `replicate.delivery` URL (TTL ~1h, would trip the renderer's Expired-hostname guard on the strip thumbs within an hour). The bytes are now downloaded and re-uploaded to R2 immediately after the upstream Replicate call in `handleRemoveBackground` (cloud/src/worker.ts:4142), and the R2 public URL is returned to the renderer instead.

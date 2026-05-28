@@ -1516,12 +1516,16 @@ async function handleMeInbox(req: Request, env: Env): Promise<Response> {
           id: n.id,
           source: 'notification',
           kind: n.kind,
-          title: '',
+          title: n.subject || '',
           message: n.message,
           read: !!n.read,
           created_at: n.created_at,
         };
         if (n.listing_id) item.listing_id = n.listing_id;
+        if (n.subject) item.subject = n.subject;
+        if (n.asset_url) item.asset_url = n.asset_url;
+        if (n.asset_kind) item.asset_kind = n.asset_kind;
+        if (n.job_id) item.job_id = n.job_id;
         items.push(item);
       } catch {}
     }
@@ -2304,6 +2308,10 @@ async function handleAdminMarketApprove(req: Request, env: Env, id: string): Pro
       kind: 'market_approved',
       message: `Your listing "${parsed.title}" was approved and is now live on /market.`,
       listing_id: id,
+      subject: parsed.title || 'Listing updated',
+      asset_url: parsed.asset_url || parsed.mesh_url,
+      asset_kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
+      job_id: parsed.job_id,
     });
     return json({ ok: true, success: true });
   } catch (e) {
@@ -2333,6 +2341,10 @@ async function handleAdminMarketReject(req: Request, env: Env, id: string): Prom
       kind: 'market_rejected',
       message: `Your listing "${parsed.title}" was rejected.${reasonSuffix}`,
       listing_id: id,
+      subject: parsed.title || 'Listing updated',
+      asset_url: parsed.asset_url || parsed.mesh_url,
+      asset_kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
+      job_id: parsed.job_id,
     });
     return json({ ok: true, success: true });
   } catch (e) {
@@ -2452,6 +2464,10 @@ type UserNotification = {
   kind: UserNotificationKind;
   message: string;
   listing_id?: string;
+  subject?: string;
+  asset_url?: string;
+  asset_kind?: 'mesh' | 'image';
+  job_id?: string;
   read: boolean;
   created_at: string;
 };
@@ -2459,7 +2475,15 @@ type UserNotification = {
 async function _addUserNotification(
   env: Env,
   userId: string,
-  partial: { kind: UserNotificationKind; message: string; listing_id?: string },
+  partial: {
+    kind: UserNotificationKind;
+    message: string;
+    listing_id?: string;
+    subject?: string;
+    asset_url?: string;
+    asset_kind?: 'mesh' | 'image';
+    job_id?: string;
+  },
 ): Promise<void> {
   if (!env.MESHES || !userId) return;
   try {
@@ -2475,6 +2499,10 @@ async function _addUserNotification(
       created_at: ts,
     };
     if (partial.listing_id) rec.listing_id = partial.listing_id;
+    if (partial.subject) rec.subject = partial.subject;
+    if (partial.asset_url) rec.asset_url = partial.asset_url;
+    if (partial.asset_kind) rec.asset_kind = partial.asset_kind;
+    if (partial.job_id) rec.job_id = partial.job_id;
     await env.MESHES.put(
       `_notifications/${userId}/${id}.json`,
       JSON.stringify(rec),
@@ -2861,6 +2889,10 @@ async function _processMarketPurchase(env: Env, sess: {
           kind: 'market_sale',
           message: `You sold "${listing.title}" for ${formattedPrice} (+${payoutCredits} credits earned).`,
           listing_id: listing.id,
+          subject: listing.title || 'Listing updated',
+          asset_url: listing.asset_url || listing.mesh_url,
+          asset_kind: listing.asset_kind || (listing.mesh_url ? 'mesh' : 'image'),
+          job_id: listing.job_id,
         });
       } catch {}
     }
