@@ -10,6 +10,14 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Marketplace — download forces attachment via worker proxy)
+
+- Marketplace download buttons now hit /api/market/download/<id> which proxies the asset bytes through the worker with Content-Disposition: attachment. Browser downloads instead of opening inline (the cross-origin R2 URL stripped the HTML `download` attribute and the previous 302 redirect kept the same cross-origin problem).
+- Free listings are accessible anonymously; paid still require ownership.
+- listing.downloads counter bumped per request (best-effort).
+
+---
+
 ## 2026-05-29 (Fix cold-start hint + retexture imagePath)
 
 - Cold-start hint now only shows when window.__modalWarm === false at render time. The regex fallback on the frozen Engine label was producing false positives for warm runs (the label is captured at job launch and never updates, so once "Warming up" appeared it stuck the hint on for the whole job).

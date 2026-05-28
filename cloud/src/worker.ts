@@ -2945,28 +2945,58 @@ async function handleMarketOwned(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, items });
 }
 
-/** GET /api/market/download/<listing_id> — must own. We don't proxy
- *  the file (would waste worker CPU on multi-MB GLBs); we just sign a
- *  short-lived redirect to the R2 public URL. The asset URL itself is
- *  public so this is "soft DRM" — good enough for MVP. */
+/** GET /api/market/download/<listing_id> — proxies the asset bytes
+ *  through the worker with Content-Disposition: attachment so the
+ *  browser actually downloads instead of opening inline. Returning a
+ *  302 to a cross-origin R2 URL strips the HTML `download` attribute
+ *  and the browser falls back to "open in tab". Streaming
+ *  `upstream.body` doesn't buffer, so this stays light on CPU. */
 async function handleMarketDownload(req: Request, env: Env, listingId: string): Promise<Response> {
-  const user = await getSessionUser(req, env);
-  if (!user) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
-  // Free listings are downloadable by anyone — skip ownership check.
   const lTxt = await r2GetText(env, `_market/listings/${listingId}.json`);
   if (!lTxt) return err(404, 'listing not found');
   let listing: MarketListing;
   try { listing = JSON.parse(lTxt); } catch { return err(500, 'listing parse failed'); }
   if (listing.status !== 'approved') return err(404, 'listing not visible');
+  // Paid listings require auth + ownership. Free listings are public.
   if (listing.price_cents > 0) {
+    const user = await getSessionUser(req, env);
+    if (!user) return err(401, 'unauthorized');
     const head = await env.MESHES.head(`_market/owners/${listingId}/${user.id}.json`);
     if (!head) return err(402, 'purchase required');
   }
   const url = listing.asset_url || listing.mesh_url;
   if (!url) return err(404, 'asset URL missing');
-  // Redirect — browser handles the file download.
-  return new Response(null, { status: 302, headers: { Location: url } });
+
+  const upstream = await fetch(url);
+  if (!upstream.ok || !upstream.body) return err(502, 'asset fetch failed');
+
+  // Safe filename: alphanumerics + dash + underscore from the title,
+  // plus the extension lifted off the asset URL pathname.
+  const safeTitle = (listing.title || 'asset').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 80) || 'asset';
+  let ext = '';
+  try {
+    const m = new URL(url).pathname.match(/\.([A-Za-z0-9]{1,8})$/);
+    if (m) ext = '.' + m[1].toLowerCase();
+  } catch {}
+  const filename = safeTitle + ext;
+
+  const headers = new Headers();
+  const upCT = upstream.headers.get('Content-Type');
+  if (upCT) headers.set('Content-Type', upCT);
+  const upCL = upstream.headers.get('Content-Length');
+  if (upCL) headers.set('Content-Length', upCL);
+  headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+  headers.set('Cache-Control', 'private, max-age=60');
+
+  // Best-effort downloads counter — don't block the response on this.
+  try {
+    listing.downloads = (listing.downloads || 0) + 1;
+    await env.MESHES.put(`_market/listings/${listingId}.json`, JSON.stringify(listing),
+                         { httpMetadata: { contentType: 'application/json' } });
+  } catch {}
+
+  return new Response(upstream.body, { status: 200, headers });
 }
 
 /** DELETE /api/admin/market/<id> — ADMIN. Hard-remove a listing. */

@@ -740,7 +740,8 @@ function MarketPageInner() {
                     );
                   })() : owns ? (
                     <a
-                      href={`/api/market/download/${l.id}`}
+                      href={`/api/market/download/${encodeURIComponent(l.id)}`}
+                      download
                       onClick={(e) => e.stopPropagation()}
                       className="primary-btn"
                       style={{ marginTop: 6, padding: '6px 12px', fontSize: 12, textAlign: 'center', textDecoration: 'none' }}
@@ -749,7 +750,7 @@ function MarketPageInner() {
                     </a>
                   ) : l.price_cents === 0 ? (
                     <a
-                      href={l.asset_url || l.mesh_url}
+                      href={`/api/market/download/${encodeURIComponent(l.id)}`}
                       download
                       onClick={(e) => e.stopPropagation()}
                       className="ghost-btn"
@@ -854,11 +855,11 @@ function MarketPageInner() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{formatPrice(selected.price_cents, selected.currency)}</div>
               {ownedIds.has(selected.id) ? (
-                <a href={`/api/market/download/${selected.id}`} className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
+                <a href={`/api/market/download/${encodeURIComponent(selected.id)}`} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
                   ⬇ Download
                 </a>
               ) : selected.price_cents === 0 ? (
-                <a href={selected.asset_url || selected.mesh_url} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
+                <a href={`/api/market/download/${encodeURIComponent(selected.id)}`} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
                   ⬇ Free download
                 </a>
               ) : (meUserId && selected.user_id === meUserId) ? (
