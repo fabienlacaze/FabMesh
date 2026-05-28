@@ -6584,18 +6584,19 @@ function _jsLaplacianSmooth(geom, iter, lambda) {
 
 // Fill Holes — Unreal-Modeling-Mode-style preview.
 // Highlights every detected hole boundary with a coloured line loop:
-//   green  → the hole is small enough (size ≤ maxHoleSize) and gets
-//             filled with a centroid-fan triangulation in the preview.
-//   red    → the hole is bigger than the cap, left untouched.
-// Caller decides via the live max_hole_size slider, so dragging it
-// shifts loops between red and green in real time.
+//   grey   → smaller than minHoleSize, left untouched (e.g. micro-cracks
+//             you don't want to weld over).
+//   green  → minHoleSize ≤ size ≤ maxHoleSize → filled with a centroid-
+//             fan triangulation in the preview.
+//   red    → bigger than maxHoleSize, left untouched.
+// Caller drives both ends via the live sliders, so dragging shifts loops
+// between buckets in real time.
 //
-// Returns { geometry, helpers, stats: { loops, filled, tooBig, biggest } }
-// so the modal's status line can tell the user exactly what's going on
-// ("0 loops found" = the dark patches are probably texture, not holes).
-function _jsFillHoles(geom, maxHoleSize) {
+// Returns { geometry, helpers, stats: { loops, filled, tooBig, tooSmall,
+// biggest, smallest } } so the modal can render the status line.
+function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
   if (!geom.index) {
-    return { geometry: geom.clone(), helpers: [], stats: { loops: 0, filled: 0, tooBig: 0, biggest: 0 } };
+    return { geometry: geom.clone(), helpers: [], stats: { loops: 0, filled: 0, tooBig: 0, tooSmall: 0, biggest: 0, smallest: 0 } };
   }
   const posAttr = geom.attributes.position;
   const indices = geom.index.array;
@@ -6685,19 +6686,26 @@ function _jsFillHoles(geom, maxHoleSize) {
   const hasUV = !!geom.attributes.uv;
   const newUVs = hasUV ? Array.from(geom.attributes.uv.array) : null;
 
-  // Pre-collect line vertices for the helpers (green = fillable, red = too big).
+  // Pre-collect line vertices for the helpers.
+  // grey  = below minHoleSize (skipped on purpose)
+  // green = within [min,max] (will be filled in the preview)
+  // red   = above maxHoleSize (skipped — raise the max to include them)
+  const greyLineVerts = [];
   const greenLineVerts = [];
   const redLineVerts = [];
 
   for (const loop of loops) {
-    const willFill = loop.length <= maxHoleSize;
+    let bucket;
+    if (loop.length < minHoleSize) bucket = greyLineVerts;
+    else if (loop.length > maxHoleSize) bucket = redLineVerts;
+    else bucket = greenLineVerts;
+    const willFill = bucket === greenLineVerts;
     // Build the loop line geometry — LineSegments expects pairs, so
     // we emit each edge as two vertices.
-    const sink = willFill ? greenLineVerts : redLineVerts;
     for (let i = 0; i < loop.length; i++) {
       const va = repOfGroup[loop[i]];
       const vb = repOfGroup[loop[(i + 1) % loop.length]];
-      sink.push(
+      bucket.push(
         newPositions[va * 3], newPositions[va * 3 + 1], newPositions[va * 3 + 2],
         newPositions[vb * 3], newPositions[vb * 3 + 1], newPositions[vb * 3 + 2],
       );
@@ -6734,6 +6742,13 @@ function _jsFillHoles(geom, maxHoleSize) {
   result.computeVertexNormals();
 
   const helpers = [];
+  if (greyLineVerts.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(greyLineVerts, 3));
+    helpers.push(new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+      color: 0x888888, depthTest: false, transparent: true, opacity: 0.85,
+    })));
+  }
   if (greenLineVerts.length) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(greenLineVerts, 3));
@@ -6751,13 +6766,17 @@ function _jsFillHoles(geom, maxHoleSize) {
   // Render the lines on top of the mesh so they're not z-buried.
   for (const h of helpers) h.renderOrder = 999;
   // Stats so the modal can surface "0 loops found" (probably texture,
-  // not geometry) vs "5 loops, 2 filled, 3 too big — raise the slider".
-  let filled = 0, tooBig = 0, biggest = 0;
+  // not geometry) vs "5 loops, 2 filled, 1 too small, 2 too big".
+  let filled = 0, tooBig = 0, tooSmall = 0, biggest = 0, smallest = Infinity;
   for (const loop of loops) {
     if (loop.length > biggest) biggest = loop.length;
-    if (loop.length <= maxHoleSize) filled++; else tooBig++;
+    if (loop.length < smallest) smallest = loop.length;
+    if (loop.length < minHoleSize) tooSmall++;
+    else if (loop.length > maxHoleSize) tooBig++;
+    else filled++;
   }
-  return { geometry: result, helpers, stats: { loops: loops.length, filled, tooBig, biggest } };
+  if (loops.length === 0) smallest = 0;
+  return { geometry: result, helpers, stats: { loops: loops.length, filled, tooBig, tooSmall, biggest, smallest } };
 }
 
 // Edge-collapse decimation via three.js SimplifyModifier. Quadric
@@ -6916,24 +6935,35 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Cap mesh holes — green outlines will be filled, red are larger than the cap. If nothing highlights, the dark patches are texture/back-faces, not geometry holes.',
+    subtitle: 'Cap mesh holes — green outlines will be filled, grey are smaller than the min, red are bigger than the max. If nothing highlights, the dark patches are texture/back-faces, not geometry holes.',
     needsImage: false,
     supportsClientApply: true,
     params: [
-      { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 20000, step: 10, default: 2000 },
+      { id: 'min_hole_size', label: 'Min hole size (edges)', type: 'range', min: 3,  max: 20000, step: 1,  default: 3 },
+      { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3,  max: 20000, step: 10, default: 2000 },
     ],
-    build: (vals) => [String(vals.max_hole_size)],
-    preview: (geom, vals) => _jsFillHoles(geom, Math.max(3, vals.max_hole_size | 0)),
+    build: (vals) => [String(vals.min_hole_size), String(vals.max_hole_size)],
+    preview: (geom, vals) => _jsFillHoles(
+      geom,
+      Math.max(3, vals.min_hole_size | 0),
+      Math.max(3, vals.max_hole_size | 0),
+    ),
     previewStatus: (vals, st) => {
       const s = st.lastStats;
       if (!s) return 'Computing…';
       if (s.loops === 0) {
-        return 'No boundary edges found — the mesh is closed (the dark patches are probably texture or back-faces, not geometry holes).';
+        return 'No boundary edges found — the mesh is closed (the dark patches are probably texture or back-faces, not geometry holes — try Fix Normals or Re-Texture instead).';
       }
       if (s.filled === s.loops) {
-        return `Filled ${s.filled} hole${s.filled > 1 ? 's' : ''} (biggest ${s.biggest} edges).`;
+        return `Filled ${s.filled} hole${s.filled > 1 ? 's' : ''} (range ${s.smallest}–${s.biggest} edges).`;
       }
-      return `${s.loops} hole${s.loops > 1 ? 's' : ''} found · ${s.filled} filled (green) · ${s.tooBig} too big (red, biggest ${s.biggest} edges). Raise the slider to fill more.`;
+      const parts = [];
+      parts.push(`${s.loops} hole${s.loops > 1 ? 's' : ''} found`);
+      if (s.filled) parts.push(`${s.filled} filled (green)`);
+      if (s.tooSmall) parts.push(`${s.tooSmall} too small (grey)`);
+      if (s.tooBig) parts.push(`${s.tooBig} too big (red)`);
+      parts.push(`range ${s.smallest}–${s.biggest} edges`);
+      return parts.join(' · ') + '. Adjust min/max to include more.';
     },
   },
   center: {

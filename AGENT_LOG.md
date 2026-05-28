@@ -9255,3 +9255,22 @@ Fix (`cloud-overrides.js`):
 Combiné avec le setInterval (le "happy path" pour tabs actifs), le
 refresh-on-401 couvre le cas "tab idle puis retour" qui était le
 trou dans le filet.
+
+## 2026-05-28 — Fill Holes: dual slider min/max + grey bucket
+
+User veut pouvoir filtrer "trous trop petits" (micro-cracks) en plus de
+"trous trop gros". Refactor de `_jsFillHoles(geom, min, max)`:
+
+- 3-state classification par loop: tooSmall (grey lines 0x888888) /
+  fillable (green 0x22cc66) / tooBig (red 0xff3344).
+- Schema fill_holes: 2 params `min_hole_size` (default 3) +
+  `max_hole_size` (default 2000), tous deux 3..20000.
+- Stats étendues: { loops, filled, tooBig, tooSmall, biggest, smallest }.
+- previewStatus rend une phrase composée: "5 holes found · 2 filled
+  (green) · 1 too small (grey) · 2 too big (red) · range 4–4127 edges.
+  Adjust min/max to include more."
+
+Note importante pour le user: si le mesh est topologiquement clos
+(status "No boundary edges found"), les patches sombres visibles à
+l'écran ne sont PAS des trous géométriques — c'est du texture/back-face.
+Fill Holes ne peut rien y faire; il faut Fix Normals ou Re-Texture.
