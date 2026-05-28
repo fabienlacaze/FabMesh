@@ -1037,8 +1037,8 @@
               </div>
               <input id="mat-roughness" type="range" min="0.0" max="1.0" step="0.05" value="0.7" style="width:100%;">
             </div>
+            <button id="mat-reset-btn" class="ghost-btn" style="padding:6px 12px; font-size:11px; margin-top:6px; width:auto; align-self:flex-start;">↺ Reset</button>
             <div class="modal-actions" style="margin-top:auto;">
-              <button id="mat-reset-btn" class="ghost-btn">Reset</button>
               <button id="mat-cancel-btn" class="ghost-btn">Cancel</button>
               <button id="mat-apply-btn" class="primary-btn">Save as new version</button>
             </div>
@@ -1167,6 +1167,10 @@
             <div style="display:flex; gap:6px; padding:6px 8px; background:#0a0a0a; border-radius:4px;">
               <button id="pe-mode-paint" class="ghost-btn" style="flex:1; padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;">🖌 Paint</button>
               <button id="pe-mode-erase" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;">🧽 Erase</button>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button id="pe-undo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Undo (Ctrl+Z)">↶ Undo</button>
+              <button id="pe-redo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Redo (Ctrl+Y)">↷ Redo</button>
             </div>
             <button id="pe-clear" class="ghost-btn" style="padding:6px; font-size:11px;">↺ Clear all</button>
             <div style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">

@@ -7343,7 +7343,54 @@ const peState = {
   brushMode: 'paint',
   intensity: 1.0,
   isPainting: false,
+  history: [],
+  historyIndex: -1,
 };
+const PE_HISTORY_MAX = 30;
+function _peSnapshotAll() {
+  if (!peState.canvases) return null;
+  const snap = new Map();
+  peState.canvases.forEach((entry, mesh) => {
+    snap.set(mesh, entry.ctx.getImageData(0, 0, PE_TEX_SIZE, PE_TEX_SIZE));
+  });
+  return snap;
+}
+function _peApplySnapshot(snap) {
+  if (!snap) return;
+  peState.canvases?.forEach((entry, mesh) => {
+    const img = snap.get(mesh);
+    if (!img) return;
+    entry.ctx.putImageData(img, 0, 0);
+    entry.texture.needsUpdate = true;
+  });
+}
+function _peHistoryPush() {
+  const snap = _peSnapshotAll();
+  if (!snap) return;
+  peState.history.length = peState.historyIndex + 1;
+  peState.history.push(snap);
+  if (peState.history.length > PE_HISTORY_MAX) peState.history.shift();
+  peState.historyIndex = peState.history.length - 1;
+  _peUpdateUndoRedoButtons();
+}
+function _peUndo() {
+  if (peState.historyIndex <= 0) return;
+  peState.historyIndex--;
+  _peApplySnapshot(peState.history[peState.historyIndex]);
+  _peUpdateUndoRedoButtons();
+}
+function _peRedo() {
+  if (peState.historyIndex >= peState.history.length - 1) return;
+  peState.historyIndex++;
+  _peApplySnapshot(peState.history[peState.historyIndex]);
+  _peUpdateUndoRedoButtons();
+}
+function _peUpdateUndoRedoButtons() {
+  const u = document.getElementById('pe-undo');
+  const r = document.getElementById('pe-redo');
+  if (u) u.disabled = peState.historyIndex <= 0;
+  if (r) r.disabled = peState.historyIndex >= peState.history.length - 1;
+}
 
 async function _peInitViewport() {
   if (peState.renderer) return;
@@ -7429,6 +7476,9 @@ function _peSetupCanvasAndBind() {
       mat.needsUpdate = true;
     });
   });
+  peState.history = [];
+  peState.historyIndex = -1;
+  _peHistoryPush();
 }
 
 function _peRestoreMaterials() {
@@ -7504,12 +7554,9 @@ function _peStampAtPointer(clientX, clientY) {
   const entry = peState.canvases?.get(hit.object);
   if (!entry) return;
   const ctx = entry.ctx;
-  const uvX = Math.max(0, Math.min(1, hit.uv.x));
-  const uvY = Math.max(0, Math.min(1, hit.uv.y));
-  // flipY=false on the texture → canvas Y matches uv.v 1:1 (glTF
-  // convention has V=0 at the top of the image).
-  const px = uvX * PE_TEX_SIZE;
-  const py = uvY * PE_TEX_SIZE;
+  const TEX = PE_TEX_SIZE;
+  const px = Math.max(0, Math.min(1, hit.uv.x)) * TEX;
+  const py = Math.max(0, Math.min(1, hit.uv.y)) * TEX;
   const r = Math.max(1, peState.brushSize * 0.5);
   const fall = Math.max(0, Math.min(1, peState.brushFalloff));
   const innerColor = peState.brushMode === 'erase'
@@ -7522,11 +7569,67 @@ function _peStampAtPointer(clientX, clientY) {
   grad.addColorStop(0, innerColor);
   grad.addColorStop(1 - fall, innerColor);
   grad.addColorStop(1, edgeColor);
+  const mesh = hit.object;
+  const geom = mesh.geometry;
+  const uvAttr = geom.attributes.uv;
+  const posAttr = geom.attributes.position;
+  const idx = geom.index?.array;
   ctx.globalCompositeOperation = peState.brushMode === 'erase' ? 'destination-out' : 'source-over';
-  ctx.fillStyle = grad;
+  if (!uvAttr || !posAttr) {
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    entry.texture.needsUpdate = true;
+    return;
+  }
+  // 3D-aware stamping — kills the "stray paint on the ground when I
+  // clicked the sign" issue from overlapping UV islands in Trellis2's
+  // texture atlas. Only triangles physically close (in 3D) to the
+  // hit point can pick up the brush.
+  const localHit = mesh.worldToLocal(hit.point.clone());
+  const cam = peState.camera;
+  const camDist = cam.position.distanceTo(hit.point);
+  const viewH = peState.renderer.domElement.clientHeight || 600;
+  const heightAtDist = 2 * camDist * Math.tan((cam.fov * Math.PI / 180) / 2);
+  const unitsPerPx = heightAtDist / viewH;
+  const R3D = peState.brushSize * 0.5 * unitsPerPx * 1.2;
+  const R3DSq = R3D * R3D;
+  const posArr = posAttr.array;
+  const uvArr = uvAttr.array;
+  const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(posAttr.count / 3);
+  ctx.save();
   ctx.beginPath();
   ctx.arc(px, py, r, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = grad;
+  for (let t = 0; t < triCount; t++) {
+    const i0 = idx ? idx[t*3]   : t*3;
+    const i1 = idx ? idx[t*3+1] : t*3+1;
+    const i2 = idx ? idx[t*3+2] : t*3+2;
+    const p0x = posArr[i0*3], p0y = posArr[i0*3+1], p0z = posArr[i0*3+2];
+    const p1x = posArr[i1*3], p1y = posArr[i1*3+1], p1z = posArr[i1*3+2];
+    const p2x = posArr[i2*3], p2y = posArr[i2*3+1], p2z = posArr[i2*3+2];
+    const d0 = (p0x-localHit.x)**2 + (p0y-localHit.y)**2 + (p0z-localHit.z)**2;
+    if (d0 >= R3DSq) {
+      const d1 = (p1x-localHit.x)**2 + (p1y-localHit.y)**2 + (p1z-localHit.z)**2;
+      if (d1 >= R3DSq) {
+        const d2 = (p2x-localHit.x)**2 + (p2y-localHit.y)**2 + (p2z-localHit.z)**2;
+        if (d2 >= R3DSq) continue;
+      }
+    }
+    const u0x = uvArr[i0*2] * TEX, u0y = uvArr[i0*2+1] * TEX;
+    const u1x = uvArr[i1*2] * TEX, u1y = uvArr[i1*2+1] * TEX;
+    const u2x = uvArr[i2*2] * TEX, u2y = uvArr[i2*2+1] * TEX;
+    ctx.beginPath();
+    ctx.moveTo(u0x, u0y);
+    ctx.lineTo(u1x, u1y);
+    ctx.lineTo(u2x, u2y);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
   ctx.globalCompositeOperation = 'source-over';
   entry.texture.needsUpdate = true;
 }
@@ -7588,7 +7691,23 @@ function openPaintEmissive() {
       entry.ctx.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
       entry.texture.needsUpdate = true;
     });
+    _peHistoryPush();
   };
+  $('pe-undo').onclick = () => _peUndo();
+  $('pe-redo').onclick = () => _peRedo();
+  const onKey = (e) => {
+    if (modal.classList.contains('hidden')) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault();
+      if (e.shiftKey) _peRedo(); else _peUndo();
+    } else if (e.key === 'y' || e.key === 'Y') {
+      e.preventDefault();
+      _peRedo();
+    }
+  };
+  document.addEventListener('keydown', onKey);
 
   requestAnimationFrame(async () => {
     await _peInitViewport();
@@ -7622,7 +7741,10 @@ function openPaintEmissive() {
       _peStampAtPointer(e.clientX, e.clientY);
     };
     const up = (e) => {
-      peState.isPainting = false;
+      if (peState.isPainting) {
+        peState.isPainting = false;
+        _peHistoryPush();
+      }
       try { cv.releasePointerCapture(e.pointerId); } catch {}
     };
     const leave = () => { preview.style.display = 'none'; };

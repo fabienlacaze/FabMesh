@@ -6752,9 +6752,12 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
 
   // ── Step 7: Build boundarySuccessors from the SURVIVING candidates
   // (still unmatched after the merge pass).
+  const candidatesBeforeMerge = candidates.length;
+  let candidatesAfterMerge = 0;
   const boundarySuccessors = new Map();
   for (const c of candidates) {
     if (c.matched) continue;
+    candidatesAfterMerge++;
     if (!boundarySuccessors.has(c.ga)) boundarySuccessors.set(c.ga, []);
     boundarySuccessors.get(c.ga).push(c.gb);
   }
@@ -6881,7 +6884,13 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     else filled++;
   }
   if (loops.length === 0) smallest = 0;
-  return { geometry: result, helpers, stats: { loops: loops.length, filled, tooBig, tooSmall, biggest, smallest } };
+  return {
+    geometry: result,
+    helpers,
+    stats: { loops: loops.length, filled, tooBig, tooSmall, biggest, smallest,
+             rawCandidates: candidatesBeforeMerge,
+             unmatched: candidatesAfterMerge },
+  };
 }
 
 // Edge-collapse decimation via three.js SimplifyModifier. Quadric
@@ -7196,11 +7205,20 @@ const MESH_TOOL_SCHEMAS = {
     previewStatus: (vals, st) => {
       const s = st.lastStats;
       if (!s) return 'Computing…';
+      // Diagnostic suffix so we can SEE if the merge pass is killing
+      // candidates: rawCandidates = count===1 edges found, unmatched =
+      // what survived the MergeCoincidentEdges pass.
+      const diag = (s.rawCandidates != null)
+        ? ` [debug: ${s.rawCandidates} raw boundary edges → ${s.unmatched} after seam-merge]`
+        : '';
       if (s.loops === 0) {
-        return 'No boundary edges found — the mesh is closed (the dark patches are probably texture or back-faces, not geometry holes — try Fix Normals or Re-Texture instead).';
+        if (s.rawCandidates > 0 && s.unmatched === 0) {
+          return `Detector found ${s.rawCandidates} boundary edges but merged them ALL as seam pairs — likely a false positive on the merge pass. (try Fix Normals first; then re-run)${diag}`;
+        }
+        return 'No boundary edges found — the mesh is closed (the dark patches are probably texture or back-faces, not geometry holes — try Fix Normals or Re-Texture instead).' + diag;
       }
       if (s.filled === s.loops) {
-        return `Filled ${s.filled} hole${s.filled > 1 ? 's' : ''} (range ${s.smallest}–${s.biggest} edges).`;
+        return `Filled ${s.filled} hole${s.filled > 1 ? 's' : ''} (range ${s.smallest}–${s.biggest} edges).${diag}`;
       }
       const parts = [];
       parts.push(`${s.loops} hole${s.loops > 1 ? 's' : ''} found`);
@@ -7208,7 +7226,7 @@ const MESH_TOOL_SCHEMAS = {
       if (s.tooSmall) parts.push(`${s.tooSmall} too small (grey)`);
       if (s.tooBig) parts.push(`${s.tooBig} too big (red)`);
       parts.push(`range ${s.smallest}–${s.biggest} edges`);
-      return parts.join(' · ') + '. Adjust min/max to include more.';
+      return parts.join(' · ') + '. Adjust min/max to include more.' + diag;
     },
   },
   center: {
@@ -8561,7 +8579,57 @@ const peState = {
   brushMode: 'paint',          // 'paint' | 'erase'
   intensity: 1.0,              // 1.0 = canvas color is the emissive 1:1; >1 boosts brightness (HDR)
   isPainting: false,
+  // Undo/redo: snapshots of every canvas at the END of each stroke.
+  // Each snapshot is Map<Mesh, ImageData>. Capped to avoid runaway
+  // memory on long sessions.
+  history: [],
+  historyIndex: -1,
 };
+const PE_HISTORY_MAX = 30;
+function _peSnapshotAll() {
+  if (!peState.canvases) return null;
+  const snap = new Map();
+  peState.canvases.forEach((entry, mesh) => {
+    snap.set(mesh, entry.ctx.getImageData(0, 0, PE_TEX_SIZE, PE_TEX_SIZE));
+  });
+  return snap;
+}
+function _peApplySnapshot(snap) {
+  if (!snap) return;
+  peState.canvases?.forEach((entry, mesh) => {
+    const img = snap.get(mesh);
+    if (!img) return;
+    entry.ctx.putImageData(img, 0, 0);
+    entry.texture.needsUpdate = true;
+  });
+}
+function _peHistoryPush() {
+  const snap = _peSnapshotAll();
+  if (!snap) return;
+  peState.history.length = peState.historyIndex + 1;
+  peState.history.push(snap);
+  if (peState.history.length > PE_HISTORY_MAX) peState.history.shift();
+  peState.historyIndex = peState.history.length - 1;
+  _peUpdateUndoRedoButtons();
+}
+function _peUndo() {
+  if (peState.historyIndex <= 0) return;
+  peState.historyIndex--;
+  _peApplySnapshot(peState.history[peState.historyIndex]);
+  _peUpdateUndoRedoButtons();
+}
+function _peRedo() {
+  if (peState.historyIndex >= peState.history.length - 1) return;
+  peState.historyIndex++;
+  _peApplySnapshot(peState.history[peState.historyIndex]);
+  _peUpdateUndoRedoButtons();
+}
+function _peUpdateUndoRedoButtons() {
+  const u = document.getElementById('pe-undo');
+  const r = document.getElementById('pe-redo');
+  if (u) u.disabled = peState.historyIndex <= 0;
+  if (r) r.disabled = peState.historyIndex >= peState.history.length - 1;
+}
 
 async function _peInitViewport() {
   if (peState.renderer) return;
@@ -8654,6 +8722,11 @@ function _peSetupCanvasAndBind() {
       mat.needsUpdate = true;
     });
   });
+  // Reset history with the blank canvases as the base state so the
+  // first undo brings the user back to "nothing painted".
+  peState.history = [];
+  peState.historyIndex = -1;
+  _peHistoryPush();
 }
 
 function _peRestoreMaterials() {
@@ -8738,17 +8811,10 @@ function _peStampAtPointer(clientX, clientY) {
   const entry = peState.canvases?.get(hit.object);
   if (!entry) return;
   const ctx = entry.ctx;
-  // Clamp UVs to [0,1] in case a stray hit lands on a UV with tiling.
-  const uvX = Math.max(0, Math.min(1, hit.uv.x));
-  const uvY = Math.max(0, Math.min(1, hit.uv.y));
-  // glTF stores UVs with V=0 at the top of the texture image; we also
-  // set `flipY = false` so the CanvasTexture is uploaded "as-is". Net
-  // result: canvas Y matches uv.v 1:1, no extra flip needed.
-  const px = uvX * PE_TEX_SIZE;
-  const py = uvY * PE_TEX_SIZE;
+  const TEX = PE_TEX_SIZE;
+  const px = Math.max(0, Math.min(1, hit.uv.x)) * TEX;
+  const py = Math.max(0, Math.min(1, hit.uv.y)) * TEX;
   const r = Math.max(1, peState.brushSize * 0.5);
-  const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
-  // Falloff: 0 = hard edge, 1 = full gradient.
   const fall = Math.max(0, Math.min(1, peState.brushFalloff));
   const innerColor = peState.brushMode === 'erase'
     ? `rgba(0, 0, 0, ${peState.brushOpacity})`
@@ -8756,14 +8822,94 @@ function _peStampAtPointer(clientX, clientY) {
   const edgeColor = peState.brushMode === 'erase'
     ? 'rgba(0, 0, 0, 0)'
     : _peHexToRgba(peState.brushColor, 0);
+  const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
   grad.addColorStop(0, innerColor);
   grad.addColorStop(1 - fall, innerColor);
   grad.addColorStop(1, edgeColor);
+
+  const mesh = hit.object;
+  const geom = mesh.geometry;
+  const uvAttr = geom.attributes.uv;
+  const posAttr = geom.attributes.position;
+  const idx = geom.index?.array;
+
   ctx.globalCompositeOperation = peState.brushMode === 'erase' ? 'destination-out' : 'source-over';
-  ctx.fillStyle = grad;
+
+  if (!uvAttr || !posAttr) {
+    // No UVs → fall back to plain disc stamp.
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    entry.texture.needsUpdate = true;
+    return;
+  }
+
+  // 3D-aware stamping: only paint canvas regions that come from
+  // triangles physically close to the hit point. This kills the
+  // "stray paint on the ground when I clicked the sign" issue caused
+  // by overlapping UV islands in Trellis2's texture atlas — far-away
+  // mesh parts that happen to share UV space with the hit no longer
+  // pick up the brush.
+  const localHit = mesh.worldToLocal(hit.point.clone());
+  // 3D brush radius scales with the brush's CSS pixel size and the
+  // camera-to-hit distance via the perspective FOV (so a 40-px brush
+  // covers a similar mesh footprint regardless of zoom).
+  const cam = peState.camera;
+  const camDist = cam.position.distanceTo(hit.point);
+  const viewH = peState.renderer.domElement.clientHeight || 600;
+  const heightAtDist = 2 * camDist * Math.tan((cam.fov * Math.PI / 180) / 2);
+  const unitsPerPx = heightAtDist / viewH;
+  const R3D = peState.brushSize * 0.5 * unitsPerPx * 1.2; // 1.2 = small overshoot so triangle edges aren't clipped
+  const R3DSq = R3D * R3D;
+
+  const posArr = posAttr.array;
+  const uvArr = uvAttr.array;
+  const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(posAttr.count / 3);
+
+  // Clip the canvas operations to the brush circle around the hit UV
+  // — combined with the per-triangle fills below, this gives a soft,
+  // gradient-shaped paint that respects 3D locality.
+  ctx.save();
   ctx.beginPath();
   ctx.arc(px, py, r, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = grad;
+
+  for (let t = 0; t < triCount; t++) {
+    const i0 = idx ? idx[t*3]   : t*3;
+    const i1 = idx ? idx[t*3+1] : t*3+1;
+    const i2 = idx ? idx[t*3+2] : t*3+2;
+    const p0x = posArr[i0*3],   p0y = posArr[i0*3+1], p0z = posArr[i0*3+2];
+    const p1x = posArr[i1*3],   p1y = posArr[i1*3+1], p1z = posArr[i1*3+2];
+    const p2x = posArr[i2*3],   p2y = posArr[i2*3+1], p2z = posArr[i2*3+2];
+    // Reject the triangle if all 3 vertices are outside the 3D
+    // brush sphere. Cheap and good enough for an interactive tool.
+    const d0 = (p0x-localHit.x)**2 + (p0y-localHit.y)**2 + (p0z-localHit.z)**2;
+    if (d0 < R3DSq) { /* keep */ }
+    else {
+      const d1 = (p1x-localHit.x)**2 + (p1y-localHit.y)**2 + (p1z-localHit.z)**2;
+      if (d1 < R3DSq) { /* keep */ }
+      else {
+        const d2 = (p2x-localHit.x)**2 + (p2y-localHit.y)**2 + (p2z-localHit.z)**2;
+        if (d2 >= R3DSq) continue;
+      }
+    }
+    // Fill the triangle on the canvas — the clip path above limits
+    // the actual painted area to the brush circle intersection.
+    const u0x = uvArr[i0*2] * TEX, u0y = uvArr[i0*2+1] * TEX;
+    const u1x = uvArr[i1*2] * TEX, u1y = uvArr[i1*2+1] * TEX;
+    const u2x = uvArr[i2*2] * TEX, u2y = uvArr[i2*2+1] * TEX;
+    ctx.beginPath();
+    ctx.moveTo(u0x, u0y);
+    ctx.lineTo(u1x, u1y);
+    ctx.lineTo(u2x, u2y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
   ctx.globalCompositeOperation = 'source-over';
   entry.texture.needsUpdate = true;
 }
@@ -8832,7 +8978,24 @@ function openPaintEmissive() {
       entry.ctx.fillRect(0, 0, PE_TEX_SIZE, PE_TEX_SIZE);
       entry.texture.needsUpdate = true;
     });
+    _peHistoryPush();
   };
+  $('pe-undo').onclick = () => _peUndo();
+  $('pe-redo').onclick = () => _peRedo();
+  // Keyboard: Ctrl/Cmd+Z = undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z = redo.
+  const onKey = (e) => {
+    if (modal.classList.contains('hidden')) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault();
+      if (e.shiftKey) _peRedo(); else _peUndo();
+    } else if (e.key === 'y' || e.key === 'Y') {
+      e.preventDefault();
+      _peRedo();
+    }
+  };
+  document.addEventListener('keydown', onKey);
 
   // Init viewport then load mesh.
   requestAnimationFrame(async () => {
@@ -8871,7 +9034,11 @@ function openPaintEmissive() {
       _peStampAtPointer(e.clientX, e.clientY);
     };
     const up = (e) => {
-      peState.isPainting = false;
+      if (peState.isPainting) {
+        peState.isPainting = false;
+        // End of stroke → snapshot every canvas for undo.
+        _peHistoryPush();
+      }
       try { cv.releasePointerCapture(e.pointerId); } catch {}
     };
     const leave = () => { preview.style.display = 'none'; };
