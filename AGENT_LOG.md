@@ -10,6 +10,15 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Market badge — refresh + hide rejected)
+
+- `_publishedIndex` now filters out rejected listings so they don't badge anything (user already informed via 📬 Inbox).
+- `_badgeCard` updates existing badges when status changes (pending → approved), instead of leaving the stale colour.
+- `_badgeAllCards` now removes badges whose listing no longer matches the index (handles rejected + unpublish).
+- `_fetchPublishedIndex` polled every 60s so badges follow admin actions without a page reload.
+
+---
+
 ## 2026-05-29 (Feature — Home drag&drop now routes through New Project modal)
 
 - Previous behavior: dropping an image on the app called `API.importImageFile(blobURL)` which silently spawned a project named after the filename stem with no asset type / style / prompt; dropping a mesh called `API.importMesh()` which opened a second file picker and discarded the result. Effectively a UX dead-end for meshes and a confusing one for images.
