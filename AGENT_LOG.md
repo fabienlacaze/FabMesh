@@ -10,6 +10,40 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace v1.1 — images + sellable indicator + export UX)
+
+- **Contact form** : 4 champs maintenant required (name + email +
+  subject + message). Validation manuelle dans le submit handler
+  (preventDefault désactive le HTML5 required natif), feedback
+  rouge avec focus sur le premier champ vide. Backend renforcé
+  pareil pour rejeter les API calls qui passeraient outre.
+- **Export image** : renommé en "Export" tout court. Nouveau
+  `modal-export-image` (PNG / JPG / WebP avec slider quality
+  conditionnel, dropdown Licence avec sellable indicator, Output
+  path). Transcode via canvas.toBlob, écrit un sibling LICENSE.txt
+  + download du fichier image. Pareil pour mesh : output path
+  placeholder = "Downloads/<name>.<ext>".
+- **Sellable indicator** : pill verte ✓ Sellable / rouge ✗ Not
+  sellable à côté de chaque dropdown Licence (modal Export mesh,
+  Export image, Publish to marketplace). Mapping fixé :
+  personal=NON, cc0=OUI, cc-by=OUI, cc-by-nc=NON, commercial=OUI.
+- **Fix `[object Object]`** : `API.pickExportPath` retourne un
+  objet `{ok, path, cloud}` sur cloud (string sur desktop). Le
+  caller assignait l'objet entier au champ input — fix avec
+  extraction `picked.path`.
+- **Publish image** : nouveau bouton "🛒 Publish to marketplace"
+  dans la step File de l'image. Réutilise un modal unifié
+  `modal-publish-asset` (mesh ET image) avec data-asset-kind.
+- **Backend marketplace v1.1** : `MarketListing` étendue avec
+  `asset_kind: 'mesh'|'image'` + `asset_url`. `mesh_url` gardé
+  populé pour rétrocompat. Publish accepte deux body shapes (jobId
+  pour mesh, imageUrl pour image). Ownership check sur l'URL image
+  (path must contain `/<user_id>/`).
+- **Public /market** et **admin tab** : tous deux rendent un
+  `<img>` quand asset_kind === 'image', sinon `<model-viewer>`.
+
+---
+
 ## 2026-05-28 (Marketplace MVP + reply privacy + admin delete mesh)
 
 - **Reply privacy** : remplacé le `mailto:` du panel admin Messages

@@ -16,7 +16,9 @@ interface Listing {
   price_cents: number;
   currency: string;
   licence: string;
+  asset_kind?: 'mesh' | 'image';
   asset_type: string | null;
+  asset_url?: string;
   mesh_url: string;
   author_display: string;
   created_at: string;
@@ -114,37 +116,46 @@ export default function MarketPage() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-          {filtered.map((l) => (
-            <div
-              key={l.id}
-              onClick={() => setSelected(l)}
-              style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', display: 'flex', flexDirection: 'column', transition: 'transform 0.15s, border-color 0.15s' }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.borderColor = ''; }}
-            >
-              {/* @ts-expect-error model-viewer is a custom element */}
-              <model-viewer
-                src={l.mesh_url}
-                camera-controls auto-rotate
-                shadow-intensity="1" exposure="1"
-                style={{ width: '100%', height: 200, background: '#0a0a0e' }}
-              />
-              <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.title}</div>
-                  <div style={{ background: l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)', color: l.price_cents === 0 ? 'var(--ok)' : '#ffcc66', padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                    {formatPrice(l.price_cents, l.currency)}
+          {filtered.map((l) => {
+            const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
+            const url = l.asset_url || l.mesh_url;
+            return (
+              <div
+                key={l.id}
+                onClick={() => setSelected(l)}
+                style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', display: 'flex', flexDirection: 'column', transition: 'transform 0.15s, border-color 0.15s' }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.borderColor = ''; }}
+              >
+                {kind === 'image' ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={url} alt={l.title} style={{ width: '100%', height: 200, objectFit: 'cover', background: '#0a0a0e', display: 'block' }} />
+                ) : (
+                  // @ts-expect-error model-viewer is a custom element
+                  <model-viewer
+                    src={url}
+                    camera-controls auto-rotate
+                    shadow-intensity="1" exposure="1"
+                    style={{ width: '100%', height: 200, background: '#0a0a0e' }}
+                  />
+                )}
+                <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.title}</div>
+                    <div style={{ background: l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)', color: l.price_cents === 0 ? 'var(--ok)' : '#ffcc66', padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      {formatPrice(l.price_cents, l.currency)}
+                    </div>
+                  </div>
+                  <div style={{ color: 'var(--text-2)', fontSize: 11 }}>
+                    by {l.author_display} · {kind === 'image' ? '2D image' : (l.asset_type || '3D mesh')}
+                  </div>
+                  <div style={{ color: 'var(--text-3)', fontSize: 10 }}>
+                    {LICENCE_LABELS[l.licence] || l.licence}
                   </div>
                 </div>
-                <div style={{ color: 'var(--text-2)', fontSize: 11 }}>
-                  by {l.author_display}{l.asset_type ? ` · ${l.asset_type}` : ''}
-                </div>
-                <div style={{ color: 'var(--text-3)', fontSize: 10 }}>
-                  {LICENCE_LABELS[l.licence] || l.licence}
-                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -160,21 +171,30 @@ export default function MarketPage() {
               </div>
               <button onClick={() => setSelected(null)} className="ghost-btn" style={{ padding: '4px 12px' }}>✕</button>
             </div>
-            {/* @ts-expect-error model-viewer is a custom element */}
-            <model-viewer
-              src={selected.mesh_url}
-              camera-controls auto-rotate
-              shadow-intensity="1" exposure="1"
-              style={{ width: '100%', height: 420, background: '#0a0a0e', borderRadius: 8 }}
-            />
+            {(() => {
+              const kind = selected.asset_kind || (selected.mesh_url ? 'mesh' : 'image');
+              const url = selected.asset_url || selected.mesh_url;
+              return kind === 'image' ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={url} alt={selected.title} style={{ width: '100%', maxHeight: 480, objectFit: 'contain', background: '#0a0a0e', borderRadius: 8 }} />
+              ) : (
+                // @ts-expect-error model-viewer is a custom element
+                <model-viewer
+                  src={url}
+                  camera-controls auto-rotate
+                  shadow-intensity="1" exposure="1"
+                  style={{ width: '100%', height: 420, background: '#0a0a0e', borderRadius: 8 }}
+                />
+              );
+            })()}
             {selected.description && (
               <p style={{ whiteSpace: 'pre-wrap', color: 'var(--text-1)', fontSize: 13, lineHeight: 1.5, margin: 0 }}>{selected.description}</p>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{formatPrice(selected.price_cents, selected.currency)}</div>
               {selected.price_cents === 0 ? (
-                <a href={selected.mesh_url} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
-                  ⬇ Download GLB
+                <a href={selected.asset_url || selected.mesh_url} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
+                  ⬇ Download
                 </a>
               ) : (
                 <button className="primary-btn" disabled style={{ padding: '10px 24px', opacity: 0.6, cursor: 'not-allowed' }} title="Stripe checkout coming soon">

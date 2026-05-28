@@ -1198,8 +1198,13 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
   const email   = String(body.email   ?? '').trim().slice(0, 120);
   const subject = String(body.subject ?? '').trim().slice(0, 120);
   const message = String(body.message ?? '').trim().slice(0, 4000);
-  if (!subject || !message) return err(400, 'subject + message required');
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err(400, 'invalid email');
+  // Every field is required — UI mirror enforces this too, but a
+  // direct API call could bypass the UI so we re-check here.
+  if (!name)    return err(400, 'name required');
+  if (!email)   return err(400, 'email required');
+  if (!subject) return err(400, 'subject required');
+  if (!message) return err(400, 'message required');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err(400, 'invalid email');
   // Try to attach the authenticated user if there is one — helpful
   // context for replying.
   let user_id: string | null = null;
@@ -1437,7 +1442,7 @@ async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Respon
 
 type MarketListing = {
   id: string;
-  job_id: string;
+  job_id: string | null;    // null for image listings (no mesh job)
   user_id: string;
   author_email: string | null;
   author_display: string;
@@ -1446,7 +1451,12 @@ type MarketListing = {
   price_cents: number;
   currency: string;
   licence: string;
+  asset_kind: 'mesh' | 'image';
   asset_type: string | null;
+  // Canonical asset URL — for backwards compatibility we keep
+  // `mesh_url` populated when asset_kind === 'mesh' so older clients
+  // still render the listing. New clients should read `asset_url`.
+  asset_url: string;
   mesh_url: string;
   thumbnail_url: string | null;
   status: 'pending' | 'approved' | 'rejected';
@@ -1481,16 +1491,20 @@ async function _loadAllListings(env: Env): Promise<MarketListing[]> {
   return out;
 }
 
-/** POST /api/market/publish  body { jobId, title, description, price_cents, currency, licence }
- *  — author publishes one of their own succeeded meshes. We snapshot
- *  the mesh_url + thumbnail at publish time. Status starts as
+/** POST /api/market/publish — author publishes one of their own
+ *  succeeded meshes OR an image they own. Body shapes:
+ *    mesh:  { asset_kind:'mesh',  jobId, title, description, price_cents, currency, licence }
+ *    image: { asset_kind:'image', imageUrl, title, description, price_cents, currency, licence }
+ *  We snapshot the asset URL at publish time. Status starts as
  *  'pending' so admin can approve before it shows on the public grid. */
 async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
   let body: {
+    asset_kind?: string;
     jobId?: string;
+    imageUrl?: string;
     title?: string;
     description?: string;
     price_cents?: number;
@@ -1498,27 +1512,50 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
     licence?: string;
   };
   try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
-  const jobId = String(body.jobId ?? '').trim();
+  const kind = String(body.asset_kind ?? 'mesh').toLowerCase();
   const title = String(body.title ?? '').trim().slice(0, 120);
   const description = String(body.description ?? '').trim().slice(0, 4000);
   const price_cents = Math.max(0, Math.min(1_000_000, Math.round(Number(body.price_cents ?? 0))));
   const currency = String(body.currency ?? 'USD').trim().toUpperCase().slice(0, 3) || 'USD';
   const licence = String(body.licence ?? 'personal').trim().toLowerCase();
-  if (!jobId)  return err(400, 'jobId required');
-  if (!title)  return err(400, 'title required');
+  if (kind !== 'mesh' && kind !== 'image') return err(400, 'asset_kind must be mesh or image');
+  if (!title) return err(400, 'title required');
   if (!MARKET_LICENCES.has(licence)) return err(400, 'invalid licence');
-  // Verify the user owns the mesh.
-  const sb = supabaseAdmin(env);
-  const { data: job } = await sb.from('jobs')
-    .select('id, user_id, mesh_url, project_name, asset_type, status')
-    .eq('id', jobId).eq('user_id', user.id).maybeSingle();
-  if (!job)                          return err(404, 'mesh not found');
-  if (job.status !== 'succeeded')    return err(400, 'mesh not ready');
-  if (!job.mesh_url)                 return err(400, 'mesh has no URL');
-  // Reject duplicate listings for the same mesh.
+
+  let assetUrl = '';
+  let jobId: string | null = null;
+  let assetType: string | null = null;
+
+  if (kind === 'mesh') {
+    jobId = String(body.jobId ?? '').trim();
+    if (!jobId) return err(400, 'jobId required for mesh listings');
+    const sb = supabaseAdmin(env);
+    const { data: job } = await sb.from('jobs')
+      .select('id, user_id, mesh_url, project_name, asset_type, status')
+      .eq('id', jobId).eq('user_id', user.id).maybeSingle();
+    if (!job)                       return err(404, 'mesh not found');
+    if (job.status !== 'succeeded') return err(400, 'mesh not ready');
+    if (!job.mesh_url)              return err(400, 'mesh has no URL');
+    assetUrl = job.mesh_url;
+    assetType = (job.asset_type as string | null) ?? null;
+  } else {
+    const imageUrl = String(body.imageUrl ?? '').trim();
+    if (!imageUrl) return err(400, 'imageUrl required for image listings');
+    // Lightweight ownership check: the URL must live under the user's
+    // R2 prefix. Without this anyone could re-publish someone else's
+    // public asset.
+    const u = new URL(imageUrl);
+    const path = decodeURIComponent(u.pathname);
+    if (!path.includes(`/${user.id}/`) && !path.includes(`/users/${user.id}/`)) {
+      return err(403, 'image must belong to your account');
+    }
+    assetUrl = imageUrl;
+    assetType = 'image';
+  }
+  // Reject duplicate listings for the same asset.
   const existing = await _loadAllListings(env);
-  if (existing.some((l) => l.job_id === jobId && l.status !== 'rejected')) {
-    return err(409, 'this mesh is already listed');
+  if (existing.some((l) => l.asset_url === assetUrl && l.status !== 'rejected')) {
+    return err(409, 'this asset is already listed');
   }
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const listing: MarketListing = {
@@ -1532,9 +1569,11 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
     price_cents,
     currency,
     licence,
-    asset_type: (job.asset_type as string | null) ?? null,
-    mesh_url: job.mesh_url,
-    thumbnail_url: null,
+    asset_kind: kind as 'mesh' | 'image',
+    asset_type: assetType,
+    asset_url: assetUrl,
+    mesh_url: kind === 'mesh' ? assetUrl : '',  // legacy field kept populated for meshes
+    thumbnail_url: kind === 'image' ? assetUrl : null,
     status: 'pending',
     created_at: new Date().toISOString(),
     approved_at: null,
@@ -1575,7 +1614,9 @@ async function handleMarketList(_req: Request, env: Env): Promise<Response> {
       price_cents: l.price_cents,
       currency: l.currency,
       licence: l.licence,
+      asset_kind: l.asset_kind || (l.mesh_url ? 'mesh' : 'image'),
       asset_type: l.asset_type,
+      asset_url: l.asset_url || l.mesh_url,
       mesh_url: l.mesh_url,
       author_display: l.author_display,
       created_at: l.created_at,
@@ -1595,7 +1636,10 @@ async function handleMarketGet(_req: Request, env: Env, id: string): Promise<Res
     return json({ ok: true, listing: {
       id: parsed.id, title: parsed.title, description: parsed.description,
       price_cents: parsed.price_cents, currency: parsed.currency, licence: parsed.licence,
-      asset_type: parsed.asset_type, mesh_url: parsed.mesh_url,
+      asset_kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
+      asset_type: parsed.asset_type,
+      asset_url: parsed.asset_url || parsed.mesh_url,
+      mesh_url: parsed.mesh_url,
       author_display: parsed.author_display, created_at: parsed.created_at,
       downloads: parsed.downloads,
     }});

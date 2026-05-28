@@ -1050,35 +1050,68 @@
 
   /* ──────────────────────────────────────────────────────────────────
    * Marketplace publish flow — wires the "Publish to marketplace"
-   * button in the mesh step to a small modal collecting title,
-   * description, price, licence. POSTs to /api/market/publish and
-   * tells the user the listing is pending admin review.
+   * button (one for mesh step, one for image step) to a single modal
+   * collecting title, description, price, licence. POSTs to
+   * /api/market/publish and tells the user the listing is pending
+   * admin review.
+   *
+   * The modal carries data-asset-kind="mesh|image" so the submit
+   * handler picks the right URL + endpoint payload.
    * ────────────────────────────────────────────────────────────────── */
   function installMarketplacePublish() {
-    const btn = document.getElementById('ws-mesh-publish-btn');
-    const modal = document.getElementById('modal-publish-mesh');
+    const modal = document.getElementById('modal-publish-asset');
+    if (!modal) return;
+    const meshBtn  = document.getElementById('ws-mesh-publish-btn');
+    const imageBtn = document.getElementById('ws-image-publish-btn');
     const cancel = document.getElementById('pub-cancel');
-    const go = document.getElementById('pub-go');
-    if (!btn || !modal) return;
-    // Close helper — clears form so the next open starts fresh.
+    const go     = document.getElementById('pub-go');
     const close = () => modal.classList.add('hidden');
     cancel?.addEventListener('click', close);
     modal.addEventListener('click', (ev) => { if (ev.target === modal) close(); });
-    btn.addEventListener('click', () => {
-      const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
-      if (!m) {
-        if (typeof showToast === 'function') showToast('Pick a mesh first.', 'error');
-        return;
-      }
-      // Pre-fill the title from the project name for convenience.
+
+    function openFor(kind) {
       const p = (typeof state !== 'undefined') ? state?.currentProject : null;
+      let payload = null;
+      if (kind === 'mesh') {
+        const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
+        if (!m) {
+          if (typeof showToast === 'function') showToast('Pick a mesh first.', 'error');
+          return;
+        }
+        const jobId = m.id || m.jobId;
+        if (!jobId) {
+          if (typeof showToast === 'function') showToast('This mesh has no job ID — cannot publish.', 'error', 4000);
+          return;
+        }
+        payload = { kind: 'mesh', jobId };
+      } else {
+        // Image: use the currently selected image of the project.
+        const url = p?.selectedImagePath;
+        if (!url) {
+          if (typeof showToast === 'function') showToast('Pick an image first.', 'error');
+          return;
+        }
+        payload = { kind: 'image', imageUrl: url };
+      }
+      modal.dataset.assetKind = kind;
+      modal.dataset.publishPayload = JSON.stringify(payload);
+      // Tweak the title + subtitle so users know whether they're
+      // publishing a mesh or an image.
+      const h2 = document.getElementById('pub-title-h2');
+      if (h2) h2.innerHTML = kind === 'image'
+        ? '\u{1F6D2} Publish image to marketplace'
+        : '\u{1F6D2} Publish 3D mesh to marketplace';
       const titleInput = document.getElementById('pub-title');
       if (titleInput && !titleInput.value) titleInput.value = p?.name || '';
       modal.classList.remove('hidden');
-    });
+    }
+    meshBtn?.addEventListener('click',  () => openFor('mesh'));
+    imageBtn?.addEventListener('click', () => openFor('image'));
+
     go?.addEventListener('click', async () => {
-      const m = (typeof getCurrentMeshObj === 'function') ? getCurrentMeshObj() : null;
-      if (!m) return;
+      const kind = modal.dataset.assetKind || 'mesh';
+      let payload = null;
+      try { payload = JSON.parse(modal.dataset.publishPayload || '{}'); } catch {}
       const title       = document.getElementById('pub-title')?.value.trim() || '';
       const description = document.getElementById('pub-description')?.value.trim() || '';
       const priceUSD    = Math.max(0, Number(document.getElementById('pub-price')?.value) || 0);
@@ -1087,28 +1120,26 @@
         if (typeof showToast === 'function') showToast('Title is required.', 'error');
         return;
       }
-      // m.id is the Supabase jobs.id (we set it in handleProjects).
-      const jobId = m.id || m.jobId;
-      if (!jobId) {
-        if (typeof showToast === 'function') showToast('This mesh has no job ID — cannot publish.', 'error', 4000);
-        return;
-      }
       go.disabled = true;
       go.textContent = 'Submitting…';
       try {
+        const body = {
+          title, description,
+          price_cents: Math.round(priceUSD * 100),
+          currency: 'USD', licence,
+          asset_kind: kind,
+        };
+        if (kind === 'mesh')  body.jobId    = payload?.jobId;
+        if (kind === 'image') body.imageUrl = payload?.imageUrl;
         const r = await fetch('/api/market/publish', {
           method: 'POST', credentials: 'include',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            jobId, title, description,
-            price_cents: Math.round(priceUSD * 100),
-            currency: 'USD', licence,
-          }),
+          body: JSON.stringify(body),
         });
         if (!r.ok) {
-          let body = '';
-          try { body = await r.text(); } catch {}
-          throw new Error('HTTP ' + r.status + (body ? ' — ' + body.slice(0, 200) : ''));
+          let errBody = '';
+          try { errBody = await r.text(); } catch {}
+          throw new Error('HTTP ' + r.status + (errBody ? ' — ' + errBody.slice(0, 200) : ''));
         }
         close();
         if (typeof showToast === 'function') {
