@@ -10,6 +10,12 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-29 (Topbar — 🛒 Marketplace quick-jump button)
+
+- Added `installMarketplaceButton()` in `cloud/public/app/cloud-overrides.js` mirroring `installCreditsPill`. Inserts a purple pill `<a href="/market">🛒 Marketplace</a>` into `#topbar .topbar-right`, slotted to the LEFT of the inbox so the order reads: Marketplace · Inbox · Credits.
+- Inline hover handlers brighten the gradient + boost the shadow on mouseenter/leave (no extra CSS rule needed).
+- Idempotent: bails if the existing element is already in the DOM.
+
 ## 2026-05-29 (Admin tabs — auto-refresh badge counts)
 
 - Single 30s interval refreshes every admin tab badge (Marketplace pending, Active running, Messages unread) so the pill numbers stay in sync with the backend without the admin needing to F5 or click the tab.

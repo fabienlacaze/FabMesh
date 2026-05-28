@@ -280,6 +280,11 @@
     // Polls /api/me/inbox every 30 s and shows an unread-count badge.
     installInboxButton();
 
+    // 🛒 Marketplace button — quick jump to /market from anywhere in
+    // the workspace topbar. Inserted to the LEFT of the inbox button so
+    // the final order reads: Marketplace · Inbox · Credits.
+    installMarketplaceButton();
+
     // Sign-out button next to the credits pill. Sessions are stored in
     // non-httpOnly `sb-<ref>-auth-token` cookies (set by LoginForm.tsx
     // and read by worker.ts:getSessionUser) so JS can delete them.
@@ -1053,6 +1058,66 @@
 
   // Expose a hook so other Cloud code can force a refresh after spend.
   window.__cloudCreditsRefresh = refreshCreditsPill;
+
+  /* ────────────────────────── Marketplace button ─────────────────────
+   * Tiny purple pill in #topbar .topbar-right that jumps to /market.
+   * Mirrors installCreditsPill (same insertion point) but slotted to
+   * the LEFT of the inbox button so the topbar reads, left → right:
+   *   Marketplace · Inbox · Credits.
+   * Purple gradient distinguishes it from the gold credits pill.
+   * ────────────────────────────────────────────────────────────────── */
+  let _marketplaceBtnEl = null;
+  function installMarketplaceButton() {
+    if (_marketplaceBtnEl) return;
+    if (document.getElementById('cloud-marketplace-btn')) return;
+    const right = document.querySelector('#topbar .topbar-right');
+    if (!right) return;
+
+    const btn = document.createElement('a');
+    btn.id = 'cloud-marketplace-btn';
+    btn.href = '/market';
+    btn.target = '_self';
+    btn.title = 'Browse the marketplace';
+    btn.textContent = '🛒 Marketplace';
+    const baseShadow = '0 2px 6px rgba(90,79,207,0.5)';
+    const hoverShadow = '0 3px 10px rgba(139,92,246,0.7)';
+    const baseBg = 'linear-gradient(135deg, #5a4fcf, #8b5cf6)';
+    const hoverBg = 'linear-gradient(135deg, #6e63e0, #a78bfa)';
+    btn.style.cssText = [
+      'display:inline-flex',
+      'align-items:center',
+      'gap:6px',
+      'padding:5px 12px',
+      'font-size:12px',
+      'font-weight:700',
+      'border-radius:999px',
+      `background:${baseBg}`,
+      'color:#fff',
+      'text-decoration:none',
+      'margin-right:8px',
+      `box-shadow:${baseShadow}`,
+      'cursor:pointer',
+      'transition:background 0.15s ease, box-shadow 0.15s ease',
+    ].join(';');
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = hoverBg;
+      btn.style.boxShadow  = hoverShadow;
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = baseBg;
+      btn.style.boxShadow  = baseShadow;
+    });
+
+    // Slot to the LEFT of the inbox button so order is:
+    // Marketplace · Inbox · Credits. Fall back to before the credits
+    // pill, then to firstChild if neither sibling exists yet.
+    const inbox = right.querySelector('#cloud-inbox-btn');
+    const credits = right.querySelector('#cloud-credits-pill');
+    const anchor = inbox || credits || right.firstChild;
+    if (anchor) right.insertBefore(btn, anchor);
+    else        right.appendChild(btn);
+    _marketplaceBtnEl = btn;
+  }
 
   /* ────────────────────────── Logout button ──────────────────────────
    * Moved 2026-05-25 from the topbar to a fresh "Account" section
