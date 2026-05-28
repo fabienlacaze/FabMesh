@@ -9336,3 +9336,29 @@ Fix (`_jsFixNormalsWelded`):
 Positions et UVs intacts (on ne touche que l'attribut normal). Seam
 visible disparaît. Schema `fix_normals` retitled "Fix normals (weld UV
 seams)" + subtitle explicative.
+
+## 2026-05-28 — Set pivot point: gizmo-only preview + manual XYZ + free
+
+User feedback x3:
+- "Vraiment besoin de faire payer ça ? (on utilise le cloud?)" — non,
+  c'est un translate, ça peut se faire en JS. Ajout flag
+  `clientApplyOnly: true` sur le schema; le modal hide le bouton "Apply
+  on cloud" entièrement et relabel le device button "⚡ Apply".
+- "Le pivot point qui bouge pas le mesh" — actuellement preview()
+  translatait les vertices → le mesh sautait dans le viewer à chaque
+  changement. Refactor: `_jsSetPivotPreview` ne touche PAS la geometry,
+  juste positionne le gizmo au pivot point local. Le mesh reste fixe.
+- "Bouger le pivot manuellement" — ajout de 3 sliders X/Y/Z offset
+  (-1..1 mesh units) en plus des 8 presets. Le pivot final = preset +
+  offset. Le gizmo bouge live à chaque drag de slider.
+
+Plomberie:
+- Nouveau hook schema `applyClient(geom, vals)` qui retourne la geom
+  transformée. Le preview reste "léger" (gizmo only), l'apply fait la
+  vraie transformation. `_mtApplyOnDevice` swap les geoms via
+  applyClient avant l'export GLTF, puis restore au finally.
+- `clientApplyOnly: true` bypass le check device-capable (l'opération
+  est suffisamment légère pour tourner même sur mobile).
+
+Set pivot point devient donc: gratuit, visuellement stable, et
+manuellement ajustable.

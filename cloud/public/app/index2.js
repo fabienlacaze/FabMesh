@@ -6967,18 +6967,13 @@ function _jsFixNormalsWelded(geom) {
 }
 
 function _jsCenter(geom) {
-  return _jsSetPivot(geom, 'bottom').geometry;
+  return _jsSetPivotApply(geom, 'bottom', 0, 0, 0);
 }
 
-// Move the geometry so the requested AABB landmark lands at local (0,0,0)
-// — that becomes the mesh's pivot point when re-imported into Unreal /
-// Unity / Blender. Inspired by Unreal Modeling Mode's "Box Positions"
-// (Center / Bottom / Top / Left / Right / Front / Back / World Origin).
-// Returns { geometry, helpers: [pivotGizmo] } so the modal viewer can
-// show a small axes-marker exactly where the new pivot now sits.
-function _jsSetPivot(geom, mode) {
-  const result = geom.clone();
-  const pos = result.attributes.position;
+// Compute the pivot point coordinates in the mesh's LOCAL space, given
+// a preset landmark on the AABB + an X/Y/Z offset for fine tuning.
+function _computePivotPoint(geom, mode, ox, oy, oz) {
+  const pos = geom.attributes.position;
   const arr = pos.array;
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -7003,6 +6998,34 @@ function _jsSetPivot(geom, mode) {
     case 'bottom':
     default:             px = cx;   py = minY; pz = cz; break;
   }
+  return {
+    pivot: [px + (ox || 0), py + (oy || 0), pz + (oz || 0)],
+    diag: Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1,
+  };
+}
+
+// PREVIEW path — does NOT translate the mesh. Just drops a yellow
+// gizmo at the chosen pivot point so the user can see WHERE the pivot
+// will land without the mesh "jumping" each time they change the
+// preset or drag a slider. The actual translate is deferred to
+// `applyClient` (run by _mtApplyOnDevice at Apply time).
+function _jsSetPivotPreview(geom, mode, ox, oy, oz) {
+  const { pivot, diag } = _computePivotPoint(geom, mode, ox, oy, oz);
+  const gizmo = _makePivotGizmo(diag * 0.08);
+  gizmo.position.set(pivot[0], pivot[1], pivot[2]);
+  // Return the original geometry untouched + the gizmo at the pivot
+  // location in local space.
+  return { geometry: geom.clone(), helpers: [gizmo] };
+}
+
+// APPLY path — actually translate the vertices so the chosen pivot
+// lands at local (0,0,0). Used only when the user clicks Apply.
+function _jsSetPivotApply(geom, mode, ox, oy, oz) {
+  const { pivot } = _computePivotPoint(geom, mode, ox, oy, oz);
+  const result = geom.clone();
+  const pos = result.attributes.position;
+  const arr = pos.array;
+  const [px, py, pz] = pivot;
   for (let i = 0; i < pos.count; i++) {
     arr[i*3]   -= px;
     arr[i*3+1] -= py;
@@ -7010,12 +7033,7 @@ function _jsSetPivot(geom, mode) {
   }
   pos.needsUpdate = true;
   result.computeVertexNormals();
-  // Gizmo size scales with the bbox so it stays readable on tiny props
-  // and large characters alike. After translate, the pivot sits at the
-  // mesh's local origin (0,0,0) — exactly where AxesHelper draws itself.
-  const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
-  const helpers = [_makePivotGizmo(diag * 0.08)];
-  return { geometry: result, helpers };
+  return result;
 }
 
 function _makePivotGizmo(size) {
@@ -7128,11 +7146,13 @@ const MESH_TOOL_SCHEMAS = {
   },
   center: {
     title: 'Set pivot point',
-    subtitle: 'Place the local origin of the mesh (its pivot) at the requested AABB landmark. Yellow gizmo = new pivot.',
+    subtitle: 'Place the local origin of the mesh (its pivot) at an AABB landmark, or fine-tune with the X/Y/Z sliders. Yellow gizmo = new pivot.',
     needsImage: false,
     supportsClientApply: true,
+    // 100% client-side — it's a single translation, no Modal work.
+    clientApplyOnly: true,
     params: [
-      { id: 'pivot', label: 'Pivot position', type: 'toggle-group', default: 'bottom',
+      { id: 'pivot', label: 'Pivot preset', type: 'toggle-group', default: 'bottom',
         options: [
           ['center', 'Center'], ['bottom', 'Bottom'], ['top', 'Top'],
           ['left', 'Left'], ['right', 'Right'],
@@ -7140,12 +7160,28 @@ const MESH_TOOL_SCHEMAS = {
           ['world_origin', 'World Origin'],
         ],
       },
+      { id: 'offset_x', label: 'X offset', type: 'range', min: -1, max: 1, step: 0.01, default: 0 },
+      { id: 'offset_y', label: 'Y offset', type: 'range', min: -1, max: 1, step: 0.01, default: 0 },
+      { id: 'offset_z', label: 'Z offset', type: 'range', min: -1, max: 1, step: 0.01, default: 0 },
     ],
-    // Modal-side `center` op only supports the legacy bottom behaviour;
-    // for non-bottom pivots, use "Apply on device (free)" which exports
-    // the welded geometry directly (no Modal hop).
-    build: (vals) => [String(vals.pivot || 'bottom')],
-    preview: (geom, vals) => _jsSetPivot(geom, vals.pivot || 'bottom'),
+    build: (vals) => [String(vals.pivot || 'bottom'),
+                      String(vals.offset_x || 0),
+                      String(vals.offset_y || 0),
+                      String(vals.offset_z || 0)],
+    // Preview = drop gizmo, mesh stays put.
+    preview: (geom, vals) => _jsSetPivotPreview(
+      geom, vals.pivot || 'bottom',
+      Number(vals.offset_x) || 0,
+      Number(vals.offset_y) || 0,
+      Number(vals.offset_z) || 0,
+    ),
+    // Apply = actually translate vertices so pivot lands at (0,0,0).
+    applyClient: (geom, vals) => _jsSetPivotApply(
+      geom, vals.pivot || 'bottom',
+      Number(vals.offset_x) || 0,
+      Number(vals.offset_y) || 0,
+      Number(vals.offset_z) || 0,
+    ),
   },
   retexture: {
     title: 'Re-Texture (quick)',
@@ -7271,6 +7307,25 @@ async function _mtApplyOnDevice(opType) {
   }
   const savedPos = mtState.origModel.position.clone();
   mtState.origModel.position.set(0, 0, 0);
+  // Some schemas (Set pivot point) keep the preview cheap by only
+  // moving a gizmo, then commit the real geometry edit at Apply time
+  // via the `applyClient(geom, vals)` hook. Run that hook now on each
+  // submesh, swap in the transformed geometry, and remember the old
+  // one so we can restore in `finally`.
+  const swappedGeoms = [];
+  if (mtState.schema?.applyClient && mtState.vals) {
+    for (const e of mtState.origGeoms) {
+      try {
+        const out = mtState.schema.applyClient(e.originalGeom, mtState.vals);
+        if (out && out.attributes && out.attributes.position) {
+          swappedGeoms.push({ mesh: e.mesh, prev: e.mesh.geometry });
+          e.mesh.geometry = out;
+        }
+      } catch (err) {
+        console.warn('[mesh-tool] applyClient failed:', err);
+      }
+    }
+  }
   try {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const exporter = new GLTFExporter();
@@ -7321,6 +7376,9 @@ async function _mtApplyOnDevice(opType) {
     }
     return newUrl;
   } finally {
+    // Restore swapped geometries so the modal viewer cleanup runs
+    // against the same originals the rest of the code expects.
+    for (const s of swappedGeoms) s.mesh.geometry = s.prev;
     mtState.origModel.position.copy(savedPos);
     for (const h of detachedHelpers) mtState.origModel.add(h);
   }
@@ -7651,7 +7709,11 @@ function openMeshToolModal(toolName) {
   const applyParent = applyBtn.parentElement;
   let deviceBtn = document.getElementById('mt-apply-device');
   if (deviceBtn) deviceBtn.remove();
-  const deviceCapable = _deviceCanRunMeshClient();
+  // Lightweight client-only ops (Set pivot point — a single translate)
+  // ignore the device capability check: any browser can do them, even
+  // mobile, so we don't punish mobile users with "no Apply button"
+  // on tools that would never crash them.
+  const deviceCapable = !!schema.clientApplyOnly || _deviceCanRunMeshClient();
   if (schema.supportsClientApply && deviceCapable && applyParent) {
     deviceBtn = document.createElement('button');
     deviceBtn.id = 'mt-apply-device';
@@ -7664,8 +7726,15 @@ function openMeshToolModal(toolName) {
   }
   // Relabel the cloud Apply button to make the trade-off explicit
   // (clear that it costs 1 credit) when both options are visible.
+  // For purely client-side ops (Set pivot point — just a translate),
+  // hide the cloud button entirely so the user isn't asked to pay 1
+  // credit for work the browser can do alone.
   const originalApplyLabel = applyBtn.textContent;
-  if (schema.supportsClientApply && deviceCapable) {
+  const cloudHidden = !!schema.clientApplyOnly;
+  if (cloudHidden) {
+    applyBtn.style.display = 'none';
+    if (deviceBtn) deviceBtn.textContent = '⚡ Apply';
+  } else if (schema.supportsClientApply && deviceCapable) {
     applyBtn.textContent = 'Apply on cloud (1 cr)';
   } else if (schema.supportsClientApply && !deviceCapable) {
     applyBtn.textContent = 'Apply on cloud (1 cr)';
@@ -7683,6 +7752,7 @@ function openMeshToolModal(toolName) {
     // tool that doesn't relabel it starts from a clean state.
     applyBtn.textContent = originalApplyLabel || 'Apply';
     applyBtn.removeAttribute('title');
+    applyBtn.style.display = '';
     deviceBtn?.remove();
     // Restore original geoms (memory hygiene) + clear any helper
     // overlays the preview hook added (Fill Holes boundary lines, ...).
