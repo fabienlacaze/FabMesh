@@ -1302,6 +1302,61 @@ async function handleAdminContactDelete(req: Request, env: Env, id: string): Pro
   return json({ ok: true, success: true });
 }
 
+/** GET /api/admin/modal-credits — sums every `_meta/modal_spend/<day>`
+ *  entry to compute the cumulative Modal spend, reads the admin-set
+ *  budget total, and returns { total, spent, remaining, today }. */
+async function handleAdminModalCredits(req: Request, env: Env): Promise<Response> {
+  const adminCheck = await _requireAdmin(req, env);
+  if (adminCheck) return adminCheck;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  try {
+    let cursor: string | undefined = undefined;
+    let total = 0;
+    do {
+      const page = await env.MESHES.list({ prefix: '_meta/modal_spend/', limit: 1000, cursor });
+      for (const obj of page.objects) {
+        // Skip the optional running-total marker (we recompute every call).
+        if (obj.key.endsWith('/_total.txt')) continue;
+        try {
+          const txt = await r2GetText(env, obj.key);
+          const n = parseFloat(txt || '0');
+          if (Number.isFinite(n)) total += n;
+        } catch {}
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    const todayKey = `_meta/modal_spend/${todayUTC()}`;
+    const todayTxt = await r2GetText(env, todayKey);
+    const todaySpent = parseFloat(todayTxt || '0') || 0;
+    const budgetTxt = await r2GetText(env, '_meta/modal_budget_total.txt');
+    const budget = parseFloat(budgetTxt || '0') || 0;
+    return json({
+      ok: true,
+      total_budget: budget,
+      total_spent: Math.round(total * 10000) / 10000,
+      today_spent: Math.round(todaySpent * 10000) / 10000,
+      remaining: Math.max(0, Math.round((budget - total) * 10000) / 10000),
+    });
+  } catch (e) {
+    return err(500, 'modal credits failed: ' + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+/** POST /api/admin/modal-credits/total  body { total: number } — set
+ *  the workspace budget (USD). Admin updates this manually from the
+ *  Modal dashboard when they top up. */
+async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Response> {
+  const adminCheck = await _requireAdmin(req, env);
+  if (adminCheck) return adminCheck;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { total?: number };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const n = Number(body?.total);
+  if (!Number.isFinite(n) || n < 0) return err(400, 'total must be a non-negative number');
+  await env.MESHES.put('_meta/modal_budget_total.txt', String(n));
+  return json({ ok: true, success: true, total: n });
+}
+
 async function handleMe(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) {
@@ -5639,6 +5694,8 @@ export default {
         if (pathname === '/api/me'                    && method === 'GET')  return await handleMe(req, env);
         if (pathname === '/api/contact'               && method === 'POST') return await handleContactSubmit(req, env);
         if (pathname === '/api/admin/contact-messages' && method === 'GET') return await handleAdminContactList(req, env);
+        if (pathname === '/api/admin/modal-credits'         && method === 'GET')  return await handleAdminModalCredits(req, env);
+        if (pathname === '/api/admin/modal-credits/total'   && method === 'POST') return await handleAdminModalSetBudget(req, env);
         {
           const m = pathname.match(/^\/api\/admin\/contact-messages\/([A-Za-z0-9_]+)(?:\/(read))?$/);
           if (m) {
