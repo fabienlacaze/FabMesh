@@ -10,6 +10,19 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace v3 — Stripe Connect Express cash payouts)
+
+- New: Stripe Connect Express. Sellers can opt in to cash payouts (IBAN/bank) instead of platform credits. Onboarding via account_links, 5 min KYC handled by Stripe.
+- New: R2 record _market/sellers/<user_id>.json caches charges_enabled / payouts_enabled / requirements; refreshed on every status fetch + via account.updated webhook.
+- New: routes POST /api/market/seller/onboard | GET /api/market/seller/status | POST /api/market/seller/dashboard.
+- Modified: _processMarketPurchase now attempts a Stripe Transfer (Separate Charges and Transfers pattern) to the seller account before falling back to credits. Sale JSON gains payout_cash_cents + payout_transfer_id when paid via cash.
+- Modified: /account has a new "Marketplace earnings" card showing total credits earned + cash earned per currency + Connect status (Set up | Pending | Active dashboard link).
+- Modified: publish modal shows a live "Payout method" line that switches between credits / pending verification / cash via Stripe based on seller status + price.
+- Bug: 409 publish (already applied) — confirmed openFor("image") now reads previewImagePath || selectedImagePath || #step1-preview.src.
+- Commission unchanged: 30% platform fee. Sellers receive 70% net (cash if Connect, credits otherwise).
+
+---
+
 ## 2026-05-28 (Marketplace v3 — Stripe Connect Express seller payouts)
 
 - Added Stripe Connect (Separate Charges and Transfers) so sellers actually get cash, not just platform credits.

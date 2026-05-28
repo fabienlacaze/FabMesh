@@ -22,6 +22,18 @@ interface Reply {
   id: string; subject: string; message: string;
   reply_body: string; replied_at: string; created_at: string;
 }
+interface EarningsCashBucket { currency: string; amount_cents: number; }
+interface Earnings {
+  total_credits_paid: number;
+  sales_count: number;
+  cash: EarningsCashBucket[];
+}
+interface SellerStatus {
+  has_account: boolean;
+  charges_enabled: boolean;
+  payouts_enabled?: boolean;
+  details_submitted?: boolean;
+}
 
 export default function AccountPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -29,9 +41,16 @@ export default function AccountPage() {
   const [replies, setReplies] = useState<Reply[]>([]);
   const [loading, setLoading] = useState(true);
   const [paidBanner, setPaidBanner] = useState(false);
+  const [earnings, setEarnings] = useState<Earnings | null>(null);
+  const [sellerStatus, setSellerStatus] = useState<SellerStatus | null>(null);
+  const [stripeReturn, setStripeReturn] = useState<'return' | 'refresh' | null>(null);
+  const [onboardBusy, setOnboardBusy] = useState(false);
 
   useEffect(() => {
-    setPaidBanner(new URLSearchParams(window.location.search).get('paid') === '1');
+    const qs = new URLSearchParams(window.location.search);
+    setPaidBanner(qs.get('paid') === '1');
+    if (qs.get('stripe_return') === '1') setStripeReturn('return');
+    else if (qs.get('stripe_refresh') === '1') setStripeReturn('refresh');
     (async () => {
       const meRes = await fetch('/api/me');
       if (!meRes.ok) { window.location.href = '/login?next=/account'; return; }
@@ -47,6 +66,33 @@ export default function AccountPage() {
         if (rpRes.ok) {
           const rp = await rpRes.json();
           setReplies(rp.replies ?? []);
+        }
+      } catch {}
+      // Marketplace earnings + Stripe Connect status — fetched in
+      // parallel, silent 401/404 fall back to no-display so older
+      // deploys (without these routes) still render the rest of the
+      // page.
+      try {
+        const [erRes, ssRes] = await Promise.all([
+          fetch('/api/me/earnings').catch(() => null),
+          fetch('/api/market/seller/status').catch(() => null),
+        ]);
+        if (erRes && erRes.ok) {
+          const er = await erRes.json();
+          setEarnings({
+            total_credits_paid: er.total_credits_paid ?? 0,
+            sales_count: er.sales_count ?? 0,
+            cash: Array.isArray(er.cash) ? er.cash : [],
+          });
+        }
+        if (ssRes && ssRes.ok) {
+          const ss = await ssRes.json();
+          setSellerStatus({
+            has_account: !!ss.has_account,
+            charges_enabled: !!ss.charges_enabled,
+            payouts_enabled: !!ss.payouts_enabled,
+            details_submitted: !!ss.details_submitted,
+          });
         }
       } catch {}
       setLoading(false);
@@ -68,6 +114,17 @@ export default function AccountPage() {
       {paidBanner && (
         <div className="banner ok" style={{ marginBottom: 24 }}>
           ✓ Payment received · credits are arriving in a few seconds.
+        </div>
+      )}
+
+      {stripeReturn === 'return' && (
+        <div className="banner ok" style={{ marginBottom: 24 }}>
+          ✓ Stripe setup completed — your payout status will update in a moment.
+        </div>
+      )}
+      {stripeReturn === 'refresh' && (
+        <div className="banner" style={{ marginBottom: 24 }}>
+          Onboarding resumed — finish in Stripe.
         </div>
       )}
 
@@ -123,6 +180,129 @@ export default function AccountPage() {
           </table>
         )}
       </div>
+
+      {/* Marketplace earnings — sales summary + Stripe Connect status.
+          Hidden if both endpoints 401/404 (no marketplace activity AND
+          no Connect account). */}
+      {(earnings || sellerStatus) && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 12 }}>Marketplace earnings</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
+            {/* Stats column */}
+            <div style={{ flex: '1 1 220px', minWidth: 220 }}>
+              <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Sales</div>
+              <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 2 }}>
+                {earnings?.sales_count ?? 0}
+              </div>
+              <div style={{ color: 'var(--text-2)', fontSize: 12, marginBottom: 14 }}>items sold</div>
+              <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Credits earned</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <span className="credit-badge">{earnings?.total_credits_paid ?? 0}</span>
+              </div>
+              {earnings && earnings.cash.length > 0 && (
+                <>
+                  <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Cash payouts</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {earnings.cash.map((b) => (
+                      <div key={b.currency} style={{ fontSize: 14, fontWeight: 600 }}>
+                        {(b.amount_cents / 100).toLocaleString('fr', { style: 'currency', currency: b.currency.toUpperCase() })}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            {/* Stripe Connect column */}
+            <div style={{ flex: '1 1 260px', minWidth: 260 }}>
+              <div style={{ color: 'var(--text-2)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Payouts</div>
+              {!sellerStatus?.has_account && (
+                <>
+                  <p style={{ color: 'var(--text-2)', fontSize: 13, marginTop: 0, marginBottom: 12, lineHeight: 1.5 }}>
+                    Sellers are paid in platform credits by default. Activate Stripe payouts to receive cash instead.
+                  </p>
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    disabled={onboardBusy}
+                    onClick={async () => {
+                      setOnboardBusy(true);
+                      try {
+                        const r = await fetch('/api/market/seller/onboard', { method: 'POST', credentials: 'include' });
+                        const j = await r.json().catch(() => ({} as { url?: string }));
+                        if (r.ok && j.url) { window.location.href = j.url; return; }
+                        alert('Stripe onboarding failed: ' + ((j as { error?: string }).error || r.status));
+                      } catch (e) {
+                        alert('Stripe onboarding failed: ' + (e instanceof Error ? e.message : String(e)));
+                      } finally {
+                        setOnboardBusy(false);
+                      }
+                    }}
+                  >
+                    {onboardBusy ? '…' : '💳 Set up cash payouts'}
+                  </button>
+                </>
+              )}
+              {sellerStatus?.has_account && !sellerStatus.charges_enabled && (
+                <>
+                  <div style={{ marginBottom: 10 }}>
+                    <span className="pill warn">Verification pending</span>
+                  </div>
+                  <p style={{ color: 'var(--text-2)', fontSize: 13, marginTop: 0, marginBottom: 12, lineHeight: 1.5 }}>
+                    Stripe is verifying your details.
+                  </p>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={onboardBusy}
+                    onClick={async () => {
+                      setOnboardBusy(true);
+                      try {
+                        const r = await fetch('/api/market/seller/onboard', { method: 'POST', credentials: 'include' });
+                        const j = await r.json().catch(() => ({} as { url?: string }));
+                        if (r.ok && j.url) { window.location.href = j.url; return; }
+                        alert('Could not resume onboarding: ' + ((j as { error?: string }).error || r.status));
+                      } catch (e) {
+                        alert('Could not resume onboarding: ' + (e instanceof Error ? e.message : String(e)));
+                      } finally {
+                        setOnboardBusy(false);
+                      }
+                    }}
+                  >
+                    {onboardBusy ? '…' : 'Resume onboarding'}
+                  </button>
+                </>
+              )}
+              {sellerStatus?.has_account && sellerStatus.charges_enabled && (
+                <>
+                  <div style={{ marginBottom: 12 }}>
+                    <span className="pill success">Payouts active</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={onboardBusy}
+                    onClick={async () => {
+                      setOnboardBusy(true);
+                      try {
+                        const r = await fetch('/api/market/seller/dashboard', { method: 'POST', credentials: 'include' });
+                        const j = await r.json().catch(() => ({} as { url?: string }));
+                        if (r.ok && j.url) { window.open(j.url, '_blank', 'noopener,noreferrer'); return; }
+                        alert('Could not open Stripe dashboard: ' + ((j as { error?: string }).error || r.status));
+                      } catch (e) {
+                        alert('Could not open Stripe dashboard: ' + (e instanceof Error ? e.message : String(e)));
+                      } finally {
+                        setOnboardBusy(false);
+                      }
+                    }}
+                  >
+                    {onboardBusy ? '…' : 'Open Stripe dashboard'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Replies from support — the admin's response to any contact-form
           message you sent. Stored on the platform, never delivered to
