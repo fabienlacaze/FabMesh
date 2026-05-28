@@ -325,6 +325,7 @@
         <div class="tab-group-header">🛠 SYSTEM</div>
         <div class="tab-group-items">
           <button class="tab" data-tab="users">🧑 Users</button>
+          <button class="tab" data-tab="market">🛒 Marketplace <span class="tab-badge" id="badge-market" style="display:none;">0</span></button>
           <button class="tab" data-tab="services">🚨 Services <span id="services-badge" class="tab-badge" style="display:none;">!</span></button>
           <button class="tab" data-tab="audit">📜 Audit log</button>
         </div>
@@ -575,6 +576,22 @@
 
     <!-- Tab: Audit log — JSONL trail of every admin mutating action.
          Sensitive-tabs lock already password-gates this view. -->
+    <!-- Tab: Marketplace — community listings (publish + moderation) -->
+    <div class="tab-panel" data-panel="market">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
+        <span style="color:var(--text-2); font-size:12px;">Community-published meshes. Approve to make them visible on <code>/market</code>. Stored on R2 under <code>_market/listings/</code>.</span>
+        <button class="btn" onclick="loadMarketListings()">🔄 Refresh</button>
+      </div>
+      <div id="market-filters" style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+        <button class="btn market-filter-btn active" data-mf="pending">Pending <span id="mf-pending-count" style="background:var(--warn); color:#000; padding:1px 6px; border-radius:9px; font-size:10px; margin-left:4px;">0</span></button>
+        <button class="btn market-filter-btn" data-mf="approved">Approved <span id="mf-approved-count" style="background:var(--ok); color:#fff; padding:1px 6px; border-radius:9px; font-size:10px; margin-left:4px;">0</span></button>
+        <button class="btn market-filter-btn" data-mf="rejected">Rejected <span id="mf-rejected-count" style="background:var(--err); color:#fff; padding:1px 6px; border-radius:9px; font-size:10px; margin-left:4px;">0</span></button>
+      </div>
+      <div id="market-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
+        <div style="color:var(--text-2); text-align:center; padding:24px; grid-column:1/-1;">Click Refresh to load.</div>
+      </div>
+    </div>
+
     <!-- Tab: Messages — contact form submissions from the public site -->
     <div class="tab-panel" data-panel="messages">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
@@ -1397,7 +1414,7 @@
       const visible = _adminAllMeshes.slice(0, _adminMeshPageSize);
       const remaining = _adminAllMeshes.length - visible.length;
       const cards = visible.map((m) => `
-        <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;">
+        <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;" data-mesh-job-id="${escapeHtml(m.id)}" data-mesh-user-id="${escapeHtml(m.user_id || '')}">
           <div style="font-weight:600; font-size:13px;">${escapeHtml(m.project_name || '—')}</div>
           <div style="color:var(--text-2); font-size:11px;">${escapeHtml(m.asset_type)} · ${escapeHtml(fmtDate(m.created_at))}</div>
           <model-viewer
@@ -1408,7 +1425,10 @@
               exposure="1"
               style="width:100%; height:240px; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;">
           </model-viewer>
-          <a class="btn" href="${escapeHtml(m.mesh_url)}" target="_blank" rel="noopener" style="text-align:center; font-size:12px;">⬇ Download GLB</a>
+          <div style="display:flex; gap:6px;">
+            <a class="btn" href="${escapeHtml(m.mesh_url)}" target="_blank" rel="noopener" style="flex:1; text-align:center; font-size:12px;">⬇ Download GLB</a>
+            <button class="btn btn-admin-delete-mesh" style="background:var(--err); border-color:var(--err); color:#fff; font-size:12px; padding:4px 10px;" title="Delete this mesh from R2 and Supabase">🗑</button>
+          </div>
         </div>
       `).join('');
       const more = remaining > 0
@@ -1423,6 +1443,31 @@
       if (moreBtn) moreBtn.addEventListener('click', () => {
         _adminMeshPageSize += ADMIN_MESH_PAGE_SIZE;
         _renderAdminMeshGrid();
+      });
+      // Delegated click: each card carries data-mesh-job-id +
+      // data-mesh-user-id; we POST to /api/admin/users/:uid/meshes/:jobId
+      // to nuke R2 + Supabase rows.
+      grid.querySelectorAll('.btn-admin-delete-mesh').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const card = btn.closest('[data-mesh-job-id]');
+          if (!card) return;
+          const jobId = card.getAttribute('data-mesh-job-id');
+          const userId = card.getAttribute('data-mesh-user-id');
+          if (!jobId || !userId) { alert('Missing user/job id'); return; }
+          if (!confirm('Delete this mesh permanently? This removes the GLB from R2 and the row from Supabase.')) return;
+          try {
+            const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/meshes/${encodeURIComponent(jobId)}`,
+                                  { method: 'DELETE', credentials: 'include' });
+            if (!r.ok) {
+              let body = '';
+              try { body = await r.text(); } catch {}
+              throw new Error('HTTP ' + r.status + (body ? ' — ' + body.slice(0, 120) : ''));
+            }
+            // Optimistic remove from cache + re-render.
+            _adminAllMeshes = _adminAllMeshes.filter((x) => x.id !== jobId);
+            _renderAdminMeshGrid();
+          } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
+        });
       });
     }
 
@@ -2117,28 +2162,37 @@
         list.innerHTML = msgs.map((m) => {
           const dt = new Date(m.created_at).toLocaleString('fr');
           const who = m.name || (m.user_email ? '<i>signed-in</i>' : '<i>anonymous</i>');
-          const replyTo = m.email || m.user_email || '';
-          const replyLink = replyTo
-            ? `<a href="mailto:${escapeHtml(replyTo)}?subject=Re:%20${encodeURIComponent(m.subject)}" style="color:var(--accent);">↩ Reply</a>`
-            : '<span style="color:var(--text-2); font-size:11px;">(no email provided)</span>';
+          // Reply path: no more mailto: (would expose the admin's perso
+          // email in From). Instead an inline Reply button writes the
+          // response to R2; the user reads it on /account. We surface
+          // "no reply possible" when the sender was anonymous AND not
+          // signed in — there's nobody to deliver to.
+          const canReply = !!(m.user_id || m.email);
+          const replyBtn = canReply
+            ? `<button class="btn" style="font-size:11px; padding:4px 10px;" onclick="openReplyForm('${escapeHtml(m.id)}')">↩ Reply</button>`
+            : '<span style="color:var(--text-2); font-size:11px;">(anonymous — no reply possible)</span>';
+          const repliedBadge = m.replied
+            ? '<span style="background:var(--ok); color:#fff; padding:1px 6px; border-radius:9px; font-size:10px; margin-right:6px;">REPLIED</span>'
+            : '';
           const unreadBadge = m.read ? '' : '<span style="background:var(--accent); color:#fff; padding:1px 6px; border-radius:9px; font-size:10px; margin-right:6px;">NEW</span>';
           return `
             <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:8px; padding:14px;">
               <div style="display:flex; justify-content:space-between; align-items:start; gap:10px; margin-bottom:8px;">
                 <div>
-                  <div style="font-weight:600; font-size:14px;">${unreadBadge}${escapeHtml(m.subject)}</div>
+                  <div style="font-weight:600; font-size:14px;">${unreadBadge}${repliedBadge}${escapeHtml(m.subject)}</div>
                   <div style="font-size:12px; color:var(--text-2); margin-top:2px;">From ${who} · ${escapeHtml(dt)}</div>
                   ${m.email ? `<div style="font-size:12px; color:var(--text-2);">Reply-to: <code>${escapeHtml(m.email)}</code></div>` : ''}
                   ${m.user_email ? `<div style="font-size:12px; color:var(--text-2);">Signed in as <code>${escapeHtml(m.user_email)}</code></div>` : ''}
                   ${m.ip ? `<div style="font-size:11px; color:var(--text-2);">IP: <code>${escapeHtml(m.ip)}</code></div>` : ''}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0;">
-                  ${replyLink}
+                  ${replyBtn}
                   ${!m.read ? `<button class="btn" style="font-size:11px; padding:4px 10px;" onclick="markMessageRead('${escapeHtml(m.id)}')">✓ Mark read</button>` : ''}
                   <button class="btn" style="font-size:11px; padding:4px 10px; background:var(--err); color:#fff;" onclick="deleteMessage('${escapeHtml(m.id)}')">🗑</button>
                 </div>
               </div>
               <pre style="white-space:pre-wrap; word-break:break-word; background:var(--bg-2); padding:10px; border-radius:6px; font-size:13px; font-family:inherit; margin:0;">${escapeHtml(m.message)}</pre>
+              ${m.reply_body ? `<div style="margin-top:10px; padding:10px; background:rgba(76,175,80,0.1); border-left:3px solid var(--ok); border-radius:0 6px 6px 0;"><div style="font-size:11px; color:var(--text-2); margin-bottom:4px;">Your reply · ${escapeHtml(new Date(m.replied_at || m.created_at).toLocaleString('fr'))}</div><pre style="white-space:pre-wrap; word-break:break-word; font-size:13px; font-family:inherit; margin:0;">${escapeHtml(m.reply_body)}</pre></div>` : ''}
             </div>
           `;
         }).join('');
@@ -2163,6 +2217,153 @@
         loadContactMessages();
       } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
     }
+    // Inline reply dialog — admin types the response, we POST it to
+    // the worker which stores reply_body + replied_at on the message
+    // JSON. The user reads it on /account (no email leaves the
+    // platform, so the admin's perso address is never exposed in From).
+    function openReplyForm(id) {
+      const existing = document.getElementById('reply-modal-' + id);
+      if (existing) { existing.remove(); return; }
+      const overlay = document.createElement('div');
+      overlay.id = 'reply-modal-' + id;
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:9999; padding:20px;';
+      overlay.innerHTML = `
+        <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:10px; padding:20px; max-width:600px; width:100%; display:flex; flex-direction:column; gap:12px;">
+          <h3 style="margin:0;">Reply to message</h3>
+          <p style="margin:0; font-size:12px; color:var(--text-2);">Your reply is saved on the platform and visible to the user on their <code>/account</code> page. Your personal email is never disclosed.</p>
+          <textarea id="reply-body-${id}" rows="8" placeholder="Type your reply…" style="padding:10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:13px; resize:vertical;"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button class="btn" onclick="document.getElementById('reply-modal-${id}').remove()">Cancel</button>
+            <button class="btn" style="background:var(--accent); color:#fff; border-color:var(--accent);" onclick="submitReply('${id}')">Send reply</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      setTimeout(() => document.getElementById('reply-body-' + id)?.focus(), 50);
+    }
+    async function submitReply(id) {
+      const body = document.getElementById('reply-body-' + id)?.value.trim();
+      if (!body) { alert('Reply body cannot be empty.'); return; }
+      try {
+        const r = await fetch('/api/admin/contact-messages/' + encodeURIComponent(id) + '/reply', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ body }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        document.getElementById('reply-modal-' + id)?.remove();
+        loadContactMessages();
+      } catch (e) { alert('Reply failed: ' + (e?.message || e)); }
+    }
+
+    // ============================================================
+    // MARKETPLACE moderation panel
+    // ============================================================
+    let _allMarketListings = [];
+    let _marketFilter = 'pending';
+    const _MARKET_LIC_LABEL = {
+      personal: 'Personal use',
+      cc0: 'CC0', 'cc-by': 'CC-BY', 'cc-by-nc': 'CC-BY-NC',
+      commercial: 'Commercial',
+    };
+    async function loadMarketListings() {
+      const list = document.getElementById('market-list');
+      list.innerHTML = '<div style="color:var(--text-2); text-align:center; padding:24px; grid-column:1/-1;">Loading…</div>';
+      try {
+        const r = await fetch('/api/admin/market/list', { credentials: 'include' });
+        if (!r.ok) {
+          let body = '';
+          try { body = await r.text(); } catch {}
+          throw new Error('HTTP ' + r.status + (body ? ' — ' + body.slice(0, 200) : ''));
+        }
+        const j = await r.json();
+        _allMarketListings = j.listings || [];
+        _renderMarketListings();
+      } catch (e) {
+        list.innerHTML = '<div style="color:var(--err); padding:14px; grid-column:1/-1;">' + escapeHtml(e?.message || String(e)) + '</div>';
+      }
+    }
+    function _renderMarketListings() {
+      const list = document.getElementById('market-list');
+      const counts = { pending: 0, approved: 0, rejected: 0 };
+      _allMarketListings.forEach((l) => { counts[l.status] = (counts[l.status] || 0) + 1; });
+      document.getElementById('mf-pending-count').textContent  = String(counts.pending);
+      document.getElementById('mf-approved-count').textContent = String(counts.approved);
+      document.getElementById('mf-rejected-count').textContent = String(counts.rejected);
+      const badge = document.getElementById('badge-market');
+      if (badge) {
+        if (counts.pending > 0) { badge.textContent = String(counts.pending); badge.style.display = ''; }
+        else { badge.style.display = 'none'; }
+      }
+      const visible = _allMarketListings.filter((l) => l.status === _marketFilter);
+      if (!visible.length) {
+        list.innerHTML = `<div style="color:var(--text-2); text-align:center; padding:24px; grid-column:1/-1;">No ${escapeHtml(_marketFilter)} listings.</div>`;
+        return;
+      }
+      list.innerHTML = visible.map((l) => {
+        const price = l.price_cents === 0 ? 'Free' : `$${(l.price_cents / 100).toFixed(2)}`;
+        const dt = new Date(l.created_at).toLocaleString('fr');
+        const actions = l.status === 'pending'
+          ? `<button class="btn" style="background:var(--ok); color:#fff; border-color:var(--ok);" onclick="approveListing('${escapeHtml(l.id)}')">✓ Approve</button>
+             <button class="btn" onclick="rejectListing('${escapeHtml(l.id)}')">✗ Reject</button>
+             <button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`
+          : `<button class="btn" style="background:var(--err); color:#fff; border-color:var(--err);" onclick="deleteListing('${escapeHtml(l.id)}')">🗑 Delete</button>`;
+        return `
+          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+              <div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(l.title)}</div>
+              <div style="background:${l.price_cents === 0 ? 'rgba(76,175,80,0.2)' : 'rgba(255,200,80,0.2)'}; color:${l.price_cents === 0 ? 'var(--ok)' : '#ffcc66'}; padding:2px 8px; border-radius:9px; font-size:11px; font-weight:700; white-space:nowrap;">${escapeHtml(price)}</div>
+            </div>
+            <div style="color:var(--text-2); font-size:11px;">${escapeHtml(l.author_display)} · ${escapeHtml(_MARKET_LIC_LABEL[l.licence] || l.licence)} · ${escapeHtml(dt)}</div>
+            <model-viewer src="${escapeHtml(l.mesh_url)}" camera-controls touch-action="pan-y" shadow-intensity="1" exposure="1" style="width:100%; height:200px; background:#0a0a0e; border-radius:6px;"></model-viewer>
+            ${l.description ? `<div style="font-size:12px; color:var(--text-1); max-height:60px; overflow:hidden;">${escapeHtml(l.description)}</div>` : ''}
+            ${l.rejection_reason ? `<div style="font-size:11px; color:var(--err); padding:6px; background:rgba(244,67,54,0.1); border-radius:4px;">Rejected: ${escapeHtml(l.rejection_reason)}</div>` : ''}
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">${actions}</div>
+          </div>
+        `;
+      }).join('');
+    }
+    async function approveListing(id) {
+      try {
+        const r = await fetch('/api/admin/market/' + encodeURIComponent(id) + '/approve',
+                              { method: 'POST', credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        loadMarketListings();
+      } catch (e) { alert('Approve failed: ' + (e?.message || e)); }
+    }
+    async function rejectListing(id) {
+      const reason = window.prompt('Reason for rejection (optional, shown to author):');
+      if (reason === null) return;
+      try {
+        const r = await fetch('/api/admin/market/' + encodeURIComponent(id) + '/reject', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        loadMarketListings();
+      } catch (e) { alert('Reject failed: ' + (e?.message || e)); }
+    }
+    async function deleteListing(id) {
+      if (!confirm('Delete this listing permanently? The author will need to re-publish if they want it back.')) return;
+      try {
+        const r = await fetch('/api/admin/market/' + encodeURIComponent(id),
+                              { method: 'DELETE', credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        loadMarketListings();
+      } catch (e) { alert('Delete failed: ' + (e?.message || e)); }
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const tab = document.querySelector('.tab[data-tab="market"]');
+      tab?.addEventListener('click', loadMarketListings);
+      document.querySelectorAll('.market-filter-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.market-filter-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          _marketFilter = btn.getAttribute('data-mf') || 'pending';
+          _renderMarketListings();
+        });
+      });
+    });
     // Auto-load when the Messages tab is opened.
     document.addEventListener('DOMContentLoaded', () => {
       const tab = document.querySelector('.tab[data-tab="messages"]');

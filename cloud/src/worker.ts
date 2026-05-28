@@ -1302,6 +1302,69 @@ async function handleAdminContactDelete(req: Request, env: Env, id: string): Pro
   return json({ ok: true, success: true });
 }
 
+/** GET /api/me/replies — current user only. Returns every contact
+ *  message they sent that has an admin reply attached, so they can
+ *  read the response on /account without us emailing them. */
+async function handleMeReplies(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const items: Array<Record<string, unknown>> = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_meta/contact/', limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const text = await r2GetText(env, obj.key);
+        if (!text) continue;
+        const m = JSON.parse(text);
+        if (m && m.user_id === user.id && m.reply_body) {
+          items.push({
+            id: m.id,
+            subject: m.subject,
+            message: m.message,
+            reply_body: m.reply_body,
+            replied_at: m.replied_at,
+            created_at: m.created_at,
+          });
+        }
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  items.sort((a, b) => String(b.replied_at).localeCompare(String(a.replied_at)));
+  return json({ ok: true, replies: items });
+}
+
+/** POST /api/admin/contact-messages/<id>/reply  body { body: string }
+ *  — store the admin's reply on the message JSON. The user reads it on
+ *  /account. Keeps the admin's perso email private (no mailto). */
+async function handleAdminContactReply(req: Request, env: Env, id: string): Promise<Response> {
+  const adminCheck = await _requireAdmin(req, env);
+  if (adminCheck instanceof Response) return adminCheck;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { body?: string };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const text = String(body.body ?? '').trim().slice(0, 8000);
+  if (!text) return err(400, 'reply body required');
+  const key = `_meta/contact/${_safeId(id)}.json`;
+  const existing = await r2GetText(env, key);
+  if (!existing) return err(404, 'message not found');
+  try {
+    const m = JSON.parse(existing);
+    m.reply_body = text;
+    m.replied_at = new Date().toISOString();
+    m.replied = true;
+    m.read = true;  // a reply implies the admin has read the message
+    await env.MESHES.put(key, JSON.stringify(m),
+                         { httpMetadata: { contentType: 'application/json' } });
+    return json({ ok: true, success: true });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** GET /api/admin/modal-credits — sums every `_meta/modal_spend/<day>`
  *  entry to compute the cumulative Modal spend, reads the admin-set
  *  budget total, and returns { total, spent, remaining, today }. */
@@ -1355,6 +1418,252 @@ async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Respon
   if (!Number.isFinite(n) || n < 0) return err(400, 'total must be a non-negative number');
   await env.MESHES.put('_meta/modal_budget_total.txt', String(n));
   return json({ ok: true, success: true, total: n });
+}
+
+// =============================================================
+// MARKETPLACE
+// -------------------------------------------------------------
+// MVP scope: users publish their own succeeded meshes to a public
+// catalogue, free or with a price tag + licence. Admin moderates
+// (approve / reject / delete). Payments are NOT wired yet — every
+// listing is downloadable for free once approved. Paywall via
+// Stripe is a follow-up (worker has the Stripe wiring already).
+//
+// Storage: a single R2 prefix `_market/listings/<id>.json`. Each
+// listing record carries enough info to render the public grid +
+// detail page without a Supabase round-trip (we copy thumbnail_url,
+// mesh_url, project_name from the source job at publish time).
+// =============================================================
+
+type MarketListing = {
+  id: string;
+  job_id: string;
+  user_id: string;
+  author_email: string | null;
+  author_display: string;
+  title: string;
+  description: string;
+  price_cents: number;
+  currency: string;
+  licence: string;
+  asset_type: string | null;
+  mesh_url: string;
+  thumbnail_url: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason?: string;
+  created_at: string;
+  approved_at: string | null;
+  downloads: number;
+};
+
+const MARKET_LICENCES = new Set([
+  'personal', 'cc0', 'cc-by', 'cc-by-nc', 'commercial',
+]);
+
+async function _loadAllListings(env: Env): Promise<MarketListing[]> {
+  if (!env.MESHES) return [];
+  const out: MarketListing[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_market/listings/', limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const parsed = JSON.parse(txt);
+        if (parsed && parsed.id) out.push(parsed);
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  out.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  return out;
+}
+
+/** POST /api/market/publish  body { jobId, title, description, price_cents, currency, licence }
+ *  — author publishes one of their own succeeded meshes. We snapshot
+ *  the mesh_url + thumbnail at publish time. Status starts as
+ *  'pending' so admin can approve before it shows on the public grid. */
+async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: {
+    jobId?: string;
+    title?: string;
+    description?: string;
+    price_cents?: number;
+    currency?: string;
+    licence?: string;
+  };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const jobId = String(body.jobId ?? '').trim();
+  const title = String(body.title ?? '').trim().slice(0, 120);
+  const description = String(body.description ?? '').trim().slice(0, 4000);
+  const price_cents = Math.max(0, Math.min(1_000_000, Math.round(Number(body.price_cents ?? 0))));
+  const currency = String(body.currency ?? 'USD').trim().toUpperCase().slice(0, 3) || 'USD';
+  const licence = String(body.licence ?? 'personal').trim().toLowerCase();
+  if (!jobId)  return err(400, 'jobId required');
+  if (!title)  return err(400, 'title required');
+  if (!MARKET_LICENCES.has(licence)) return err(400, 'invalid licence');
+  // Verify the user owns the mesh.
+  const sb = supabaseAdmin(env);
+  const { data: job } = await sb.from('jobs')
+    .select('id, user_id, mesh_url, project_name, asset_type, status')
+    .eq('id', jobId).eq('user_id', user.id).maybeSingle();
+  if (!job)                          return err(404, 'mesh not found');
+  if (job.status !== 'succeeded')    return err(400, 'mesh not ready');
+  if (!job.mesh_url)                 return err(400, 'mesh has no URL');
+  // Reject duplicate listings for the same mesh.
+  const existing = await _loadAllListings(env);
+  if (existing.some((l) => l.job_id === jobId && l.status !== 'rejected')) {
+    return err(409, 'this mesh is already listed');
+  }
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const listing: MarketListing = {
+    id,
+    job_id: jobId,
+    user_id: user.id,
+    author_email: user.email ?? null,
+    author_display: user.email ? user.email.split('@')[0] : 'anonymous',
+    title,
+    description,
+    price_cents,
+    currency,
+    licence,
+    asset_type: (job.asset_type as string | null) ?? null,
+    mesh_url: job.mesh_url,
+    thumbnail_url: null,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    approved_at: null,
+    downloads: 0,
+  };
+  await env.MESHES.put(`_market/listings/${id}.json`, JSON.stringify(listing),
+                       { httpMetadata: { contentType: 'application/json' } });
+  return json({ ok: true, success: true, id, status: 'pending' });
+}
+
+/** POST /api/market/unpublish/<id>  — author retracts a listing. */
+async function handleMarketUnpublish(req: Request, env: Env, id: string): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  try {
+    const parsed = JSON.parse(txt);
+    if (parsed.user_id !== user.id) return err(403, 'not your listing');
+    await env.MESHES.delete(key);
+    return json({ ok: true, success: true });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** GET /api/market/list — PUBLIC. Approved listings only. Browse-only;
+ *  no auth required so search engines + anonymous users can land here. */
+async function handleMarketList(_req: Request, env: Env): Promise<Response> {
+  const all = await _loadAllListings(env);
+  const visible = all.filter((l) => l.status === 'approved')
+    .map((l) => ({  // strip the author_email — public surface
+      id: l.id,
+      title: l.title,
+      description: l.description,
+      price_cents: l.price_cents,
+      currency: l.currency,
+      licence: l.licence,
+      asset_type: l.asset_type,
+      mesh_url: l.mesh_url,
+      author_display: l.author_display,
+      created_at: l.created_at,
+      downloads: l.downloads,
+    }));
+  return json({ ok: true, listings: visible });
+}
+
+/** GET /api/market/<id> — PUBLIC. Single listing details. */
+async function handleMarketGet(_req: Request, env: Env, id: string): Promise<Response> {
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  try {
+    const parsed = JSON.parse(txt);
+    if (parsed.status !== 'approved') return err(404, 'listing not visible');
+    return json({ ok: true, listing: {
+      id: parsed.id, title: parsed.title, description: parsed.description,
+      price_cents: parsed.price_cents, currency: parsed.currency, licence: parsed.licence,
+      asset_type: parsed.asset_type, mesh_url: parsed.mesh_url,
+      author_display: parsed.author_display, created_at: parsed.created_at,
+      downloads: parsed.downloads,
+    }});
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** GET /api/admin/market/list — ADMIN. Returns ALL listings (every
+ *  status) so the admin sees pending entries that need review. */
+async function handleAdminMarketList(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const all = await _loadAllListings(env);
+  return json({ ok: true, listings: all });
+}
+
+/** POST /api/admin/market/<id>/approve — ADMIN. */
+async function handleAdminMarketApprove(req: Request, env: Env, id: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  try {
+    const parsed = JSON.parse(txt);
+    parsed.status = 'approved';
+    parsed.approved_at = new Date().toISOString();
+    delete parsed.rejection_reason;
+    await env.MESHES.put(key, JSON.stringify(parsed),
+                         { httpMetadata: { contentType: 'application/json' } });
+    return json({ ok: true, success: true });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** POST /api/admin/market/<id>/reject  body { reason } — ADMIN. */
+async function handleAdminMarketReject(req: Request, env: Env, id: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { reason?: string };
+  try { body = await req.json() as typeof body; } catch { body = {}; }
+  const reason = String(body.reason ?? '').trim().slice(0, 400);
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  try {
+    const parsed = JSON.parse(txt);
+    parsed.status = 'rejected';
+    parsed.rejection_reason = reason || 'No reason provided';
+    await env.MESHES.put(key, JSON.stringify(parsed),
+                         { httpMetadata: { contentType: 'application/json' } });
+    return json({ ok: true, success: true });
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** DELETE /api/admin/market/<id> — ADMIN. Hard-remove a listing. */
+async function handleAdminMarketDelete(req: Request, env: Env, id: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'storage not configured');
+  await env.MESHES.delete(`_market/listings/${id}.json`);
+  return json({ ok: true, success: true });
 }
 
 async function handleMe(req: Request, env: Env): Promise<Response> {
@@ -5436,7 +5745,7 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
   if (guard instanceof Response) return guard;
   const sb = supabaseAdmin(env);
   const { data, error } = await sb.from('jobs')
-    .select('id, asset_type, mesh_url, status, project_name, created_at, options')
+    .select('id, user_id, asset_type, mesh_url, status, project_name, created_at, options')
     .eq('user_id', userId)
     .eq('status', 'succeeded')
     .not('mesh_url', 'is', null)
@@ -5444,6 +5753,40 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
     .limit(200);
   if (error) return err(500, error.message);
   return json({ meshes: data || [] });
+}
+
+/** DELETE /api/admin/users/<userId>/meshes/<jobId> — ADMIN ONLY.
+ *  Removes the R2 GLB + the Supabase jobs row. Also unpublishes any
+ *  marketplace listing tied to that mesh. */
+async function handleAdminDeleteMesh(req: Request, env: Env, userId: string, jobId: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  const sb = supabaseAdmin(env);
+  const { data: job } = await sb.from('jobs').select('id, user_id, mesh_url')
+    .eq('id', jobId).eq('user_id', userId).maybeSingle();
+  if (!job) return err(404, 'mesh not found');
+  // Best-effort R2 cleanup. delete() never throws on a missing key.
+  if (env.MESHES) {
+    try { await env.MESHES.delete(`${userId}/${jobId}.glb`); } catch {}
+    // Cascade: any market listing referencing this mesh becomes invalid;
+    // we delete the listing JSON too so the marketplace stays clean.
+    try {
+      const page = await env.MESHES.list({ prefix: '_market/listings/', limit: 1000 });
+      for (const obj of page.objects) {
+        try {
+          const txt = await r2GetText(env, obj.key);
+          if (!txt) continue;
+          const parsed = JSON.parse(txt);
+          if (parsed?.job_id === jobId) {
+            await env.MESHES.delete(obj.key);
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  const { error } = await sb.from('jobs').delete().eq('id', jobId).eq('user_id', userId);
+  if (error) return err(500, error.message);
+  return json({ ok: true, success: true });
 }
 
 /** GET /api/admin/history.xlsx — ADMIN ONLY full export with margin. */
@@ -5696,17 +6039,39 @@ export default {
         if (pathname === '/api/admin/contact-messages' && method === 'GET') return await handleAdminContactList(req, env);
         if (pathname === '/api/admin/modal-credits'         && method === 'GET')  return await handleAdminModalCredits(req, env);
         if (pathname === '/api/admin/modal-credits/total'   && method === 'POST') return await handleAdminModalSetBudget(req, env);
+        // ── Marketplace ──
+        if (pathname === '/api/market/list'                 && method === 'GET')  return await handleMarketList(req, env);
+        if (pathname === '/api/market/publish'              && method === 'POST') return await handleMarketPublish(req, env);
+        if (pathname === '/api/admin/market/list'           && method === 'GET')  return await handleAdminMarketList(req, env);
         {
-          const m = pathname.match(/^\/api\/admin\/contact-messages\/([A-Za-z0-9_]+)(?:\/(read))?$/);
+          const m = pathname.match(/^\/api\/market\/([A-Za-z0-9_]+)$/);
+          if (m && method === 'GET') return await handleMarketGet(req, env, m[1]);
+        }
+        {
+          const m = pathname.match(/^\/api\/market\/unpublish\/([A-Za-z0-9_]+)$/);
+          if (m && method === 'POST') return await handleMarketUnpublish(req, env, m[1]);
+        }
+        {
+          const m = pathname.match(/^\/api\/admin\/market\/([A-Za-z0-9_]+)(?:\/(approve|reject))?$/);
           if (m) {
-            if (m[2] === 'read' && method === 'POST')   return await handleAdminContactRead(req, env, m[1]);
-            if (!m[2]            && method === 'DELETE') return await handleAdminContactDelete(req, env, m[1]);
+            if (m[2] === 'approve' && method === 'POST')   return await handleAdminMarketApprove(req, env, m[1]);
+            if (m[2] === 'reject'  && method === 'POST')   return await handleAdminMarketReject(req, env, m[1]);
+            if (!m[2]              && method === 'DELETE') return await handleAdminMarketDelete(req, env, m[1]);
+          }
+        }
+        {
+          const m = pathname.match(/^\/api\/admin\/contact-messages\/([A-Za-z0-9_]+)(?:\/(read|reply))?$/);
+          if (m) {
+            if (m[2] === 'read'  && method === 'POST')   return await handleAdminContactRead(req, env, m[1]);
+            if (m[2] === 'reply' && method === 'POST')   return await handleAdminContactReply(req, env, m[1]);
+            if (!m[2]             && method === 'DELETE') return await handleAdminContactDelete(req, env, m[1]);
           }
         }
         if (pathname === '/api/auth/install-session'  && method === 'POST') return await handleAuthInstallSession(req, env);
         if (pathname === '/api/auth/refresh'          && method === 'POST') return await handleAuthRefresh(req, env);
         if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
+        if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
@@ -5769,6 +6134,14 @@ export default {
         // /api/admin/users/<userId>/meshes — dynamic
         const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
         if (adminMeshes && method === 'GET') return await handleAdminUserMeshes(req, env, decodeURIComponent(adminMeshes[1]));
+
+        // /api/admin/users/<userId>/meshes/<jobId> — delete one mesh
+        const adminMeshDel = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/([^/]+)\/?$/);
+        if (adminMeshDel && method === 'DELETE') {
+          return await handleAdminDeleteMesh(req, env,
+            decodeURIComponent(adminMeshDel[1]),
+            decodeURIComponent(adminMeshDel[2]));
+        }
 
         // /api/admin/users/<userId>/images — dynamic
         const adminImages = pathname.match(/^\/api\/admin\/users\/([^/]+)\/images\/?$/);

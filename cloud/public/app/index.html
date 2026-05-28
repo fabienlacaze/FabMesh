@@ -521,6 +521,7 @@
                       <div class="step-tools-label">File</div>
                       <div class="step-tools-grid">
                         <button id="ws-mesh-export-btn" class="ghost-btn tool-btn">&#128190; Export...</button>
+                        <button id="ws-mesh-publish-btn" class="ghost-btn tool-btn">&#128722; Publish to marketplace</button>
                         <button id="ws-mesh-blender-btn" class="ghost-btn tool-btn">&#129704; Open in Blender</button>
                         <button id="ws-mesh-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
                       </div>
@@ -1635,6 +1636,46 @@
         <div class="modal-actions">
           <button class="ghost-btn" id="exp-cancel">Cancel</button>
           <button class="primary-btn" id="exp-go">Export</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         PUBLISH TO MARKETPLACE MODAL
+         ============================================================ -->
+    <div id="modal-publish-mesh" class="modal-overlay hidden">
+      <div class="modal-card modal-card-wide">
+        <h2>&#128722; Publish to marketplace</h2>
+        <p class="modal-subtitle">Share this mesh with the community. Free or with a price tag — your choice. An admin will review your listing before it goes live.</p>
+        <label>Title</label>
+        <input type="text" id="pub-title" maxlength="120" placeholder="Orc soldier — battle-ready"
+               style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px;" />
+        <label>Description</label>
+        <textarea id="pub-description" rows="4" maxlength="4000" placeholder="What makes your asset special? Pose, polycount, texture resolution, intended use…"
+                  style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px; resize:vertical; font-family:inherit;"></textarea>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div>
+            <label>Price (USD, 0 = free)</label>
+            <input type="number" id="pub-price" min="0" step="1" value="0"
+                   style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px; width:100%; box-sizing:border-box;" />
+          </div>
+          <div>
+            <label>Licence</label>
+            <select id="pub-licence" style="padding:8px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:13px; width:100%;">
+              <option value="personal">Personal use only</option>
+              <option value="cc0">Public domain (CC0)</option>
+              <option value="cc-by" selected>CC-BY 4.0 (attribution)</option>
+              <option value="cc-by-nc">CC-BY-NC 4.0 (non-commercial)</option>
+              <option value="commercial">Royalty-free commercial</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:11px; color:var(--text-2); line-height:1.5;">
+          ⚠ Free listings (price = 0) are immediately downloadable by anyone after approval. Paid listings show the price but the buy flow is coming soon (Stripe).
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="pub-cancel">Cancel</button>
+          <button class="primary-btn" id="pub-go">Submit for review</button>
         </div>
       </div>
     </div>

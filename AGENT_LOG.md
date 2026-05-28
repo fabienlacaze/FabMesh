@@ -10,6 +10,39 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace MVP + reply privacy + admin delete mesh)
+
+- **Reply privacy** : remplacé le `mailto:` du panel admin Messages
+  (qui mettait l'adresse perso de l'admin en From) par un dialog
+  "Reply" stocké en R2 sous `_meta/contact/<id>.json#reply_body`.
+  Nouvel endpoint `POST /api/admin/contact-messages/<id>/reply`.
+  L'utilisateur voit sa réponse sur `/account` via
+  `GET /api/me/replies` + nouvelle section "Replies from support".
+- **Admin delete mesh** : bouton 🗑 sur chaque mesh card de la modal
+  "Meshes for X". Endpoint `DELETE /api/admin/users/<uid>/meshes/<jobId>`
+  qui nettoie R2 + Supabase + cascade les listings marketplace
+  référençant ce mesh.
+- **Marketplace MVP** :
+  - Backend : `_market/listings/<id>.json` schema + 7 routes
+    (`/api/market/list`, `/publish`, `/<id>`, `/unpublish/<id>`,
+    admin: `/api/admin/market/list`, `/<id>/approve`, `/<id>/reject`,
+    `DELETE /<id>`).
+  - Page publique `/market` (Next.js) : grille de cards alignée sur
+    le look de la home, search + filtres free/paid, modal détail
+    avec download GLB (paiement Stripe = follow-up).
+  - Bouton "🛒 Publish to marketplace" dans la step Mesh File de
+    l'app cloud, ouvre `modal-publish-mesh` (titre, description,
+    prix, licence), POST `/api/market/publish` → status=`pending`.
+  - Admin tab Marketplace dans admin.html avec filtres
+    pending/approved/rejected, badges count, actions
+    Approve/Reject/Delete.
+- **Hors scope MVP** : payment Stripe (boutons "coming soon"),
+  publish depuis Desktop (à wirer dans une release suivante via
+  l'IPC main → bridge cloud), envoi d'emails de notification de
+  réponse.
+
+---
+
 ## 2026-05-28 (worker — Admin handlers HTTP 500 fix + UI cleanup)
 
 - **HTTP 500 sur Admin Messages + Modal credits** (cap. user) :
