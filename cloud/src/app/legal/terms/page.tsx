@@ -100,6 +100,48 @@ export default function TermsPage() {
         the French courts.
       </p>
 
+      <h2>11. Marketplace</h2>
+
+      <h3>11.1 Publishing assets</h3>
+      <ul>
+        <li>Users may publish meshes and images they generated on the platform to the Marketplace.</li>
+        <li>Each listing is reviewed by an administrator before becoming visible to buyers.</li>
+        <li>The author retains ownership of their creation; publishing grants the platform a non-exclusive right to display the asset and process sales.</li>
+        <li>Authors guarantee that their submission does not infringe any third-party rights.</li>
+        <li>Authors can choose between five licences (Personal use, CC0, CC-BY 4.0, CC-BY-NC 4.0, Royalty-free commercial). The licence is attached to the asset on download.</li>
+        <li>An administrator may at any time reject or remove a listing that breaches these terms.</li>
+      </ul>
+
+      <h3>11.2 Buying assets</h3>
+      <ul>
+        <li>Free listings are downloadable immediately by any signed-in user after approval.</li>
+        <li>Paid listings are bought via Stripe Checkout. Buyers receive a non-exclusive licence under the terms attached to the asset.</li>
+        <li>Buyers may NOT redistribute, resell, or sublicense purchased assets unless the chosen licence (CC0, CC-BY, commercial) explicitly allows it.</li>
+        <li>Refunds are handled case-by-case via support; contact us within 14 days of purchase with a clear reason.</li>
+      </ul>
+
+      <h3>11.3 Commission and payouts</h3>
+      <ul>
+        <li>The platform takes a 30% commission on every paid sale. The seller receives 70% net.</li>
+        <li>Sellers can opt to receive their share either as platform credits (instant, +20% bonus over cash equivalent) or as cash via Stripe Connect (after KYC onboarding handled by Stripe).</li>
+        <li>Cash payouts are settled by Stripe directly to the seller&apos;s linked bank account on the Stripe payout schedule.</li>
+        <li>Sellers using Stripe Connect agree to Stripe&apos;s <a href="https://stripe.com/connect-account/legal">Connected Account Agreement</a>.</li>
+        <li>The platform is not responsible for delays caused by Stripe verification, banking holidays, or KYC issues.</li>
+      </ul>
+
+      <h3>11.4 Taxes</h3>
+      <ul>
+        <li>Sellers are responsible for declaring and paying any taxes (VAT, income tax) due in their jurisdiction on their marketplace earnings.</li>
+        <li>The platform may report seller activity to tax authorities where required (US 1099-K reporting via Stripe above the IRS threshold; EU DAC7 above the EUR 2000 / 30-sales annual threshold).</li>
+      </ul>
+
+      <h3>11.5 Disputes</h3>
+      <ul>
+        <li>Disputes between buyer and seller (asset quality, licence interpretation) should first be brought to platform support.</li>
+        <li>The platform may mediate and, if appropriate, refund the buyer or sanction the seller.</li>
+        <li>Chargebacks initiated by buyers via their bank are handled by Stripe; the platform may withhold the disputed amount from the seller&apos;s pending balance until resolution.</li>
+      </ul>
+
       <p style={{ marginTop: 32, fontSize: 13 }}>
         <a href="/legal/privacy">Privacy Policy</a> &middot;{' '}
         <a href="/">Home</a>
