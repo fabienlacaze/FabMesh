@@ -1347,6 +1347,51 @@
     let _adminAllImages = [];
     let _adminImgPageSize = ADMIN_IMG_PAGE_SIZE;
 
+    // Marketplace state indices, populated by viewUserImages/viewUserMeshes.
+    // Used by the grid renderers to overlay a pill on each card.
+    let _adminUserListingsByJobId = new Map();
+    let _adminUserListingsByUrl   = new Map();
+
+    function _marketPillHtml(info) {
+      if (!info) return '';
+      const status = String(info.status || '').toLowerCase();
+      const base = 'position:absolute; top:8px; right:8px; font-size:11px; padding:3px 8px; border-radius:999px; color:#fff; font-weight:600; pointer-events:none; z-index:2;';
+      if (status === 'approved') {
+        const cents = Number(info.price_cents || 0);
+        const label = cents > 0
+          ? ('Live on /market — $' + (cents / 100).toFixed(2))
+          : 'Live on /market — Free';
+        return `<span style="${base} background:var(--ok); border:1px solid var(--ok);">🛒 ${escapeHtml(label)}</span>`;
+      }
+      if (status === 'pending') {
+        return `<span style="${base} background:var(--warn); border:1px solid var(--warn); color:#1a1a1a;">🛒 Pending review</span>`;
+      }
+      if (status === 'rejected') {
+        return `<span style="${base} background:var(--err); border:1px solid var(--err);">🛒 Rejected</span>`;
+      }
+      return '';
+    }
+
+    async function _fetchAdminUserListings(userId) {
+      try {
+        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/listings`, { credentials: 'include' });
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data?.listings) ? data.listings : [];
+      } catch { return []; }
+    }
+
+    function _indexAdminUserListings(listings) {
+      _adminUserListingsByJobId = new Map();
+      _adminUserListingsByUrl   = new Map();
+      for (const l of (listings || [])) {
+        const info = { status: l.status, listing_id: l.id, price_cents: l.price_cents };
+        if (l.job_id) _adminUserListingsByJobId.set(String(l.job_id), info);
+        const u = l.asset_url || l.mesh_url;
+        if (u) _adminUserListingsByUrl.set(String(u), info);
+      }
+    }
+
     function _renderAdminImageGrid() {
       const grid = document.getElementById('meshes-grid');
       const visible = _adminAllImages.slice(0, _adminImgPageSize);
@@ -1354,8 +1399,10 @@
       const cards = visible.map((m) => {
         const name = m.key.split('/').pop();
         const kb = (m.size / 1024).toFixed(0);
+        const pill = _marketPillHtml(_adminUserListingsByUrl.get(String(m.url)));
         return `
-          <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;" data-image-key="${escapeHtml(m.key)}">
+          <div style="position:relative; background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;" data-image-key="${escapeHtml(m.key)}">
+            ${pill}
             <img src="${escapeHtml(m.url)}" loading="lazy"
                  style="width:100%; height:200px; object-fit:contain; background:#0a0a0e; border:1px solid var(--border); border-radius:6px;"
                  onerror="this.style.opacity=0.3; this.alt='Load failed';" />
@@ -1411,11 +1458,19 @@
       document.getElementById('meshes-overlay').style.display = 'flex';
       _adminAllImages = [];
       _adminImgPageSize = ADMIN_IMG_PAGE_SIZE;
+      _indexAdminUserListings([]);
       try {
-        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/images`, { credentials: 'include' });
+        // Fetch images + the user's marketplace listings in parallel so the
+        // grid can badge each card with its listing state (pending / live /
+        // rejected) without a second round-trip.
+        const [r, listings] = await Promise.all([
+          fetch(`/api/admin/users/${encodeURIComponent(userId)}/images`, { credentials: 'include' }),
+          _fetchAdminUserListings(userId),
+        ]);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         _adminAllImages = data.images || [];
+        _indexAdminUserListings(listings);
         if (!_adminAllImages.length) {
           grid.innerHTML = '<div style="color:var(--text-2);">No images.</div>';
           return;
@@ -1438,8 +1493,13 @@
       const grid = document.getElementById('meshes-grid');
       const visible = _adminAllMeshes.slice(0, _adminMeshPageSize);
       const remaining = _adminAllMeshes.length - visible.length;
-      const cards = visible.map((m) => `
-        <div style="background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;" data-mesh-job-id="${escapeHtml(m.id)}" data-mesh-user-id="${escapeHtml(m.user_id || '')}">
+      const cards = visible.map((m) => {
+        const info = _adminUserListingsByJobId.get(String(m.id))
+                  || _adminUserListingsByUrl.get(String(m.mesh_url));
+        const pill = _marketPillHtml(info);
+        return `
+        <div style="position:relative; background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px;" data-mesh-job-id="${escapeHtml(m.id)}" data-mesh-user-id="${escapeHtml(m.user_id || '')}">
+          ${pill}
           <div style="font-weight:600; font-size:13px;">${escapeHtml(m.project_name || '—')}</div>
           <div style="color:var(--text-2); font-size:11px;">${escapeHtml(m.asset_type)} · ${escapeHtml(fmtDate(m.created_at))}</div>
           <model-viewer
@@ -1455,7 +1515,8 @@
             <button class="btn btn-admin-delete-mesh" style="background:var(--err); border-color:var(--err); color:#fff; font-size:12px; padding:4px 10px;" title="Delete this mesh from R2 and Supabase">🗑</button>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
       const more = remaining > 0
         ? `<div style="grid-column:1/-1; display:flex; justify-content:center; padding:12px;">
              <button class="btn btn-accent" id="admin-mesh-more">Load ${Math.min(ADMIN_MESH_PAGE_SIZE, remaining)} more (${remaining} remaining)</button>
@@ -1503,11 +1564,19 @@
       document.getElementById('meshes-overlay').style.display = 'flex';
       _adminAllMeshes = [];
       _adminMeshPageSize = ADMIN_MESH_PAGE_SIZE;
+      _indexAdminUserListings([]);
       try {
-        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/meshes`, { credentials: 'include' });
+        // Fetch meshes + the user's marketplace listings in parallel so the
+        // grid can badge each card with its listing state (pending / live /
+        // rejected) without a second round-trip.
+        const [r, listings] = await Promise.all([
+          fetch(`/api/admin/users/${encodeURIComponent(userId)}/meshes`, { credentials: 'include' }),
+          _fetchAdminUserListings(userId),
+        ]);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         _adminAllMeshes = data.meshes || [];
+        _indexAdminUserListings(listings);
         if (!_adminAllMeshes.length) {
           grid.innerHTML = '<div style="color:var(--text-2);">No succeeded meshes.</div>';
           return;
