@@ -3030,6 +3030,25 @@ async function handleDebugAuth(req: Request, env: Env): Promise<Response> {
   });
 }
 
+// Public endpoint — returns which packs can currently be purchased.
+// Subscription packs require STRIPE_PRICE_<PACKID> to be set as a Worker
+// secret; without it /api/checkout returns 503, so the buy page should
+// hide those cards. One-shot (payment-mode) packs are always available
+// because we use price_data on the fly — no preconfigured Stripe Price
+// needed. No auth required: this is read-only metadata.
+async function handlePricingAvailability(_req: Request, env: Env): Promise<Response> {
+  const available: Record<string, boolean> = {};
+  for (const pack of Object.values(PACKS)) {
+    if (pack.mode === 'subscription') {
+      const envKey = `STRIPE_PRICE_${pack.id.toUpperCase()}` as keyof Env;
+      available[pack.id] = !!(env[envKey] as string | undefined);
+    } else {
+      available[pack.id] = true;
+    }
+  }
+  return json({ ok: true, available });
+}
+
 async function handleCheckout(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -7626,6 +7645,7 @@ export default {
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
+        if (pathname === '/api/pricing/availability'  && method === 'GET')  return await handlePricingAvailability(req, env);
         if (pathname === '/api/stripe-webhook'        && method === 'POST') return await handleStripeWebhook(req, env);
         if (pathname === '/api/generate'              && method === 'POST') return await handleGenerate(req, env);
         if (pathname === '/api/projects'              && method === 'GET')  return await handleProjects(req, env);
