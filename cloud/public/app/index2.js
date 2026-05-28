@@ -7464,9 +7464,13 @@ function _mtRunPreview() {
     _mtEnsureTransformGizmo().then(() => {
       const tc = mtState.transformControls;
       if (!tc || !mtState.dummy || !mtState.origModel) return;
-      // Attach to scene + origModel on first activation so the dummy
-      // moves in MESH-local space (pivot offsets are local-space).
-      if (!tc.parent) mtState.scene.add(tc);
+      // three.js r166+ split TransformControls into a logic object and
+      // a separate visual helper. The HELPER is what we add to the
+      // scene; the TC object itself is event-driven and doesn't render
+      // anything when added directly.
+      const tcHelper = (typeof tc.getHelper === 'function') ? tc.getHelper() : tc;
+      mtState.transformControlsHelper = tcHelper;
+      if (!tcHelper.parent) mtState.scene.add(tcHelper);
       if (mtState.dummy.parent !== mtState.origModel) {
         mtState.origModel.add(mtState.dummy);
       }
@@ -7574,6 +7578,10 @@ function _mtDisableTransformGizmo() {
   const tc = mtState.transformControls;
   if (!tc) return;
   tc.detach();
+  // Remove the visual helper from the scene (r166+ split — see
+  // _mtEnsureTransformGizmo for context).
+  const tcHelper = mtState.transformControlsHelper;
+  if (tcHelper?.parent) tcHelper.parent.remove(tcHelper);
   if (tc.parent) tc.parent.remove(tc);
   if (mtState.dummy?.parent) mtState.dummy.parent.remove(mtState.dummy);
   if (mtState.controls) mtState.controls.enabled = true;

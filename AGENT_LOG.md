@@ -9507,3 +9507,24 @@ opposite orientation. Bowtie handling uses tangent-plane smallest-
 loop turn. Liepa DP with lexicographic (max-dihedral, area) weight
 remains canonical for moderate loops (≤200 verts). Reference source:
 geometry3Sharp (C# precursor, Ryan Schmidt → Epic). On the TODO.
+
+## 2026-05-28 — Set pivot point: fix gizmo invisible on three r170
+
+User report: "je ne vois plus le gizmo pour le pivot point". Cause:
+three.js **r166** split TransformControls into a logic object + a
+separate visual helper. Adding the TC directly to the scene no longer
+renders the gizmo — you have to use `tc.getHelper()` and add THAT to
+the scene.
+
+We pin three@0.170.0 in index.html (`<script type="importmap">`), so
+this affects us.
+
+Fix in `_mtRunPreview` and `_mtDisableTransformGizmo`:
+- Store `mtState.transformControlsHelper = tc.getHelper()` on
+  activation.
+- Add the helper (not the TC) to the scene.
+- On disable, remove the helper from its parent.
+
+Also renamed the workspace toolbar button "Center" → "Pivot" per user
+request (the schema-side title was already "Set pivot point", the
+toolbar label was the legacy one).
