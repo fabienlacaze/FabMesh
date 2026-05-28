@@ -6650,39 +6650,30 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     if (repOfGroup[g] === -1) repOfGroup[g] = v;
   }
 
-  // Count directed edges (ga->gb) AND undirected edges in group space.
+  // Count undirected edges in group space.
   //
   //   undirectedCount = 1 → genuine boundary (visible hole)
   //   undirectedCount = 2 → manifold interior edge (most edges)
-  //   undirectedCount ≥ 3 → non-manifold (T-junction, intersecting
-  //                          geometry — Trellis2 marching-cubes leaves
-  //                          a lot of these and they LOOK like holes
-  //                          when the shading discontinues)
-  //
-  // We treat count !== 2 as a candidate hole edge so the user can fill
-  // both kinds in one pass.
-  const directedCount = new Map();      // "ga,gb" -> n times this directed edge appears
+  //   undirectedCount ≥ 3 → non-manifold T-junction (Trellis2 marching-
+  //                          cubes leaves a flood of these; treating
+  //                          them as boundaries floods the preview
+  //                          with green noise and drowns the real
+  //                          holes — so we IGNORE them and let Fix
+  //                          Normals handle T-junction shading).
   const undirectedCount = new Map();    // "min,max" -> count
   for (let t = 0; t < triCount; t++) {
     const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
     const g0 = groupOfVertex[i0], g1 = groupOfVertex[i1], g2 = groupOfVertex[i2];
     for (const [ga, gb] of [[g0,g1],[g1,g2],[g2,g0]]) {
-      if (ga === gb) continue;  // degenerate after welding
-      directedCount.set(ga + ',' + gb, (directedCount.get(ga + ',' + gb) || 0) + 1);
+      if (ga === gb) continue;
       const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
       undirectedCount.set(key, (undirectedCount.get(key) || 0) + 1);
     }
   }
 
-  // Build a multi-map ga -> [gb1, gb2, ...] of "wants-to-be-followed"
-  // boundary successors. Manifold boundary edges (count=1) appear once.
-  // Non-manifold edges (count≥3) appear with their count, minus the
-  // "expected" 2 matched copies, so a count-3 edge contributes 1
-  // unbalanced successor and looks like a tiny crack.
-  //
-  // The previous Map.set-overwrites design lost loops at T-junctions
-  // where one vertex was on two boundaries — we now keep ALL successors
-  // so the loop walker can discover every distinct hole.
+  // Build a multi-map ga -> [gb1, gb2, ...] of REAL boundary
+  // successors (count === 1 only). Multi-successor design lets us
+  // discover every loop at T-junction vertices without overwriting.
   const boundarySuccessors = new Map();   // ga -> [gb, gb, ...]
   for (let t = 0; t < triCount; t++) {
     const i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
@@ -6690,13 +6681,7 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
     for (const [ga, gb] of [[g0,g1],[g1,g2],[g2,g0]]) {
       if (ga === gb) continue;
       const key = ga < gb ? ga + ',' + gb : gb + ',' + ga;
-      const cnt = undirectedCount.get(key);
-      // Manifold edge (count===2) → interior, skip.
-      if (cnt === 2) continue;
-      // Otherwise this triangle's directed edge is an unbalanced one.
-      // To avoid double-pushing for non-manifold edges we deduct any
-      // "balanced" copies — see _consumeBalanced below. For count=1
-      // (the common case) we just push it directly.
+      if (undirectedCount.get(key) !== 1) continue;
       if (!boundarySuccessors.has(ga)) boundarySuccessors.set(ga, []);
       boundarySuccessors.get(ga).push(gb);
     }
@@ -6903,15 +6888,76 @@ function _jsMidpointSubdivide(geom, levels) {
 }
 
 // Center: translate vertices so X/Z centroid = 0, min Y = 0.
-// Recompute vertex normals AND average them across position-welded
-// groups. Without this, vertices duplicated at UV seams (every island
-// in a Trellis2 GLB) get independent normals — each side of the seam
-// gets normals averaged over its own incident faces — and the lighting
-// shows a visible crack at every seam. Welding normals across the
-// duplicates flattens out those discontinuities while keeping the UV
-// split intact (positions are not touched, only the normal attribute).
+// Recompute vertex normals, weld them across UV seams, AND flip any
+// triangle whose face normal points INWARD (toward the centroid of
+// the mesh). Reversed-winding triangles are what causes the "black
+// patches" on a closed mesh — geometry IS there, just facing the
+// wrong way → back-face culling renders them as voids.
+//
+// Welding: vertices duplicated at UV seams (every island in a Trellis2
+// GLB) used to get independent normals → lighting cracks at seams.
+// Welding normals across position-welded groups kills those cracks.
+//
+// Positions and UVs are not touched; only the normal attribute is
+// rewritten and the index array gets its winding flipped on offending
+// triangles.
 function _jsFixNormalsWelded(geom) {
   const result = geom.clone();
+
+  // ── Pass 1: flip triangles whose face normal points toward the
+  // mesh centroid. We compare each triangle normal against the
+  // direction from the triangle to the centroid; if they're in the
+  // same hemisphere (dot > 0), the triangle is inward-facing and we
+  // swap two of its indices to reverse the winding.
+  if (result.index) {
+    const pos = result.attributes.position;
+    const arr = pos.array;
+    const idx = result.index.array;
+    // Centroid of the mesh's AABB — close enough for convex-ish
+    // characters; for very concave shapes the heuristic is weaker
+    // but still right for most surface triangles.
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const x = arr[i*3], y = arr[i*3+1], z = arr[i*3+2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const ccx = (minX + maxX) / 2;
+    const ccy = (minY + maxY) / 2;
+    const ccz = (minZ + maxZ) / 2;
+    // Mutate the index in place — we own the clone.
+    const tri = Math.floor(idx.length / 3);
+    let flipped = 0;
+    for (let t = 0; t < tri; t++) {
+      const i0 = idx[t*3], i1 = idx[t*3+1], i2 = idx[t*3+2];
+      const ax = arr[i0*3], ay = arr[i0*3+1], az = arr[i0*3+2];
+      const bx = arr[i1*3], by = arr[i1*3+1], bz = arr[i1*3+2];
+      const cx = arr[i2*3], cy = arr[i2*3+1], cz = arr[i2*3+2];
+      // Triangle face normal = (B-A) × (C-A).
+      const ex = bx - ax, ey = by - ay, ez = bz - az;
+      const fx = cx - ax, fy = cy - ay, fz = cz - az;
+      const nx = ey * fz - ez * fy;
+      const ny = ez * fx - ex * fz;
+      const nz = ex * fy - ey * fx;
+      // Direction from triangle centroid → mesh centroid.
+      const tcx = (ax + bx + cx) / 3;
+      const tcy = (ay + by + cy) / 3;
+      const tcz = (az + bz + cz) / 3;
+      const dx = ccx - tcx, dy = ccy - tcy, dz = ccz - tcz;
+      // If the face normal points toward the mesh centroid, swap
+      // indices 1 and 2 to flip the winding.
+      if (nx * dx + ny * dy + nz * dz > 0) {
+        idx[t*3+1] = i2;
+        idx[t*3+2] = i1;
+        flipped++;
+      }
+    }
+    if (flipped) result.index.needsUpdate = true;
+  }
+
+  // ── Pass 2: standard normal recompute (now using corrected winding).
   result.computeVertexNormals();
   const pos = result.attributes.position;
   const norm = result.attributes.normal;
@@ -7103,8 +7149,8 @@ const MESH_TOOL_SCHEMAS = {
     preview: (geom, vals) => _jsMidpointSubdivide(geom, Math.max(1, vals.levels | 0)),
   },
   fix_normals: {
-    title: 'Fix normals (weld UV seams)',
-    subtitle: 'Recompute vertex normals AND weld them across UV seams — kills the "criss-cross" / "cracked plate" shading on Trellis2 output where the texture islands made the lighting break.',
+    title: 'Fix normals',
+    subtitle: 'Flip inward-facing triangles (= black patches on a "closed" mesh) + recompute and weld vertex normals across UV seams (= criss-cross plate shading). Run this first when a fresh Trellis2 mesh has dark voids or shading cracks.',
     needsImage: false,
     supportsClientApply: true,
     params: [],
