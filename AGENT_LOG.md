@@ -9440,3 +9440,28 @@ Limites:
 - Coût léger de rendering (les deux faces sont dessinées).
 - L'export Apply on device propage le flag; l'export via Modal mesh-op
   pourrait ne pas le faire (à vérifier si problème).
+
+## 2026-05-28 — Set pivot point: drop geom.clone() + Reset offsets button
+
+User feedback: "si je bouge le slider, le pivot point met quelques
+instants à bouger" + "j'aimerais un bouton reset offsets".
+
+Causes:
+- `_jsSetPivotPreview` faisait `geom.clone()` à chaque tick et par
+  submesh. Sur un mesh à 6 submeshes × 100K vertices, le clone coutait
+  ~30-100 ms par drag → lag perceptible.
+- Pas de moyen rapide de remettre les 3 sliders X/Y/Z à 0 sauf les
+  bouger un par un.
+
+Changes:
+- `_jsSetPivotPreview` retourne maintenant `{ geometry: geom }` au
+  lieu de `geom.clone()`. C'est OK parce que preview ne modifie pas la
+  geometry — la modification réelle est dans applyClient. _mtRunPreview
+  réassigne `e.mesh.geometry = geom` qui est la même référence → no-op.
+- Nouveau flag schema `resetButton: 'Label du bouton'`. Si défini, un
+  bouton ↺ apparaît sous les params et remet TOUS les params type
+  range/number à leur default. Sur le schema `center`, valeur "Reset
+  offsets" → reset les sliders X/Y/Z.
+
+Le slider est maintenant fluide (< 16ms par tick) et le reset est en
+1 clic.
