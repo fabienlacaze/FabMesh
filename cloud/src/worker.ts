@@ -3503,6 +3503,67 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   }
 }
 
+/** POST /api/mesh-op/client-result — accepts a GLB that the renderer
+ *  produced 100% client-side (three.js Smooth / Decimate / Subdivide /
+ *  Fix Normals / Fill Holes / Center JS implementations). No Modal
+ *  hop, no credit charge — the work was done in the browser, the
+ *  server just persists the result to R2 and returns the URL.
+ *
+ *  Safeguards: auth required, glTF magic-byte check, hard size cap,
+ *  per-user daily call quota (shared with paid ops). */
+async function handleMeshOpClientResult(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
+  const { opType, glbBase64 } = await req.json() as {
+    opType?: string; glbBase64?: string;
+  };
+  const CLIENT_OPS = new Set([
+    'smooth', 'decimate', 'subdivide', 'fix_normals', 'fill_holes', 'center',
+  ]);
+  const op = (opType ?? '').toLowerCase();
+  if (!CLIENT_OPS.has(op)) {
+    return err(400, `opType must be one of ${Array.from(CLIENT_OPS).join(', ')} (client-side ops only)`);
+  }
+  if (!glbBase64 || typeof glbBase64 !== 'string') return err(400, 'glbBase64 required');
+  // 100 MB max — pathological mesh would never legitimately exceed this
+  // and we don't want to host runaway uploads for free.
+  if (glbBase64.length > 140_000_000) return err(413, 'glb too large (>100 MB)');
+
+  // Per-user call quota (shared bucket with /api/mesh-op).
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    return json({ ok: false, success: false, error: 'user limit reached.' }, { status: 429 });
+  }
+
+  const bin = atob(glbBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  // glTF 2.0 binary magic: "glTF" (0x676C5446) then version 2.
+  if (bytes.length < 12 ||
+      bytes[0] !== 0x67 || bytes[1] !== 0x6C || bytes[2] !== 0x54 || bytes[3] !== 0x46) {
+    return err(400, 'payload is not a valid GLB (magic bytes missing)');
+  }
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  const opStart = Date.now();
+  try {
+    const key = `${user.id}/mesh-op/${Date.now()}_${op}_client.glb`;
+    await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
+    const url = `${env.R2_PUBLIC_URL}/${key}`;
+    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+                       0, opStart, Date.now(), 'succeeded',
+                       { op_type: op, client_side: true, size_bytes: bytes.length });
+    return json({ ok: true, success: true, path: url, newPath: url, mesh_url: url });
+  } catch (e) {
+    await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
+                       0, opStart, Date.now(), 'failed',
+                       { op_type: op, client_side: true,
+                         error: e instanceof Error ? e.message : String(e) });
+    return err(502, `client-side mesh op upload failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 // Threshold (ms) above which we consider the Modal MyFabmeshBackview
 // container scaled-down → next call will pay full cold start.
 // scaledown_window in app.py is 600s; we tag anything beyond 9 min as
@@ -5418,6 +5479,7 @@ export default {
         if (pathname === '/api/upload-image'          && method === 'POST') return await handleUploadImage(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
+        if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
