@@ -2107,6 +2107,15 @@ _ws3dEngineSync();
       el.style.color = on ? 'var(--text-1)' : 'var(--text-2)';
     });
     document.getElementById('variant-modal').dataset.tab = tab;
+    // Sync the Generate button credit badge with the active tab:
+    // re-roll uses the slider value, strength is always 1.
+    const applyBadge = document.getElementById('var-apply-cost-badge');
+    if (applyBadge) {
+      const n = tab === 'reroll'
+        ? Number(document.getElementById('var-reroll-count')?.value || 1)
+        : 1;
+      applyBadge.textContent = String(n);
+    }
   };
   document.getElementById('var-tab-reroll')?.addEventListener('click', () => showTab('reroll'));
   document.getElementById('var-tab-strength')?.addEventListener('click', () => showTab('strength'));
@@ -2118,7 +2127,14 @@ _ws3dEngineSync();
   const syncReroll = () => {
     const n = Number(rerollSlider.value);
     rerollVal.textContent = String(n);
-    rerollCost.innerHTML = `Total cost: <span style="color:var(--accent, #5a4fcf); font-weight:600;">${n} credit${n > 1 ? 's' : ''}</span>`;
+    // Update both badges: the inline "Total cost: <badge>" and the
+    // Generate-button badge that mirrors the live total cost. Img2img
+    // tab is always 1 credit (handled in showTab).
+    const badge = document.getElementById('var-reroll-cost-badge');
+    if (badge) badge.textContent = String(n);
+    const applyBadge = document.getElementById('var-apply-cost-badge');
+    const tab = document.getElementById('variant-modal')?.dataset.tab || 'reroll';
+    if (applyBadge && tab === 'reroll') applyBadge.textContent = String(n);
   };
   rerollSlider?.addEventListener('input', syncReroll);
   syncReroll();
@@ -8388,7 +8404,10 @@ function openMeshToolModal(toolName) {
     deviceBtn.id = 'mt-apply-device';
     deviceBtn.className = 'secondary-btn';
     deviceBtn.style.cssText = 'margin:0; padding:8px 18px; width:auto;';
-    deviceBtn.textContent = '⚡ Apply on device (free)';
+    // Free icon (💻) reserved for "runs on user hardware". The ⚡
+    // emoji is reserved for the credit badge so the two are never
+    // confused in the UI.
+    deviceBtn.textContent = '💻 Apply on device (free)';
     deviceBtn.title = 'Move a slider to compute a preview before applying on device.';
     deviceBtn.disabled = true;
     applyParent.insertBefore(deviceBtn, applyBtn);
@@ -8400,13 +8419,17 @@ function openMeshToolModal(toolName) {
   // credit for work the browser can do alone.
   const originalApplyLabel = applyBtn.textContent;
   const cloudHidden = !!schema.clientApplyOnly;
+  // Apply-on-cloud label with a real .credit-badge instead of the
+  // text "(1 cr)" — keeps the credit indicator consistent with every
+  // other place in the app.
+  const cloudApplyHTML = 'Apply on cloud <span class="credit-badge" style="margin-left:6px;">1</span>';
   if (cloudHidden) {
     applyBtn.style.display = 'none';
-    if (deviceBtn) deviceBtn.textContent = '⚡ Apply';
+    if (deviceBtn) deviceBtn.textContent = '💻 Apply';
   } else if (schema.supportsClientApply && deviceCapable) {
-    applyBtn.textContent = 'Apply on cloud (1 cr)';
+    applyBtn.innerHTML = cloudApplyHTML;
   } else if (schema.supportsClientApply && !deviceCapable) {
-    applyBtn.textContent = 'Apply on cloud (1 cr)';
+    applyBtn.innerHTML = cloudApplyHTML;
     applyBtn.title = 'This device is mobile/low-spec — only the cloud path is available.';
   } else {
     applyBtn.textContent = originalApplyLabel || 'Apply';
