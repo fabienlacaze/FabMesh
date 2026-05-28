@@ -10,6 +10,32 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace UX polish — inspect lightbox + home badge)
+
+- **Publish modal** : vignette qui chevauchait le subtitle → refactor
+  header en flex layout (titre+subtitle à gauche, thumb 84×84 à
+  droite, `flex-shrink:0`).
+- **Admin Marketplace** :
+  - Bouton Reject orange (`var(--warn)`) pour cohérence avec
+    Approve/vert et Delete/rouge.
+  - Bouton 🔍 Inspect dans le coin top-right de chaque card preview
+    → ouvre une lightbox 90vh (image ou model-viewer auto-rotate).
+    ESC ou click outside ferme. Garde l'orbit interactif sur la
+    card model-viewer (pas de pointer-events:none).
+- **Home grid badge 🛒** : nouveau worker route
+  `GET /api/me/published-assets` qui dump la liste des listings
+  marketplace de l'user. `cloud-overrides.js` fetch ça au boot
+  + après chaque publish (via `window.__publishedRefresh`), et
+  un MutationObserver patche les cards de
+  `projects-grid` / `all-images-grid` / `all-meshes-grid` avec un
+  badge rond 🛒 en bas-gauche. Code couleur :
+  - **pending** : jaune `#ffb84d`
+  - **approved** : vert `#4caf50`
+  - **rejected** : rouge `#f44336`
+- Pas de touche au pipeline scripts Python — pur worker+JS.
+
+---
+
 ## 2026-05-28 (Microsoft Store cert 10.1.1.11 — APPX tile icons)
 
 - **Refus cert MS Store** : Product ID 9PH6GT8XKQDW renvoyé en

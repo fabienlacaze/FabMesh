@@ -1192,6 +1192,11 @@
         }
         close();
         notify('✓ Submitted for review — an admin will approve it shortly.', 'success');
+        // Refresh the published-assets index so the 🛒 badge appears
+        // immediately on the card we just published.
+        if (typeof window.__publishedRefresh === 'function') {
+          window.__publishedRefresh();
+        }
       } catch (e) {
         console.error('[market.publish] failed:', e);
         notify('Publish failed: ' + (e?.message || e), 'error');
@@ -1202,14 +1207,129 @@
     });
   }
 
+  /* ──────────────────────────────────────────────────────────────────
+   * Marketplace "published" badge on home grid cards. Fetches the
+   * current user's listings once at boot (and after every publish
+   * via window.__publishedRefresh), indexes them by job_id (mesh)
+   * and asset_url (image), then a MutationObserver watches the home
+   * grids and stamps a 🛒 badge on every card whose underlying asset
+   * is already on the marketplace.
+   *
+   * Badge colour reflects status:
+   *   pending  → yellow  "Pending approval"
+   *   approved → green   "Live on marketplace"
+   *   rejected → red     "Rejected — re-publish to retry"
+   * ────────────────────────────────────────────────────────────────── */
+  const _publishedIndex = {
+    byJobId: new Map(),   // job_id → { status, listing_id }
+    byUrl:   new Map(),   // asset_url → { status, listing_id }
+  };
+  async function _fetchPublishedIndex() {
+    try {
+      const r = await fetch('/api/me/published-assets', { credentials: 'include' });
+      if (!r.ok) return;
+      const j = await r.json();
+      _publishedIndex.byJobId.clear();
+      _publishedIndex.byUrl.clear();
+      (j.items || []).forEach((it) => {
+        const meta = { status: it.status, listing_id: it.listing_id, kind: it.kind };
+        if (it.job_id)   _publishedIndex.byJobId.set(it.job_id, meta);
+        if (it.asset_url) _publishedIndex.byUrl.set(it.asset_url, meta);
+      });
+      _badgeAllCards();
+    } catch { /* network blip — leave previous index */ }
+  }
+  window.__publishedRefresh = _fetchPublishedIndex;
+
+  function _ensurePublishedBadgeStyle() {
+    if (document.getElementById('cloud-published-badge-style')) return;
+    const s = document.createElement('style');
+    s.id = 'cloud-published-badge-style';
+    s.textContent = `
+      .published-badge {
+        position: absolute; bottom: 6px; left: 6px;
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 24px; height: 24px;
+        font-size: 13px; line-height: 1;
+        border-radius: 50%;
+        border: 2px solid #1a1a1a;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+        z-index: 4; pointer-events: auto;
+        cursor: help;
+      }
+      .published-badge.pending  { background:#ffb84d; color:#1a1a1a; }
+      .published-badge.approved { background:#4caf50; color:#fff; }
+      .published-badge.rejected { background:#f44336; color:#fff; }
+      /* Cards are usually static-positioned; we need relative so the
+         badge can absolute-position against the card. */
+      .project-card, .all-image-card, .all-mesh-card { position: relative; }
+    `;
+    document.head.appendChild(s);
+  }
+  function _badgeCard(card, meta) {
+    if (!card || !meta) return;
+    if (card.querySelector('.published-badge')) {
+      // Refresh status class only.
+      const existing = card.querySelector('.published-badge');
+      existing.className = 'published-badge ' + meta.status;
+      existing.title = 'Marketplace: ' + meta.status;
+      return;
+    }
+    const b = document.createElement('span');
+    b.className = 'published-badge ' + meta.status;
+    b.textContent = '🛒';
+    b.title = 'Marketplace: ' + meta.status;
+    card.appendChild(b);
+  }
+  // Walks every <img>/<model-viewer> under the three home grids, looks
+  // up its src in _publishedIndex.byUrl, and stamps the badge on the
+  // closest card ancestor when there's a match. Avoids requiring the
+  // existing renderers to emit a `data-card-*` attribute.
+  function _badgeAllCards() {
+    _ensurePublishedBadgeStyle();
+    const containers = [
+      document.getElementById('projects-grid'),
+      document.getElementById('all-images-grid'),
+      document.getElementById('all-meshes-grid'),
+    ].filter(Boolean);
+    containers.forEach((root) => {
+      root.querySelectorAll('img[src], model-viewer[src]').forEach((media) => {
+        const src = media.getAttribute('src');
+        if (!src) return;
+        const meta = _publishedIndex.byUrl.get(src);
+        if (!meta) return;
+        // Find the closest card-like ancestor. The renderer uses
+        // .project-card / .all-image-card / .all-mesh-card / .card.
+        const card = media.closest('.project-card, .all-image-card, .all-mesh-card, .card, [class*="-card"]')
+                   || media.parentElement;
+        if (card) _badgeCard(card, meta);
+      });
+    });
+  }
+  function _installPublishedBadgeWatcher() {
+    const targets = [
+      document.getElementById('projects-grid'),
+      document.getElementById('all-images-grid'),
+      document.getElementById('all-meshes-grid'),
+    ].filter(Boolean);
+    if (!targets.length) return;
+    const obs = new MutationObserver(() => _badgeAllCards());
+    targets.forEach((t) => obs.observe(t, { childList: true, subtree: true }));
+    _badgeAllCards();
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       applyOverrides();
       installMarketplacePublish();
+      _fetchPublishedIndex();
+      _installPublishedBadgeWatcher();
     });
   } else {
     applyOverrides();
     installMarketplacePublish();
+    _fetchPublishedIndex();
+    _installPublishedBadgeWatcher();
   }
 
   // The Settings / About modals sometimes lazy-inject content; re-apply
