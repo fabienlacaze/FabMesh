@@ -10,6 +10,16 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Market v4 — clickable badges + asset filter + author page + 5★ ratings)
+- Clickable 🛒 badge on workspace + home grids → /market?item=<id> opens the listing detail directly.
+- /market reads ?item= from URL on mount and auto-opens the detail modal.
+- New asset_kind filter row above All/Free/Paid/Owned/Mine: All kinds / 🧊 3D Meshes / 🖼 2D Images. Combines with the other filters.
+- "by <author>" everywhere becomes a clickable link to /market/author/<user_id>.
+- New public page /market/author/<user_id>: header with display name + member_since + stats (listings count, sales count, total earned per currency) + grid of approved listings.
+- 5-star rating system: yellow stars rendered on every card; rate widget in the detail modal (auth required, cannot rate own listing). POST /api/market/listing/<id>/rate stores R2 _market/ratings/<id>/<user>.json. Listings JSON now includes rating_avg + rating_count.
+- Admin: image/mesh marketplace pills now clickable — close modal, switch to Marketplace tab, scroll the matching card into view, flash gold highlight. Direct /admin#market-<id> URL also lands there.
+- Backend: new routes POST /api/market/listing/<id>/rate, GET /api/market/author/<user_id>. handleMarketList + handleMarketGet now expose user_id + rating_avg + rating_count.
+
 ## 2026-05-28 (Market — admin badges + My Listings tab)
 
 - Admin: viewing a user's Images/Meshes modal now badges every card with its marketplace status (Pending review / Live on /market $X.XX / Rejected). Indexed by job_id (meshes) and asset_url (images).

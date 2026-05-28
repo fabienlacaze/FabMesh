@@ -1329,9 +1329,14 @@ async function handleMePublishedAssets(req: Request, env: Env): Promise<Response
     mesh_url: string;
     asset_type: string | null;
     author_display: string;
+    user_id: string;
     created_at: string;
     rejection_reason?: string;
+    rating_avg: number;
+    rating_count: number;
   }> = [];
+  // One bulk pass over ratings — N+1 would be brutal for a heavy seller.
+  const ratingsByListing = await _loadAllRatingsByListing(env);
   let cursor: string | undefined;
   do {
     const page = await env.MESHES.list({ prefix: '_market/listings/', limit: 1000, cursor });
@@ -1342,6 +1347,7 @@ async function handleMePublishedAssets(req: Request, env: Env): Promise<Response
         if (!txt) continue;
         const parsed = JSON.parse(txt);
         if (parsed?.user_id === user.id) {
+          const r = ratingsByListing.get(parsed.id) || { avg: 0, count: 0 };
           items.push({
             listing_id: parsed.id,
             kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
@@ -1356,8 +1362,11 @@ async function handleMePublishedAssets(req: Request, env: Env): Promise<Response
             mesh_url: parsed.mesh_url || '',
             asset_type: parsed.asset_type ?? null,
             author_display: parsed.author_display || '',
+            user_id: parsed.user_id || '',
             created_at: parsed.created_at || '',
             rejection_reason: parsed.rejection_reason,
+            rating_avg: r.avg,
+            rating_count: r.count,
           });
         }
       } catch {}
@@ -1839,8 +1848,230 @@ async function handleMarketListingUpdate(req: Request, env: Env, id: string): Pr
  *  no auth required so search engines + anonymous users can land here. */
 async function handleMarketList(_req: Request, env: Env): Promise<Response> {
   const all = await _loadAllListings(env);
+  // One bulk pass over _market/ratings/ so we don't N+1 per listing.
+  const ratingsByListing = await _loadAllRatingsByListing(env);
   const visible = all.filter((l) => l.status === 'approved')
-    .map((l) => ({  // strip the author_email — public surface
+    .map((l) => {
+      const r = ratingsByListing.get(l.id) || { avg: 0, count: 0 };
+      return {  // strip the author_email — public surface
+        id: l.id,
+        title: l.title,
+        description: l.description,
+        price_cents: l.price_cents,
+        currency: l.currency,
+        licence: l.licence,
+        asset_kind: l.asset_kind || (l.mesh_url ? 'mesh' : 'image'),
+        asset_type: l.asset_type,
+        asset_url: l.asset_url || l.mesh_url,
+        mesh_url: l.mesh_url,
+        author_display: l.author_display,
+        user_id: l.user_id,
+        created_at: l.created_at,
+        downloads: l.downloads,
+        rating_avg: r.avg,
+        rating_count: r.count,
+      };
+    });
+  return json({ ok: true, listings: visible });
+}
+
+/** GET /api/market/<id> — PUBLIC. Single listing details. */
+async function handleMarketGet(_req: Request, env: Env, id: string): Promise<Response> {
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  try {
+    const parsed = JSON.parse(txt);
+    if (parsed.status !== 'approved') return err(404, 'listing not visible');
+    const stats = await _loadListingRatings(env, id);
+    // If the viewer is logged in, surface their own rating so the UI can
+    // pre-select the star they previously gave (idempotent re-vote).
+    let myRating: number | null = null;
+    const viewer = await getSessionUser(_req, env);
+    if (viewer) {
+      const myTxt = await r2GetText(env, `_market/ratings/${id}/${viewer.id}.json`);
+      if (myTxt) {
+        try {
+          const mr = JSON.parse(myTxt) as { rating?: number };
+          if (Number.isInteger(mr?.rating)) myRating = Number(mr.rating);
+        } catch {}
+      }
+    }
+    return json({ ok: true, listing: {
+      id: parsed.id, title: parsed.title, description: parsed.description,
+      price_cents: parsed.price_cents, currency: parsed.currency, licence: parsed.licence,
+      asset_kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
+      asset_type: parsed.asset_type,
+      asset_url: parsed.asset_url || parsed.mesh_url,
+      mesh_url: parsed.mesh_url,
+      author_display: parsed.author_display,
+      user_id: parsed.user_id,
+      created_at: parsed.created_at,
+      downloads: parsed.downloads,
+      rating_avg: stats.avg,
+      rating_count: stats.count,
+      my_rating: myRating,
+    }});
+  } catch (e) {
+    return err(500, e instanceof Error ? e.message : String(e));
+  }
+}
+
+// ── Marketplace ratings / authors ──────────────────────────────
+
+/** Walk _market/ratings/<listingId>/ and return aggregate stats. */
+async function _loadListingRatings(env: Env, listingId: string):
+    Promise<{ avg: number; count: number; all: Array<{ user_id: string; rating: number }> }> {
+  if (!env.MESHES) return { avg: 0, count: 0, all: [] };
+  const all: Array<{ user_id: string; rating: number }> = [];
+  let cursor: string | undefined;
+  const prefix = `_market/ratings/${listingId}/`;
+  do {
+    const page = await env.MESHES.list({ prefix, limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const r = JSON.parse(txt) as { rating?: number };
+        const rating = Number(r?.rating);
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) continue;
+        const fname = obj.key.slice(prefix.length, -'.json'.length);
+        all.push({ user_id: fname, rating });
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  if (all.length === 0) return { avg: 0, count: 0, all: [] };
+  const sum = all.reduce((s, r) => s + r.rating, 0);
+  return { avg: sum / all.length, count: all.length, all };
+}
+
+/** Bulk variant: load all ratings in one R2 list pass, group by listing.
+ *  Used by handleMarketList / handleMarketAuthorPage so we don't N+1 list. */
+async function _loadAllRatingsByListing(env: Env):
+    Promise<Map<string, { avg: number; count: number }>> {
+  const acc = new Map<string, { sum: number; count: number }>();
+  if (!env.MESHES) return new Map();
+  let cursor: string | undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_market/ratings/', limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      // key shape: _market/ratings/<listingId>/<userId>.json
+      const rest = obj.key.slice('_market/ratings/'.length);
+      const slash = rest.indexOf('/');
+      if (slash < 0) continue;
+      const listingId = rest.slice(0, slash);
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const r = JSON.parse(txt) as { rating?: number };
+        const rating = Number(r?.rating);
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) continue;
+        const cur = acc.get(listingId) || { sum: 0, count: 0 };
+        cur.sum += rating;
+        cur.count += 1;
+        acc.set(listingId, cur);
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  const out = new Map<string, { avg: number; count: number }>();
+  for (const [k, v] of acc) out.set(k, { avg: v.sum / v.count, count: v.count });
+  return out;
+}
+
+/** POST /api/market/listing/<id>/rate  body { rating: 1-5 } — authed.
+ *  Buyers/visitors rate an approved listing. One rating per user
+ *  (overwrite). Authors cannot rate their own listing. */
+async function handleMarketRate(req: Request, env: Env, id: string): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { rating?: number };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const rating = Number(body?.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return err(400, 'rating must be an integer 1-5');
+  }
+  const key = `_market/listings/${id}.json`;
+  const txt = await r2GetText(env, key);
+  if (!txt) return err(404, 'listing not found');
+  let listing: MarketListing;
+  try { listing = JSON.parse(txt) as MarketListing; }
+  catch (e) { return err(500, e instanceof Error ? e.message : String(e)); }
+  if (listing.status !== 'approved') return err(404, 'listing not visible');
+  if (listing.user_id === user.id) return err(403, 'cannot rate your own listing');
+
+  const now = new Date().toISOString();
+  const rateKey = `_market/ratings/${id}/${user.id}.json`;
+  const prevTxt = await r2GetText(env, rateKey);
+  let created_at = now;
+  if (prevTxt) {
+    try {
+      const prev = JSON.parse(prevTxt) as { created_at?: string };
+      if (prev?.created_at) created_at = String(prev.created_at);
+    } catch {}
+  }
+  await env.MESHES.put(rateKey, JSON.stringify({
+    rating, created_at, updated_at: now,
+  }), { httpMetadata: { contentType: 'application/json' } });
+
+  const stats = await _loadListingRatings(env, id);
+  return json({
+    ok: true,
+    my_rating: rating,
+    avg: stats.avg,
+    count: stats.count,
+  });
+}
+
+/** GET /api/market/author/<userId> — PUBLIC. Aggregated public profile:
+ *  approved listings (with rating stats), sales totals per currency,
+ *  member_since (earliest listing). */
+async function handleMarketAuthorPage(_req: Request, env: Env, authorId: string): Promise<Response> {
+  if (!env.MESHES) return err(500, 'storage not configured');
+  const all = await _loadAllListings(env);
+  const mine = all.filter((l) => l.user_id === authorId);
+  const approved = mine.filter((l) => l.status === 'approved');
+
+  // Author display + member_since from earliest listing (any status).
+  let display = 'anonymous';
+  let memberSince: string | null = null;
+  if (mine.length > 0) {
+    const sorted = [...mine].sort((a, b) =>
+      String(a.created_at).localeCompare(String(b.created_at)));
+    memberSince = sorted[0]?.created_at ?? null;
+    display = sorted[0]?.author_display || 'anonymous';
+  }
+
+  // Sales aggregation.
+  let salesCount = 0;
+  const salesByCurrency: Record<string, number> = {};
+  let cursor: string | undefined;
+  do {
+    const page = await env.MESHES.list({ prefix: '_market/sales/', limit: 1000, cursor });
+    for (const obj of page.objects) {
+      if (!obj.key.endsWith('.json')) continue;
+      try {
+        const txt = await r2GetText(env, obj.key);
+        if (!txt) continue;
+        const s = JSON.parse(txt) as Record<string, unknown>;
+        if (s?.seller_user_id !== authorId) continue;
+        salesCount += 1;
+        const cur = String(s.currency || 'USD').toUpperCase();
+        salesByCurrency[cur] = (salesByCurrency[cur] || 0) + Number(s.amount_cents || 0);
+      } catch {}
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  // Hydrate approved listings with ratings (single bulk pass).
+  const ratingsByListing = await _loadAllRatingsByListing(env);
+  const listings = approved.map((l) => {
+    const r = ratingsByListing.get(l.id) || { avg: 0, count: 0 };
+    return {
       id: l.id,
       title: l.title,
       description: l.description,
@@ -1854,31 +2085,23 @@ async function handleMarketList(_req: Request, env: Env): Promise<Response> {
       author_display: l.author_display,
       created_at: l.created_at,
       downloads: l.downloads,
-    }));
-  return json({ ok: true, listings: visible });
-}
+      rating_avg: r.avg,
+      rating_count: r.count,
+    };
+  });
 
-/** GET /api/market/<id> — PUBLIC. Single listing details. */
-async function handleMarketGet(_req: Request, env: Env, id: string): Promise<Response> {
-  const key = `_market/listings/${id}.json`;
-  const txt = await r2GetText(env, key);
-  if (!txt) return err(404, 'listing not found');
-  try {
-    const parsed = JSON.parse(txt);
-    if (parsed.status !== 'approved') return err(404, 'listing not visible');
-    return json({ ok: true, listing: {
-      id: parsed.id, title: parsed.title, description: parsed.description,
-      price_cents: parsed.price_cents, currency: parsed.currency, licence: parsed.licence,
-      asset_kind: parsed.asset_kind || (parsed.mesh_url ? 'mesh' : 'image'),
-      asset_type: parsed.asset_type,
-      asset_url: parsed.asset_url || parsed.mesh_url,
-      mesh_url: parsed.mesh_url,
-      author_display: parsed.author_display, created_at: parsed.created_at,
-      downloads: parsed.downloads,
-    }});
-  } catch (e) {
-    return err(500, e instanceof Error ? e.message : String(e));
-  }
+  return json({
+    ok: true,
+    author: {
+      user_id: authorId,
+      display,
+      member_since: memberSince,
+      listings_count: approved.length,
+      sales_count: salesCount,
+      sales_amount_by_currency: salesByCurrency,
+    },
+    listings,
+  });
 }
 
 /** GET /api/admin/market/list — ADMIN. Returns ALL listings (every
@@ -6903,6 +7126,18 @@ export default {
         {
           const m = pathname.match(/^\/api\/market\/download\/([A-Za-z0-9_]+)$/);
           if (m && method === 'GET') return await handleMarketDownload(req, env, m[1]);
+        }
+        // Rate a listing — must come BEFORE the bare /api/market/<id> regex
+        // so the trailing /rate segment isn't swallowed.
+        {
+          const m = pathname.match(/^\/api\/market\/listing\/([A-Za-z0-9_]+)\/rate$/);
+          if (m && method === 'POST') return await handleMarketRate(req, env, m[1]);
+        }
+        // Public author profile page — disjoint from /api/market/<id> (two
+        // path segments after /api/market/) but kept before for grouping.
+        {
+          const m = pathname.match(/^\/api\/market\/author\/([A-Za-z0-9_-]+)$/);
+          if (m && method === 'GET') return await handleMarketAuthorPage(req, env, m[1]);
         }
         {
           const m = pathname.match(/^\/api\/market\/([A-Za-z0-9_]+)$/);

@@ -22,8 +22,11 @@ interface Listing {
   asset_url?: string;
   mesh_url: string;
   author_display: string;
+  user_id?: string;
   created_at: string;
   downloads: number;
+  rating_avg?: number;
+  rating_count?: number;
 }
 
 interface OwnedItem {
@@ -37,7 +40,10 @@ interface OwnedItem {
   asset_url: string;
   mesh_url: string;
   author_display: string;
+  user_id?: string;
   created_at: string;
+  rating_avg?: number;
+  rating_count?: number;
 }
 
 const LICENCE_LABELS: Record<string, string> = {
@@ -77,8 +83,81 @@ interface MineItem {
   licence: string;
   asset_type: string | null;
   author_display: string;
+  user_id?: string;
   created_at: string;
   rejection_reason?: string;
+  rating_avg?: number;
+  rating_count?: number;
+}
+
+// Star rating display + interactive widget.
+function Stars({
+  value,
+  count,
+  size = 14,
+  interactive = false,
+  onRate,
+}: {
+  value: number;
+  count?: number;
+  size?: number;
+  interactive?: boolean;
+  onRate?: (n: number) => void;
+}) {
+  const [hover, setHover] = useState(0);
+  const shown = interactive && hover > 0 ? hover : value;
+  const stars = [1, 2, 3, 4, 5].map((i) => {
+    const diff = shown - (i - 1);
+    let fill = 0;
+    if (diff >= 1) fill = 1;
+    else if (diff > 0) fill = diff;
+    const colorFull = '#ffc107';
+    const colorEmpty = 'var(--text-3)';
+    return (
+      <span
+        key={i}
+        onClick={interactive ? (e) => { e.stopPropagation(); onRate?.(i); } : undefined}
+        onMouseEnter={interactive ? () => setHover(i) : undefined}
+        onMouseLeave={interactive ? () => setHover(0) : undefined}
+        style={{
+          position: 'relative',
+          display: 'inline-block',
+          fontSize: size,
+          lineHeight: 1,
+          cursor: interactive ? 'pointer' : 'default',
+          color: colorEmpty,
+        }}
+        aria-label={interactive ? `Rate ${i} stars` : undefined}
+      >
+        <span style={{ color: colorEmpty }}>★</span>
+        {fill > 0 && (
+          <span
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: `${fill * 100}%`,
+              overflow: 'hidden',
+              color: colorFull,
+              pointerEvents: 'none',
+            }}
+          >
+            ★
+          </span>
+        )}
+      </span>
+    );
+  });
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ display: 'inline-flex', gap: 1 }}>{stars}</span>
+      {typeof count === 'number' && (
+        <span style={{ color: 'var(--text-3)', fontSize: Math.max(10, size - 3) }}>
+          ({count})
+        </span>
+      )}
+    </span>
+  );
 }
 
 interface EditingDraft {
@@ -96,6 +175,7 @@ export default function MarketPage() {
   const [filtered, setFiltered] = useState<Listing[]>([]);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<'all' | 'free' | 'paid' | 'owned' | 'mine'>('all');
+  const [kindFilter, setKindFilter] = useState<'all' | 'mesh' | 'image'>('all');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Listing | null>(null);
   const [cart, setCart] = useState<string[]>([]);
@@ -104,10 +184,13 @@ export default function MarketPage() {
   const [paidBanner, setPaidBanner] = useState(false);
   const [editing, setEditing] = useState<EditingDraft | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [meUserId, setMeUserId] = useState<string | null>(null);
+  const [ratingBusy, setRatingBusy] = useState(false);
 
   // First load
   useEffect(() => {
     setCart(loadCart());
+    let deepLinkItem: string | null = null;
     if (typeof window !== 'undefined') {
       const q = new URLSearchParams(window.location.search);
       if (q.get('paid') === '1') {
@@ -117,6 +200,7 @@ export default function MarketPage() {
         setCart([]);
         setTab('owned');
       }
+      deepLinkItem = q.get('item');
     }
     (async () => {
       try {
@@ -142,6 +226,30 @@ export default function MarketPage() {
           setMyListings(j.items ?? []);
         }
       } catch {}
+      // Current user id (for hiding rate widget on own listings). Silent 401.
+      try {
+        const r = await fetch('/api/me');
+        if (r.ok) {
+          const j = await r.json();
+          setMeUserId(j?.user_id || j?.id || null);
+        }
+      } catch {}
+      // ?item=<id> deep link → open detail modal, then strip the param.
+      if (deepLinkItem) {
+        try {
+          const r = await fetch(`/api/market/${encodeURIComponent(deepLinkItem)}`);
+          if (r.ok) {
+            const j = await r.json();
+            const it: Listing | null = j?.listing ?? j ?? null;
+            if (it && it.id) setSelected(it);
+          }
+        } catch {}
+        if (typeof window !== 'undefined') {
+          const u = new URL(window.location.href);
+          u.searchParams.delete('item');
+          window.history.replaceState({}, '', u.toString());
+        }
+      }
       setLoading(false);
     })();
   }, []);
@@ -162,10 +270,13 @@ export default function MarketPage() {
     setFiltered(listings.filter((l) => {
       if (tab === 'free' && l.price_cents !== 0) return false;
       if (tab === 'paid' && l.price_cents === 0) return false;
+      const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
+      if (kindFilter === 'mesh' && kind !== 'mesh') return false;
+      if (kindFilter === 'image' && kind !== 'image') return false;
       if (q && !`${l.title} ${l.description} ${l.author_display}`.toLowerCase().includes(q)) return false;
       return true;
     }));
-  }, [listings, search, tab]);
+  }, [listings, search, tab, kindFilter]);
 
   const inCart = (id: string) => cart.includes(id);
   const addToCart = (id: string) => {
@@ -218,24 +329,34 @@ export default function MarketPage() {
   // Display list = filtered listings for All/Free/Paid, or `owned`
   // mapped into the same shape for the "Owned" tab, or `myListings`
   // mapped into the same shape for the "Mine" tab.
+  const kindMatch = (k: string | undefined | null) => {
+    const eff = k || 'mesh';
+    if (kindFilter === 'mesh' && eff !== 'mesh') return false;
+    if (kindFilter === 'image' && eff !== 'image') return false;
+    return true;
+  };
   const displayItems: Listing[] = tab === 'owned'
-    ? owned.map((o) => ({
+    ? owned.filter((o) => kindMatch(o.asset_kind)).map((o) => ({
         id: o.id, title: o.title, description: o.description,
         price_cents: o.price_cents, currency: o.currency, licence: o.licence,
         asset_kind: (o.asset_kind as 'mesh' | 'image' | undefined) || 'mesh',
         asset_type: null,
         asset_url: o.asset_url, mesh_url: o.mesh_url,
-        author_display: o.author_display, created_at: o.created_at,
+        author_display: o.author_display, user_id: o.user_id,
+        created_at: o.created_at,
         downloads: 0,
+        rating_avg: o.rating_avg, rating_count: o.rating_count,
       }))
     : tab === 'mine'
-    ? myListings.map((m) => ({
+    ? myListings.filter((m) => kindMatch(m.kind)).map((m) => ({
         id: m.listing_id, title: m.title, description: m.description,
         price_cents: m.price_cents, currency: m.currency, licence: m.licence,
         asset_kind: m.kind, asset_type: m.asset_type,
         asset_url: m.asset_url, mesh_url: m.mesh_url,
-        author_display: m.author_display, created_at: m.created_at,
+        author_display: m.author_display, user_id: m.user_id,
+        created_at: m.created_at,
         downloads: 0,
+        rating_avg: m.rating_avg, rating_count: m.rating_count,
       }))
     : filtered;
 
@@ -267,6 +388,45 @@ export default function MarketPage() {
       price_cents: m.price_cents,
       licence: m.licence || 'personal',
     });
+  }
+
+  async function rateListing(listingId: string, stars: number) {
+    if (ratingBusy) return;
+    setRatingBusy(true);
+    try {
+      const r = await fetch(`/api/market/listing/${listingId}/rate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ stars }),
+      });
+      if (!r.ok) {
+        if (r.status === 401) {
+          window.location.href = '/login?next=/market';
+          return;
+        }
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+      const j = await r.json().catch(() => ({}));
+      const newAvg: number | undefined = j?.rating_avg;
+      const newCount: number | undefined = j?.rating_count;
+      if (typeof newAvg === 'number' && typeof newCount === 'number') {
+        setListings((prev) => prev.map((l) => l.id === listingId
+          ? { ...l, rating_avg: newAvg, rating_count: newCount }
+          : l));
+        setOwned((prev) => prev.map((o) => o.id === listingId
+          ? { ...o, rating_avg: newAvg, rating_count: newCount }
+          : o));
+        setSelected((s) => (s && s.id === listingId)
+          ? { ...s, rating_avg: newAvg, rating_count: newCount }
+          : s);
+      }
+    } catch (e: unknown) {
+      alert('Rating failed: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setRatingBusy(false);
+    }
   }
 
   async function saveEdit() {
@@ -339,6 +499,21 @@ export default function MarketPage() {
         </div>
       )}
 
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        {(['all', 'mesh', 'image'] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setKindFilter(k)}
+            className={kindFilter === k ? 'primary-btn' : 'ghost-btn'}
+            style={{ padding: '6px 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {k === 'all' ? '🎴 All kinds'
+              : k === 'mesh' ? '🧊 3D Meshes'
+              : '🖼 2D Images'}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {(['all', 'free', 'paid', 'owned', 'mine'] as const).map((p) => (
           <button
@@ -406,10 +581,24 @@ export default function MarketPage() {
                     </div>
                   </div>
                   <div style={{ color: 'var(--text-2)', fontSize: 11 }}>
-                    by {l.author_display} · {kind === 'image' ? '2D image' : (l.asset_type || '3D mesh')}
+                    {l.user_id ? (
+                      <a
+                        href={`/market/author/${l.user_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'none' }}
+                      >
+                        by {l.author_display}
+                      </a>
+                    ) : (
+                      <>by {l.author_display}</>
+                    )}
+                    {' · '}{kind === 'image' ? '2D image' : (l.asset_type || '3D mesh')}
                   </div>
                   <div style={{ color: 'var(--text-3)', fontSize: 10 }}>
                     {LICENCE_LABELS[l.licence] || l.licence}
+                  </div>
+                  <div>
+                    <Stars value={l.rating_avg ?? 0} count={l.rating_count ?? 0} size={13} />
                   </div>
                   {tab === 'mine' ? (() => {
                     const m = mineById.get(l.id);
@@ -493,7 +682,18 @@ export default function MarketPage() {
               <div>
                 <h2 style={{ margin: 0 }}>{selected.title}</h2>
                 <div style={{ color: 'var(--text-2)', fontSize: 13, marginTop: 4 }}>
-                  by {selected.author_display}{selected.asset_type ? ` · ${selected.asset_type}` : ''} · {LICENCE_LABELS[selected.licence] || selected.licence}
+                  {selected.user_id ? (
+                    <a
+                      href={`/market/author/${selected.user_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'none' }}
+                    >
+                      by {selected.author_display}
+                    </a>
+                  ) : (
+                    <>by {selected.author_display}</>
+                  )}
+                  {selected.asset_type ? ` · ${selected.asset_type}` : ''} · {LICENCE_LABELS[selected.licence] || selected.licence}
                 </div>
               </div>
               <button onClick={() => setSelected(null)} className="ghost-btn" style={{ padding: '4px 12px' }}>✕</button>
@@ -512,6 +712,29 @@ export default function MarketPage() {
             {selected.description && (
               <p style={{ whiteSpace: 'pre-wrap', color: 'var(--text-1)', fontSize: 13, lineHeight: 1.5, margin: 0 }}>{selected.description}</p>
             )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Stars value={selected.rating_avg ?? 0} count={selected.rating_count ?? 0} size={18} />
+                {typeof selected.rating_avg === 'number' && selected.rating_count ? (
+                  <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
+                    {selected.rating_avg.toFixed(1)} / 5
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--text-3)', fontSize: 12 }}>No ratings yet</span>
+                )}
+              </div>
+              {meUserId && selected.user_id !== meUserId && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                  <span style={{ color: 'var(--text-2)', fontSize: 12 }}>Your rating:</span>
+                  <Stars
+                    value={0}
+                    size={20}
+                    interactive
+                    onRate={(n) => rateListing(selected.id, n)}
+                  />
+                </div>
+              )}
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{formatPrice(selected.price_cents, selected.currency)}</div>
               {ownedIds.has(selected.id) ? (
