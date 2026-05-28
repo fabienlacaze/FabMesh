@@ -1,5 +1,8 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (UX: asset-type dropdown grouped)
+- Asset-type dropdown options now grouped with <optgroup>: Living (Character/Creature/Animal), Vehicles (Vehicle/Avion/Bateau), Built (Building/Environment), Items (Weapon/Prop/Icon), Other (Custom). Same option values, no behaviour change.
+
 ## 2026-05-29 (admin: Users table alignment)
 - Admin Users table columns now align consistently across rows (Email flex; ID/Credits/Joined/Status/Actions hugged with table-layout rules). Empty Actions header replaced with visible "Actions" label.
 
