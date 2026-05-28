@@ -9,12 +9,17 @@ Device Tiles") because the APPX package shipped with electron-builder's
 generic placeholder tiles (a gray X) — the cert team flagged them as
 "default image, does not uniquely represent product".
 
-electron-builder only auto-generates tiles when the `appx.assetsDir`
-option points at a folder containing files with the exact names below.
-This script populates that folder from our hi-res "F" logo so we don't
-have to hand-craft every size.
+electron-builder 26 picks tile icons from `buildResources` (which is
+`build/` by default — see `build.directories.buildResources` in
+package.json). The seven PNGs below must sit directly at the root of
+that folder with the exact names Microsoft expects, otherwise the
+APPX pipeline falls back to its generic placeholder tiles.
 
-Sizes & files produced (in build/appx/):
+(Earlier electron-builder docs mentioned `appx.assetsDir`. That
+option was REMOVED in 26.x; passing it now triggers a
+ValidationError. The buildResources convention replaces it.)
+
+Sizes & files produced (in build/):
     StoreLogo.png            50  x 50
     Square44x44Logo.png      44  x 44   (Start menu small tile + taskbar)
     Square71x71Logo.png      71  x 71   (Small Start tile)
@@ -44,7 +49,9 @@ except ImportError:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT / "build" / "store_assets"
-OUT_DIR = ROOT / "build" / "appx"
+# electron-builder 26 reads APPX tile icons directly from the
+# buildResources root (= `build/`), not from a sub-folder.
+OUT_DIR = ROOT / "build"
 
 # Brand colour also used as the appx backgroundColor in package.json.
 # We pad the wide tile + splash with this so the logo sits on the same
@@ -125,8 +132,7 @@ def main() -> int:
     splash.save(OUT_DIR / "SplashScreen.png", "PNG")
 
     print(f"\n[build_appx_assets] Done. Files written to: {OUT_DIR}")
-    print("Next: ensure package.json > build.appx.assetsDir = 'build/appx'")
-    print("Then: npm run build:msix")
+    print("Next: npm run build:msix")
     return 0
 
 
