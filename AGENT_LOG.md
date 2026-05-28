@@ -10,6 +10,29 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (UI — Modal credit affordance pattern)
+
+- **Demande user** : tous les modaux d'outils qui consomment des
+  crédits doivent afficher (a) le solde courant en haut à droite et
+  (b) un badge crédit sur le bouton d'action — référence : modal
+  Modify image qui le fait déjà.
+- **Audit** : 8 modaux concernés (Modify image, Multi-view, Auto
+  inpaint, Mask inpaint, Resolution, Variant, mesh-tool, Material
+  adjust). Seuls Variant + mesh-tool avaient un badge bouton (via
+  code dédié) ; aucun n'avait le solde top-droite.
+- **Solution** : helper centralisé `installModalCreditBadges` dans
+  `cloud-overrides.js`, piloté par une map `MODAL_CREDIT_CONFIG`.
+  Au boot : injecte une pill `.credit-badge.lg.modal-balance-badge`
+  en absolute top-right du modal-card, et un `.credit-badge` dans
+  le bouton primary (sauf modaux à coût dynamique). Hook sur
+  `__cloudCreditsRefresh` pour propager le refresh au topbar + tous
+  les pills. MutationObserver par modal pour rafraîchir à l'ouverture.
+- **Pas touché au pipeline** : pur UI cloud (CSS + JS injection au
+  boot). Aucun script Python/Blender modifié. Compatible desktop
+  (cloud-overrides.js exclusivement cloud).
+
+---
+
 ## 2026-05-27 (Mesh — Smooth tool : artefacts UV seam)
 
 - **Problème** : user signalait des stries noires le long de toutes
