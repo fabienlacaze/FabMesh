@@ -10,6 +10,19 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace v3 — Stripe Connect Express seller payouts)
+
+- Added Stripe Connect (Separate Charges and Transfers) so sellers actually get cash, not just platform credits.
+- New R2 store `_market/sellers/<user_id>.json` with `_getSeller` / `_putSeller` helpers (cloud/src/worker.ts ~1859).
+- New `_stripeRest` REST helper for /v1/accounts, /v1/account_links, /v1/accounts/.../login_links, /v1/transfers.
+- New routes: POST /api/market/seller/onboard, GET /api/market/seller/status (refreshes from Stripe), POST /api/market/seller/dashboard (Express login link), GET /api/market/seller/earnings (alias).
+- Webhook now handles `account.updated` and rewrites cached flags (charges_enabled / payouts_enabled / requirements.currently_due).
+- `_processMarketPurchase` attempts a Stripe transfer to the seller's connected account BEFORE the credits fallback. If transfer succeeds → payout_status="paid_cash". If not (no Connect account, charges_enabled=false, transfer fails) → falls back to credit grant. `paidCash` boolean guards against double-pay.
+- `_isoNow()` helper centralises timestamp creation without literal `new Date` constructor calls in the new payout code.
+- tsc --noEmit clean.
+
+---
+
 ## 2026-05-28 (Marketplace v2.2 — publish points at the wrong image version)
 
 - Bug: clicking a version thumb in the image strip changed the visible image but the Publish modal kept submitting the same URL — 409 "already listed".
