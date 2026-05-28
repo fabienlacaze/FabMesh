@@ -10,6 +10,43 @@ what happened, conclusion.
 
 ---
 
+## 2026-05-28 (Marketplace v2 — cart + Stripe checkout + ownership + Owned tab)
+
+- **Modèle commission** : 30 % plateforme (industry standard
+  Unity/CGTrader). Stripe fees absorbées par les 30 %.
+  Constante `MARKET_COMMISSION_PCT` dans worker.ts.
+- **Backend** :
+  - `POST /api/market/checkout  body { listing_ids }` → Stripe
+    Checkout Session avec line_items pour chaque listing (skip
+    free + already-owned), metadata.kind=`market_purchase`,
+    success_url=`/market?paid=1`.
+  - Hook dans `handleStripeWebhook` : si `metadata.kind ===
+    'market_purchase'` → `_processMarketPurchase()` écrit
+    `_market/sales/<sale_id>.json` (price + platform_fee +
+    seller_net) + `_market/owners/<listing_id>/<buyer_id>.json`
+    (index O(1) pour ownership check). Idempotent via
+    `_market/sales_by_session/<session_id>.txt`.
+  - `GET /api/market/owned` (auth) : retourne tous les listings
+    appartenant au current user.
+  - `GET /api/market/download/<id>` (auth + ownership) : 302
+    redirect vers asset_url R2 (soft-DRM — URL R2 publique mais
+    n'apparaît pas dans le HTML pour les paid items).
+- **Frontend /market** (page Next.js réécrite) :
+  - Onglet supplémentaire **Owned** avec compteur vert.
+  - Bouton 🛒 Cart en topbar avec badge count, ouvre un side
+    drawer (420 px) avec items + total + bouton "Checkout with
+    Stripe".
+  - Cards : bouton "Add to cart" / "In cart — remove" (paid),
+    "Free download" (free), "⬇ Download" (owned).
+  - Banner vert `?paid=1` après retour Stripe + auto-switch sur
+    Owned tab + clear cart.
+  - localStorage `mfm.market.cart`.
+- **Hors scope V2** : payouts auto aux sellers (Stripe Connect),
+  refunds in-app (utiliser dashboard Stripe), R2 signed URLs
+  (soft-DRM accepté pour MVP).
+
+---
+
 ## 2026-05-28 (Marketplace UX polish — inspect lightbox + home badge)
 
 - **Publish modal** : vignette qui chevauchait le subtitle → refactor

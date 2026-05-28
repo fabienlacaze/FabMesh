@@ -1,10 +1,11 @@
 'use client';
 //
 // Public marketplace — anyone (logged in or not) can browse approved
-// listings. Look-and-feel mirrors the in-app "Your projects" grid:
-// big card with mesh thumbnail, title, author, status pill. Free
-// listings are downloadable on click; paid listings are stubbed (we
-// surface the price + licence but Stripe wiring is a follow-up).
+// listings. Filter pills All / Free / Paid / Owned. Adding a paid
+// item to the cart and clicking "Checkout" hits the Stripe-backed
+// /api/market/checkout route; once paid, the user lands back on
+// /market?paid=1 and sees the item in the "Owned" tab with a
+// Download button.
 //
 import { useEffect, useState } from 'react';
 import Script from 'next/script';
@@ -25,6 +26,20 @@ interface Listing {
   downloads: number;
 }
 
+interface OwnedItem {
+  id: string;
+  title: string;
+  description: string;
+  price_cents: number;
+  currency: string;
+  licence: string;
+  asset_kind: string;
+  asset_url: string;
+  mesh_url: string;
+  author_display: string;
+  created_at: string;
+}
+
 const LICENCE_LABELS: Record<string, string> = {
   personal: 'Personal use',
   cc0: 'CC0 (public domain)',
@@ -32,6 +47,7 @@ const LICENCE_LABELS: Record<string, string> = {
   'cc-by-nc': 'CC-BY-NC 4.0',
   commercial: 'Royalty-free commercial',
 };
+const CART_KEY = 'mfm.market.cart';
 
 function formatPrice(cents: number, currency: string): string {
   if (cents === 0) return 'Free';
@@ -39,22 +55,54 @@ function formatPrice(cents: number, currency: string): string {
   const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency + ' ';
   return symbol + amount;
 }
+function loadCart(): string[] {
+  if (typeof window === 'undefined') return [];
+  try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
+}
+function saveCart(ids: string[]) {
+  if (typeof window !== 'undefined') localStorage.setItem(CART_KEY, JSON.stringify(ids));
+}
 
 export default function MarketPage() {
   const [listings, setListings] = useState<Listing[]>([]);
+  const [owned, setOwned] = useState<OwnedItem[]>([]);
   const [filtered, setFiltered] = useState<Listing[]>([]);
   const [search, setSearch] = useState('');
-  const [filterPrice, setFilterPrice] = useState<'all' | 'free' | 'paid'>('all');
+  const [tab, setTab] = useState<'all' | 'free' | 'paid' | 'owned'>('all');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Listing | null>(null);
+  const [cart, setCart] = useState<string[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [paidBanner, setPaidBanner] = useState(false);
 
+  // First load
   useEffect(() => {
+    setCart(loadCart());
+    if (typeof window !== 'undefined') {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('paid') === '1') {
+        setPaidBanner(true);
+        // Successful checkout — clear the cart and switch to Owned.
+        saveCart([]);
+        setCart([]);
+        setTab('owned');
+      }
+    }
     (async () => {
       try {
         const r = await fetch('/api/market/list');
         if (r.ok) {
           const j = await r.json();
           setListings(j.listings ?? []);
+        }
+      } catch {}
+      // Owned needs auth; silently 401 for anonymous users.
+      try {
+        const r = await fetch('/api/market/owned');
+        if (r.ok) {
+          const j = await r.json();
+          setOwned(j.items ?? []);
         }
       } catch {}
       setLoading(false);
@@ -64,12 +112,74 @@ export default function MarketPage() {
   useEffect(() => {
     const q = search.trim().toLowerCase();
     setFiltered(listings.filter((l) => {
-      if (filterPrice === 'free' && l.price_cents !== 0) return false;
-      if (filterPrice === 'paid' && l.price_cents === 0) return false;
+      if (tab === 'free' && l.price_cents !== 0) return false;
+      if (tab === 'paid' && l.price_cents === 0) return false;
       if (q && !`${l.title} ${l.description} ${l.author_display}`.toLowerCase().includes(q)) return false;
       return true;
     }));
-  }, [listings, search, filterPrice]);
+  }, [listings, search, tab]);
+
+  const inCart = (id: string) => cart.includes(id);
+  const addToCart = (id: string) => {
+    if (inCart(id)) return;
+    const next = [...cart, id];
+    setCart(next);
+    saveCart(next);
+  };
+  const removeFromCart = (id: string) => {
+    const next = cart.filter((x) => x !== id);
+    setCart(next);
+    saveCart(next);
+  };
+
+  const cartItems = listings.filter((l) => cart.includes(l.id));
+  const cartTotal = cartItems.reduce((sum, l) => sum + l.price_cents, 0);
+
+  async function checkout() {
+    if (!cart.length) return;
+    setCheckingOut(true);
+    try {
+      const r = await fetch('/api/market/checkout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ listing_ids: cart }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (r.status === 401) {
+          window.location.href = '/login?next=/market';
+          return;
+        }
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+      if (j?.url) {
+        window.location.href = j.url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert('Checkout failed: ' + msg);
+      setCheckingOut(false);
+    }
+  }
+
+  const ownedIds = new Set(owned.map((o) => o.id));
+
+  // Display list = filtered listings for All/Free/Paid, or `owned`
+  // mapped into the same shape for the "Owned" tab.
+  const displayItems: Listing[] = tab === 'owned'
+    ? owned.map((o) => ({
+        id: o.id, title: o.title, description: o.description,
+        price_cents: o.price_cents, currency: o.currency, licence: o.licence,
+        asset_kind: (o.asset_kind as 'mesh' | 'image' | undefined) || 'mesh',
+        asset_type: null,
+        asset_url: o.asset_url, mesh_url: o.mesh_url,
+        author_display: o.author_display, created_at: o.created_at,
+        downloads: 0,
+      }))
+    : filtered;
 
   return (
     <div className="page">
@@ -77,8 +187,8 @@ export default function MarketPage() {
         src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"
         type="module" strategy="afterInteractive"
       />
-      <div className="page-header" style={{ alignItems: 'flex-end', gap: 16 }}>
-        <div>
+      <div className="page-header" style={{ alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
           <h2 style={{ marginBottom: 4 }}>Marketplace</h2>
           <div style={{ color: 'var(--text-2)', fontSize: 13 }}>
             Community-made 3D assets. Free downloads + paid listings under various licences.
@@ -89,36 +199,62 @@ export default function MarketPage() {
           placeholder="🔍 Search listings…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: '8px 12px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', minWidth: 240, fontSize: 13 }}
+          style={{ padding: '8px 12px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', minWidth: 200, fontSize: 13 }}
         />
+        {/* Cart trigger — visible when there is at least one item */}
+        <button
+          onClick={() => setCartOpen(true)}
+          className="primary-btn"
+          style={{ padding: '8px 16px', display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}
+        >
+          🛒 Cart
+          {cart.length > 0 && (
+            <span style={{ background: '#fff', color: '#000', borderRadius: 999, padding: '0 8px', fontSize: 12, fontWeight: 800 }}>
+              {cart.length}
+            </span>
+          )}
+        </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-        {(['all', 'free', 'paid'] as const).map((p) => (
+      {paidBanner && (
+        <div style={{ background: 'rgba(76,175,80,0.15)', border: '1px solid var(--ok)', color: 'var(--ok)', padding: '10px 14px', borderRadius: 8, marginBottom: 18, fontSize: 13 }}>
+          ✓ Payment received — your purchase is in the <strong>Owned</strong> tab below.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+        {(['all', 'free', 'paid', 'owned'] as const).map((p) => (
           <button
             key={p}
-            onClick={() => setFilterPrice(p)}
-            className={filterPrice === p ? 'primary-btn' : 'ghost-btn'}
-            style={{ padding: '6px 16px', fontSize: 13, textTransform: 'capitalize' }}
+            onClick={() => setTab(p)}
+            className={tab === p ? 'primary-btn' : 'ghost-btn'}
+            style={{ padding: '6px 16px', fontSize: 13, textTransform: 'capitalize', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            {p === 'all' ? 'All' : p === 'free' ? 'Free' : 'Paid'}
+            {p === 'all' ? 'All' : p === 'free' ? 'Free' : p === 'paid' ? 'Paid' : '✓ Owned'}
+            {p === 'owned' && owned.length > 0 && (
+              <span style={{ background: 'var(--ok)', color: '#fff', borderRadius: 999, padding: '0 7px', fontSize: 11, fontWeight: 700 }}>
+                {owned.length}
+              </span>
+            )}
           </button>
         ))}
         <div style={{ marginLeft: 'auto', color: 'var(--text-2)', fontSize: 12, alignSelf: 'center' }}>
-          {loading ? 'Loading…' : `${filtered.length} listing${filtered.length === 1 ? '' : 's'}`}
+          {loading ? 'Loading…' : `${displayItems.length} listing${displayItems.length === 1 ? '' : 's'}`}
         </div>
       </div>
 
-      {!loading && filtered.length === 0 ? (
+      {!loading && displayItems.length === 0 ? (
         <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-2)' }}>
-          No listings match your filters yet.{' '}
-          <a href="/app/" style={{ color: 'var(--accent)' }}>Publish your first mesh →</a>
+          {tab === 'owned'
+            ? <>No purchases yet. Browse <a onClick={() => setTab('all')} style={{ color: 'var(--accent)', cursor: 'pointer' }}>All listings →</a></>
+            : <>No listings match your filters yet. <a href="/app/" style={{ color: 'var(--accent)' }}>Publish your first mesh →</a></>}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-          {filtered.map((l) => {
+          {displayItems.map((l) => {
             const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
             const url = l.asset_url || l.mesh_url;
+            const owns = ownedIds.has(l.id);
             return (
               <div
                 key={l.id}
@@ -132,12 +268,7 @@ export default function MarketPage() {
                   <img src={url} alt={l.title} style={{ width: '100%', height: 200, objectFit: 'cover', background: '#0a0a0e', display: 'block' }} />
                 ) : (
                   // @ts-expect-error model-viewer is a custom element
-                  <model-viewer
-                    src={url}
-                    camera-controls auto-rotate
-                    shadow-intensity="1" exposure="1"
-                    style={{ width: '100%', height: 200, background: '#0a0a0e' }}
-                  />
+                  <model-viewer src={url} camera-controls auto-rotate shadow-intensity="1" exposure="1" style={{ width: '100%', height: 200, background: '#0a0a0e' }} />
                 )}
                 <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
@@ -152,6 +283,34 @@ export default function MarketPage() {
                   <div style={{ color: 'var(--text-3)', fontSize: 10 }}>
                     {LICENCE_LABELS[l.licence] || l.licence}
                   </div>
+                  {owns ? (
+                    <a
+                      href={`/api/market/download/${l.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="primary-btn"
+                      style={{ marginTop: 6, padding: '6px 12px', fontSize: 12, textAlign: 'center', textDecoration: 'none' }}
+                    >
+                      ⬇ Download
+                    </a>
+                  ) : l.price_cents === 0 ? (
+                    <a
+                      href={l.asset_url || l.mesh_url}
+                      download
+                      onClick={(e) => e.stopPropagation()}
+                      className="ghost-btn"
+                      style={{ marginTop: 6, padding: '6px 12px', fontSize: 12, textAlign: 'center', textDecoration: 'none' }}
+                    >
+                      ⬇ Free download
+                    </a>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); inCart(l.id) ? removeFromCart(l.id) : addToCart(l.id); }}
+                      className={inCart(l.id) ? 'ghost-btn' : 'primary-btn'}
+                      style={{ marginTop: 6, padding: '6px 12px', fontSize: 12 }}
+                    >
+                      {inCart(l.id) ? '✓ In cart — remove' : '🛒 Add to cart'}
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -159,6 +318,7 @@ export default function MarketPage() {
         </div>
       )}
 
+      {/* Detail modal */}
       {selected && (
         <div onClick={() => setSelected(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 100 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, maxWidth: 720, width: '100%', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -179,12 +339,7 @@ export default function MarketPage() {
                 <img src={url} alt={selected.title} style={{ width: '100%', maxHeight: 480, objectFit: 'contain', background: '#0a0a0e', borderRadius: 8 }} />
               ) : (
                 // @ts-expect-error model-viewer is a custom element
-                <model-viewer
-                  src={url}
-                  camera-controls auto-rotate
-                  shadow-intensity="1" exposure="1"
-                  style={{ width: '100%', height: 420, background: '#0a0a0e', borderRadius: 8 }}
-                />
+                <model-viewer src={url} camera-controls auto-rotate shadow-intensity="1" exposure="1" style={{ width: '100%', height: 420, background: '#0a0a0e', borderRadius: 8 }} />
               );
             })()}
             {selected.description && (
@@ -192,16 +347,72 @@ export default function MarketPage() {
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{formatPrice(selected.price_cents, selected.currency)}</div>
-              {selected.price_cents === 0 ? (
-                <a href={selected.asset_url || selected.mesh_url} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
+              {ownedIds.has(selected.id) ? (
+                <a href={`/api/market/download/${selected.id}`} className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
                   ⬇ Download
                 </a>
+              ) : selected.price_cents === 0 ? (
+                <a href={selected.asset_url || selected.mesh_url} download className="primary-btn" style={{ padding: '10px 24px', textDecoration: 'none' }}>
+                  ⬇ Free download
+                </a>
               ) : (
-                <button className="primary-btn" disabled style={{ padding: '10px 24px', opacity: 0.6, cursor: 'not-allowed' }} title="Stripe checkout coming soon">
-                  Buy (coming soon)
+                <button
+                  onClick={() => inCart(selected.id) ? removeFromCart(selected.id) : addToCart(selected.id)}
+                  className={inCart(selected.id) ? 'ghost-btn' : 'primary-btn'}
+                  style={{ padding: '10px 24px' }}
+                >
+                  {inCart(selected.id) ? '✓ In cart — remove' : '🛒 Add to cart'}
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cart drawer */}
+      {cartOpen && (
+        <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'flex-end', zIndex: 101 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: '95vw', height: '100%', background: 'var(--bg-1)', borderLeft: '1px solid var(--border)', padding: 24, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>🛒 Cart</h2>
+              <button onClick={() => setCartOpen(false)} className="ghost-btn" style={{ padding: '4px 12px' }}>✕</button>
+            </div>
+            {cartItems.length === 0 ? (
+              <p style={{ color: 'var(--text-2)', fontSize: 13 }}>Your cart is empty. Add paid listings from the grid.</p>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                  {cartItems.map((l) => (
+                    <div key={l.id} style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+                      {l.asset_kind === 'image' ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={l.asset_url || l.mesh_url} alt="" style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 6, background: '#0a0a0e' }} />
+                      ) : (
+                        <div style={{ width: 60, height: 60, background: '#0a0a0e', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>🧊</div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.title}</div>
+                        <div style={{ color: 'var(--text-2)', fontSize: 11 }}>{LICENCE_LABELS[l.licence] || l.licence}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{formatPrice(l.price_cents, l.currency)}</div>
+                      </div>
+                      <button onClick={() => removeFromCart(l.id)} className="ghost-btn" style={{ padding: '4px 10px', fontSize: 12, color: 'var(--err)' }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                    <span>Total</span>
+                    <strong>{formatPrice(cartTotal, cartItems[0]?.currency || 'USD')}</strong>
+                  </div>
+                  <button onClick={checkout} disabled={checkingOut} className="primary-btn" style={{ padding: '12px', fontSize: 14 }}>
+                    {checkingOut ? 'Redirecting to Stripe…' : `Checkout with Stripe`}
+                  </button>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center' }}>
+                    Secure payment via Stripe · 30% platform fee covers infrastructure + commission · sellers receive 70% net.
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
