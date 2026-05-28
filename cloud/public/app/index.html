@@ -1185,6 +1185,7 @@
               <button id="pe-redo" class="ghost-btn" style="flex:1; padding:6px; font-size:11px;" title="Redo (Ctrl+Y)">↷ Redo</button>
             </div>
             <button id="pe-toggle-emissive" class="ghost-btn" style="padding:6px; font-size:11px; background:var(--accent, #5a4fcf); color:#fff;" title="Show/hide the emissive texture on the mesh">💡 Emissive ON</button>
+            <button id="pe-load-image-layer" class="ghost-btn" style="padding:6px; font-size:11px;" title="Re-project the emissive layer painted on the source image">⬇ Load from image layer</button>
             <button id="pe-clear" class="ghost-btn" style="padding:6px; font-size:11px;">↺ Clear all</button>
             <div style="padding:6px 8px; background:#0a0a0a; border-radius:4px; font-size:10px; color:var(--text-2);">
               Output: <code>T_emissive</code> 1024×1024 PNG embedded in the GLB.
@@ -2018,6 +2019,7 @@
         <h3 style="margin:0; white-space:nowrap;">Paint Tools</h3>
         <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
           <button id="paint-loupe-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Magnifier">&#128270;</button>
+          <button id="paint-emissive-toggle" class="secondary-btn tool-btn" style="padding:4px 8px;" title="Paint on a separate emissive layer (stored as T_emissive on the generated mesh)">&#128161; Emissive</button>
           <button id="paint-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
           <button id="paint-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
           <button id="paint-reset" class="secondary-btn tool-btn" title="Reset">&#8634;</button>
@@ -2071,6 +2073,9 @@
         <!-- Right: canvas -->
         <div id="paint-canvas-container" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
           <canvas id="paint-canvas" style="position:absolute; left:0; top:0; cursor:none;"></canvas>
+          <!-- Emissive overlay: shown above the image when "Emissive" mode is active.
+               Blend mode "lighten" makes the painted layer glow over the base image. -->
+          <canvas id="paint-emissive-overlay" style="position:absolute; left:0; top:0; pointer-events:none; mix-blend-mode:lighten;"></canvas>
           <canvas id="paint-sel-overlay" style="position:absolute; left:0; top:0; pointer-events:none; opacity:0.4;"></canvas>
           <div id="paint-brush-cursor" style="position:fixed; pointer-events:none; border:2px solid white; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,0.7); display:none; z-index:1000;">
             <div style="position:absolute; left:50%; top:50%; width:4px; height:4px; background:white; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 2px rgba(0,0,0,0.8);"></div>
