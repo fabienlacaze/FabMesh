@@ -1058,6 +1058,40 @@
    * The modal carries data-asset-kind="mesh|image" so the submit
    * handler picks the right URL + endpoint payload.
    * ────────────────────────────────────────────────────────────────── */
+  // Cached Stripe Connect seller status — fetched lazily the first
+  // time the publish modal opens, then reused for subsequent opens to
+  // avoid hammering the worker. Shape mirrors /api/market/seller/status:
+  //   { has_account, charges_enabled, payouts_enabled, details_submitted }
+  let __sellerStatus = null;
+  let __sellerStatusFetched = false;
+
+  // Render the "Payout method" indicator at the bottom of the publish
+  // modal based on (a) the listing price and (b) the cached seller
+  // Connect status. Read-only — purely informational.
+  function renderPayoutMethod(priceUSD, status) {
+    const el = document.getElementById('pub-payout-method');
+    if (!el) return;
+    const price = Math.max(0, Number(priceUSD) || 0);
+    if (price === 0) {
+      el.textContent = 'Payout: free download (no payout).';
+      el.style.color = 'var(--text-2)';
+      return;
+    }
+    if (!status || !status.has_account) {
+      el.textContent = 'Payout: platform credits (set up Stripe payouts in /account to receive cash instead).';
+      el.style.color = 'var(--text-2)';
+      return;
+    }
+    if (!status.charges_enabled) {
+      el.textContent = 'Payout: credits (Stripe verification pending — switches to cash once active).';
+      el.style.color = '#d4a017';
+      return;
+    }
+    const cash = (price * 0.70).toFixed(2);
+    el.textContent = 'Payout: cash via Stripe (~$' + cash + ' to your bank after 30% platform fee).';
+    el.style.color = '#3fb950';
+  }
+
   function installMarketplacePublish() {
     const modal = document.getElementById('modal-publish-asset');
     if (!modal) return;
@@ -1153,6 +1187,7 @@
             hint.textContent = 'You’ll earn ~' + credits +
               ' credits per sale (after 30% platform fee, +20% bonus paid in credits).';
           }
+          renderPayoutMethod(p, __sellerStatus);
         };
         if (priceInput.dataset.payoutWired !== '1') {
           priceInput.addEventListener('input', syncPayoutHint);
@@ -1160,7 +1195,32 @@
         }
         syncPayoutHint();
       }
-      modal.classList.remove('hidden');
+      // Fetch Stripe Connect status once per session and re-render the
+      // payout indicator with the live answer. Network failure is silent
+      // — we just leave the "credits" default in place.
+      const showModal = () => {
+        renderPayoutMethod(Number(priceInput?.value) || 0, __sellerStatus);
+        modal.classList.remove('hidden');
+      };
+      if (__sellerStatusFetched) {
+        showModal();
+      } else {
+        __sellerStatusFetched = true;
+        fetch('/api/market/seller/status', { credentials: 'include' })
+          .then(r => r.ok ? r.json() : null)
+          .then(ss => {
+            if (ss) {
+              __sellerStatus = {
+                has_account: !!ss.has_account,
+                charges_enabled: !!ss.charges_enabled,
+                payouts_enabled: !!ss.payouts_enabled,
+                details_submitted: !!ss.details_submitted,
+              };
+            }
+          })
+          .catch(() => {})
+          .finally(showModal);
+      }
     }
     meshBtn?.addEventListener('click',  () => openFor('mesh'));
     imageBtn?.addEventListener('click', () => openFor('image'));
