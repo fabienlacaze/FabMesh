@@ -1609,8 +1609,13 @@ async function renderImageVersions(p) {
     const emissiveBadge = hasEmissive
       ? '<span class="v-emissive-badge" title="This image has an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
+    // _imgSrc handles blob:/http:/data: URLs (dropped-file imports) correctly;
+    // bare filesystem paths get the file:/// prefix as before. Skip cache-bust
+    // for blob URLs (they're immutable in-memory handles).
+    const _thumbSrc = _imgSrc(img.path);
+    const _thumbUrl = /^(blob|data):/i.test(img.path) ? _thumbSrc : `${_thumbSrc}?t=${_cb}`;
     t.innerHTML = `
-      <img src="file:///${img.path.replace(/\\/g, '/')}?t=${_cb}">
+      <img src="${_thumbUrl}">
       <span class="v-label">v${images.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this version">&#10005;</button>
       ${emissiveBadge}
@@ -1965,8 +1970,12 @@ function showStep1Preview(imgPath) {
     preview.insertBefore(imgEl, preview.firstChild);
   }
   // Cache-bust — see version-thumb notes above; Electron holds onto the
-  // previous bytes unless we change the URL.
-  imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  // previous bytes unless we change the URL. _imgSrc keeps blob:/http:/data:
+  // URLs intact (dropped-file imports), prefixes file:/// for raw fs paths.
+  {
+    const _src = _imgSrc(imgPath);
+    imgEl.src = /^(blob|data):/i.test(imgPath) ? _src : (_src + '?t=' + Date.now());
+  }
   setViewerFilename('ws-image-filename', imgPath);
   preview.classList.add('clickable');
   preview.onclick = (e) => {
