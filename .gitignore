@@ -74,6 +74,13 @@ external/UniRig/
 .test_api_token
 .mcp_bridge_token
 
+# Local secrets — never commit
+.env
+.env.local
+
+# Build artefacts
+dist/installer/
+
 # Build artefacts (fetched by build/fetch_*.py scripts, not committed)
 build/python-embed/
 build/vc_redist.x64.exe

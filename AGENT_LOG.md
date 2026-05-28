@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (release: Microsoft Store Submission API automation)
+- Added `scripts/submit_appx.ps1`: PowerShell automation that calls the Microsoft Store Submission API to upload + commit a new .appx submission (OAuth → fetch app state → optionally delete a pending submission → create new → swap the .appx inside the upload zip → PUT to SAS URL → commit → poll status). Supports `-DryRun`.
+- Added `docs/MS_STORE_AUTOMATION.md`: one-time Azure AD app registration walkthrough + .env wiring + troubleshooting (401/403/409/5xx).
+- Added `.env.example` template with the 4 required keys (TENANT_ID, CLIENT_ID, CLIENT_SECRET, APPLICATION_ID=9PH6GT8XKQDW).
+- Extended `.gitignore` to exclude `.env` and `dist/installer/`.
+Usage: `powershell -File scripts/submit_appx.ps1 -AppxPath "dist/installer/MyFabmesh.AI 1.0.1.appx"`.
+
 ## 2026-05-29 (appx: fix blank Store tile icons — 10.1.1.11 cert)
 - Microsoft Store certification 10.1.1.11 ("On Device Tiles") failed because the
   generated .appx contained transparent placeholder tiles instead of the custom
