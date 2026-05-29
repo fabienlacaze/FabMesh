@@ -1,5 +1,8 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (UX: style dropdown grouped)
+- Style dropdown options now grouped with <optgroup>: Realistic (Realistic, PBR), Stylized (Stylized mid-poly, Cartoon, Anime, Painterly), Retro (Low-poly, Pixel art, Voxel), Other (Custom). Same option values, no behaviour change.
+
 ## 2026-05-29 (ux: group Style selects by category with <optgroup>)
 - Same treatment previously applied to the asset-type select, now extended to the four Style dropdowns. Flat list of 10 options is too noisy; users scan faster when realistic / stylized / retro / other are visually separated.
 - Files edited (option `value="…"` and visible text unchanged — only wrapped in `<optgroup>` + reordered):
