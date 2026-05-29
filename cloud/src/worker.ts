@@ -5784,6 +5784,86 @@ async function handleUploadImage(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, success: true, path: `${env.R2_PUBLIC_URL}/${key}` });
 }
 
+/** POST /api/upload-mesh — accept a client-side sculpted/edited GLB and
+ *  persist it to R2 under a per-user prefix so the mesh strip can pick
+ *  it up. Mirrors handleUploadImage (auth, R2 binding, quota counter,
+ *  filename sanitisation) but tuned for binary glTF: 50 MB cap, magic
+ *  bytes "glTF" (0x67 0x6C 0x54 0x46), content-type model/gltf-binary. */
+async function handleUploadMesh(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  const { base64, filename } = await req.json() as { base64?: string; filename?: string };
+  if (!base64 || !filename) return err(400, 'base64 and filename required');
+
+  let bytes: Uint8Array;
+  try {
+    const bin = atob(base64);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch (e) {
+    return err(400, `base64 decode failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (bytes.byteLength === 0) return err(400, 'base64 is empty');
+
+  // 50 MB cap — Modal-generated meshes are larger than canvas snapshots
+  // (Trellis outputs ~15-30 MB GLBs, sculpts can push higher).
+  const MAX_MESH_BYTES = 50 * 1024 * 1024;
+  if (bytes.byteLength > MAX_MESH_BYTES) return err(413, 'mesh too large (50 MB max)');
+
+  // Magic-byte check — binary glTF starts with the ASCII tag "glTF".
+  // We don't gate on .gltf (JSON) magic since the writer always emits
+  // GLB; mismatched extensions are normalised to .glb below.
+  const magicOk =
+    bytes.byteLength >= 4 &&
+    bytes[0] === 0x67 && bytes[1] === 0x6C && bytes[2] === 0x54 && bytes[3] === 0x46;
+  if (!magicOk) return err(400, 'mesh bytes are not a valid GLB (missing glTF magic)');
+
+  // Sanitise filename: collapse anything outside [A-Za-z0-9._-] to '_',
+  // cap at 200 chars, and force the extension to .glb unless caller
+  // explicitly sent .gltf (which still must carry GLB magic — the
+  // writer should emit binary glTF either way).
+  let safe = String(filename).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 200);
+  if (!safe) safe = 'mesh';
+  const lower = safe.toLowerCase();
+  if (!lower.endsWith('.glb') && !lower.endsWith('.gltf')) {
+    safe = safe.replace(/\.[^.]*$/, '') + '.glb';
+    if (!safe.toLowerCase().endsWith('.glb')) safe = safe + '.glb';
+  }
+
+  // Per-user daily quota — same counter pattern as handleUploadImage.
+  const MAX_UPLOADS_PER_DAY = 200;
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const cntKey = `_meta/mesh_uploads_count/${user.id}/${day}.txt`;
+    const obj = await env.MESHES.get(cntKey);
+    const cur = obj ? parseInt(await obj.text(), 10) || 0 : 0;
+    if (cur >= MAX_UPLOADS_PER_DAY) {
+      return err(429, 'daily mesh upload quota reached');
+    }
+    await env.MESHES.put(cntKey, String(cur + 1));
+  } catch {}
+
+  // Per-user prefix — keeps sculpted/edited GLBs scoped to the owner
+  // (matches handleUploadImage's `${user.id}/canvas/` convention)
+  // rather than the flat `mesh/` namespace used by Modal outputs.
+  const base = safe.replace(/\.(glb|gltf)$/i, '');
+  const ext = safe.toLowerCase().endsWith('.gltf') ? 'gltf' : 'glb';
+  const key = `${user.id}/edited/${base}_${Date.now()}.${ext}`;
+  try {
+    await env.MESHES.put(key, bytes, {
+      httpMetadata: { contentType: 'model/gltf-binary' },
+    });
+  } catch (e) {
+    return new Response(
+      JSON.stringify({ success: false, error: `R2 upload failed: ${e instanceof Error ? e.message : String(e)}` }),
+      { status: 500, headers: { 'content-type': 'application/json' } },
+    );
+  }
+  return json({ success: true, path: key, url: `${env.R2_PUBLIC_URL}/${key}` });
+}
+
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
  *  URL, returned as-is so the browser sees a same-origin response and
  *  bypasses CORS entirely. Used by every canvas tool that needs to
@@ -7738,6 +7818,7 @@ export default {
         if (pathname === '/api/upscale-image'         && method === 'POST') return await handleUpscaleImage(req, env);
         if (pathname === '/api/proxy-image'           && method === 'GET')  return await handleProxyImage(req, env);
         if (pathname === '/api/upload-image'          && method === 'POST') return await handleUploadImage(req, env);
+        if (pathname === '/api/upload-mesh'           && method === 'POST') return await handleUploadMesh(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);
