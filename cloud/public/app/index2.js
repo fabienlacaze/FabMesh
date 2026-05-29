@@ -15369,6 +15369,20 @@ window.addEventListener('drop', async (e) => {
         proj.images.unshift({ path: blobURL, kind: 'front', mtime: ts });
         try { window.__cloudImg?.append?.(proj.name, [blobURL], 'front'); } catch (_) {}
         await populateWorkspace(proj);
+        // After successful image import, open the Edit stage (not CREATE NEW) and scroll
+        const imgCard = document.getElementById('step-card-image');
+        if (imgCard) {
+          imgCard.classList.remove('collapsed', 'disabled');
+          const createStage = imgCard.querySelector('.stage-create');
+          const editStage = imgCard.querySelector('.stage-edit');
+          if (createStage) createStage.open = false;
+          if (editStage) editStage.open = true;
+          setTimeout(() => {
+            imgCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            imgCard.classList.add('pulse-highlight');
+            setTimeout(() => imgCard.classList.remove('pulse-highlight'), 1500);
+          }, 120);
+        }
         try { showToast('✓ Imported as new image version', 'success'); } catch (_) {}
       } else if (kind === 'mesh') {
         proj.meshes = proj.meshes || [];

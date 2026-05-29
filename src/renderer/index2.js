@@ -12410,7 +12410,27 @@ window.addEventListener('drop', async (e) => {
     } else if (isMesh && API.importMesh) {
       await API.importMesh();
     }
-    await refreshProjectsPage();
+    // If a project is open in the workspace, reload it and flip the image
+    // card to its Edit stage so the newly-imported version is highlighted
+    // instead of dropping the user back on the CREATE NEW generator.
+    if (isImage && state.currentProject && state.page === 'workspace') {
+      if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+      const imgCard = document.getElementById('step-card-image');
+      if (imgCard) {
+        imgCard.classList.remove('collapsed', 'disabled');
+        const createStage = imgCard.querySelector('.stage-create');
+        const editStage = imgCard.querySelector('.stage-edit');
+        if (createStage) createStage.open = false;
+        if (editStage) editStage.open = true;
+        setTimeout(() => {
+          imgCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          imgCard.classList.add('pulse-highlight');
+          setTimeout(() => imgCard.classList.remove('pulse-highlight'), 1500);
+        }, 120);
+      }
+    } else {
+      await refreshProjectsPage();
+    }
   } catch (err) { alert('Import failed: ' + err.message); }
 });
 
