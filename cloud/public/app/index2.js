@@ -11698,7 +11698,11 @@ document.addEventListener('keydown', (e) => {
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
-  showToast('Saving new version...', 'info', 2000);
+  const projName = state.currentProject?.name || '';
+  const job = pushJob(`Save mesh edit: ${projName}`, null, null, 8000, undefined, {
+    projectName: projName,
+    assetKind: 'mesh_edit',
+  });
   try {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const exporter = new GLTFExporter();
@@ -11719,33 +11723,44 @@ document.getElementById('me-save')?.addEventListener('click', async () => {
         const b64 = btoa(binary);
         const r = await API.saveBuffer({ path: newPath, base64: b64 });
         if (r && r.success) {
-          showToast('Edited mesh saved!', 'success');
+          // Cloud worker writes to a different R2 location (per-user prefix)
+          // and returns the actual URL in r.url. Falling back to r.path keeps
+          // desktop unchanged (save-buffer IPC returns { success, path }).
+          const actualPath = (r && (r.url || r.path)) || newPath;
           // Add to project mesh list
           const p = state.currentProject;
           if (p) {
-            const filename = newPath.replace(/\\/g, '/').split('/').pop();
-            const info = await API.getFileInfo(newPath);
+            const filename = actualPath.replace(/\\/g, '/').split('/').pop();
+            const info = await API.getFileInfo(actualPath);
             p.meshes.unshift({
-              path: newPath,
+              path: actualPath,
               filename,
-              size: info?.size || 0,
+              size: info?.size || buf.length,
               mtime: Date.now(),
             });
+            p.selectedMeshPath = actualPath;
           }
+          completeJob(job.id, true);
+          showToast('Edited mesh saved!', 'success', 2000);
           _closeMeshEdit();
           populateWorkspace(state.currentProject);
         } else {
-          showToast('Save failed: ' + ((r && r.error) || 'unknown'), 'error');
+          const msg = (r && r.error) || 'unknown';
+          completeJob(job.id, false, msg);
+          showToast('Save failed: ' + msg, 'error', 3000);
         }
       } catch (err) {
         console.error('[mesh-edit] save error:', err);
-        showToast('Save error: ' + err.message, 'error');
+        completeJob(job.id, false, err.message);
+        showToast('Save error: ' + err.message, 'error', 3000);
       }
     }, (err) => {
-      showToast('Export error: ' + err, 'error');
+      completeJob(job.id, false, String(err));
+      showToast('Export error: ' + err, 'error', 3000);
     }, { binary: true });
   } catch (err) {
-    showToast('Export failed: ' + err.message, 'error');
+    completeJob(job.id, false, err.message);
+    showToast('Export failed: ' + err.message, 'error', 3000);
   }
 });
 
