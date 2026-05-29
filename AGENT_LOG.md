@@ -1,5 +1,9 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (UX: import → Edit panel + anglicise asset labels)
+- After an image import (drop on home zone or on an open project), the UI now opens the Edit selected panel showing the new version instead of the CREATE NEW generator. CREATE NEW remains accessible via its accordion header for fresh generations.
+- Asset-type dropdown labels anglicised: "Avion (vehicle)" → "Plane", "Bateau (vehicle)" → "Boat". Underlying `value="avion"` / `value="bateau"` unchanged — existing projects keep working.
+
 ## 2026-05-29 (ux: dropped image opens Edit panel, not CREATE NEW)
 - After drag-and-drop import of an image into an open workspace, the UI was
   re-rendering `step-card-image` with the CREATE NEW accordion expanded and
