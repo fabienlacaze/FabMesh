@@ -1,5 +1,8 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (cloud: fix sculpt empty viewport)
+- `_meLoadMesh` was hardcoding `file:///` URL prefix, causing the sculpt modal to load nothing on the cloud (browsers refuse file:// from https origin). Fixed by branching on URL scheme: blob:/data: → direct, https:/http: → direct, modal_<hex>.glb → /api/mesh/get?path=, else → file:/// (desktop fallback). Cloud + desktop renderer in sync.
+
 ## 2026-05-29 (cloud: unhide Sculpt button)
 - Sculpt mesh button is now visible + clickable on the cloud UI (was hidden by CLOUD_HIDE_BUTTONS in cloud-overrides.js). With the Three.js 6-brush + symmetry implementation shipped in ea85cad, sculpt runs entirely client-side — no server dependency, safe to expose. Paint Vertex, Select Face, TRELLIS-2 retexture, Blender, Show-in-folder buttons stay hidden (each for its own reason — see updated comment in cloud-overrides.js).
 

@@ -8648,7 +8648,16 @@ function _meLoadMesh(meshPath) {
   _meUpdateUndoBtns();
 
   const loader = new GLTFLoader();
-  const url = 'file:///' + meshPath.replace(/\\/g, '/');
+  let url;
+  if (/^(?:blob|data):/i.test(meshPath)) {
+    url = meshPath; // already a usable resource URL
+  } else if (/^https?:/i.test(meshPath)) {
+    url = meshPath; // R2 or other CDN — direct fetch (CORS must be set on the bucket)
+  } else if (/^modal_[a-f0-9]+\.glb$/i.test(meshPath)) {
+    url = "/api/mesh/get?path=" + encodeURIComponent(meshPath);
+  } else {
+    url = "file:///" + String(meshPath).replace(/\\/g, "/");
+  }
   console.log('[mesh-edit] loading', url);
   fetch(url).then(r => {
     if (!r.ok) throw new Error('fetch failed: ' + r.status);
