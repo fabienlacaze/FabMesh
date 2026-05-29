@@ -1,5 +1,10 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (sculpt: persist edits to R2 on cloud)
+- Added POST /api/upload-mesh worker endpoint: accepts { base64, filename }, writes to R2 under the same user prefix as Modal-generated meshes, returns { success, path, url }.
+- Fixed saveBuffer shim in meshyAPI-cloud.js: dual-signature ({ path, base64 } uploads to R2 / { filename, buffer, mime } still triggers browser download). Returns BOTH success + ok so all callers work.
+- Sculpt save no longer fails with "Save failed: unknown" on cloud — the edited mesh appears as a new version in the mesh strip.
+
 ## 2026-05-29 (cloud: fix sculpt empty viewport)
 - `_meLoadMesh` was hardcoding `file:///` URL prefix, causing the sculpt modal to load nothing on the cloud (browsers refuse file:// from https origin). Fixed by branching on URL scheme: blob:/data: → direct, https:/http: → direct, modal_<hex>.glb → /api/mesh/get?path=, else → file:/// (desktop fallback). Cloud + desktop renderer in sync.
 

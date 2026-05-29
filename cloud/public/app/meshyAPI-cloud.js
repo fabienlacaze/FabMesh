@@ -553,14 +553,38 @@
         input.click();
       });
     },
-    saveBuffer: async ({ filename, buffer, mime } = {}) => {
+    saveBuffer: async (arg = {}) => {
+      // Sculpt-save branch: caller passes { path, base64 } -> upload GLB to R2
+      // via the worker so the edited mesh becomes a persistent HTTPS URL.
+      if (arg && arg.base64 && arg.path) {
+        try {
+          const normPath = String(arg.path).replace(/\\/g, '/');
+          const segs = normPath.split('/');
+          const filename = segs.pop() || ('mesh_' + Date.now() + '.glb');
+          const resp = await fetch('/api/upload-mesh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ base64: arg.base64, filename })
+          });
+          const r = await resp.json().catch(() => ({}));
+          if (!r || !r.success) {
+            return { success: false, error: (r && r.error) || 'upload failed' };
+          }
+          return { success: true, ok: true, path: r.path, url: r.url };
+        } catch (e) {
+          return { success: false, error: String(e) };
+        }
+      }
+      // Legacy export-download branch: { filename, buffer, mime } -> browser download.
+      const { filename, buffer, mime } = arg;
       const blob = new Blob([buffer], { type: mime || 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = filename || 'download.bin';
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return { ok: true, path: filename, downloaded: true };
+      return { success: true, ok: true, path: filename, downloaded: true };
     },
     saveImageDataUrl: async ({ dataUrl, filename, basePath, suffix } = {}) => {
       // Cloud-correct behaviour: upload the dataURL produced by the
