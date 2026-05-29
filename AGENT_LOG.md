@@ -1,5 +1,8 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (cloud: unhide Sculpt button)
+- Sculpt mesh button is now visible + clickable on the cloud UI (was hidden by CLOUD_HIDE_BUTTONS in cloud-overrides.js). With the Three.js 6-brush + symmetry implementation shipped in ea85cad, sculpt runs entirely client-side — no server dependency, safe to expose. Paint Vertex, Select Face, TRELLIS-2 retexture, Blender, Show-in-folder buttons stay hidden (each for its own reason — see updated comment in cloud-overrides.js).
+
 ## 2026-05-29 (sculpt: Grab + Inflate brushes + Symmetry X/Y/Z)
 - **HTML** `cloud/public/app/index.html` L2432 area + `src/renderer/index2.html` L2159 area: added `#me-sculpt-grab` and `#me-sculpt-inflate` buttons inside `#me-sculpt-opts`; added sibling block `#me-sym-opts` with `#me-sym-{x,y,z}` toggle buttons (kept outside the brush radio group since symmetry is orthogonal to brush type and the mode-switcher only show/hides `#me-sculpt-opts`).
 - **JS state** `cloud/public/app/index2.js` L11110 + `src/renderer/index2.js` L8523: `meState` gained `symmetryAxes:{x,y,z}` (default off), plus grab-stroke transients `grabAnchor / grabScreen / grabMesh / grabLastDelta`.
