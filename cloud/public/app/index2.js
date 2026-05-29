@@ -11109,7 +11109,7 @@ document.getElementById('at-reproject')?.addEventListener('click', async () => {
 // ============================================================
 const meState = {
   mode: 'sculpt',        // sculpt | paint | select
-  sculptMode: 'push',    // push | pull | smooth | flatten
+  sculptMode: 'push',    // push | pull | smooth | flatten | grab | inflate
   brushRadius: 0.05,
   strength: 0.5,
   color: '#ff0000',
@@ -11124,6 +11124,11 @@ const meState = {
   mouse: new THREE.Vector2(),
   undoStack: [],
   redoStack: [],
+  symmetryAxes: { x: false, y: false, z: false },
+  grabAnchor: null,      // mesh-local anchor point captured on pointerdown
+  grabScreen: null,      // {x,y} screen coords captured on pointerdown
+  grabMesh: null,        // mesh object the grab stroke is acting on
+  grabLastDelta: null,   // last applied local-space translation (THREE.Vector3)
 };
 
 function openMeshEdit(mode) {
@@ -11341,6 +11346,16 @@ function _meMouseDown(e) {
   meState.painting = true;
   _mePushUndo();
   meState.controls.enabled = false;
+  // Grab brush: capture anchor in mesh-local space + screen origin
+  if (meState.mode === 'sculpt' && meState.sculptMode === 'grab') {
+    const anchor = hit.point.clone();
+    hit.object.worldToLocal(anchor);
+    meState.grabAnchor = anchor;
+    meState.grabScreen = { x: e.clientX, y: e.clientY };
+    meState.grabMesh = hit.object;
+    meState.grabLastDelta = new THREE.Vector3(0, 0, 0);
+    return; // no immediate translation; movement drives the brush
+  }
   _meApplyBrush(hit);
 }
 
@@ -11361,6 +11376,11 @@ function _meMouseMove(e) {
   const now = performance.now();
   if (now - _meLastBrushTime < 66) return;
   _meLastBrushTime = now;
+  // Grab uses screen-space delta, not raycast intersection
+  if (meState.mode === 'sculpt' && meState.sculptMode === 'grab' && meState.grabAnchor && meState.grabMesh) {
+    _meApplyGrab(e);
+    return;
+  }
   const hit = _meGetIntersection(e);
   if (hit) _meApplyBrush(hit);
 }
@@ -11369,6 +11389,10 @@ function _meMouseUp() {
   if (meState.painting) {
     meState.painting = false;
     meState.controls.enabled = true;
+    meState.grabAnchor = null;
+    meState.grabScreen = null;
+    meState.grabMesh = null;
+    meState.grabLastDelta = null;
     // Recompute normals after sculpt stroke
     meState.mesh?.traverse(c => {
       if (c.isMesh && c.geometry?._normsDirty) {
@@ -11379,51 +11403,133 @@ function _meMouseUp() {
   }
 }
 
-function _meApplyBrush(hit) {
+// Grab: translate vertices in falloff around the anchor by a camera-relative delta
+function _meApplyGrab(e) {
+  const mesh = meState.grabMesh;
+  if (!mesh) return;
+  const geom = mesh.geometry;
+  const pos = geom.attributes.position;
+  const canvas = document.getElementById('me-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const sdx = (e.clientX - meState.grabScreen.x);
+  const sdy = (e.clientY - meState.grabScreen.y);
+  // Convert pixel delta to world units roughly proportional to current view
+  const sens = (meState.brushRadius * 4) / Math.max(40, rect.width * 0.25);
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  meState.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
+  const worldDelta = right.multiplyScalar(sdx * sens).add(up.multiplyScalar(-sdy * sens));
+  // Express delta in mesh local space (direction only; ignore translation)
+  const localDelta = worldDelta.clone();
+  const m = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+  // Strip translation: transform as a direction
+  localDelta.transformDirection(m);
+  // Scale by the inverse of mesh world scale magnitude so delta keeps real length
+  const ws = new THREE.Vector3();
+  mesh.getWorldScale(ws);
+  const avgScale = (Math.abs(ws.x) + Math.abs(ws.y) + Math.abs(ws.z)) / 3 || 1;
+  localDelta.multiplyScalar(worldDelta.length() / (localDelta.length() * avgScale || 1));
+  // Incremental delta vs previous frame so vertices don't jitter
+  const inc = localDelta.clone().sub(meState.grabLastDelta);
+  meState.grabLastDelta = localDelta;
+  const anchor = meState.grabAnchor;
+  const r = meState.brushRadius;
+  const rSq = r * r;
+  const strength = meState.strength;
+  for (let i = 0; i < pos.count; i++) {
+    const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+    const dx = vx - anchor.x, dy = vy - anchor.y, dz = vz - anchor.z;
+    if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+    const distSq = dx * dx + dy * dy + dz * dz;
+    if (distSq > rSq) continue;
+    const dist = Math.sqrt(distSq);
+    const falloff = 1 - (dist / r);
+    const w = falloff * falloff * strength;
+    pos.setXYZ(i, vx + inc.x * w, vy + inc.y * w, vz + inc.z * w);
+  }
+  pos.needsUpdate = true;
+  geom._normsDirty = true;
+}
+
+// Apply brush body at a (possibly mirrored) local-space point.
+// Push/pull/smooth/flatten use the same math as before so behaviour is byte-identical
+// when no symmetry axis is enabled.
+function _applyBrushAt(hit, point) {
   const geom = hit.object.geometry;
   const pos = geom.attributes.position;
   const normals = geom.attributes.normal;
-  const point = hit.point.clone();
-  hit.object.worldToLocal(point);
-
   const r = meState.brushRadius;
   const rSq = r * r;
   const strength = meState.strength;
   const px = point.x, py = point.y, pz = point.z;
+  for (let i = 0; i < pos.count; i++) {
+    const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+    const dx = vx - px, dy = vy - py, dz = vz - pz;
+    // Fast bounding box reject
+    if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+    const distSq = dx * dx + dy * dy + dz * dz;
+    if (distSq > rSq) continue;
+    const dist = Math.sqrt(distSq);
+    const falloff = 1 - (dist / r);
+    const amount = falloff * falloff * strength * 0.01;
+
+    if (meState.sculptMode === 'push' || meState.sculptMode === 'pull') {
+      const nx = normals.getX(i), ny = normals.getY(i), nz = normals.getZ(i);
+      const dir = meState.sculptMode === 'push' ? 1 : -1;
+      pos.setXYZ(i, vx + nx * amount * dir, vy + ny * amount * dir, vz + nz * amount * dir);
+    } else if (meState.sculptMode === 'smooth') {
+      // Move vertex toward local average (simplified)
+      pos.setXYZ(i, vx * (1 - amount * 0.5) + point.x * amount * 0.5,
+                    vy * (1 - amount * 0.5) + point.y * amount * 0.5,
+                    vz * (1 - amount * 0.5) + point.z * amount * 0.5);
+    } else if (meState.sculptMode === 'flatten') {
+      // Project vertex onto the plane defined by hit point + hit normal
+      const hn = hit.face.normal.clone();
+      hit.object.worldToLocal(hn.add(hit.point)).sub(point);
+      const d = dx * hn.x + dy * hn.y + dz * hn.z;
+      pos.setXYZ(i, vx - hn.x * d * amount, vy - hn.y * d * amount, vz - hn.z * d * amount);
+    } else if (meState.sculptMode === 'inflate') {
+      // Expand along vertex normal; negative strength deflates via slider sign
+      const nx = normals.getX(i), ny = normals.getY(i), nz = normals.getZ(i);
+      pos.setXYZ(i, vx + nx * amount, vy + ny * amount, vz + nz * amount);
+    }
+  }
+  pos.needsUpdate = true;
+  // Defer normal recompute to mouseup (expensive)
+  geom._normsDirty = true;
+}
+
+function _meApplyBrush(hit) {
+  const point = hit.point.clone();
+  hit.object.worldToLocal(point);
 
   if (meState.mode === 'sculpt') {
-    for (let i = 0; i < pos.count; i++) {
-      const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - px, dy = vy - py, dz = vz - pz;
-      // Fast bounding box reject
-      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
-      const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq > rSq) continue;
-      const dist = Math.sqrt(distSq);
-      const falloff = 1 - (dist / r);
-      const amount = falloff * falloff * strength * 0.01;
-
-      if (meState.sculptMode === 'push' || meState.sculptMode === 'pull') {
-        const nx = normals.getX(i), ny = normals.getY(i), nz = normals.getZ(i);
-        const dir = meState.sculptMode === 'push' ? 1 : -1;
-        pos.setXYZ(i, vx + nx * amount * dir, vy + ny * amount * dir, vz + nz * amount * dir);
-      } else if (meState.sculptMode === 'smooth') {
-        // Move vertex toward local average (simplified)
-        pos.setXYZ(i, vx * (1 - amount * 0.5) + point.x * amount * 0.5,
-                      vy * (1 - amount * 0.5) + point.y * amount * 0.5,
-                      vz * (1 - amount * 0.5) + point.z * amount * 0.5);
-      } else if (meState.sculptMode === 'flatten') {
-        // Project vertex onto the plane defined by hit point + hit normal
-        const hn = hit.face.normal.clone();
-        hit.object.worldToLocal(hn.add(hit.point)).sub(point);
-        const d = dx * hn.x + dy * hn.y + dz * hn.z;
-        pos.setXYZ(i, vx - hn.x * d * amount, vy - hn.y * d * amount, vz - hn.z * d * amount);
+    if (meState.sculptMode === 'grab') return; // grab is driven by _meApplyGrab
+    _applyBrushAt(hit, point);
+    // Symmetry: mirror the brush LOCATION in mesh local space, reapply per enabled axis
+    const ax = meState.symmetryAxes;
+    if (ax.x || ax.y || ax.z) {
+      const combos = [];
+      if (ax.x) combos.push({ x: -1, y: 1, z: 1 });
+      if (ax.y) combos.push({ x: 1, y: -1, z: 1 });
+      if (ax.z) combos.push({ x: 1, y: 1, z: -1 });
+      if (ax.x && ax.y) combos.push({ x: -1, y: -1, z: 1 });
+      if (ax.x && ax.z) combos.push({ x: -1, y: 1, z: -1 });
+      if (ax.y && ax.z) combos.push({ x: 1, y: -1, z: -1 });
+      if (ax.x && ax.y && ax.z) combos.push({ x: -1, y: -1, z: -1 });
+      for (const c of combos) {
+        const mp = point.clone();
+        mp.x *= c.x; mp.y *= c.y; mp.z *= c.z;
+        _applyBrushAt(hit, mp);
       }
     }
-    pos.needsUpdate = true;
-    // Defer normal recompute to mouseup (expensive)
-    geom._normsDirty = true;
   } else if (meState.mode === 'paint') {
+    const geom = hit.object.geometry;
+    const pos = geom.attributes.position;
+    const r = meState.brushRadius;
+    const rSq = r * r;
+    const strength = meState.strength;
+    const px = point.x, py = point.y, pz = point.z;
     // Ensure vertex colors exist
     if (!geom.attributes.color) {
       const colors = new Float32Array(pos.count * 3).fill(1);
@@ -11452,7 +11558,11 @@ function _meApplyBrush(hit) {
     colorAttr.needsUpdate = true;
   } else if (meState.mode === 'select') {
     // Highlight face
-    const faceIndex = hit.faceIndex;
+    const geom = hit.object.geometry;
+    const pos = geom.attributes.position;
+    const r = meState.brushRadius;
+    const rSq = r * r;
+    const px = point.x, py = point.y, pz = point.z;
     if (!geom.attributes.color) {
       const colors = new Float32Array(pos.count * 3).fill(0.7);
       geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -11495,10 +11605,18 @@ document.getElementById('me-undo')?.addEventListener('click', _meUndo);
   });
 });
 // Sculpt sub-modes
-['push', 'pull', 'smooth', 'flatten'].forEach(sm => {
+['push', 'pull', 'smooth', 'flatten', 'grab', 'inflate'].forEach(sm => {
   document.getElementById('me-sculpt-' + sm)?.addEventListener('click', () => {
     meState.sculptMode = sm;
-    ['push', 'pull', 'smooth', 'flatten'].forEach(s => document.getElementById('me-sculpt-' + s)?.classList.toggle('tool-active', s === sm));
+    ['push', 'pull', 'smooth', 'flatten', 'grab', 'inflate'].forEach(s => document.getElementById('me-sculpt-' + s)?.classList.toggle('tool-active', s === sm));
+  });
+});
+// Symmetry toggles
+['x', 'y', 'z'].forEach(axis => {
+  const btn = document.getElementById('me-sym-' + axis);
+  btn?.addEventListener('click', () => {
+    meState.symmetryAxes[axis] = !meState.symmetryAxes[axis];
+    btn.classList.toggle('tool-active', meState.symmetryAxes[axis]);
   });
 });
 // Sliders

@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (sculpt: Grab + Inflate brushes + Symmetry X/Y/Z)
+- **HTML** `cloud/public/app/index.html` L2432 area + `src/renderer/index2.html` L2159 area: added `#me-sculpt-grab` and `#me-sculpt-inflate` buttons inside `#me-sculpt-opts`; added sibling block `#me-sym-opts` with `#me-sym-{x,y,z}` toggle buttons (kept outside the brush radio group since symmetry is orthogonal to brush type and the mode-switcher only show/hides `#me-sculpt-opts`).
+- **JS state** `cloud/public/app/index2.js` L11110 + `src/renderer/index2.js` L8523: `meState` gained `symmetryAxes:{x,y,z}` (default off), plus grab-stroke transients `grabAnchor / grabScreen / grabMesh / grabLastDelta`.
+- **JS dispatcher**: refactored `_meApplyBrush` so push/pull/smooth/flatten/inflate share a `_applyBrushAt(hit, point)` helper. Sculpt path now calls the helper once at the hit point, then once per enabled symmetry combo with the local-space point mirrored on the requested axes (covers single, double and triple-axis combinations). Push/pull/smooth/flatten math is unchanged — byte-identical when no symmetry is on.
+- **Inflate**: expand along vertex normal (`vx + nx*amount`) using the existing `falloff^2 * strength * 0.01` weighting.
+- **Grab**: requires pointer tracking, so it bypasses `_applyBrushAt`. `_meMouseDown` captures `hit.point` in mesh-local space + screen origin + the target mesh. `_meMouseMove` calls a dedicated `_meApplyGrab(e)` that projects the pixel delta through camera basis (right/up from `camera.matrixWorld`), converts to mesh local space (direction transform + world-scale compensation), and translates affected vertices by the *incremental* delta vs previous frame (so the brush feels like dragging, not jumping). `_meMouseUp` clears the stroke transients.
+- **Bindings**: brush radio array extended to `['push','pull','smooth','flatten','grab','inflate']`; new `['x','y','z']` loop wires the symmetry toggle buttons with `.tool-active` feedback.
+- **Parity**: cloud + desktop renderer files edited in lockstep.
+
 ## 2026-05-29 (preset: avion/bateau iter3 — single-view only)
 - User reported chimera mesh on aircraft (banana fuselage, extra horizontal stab, extra dorsal engine). Root cause: sheet-pipeline back-view (IP-Adapter Plus) hallucinates geometry inconsistent with front view; TRELLIS fuses front + inconsistent back into a chimera.
 - Iter 3 disables AUTO back-view generation for avion + bateau via AUTO_BACKVIEW_SKIP set. TRELLIS now runs single-view (front only) for these two types and infers the back from its training distribution.
