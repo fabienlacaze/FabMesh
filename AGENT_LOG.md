@@ -1,5 +1,9 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (sculpt: fix save path + add job popup)
+- Fixed sculpt save 404 on cloud: caller was unshifting the locally-built path (mesh/<orig>_edited_<ts>.glb) into p.meshes, but the worker writes to <userid>/edited/<name>_<ts>.glb (per-user scope) and returns its actual URL in r.url. Now the caller uses r.url (with fallback to r.path then locally-built path for desktop compat).
+- Replaced 2-second "Saving new version..." toast with a proper job entry in the jobs bubble (kind: mesh_edit) — user sees a progress popup like for mesh generation, transitioning to done/error.
+
 ## 2026-05-29 (sculpt: persist edits to R2 on cloud)
 - Added POST /api/upload-mesh worker endpoint: accepts { base64, filename }, writes to R2 under the same user prefix as Modal-generated meshes, returns { success, path, url }.
 - Fixed saveBuffer shim in meshyAPI-cloud.js: dual-signature ({ path, base64 } uploads to R2 / { filename, buffer, mime } still triggers browser download). Returns BOTH success + ok so all callers work.
