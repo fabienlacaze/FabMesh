@@ -1,5 +1,11 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (avion/bateau preset tuning — back-view prompt + front prompt + rectify off)
+- **Why**: passenger-aircraft inputs were producing back views that diverged from the front (sheet pipeline IP-Adapter Plus inventing a second front-facing plane instead of the actual stern). Front prompt was also too weak — no anti-duplicate tokens, no "ONE", no white background. Auto-rectify was running with `mode: 'iso'` which re-angles swept wings + long fuselage.
+- **A — back-view prompt hints injected** in `cloud/src/worker.ts` (~L3562): added `BACK_VIEW_PROMPT_HINTS` map keyed by asset_type; `avion` → rear-three-quarter prompt with "tail fin and rear engines and rear fuselage clearly visible … ONE aircraft only, no second plane"; `bateau` → "stern view … transom and rear hull and rear deck clearly visible … ONE boat only". Previously `promptHint: ''` was hardcoded for all hard-surface asset_types — the 2026-05-29 AGENT_LOG line about "multi-view back-prompts wired" referred to the front prompts only.
+- **B — front prompts hardened** in `cloud/public/app/index2.js:3773-3774` + `src/renderer/index2.js:3480-3481`: replaced weak "A detailed aircraft …" / "A detailed ship or boat …" with the proven vehicle pattern (`ONE … only, single instance, 3/4 isometric, plain white background, no shadows, no clouds/water/horizon, no duplicate`).
+- **C — auto-rectify OFF for avion/bateau**. In `cloud/public/app/index2.js:1193-1210` and added matching entries in `src/renderer/index2.js` `ASSET_OPTIONS_PROFILE` (previously fell back to `custom` which has rectify ON). Rationale: `isOrganic ? 'front' : 'iso'` at `worker.ts:3521` forced ISO 3/4 regen which distorts aerodynamic proportions; opt-out is cleaner than threading a 3-way rectify-mode through right now.
+
 ## 2026-05-29 (UX: style dropdown grouped)
 - Style dropdown options now grouped with <optgroup>: Realistic (Realistic, PBR), Stylized (Stylized mid-poly, Cartoon, Anime, Painterly), Retro (Low-poly, Pixel art, Voxel), Other (Custom). Same option values, no behaviour change.
 

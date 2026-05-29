@@ -3559,24 +3559,34 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
                        || input.asset_type === 'prop'
                        || input.asset_type === 'avion'
                        || input.asset_type === 'bateau';
+    // Per-asset_type back-view prompt hints. Empty string = generic
+    // "back view, same subject" fallback baked into the Modal endpoint.
+    // Avion/Bateau need explicit rear-geometry tokens because the sheet
+    // pipeline's IP-Adapter Plus otherwise lets the model invent a second
+    // front-facing aircraft / a side-on boat instead of the actual stern.
+    const BACK_VIEW_PROMPT_HINTS: Record<string, string> = {
+      avion:  'rear view of the same passenger aircraft from directly behind, tail fin and rear engines and rear fuselage clearly visible, same composition same lighting same background, photorealistic, ONE aircraft only, no second plane',
+      bateau: 'stern view of the same boat from directly behind, transom and rear hull and rear deck clearly visible, same composition same lighting same background, photorealistic, ONE boat only, no second boat',
+    };
     if (input.back_view !== false && !backImageHttpsUrl
         && input.asset_type !== 'icon') {
       try {
         let autoBackUrl: string | null = null;
+        const backHint = BACK_VIEW_PROMPT_HINTS[input.asset_type] ?? '';
         if (isHardSurface && env.MODAL_SHEET_URL) {
           // Wave 2.3 — sheet dispatch.
           autoBackUrl = await callModalSheet(env, user.id, {
             frontImageUrl: frontUrl,
-            promptHint: '',
+            promptHint: backHint,
             seed: (input.seed ?? 42) + 1000,
           }, 'back-auto');
-          console.log(`[wave2.3] sheet back-view for ${input.asset_type}`);
+          console.log(`[wave2.3] sheet back-view for ${input.asset_type} hint=${backHint ? 'yes' : 'no'}`);
         } else if (isOrganic && env.MODAL_BACKVIEW_URL) {
           // Wave 2.2 — realvis dispatch (also used as creature fallback
           // until Wave 2.4 brings mvadapter).
           autoBackUrl = await callModalBackView(env, user.id, {
             frontImageUrl: frontUrl,
-            promptHint: '',
+            promptHint: backHint,
             seed: (input.seed ?? 42) + 1000,
           }, 'back-auto');
           console.log(`[wave2.2] realvis back-view for ${input.asset_type}`);
