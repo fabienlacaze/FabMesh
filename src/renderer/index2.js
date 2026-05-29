@@ -1134,6 +1134,24 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-ultra-hd':     null,   // overkill — icons stay small
     'ws-trellis2-face-fix':     null,
   },
+  avion: {
+    'ws-trellis2-rectify':      false,  // OFF: rectifier distorts swept wings + long fuselage proportions
+    'ws-trellis2-smooth':       true,   // metal panels
+    'ws-trellis2-refine':       null,   // hallucinates wear on smooth fuselage
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  bateau: {
+    'ws-trellis2-rectify':      false,  // OFF: rectifier re-angles hull/superstructure away from a clean broadside
+    'ws-trellis2-smooth':       true,   // hull paint
+    'ws-trellis2-refine':       null,   // hallucinates wear on smooth hull
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
   custom: {
     'ws-trellis2-rectify':      true,
     'ws-trellis2-smooth':       true,
@@ -3477,8 +3495,8 @@ const ASSET_TYPE_PROMPTS = {
   creature: 'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
   environment: 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
   icon: 'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
-  avion: 'A detailed aircraft, full body, side angle, isolated on a neutral background, photorealistic, even lighting.',
-  bateau: 'A detailed ship or boat, full body, side angle, isolated on a neutral background, photorealistic, even lighting.',
+  avion: 'ONE complete passenger aircraft only, single plane, only one instance, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI, no duplicate, no second plane, no formation',
+  bateau: 'ONE complete boat only, single vessel, only one instance, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI, no duplicate, no second boat',
   animal: 'A detailed animal, full body, side angle, T-pose-equivalent legs apart, isolated on a neutral background, photorealistic, even lighting.',
   custom: '',
 };
