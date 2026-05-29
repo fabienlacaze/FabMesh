@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (preset: avion/bateau iter3 — single-view only)
+- User reported chimera mesh on aircraft (banana fuselage, extra horizontal stab, extra dorsal engine). Root cause: sheet-pipeline back-view (IP-Adapter Plus) hallucinates geometry inconsistent with front view; TRELLIS fuses front + inconsistent back into a chimera.
+- Iter 3 disables AUTO back-view generation for avion + bateau via AUTO_BACKVIEW_SKIP set. TRELLIS now runs single-view (front only) for these two types and infers the back from its training distribution.
+- BACK_VIEW_PROMPT_HINTS kept (used when user manually supplies a back image).
+- All other asset_types unchanged.
+- Backup: backup-pre-modal-spend-detection-20260529-184522.
+
 ## 2026-05-29 (preset: avion/bateau pipeline fix)
 - **Context**: user reported "le mesh est cassé" on passenger-aircraft generation — back view diverged from front, sheet pipeline IP-Adapter Plus invented a second front-facing plane instead of stern, rectifier distorted swept-wing geometry.
 - **worker.ts**: added `BACK_VIEW_PROMPT_HINTS` map in `handleGenerate` (~L3562) keyed by asset_type. `avion` → "rear view of the same passenger aircraft from directly behind, tail fin and rear engines and rear fuselage clearly visible … ONE aircraft only, no second plane". `bateau` → "stern view of the same boat from directly behind, transom and rear hull and rear deck clearly visible … ONE boat only, no second boat". Previously `promptHint: ''` was hardcoded for all hard-surface types in both `callModalSheet` and `callModalBackView` paths.
