@@ -144,16 +144,24 @@
                 <div class="form-row">
                   <label>Style</label>
                   <select id="ws-asset-style">
-                    <option value="realistic" selected>Realistic</option>
-                    <option value="stylized">Stylized (mid-poly)</option>
-                    <option value="lowpoly">Low-poly</option>
-                    <option value="cartoon">Cartoon</option>
-                    <option value="anime">Anime</option>
-                    <option value="pixelart">Pixel art</option>
-                    <option value="painterly">Painterly</option>
-                    <option value="pbr">PBR (high detail)</option>
-                    <option value="voxel">Voxel</option>
-                    <option value="custom">Custom (no preset)</option>
+                    <optgroup label="Realistic">
+                      <option value="realistic" selected>Realistic</option>
+                      <option value="pbr">PBR (high detail)</option>
+                    </optgroup>
+                    <optgroup label="Stylized">
+                      <option value="stylized">Stylized (mid-poly)</option>
+                      <option value="cartoon">Cartoon</option>
+                      <option value="anime">Anime</option>
+                      <option value="painterly">Painterly</option>
+                    </optgroup>
+                    <optgroup label="Retro">
+                      <option value="lowpoly">Low-poly</option>
+                      <option value="pixelart">Pixel art</option>
+                      <option value="voxel">Voxel</option>
+                    </optgroup>
+                    <optgroup label="Other">
+                      <option value="custom">Custom (no preset)</option>
+                    </optgroup>
                   </select>
                 </div>
                 <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -743,16 +751,24 @@
           <div style="flex:1;">
             <label>Style</label>
             <select id="np-asset-style" style="width:100%;">
-              <option value="realistic" selected>Realistic</option>
-              <option value="stylized">Stylized (mid-poly)</option>
-              <option value="lowpoly">Low-poly</option>
-              <option value="cartoon">Cartoon</option>
-              <option value="anime">Anime</option>
-              <option value="pixelart">Pixel art</option>
-              <option value="painterly">Painterly</option>
-              <option value="pbr">PBR (high detail)</option>
-              <option value="voxel">Voxel</option>
-              <option value="custom">Custom (no preset)</option>
+              <optgroup label="Realistic">
+                <option value="realistic" selected>Realistic</option>
+                <option value="pbr">PBR (high detail)</option>
+              </optgroup>
+              <optgroup label="Stylized">
+                <option value="stylized">Stylized (mid-poly)</option>
+                <option value="cartoon">Cartoon</option>
+                <option value="anime">Anime</option>
+                <option value="painterly">Painterly</option>
+              </optgroup>
+              <optgroup label="Retro">
+                <option value="lowpoly">Low-poly</option>
+                <option value="pixelart">Pixel art</option>
+                <option value="voxel">Voxel</option>
+              </optgroup>
+              <optgroup label="Other">
+                <option value="custom">Custom (no preset)</option>
+              </optgroup>
             </select>
           </div>
         </div>

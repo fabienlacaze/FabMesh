@@ -1,5 +1,13 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (ux: group Style selects by category with <optgroup>)
+- Same treatment previously applied to the asset-type select, now extended to the four Style dropdowns. Flat list of 10 options is too noisy; users scan faster when realistic / stylized / retro / other are visually separated.
+- Files edited (option `value="…"` and visible text unchanged — only wrapped in `<optgroup>` + reordered):
+  - `cloud/public/app/index.html` — `#np-asset-style` (L728), `#ws-asset-style` (L146)
+  - `src/renderer/index2.html` — `#np-asset-style` (L736), `#ws-asset-style` (L137)
+- Grouping: Realistic (realistic, pbr) / Stylized (stylized, cartoon, anime, painterly) / Retro (lowpoly, pixelart, voxel) / Other (custom). `selected` stays on `realistic`.
+- Not touched: `#ws-style-menu` div-based picker (~L283) — different UI component, separate task.
+
 ## 2026-05-29 (UX: import → Edit panel + anglicise asset labels)
 - After an image import (drop on home zone or on an open project), the UI now opens the Edit selected panel showing the new version instead of the CREATE NEW generator. CREATE NEW remains accessible via its accordion header for fresh generations.
 - Asset-type dropdown labels anglicised: "Avion (vehicle)" → "Plane", "Bateau (vehicle)" → "Boat". Underlying `value="avion"` / `value="bateau"` unchanged — existing projects keep working.
