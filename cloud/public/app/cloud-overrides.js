@@ -500,18 +500,18 @@
     'ws-mesh-retexture-btn':    1,   // Wave 4.2 (atlas swap)
   };
 
-  // Buttons we hide on cloud because they need a Three.js sculpting /
-  // selection editor in the browser (gros chantier, Wave 5+ if ever).
-  // Better to remove the affordance than show a "Desktop-only" toast
-  // on every click.
+  // Buttons we hide on cloud. Note: `ws-mesh-sculpt-btn` is now ENABLED
+  // on cloud as of 2026-05-29 (ea85cad shipped a client-side Three.js
+  // sculpt modal with 6 brushes Push/Pull/Smooth/Flatten/Grab/Inflate
+  // + X/Y/Z symmetry — runs in the browser, no server dep).
+  // Each remaining ID is kept hidden for its own reason below.
   const CLOUD_HIDE_BUTTONS = [
-    'ws-mesh-sculpt-btn',
-    'ws-mesh-paintvert-btn',
-    'ws-mesh-selectface-btn',
-    'ws-mesh-trellis2-btn',  // full TRELLIS-2 retexture — explained in shim error
+    'ws-mesh-paintvert-btn',   // vertex paint — still WIP UX-wise
+    'ws-mesh-selectface-btn',  // face selection is useless without delete-faces (not landed yet)
+    'ws-mesh-trellis2-btn',    // desktop-only TRELLIS-2 retexture path
     // "Open in Blender" / "Show in folder" only work on Desktop where
     // we can spawn `blender` and reveal the file on the user's FS.
-    // In the browser they'd 404; just hide them on cloud.
+    // Browser cannot do either; just hide them on cloud.
     'ws-mesh-blender-btn',
     'ws-mesh-folder-btn',
     'ws-rig-blender-btn',
