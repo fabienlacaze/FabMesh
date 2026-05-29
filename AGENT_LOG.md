@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-05-29 (ux: dropped image opens Edit panel, not CREATE NEW)
+- After drag-and-drop import of an image into an open workspace, the UI was
+  re-rendering `step-card-image` with the CREATE NEW accordion expanded and
+  red-bordered, hiding the just-added version in the collapsed Edit stage.
+- Cloud `cloud/public/app/index2.js` window drop handler (line ~15371): after
+  `populateWorkspace(proj)` in the `kind === 'image'` branch, replicate the
+  flip used by the successful image-generation path (lines 4142-4154):
+  remove `.collapsed/.disabled` on `#step-card-image`, set
+  `.stage-create open=false` + `.stage-edit open=true`, then scroll +
+  `pulse-highlight`.
+- Electron `src/renderer/index2.js` window drop handler (line ~12407): when
+  a project is open in the workspace, call `reloadCurrentProject()` and
+  apply the same Edit-flip; otherwise keep the legacy `refreshProjectsPage()`
+  path so home-zone drops still reach the New Project modal.
+- Generate button behaviour on CREATE NEW unchanged — flip only fires on
+  the post-drop branch.
+
 ## 2026-05-29 (release: Microsoft Store Submission API automation)
 - Added `scripts/submit_appx.ps1`: PowerShell automation that calls the Microsoft Store Submission API to upload + commit a new .appx submission (OAuth → fetch app state → optionally delete a pending submission → create new → swap the .appx inside the upload zip → PUT to SAS URL → commit → poll status). Supports `-DryRun`.
 - Added `docs/MS_STORE_AUTOMATION.md`: one-time Azure AD app registration walkthrough + .env wiring + troubleshooting (401/403/409/5xx).
