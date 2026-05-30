@@ -2401,11 +2401,26 @@ ipcMain.handle('list-rig-animations', (event, { templateName }) => {
   }
 });
 
-// Auto-rigging via Puppeteer (default) or UniRig fallback → swap to orc_m1 UE5 skeleton → bake anims
-ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
+// Read a target skeleton .bones.json template and return its bone count
+ipcMain.handle('read-bones-json', async (_event, targetName) => {
+  const safe = String(targetName || '').replace(/[^a-z0-9_-]/gi, '');
+  if (!safe) return { ok: false, error: 'name required' };
+  const p = path.join(__dirname, '..', '..', 'scripts', 'rig_templates', 'skm', safe + '.bones.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const bones = Array.isArray(raw.bones) ? raw.bones : [];
+    return { ok: true, count: bones.length, name: safe };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e), name: safe };
+  }
+});
+
+// Auto-rigging via Puppeteer (default) or UniRig fallback → rename to target skeleton (orc_m1 UE5 etc.) → bake anims
+ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
   const _t0 = Date.now();
   const rigEngine = engine || 'puppeteer';
-  console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} @${new Date(_t0).toISOString()}`);
+  const rigSkeleton = (skeleton || 'orc_m1').replace(/[^a-z0-9_-]/gi, '');
+  console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} skeleton=${rigSkeleton} @${new Date(_t0).toISOString()}`);
   try {
     if (!meshPath || !fs.existsSync(meshPath)) {
       return { success: false, error: 'Mesh not found' };
@@ -2500,22 +2515,28 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
     //   Step 3:  bake_procedural_anims.py bakes CC0 Idle/Walk/Run onto the
     //            renamed skeleton (lookup by exact bone name).
     // UniRig pipeline (legacy): swap_skeleton.py + bake_procedural_anims.py.
-    const puppeteerRenameScript = path.join(scriptsDir, 'puppeteer_to_orc_m1.py');
+    const puppeteerRenameScript = path.join(scriptsDir, 'puppeteer_to_skeleton.py');
+    const legacyRenameScript = path.join(scriptsDir, 'puppeteer_to_orc_m1.py');
     let step2 = { error: null, stdout: '', stderr: '' };
     let step3 = { error: null, stdout: '', stderr: '' };
 
     if (rigEngine === 'puppeteer') {
-      if (fs.existsSync(puppeteerRenameScript)) {
-        // Step 2a: rename Puppeteer joints to orc_m1 convention
-        step2 = await runStep('PuppeteerToOrcM1', [puppeteerRenameScript, tempUnirigGlb, tempSwapGlb], 'python');
+      if (rigSkeleton === 'puppeteer_raw') {
+        // Short-circuit: ship raw Puppeteer output, skip rename + bake
+        console.log('[auto-rig-ai] skeleton=puppeteer_raw, shipping raw Puppeteer GLB');
+        try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
+      } else if (fs.existsSync(puppeteerRenameScript)) {
+        // Step 2a: rename Puppeteer joints to target skeleton convention
+        step2 = await runStep('PuppeteerToSkeleton', [puppeteerRenameScript, '--target', rigSkeleton, tempUnirigGlb, tempSwapGlb], 'python');
         if (step2.error || !fs.existsSync(tempSwapGlb)) {
           // Fallback: ship raw Puppeteer output (un-renamed); anims skipped.
-          console.log('[auto-rig-ai] Step 2a (puppeteer_to_orc_m1) failed, shipping raw Puppeteer GLB');
+          console.log(`[auto-rig-ai] Step 2a (puppeteer_to_skeleton --target ${rigSkeleton}) failed, shipping raw Puppeteer GLB`);
           try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
         } else {
           // Step 3: bake CC0 anims onto the renamed skeleton
-          if (fs.existsSync(bakeAnimScript)) {
-            step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, orcBones, outputGlb], 'python');
+          const skelBones = path.join(scriptsDir, 'rig_templates', 'skm', `${rigSkeleton}.bones.json`);
+          if (fs.existsSync(bakeAnimScript) && fs.existsSync(skelBones)) {
+            step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, skelBones, outputGlb], 'python');
             if (step3.error || !fs.existsSync(outputGlb)) {
               console.log('[auto-rig-ai] Step 3 (bake anims) failed on Puppeteer, falling back to non-animated rig');
               try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
@@ -2524,9 +2545,23 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
             try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
           }
         }
+      } else if (fs.existsSync(legacyRenameScript)) {
+        // Legacy fallback: orc_m1-only rename script
+        console.log('[auto-rig-ai] puppeteer_to_skeleton.py not found, falling back to legacy puppeteer_to_orc_m1.py');
+        step2 = await runStep('PuppeteerToOrcM1', [legacyRenameScript, tempUnirigGlb, tempSwapGlb], 'python');
+        if (step2.error || !fs.existsSync(tempSwapGlb)) {
+          try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
+        } else if (fs.existsSync(bakeAnimScript)) {
+          step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, orcBones, outputGlb], 'python');
+          if (step3.error || !fs.existsSync(outputGlb)) {
+            try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+          }
+        } else {
+          try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+        }
       } else {
         // Script not yet deployed: ship raw Puppeteer output as before.
-        console.log('[auto-rig-ai] puppeteer_to_orc_m1.py not found, shipping raw Puppeteer GLB');
+        console.log('[auto-rig-ai] no rename script found, shipping raw Puppeteer GLB');
         try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
       }
       // Cleanup temps

@@ -3492,6 +3492,70 @@ const ASSET_STYLE_PROMPTS = {
   custom:     '',
 };
 
+// Rig-target skeletons exposed in the Generate Rig dropdown. The Python
+// remapper (scripts/puppeteer_to_orc_m1.py) only handles orc_m1 today;
+// other entries map to bones_json templates listed in
+// scripts/rig_templates/skm/registry.json + companions on disk.
+const SKELETON_TARGETS = [
+  { value: "orc_m1",         emoji: "🤖",  label: "Humanoide bipède",        variete: "Humanoide" },
+  { value: "ue5_mannequin",  emoji: "🤖",  label: "UE5 Mannequin std",       variete: "Humanoide" },
+  { value: "zebra",          emoji: "🐎",  label: "Quadrupède équidé",       variete: "Quadrupède équidé" },
+  { value: "lion",           emoji: "🦁",  label: "Quadrupède félidé",       variete: "Quadrupède félidé" },
+  { value: "wolf",           emoji: "🐺",  label: "Quadrupède canidé",       variete: "Quadrupède canidé" },
+  { value: "crocodile",      emoji: "🐊",  label: "Reptile quadrupède",      variete: "Reptile" },
+  { value: "elephant",       emoji: "🐘",  label: "Pachyderme",              variete: "Pachyderme" },
+  { value: "deer",           emoji: "🦌",  label: "Cervidé",                 variete: "Cervidé" },
+  { value: "crow",           emoji: "🐦",  label: "Oiseau",                  variete: "Oiseau" },
+  { value: "turtle",         emoji: "🐢",  label: "Tortue",                  variete: "Tortue" },
+  { value: "spider",         emoji: "🕷️", label: "Arachnide 8-pattes",      variete: "Arachnide" },
+  { value: "bat",            emoji: "🦇",  label: "Chiroptère",              variete: "Chiroptère" },
+  { value: "dragon",         emoji: "🐉",  label: "Dragon fantastique",      variete: "Dragon" },
+  { value: "puppeteer_raw",  emoji: "⚪",  label: "Puppeteer raw (no remap)", variete: "Raw" },
+];
+
+async function populateRigSkeletonDropdown() {
+  const sel = document.getElementById('ws-rig-skeleton');
+  if (!sel) return;
+  // Build options synchronously with "?" counts so the user sees the
+  // list immediately; then patch each label with the real bone count
+  // once readBonesJson resolves (or skip if the IPC isn't wired yet).
+  sel.innerHTML = '';
+  for (const t of SKELETON_TARGETS) {
+    const opt = document.createElement('option');
+    opt.value = t.value;
+    opt.textContent = `${t.emoji} ${t.label} (loading...)`;
+    opt.dataset.variete = t.variete;
+    sel.appendChild(opt);
+  }
+  sel.value = 'orc_m1';
+  // Fetch bone counts (best-effort).
+  const hasReader = API && typeof API.readBonesJson === 'function';
+  await Promise.all(SKELETON_TARGETS.map(async (t, i) => {
+    let count = '?';
+    if (hasReader) {
+      try {
+        const data = await API.readBonesJson(t.value);
+        if (data && typeof data.bone_count === 'number') count = data.bone_count;
+        else if (data && Array.isArray(data.bones))      count = data.bones.length;
+      } catch (_) { /* fallback */ }
+    }
+    const opt = sel.options[i];
+    if (opt) opt.textContent = `${t.emoji} ${t.label} (${count} bones)`;
+  }));
+}
+
+// Populate as soon as the script runs (DOM is parsed before this point
+// because index2.js is referenced at the bottom of index2.html).
+try { populateRigSkeletonDropdown(); } catch (_) {}
+
+// Persist the selected target on the active project so it survives
+// step navigation and reload.
+document.getElementById('ws-rig-skeleton')?.addEventListener('change', (e) => {
+  if (state && state.currentProject) {
+    state.currentProject.rigTarget = e.target.value;
+  }
+});
+
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
   const stylePrefix = ASSET_STYLE_PROMPTS[assetStyle] || '';
@@ -9868,7 +9932,10 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
     }, expectedMs, { projectName: p.name });
     try {
-      const r = await API.autoRigAI({ meshPath: meshPathToUse, engine: rigEngine });
+      const skeleton = state.currentProject?.rigTarget
+        || document.getElementById('ws-rig-skeleton')?.value
+        || 'orc_m1';
+      const r = await API.autoRigAI({ meshPath: meshPathToUse, engine: rigEngine, skeleton });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
