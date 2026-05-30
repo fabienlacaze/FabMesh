@@ -165,15 +165,26 @@ def main():
         emit({'step': 'xformers-optional', 'pct': 99, 'done': False,
               'warn': f'xformers install failed ({e}) — falling back to SDPA'})
 
-    # Step 2d: OPTIONAL — flash-attn (large perf boost on long sequences).
-    # Windows wheels from Dao-AILab GitHub Releases. If unavailable for
-    # this combo, skip without erroring out.
-    try:
-        _run([py, '-m', 'pip', 'install', FLASH_ATTN_WHL],
-             step='flash-attn-optional')
-    except Exception as e:
+    # Step 2d: SKIPPED — flash-attn install disabled 2026-05-30.
+    # Windows Smart App Control (SAC) blocks flash_attn_2_cuda.dll on this
+    # target hardware and the user formally prohibited disabling SAC. The
+    # TRELLIS-2 codebase guards every `import flash_attn` behind
+    # `if config.BACKEND == 'flash_attn'`, and the Electron spawn env now
+    # forces ATTN_BACKEND=sdpa + SPARSE_ATTN_BACKEND=sdpa authoritatively,
+    # so flash_attn is never imported. The Blackwell-correct SDPA path
+    # (modules/sparse/attention/full_attn.py:214-254 fp32-math branch)
+    # produces correct results on sm_120. To re-enable, set
+    # WIZARD_INSTALL_FLASH_ATTN=1 in the env before running this script.
+    if os.environ.get('WIZARD_INSTALL_FLASH_ATTN') == '1':
+        try:
+            _run([py, '-m', 'pip', 'install', FLASH_ATTN_WHL],
+                 step='flash-attn-optional')
+        except Exception as e:
+            emit({'step': 'flash-attn-optional', 'pct': 99, 'done': False,
+                  'warn': f'flash-attn install failed ({e}) — using slower attention'})
+    else:
         emit({'step': 'flash-attn-optional', 'pct': 99, 'done': False,
-              'warn': f'flash-attn install failed ({e}) — using slower attention'})
+              'msg': 'skipped (SAC-blocked; sdpa backend is authoritative)'})
 
     emit({'step': 'done', 'pct': 100, 'done': True})
 
