@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (rigging: MagicArticulate bridge scaffolding)
+- Added scripts/magicarticulate_bridge.py — Apache-2.0 replacement for UniRig (4.6 GB VRAM confirmed by upstream, 1-2 s/mesh, non-humanoid supported). Mirrors unirig_bridge.py CLI contract.
+- main.js auto-rig-ai handler now defaults to magicarticulate engine; unirig stays as explicit fallback.
+- UI dropdown #ws-rig-engine now offers both engines, magicarticulate first.
+- REQUIRED USER ACTION before first use: clone Seed3D/MagicArticulate to external/MagicArticulate/ + create venv + pip install (see top-of-file comment in the new bridge script for exact commands).
+- Cloud is unaffected (rig step hidden via cloud-overrides.js).
+
 ## 2026-05-30 (cloud: hide Rig step entirely)
 - Step 3 Rig card (`#step-card-rig`) is now hidden via `hideById` in cloud-overrides.js. The "Under construction" overlay was retired with it — no need to mask a section that is not present at all. Rationale: rigging is being debugged on the desktop build (free, local stack), so the cloud surface should not show a non-functional Step 3.
 

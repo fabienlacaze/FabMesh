@@ -2401,10 +2401,10 @@ ipcMain.handle('list-rig-animations', (event, { templateName }) => {
   }
 });
 
-// Auto-rigging via UniRig AI model → swap to orc_m1 UE5 skeleton (2-step pipeline)
+// Auto-rigging via MagicArticulate (default) or UniRig fallback → swap to orc_m1 UE5 skeleton → bake anims
 ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
   const _t0 = Date.now();
-  const rigEngine = engine || 'unirig';
+  const rigEngine = engine || 'magicarticulate';
   console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} @${new Date(_t0).toISOString()}`);
   try {
     if (!meshPath || !fs.existsSync(meshPath)) {
@@ -2416,28 +2416,57 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
     const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
 
     // ------------------------------------------------------------------
-    // LOCAL: UniRig pipeline (3 steps: unirig -> swap_skeleton -> bake anims)
+    // Step-1 bridge selection: MagicArticulate (default) or UniRig (fallback)
+    // Both bridges share the same CLI contract: <mesh_path> <output_glb>
+    // Step-2 (swap_skeleton) and Step-3 (bake_procedural_anims) are shared.
     // ------------------------------------------------------------------
     const unirigScript = path.join(scriptsDir, 'unirig_bridge.py');
+    const magicArtScript = path.join(scriptsDir, 'magicarticulate_bridge.py');
     const swapScript = path.join(scriptsDir, 'swap_skeleton.py');
     const bakeAnimScript = path.join(scriptsDir, 'bake_procedural_anims.py');
     const orcBones = path.join(scriptsDir, 'rig_templates', 'skm', 'orc_m1.bones.json');
-    if (!fs.existsSync(unirigScript)) {
-      return { success: false, error: 'unirig_bridge.py not found' };
+    const magicArtVenvPython = path.join(__dirname, '..', '..', 'external', 'MagicArticulate', 'venv', 'Scripts', 'python.exe');
+
+    // Resolve step-1 bridge + python interpreter based on selected engine
+    let step1Script;
+    let step1Python = 'python';
+    let step1Label;
+    let engineSuffix;
+    if (rigEngine === 'unirig') {
+      // Legacy path: bridge handles its own venv switching internally
+      if (!fs.existsSync(unirigScript)) {
+        return { success: false, error: 'unirig_bridge.py not found' };
+      }
+      step1Script = unirigScript;
+      step1Label = 'UniRig';
+      engineSuffix = 'unirig';
+    } else {
+      // Default: MagicArticulate
+      if (!fs.existsSync(magicArtScript)) {
+        return { success: false, error: 'magicarticulate_bridge.py not found' };
+      }
+      if (!fs.existsSync(magicArtVenvPython)) {
+        return { success: false, error: 'MagicArticulate venv not found at external/MagicArticulate/venv. Please run the MagicArticulate setup step.' };
+      }
+      step1Script = magicArtScript;
+      step1Python = magicArtVenvPython;
+      step1Label = 'MagicArticulate';
+      engineSuffix = 'magicart';
     }
+
     if (!fs.existsSync(swapScript)) {
       return { success: false, error: 'swap_skeleton.py not found' };
     }
     const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
     const rigTs = Date.now();
-    const tempUnirigGlb = path.join(MESHES_DIR, `${baseName}_unirig_temp_${rigTs}.glb`);
+    const tempUnirigGlb = path.join(MESHES_DIR, `${baseName}_${engineSuffix}_temp_${rigTs}.glb`);
     const tempSwapGlb = path.join(MESHES_DIR, `${baseName}_swap_temp_${rigTs}.glb`);
-    const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_unirig_${rigTs}.glb`);
+    const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_${engineSuffix}_${rigTs}.glb`);
 
     // Helper: run a python script and stream progress
-    const runStep = (label, args) => new Promise((resolve) => {
+    const runStep = (label, args, pythonBin) => new Promise((resolve) => {
       safeSend('ai3d-progress', `[${label}] Starting...`);
-      const proc = execFile('python', args, {
+      const proc = execFile(pythonBin || 'python', args, {
         timeout: 600000,
         maxBuffer: 50 * 1024 * 1024,
       }, (error, stdout, stderr) => {
@@ -2448,8 +2477,8 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
       proc.on('error', e => resolve({ error: e, stdout: '', stderr: '' }));
     });
 
-    // Step 1: UniRig skeleton + skin prediction (34 bones) → temp GLB
-    const step1 = await runStep('UniRig', [unirigScript, meshPath, tempUnirigGlb]);
+    // Step 1: AI skeleton+skin prediction → temp GLB (engine-dependent)
+    const step1 = await runStep(step1Label, [step1Script, meshPath, tempUnirigGlb], step1Python);
     if (step1.error || !fs.existsSync(tempUnirigGlb)) {
       const dur = ((Date.now() - _t0) / 1000).toFixed(2);
       console.log(`[auto-rig-ai] Step 1 FAILED duration=${dur}s`);
@@ -2459,7 +2488,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
           `[${new Date().toISOString()}] auto-rig-ai step1 (duration=${dur}s)\nmesh: ${meshPath}\n\n=== STDOUT ===\n${step1.stdout || ''}\n\n=== STDERR ===\n${step1.stderr || ''}\n`
         );
       } catch (_e) {}
-      const errMsg = extractErrorDetail(step1) || (step1.error && step1.error.message) || 'UniRig failed - no output';
+      const errMsg = extractErrorDetail(step1) || (step1.error && step1.error.message) || `${step1Label} failed - no output`;
       return { success: false, error: errMsg, stdout: step1.stdout, stderr: step1.stderr };
     }
 
