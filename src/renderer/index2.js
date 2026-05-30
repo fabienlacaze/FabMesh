@@ -3493,7 +3493,7 @@ const ASSET_TYPE_PROMPTS = {
   icon: 'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
   avion: 'ONE complete passenger aircraft only, single plane, only one instance, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI, no duplicate, no second plane, no formation',
   bateau: 'ONE complete boat only, single vessel, only one instance, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI, no duplicate, no second boat',
-  animal: 'A detailed animal, full body, side angle, T-pose-equivalent legs apart, isolated on a neutral background, photorealistic, even lighting.',
+  animal: 'ONE animal only, single creature, only one instance, isolated, full body, all four legs on the ground, natural quadruped standing pose, side angle profile view, plain white background, even studio lighting, no shadows, no human stance, no T-pose, no upright posture, centered, clean silhouette, no text, no UI, no duplicate, no second animal',
   custom: '',
 };
 
