@@ -58,6 +58,11 @@ export interface Env {
   // URL is empty/unset so we can disable Modal instantly without redeploy.
   MODAL_TEXT2IMAGE_URL?: string;
   MODAL_BACKVIEW_URL?: string;
+  // Wave 2.4 — 6-view orthographic MV-Adapter (SDXL i2mv). Used for
+  // creature/animal asset types when set. Returns a JSON manifest with
+  // 6 R2 URLs (front/right/back/left/top-3q/bottom-3q). Falls back to
+  // MODAL_BACKVIEW_URL when unset, preserving Wave 2.2 behavior.
+  MODAL_MVADAPTER_URL?: string;
   // Strict T-pose front generation (verbatim port of generate_front_tpose.py).
   // Shares the back-view container's RealVisXL + ControlNet OpenPose +
   // IPAdapter snapshot, so cold start ≈ back-view (~30-40s).
@@ -3707,7 +3712,9 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         && !AUTO_BACKVIEW_SKIP.has(input.asset_type)) {
       try {
         let autoBackUrl: string | null = null;
+        let autoMVViews: string[] = [];
         const backHint = BACK_VIEW_PROMPT_HINTS[input.asset_type] ?? '';
+        const isMVACandidate = input.asset_type === 'creature' || input.asset_type === 'animal';
         if (isHardSurface && env.MODAL_SHEET_URL) {
           // Wave 2.3 — sheet dispatch.
           autoBackUrl = await callModalSheet(env, user.id, {
@@ -3716,9 +3723,22 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
             seed: (input.seed ?? 42) + 1000,
           }, 'back-auto');
           console.log(`[wave2.3] sheet back-view for ${input.asset_type} hint=${backHint ? 'yes' : 'no'}`);
+        } else if (isMVACandidate && env.MODAL_MVADAPTER_URL) {
+          // Wave 2.4 — MV-Adapter dispatch (6 orthographic views) for
+          // creature/animal. Stores the BACK view in autoBackUrl for
+          // TRELLIS multiref compat; the full 6-view manifest lives in
+          // autoMVViews for future TRELLIS-2 multi-view conditioning.
+          const mv = await callModalMVAdapter(env, user.id, {
+            frontImageUrl: frontUrl,
+            promptHint: backHint,
+            seed: (input.seed ?? 42) + 1000,
+          }, 'mv-auto');
+          autoBackUrl = mv.back;
+          autoMVViews = mv.views;
+          console.log(`[wave2.4] mvadapter 6-view for ${input.asset_type} views=${mv.views.length}`);
         } else if (isOrganic && env.MODAL_BACKVIEW_URL) {
-          // Wave 2.2 — realvis dispatch (also used as creature fallback
-          // until Wave 2.4 brings mvadapter).
+          // Wave 2.2 — realvis dispatch (character + fallback for
+          // creature/animal when MVAdapter URL is unset).
           autoBackUrl = await callModalBackView(env, user.id, {
             frontImageUrl: frontUrl,
             promptHint: backHint,
@@ -3733,6 +3753,12 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
           // was decided BEFORE we generated the back — force it on now
           // that we have 2 views.
           input.multiref = true;
+          // Wave 2.4 — when MVAdapter populated 6 views, expose them on
+          // the input so the Modal mesh-gen call can forward them to
+          // TRELLIS-2 multi-view conditioning (no-op for TRELLIS-1).
+          if (autoMVViews.length === 6) {
+            (input as any).mv_views = autoMVViews;
+          }
         }
       } catch (e: unknown) {
         console.warn(`[wave2.x] auto back-view failed, falling back to single-view: ${e instanceof Error ? e.message : String(e)}`);
@@ -4607,6 +4633,76 @@ async function callModalBackView(env: Env, userId: string, input: {
     return `${env.R2_PUBLIC_URL}/${key}`;
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal back-view output');
+}
+
+/** Modal MV-Adapter endpoint — 6 orthographic views (front/right/back/
+ *  left/top-3q/bottom-3q) generated from a single front reference by
+ *  SDXL-base + MV-Adapter i2mv-sdxl LoRA-style custom adapter.
+ *  Different output schema from back-view: returns JSON {views: [6 urls]}
+ *  instead of raw PNG bytes, because the Modal side already persists each
+ *  view to R2 (Worker can't usefully mirror 6 separate PNG bodies in one
+ *  HTTP response under the 100 MB Cloudflare limit anyway).
+ *  Falls back behaviour: caller falls back to callModalBackView when
+ *  MODAL_MVADAPTER_URL is unset; this helper THROWS if called without it. */
+async function callModalMVAdapter(env: Env, userId: string, input: {
+  frontImageUrl: string;
+  promptHint?: string;
+  seed?: number;
+  steps?: number;
+  guidance?: number;
+  size?: number;
+}, folder: string): Promise<{ back: string; views: string[] }> {
+  const url = env.MODAL_MVADAPTER_URL;
+  const secret = env.MODAL_SHARED_SECRET;
+  if (!url) throw new Error('MODAL_MVADAPTER_URL not set');
+  if (!secret) throw new Error('MODAL_SHARED_SECRET not set');
+
+  const t0 = Date.now();
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _auth: secret,
+      front_image_url: input.frontImageUrl,
+      prompt_hint: input.promptHint ?? '',
+      seed: input.seed ?? 1234,
+      steps: input.steps ?? 50,
+      guidance: input.guidance ?? 4.5,
+      size: input.size ?? 768,
+      user_id: userId,
+      folder,
+    }),
+    // 6× SDXL passes with cpu_offload on L40S ≈ 90-180s. Give 7 min
+    // ceiling (matches sheet timeout; well under the 600s Modal cap).
+    signal: AbortSignal.timeout(420_000),
+  });
+  if (!r.ok) {
+    throw new Error(`Modal mvadapter HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  }
+
+  // Expected response shape (Modal side persists to R2 and returns URLs):
+  // { views: [front, right, back, left, top, bottom],
+  //   engine: 'mvadapter',
+  //   azim_elev: [[0,0],[90,0],[180,0],[270,0],[0,60],[0,-60]] }
+  // View order matches VIEW_SLOTS in scripts/multiview_mvadapter_gen.py.
+  const payload = await r.json() as {
+    views?: string[];
+    engine?: string;
+    error?: string;
+  };
+  if (payload.error) {
+    throw new Error(`Modal mvadapter error: ${payload.error}`);
+  }
+  const views = Array.isArray(payload.views) ? payload.views : [];
+  if (views.length !== 6) {
+    throw new Error(`Modal mvadapter expected 6 views, got ${views.length}`);
+  }
+  const back = views[2]; // VIEW_SLOTS[2] = (180, 0) = back
+  if (!back || typeof back !== 'string') {
+    throw new Error('Modal mvadapter: back view (index 2) missing/invalid');
+  }
+  console.log(`[modal] mvadapter dt=${Date.now() - t0}ms views=${views.length} back=${back.slice(-40)}`);
+  return { back, views };
 }
 
 /** Strict T-pose FRONT generation — verbatim port of the desktop's
