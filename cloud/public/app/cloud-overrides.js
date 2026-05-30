@@ -271,6 +271,11 @@
     hideById('set-open-logs');
     hideById('set-live-logs');
 
+    // Rigging is debugged on the desktop build (free, local). Hide the
+    // whole Step 3 Rig card on cloud — no need for the under-construction
+    // overlay since the section itself is gone.
+    hideById('step-card-rig');
+
     // Defensive — if the Control API box ends up outside the AI Assistant
     // section in a future refactor, hide it explicitly too.
     hideById('set-control-api-box');

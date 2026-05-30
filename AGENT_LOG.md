@@ -1,5 +1,8 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (cloud: hide Rig step entirely)
+- Step 3 Rig card (`#step-card-rig`) is now hidden via `hideById` in cloud-overrides.js. The "Under construction" overlay was retired with it — no need to mask a section that is not present at all. Rationale: rigging is being debugged on the desktop build (free, local stack), so the cloud surface should not show a non-functional Step 3.
+
 ## 2026-05-30 (cleanup: Meshy.ai external integration removed)
 
 - Deleted scripts/meshy_bridge.py (273 lines — paid external service, https://api.meshy.ai).
