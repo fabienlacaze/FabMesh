@@ -68,8 +68,21 @@ import modal
 # Control is Windows-only.
 # ---------------------------------------------------------------------------
 image = (
-    modal.Image.debian_slim(python_version="3.10")
+    # nvidia/cuda:12.8.1-devel includes nvcc (CUDA compiler) which is
+    # REQUIRED for flash-attn's source build. debian_slim only has CUDA
+    # runtime libs (no nvcc) -> flash-attn build fails with
+    # "CUDA_HOME environment variable is not set".
+    modal.Image.from_registry(
+        "nvidia/cuda:12.8.1-devel-ubuntu22.04",
+        add_python="3.10",
+    )
+    .env({"CUDA_HOME": "/usr/local/cuda"})
     .apt_install(
+        # clang/clang++ — pytorch3d setup.py uses clang++ as linker even
+        # when CC/CXX are gcc/g++ (Modal's add_python="3.10" toolchain hint).
+        # Without it: "clang++: No such file or directory" at link stage
+        # after 67/67 nvcc compiles succeeded.
+        "clang",
         "git", "build-essential", "ninja-build",
         # libgl1 / libegl1 — required by bpy 4.2 even in headless mode
         # (it links against system OpenGL libs at import).
@@ -93,6 +106,15 @@ image = (
         extra_options="--index-url https://download.pytorch.org/whl/cu128",
     )
     .pip_install(
+        # Build deps required by flash-attn setup.py with --no-build-isolation:
+        # the isolated env is OFF so the BASE env must already have packaging,
+        # setuptools, wheel, ninja. Without them: ModuleNotFoundError: packaging.
+        "packaging",
+        "setuptools",
+        "wheel",
+        "ninja",
+    )
+    .pip_install(
         # flash-attn 2.7.4.post1 — first wheel with sm_120 support. On
         # Linux Modal there is no prebuilt wheel for torch 2.7 / py3.10 /
         # cu128 in PyPI, so pip builds from source. --no-build-isolation
@@ -110,13 +132,18 @@ image = (
         ),
     )
     .pip_install(
-        # pytorch3d — wheels live on the fbaipublicfiles index. We don't
-        # pin the version because their wheel index is updated rarely and
-        # the latest is always compatible with the torch we just installed.
-        "pytorch3d",
-        extra_options=(
-            "-f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/index.html"
-        ),
+        # pytorch3d build deps (compiled from git source — see next step).
+        # The fbaipublicfiles wheel index does NOT publish wheels for
+        # torch 2.7 + cu128 + py310 (only torch 2.1-2.4). Install from
+        # source against our exact torch + nvcc.
+        "fvcore", "iopath",
+    )
+    .run_commands(
+        # pytorch3d from git source (stable tag, builds against torch
+        # 2.7+cu128 with nvcc from the cuda:devel base). ~10-15 min.
+        "FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST='8.0;8.9;9.0+PTX' "
+        "pip install --no-build-isolation "
+        "'git+https://github.com/facebookresearch/pytorch3d.git@v0.7.6'",
     )
     # ---- Puppeteer requirements + the bits the desktop venv ships ----
     .pip_install(
