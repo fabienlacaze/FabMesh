@@ -344,7 +344,7 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
                 image=skel_img,                # ControlNet conditioning
                 controlnet_conditioning_scale=cn_scale,
                 ip_adapter_image=ref_img_no_face,  # face-masked ref
-                num_inference_steps=steps, guidance_scale=7.0,
+                num_inference_steps=int(steps), guidance_scale=7.0,
                 height=1024, width=1024,
                 generator=gen,
             ).images[0]

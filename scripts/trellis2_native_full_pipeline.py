@@ -304,7 +304,11 @@ def main():
     if os.environ.get('FABMESH_TRELLIS2_SKIP_BRIGHTEN') != '1':
         _brighten_baseColor(glb)
 
-    glb.export(out_glb)
+    use_webp = os.environ.get('FABMESH_TRELLIS2_EXPORT_WEBP', '1') == '1'
+    if use_webp:
+        glb.export(out_glb, extension_webp=True)
+    else:
+        glb.export(out_glb)
     log(f'exported: {os.path.getsize(out_glb)} bytes -> {out_glb}')
 
     # EU AI Act art. 50 — mark GLB as AI-generated (machine-readable).
