@@ -110,3 +110,6 @@ cloud/tsconfig.tsbuildinfo
 
 # Local runtime logs (kept as artefacts on disk for debugging only)
 logs/*.err
+
+# Puppeteer rigging — Seed3D/Puppeteer cloned at ~22 GB (venv + checkpoints).
+external/Puppeteer/

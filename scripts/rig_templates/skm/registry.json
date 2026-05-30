@@ -36,9 +36,175 @@
     }
   ],
   "generic_templates": [
-    { "id": "ue5_mannequin", "name": "Humanoid",   "category": "humanoid",  "json": "ue5_mannequin.json" },
-    { "id": "ue5_quadruped", "name": "Quadruped",  "category": "quadruped", "json": "ue5_quadruped.json" },
-    { "id": "ue5_hexapod",   "name": "Hexapod",    "category": "hexapod",   "json": "ue5_hexapod.json" },
-    { "id": "ue5_octopod",   "name": "Octopod",    "category": "octopod",   "json": "ue5_octopod.json" }
+    {
+      "id": "ue5_mannequin",
+      "name": "Humanoid",
+      "category": "humanoid",
+      "json": "ue5_mannequin.json"
+    },
+    {
+      "id": "ue5_quadruped",
+      "name": "Quadruped",
+      "category": "quadruped",
+      "json": "ue5_quadruped.json"
+    },
+    {
+      "id": "ue5_hexapod",
+      "name": "Hexapod",
+      "category": "hexapod",
+      "json": "ue5_hexapod.json"
+    },
+    {
+      "id": "ue5_octopod",
+      "name": "Octopod",
+      "category": "octopod",
+      "json": "ue5_octopod.json"
+    }
+  ],
+  "apovivor_templates": [
+    {
+      "id": "bat",
+      "name": "🦇 Chauve-souris",
+      "category": "bird",
+      "type": "json",
+      "json": "skm/bat.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 20,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/Animal_pack_ultra_2/Meshes/Bat/bat_Skeleton) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 46
+    },
+    {
+      "id": "crocodile",
+      "name": "🐊 Crocodile",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/crocodile.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 50,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AfricanAnimalsPack/Crocodile/Meshes/SK_Crocodile) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 38
+    },
+    {
+      "id": "crow",
+      "name": "🐦 Corbeau",
+      "category": "bird",
+      "type": "json",
+      "json": "skm/crow.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 30,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AnimalVarietyPack/Crow/Meshes/SK_Crow) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 61
+    },
+    {
+      "id": "deer",
+      "name": "🦌 Cerf",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/deer.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 150,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AnimalVarietyPack/DeerStagAndDoe/Meshes/SK_DeerStag) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 31
+    },
+    {
+      "id": "dragon",
+      "name": "🐲 Dragon",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/dragon.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 300,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/QuadrapedCreatures/MountainDragon/Meshes/MOUNTAIN_DRAGON_Skeleton) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 103
+    },
+    {
+      "id": "elephant",
+      "name": "🐘 Elephant",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/elephant.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 320,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AfricanAnimalsPack/Elephant/Meshes/SK_Elephant) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 48
+    },
+    {
+      "id": "lion",
+      "name": "🦁 Lion",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/lion.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 120,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AfricanAnimalsPack/LionAndLioness/Meshes/SK_Lion_LOD0) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 39
+    },
+    {
+      "id": "spider",
+      "name": "🕷 Araignee",
+      "category": "hexapod",
+      "type": "json",
+      "json": "skm/spider.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 15,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/Animal_pack_ultra_2/Meshes/Goliath_spider/goliath_spider_Skeleton) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 44
+    },
+    {
+      "id": "turtle",
+      "name": "🐢 Tortue",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/turtle.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 20,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/Animal_pack_ultra_2/Meshes/Box_turtle/box_turtle_Skeleton) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 31
+    },
+    {
+      "id": "ue5_mannequin",
+      "name": "🙋 Bras FPS (Mannequin)",
+      "category": "humanoid",
+      "type": "json",
+      "json": "skm/ue5_mannequin.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 180,
+      "description": "Imported from Apovivor SK asset (/Game/2_Levels/4_Cinematic/FirstPerson/FirstPersonArms/Character/Mesh/SK_Mannequin_Arms) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 161
+    },
+    {
+      "id": "wolf",
+      "name": "🐺 Loup",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/wolf.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 90,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AnimalVarietyPack/Wolf/Meshes/SK_Wolf) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 34
+    },
+    {
+      "id": "zebra",
+      "name": "🦓 Zebre",
+      "category": "quadruped",
+      "type": "json",
+      "json": "skm/zebra.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 140,
+      "description": "Imported from Apovivor SK asset (/Game/1_Actors/Animals/1_Source/AfricanAnimalsPack/Zebra/Meshes/SK_Zebra) - bone positions only, uncopyrightable landmarks.",
+      "license": "landmarks-only",
+      "bone_count": 35
+    }
   ]
 }

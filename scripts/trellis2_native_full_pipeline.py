@@ -28,6 +28,13 @@ import os
 os.environ.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
 os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
 os.environ.setdefault('TORCHDYNAMO_DISABLE', '1')
+# Force PyTorch native scaled_dot_product_attention so we don't load
+# flash_attn / xformers compiled CUDA extensions — Windows Smart App
+# Control blocks unsigned .pyd files (flash_attn_2_cuda.dll etc.). SDPA
+# is built into torch itself and ships in the signed torch wheel, so it
+# always loads. Slight perf hit (~20%) vs flash_attn 2.x but reliable.
+os.environ.setdefault('ATTN_BACKEND', 'sdpa')
+os.environ.setdefault('SPARSE_ATTN_BACKEND', 'sdpa')
 os.environ.setdefault('TORCHINDUCTOR_USE_TRITON', '0')
 os.environ.setdefault('TRANSFORMERS_ATTN_IMPLEMENTATION', 'eager')
 
