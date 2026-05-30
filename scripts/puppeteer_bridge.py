@@ -219,7 +219,6 @@ def _run_skeleton(input_obj, work_dir, run_name):
         "--output_dir", results_dir.replace("\\", "/"),
         "--save_name", run_name,
         "--input_pc_num", "8192",
-        "--save_render",
         "--apply_marching_cubes",
         "--joint_token",
         "--seq_shuffle",

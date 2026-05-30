@@ -156,7 +156,7 @@ def generate_idle_anim(bones_json: dict,
         _add_rot(tracks, b["LeftArm"],  f, 0.0, 0.0,  arm_swing)
         _add_rot(tracks, b["RightArm"], f, 0.0, 0.0, -arm_swing)
 
-        _add_pos(tracks, b["Hips"], f, [0.0, 0.0, hip_bob])
+        _add_pos(tracks, b["Hips"], f, [0.0, hip_bob, 0.0])
 
     return {
         "name": "idle",
@@ -209,8 +209,8 @@ def generate_walk_anim(bones_json: dict,
         _add_rot(tracks, b["Spine"],  f, 0.0, 0.0, math.sin(phase) * math.radians(4))
         _add_rot(tracks, b["Spine2"], f, 0.0, 0.0, -math.sin(phase) * math.radians(3))
 
-        hip_bob = 0.03 * abs(math.sin(phase * 2))  # 3 cm bounce
-        _add_pos(tracks, b["Hips"], f, [0.0, 0.0, hip_bob])
+        hip_bob = 0.03 * abs(math.sin(phase * 2))  # 3 cm vertical bounce (GLB Y-up)
+        _add_pos(tracks, b["Hips"], f, [0.0, hip_bob, 0.0])
 
     return {
         "name": "walk",
@@ -254,14 +254,19 @@ def generate_run_anim(bones_json: dict,
 
         _add_rot(tracks, b["LeftArm"],      f, l_arm, 0.0, 0.0)
         _add_rot(tracks, b["RightArm"],     f, r_arm, 0.0, 0.0)
-        _add_rot(tracks, b["LeftForeArm"],  f, -elbow_amp, 0.0, 0.0)
-        _add_rot(tracks, b["RightForeArm"], f, -elbow_amp, 0.0, 0.0)
+        l_elb = (0.5 + 0.5 * math.sin(phase)) * elbow_amp           # 0..75deg, breathes with stride
+        r_elb = (0.5 + 0.5 * math.sin(phase + math.pi)) * elbow_amp
+        _add_rot(tracks, b["LeftForeArm"],  f, -l_elb, 0.0, 0.0)
+        _add_rot(tracks, b["RightForeArm"], f, -r_elb, 0.0, 0.0)
 
-        _add_rot(tracks, b["Spine"],  f, lean, 0.0, math.sin(phase) * math.radians(6))
-        _add_rot(tracks, b["Spine2"], f, lean * 0.5, 0.0, -math.sin(phase) * math.radians(4))
+        # keep constant baseline so torso always leans forward when running,
+        # but reduce so it doesn't look frozen against the rest of the body.
+        spine_lean = lean * (0.6 + 0.4 * abs(math.sin(phase * 2)))   # 7.2..12 deg
+        _add_rot(tracks, b["Spine"],  f, spine_lean, 0.0, math.sin(phase) * math.radians(6))
+        _add_rot(tracks, b["Spine2"], f, spine_lean * 0.5, 0.0, -math.sin(phase) * math.radians(4))
 
         hip_bob = 0.06 * abs(math.sin(phase * 2))
-        _add_pos(tracks, b["Hips"], f, [0.0, 0.0, hip_bob])
+        _add_pos(tracks, b["Hips"], f, [0.0, hip_bob, 0.0])
 
     return {
         "name": "run",

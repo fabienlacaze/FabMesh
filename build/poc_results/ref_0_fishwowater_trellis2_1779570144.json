@@ -1,0 +1,11 @@
+{
+  "model": "fishwowater/trellis2",
+  "image": "images\\voiture_de_course\\ref_0.png",
+  "seed": 42,
+  "duration_s": 481.67,
+  "output": {
+    "model_file": "https://replicate.delivery/yhqm/5v5ZE3A0h5pFJlBpdXC8gmTIDGwJlDpL9Uc4wBrfbVcvPenWA/output.glb",
+    "no_background_image": "None",
+    "video": "None"
+  }
+}

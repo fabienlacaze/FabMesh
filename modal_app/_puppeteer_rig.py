@@ -68,7 +68,15 @@ import modal
 # Control is Windows-only.
 # ---------------------------------------------------------------------------
 image = (
-    modal.Image.debian_slim(python_version="3.10")
+    # nvidia/cuda:12.8.1-devel includes nvcc (CUDA compiler) which is
+    # REQUIRED for flash-attn's source build. debian_slim only has CUDA
+    # runtime libs (no nvcc) -> flash-attn build fails with
+    # "CUDA_HOME environment variable is not set".
+    modal.Image.from_registry(
+        "nvidia/cuda:12.8.1-devel-ubuntu22.04",
+        add_python="3.10",
+    )
+    .env({"CUDA_HOME": "/usr/local/cuda"})
     .apt_install(
         "git", "build-essential", "ninja-build",
         # libgl1 / libegl1 — required by bpy 4.2 even in headless mode
@@ -91,6 +99,15 @@ image = (
         "torchvision==0.22.0",
         "torchaudio==2.7.0",
         extra_options="--index-url https://download.pytorch.org/whl/cu128",
+    )
+    .pip_install(
+        # Build deps required by flash-attn setup.py with --no-build-isolation:
+        # the isolated env is OFF so the BASE env must already have packaging,
+        # setuptools, wheel, ninja. Without them: ModuleNotFoundError: packaging.
+        "packaging",
+        "setuptools",
+        "wheel",
+        "ninja",
     )
     .pip_install(
         # flash-attn 2.7.4.post1 — first wheel with sm_120 support. On

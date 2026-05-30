@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>FabMesh — POC viewer</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+<style>
+  body{margin:0;background:#0b0d12;color:#e8eaf0;font:14px/1.4 system-ui,sans-serif}
+  header{padding:12px 18px;border-bottom:1px solid #1a1f2b;display:flex;justify-content:space-between;align-items:center}
+  h1{margin:0;font-size:15px;font-weight:600;color:#fff}
+  .meta{color:#7a8295;font-size:12px}
+  model-viewer{width:100%;height:calc(100vh - 56px);background:#0b0d12}
+  .pill{display:inline-block;padding:3px 9px;border-radius:6px;background:#1c2230;color:#a5b4d0;font-size:11px;margin-left:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>POC TRELLIS-2 — fishwowater/trellis2 <span class="pill">$0.33 / 238 s / A100 80GB</span></h1>
+  <div class="meta">ref_0.png → mesh.glb (5.3 MB)</div>
+</header>
+<model-viewer
+  id="mv"
+  src="./ref_0_fishwowater_trellis2_1779570144_model_file.glb"
+  alt="POC mesh"
+  camera-controls
+  auto-rotate
+  exposure="1.2"
+  shadow-intensity="0.4"
+  environment-image="neutral"
+  tone-mapping="aces"
+  ar-status="not-presenting"
+  style="background:#1a1f2b">
+  <div slot="progress-bar" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#7a8295">chargement…</div>
+</model-viewer>
+<script>
+  const mv = document.getElementById('mv');
+  mv.addEventListener('load', () => {
+    console.log('mesh loaded:', mv.modelIsVisible);
+    mv.cameraOrbit = 'auto auto 1.6m';
+    mv.fieldOfView = '35deg';
+  });
+  mv.addEventListener('error', e => {
+    document.title = 'ERREUR — ' + (e.detail?.sourceError?.message || 'unknown');
+    console.error(e);
+  });
+</script>
+</body>
+</html>
