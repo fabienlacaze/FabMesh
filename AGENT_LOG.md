@@ -1,5 +1,9 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (rig UI: remove UniRig legacy option)
+
+- Dropped the "MyFabmesh.AI Rig (legacy)" UniRig option from the rig engine dropdown. UniRig is confirmed broken upstream (skin writer Issue #20) and incompatible with RTX 5080 sm_120. Only Puppeteer remains. UniRig branch in main.js stays as dead code in case of future resurrection.
+
 ## 2026-05-30 (rigging: multi-skeleton target + Apovivor extraction tool + UI dropdown)
 
 - Added scripts/puppeteer_to_skeleton.py: generalizes puppeteer_to_orc_m1.py with --target NAME arg. Targets: orc_m1 (default), ue5_mannequin, zebra, lion, wolf, crocodile, elephant, deer, crow, turtle, spider, bat, dragon, puppeteer_raw.

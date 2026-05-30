@@ -136,8 +136,7 @@ const ENGINE_LABELS = {
   'trellis2_native':'MyFabmesh.AI 3D Native',
   'trellis':        'MyFabmesh.AI 3D Engine',
   // Rigging engine labels (user-visible in job details)
-  'puppeteer':      'MyFabmesh.AI Rig (local)',
-  'unirig':         'MyFabmesh.AI Rig (legacy)',
+  'puppeteer':      'MyFabmesh.AI Rig',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
@@ -9914,7 +9913,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
   });
 });
 
-// AUTO-RIG AI button handler — engine selected via #ws-rig-engine (unirig)
+// AUTO-RIG AI button handler — engine selected via #ws-rig-engine (puppeteer)
 document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p) return;
