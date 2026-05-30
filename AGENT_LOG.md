@@ -1,5 +1,37 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Wave 2.4 — MVAdapter Modal endpoint deployable wrap)
+
+- **`modal_app/_mvadapter.py`** — added 517-line self-contained Modal wrap
+  on top of the existing pure `generate()` / `preprocess_reference()` /
+  `grey_to_alpha()` / `build_plucker_embeds()` functions:
+    - `modal.Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04")`
+      with torch 2.4.1 + diffusers + transformers + rembg + boto3 — matches
+      `modal_app/app.py:_base_image` so cached pip layers are reused. The
+      build-time step clones upstream MV-Adapter and runs FabMesh's
+      `scripts/patch_mvadapter.py`, plus `snapshot_download` pre-warms the
+      i2mv-sdxl checkpoints (~3 GB saved on cold restore).
+    - `app = modal.App("myfabmesh-mvadapter")` with class
+      `MyFabmeshMVAdapter` (`@app.cls`, A10G 24 GB, snapshot enabled,
+      timeout 600 s, scaledown 300 s). `@modal.enter(snap=True)` loads the
+      pipeline on CPU; `@modal.enter(snap=False)` moves to CUDA after
+      hydration so snapshot doesn't capture stale GPU pointers.
+    - `mvadapter_endpoint` (`@app.function` CPU + `@modal.fastapi_endpoint
+      method=POST`) — auth via `_auth` body field against `SHARED_SECRET`,
+      downloads `front_image_url`, fans the work to the GPU worker via
+      `.remote()`, uploads each of the 6 PNG views to R2 via boto3
+      (`R2_*` secrets), returns `{views: [6 r2.dev URLs], engine,
+      azim_elev}` — exactly the JSON shape the worker callsite
+      (`cloud/src/worker.ts:4683-4702`) already expects.
+- AST parse OK on `external/TRELLIS2_win/.venv` python (242 → 759 lines).
+- **Not deployed in this commit** — user will run `modal deploy
+  modal_app/_mvadapter.py` after the Puppeteer rig deploy finishes to
+  avoid two Modal builds fighting for slots in the same workspace.
+- Post-deploy: capture the printed endpoint URL into a Cloudflare worker
+  secret (`npx wrangler secret put MODAL_MVADAPTER_URL --env production`),
+  then `cd cloud && npm run build && npx wrangler deploy` so the worker
+  picks up the new env binding.
+
 ## 2026-05-31 (Cloud→desktop parity ports 2/3/5/6 — webp gate, empty-mask early-out, steps cast, IPAdapter neutralisation)
 
 - **Port 2 (KTX2/WebP GLB export gate)** — `scripts/trellis2_native_full_pipeline.py:307-311`
