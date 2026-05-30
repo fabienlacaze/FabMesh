@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (rigging: Puppeteer end-to-end SUCCESS on orc_marron)
+
+- Live-debug session walked the Puppeteer pipeline through 10+ runtime
+  errors to a clean rigged GLB: ~113s total on RTX 5080 (sm_120) —
+  34s skeleton + 63s skinning + 10s FBX export + 3s GLB conversion.
+  Output: 49.8 MB GLB with armature + skin weights.
+- Bridge fixes committed: torchrun bypass for skinning (libuv broken
+  on Windows PyTorch 2.7), bake_mesh = staged_obj, filtered rig.txt
+  concat, lenient bpy GLB success check.
+- Upstream patches applied in-place in `external/Puppeteer/`:
+  weights_only=False in 3 torch.load sites, gloo dist backend on
+  Windows, Michelangelo copied to skinning/third_partys/, vtk stub
+  to dodge Windows Smart App Control DLL blocks.
+- Venv: torch 2.7.0+cu128, flash-attn 2.7.4.post1 (prebuilt Win wheel),
+  numpy <2, torch-scatter 2.1.2+pt27cu128, tetgen 0.8.4, full
+  requirements.txt deps.
+
 ## 2026-05-30 (rigging: pivot to Puppeteer end-to-end, retire MA scaffold)
 - User flagged that Puppeteer already produces the skeleton, so the MA+Puppeteer combo was redundant. Pivoted to Puppeteer end-to-end (same Apache-2.0, same team Seed3D).
 - Added scripts/puppeteer_bridge.py with 3-step pipeline (skeleton -> skinning -> final_rigging/export -> GLB).
