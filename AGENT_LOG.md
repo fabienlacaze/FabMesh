@@ -1,5 +1,33 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Cat 8 mask-inpaint cloud parity — crop+composite-back in `scripts/sdxl_server.py`)
+
+- Port Cat 8: aligned `do_mask_inpaint` with cloud `modal_app/_mask_inpaint.py`
+  (cat8 revision). Brings 3 quality wins to the desktop `/mask_inpaint` endpoint:
+  1. **Concept boosters** — 25-entry `_CONCEPT_BOOSTERS` dict expands weak SDXL
+     keywords (bazooka, sword, helmet, cyborg, wings, dragon, etc.) with
+     concrete visual descriptors. Bare `"bazooka"` was rendering as a tube;
+     now resolves to "M1 bazooka shoulder-fired rocket launcher…".
+  2. **add/remove verb parsing** — `_enrich_prompt` strips `add/put/place/insert/
+     paint/draw` and matches `remove/delete/erase/hide/clear` for removal
+     prompts (negative-prompts the target, positive-prompts background continuation).
+  3. **Crop-inpaint-paste** — for masks <40% coverage, crop a square 30%-padded
+     bbox, inpaint at 1024², resize back, paste, then composite at full res
+     against the original blurred mask. Painted pixels only — no global resize
+     blur on untouched areas.
+- Global path (mask >40%) still uses a composite-back blend so the un-masked
+  pixels match the input byte-for-byte (after the alpha-1 mask region).
+- Empty-mask sentinel changed from `(mask > 128).mean() < 0.1%` to
+  `_mask_bbox(threshold=30) is None` — slightly more permissive on faint
+  strokes, same JSON error shape `{"ok": false, "error": "Mask is empty"}`.
+- API unchanged: `do_mask_inpaint(input_path, mask_path, prompt, output_path)`
+  signature and `{ok, output, time, mask_coverage}` return dict are byte-identical.
+  No HTTP handler change.
+- Added `import re` at top of the file (was missing).
+- Kept: `state.inference_lock`, `unload_model('img2img')`, `load_inpaint()`,
+  `state.last_use['inpaint']`, `save_debug_mask`, `torch.inference_mode()`,
+  `free_vram()` error path. NSFW + GPU-throttle code paths untouched.
+
 ## 2026-05-31 (Cat 14 mesh-op cloud parity — preset selector in `scripts/mesh_tools.py`)
 
 - Port Cat 14: aligned desktop mesh tools with cloud `modal_app/_mesh_op.py`

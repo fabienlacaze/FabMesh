@@ -8,13 +8,14 @@ Listens on 127.0.0.1:5555 via simple HTTP/JSON.
 Endpoints:
   GET  /ping              - health check + model status
   GET  /status            - detailed model + GPU status
-  POST /img2img           - { input, prompt, output, strength }
+  POST /img2img           - { input, prompt, output, strength, guidance, steps, seed }
   POST /inpaint           - { input, target, prompt, output, dilate }
   POST /shutdown          - graceful exit
   POST /unload            - free a specific model from VRAM
 """
 import os
 import sys
+import re
 import json
 import time
 import gc
@@ -44,6 +45,24 @@ CLIPSEG_MODEL = "CIDAS/clipseg-rd64-refined"
 # the UV layout: the tile ControlNet constrains SDXL to respect the
 # source image structure while still adding micro-detail.
 CONTROLNET_TILE_MODEL = "xinsir/controlnet-tile-sdxl-1.0"
+
+# Identity-preserving prompt scaffolding (ported from cloud modal_app/_modify.py).
+# When the user is doing a low-strength "modify" pass (e.g. add a hat, change
+# colour), prefix their prompt with these tokens so SDXL doesn't drift to a
+# different subject. At high strength (>0.6) the user is going for a re-style
+# so we skip the prefix and let the prompt drive the redraw.
+PRESERVE_PREFIX = (
+    'same character, same outfit, same pose, same composition, '
+    'preserve original subject identity, only change: '
+)
+PRESERVE_NEG = (
+    'different character, changed face, changed outfit, different pose, '
+    'distorted, blurry, low quality, deformed, extra limbs, missing limbs, '
+    'bad anatomy, watermark, multiple subjects'
+)
+# Toggle (default ON). Set FABMESH_MODIFY_PRESERVE=0 to disable the prefix
+# globally — useful if a downstream caller is doing its own prompt scaffolding.
+PRESERVE_IDENTITY_ENABLED = os.environ.get('FABMESH_MODIFY_PRESERVE', '1') != '0'
 
 # Enforce VRAM cap from FabMesh settings (passed via FABMESH_VRAM_FRACTION env var).
 GPU_MEMORY_FRACTION = float(os.environ.get('FABMESH_VRAM_FRACTION', '0.95'))
@@ -317,7 +336,25 @@ def save_debug_mask(output_path, mask_img):
 
 
 # ========== INFERENCE ==========
-def do_img2img(input_path, prompt, output_path, strength=0.55):
+def do_img2img(input_path, prompt, output_path, strength=0.55,
+               guidance=7.0, steps=None, seed=42):
+    """
+    SDXL img2img with optional identity-preserving prefix for "Modify Image"
+    flows (ported from cloud modal_app/_modify.py).
+
+    Args:
+      strength: img2img denoise strength. Legacy default 0.55 preserved at
+                this layer so existing callers don't shift behaviour. Cloud
+                "Modify Image" uses 0.35 — callers wanting modify semantics
+                should pass strength=0.35 explicitly.
+      guidance: classifier-free guidance scale. Cloud default 7.0.
+                The legacy 6.0 is used as a fallback only if caller passes
+                None.
+      steps:    explicit step count. None = legacy auto-derive from strength
+                (`max(round(25/s), round(1/s)+1)` capped at 60).
+      seed:     deterministic seed (default 42, matching cloud). Pass None
+                for non-deterministic.
+    """
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
 
@@ -333,30 +370,58 @@ def do_img2img(input_path, prompt, output_path, strength=0.55):
     with state.inference_lock:
         try:
             img = Image.open(input_path).convert("RGB")
+            # NOTE: we intentionally keep variable aspect ratio (longer side
+            # 1024, snapped to /8) rather than the cloud's forced 1024x1024
+            # square. Desktop has a dedicated img2img pipe (no ControlNet
+            # base constraint) so this is strictly better.
             img, (w, h) = resize_for_sdxl(img, max_dim=1024)
 
-            enhanced = f"{prompt}, high quality, detailed"
             s = max(0.1, min(1.0, float(strength)))
+
+            # Identity-preserving prefix for low-strength "modify" passes.
+            # At strength > 0.6 the user is going for a re-style — skip the
+            # prefix and keep the legacy "high quality, detailed" suffix so
+            # existing high-strength callers' output doesn't soften.
+            if PRESERVE_IDENTITY_ENABLED and s <= 0.6:
+                final_prompt = PRESERVE_PREFIX + prompt
+                final_neg = PRESERVE_NEG
+            else:
+                final_prompt = f"{prompt}, high quality, detailed"
+                final_neg = ''
+
             # RealVis XL V4.0: standard SDXL fine-tune, likes 25-30 steps + CFG 5-7.
             # num_inference_steps * strength must be >= 1 (same diffusers rule
             # as Turbo, but with higher base step count).
-            steps = max(int(round(25 / s)), int(round(1 / s)) + 1)
-            steps = min(steps, 60)  # safety upper bound
+            if steps is None:
+                _steps = max(int(round(25 / s)), int(round(1 / s)) + 1)
+                _steps = min(_steps, 60)  # safety upper bound
+            else:
+                _steps = int(steps)
+
+            # guidance=None falls back to legacy CFG 6.0
+            _guidance = 6.0 if guidance is None else float(guidance)
+
+            gen = None
+            if seed is not None and torch.cuda.is_available():
+                gen = torch.Generator('cuda').manual_seed(int(seed))
 
             t0 = time.time()
             with torch.inference_mode():
                 result = pipe(
-                    prompt=enhanced,
+                    prompt=final_prompt,
+                    negative_prompt=final_neg,
                     image=img,
                     strength=s,
-                    num_inference_steps=steps,
-                    guidance_scale=6.0,
+                    num_inference_steps=_steps,
+                    guidance_scale=_guidance,
+                    generator=gen,
                 ).images[0]
 
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             result.save(output_path)
             elapsed = time.time() - t0
-            log(f"img2img done in {elapsed:.1f}s ({steps} steps, {w}x{h}) -> {output_path}")
+            log(f"img2img done in {elapsed:.1f}s ({_steps} steps, cfg={_guidance}, "
+                f"preserve={'Y' if final_neg else 'N'}, {w}x{h}) -> {output_path}")
             return {"ok": True, "output": output_path, "time": elapsed, "size": [w, h]}
         except Exception as e:
             log(f"img2img error: {e}", 'err')
@@ -533,8 +598,103 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             return {"ok": False, "error": str(e)}
 
 
+# ========== MASK INPAINT HELPERS (ported from cloud cat8) ==========
+# Concept-specific boosters — SDXL Inpaint v1.0 is weak on bare nouns
+# for distinctive objects. A bare "bazooka" gets generated as a tube
+# or pipe. Adding concept-specific synonyms + visual descriptors
+# disambiguates ("M72 LAW", "shoulder-fired rocket launcher", etc.).
+# Keys are matched case-insensitively as substrings in the user's
+# stripped noun phrase.
+_CONCEPT_BOOSTERS = {
+    # Weapons
+    'bazooka': 'M1 bazooka shoulder-fired rocket launcher, large green metal tube, military weapon, tactical hardware',
+    'rocket launcher': 'M72 LAW shoulder-fired rocket launcher, large tube weapon, military tactical hardware',
+    'sword': 'large medieval sword, sharp steel blade, leather-wrapped hilt, fantasy weapon',
+    'shield': 'large round battle shield, embossed metal, leather straps, fantasy armor',
+    'gun': 'realistic firearm, metallic, detailed mechanism',
+    'rifle': 'tactical assault rifle, military firearm, detailed scope and stock',
+    'axe':   'heavy battle axe, sharp steel blade, wooden handle, fantasy weapon',
+    # Armor / clothing
+    'helmet': 'fitted protective helmet, metal alloy, articulated visor, fantasy armor',
+    'crown': 'ornate royal crown, gold inlay, jewels, fantasy regalia',
+    'hat':   'fitted hat, recognizable headwear',
+    'cape':  'flowing fabric cape, draped, ornate trim',
+    'mask':  'theatrical face mask, detailed, expressive features',
+    # Sci-fi / transformations
+    'robotic': 'cyborg face, mechanical metallic plating, glowing red eye, exposed wires, sci-fi cybernetic, chrome and steel, hyper-detailed',
+    'cyborg':  'cyborg face, mechanical metallic plating, glowing red eye, exposed wires, sci-fi cybernetic, chrome and steel, hyper-detailed',
+    'android': 'android face, smooth synthetic skin, mechanical components visible at seams, sci-fi humanoid',
+    'cybernetic': 'cyborg face, mechanical metallic plating, glowing red eye, exposed wires, sci-fi cybernetic',
+    'robot face': 'robotic face, metallic head, glowing eyes, mechanical jaw, chrome plating, sci-fi',
+    # Fantasy creatures
+    'wings': 'large feathered wings spread wide, anatomically integrated',
+    'dragon': 'majestic dragon, scaled, large wings',
+    'horns':  'curved fantasy horns, bone texture, naturally integrated',
+    # Nature
+    'flower': 'large blooming flower, vibrant petals, garden quality, botanical',
+    'fire':   'bright flames, glowing embers, smoke wisps',
+    'lightning': 'electric lightning bolts, bright glowing arcs, energy crackling',
+}
+
+
+def _boost(obj: str) -> str:
+    low = obj.lower()
+    for key, repl in _CONCEPT_BOOSTERS.items():
+        if key in low:
+            return f'{repl}, in place of "{obj}"'
+    return obj
+
+
+def _enrich_prompt(raw: str) -> tuple:
+    """Light prompt cleanup: strip add/put/place verbs, expand concept
+    boosters, build a sane negative prompt. Returns (positive, negative)."""
+    p = (raw or '').strip()
+    if not p:
+        return ('continuation of the surrounding area, seamless',
+                'object, item, blurry, distorted')
+
+    low = p.lower()
+    add_m = re.match(r'^(?:add|put|place|insert|paint|draw)\s+(?:a|an|the|some)?\s*(.+)$',
+                     low, flags=re.IGNORECASE)
+    rem_m = re.match(r'^(?:remove|delete|erase|hide|clear)\s+(?:the|a|an)?\s*(.+)$',
+                     low, flags=re.IGNORECASE)
+
+    if rem_m:
+        target = rem_m.group(1).strip()
+        return (
+            f'continuation of the surrounding area, same background, '
+            f'no {target}, seamless',
+            f'{target}, any object, duplicate, artifact, blurry, distorted'
+        )
+
+    obj = add_m.group(1).strip() if add_m else p
+    boosted = _boost(obj)
+    positive = f'{boosted}, detailed, photorealistic'
+    negative = 'blurry, distorted, low quality, deformed, watermark, text'
+    return (positive, negative)
+
+
+def _mask_bbox(msk, threshold: int = 30):
+    """Return (x0, y0, x1, y1) of the painted region, or None if empty."""
+    arr = np.array(msk)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    ys, xs = np.where(arr > threshold)
+    if len(ys) == 0:
+        return None
+    return (int(xs.min()), int(ys.min()),
+            int(xs.max()) + 1, int(ys.max()) + 1)
+
+
 def do_mask_inpaint(input_path, mask_path, prompt, output_path):
-    """Inpaint using a user-provided mask (white = inpaint, black = keep)."""
+    """Inpaint using a user-provided mask (white = inpaint, black = keep).
+
+    Crop-inpaint-paste strategy (ported from cloud cat8):
+      - bbox of mask, square-pad 30%, crop to bbox, inpaint at 1024², paste back
+      - >40% coverage → fall back to global path
+      - composite-back with full-res blurred mask so only painted pixels change
+      - prompt enrichment via _enrich_prompt (concept boosters, add/remove verbs)
+    """
     if not os.path.exists(input_path):
         return {"ok": False, "error": f"Input not found: {input_path}"}
     if not os.path.exists(mask_path):
@@ -548,52 +708,139 @@ def do_mask_inpaint(input_path, mask_path, prompt, output_path):
     pipe = load_inpaint()
     state.last_use['inpaint'] = time.time()
 
+    sdxl_native = 1024
+    max_dim = 1024
+
     with state.inference_lock:
         try:
-            img = Image.open(input_path).convert("RGB")
-            orig_size = img.size
-            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+            src = Image.open(input_path).convert("RGB")
+            msk = Image.open(mask_path).convert("L")
 
-            mask = Image.open(mask_path).convert("L").resize((work_w, work_h), Image.BILINEAR)
-            mask = mask.filter(ImageFilter.GaussianBlur(3))
+            orig_w, orig_h = src.size
+            if msk.size != (orig_w, orig_h):
+                msk = msk.resize((orig_w, orig_h), Image.LANCZOS)
 
-            coverage = (np.array(mask) > 128).mean() * 100
-            if coverage < 0.1:
+            pos_prompt, neg_prompt = _enrich_prompt(prompt)
+
+            bbox = _mask_bbox(msk)
+            if bbox is None:
                 return {"ok": False, "error": "Mask is empty"}
 
-            save_debug_mask(output_path, mask)
+            bx0, by0, bx1, by1 = bbox
+            bw, bh = bx1 - bx0, by1 - by0
+            mask_frac = (bw * bh) / float(orig_w * orig_h)
+            coverage = mask_frac * 100
+            log(f"mask_inpaint bbox={bbox} frac={mask_frac:.3f} "
+                f"enriched=\"{pos_prompt[:100]}...\"")
 
-            inpaint_prompt = (prompt or "").strip()
-            removal_keywords = ("", "remove", "delete", "none", "nothing", "empty", "gone")
-            is_removal = inpaint_prompt.lower() in removal_keywords
-            if is_removal:
-                inpaint_prompt = "continuation of the surrounding area, same background, seamless"
-                negative_prompt = "any object, duplicate, artifact, blurry, distorted, deformed"
-            else:
-                negative_prompt = "blurry, distorted, duplicate, deformed, low quality"
+            # Debug-save the full-res mask used for compositing
+            save_debug_mask(output_path, msk)
 
-            t0 = time.time()
-            with torch.inference_mode():
-                result = pipe(
-                    prompt=inpaint_prompt,
-                    negative_prompt=negative_prompt,
-                    image=img_work,
-                    mask_image=mask,
-                    num_inference_steps=40,
-                    guidance_scale=8.5,
-                    strength=0.99,
-                    height=work_h,
-                    width=work_w,
-                ).images[0]
+            # >40% → global path (less risk of edge artefacts)
+            use_global = mask_frac > 0.40
 
-            if (work_w, work_h) != orig_size:
-                result = result.resize(orig_size, Image.LANCZOS)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            result.save(output_path)
+            t0 = time.time()
 
+            if not use_global:
+                # ---- Crop branch ----
+                cx = (bx0 + bx1) / 2
+                cy = (by0 + by1) / 2
+                side = max(bw, bh) * 1.6  # 30% padding each side
+                side = max(side, max(orig_w, orig_h) * 0.20)
+                side = min(side, min(orig_w, orig_h))
+                cx0 = max(0, int(cx - side / 2))
+                cy0 = max(0, int(cy - side / 2))
+                cx1 = min(orig_w, cx0 + int(side))
+                cy1 = min(orig_h, cy0 + int(side))
+                if cx1 - cx0 < int(side):
+                    cx0 = max(0, cx1 - int(side))
+                if cy1 - cy0 < int(side):
+                    cy0 = max(0, cy1 - int(side))
+
+                crop_img = src.crop((cx0, cy0, cx1, cy1))
+                crop_msk = msk.crop((cx0, cy0, cx1, cy1))
+                cw, ch = crop_img.size
+
+                work = (sdxl_native // 8) * 8
+                crop_img_w = crop_img.resize((work, work), Image.LANCZOS)
+                crop_msk_w = crop_msk.resize((work, work), Image.LANCZOS) \
+                                     .filter(ImageFilter.GaussianBlur(2))
+
+                with torch.inference_mode():
+                    result_w = pipe(
+                        prompt=pos_prompt,
+                        negative_prompt=neg_prompt,
+                        image=crop_img_w,
+                        mask_image=crop_msk_w,
+                        num_inference_steps=40,
+                        guidance_scale=8.5,
+                        strength=0.99,
+                        height=work, width=work,
+                    ).images[0]
+
+                result_crop = result_w.resize((cw, ch), Image.LANCZOS)
+                composed = src.copy()
+                composed.paste(result_crop, (cx0, cy0))
+
+                # Composite-back with FULL-RES mask — only painted pixels change
+                msk_full = msk.filter(ImageFilter.GaussianBlur(1.5))
+                src_arr = np.array(src, dtype=np.float32)
+                new_arr = np.array(composed, dtype=np.float32)
+                mask_arr = np.array(msk_full, dtype=np.float32) / 255.0
+                if mask_arr.ndim == 2:
+                    mask_arr = mask_arr[..., None]
+                blend = src_arr * (1.0 - mask_arr) + new_arr * mask_arr
+                final = Image.fromarray(np.clip(blend, 0, 255).astype(np.uint8), 'RGB')
+            else:
+                # ---- Global branch (large mask) ----
+                if max(orig_w, orig_h) > max_dim:
+                    if orig_w > orig_h:
+                        work_w, work_h = max_dim, int(orig_h * max_dim / orig_w)
+                    else:
+                        work_h, work_w = max_dim, int(orig_w * max_dim / orig_h)
+                else:
+                    work_w, work_h = orig_w, orig_h
+                work_w = (work_w // 8) * 8
+                work_h = (work_h // 8) * 8
+
+                img_work = src.resize((work_w, work_h), Image.LANCZOS)
+                msk_work = msk.resize((work_w, work_h), Image.LANCZOS)
+                msk_work_soft = msk_work.filter(ImageFilter.GaussianBlur(3))
+
+                with torch.inference_mode():
+                    result = pipe(
+                        prompt=pos_prompt,
+                        negative_prompt=neg_prompt,
+                        image=img_work,
+                        mask_image=msk_work_soft,
+                        num_inference_steps=40,
+                        guidance_scale=8.5,
+                        strength=0.99,
+                        height=work_h, width=work_w,
+                    ).images[0]
+
+                if (work_w, work_h) != (orig_w, orig_h):
+                    result = result.resize((orig_w, orig_h), Image.LANCZOS)
+                    msk_full = msk.filter(ImageFilter.GaussianBlur(3))
+                else:
+                    msk_full = msk_work_soft
+
+                src_arr = np.array(src, dtype=np.float32)
+                new_arr = np.array(result, dtype=np.float32)
+                mask_arr = np.array(msk_full, dtype=np.float32) / 255.0
+                if mask_arr.ndim == 2:
+                    mask_arr = mask_arr[..., None]
+                blend = src_arr * (1.0 - mask_arr) + new_arr * mask_arr
+                final = Image.fromarray(np.clip(blend, 0, 255).astype(np.uint8), 'RGB')
+
+            final.save(output_path)
             elapsed = time.time() - t0
-            log(f"mask_inpaint done in {elapsed:.1f}s ({coverage:.0f}% mask) -> {output_path}")
-            return {"ok": True, "output": output_path, "time": elapsed, "mask_coverage": round(coverage, 1)}
+            log(f"mask_inpaint done in {elapsed:.1f}s "
+                f"({coverage:.0f}% mask, {'global' if use_global else 'crop'}) "
+                f"-> {output_path}")
+            return {"ok": True, "output": output_path, "time": elapsed,
+                    "mask_coverage": round(coverage, 1)}
         except Exception as e:
             log(f"mask_inpaint error: {e}", 'err')
             traceback.print_exc()
@@ -666,11 +913,18 @@ class Handler(BaseHTTPRequestHandler):
                 if 'input' not in data or 'output' not in data:
                     self._json_response(400, {"ok": False, "error": "missing input/output"})
                     return
+                # HTTP-layer strength default kept at 0.55 for back-compat with
+                # all existing renderer callsites (ipcMain `img2img` handler in
+                # src/main/main.js). New "Modify Image" UI should pass
+                # strength=0.35 + guidance=7.0 explicitly.
                 result = do_img2img(
                     data['input'],
                     data.get('prompt', ''),
                     data['output'],
                     data.get('strength', 0.55),
+                    guidance=data.get('guidance', 7.0),
+                    steps=data.get('steps', None),
+                    seed=data.get('seed', 42),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 
