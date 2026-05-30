@@ -373,15 +373,10 @@ function customErrorWithAction(message, title, actionLabel) {
   });
 }
 
-// Route an error message to either the Meshy-key-missing flow (with a
-// shortcut button to Settings) or a plain customError. This is used by the
-// 3 Meshy-aware handlers (image gen, mesh gen, rig gen) so any of them can
-// surface the "API key not configured" error the same way.
+// Route an error message to a plain customError. Extracts the most useful
+// error line from large Python tracebacks before falling back to the raw text.
 function reportPipelineError(errMsg, title) {
   const raw = String(errMsg || '').trim();
-  if (/meshy.*api key not configured/i.test(raw)) {
-    return showMeshyKeyMissingError(title);
-  }
   // Extract the most useful error line from a potentially huge Python dump.
   // Python tracebacks end with the actual error on the last non-empty line
   // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")
@@ -400,25 +395,6 @@ function reportPipelineError(errMsg, title) {
     );
   }
   return customError(raw || 'unknown', title);
-}
-
-// Show a "Meshy API key not configured" error with a shortcut button to the
-// Settings modal. Dedicated helper because this error is raised from 3
-// different code paths (image gen, mesh gen, rigging).
-async function showMeshyKeyMissingError(errorTitle) {
-  const wantsOpen = await customErrorWithAction(
-    'MyFabmesh.AI API key not configured.\n\nOpen Settings and paste your key, then try again.\nGet a free key at https://www.meshy.ai/api',
-    errorTitle || 'MyFabmesh.AI API key missing',
-    'Open Settings'
-  );
-  if (wantsOpen) {
-    openSettings();
-    // Focus the API key field after the modal has rendered
-    setTimeout(() => {
-      const el = document.getElementById('set-meshy-api-key');
-      if (el) { el.focus(); el.select?.(); }
-    }, 120);
-  }
 }
 
 // Inline toast banner — appears at the bottom of the screen for 3s then fades.
@@ -583,13 +559,13 @@ async function refreshProjectsPage() {
       // Remove trailing timestamp (_<10+ digits>)
       base = base.replace(/_\d{10,}$/, '');
     } while (base !== prev);
-    // Remove trailing engine suffix added by main.js: _sf3d / _meshy / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _trellis2_native
+    // Remove trailing engine suffix added by main.js: _sf3d / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _trellis2_native
     // Optionally followed by arbitrary short tags like _apilive, _test, _v2,
     // each possibly followed by its own timestamp. This handles ad-hoc CLI
     // names like test_e2e_sf3d_apilive_1776274212 that would otherwise form
     // their own phantom projects.
     base = base.replace(
-      /_(sf3d|meshy|hunyuan|local|trellis2_native|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
+      /_(sf3d|hunyuan|local|trellis2_native|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
       ''
     );
     // Remove a trailing _<number> if any (legacy index naming)
@@ -2265,7 +2241,7 @@ function _ws3dEngineSync() {
   const sf3dHint = document.getElementById('ws-3d-sf3d-hint');
   const hi3dgenHint = document.getElementById('ws-3d-hi3dgen-hint');
   const trellis2Opts = document.getElementById('ws-3d-trellis2-opts');
-  const legacy = ['sf3d', 'meshy'].includes(eng);
+  const legacy = ['sf3d'].includes(eng);
   // Hide texture-res / triangles when using TRELLIS-2 native or Hi3DGen
   // (both have their own internal quality settings).
   if (qRow) qRow.style.display = legacy ? '' : 'none';
@@ -7070,8 +7046,6 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     //   - MV-Adapter 6 views (RealVisXL + adapter): ~60s
     //   - texture_project bake at 1024 (6 views): ~60s
     // Total ~3-4 min for complex meshes, ~2 min for simple.
-    expectedMs = 240000;
-  } else if (engine === 'meshy') {
     expectedMs = 240000;
   } else {
     expectedMs = 60000;
@@ -11964,7 +11938,7 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
 // ----- Rig step -----
 async function loadRigTemplatesIntoSelect() {
   // The template dropdown was removed from the UI in favor of AI rigging
-  // (UniRig / Meshy). Keep the function as a no-op so the existing call sites
+  // (UniRig). Keep the function as a no-op so the existing call sites
   // don't break.
   const sel = document.getElementById('ws-rig-template');
   if (!sel) return;
@@ -12604,7 +12578,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
   });
 });
 
-// AUTO-RIG AI button handler — engine selected via #ws-rig-engine (unirig | meshy)
+// AUTO-RIG AI button handler — engine selected via #ws-rig-engine (unirig)
 document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p) return;
@@ -12614,8 +12588,8 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
   const rigEngine = document.getElementById('ws-rig-engine')?.value || 'unirig';
-  const engineLabel = rigEngine === 'meshy' ? 'MyFabmesh.AI (cloud)' : 'MyFabmesh.AI Rig (local, neural)';
-  const expectedMs = rigEngine === 'meshy' ? 120000 : 90000;
+  const engineLabel = 'MyFabmesh.AI Rig (local, neural)';
+  const expectedMs = 90000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {
     const job = pushJob(`Auto-rig AI (${rigEngine}): ${p.name}`, null, {
       Engine: engineLabel,
@@ -12910,8 +12884,7 @@ function completeJob(id, success, errorMessage) {
   }
   renderJobs();
   // Failed jobs linger longer than successful ones so the user has time to
-  // open the details modal and click the recovery button (e.g. "Open Settings"
-  // when a Meshy API key is missing).
+  // open the details modal and read the error message.
   const ttl = success ? 4000 : 30000;
   setTimeout(() => {
     state.jobs = state.jobs.filter(x => x.id !== id);
@@ -13217,7 +13190,7 @@ async function refreshJobDetailsModal(id) {
   document.getElementById('jd-progress-pct').textContent = pct + '%';
   // First-run hint — shown while a local SDXL-server-backed job is running,
   // so the user understands why the first call takes 1-3 minutes (model
-  // download + VRAM load). Hidden for cloud jobs (pollinations / meshy) and
+  // download + VRAM load). Hidden for cloud jobs (pollinations) and
   // for jobs that have already finished.
   // First-run hint: only show when the job JUST started (first 15s) AND
   // it's a local GPU job. After 15s the model is either loaded (hint no
@@ -13284,34 +13257,24 @@ async function refreshJobDetailsModal(id) {
   const cancelBtn = document.getElementById('job-details-cancel');
   cancelBtn.disabled = j.status !== 'running';
   cancelBtn.style.display = j.status === 'running' ? '' : 'none';
-  // Error box + contextual "Open Settings" shortcut.
-  // Shown when the job failed with a message. If the error message matches
-  // the Meshy "API key not configured" pattern, we surface a dedicated
-  // primary button that opens Settings and focuses the Meshy key field.
+  // Error box — shown when the job failed with a message.
   const errBox = document.getElementById('jd-error-box');
   const openSettingsBtn = document.getElementById('job-details-open-settings');
-  if (errBox && openSettingsBtn) {
+  if (errBox) {
     if (j.status === 'error' && j.errorMessage) {
       errBox.textContent = j.errorMessage;
       errBox.classList.remove('hidden');
-      const needsApiKey = /api key not configured/i.test(j.errorMessage);
-      openSettingsBtn.style.display = needsApiKey ? '' : 'none';
     } else {
       errBox.textContent = '';
       errBox.classList.add('hidden');
-      openSettingsBtn.style.display = 'none';
     }
   }
+  if (openSettingsBtn) openSettingsBtn.style.display = 'none';
 }
 document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
 document.getElementById('job-details-open-settings')?.addEventListener('click', () => {
   closeJobDetails();
   openSettings();
-  // Focus the Meshy API key field after the Settings modal has rendered
-  setTimeout(() => {
-    const el = document.getElementById('set-meshy-api-key');
-    if (el) { el.focus(); el.select?.(); }
-  }, 120);
 });
 document.getElementById('job-details-cancel').addEventListener('click', async () => {
   const id = state._jobDetailsOpenId;
@@ -13870,8 +13833,6 @@ async function openSettings() {
     const cfg = await API.getConfig();
     const blenderEl = document.getElementById('set-blender-path');
     if (blenderEl) blenderEl.value = cfg?.blenderPath || '';
-    const meshyInput = document.getElementById('set-meshy-api-key');
-    if (meshyInput) meshyInput.value = cfg?.meshyApiKey || '';
   } catch (e) {}
   applyGpuLimitMarkers();
   setupGpuLimitDragging();
@@ -15312,47 +15273,6 @@ document.getElementById('set-blender-browse')?.addEventListener('click', async (
       if (el) el.value = r.blenderPath || r;
     }
   } catch (e) {}
-});
-
-// ----------- Meshy.ai API key: persist on blur, test via button ----------
-const meshyKeyEl = document.getElementById('set-meshy-api-key');
-if (meshyKeyEl) {
-  // Persist the key to config.json as soon as the user leaves the field.
-  meshyKeyEl.addEventListener('change', async () => {
-    const key = meshyKeyEl.value.trim();
-    try {
-      await API.setConfig({ meshyApiKey: key });
-    } catch (e) {
-      console.warn('setConfig(meshyApiKey) failed', e);
-    }
-  });
-}
-document.getElementById('set-meshy-test')?.addEventListener('click', async () => {
-  const btn = document.getElementById('set-meshy-test');
-  const key = document.getElementById('set-meshy-api-key').value.trim();
-  if (!key) { alert('Enter your MyFabmesh.AI API key first.'); return; }
-  const orig = btn.textContent;
-  btn.textContent = 'Testing...';
-  btn.disabled = true;
-  try {
-    // Persist before testing so the user doesn't lose the typed key if the test roundtrips.
-    await API.setConfig({ meshyApiKey: key });
-    const r = await API.testMeshyKey(key);
-    if (r && r.ok) {
-      btn.textContent = 'OK';
-      btn.style.background = '#1f6f3a';
-      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 1800);
-    } else {
-      btn.textContent = 'Failed';
-      btn.style.background = '#7f1d1d';
-      alert('MyFabmesh.AI key test failed: ' + (r?.error || 'unknown error'));
-      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 1800);
-    }
-  } catch (e) {
-    btn.textContent = 'Error';
-    alert('Test error: ' + e.message);
-    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
-  }
 });
 
 // ----------- Claude Desktop: connect button + status check ----------

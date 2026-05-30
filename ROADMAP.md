@@ -459,7 +459,7 @@ après les bugfix UX en cours. Ordre = à décider avec le user.
   strict + IK bones `ik_foot_root` / `ik_hand_root`) + table Supabase
   `user_skeletons` + endpoint `/api/skeletons/list`
 - M4 (2 j) : retarget anims CC0 baked vers tout skeleton
-- M5 (1 j) : Meshy.ai retiré (✓ fait dans commit 8ade29e)
+- M5 (✓ done 2026-05-30) — Meshy.ai entirely removed from codebase (was: paid external service, replaced by local-only stack)
 
 MVP cloud rigging stable : **6 jours** (M1+M2). MVP UE5 Manny natif :
 **10 jours** (M1+M2+M3). Voie privilégiée par l'audit : UniRig Modal,

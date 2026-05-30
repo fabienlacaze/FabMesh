@@ -2402,7 +2402,6 @@ ipcMain.handle('list-rig-animations', (event, { templateName }) => {
 });
 
 // Auto-rigging via UniRig AI model → swap to orc_m1 UE5 skeleton (2-step pipeline)
-// OR via Meshy.ai cloud API (rigging + walk/run anims), depending on `engine`.
 ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
   const _t0 = Date.now();
   const rigEngine = engine || 'unirig';
@@ -2415,42 +2414,6 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
       return { success: false, error: 'Mesh path not allowed' };
     }
     const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
-
-    // ------------------------------------------------------------------
-    // MESHY.AI cloud rigging path
-    // ------------------------------------------------------------------
-    if (rigEngine === 'meshy') {
-      const cfg = loadConfig();
-      const key = (cfg && cfg.meshyApiKey) || '';
-      if (!key.trim()) {
-        return { success: false, error: 'Meshy.ai API key not configured. Open Settings and paste your key.' };
-      }
-      const meshyScript = path.join(scriptsDir, 'meshy_bridge.py');
-      if (!fs.existsSync(meshyScript)) {
-        return { success: false, error: 'meshy_bridge.py not found' };
-      }
-      const baseName = path.basename(meshPath, path.extname(meshPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
-      const outputGlb = path.join(MESHES_DIR, `${baseName}_rigged_meshy_${Date.now()}.glb`);
-      const meshyResult = await new Promise((resolve) => {
-        safeSend('ai3d-progress', '[MeshyRig] Starting...');
-        const proc = execFile(
-          'python',
-          [meshyScript, 'rig', key, meshPath, outputGlb, '1.7'],
-          { timeout: 1800000, maxBuffer: 50 * 1024 * 1024 },
-          (error, stdout, stderr) => resolve({ error, stdout, stderr })
-        );
-        proc.stdout?.on('data', d => safeSend('ai3d-progress', `[MeshyRig] ${d.toString()}`));
-        proc.stderr?.on('data', d => safeSend('ai3d-progress', `[MeshyRig][stderr] ${d.toString()}`));
-      });
-      const durM = ((Date.now() - _t0) / 1000).toFixed(2);
-      console.log(`[auto-rig-ai meshy] END duration=${durM}s error=${!!meshyResult.error}`);
-      if (meshyResult.error || !fs.existsSync(outputGlb)) {
-        const errMsg = extractErrorDetail(meshyResult) || (meshyResult.error && meshyResult.error.message) || 'Meshy rigging failed';
-        return { success: false, error: errMsg, stdout: meshyResult.stdout, stderr: meshyResult.stderr };
-      }
-      const statsM = fs.statSync(outputGlb);
-      return { success: true, path: outputGlb, filename: path.basename(outputGlb), size: statsM.size };
-    }
 
     // ------------------------------------------------------------------
     // LOCAL: UniRig pipeline (3 steps: unirig -> swap_skeleton -> bake anims)
@@ -3842,34 +3805,6 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
       return { success: true, images: result.images };
     }
 
-    // CLOUD: Meshy.ai text-to-image (nano-banana). Uses the user's API key
-    // saved in config.json (set via Settings modal). Free tier = CC-BY 4.0.
-    if (engine === 'meshy') {
-      const cfg = loadConfig();
-      const key = (cfg && cfg.meshyApiKey) || '';
-      if (!key.trim()) {
-        return { success: false, error: 'Meshy.ai API key not configured. Open Settings and paste your key.' };
-      }
-      const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py');
-      const result = await new Promise((resolve, reject) => {
-        const proc = execFile(
-          'python',
-          [bridgeScript, 'text2image', key, prompt, imagesDir, String(numImages || 1)],
-          { timeout: 1800000, maxBuffer: 50 * 1024 * 1024, env: childEnv },
-          (error, stdout, stderr) => {
-            if (error) { reject({ error: error.message, stdout, stderr }); return; }
-            const imgs = fs.readdirSync(imagesDir)
-              .filter(f => /^meshy_.*\.png$/i.test(f))
-              .map(f => path.join(imagesDir, f));
-            resolve({ images: imgs, stdout });
-          }
-        );
-        proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
-        proc.stderr?.on('data', d => { safeSend('ai3d-progress', '[stderr] ' + d.toString()); });
-      });
-      return { success: true, images: result.images };
-    }
-
     // LOCAL GPU: Stable Diffusion XL Turbo — REMOVED.
     // SDXL Turbo is distributed under the SAI Non-Commercial Research License,
     // which disqualifies it from our "free AND commercially sellable" rule.
@@ -3877,15 +3812,15 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     // fall back to RealVis XL (local-flux) above.
     if (engine === 'local-sd') {
       console.warn('[generate-images] local-sd (SDXL Turbo) is disabled (non-commercial license).');
-      return { success: false, error: 'SDXL Turbo is non-commercial. Please pick RealVis XL or Meshy.ai.' };
+      return { success: false, error: 'SDXL Turbo is non-commercial. Please pick RealVis XL.' };
     }
 
     // Pollinations: community service without formal commercial ToS on outputs.
     // Disabled for the Steam release. Legacy projects that still reference
-    // engine='pollinations' get a clear error directing them to RealVis or Meshy.
+    // engine='pollinations' get a clear error directing them to RealVis.
     if (engine === 'pollinations') {
       console.warn('[generate-images] pollinations disabled (no formal commercial ToS on outputs).');
-      return { success: false, error: 'Pollinations has been removed. Please pick RealVis XL (local) or Meshy.ai (cloud).' };
+      return { success: false, error: 'Pollinations has been removed. Please pick RealVis XL (local).' };
     }
 
     // CLOUD: Pollinations (legacy code path kept for reference; unreachable because
@@ -3975,7 +3910,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
   }
 });
 
-// --- Image-to-3D: TRELLIS-2 native (default), Hi3DGen, Meshy. SF3D and
+// --- Image-to-3D: TRELLIS-2 native (default), Hi3DGen. SF3D and
 // TripoSR have been retired for non-commercial license; legacy requests
 // for those engines are silently rerouted to trellis2_native. ---
 ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2FaceFix, trellis2UltraHD, trellis2Preset, assetType }) => {
@@ -4057,8 +3992,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       // + texture_project.py so the output is a textured GLB (the bare
       // bridge alone produces geometry-only mesh).
       'hi3dgen': path.join(__dirname, '..', '..', 'scripts', 'hi3dgen_full_pipeline.py'),
-      'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py'),
-      'meshy':   path.join(__dirname, '..', '..', 'scripts', 'meshy_bridge.py')
+      'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
     };
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['trellis2_native'];
 
@@ -4068,10 +4002,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     const sf3dRemesh = (targetFaces && Number(targetFaces) > 0) ? 'triangle' : 'none';
     const sf3dSubdivide = String(typeof subdivide === 'number' ? subdivide : 0);
 
-    // Meshy needs its API key as argv[2] — fetched from config.json.
-    const meshyApiKey = (loadConfig() || {}).meshyApiKey || '';
-    const meshyTargetFaces = (targetFaces && Number(targetFaces) > 0) ? String(Math.min(300000, Number(targetFaces))) : '50000';
-
     const effortVal = String(effort || 2);
     const argsMap = {
       'local':   [bridgeScript, imagePath, meshPath, '512'],
@@ -4079,15 +4009,8 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
       'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
-      'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
     const args = argsMap[engine] || argsMap['trellis2_native'];
-
-    // Meshy requires an API key — fail fast with a clear message rather than
-    // waiting for the Python bridge to explode on an empty argv.
-    if (engine === 'meshy' && !meshyApiKey.trim()) {
-      return { success: false, error: 'Meshy.ai API key not configured. Open Settings and paste your key.' };
-    }
 
     // Fix truncated image path (known bug: last char gets cut)
     if (!fs.existsSync(imagePath)) {
@@ -4109,7 +4032,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
       'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
-      'meshy':   [bridgeScript, 'image2mesh', meshyApiKey, imagePath, meshPath, meshyTargetFaces, sf3dTexRes],
     };
     const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['trellis2_native'];
 
@@ -5376,52 +5298,17 @@ ipcMain.handle('get-control-api-token', () => {
   return null;
 });
 
-// Patch-merge into config.json. Caller passes e.g. {meshyApiKey: 'msy_...'}.
-// Only whitelisted fields are accepted to avoid the renderer corrupting arbitrary keys.
+// Patch-merge into config.json. Only whitelisted fields are accepted to
+// avoid the renderer corrupting arbitrary keys.
 ipcMain.handle('set-config', (_event, patch) => {
   if (!patch || typeof patch !== 'object') return { success: false, error: 'invalid patch' };
   const config = loadConfig();
-  const ALLOWED = new Set(['blenderPath', 'meshyApiKey']);
+  const ALLOWED = new Set(['blenderPath']);
   for (const [k, v] of Object.entries(patch)) {
     if (ALLOWED.has(k)) config[k] = v;
   }
   saveConfig(config);
   return { success: true };
-});
-
-// Validate a Meshy.ai API key by hitting a cheap authenticated endpoint.
-// Returns { ok: true } on success, { ok: false, error } otherwise.
-ipcMain.handle('test-meshy-key', async (_event, apiKey) => {
-  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 8) {
-    return { ok: false, error: 'API key looks empty or too short' };
-  }
-  return await new Promise((resolve) => {
-    const https = require('https');
-    const req = https.request({
-      method: 'GET',
-      hostname: 'api.meshy.ai',
-      // This endpoint exists and requires auth — any 2xx means the key is valid.
-      // If the endpoint name changes, we simply fall back to checking the HTTP code.
-      path: '/openapi/v1/text-to-image?page_size=1',
-      headers: {
-        'Authorization': `Bearer ${apiKey.trim()}`,
-        'Accept': 'application/json',
-      },
-      timeout: 10000,
-    }, (resp) => {
-      const code = resp.statusCode || 0;
-      let body = '';
-      resp.on('data', (c) => { body += c.toString('utf-8'); });
-      resp.on('end', () => {
-        if (code >= 200 && code < 300) return resolve({ ok: true });
-        if (code === 401 || code === 403) return resolve({ ok: false, error: `Meshy rejected the key (HTTP ${code})` });
-        return resolve({ ok: false, error: `Meshy returned HTTP ${code}: ${body.slice(0, 200)}` });
-      });
-    });
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Timed out contacting Meshy.ai' }); });
-    req.on('error', (err) => resolve({ ok: false, error: `Network error: ${err.message}` }));
-    req.end();
-  });
 });
 
 // Connect FabMesh to Claude Desktop by writing the MCP server config into

@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (cleanup: Meshy.ai external integration removed)
+
+- Deleted scripts/meshy_bridge.py (273 lines — paid external service, https://api.meshy.ai).
+- Removed Meshy.ai dispatch blocks from src/main/main.js (rig, text-to-image, image-to-3d). Removed test-meshy-key IPC handler + preload.js expose. Removed meshyApiKey from ALLOWED config whitelist.
+- Removed Meshy entries from rig engine dropdown, error handlers, regex cleanup, timing estimates in src/renderer/index2.js + cloud/public/app/index2.js.
+- Updated stale comments in cloud/public/app/meshyAPI-cloud.js.
+- Updated ROADMAP.md M5 status.
+- PRESERVED: internal `window.meshyAPI` / `MeshyAPI` shim object (our local wrapper, NOT the external service).
+
 ## 2026-05-30 (audit: apply 20+ fixes from AUDIT_2026-05-29.md)
 
 ### HIGH (user-visible bug / blocking)
