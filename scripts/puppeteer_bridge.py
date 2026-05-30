@@ -90,6 +90,15 @@ import tempfile
 import shutil
 import time
 
+# Force UTF-8 stdout so Unicode log chars (-> arrows, etc.) survive on
+# Windows cp1252 consoles. Without this, the bridge crashes with
+# UnicodeEncodeError the first time it tries to log a non-ASCII char.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HERE = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 PUP_DIR = os.path.join(PROJECT_ROOT, "external", "Puppeteer")
