@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (rigging: multi-skeleton target + Apovivor extraction tool + UI dropdown)
+
+- Added scripts/puppeteer_to_skeleton.py: generalizes puppeteer_to_orc_m1.py with --target NAME arg. Targets: orc_m1 (default), ue5_mannequin, zebra, lion, wolf, crocodile, elephant, deer, crow, turtle, spider, bat, dragon, puppeteer_raw.
+- Added scripts/apovivor_export_skeletons.py: READ-ONLY UE5 Python script the user pastes in Apovivor editor to extract 12 skeletons to scripts/rig_templates/skm/<name>.bones.json + update registry.json. NEVER writes to Apovivor content, NEVER saves Apovivor assets.
+- Added SKELETON dropdown in desktop rig step UI with emoji + bone count per target (auto-fetched via new read-bones-json IPC).
+- main.js auto-rig-ai now routes the user-selected target through puppeteer_to_skeleton.py. puppeteer_raw target short-circuits the bake step.
+- Existing scripts/puppeteer_to_orc_m1.py kept for backward compat.
+- REQUIRED USER ACTION before non-orc_m1 targets work: open Apovivor in UE5 -> Tools -> Python -> Execute Script -> paste content of scripts/apovivor_export_skeletons.py. Output JSON files land in FabMesh; Apovivor is read-only throughout.
+
 ## 2026-05-30 (rigging: Puppeteer joints renamed to orc_m1 + anims re-enabled)
 
 - Added scripts/puppeteer_to_orc_m1.py — anatomical classifier that renames Puppeteer 34 generic joints (joint0..joint33) to orc_m1/UE5 conventions (pelvis, spine_01, clavicle_l/r, upperarm_l/r, hand_l/r, thigh_l/r, foot_l/r, etc.). World-space positions, not local — avoids the swap_skeleton.py classifier bug.
