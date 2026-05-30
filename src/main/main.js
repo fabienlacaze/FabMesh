@@ -4187,6 +4187,18 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       PYTHONUNBUFFERED: '1',
       FABMESH_VRAM_FRACTION: String(fraction),
       PYTORCH_CUDA_ALLOC_CONF: allocConf,
+      // 2026-05-30 — Authoritative TRELLIS-2 attention backend config.
+      // Forces sdpa (Blackwell-correct, fp32-math in dense + sparse paths)
+      // and disables torchdynamo/triton/flash_attn so SAC never blocks on
+      // flash_attn_2_cuda.dll. These must NOT rely on Python setdefault
+      // because a polluted parent env (e.g. local_hi3dgen_bridge.py) used
+      // to force flash_attn. Set authoritatively here to override.
+      ATTN_BACKEND: 'sdpa',
+      SPARSE_ATTN_BACKEND: 'sdpa',
+      TORCHDYNAMO_DISABLE: '1',
+      TORCHINDUCTOR_USE_TRITON: '0',
+      TRANSFORMERS_ATTN_IMPLEMENTATION: 'eager',
+      TRELLIS2_USE_KAOLIN_RASTER: '1',
       ..._ramLimitMB2 ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB2 } : {},
       ..._gpuLimit2   ? { FABMESH_GPU_LIMIT:   _gpuLimit2   } : {},
       ..._tempLimit2  ? { FABMESH_TEMP_LIMIT:  _tempLimit2  } : {},

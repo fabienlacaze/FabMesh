@@ -1,5 +1,42 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (TRELLIS-2 attention: flash_attn uninstalled, sdpa authoritative end-to-end)
+
+- Windows SAC was blocking `flash_attn_2_cuda.dll` on the target machine
+  (user formally prohibits disabling SAC). Even with the existing
+  Python-side `os.environ.setdefault('ATTN_BACKEND','sdpa')` at the top
+  of `scripts/trellis2_native_full_pipeline.py`, an inherited parent-env
+  value or a polluted wrapper (notably `scripts/local_hi3dgen_bridge.py`
+  which used to FORCE `ATTN_BACKEND=flash_attn`) would silently win
+  because `setdefault` is non-authoritative.
+- Mapping evidence (deferred-tool ToolSearch agents) confirmed every
+  `import flash_attn` in trellis2 lives inside `if config.BACKEND/ATTN
+  == 'flash_attn'` branches with no try/except guard — so the only ways
+  to hit the SAC block are (a) ATTN_BACKEND=flash_attn slipping through
+  or (b) the .pyd existing on disk and being touched by some other lib.
+- Fixes applied:
+  - `src/main/main.js` (Electron image-to-3d spawn env block, around
+    lines 4183-4200): added authoritative entries AFTER `...process.env`
+    so parent-env pollution can never override:
+      `ATTN_BACKEND='sdpa'`, `SPARSE_ATTN_BACKEND='sdpa'`,
+      `TORCHDYNAMO_DISABLE='1'`, `TORCHINDUCTOR_USE_TRITON='0'`,
+      `TRANSFORMERS_ATTN_IMPLEMENTATION='eager'`,
+      `TRELLIS2_USE_KAOLIN_RASTER='1'`.
+  - `scripts/local_hi3dgen_bridge.py` (lines 67-68): switched the
+    Hi3DGen wrapper from forcing `flash_attn` to forcing `sdpa`. The
+    sparse module DOES support sdpa via the fp32-math branch
+    (`modules/sparse/attention/full_attn.py:214-254`) which is the
+    canonical Blackwell sm_120 path.
+  - `scripts/wizard_install_deps.py` (~lines 168-176): the optional
+    flash-attn install is now opt-in via `WIZARD_INSTALL_FLASH_ATTN=1`
+    env var. By default the wizard skips it with a "SAC-blocked; sdpa
+    backend is authoritative" message.
+- Filesystem cleanup: uninstalled flash_attn 2.8.2 from the trellis2
+  venv (`external/TRELLIS2_win/.venv`). pip metadata showed zero
+  reverse-dependencies, so this is clean.
+- IMPORTANT: requires a full Electron restart (main.js changed) — Ctrl+R
+  is NOT enough. See "Restart Electron quand main.js change" rule.
+
 ## 2026-05-30 (backup: 12 Apovivor skeletons + TRELLIS-2 patches + ATTN_BACKEND default + audit doc)
 
 - Bulk safety commit covering several days of un-staged work.

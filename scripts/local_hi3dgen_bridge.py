@@ -60,12 +60,14 @@ def generate_3d(image_path, output_path):
     os.environ['SPCONV_ALGO'] = 'native'
     # PyTorch CUDA alloc — large allocations during sparse structure flow
     os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
-    # Hi3DGen sparse attention only accepts 'xformers' or 'flash_attn'
-    # (no SDPA fallback in sparse module). We route this engine to the
-    # TRELLIS2 venv which has flash_attn 2.8.2 built against torch 2.8.
-    # Non-sparse attention also uses flash_attn via the same env var.
-    os.environ['ATTN_BACKEND'] = 'flash_attn'
-    os.environ['SPARSE_ATTN_BACKEND'] = 'flash_attn'
+    # 2026-05-30 — Switched from flash_attn to sdpa (Blackwell-correct path).
+    # Windows SAC blocks flash_attn_2_cuda.dll on this machine and user
+    # explicitly prohibited disabling SAC. TRELLIS-2 sparse module DOES
+    # support sdpa (modules/sparse/attention/full_attn.py:214-254 implements
+    # the fp32-math SDPA branch for sm_120 Blackwell). flash_attn is being
+    # uninstalled from the trellis2 venv to make this unambiguous.
+    os.environ['ATTN_BACKEND'] = 'sdpa'
+    os.environ['SPARSE_ATTN_BACKEND'] = 'sdpa'
 
     if not os.path.isdir(HI3DGEN_DIR):
         print(f"LOCAL_HI3DGEN_ERROR: Hi3DGen repo not found at {HI3DGEN_DIR}", flush=True)
