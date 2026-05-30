@@ -121,6 +121,41 @@ try {
 } catch (_) {}
 
 // ────────────────────────────────────────────────────────────────
+// uploadClientMeshResult — single source of truth for the three
+// client-side mesh edit tools (Mesh Tools, Paint Emissive, Paint
+// Mesh) that produce a GLB locally and post it to the Worker for
+// free R2 storage.
+//
+// Server allowlist (cloud/src/worker.ts CLIENT_OPS):
+//   smooth, decimate, subdivide, fix_normals, fill_holes, center
+// Anything else returns 400. Paint Emissive / Paint Mesh aren't
+// real mesh ops on the server — they piggy-back on 'center' purely
+// to get the GLB stored, hence the `opType` parameter the caller
+// supplies (no hardcoded value here).
+// ────────────────────────────────────────────────────────────────
+async function uploadClientMeshResult(bytes, opType, extra = {}) {
+  // Chunked base64 encode — avoids the "Maximum call stack" trap
+  // String.fromCharCode.apply hits on multi-MB buffers.
+  let bin = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  const b64 = btoa(bin);
+  const r = await fetch('/api/mesh-op/client-result', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ opType, glbBase64: b64, ...extra }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || !data?.success) {
+    throw new Error(data?.error || `HTTP ${r.status}`);
+  }
+  return data;
+}
+
+// ────────────────────────────────────────────────────────────────
 // Inbox → project deep-link helper
 // ────────────────────────────────────────────────────────────────
 // Called from cloud-overrides.js openInboxPopup when the user clicks a
@@ -1951,16 +1986,29 @@ document.getElementById('ws-3d-source-back-preview')?.addEventListener('click', 
       input.onchange = async () => {
         const f = input.files?.[0];
         if (!f) return;
-        const arrBuf = await f.arrayBuffer();
-        const saveRes = await window.meshyAPI.saveBuffer({
-          buffer: Array.from(new Uint8Array(arrBuf)),
-          filename: `${p.name}_back_${Date.now()}.png`,
-          subdir: 'images',
+        // On cloud, saveBuffer falls back to the legacy "download" branch
+        // and leaves backImagePath as a local filename string — the
+        // Worker can't fetch that, so multi-ref TRELLIS-2 then fails.
+        // Route through saveImageDataUrl, which uploads to R2 and
+        // returns a stable HTTPS URL the Worker can actually GET.
+        const dataUrl = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result);
+          fr.onerror = () => reject(fr.error || new Error('FileReader failed'));
+          fr.readAsDataURL(f);
         });
-        if (saveRes?.path) {
-          p.backImagePath = saveRes.path;
-          showStep2BackImage(saveRes.path);
+        const saveRes = await window.meshyAPI.saveImageDataUrl({
+          dataUrl,
+          suffix: 'back',
+          basePath: `${p.name}_back_${Date.now()}.png`,
+        });
+        const savedPath = saveRes?.newPath || saveRes?.path;
+        if (saveRes?.success && savedPath) {
+          p.backImagePath = savedPath;
+          showStep2BackImage(savedPath);
           showToast('Back photo added', 'success');
+        } else {
+          showToast(`Add back photo failed: ${saveRes?.error || 'unknown'}`, 'error');
         }
       };
       input.click();
@@ -7093,7 +7141,10 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2FaceFix,
     trellis2UltraHD,
     trellis2Preset,
-    assetType: document.getElementById('ws-asset-type')?.value || 'character',
+    // Network-boundary key: the Worker (/api/generate) reads `asset_type`.
+    // Sending `assetType` here was a silent no-op that disabled the
+    // asset-type-aware pipeline routing on the server side.
+    asset_type: document.getElementById('ws-asset-type')?.value || 'character',
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
   const jobParams = {
@@ -7116,6 +7167,11 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     });
     try {
       const r = await API.imageTo3D(params);
+      // Capture the REAL worker-side job id so cancelJob can
+      // forward it to /api/jobs/cancel. Without this, the renderer
+      // was sending its local UI counter (state.jobIdCounter), which
+      // the Worker has no row for — every cancel was a silent no-op.
+      if (r?.jobId) job.workerJobId = r.jobId;
       if (r?.success) {
         // Show mesh stats in the job details before completing
         if (r.meshVerts || r.meshFaces) {
@@ -8250,23 +8306,7 @@ async function _mtApplyOnDevice(opType) {
       );
     });
     const bytes = new Uint8Array(arrayBuffer);
-    // Chunked base64 to avoid the "Maximum call stack" trap on big buffers.
-    let bin = '';
-    const CHUNK = 8192;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    }
-    const b64 = btoa(bin);
-    const r = await fetch('/api/mesh-op/client-result', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ opType, glbBase64: b64 }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data?.success) {
-      throw new Error(data?.error || `HTTP ${r.status}`);
-    }
+    const data = await uploadClientMeshResult(bytes, opType);
     const newUrl = data.path || data.newPath || data.mesh_url;
     showToast(`${opType} done (free, on device)`, 'success');
     // populateWorkspace re-renders from p.meshes — push the new URL
@@ -10138,22 +10178,11 @@ async function _peApplyOnDevice() {
       );
     });
     const bytes = new Uint8Array(arrayBuffer);
-    let bin = '';
-    const CHUNK = 8192;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    }
-    const b64 = btoa(bin);
     // Reuse the client-result endpoint that the other free tools use
-    // (auth + magic-byte check + R2 store, no credit charge).
-    const r = await fetch('/api/mesh-op/client-result', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ opType: 'center', glbBase64: b64 }),  // server route validates against a fixed allowlist
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
+    // (auth + magic-byte check + R2 store, no credit charge). Paint
+    // Emissive isn't on the server allowlist, so we tunnel through
+    // 'center' purely to store the modified GLB.
+    const data = await uploadClientMeshResult(bytes, 'center');
     const newUrl = data.path || data.newPath || data.mesh_url;
     showToast('Paint Emissive applied (free, on device)', 'success');
     const p = state.currentProject;
@@ -10747,19 +10776,10 @@ async function _pmApplyOnDevice() {
       );
     });
     const bytes = new Uint8Array(buf);
-    let bin = '';
-    const CHUNK = 8192;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    }
-    const b64 = btoa(bin);
-    const r = await fetch('/api/mesh-op/client-result', {
-      method: 'POST', credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ opType: 'center', glbBase64: b64 }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
+    // Same tunneling as Paint Emissive: Paint Mesh isn't on the
+    // server allowlist (smooth/decimate/subdivide/fix_normals/
+    // fill_holes/center), so we pass 'center' to store the GLB.
+    const data = await uploadClientMeshResult(bytes, 'center');
     const newUrl = data.path || data.newPath || data.mesh_url;
     showToast('Paint Mesh saved!', 'success');
     const p = state.currentProject;
@@ -12929,9 +12949,12 @@ async function cancelJob(id) {
   j.progress = 100;
   j.name += ' (cancelled)';
   renderJobs();
-  // If the IPC supports cancellation, fire it
+  // If the IPC supports cancellation, fire it.
+  // Forward the REAL worker job id (captured when /api/generate
+  // returned), not the local UI counter `id` — the Worker indexes
+  // jobs by its own id, not ours.
   try {
-    if (API.cancelJob) await API.cancelJob(id);
+    if (API.cancelJob) await API.cancelJob(j.workerJobId || id);
   } catch (e) { console.warn('cancelJob IPC failed:', e); }
   if (j.onCancel) {
     try { j.onCancel(); } catch (e) {}

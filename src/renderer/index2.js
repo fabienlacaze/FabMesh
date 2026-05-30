@@ -2189,7 +2189,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
     const job = pushJob(`2-view back photo: ${p.name}`, null, {
       Image: (mvImagePath || '').split(/[\\/]/).pop(),
       Mode: '2-view (back photo)',
-    }, expectedMs);
+    }, expectedMs, { sourceImageUrl: mvImagePath, projectName: p.name });
     showToast('Generating back photo...', 'info', 5000);
     try {
       const rawPrompt = document.getElementById('ws-prompt')?.dataset.rawPrompt
@@ -2223,7 +2223,7 @@ document.getElementById('mv-opt-start')?.addEventListener('click', async () => {
     Mode: '6 views',
     Harmonize: harmonize ? 'yes' : 'no',
     Upscale: upscale ? 'yes' : 'no',
-  }, expectedMs);
+  }, expectedMs, { sourceImageUrl: mvImagePath, projectName: p.name });
   showToast('Generating 6 multi-views...', 'info', 5000);
   try {
     const result = await API.generateMultiview({
@@ -3735,7 +3735,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       'Multi-view': mv6view ? '6 views' : (multiView ? '2 views (back)' : 'no'),
       'Construction stages': buildStages ? 'yes' : 'no',
       Prompt: userPrompt,
-    }, expectedMs);
+    }, expectedMs, { projectName: p.name, assetKind: assetType });
     try {
       const r = await API.generateImages({ prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100 });
       if (r?.success) {
@@ -4021,7 +4021,7 @@ document.getElementById('mod-apply').addEventListener('click', async () => {
       Engine: engineLabel(engine),
       Strength: `${Math.round(strength * 100)}%`,
       Prompt: prompt,
-    }, modifyExpected);
+    }, modifyExpected, { sourceImageUrl: target, projectName: p.name });
     try {
       const r = await API.img2img({ imagePath: target, prompt, strength, engine, jobId: job.id });
       if (r?.success) {
@@ -4057,7 +4057,7 @@ document.getElementById('ws-removebg-btn').addEventListener('click', async () =>
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
   gatedRun('bg', `Remove background: ${p.name}`, async () => {
-    const job = pushJob(`Remove background: ${p.name}`);
+    const job = pushJob(`Remove background: ${p.name}`, null, null, undefined, { sourceImageUrl: target, projectName: p.name });
     try {
       const r = await API.removeBackground(target);
       if (r?.success) {
@@ -4109,7 +4109,7 @@ async function runQuickEdit(operation, params) {
   const expectedMs = QUICK_EDIT_EXPECTED_MS[operation] || 6000;
   const imgName = String(target).split(/[\\/]/).pop();
   const job = (typeof pushJob === 'function')
-    ? pushJob(`${operation}: ${p.name}`, null, { Image: imgName }, expectedMs)
+    ? pushJob(`${operation}: ${p.name}`, null, { Image: imgName }, expectedMs, { sourceImageUrl: target, projectName: p.name })
     : null;
   try {
     const r = await API.imageQuickEdit({ imagePath: target, operation, params });
@@ -4555,7 +4555,7 @@ document.getElementById('sym-apply')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imgName = String(symState.imgPath).split(/[\\/]/).pop();
   const job = (typeof pushJob === 'function')
-    ? pushJob(`Symmetrize: ${p?.name || ''}`, null, { Image: imgName }, 5000)
+    ? pushJob(`Symmetrize: ${p?.name || ''}`, null, { Image: imgName }, 5000, { sourceImageUrl: symState.imgPath, projectName: p?.name })
     : null;
   try {
     const dataUrl = canvas.toDataURL('image/png');
@@ -4620,7 +4620,7 @@ document.getElementById('res-downscale')?.addEventListener('click', async () => 
   const nw = Math.round(_resW / 2), nh = Math.round(_resH / 2);
   const imgName = String(tgt).split(/[\\/]/).pop();
   const job = (typeof pushJob === 'function')
-    ? pushJob(`Downscale: ${p?.name || ''}`, null, { Image: imgName, From: `${_resW}x${_resH}`, To: `${nw}x${nh}` }, 4000)
+    ? pushJob(`Downscale: ${p?.name || ''}`, null, { Image: imgName, From: `${_resW}x${_resH}`, To: `${nw}x${nh}` }, 4000, { sourceImageUrl: tgt, projectName: p?.name })
     : null;
   try {
     const r = await API.imageQuickEdit({ imagePath: tgt, operation: 'downscale', params: {} });
@@ -5013,7 +5013,7 @@ document.getElementById('ws-style-menu')?.addEventListener('click', async (e) =>
   if (!tgt) { showToast('Pick an image first.', 'error'); return; }
   showToast(`Applying style: ${style.split(',')[0]}...`, 'info', 2000);
   gatedRun('img2img', `Style: ${style.split(',')[0]}`, async () => {
-    const job = pushJob(`Style Transfer: ${p.name}`, null, { Style: style.split(',')[0] }, 30000);
+    const job = pushJob(`Style Transfer: ${p.name}`, null, { Style: style.split(',')[0] }, 30000, { sourceImageUrl: tgt, projectName: p.name });
     try {
       const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'local-sdxl' });
       if (r?.success) {
@@ -5255,7 +5255,7 @@ document.getElementById('blur-save')?.addEventListener('click', async () => {
   modal?.classList.add('hidden');
   const imgName = String(tgt).split(/[\\/]/).pop();
   const job = (typeof pushJob === 'function')
-    ? pushJob(`Blur brush: ${p?.name || ''}`, null, { Image: imgName }, 4000)
+    ? pushJob(`Blur brush: ${p?.name || ''}`, null, { Image: imgName }, 4000, { sourceImageUrl: tgt, projectName: p?.name })
     : null;
   try {
     const dataUrl = bCanvas.toDataURL('image/png');
@@ -5952,7 +5952,7 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imgName = String(paintState.imgPath).split(/[\\/]/).pop();
   const job = (typeof pushJob === 'function')
-    ? pushJob(`Paint: ${p?.name || ''}`, null, { Image: imgName }, 4000)
+    ? pushJob(`Paint: ${p?.name || ''}`, null, { Image: imgName }, 4000, { sourceImageUrl: paintState.imgPath, projectName: p?.name })
     : null;
   try {
     const result = await window.meshyAPI.saveImageDataUrl({
@@ -6442,7 +6442,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   };
   gatedRun('mesh', `Generate 3D: ${p.name}`, async () => {
-    const job = pushJob(`Generate 3D: ${p.name}`, null, jobParams, expectedMs);
+    const job = pushJob(`Generate 3D: ${p.name}`, null, jobParams, expectedMs, { sourceImageUrl: p.selectedImagePath, projectName: p.name });
     try {
       const r = await API.imageTo3D(params);
       if (r?.success) {
@@ -6526,7 +6526,7 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
       Format: format,
       'AI model': model,
       'Source mesh': m.filename,
-    });
+    }, undefined, { projectName: p.name });
     try {
       const r = await API.refineMesh({ projectName: p.name, modification, format, model, jobId: job.id });
       if (r?.success || r?.meshPath) {
@@ -9833,7 +9833,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
       'Mirror X': mirrorX ? 'yes' : 'no',
       Landmarks: Object.keys(lmData).length > 0 ? `${Object.keys(lmData).length} placed` : 'auto',
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
-    }, rigExpected);
+    }, rigExpected, { projectName: p.name });
     try {
       const r = await API.autoRig({
         meshPath: meshPathToUse,
@@ -9890,7 +9890,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
     const job = pushJob(`Auto-rig AI (${rigEngine === 'meshy' ? 'cloud' : 'local'}): ${p.name}`, null, {
       Engine: engineLabel,
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
-    }, expectedMs);
+    }, expectedMs, { projectName: p.name });
     try {
       const r = await API.autoRigAI({ meshPath: meshPathToUse, engine: rigEngine });
       if (r?.success) {
@@ -10107,12 +10107,18 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
 // can push/complete jobs in the same queue the rest of the app uses.
 // Because index2.js is an ES module, plain `function foo()` declarations
 // don't land on `window`; we wire them up explicitly below after definition.
-function pushJob(name, onCancel, params, expectedMsOverride) {
+function pushJob(name, onCancel, params, expectedMsOverride, opts) {
   const id = ++state.jobIdCounter;
   const kind = inferKind(name);
   const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
     ? expectedMsOverride
     : (JOB_EXPECTED_MS[kind] || 60000);
+  // SNAPSHOT the source image at launch time. Without this, the Job
+  // Details modal reads state.currentProject.* at RENDER time, which
+  // may have changed if the user clicked another version thumbnail
+  // between launch and the modal refresh (bug: modal shows wrong
+  // thumb because the user switched selected image mid-job).
+  const o = opts || {};
   const job = {
     id,
     name,
@@ -10124,6 +10130,9 @@ function pushJob(name, onCancel, params, expectedMsOverride) {
     onCancel: onCancel || null,
     tickTimer: null,
     params: params || null,
+    sourceImageUrl: o.sourceImageUrl || null,
+    projectName: o.projectName || (state.currentProject ? state.currentProject.name : null),
+    assetKind: o.assetKind || null,
   };
   // Smoothly climb from 5 to 90% over expected duration UNTIL the bridge
   // starts emitting real progress events. After that, the bridge is the
@@ -10176,7 +10185,7 @@ function completeJob(id, success, errorMessage) {
 // - complete: mark a job done/error + optional error message
 // - render: force a UI redraw of the jobs panel
 window.fabmeshJobs = {
-  push: (name, onCancel, params, expectedMs) => pushJob(name, onCancel, params, expectedMs),
+  push: (name, onCancel, params, expectedMs, opts) => pushJob(name, onCancel, params, expectedMs, opts),
   enqueue: (kind, name, runFn) => enqueueJob(kind, name, runFn),
   complete: (id, success, errorMessage) => completeJob(id, success, errorMessage),
   render: () => renderJobs(),
@@ -10398,6 +10407,10 @@ async function refreshJobDetailsModal(id) {
   // (`Generate images: ...`) there is no source asset yet — showing the
   // project's previously-selected image is misleading ("looks like the new
   // gen has the old image"), so we hide the thumb in that case.
+  // PRIORITY: job.sourceImageUrl (the SNAPSHOT taken at pushJob time) wins
+  // over state.currentProject.* — because the user can click another
+  // version thumb between launch and the modal refresh, which would swap
+  // the displayed source image to a completely different asset.
   const refImg = document.getElementById('jd-ref-img');
   const p = state.currentProject;
   const isRigJob = /rig/i.test(j.name || '');
@@ -10407,12 +10420,23 @@ async function refreshJobDetailsModal(id) {
   // regex and reveal the stale thumb mid-generation.
   const isImageGenJob = /^(generate images?|generating (back|6) views|generate back views|multi-views)\b/i.test(j.name || '');
   let thumbUrl = null;
-  if (isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
+  // 1) Snapshot wins — set at launch time, immune to UI state mutations.
+  if (j.sourceImageUrl && !isImageGenJob) {
+    const u = j.sourceImageUrl;
+    if (/^https?:|^file:|^data:|^blob:/i.test(u)) {
+      thumbUrl = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now();
+    } else {
+      thumbUrl = 'file:///' + String(u).replace(/\\/g, '/') + '?t=' + Date.now();
+    }
+  }
+  // 2) Rig jobs: show the source mesh thumbnail (not an image).
+  if (!thumbUrl && isRigJob && p && p.selectedMeshPath && API.getThumbnail) {
     try {
       const t = await API.getThumbnail(p.selectedMeshPath);
       if (t) thumbUrl = t + '?t=' + Date.now();
     } catch (_) {}
   }
+  // 3) Fallback to the current project's image path (legacy behaviour).
   if (!thumbUrl && p && !isImageGenJob) {
     const imgPath = p.selectedImagePath || p.previewImagePath || p.thumb;
     if (imgPath) thumbUrl = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
@@ -10542,7 +10566,7 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
       Target: target,
       Replace: replace || '(remove)',
       Padding: dilate + 'px',
-    }, 180000);
+    }, 180000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
       const r = await API.autoInpaint({ imagePath, targetText: target, prompt: replace, dilate, jobId: job.id });
       if (r?.success) {
