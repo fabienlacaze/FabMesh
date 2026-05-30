@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (rigging: pivot to Puppeteer end-to-end, retire MA scaffold)
+- User flagged that Puppeteer already produces the skeleton, so the MA+Puppeteer combo was redundant. Pivoted to Puppeteer end-to-end (same Apache-2.0, same team Seed3D).
+- Added scripts/puppeteer_bridge.py with 3-step pipeline (skeleton -> skinning -> final_rigging/export -> GLB).
+- main.js auto-rig-ai now defaults to puppeteer engine. unirig stays as legacy fallback.
+- Removed scripts/magicarticulate_bridge.py + magicarticulate dropdown entry + IPC branch.
+- REQUIRED USER SETUP: clone Seed3D/Puppeteer to external/Puppeteer/ + venv (torch 2.6+cu128 + flash-attn 2.7) + HF weights. Commands in puppeteer_bridge.py top-of-file docstring.
+
 ## 2026-05-30 (rigging: MagicArticulate bridge scaffolding)
 - Added scripts/magicarticulate_bridge.py — Apache-2.0 replacement for UniRig (4.6 GB VRAM confirmed by upstream, 1-2 s/mesh, non-humanoid supported). Mirrors unirig_bridge.py CLI contract.
 - main.js auto-rig-ai handler now defaults to magicarticulate engine; unirig stays as explicit fallback.

@@ -2401,10 +2401,10 @@ ipcMain.handle('list-rig-animations', (event, { templateName }) => {
   }
 });
 
-// Auto-rigging via MagicArticulate (default) or UniRig fallback → swap to orc_m1 UE5 skeleton → bake anims
+// Auto-rigging via Puppeteer (default) or UniRig fallback → swap to orc_m1 UE5 skeleton → bake anims
 ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
   const _t0 = Date.now();
-  const rigEngine = engine || 'magicarticulate';
+  const rigEngine = engine || 'puppeteer';
   console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} @${new Date(_t0).toISOString()}`);
   try {
     if (!meshPath || !fs.existsSync(meshPath)) {
@@ -2416,16 +2416,16 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
     const scriptsDir = path.join(__dirname, '..', '..', 'scripts');
 
     // ------------------------------------------------------------------
-    // Step-1 bridge selection: MagicArticulate (default) or UniRig (fallback)
+    // Step-1 bridge selection: Puppeteer (default) or UniRig (legacy fallback)
     // Both bridges share the same CLI contract: <mesh_path> <output_glb>
     // Step-2 (swap_skeleton) and Step-3 (bake_procedural_anims) are shared.
     // ------------------------------------------------------------------
     const unirigScript = path.join(scriptsDir, 'unirig_bridge.py');
-    const magicArtScript = path.join(scriptsDir, 'magicarticulate_bridge.py');
+    const puppeteerScript = path.join(scriptsDir, 'puppeteer_bridge.py');
     const swapScript = path.join(scriptsDir, 'swap_skeleton.py');
     const bakeAnimScript = path.join(scriptsDir, 'bake_procedural_anims.py');
     const orcBones = path.join(scriptsDir, 'rig_templates', 'skm', 'orc_m1.bones.json');
-    const magicArtVenvPython = path.join(__dirname, '..', '..', 'external', 'MagicArticulate', 'venv', 'Scripts', 'python.exe');
+    const puppeteerVenvPython = path.join(__dirname, '..', '..', 'external', 'Puppeteer', 'venv', 'Scripts', 'python.exe');
 
     // Resolve step-1 bridge + python interpreter based on selected engine
     let step1Script;
@@ -2441,17 +2441,17 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
       step1Label = 'UniRig';
       engineSuffix = 'unirig';
     } else {
-      // Default: MagicArticulate
-      if (!fs.existsSync(magicArtScript)) {
-        return { success: false, error: 'magicarticulate_bridge.py not found' };
+      // Default: Puppeteer
+      if (!fs.existsSync(puppeteerScript)) {
+        return { success: false, error: 'puppeteer_bridge.py not found' };
       }
-      if (!fs.existsSync(magicArtVenvPython)) {
-        return { success: false, error: 'MagicArticulate venv not found at external/MagicArticulate/venv. Please run the MagicArticulate setup step.' };
+      if (!fs.existsSync(puppeteerVenvPython)) {
+        return { success: false, error: 'Puppeteer venv not found at external/Puppeteer/venv. Please run the Puppeteer setup step.' };
       }
-      step1Script = magicArtScript;
-      step1Python = magicArtVenvPython;
-      step1Label = 'MagicArticulate';
-      engineSuffix = 'magicart';
+      step1Script = puppeteerScript;
+      step1Python = puppeteerVenvPython;
+      step1Label = 'Puppeteer';
+      engineSuffix = 'puppeteer';
     }
 
     if (!fs.existsSync(swapScript)) {
