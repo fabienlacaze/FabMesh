@@ -1,5 +1,30 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (multiview_sheet_gen — generic-subject prompt port from cloud `_sheet.py`)
+
+- Port Cat 5: removed humanoid-specific tokens from `build_prompt()` in
+  `scripts/multiview_sheet_gen.py` so the 2x2 multi-view sheet works for
+  vehicles, buildings, props — not only humanoids.
+- Changes (verbatim port from `modal_app/_sheet.py:_build_prompt`):
+  - default subject token: `'character'` -> `'subject'`
+  - sheet label: dropped the word `character` ("orthographic character
+    model sheet of …" -> "orthographic model sheet of …")
+  - pose line: `'T-pose neutral stance, arms extended, full body visible
+    in each cell'` -> `'neutral stance, full subject visible in each
+    cell'`
+  - consistency line: `'consistent character identical across all cells,
+    same lighting'` -> `'consistent identical subject across all cells,
+    same lighting'`
+- Untouched: `NEG_PROMPT`, `LAYOUTS`, `ORIENT_AZIM_ELEV`, `split_sheet`,
+  `main()`, IPAdapter loading, CLI args. Function signature
+  `build_prompt(subject_hint, layout)` unchanged. Return shape (PNG +
+  views.json) unchanged. Zero call-site impact.
+- Behavioural note: same seed will now produce a slightly different
+  image (prompt text is part of SDXL conditioning). Humanoid callers
+  that relied on the implicit `T-pose` token should add it to
+  `prompt_hint` — follow-up may re-inject `T-pose` conditionally when
+  `asset_type == humanoid`.
+
 ## 2026-05-30 (Rig anim fix — puppeteer_default 34-bone template)
 
 - Bug: rigged mesh exploded during Run animation playback even though

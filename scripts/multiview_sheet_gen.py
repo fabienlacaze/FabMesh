@@ -73,14 +73,14 @@ ORIENT_AZIM_ELEV = {
 
 def build_prompt(subject_hint: str, layout):
     cols, rows, _, slots = layout
-    base = subject_hint.strip() if subject_hint else 'character'
+    base = (subject_hint or '').strip() or 'subject'
     grid_label = f'{cols}x{rows}' if rows > 1 else f'{cols} views'
     parts = [
-        f'{len(slots)}-view orthographic character model sheet of {base}',
+        f'{len(slots)}-view orthographic model sheet of {base}',
         f'{grid_label} grid layout, equal cells',
         'STRICT ORTHOGRAPHIC projection, no perspective, no foreshortening',
-        'T-pose neutral stance, arms extended, full body visible in each cell',
-        'consistent character identical across all cells, same lighting',
+        'neutral stance, full subject visible in each cell',
+        'consistent identical subject across all cells, same lighting',
         'plain white background, even studio lighting, no shadows',
         'symmetric grid, perfectly aligned, centered subject in each cell',
         'ultra detailed, sharp focus, 8k, photorealistic',
