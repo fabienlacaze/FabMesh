@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (backup: 12 Apovivor skeletons + TRELLIS-2 patches + ATTN_BACKEND default + audit doc)
+
+- Bulk safety commit covering several days of un-staged work.
+- 12 skeleton .bones.json templates extracted read-only from
+  Apovivor (bat/crocodile/crow/deer/dragon/elephant/lion/spider/turtle/
+  ue5_mannequin/wolf/zebra) + registry.json updated.
+- TRELLIS-2 mesh-gen patches: `ATTN_BACKEND=sdpa` default in the
+  pipeline (so flash-attn .pyd is never loaded — Smart App Control
+  blocks unsigned binaries) + mirror of the
+  `external/TRELLIS2_win/src/trellis2/models/__init__.py` patch
+  (relative ckpt path resolution) under
+  `scripts/trellis2_upstream_patches/` with re-apply docs.
+- AUDIT_2026-05-29.md: full multi-agent audit report committed.
+- .gitignore: `external/Puppeteer/` added (22 GB venv + ckpts).
+
 ## 2026-05-30 (prompts: animal de-dup tail tokens — SDXL was growing extras)
 
 - Previous animal prompt (commit 7e4cd62) mentioned "tail" twice
