@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (prompts: animal de-dup tail tokens — SDXL was growing extras)
+
+- Previous animal prompt (commit 7e4cd62) mentioned "tail" twice
+  ("tail extending behind" + "head and tail at the same low height as
+  the spine"). SDXL over-fixated and produced alligators with multiple
+  tail-like protrusions branching off the body.
+- Replaced with a single "ONE single tail only" mention + negative
+  reinforcement: "exactly one tail, no extra tails, no multiple tails,
+  no extra limbs". Horizontal-body convention preserved by the
+  remaining tokens.
+
 ## 2026-05-30 (cloud: Puppeteer rigging deployed to Modal)
 
 - Added modal_app/_puppeteer_rig.py: Modal Labs container with Puppeteer + all upstream patches replicated on Linux (no Windows-specific workarounds needed). HF ckpts baked into image. A10G GPU. ~3 min cold / ~1.5 min warm.

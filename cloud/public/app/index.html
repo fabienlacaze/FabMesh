@@ -579,19 +579,12 @@
         </article>
 
         <!-- STEP 3: RIG -->
-        <article class="step-card disabled" id="step-card-rig" style="position:relative;">
-          <!-- ===== UNDER CONSTRUCTION OVERLAY (Rig step) ===== -->
-          <div class="rig-construction-overlay" style="position:absolute; inset:0; z-index:10; background:rgba(0,0,0,0.65); display:flex; align-items:center; justify-content:center; pointer-events:auto; border-radius:inherit;">
-            <div style="background:#1a1a1a; border-radius:10px; max-width:540px; width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.6); overflow:hidden; text-align:center;">
-              <div style="height:14px; background:repeating-linear-gradient(45deg, #ffd54f 0 12px, #1a1a1a 12px 24px);"></div>
-              <div style="padding:28px 32px 24px 32px;">
-                <div style="font-size:56px; line-height:1;">&#128679;</div>
-                <h2 style="color:#ffd54f; font-weight:800; margin:14px 0 10px 0; font-size:22px; letter-spacing:0.5px;">Under construction &mdash; Rigging is being reworked, coming soon</h2>
-                <p style="color:#ddd; max-width:480px; margin:0 auto 14px auto; font-size:14px; line-height:1.5;">Mesh + image generation continue to work normally. Rigging will be back shortly.</p>
-              </div>
-              <div style="height:14px; background:repeating-linear-gradient(45deg, #ffd54f 0 12px, #1a1a1a 12px 24px);"></div>
-            </div>
-          </div>
+        <!-- Construction overlay removed 2026-05-30: Puppeteer is deployed
+             on Modal Labs (see modal_app/_puppeteer_rig.py +
+             PUPPETEER_DEPLOY.md). The rig step is now fully functional
+             on cloud once `modal deploy` + `wrangler secret put
+             MODAL_PUPPETEER_RIG_URL` are run. -->
+        <article class="step-card" id="step-card-rig" style="position:relative;">
           <header class="step-card-header">
             <span class="step-badge" data-step="3">3</span>
             <h3>Rig</h3>
