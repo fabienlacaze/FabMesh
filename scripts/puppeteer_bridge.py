@@ -162,25 +162,39 @@ def _venv_env():
 def _convert_to_obj(mesh_path, tmp_dir):
     """Convert .glb/.fbx/.stl → .obj using trimesh (bridge parent env).
 
-    Pass-through if already .obj or .ply.
+    Always re-centers the mesh so its FEET sit at Y=0 (bbox.min.y=0) and
+    its X/Z bbox is centered on the origin. This matches the FabMesh
+    "Center mesh" convention so the rigged output has a predictable
+    pivot point (skeleton root + mesh feet co-located at world origin).
+
+    Pass-through if already .obj or .ply — but ALSO re-center those.
     """
-    ext = os.path.splitext(mesh_path)[1].lower()
-    if ext in (".obj", ".ply"):
-        return mesh_path
     try:
         import trimesh
+        import numpy as np
     except ImportError:
-        print("AUTORIG_ERROR: trimesh not installed in bridge env — "
-              "cannot convert non-OBJ input. pip install trimesh.")
+        print("AUTORIG_ERROR: trimesh+numpy not installed in bridge env — "
+              "cannot stage input. pip install trimesh numpy.")
         sys.exit(1)
+    ext = os.path.splitext(mesh_path)[1].lower()
     out_obj = os.path.join(tmp_dir, "input.obj")
-    log(f"converting {ext} → .obj via trimesh")
+    log(f"loading {ext} via trimesh + recentering to feet-at-Y=0")
     scene = trimesh.load(mesh_path, force="mesh")
-    if hasattr(scene, "export"):
-        scene.export(out_obj)
-    else:
-        print(f"AUTORIG_ERROR: trimesh could not load {mesh_path}")
+    if not hasattr(scene, "vertices"):
+        print(f"AUTORIG_ERROR: trimesh could not load mesh {mesh_path}")
         sys.exit(1)
+    # Compute bbox + apply pivot translation (matches FabMesh _jsCenter).
+    bb_min = scene.vertices.min(axis=0)
+    bb_max = scene.vertices.max(axis=0)
+    cx = (bb_min[0] + bb_max[0]) * 0.5
+    cz = (bb_min[2] + bb_max[2]) * 0.5
+    fy = bb_min[1]  # feet Y
+    scene.vertices = scene.vertices - np.array([cx, fy, cz], dtype=scene.vertices.dtype)
+    log(f"  pre-shift bbox=[{bb_min.round(3).tolist()}, {bb_max.round(3).tolist()}]")
+    nb_min = scene.vertices.min(axis=0)
+    nb_max = scene.vertices.max(axis=0)
+    log(f"  post-shift bbox=[{nb_min.round(3).tolist()}, {nb_max.round(3).tolist()}] (feet at Y=0)")
+    scene.export(out_obj)
     if not os.path.exists(out_obj):
         print(f"AUTORIG_ERROR: obj export failed: {out_obj}")
         sys.exit(1)
