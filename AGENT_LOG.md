@@ -1,5 +1,32 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Cloud→desktop parity ports 2/3/5/6 — webp gate, empty-mask early-out, steps cast, IPAdapter neutralisation)
+
+- **Port 2 (KTX2/WebP GLB export gate)** — `scripts/trellis2_native_full_pipeline.py:307-311`
+  and `scripts/face_inpaint_atlas.py:315-319`. Both exports now branch on
+  `FABMESH_TRELLIS2_EXPORT_WEBP` (default `'1'`): when enabled, GLB textures are
+  written as KTX2/WebP via `extension_webp=True`; otherwise legacy PNG GLB path
+  (compat with downstream tools that don't read KTX2). Matches the cloud worker
+  which has been emitting WebP atlases since cat 7.
+- **Port 3 (empty-mask SDXL early-out)** — `scripts/face_inpaint_atlas.py:301-305`.
+  After computing `mask_white_ratio`, if <0.1% of the atlas is masked we
+  passthrough-copy the input GLB and exit before loading the SDXL inpaint
+  pipeline (~6 s VRAM warmup avoided). Same sentinel as cloud's
+  `face-inpaint-atlas` modal endpoint.
+- **Port 5 (`int(steps)` cast on diffusers calls)** — `scripts/generate_back_view.py:347`,
+  `scripts/generate_front_tpose.py:148` (`run_from_prompt`) and `:180`
+  (`run_from_image`). Diffusers ≥0.30 raises `TypeError` if `num_inference_steps`
+  is a Python `float` (from JSON parse); the cloud already casts and the desktop
+  now matches.
+- **Port 6 (neutralise IPAdapter in pure-prompt path)** — `scripts/generate_front_tpose.py:136-139`.
+  After `load_pipeline()` in `run_from_prompt`, wrap
+  `pipe.set_ip_adapter_scale(0.0)` in try/except so that even if a prior call
+  in the same Python process loaded an IPAdapter weight, the prompt-only run
+  is not biased by a stale reference image. Mirrors cloud
+  `_front_tpose_from_prompt` behaviour.
+- Pre-commit AST + py_compile checks: all 4 files OK on
+  `external/TRELLIS2_win/.venv` python.
+
 ## 2026-05-31 (Cat 8 mask-inpaint cloud parity — crop+composite-back in `scripts/sdxl_server.py`)
 
 - Port Cat 8: aligned `do_mask_inpaint` with cloud `modal_app/_mask_inpaint.py`

@@ -298,6 +298,11 @@ def main():
         sys.exit(0)
     mask_white_ratio = np.array(mask).mean() / 255.0
     log(f'mask covers {mask_white_ratio*100:.1f}% of atlas')
+    if mask_white_ratio < 0.001:
+        log('mask too small — passthrough (skipping SDXL load)')
+        import shutil
+        shutil.copy(args.input, args.output)
+        sys.exit(0)
 
     log(f'SDXL inpaint with strength={args.strength}...')
     t0 = time.time()
@@ -307,7 +312,11 @@ def main():
     mesh.visual.material.baseColorTexture = new_tex
 
     log(f'export {args.output}')
-    scene.export(args.output)
+    use_webp = os.environ.get('FABMESH_TRELLIS2_EXPORT_WEBP', '1') == '1'
+    if use_webp:
+        scene.export(args.output, extension_webp=True)
+    else:
+        scene.export(args.output)
     log(f'wrote {os.path.getsize(args.output)} bytes')
 
 

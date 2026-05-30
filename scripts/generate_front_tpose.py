@@ -133,6 +133,10 @@ def run_from_prompt(prompt, out_path, seed=42, cn_scale=1.15, steps=30,
                     guidance=7.0, size=1024):
     skel = Image.open(ensure_skeleton()).convert('RGB')
     pipe = load_pipeline()
+    try:
+        pipe.set_ip_adapter_scale(0.0)
+    except Exception:
+        pass
     t0 = time.time()
     full_prompt = prompt.strip().rstrip('.,') + FRONT_PROMPT_TAIL
     log(f'prompt: "{full_prompt[:200]}..."')
@@ -141,7 +145,7 @@ def run_from_prompt(prompt, out_path, seed=42, cn_scale=1.15, steps=30,
     img = pipe(
         prompt=full_prompt, negative_prompt=NEG,
         image=skel, controlnet_conditioning_scale=cn_scale,
-        num_inference_steps=steps, guidance_scale=guidance,
+        num_inference_steps=int(steps), guidance_scale=guidance,
         height=size, width=size,
         generator=gen,
     ).images[0]
@@ -173,7 +177,7 @@ def run_from_image(ref_path, out_path, seed=42, cn_scale=1.15,
         prompt=full_prompt, negative_prompt=NEG,
         image=skel, controlnet_conditioning_scale=cn_scale,
         ip_adapter_image=ref,
-        num_inference_steps=steps, guidance_scale=guidance,
+        num_inference_steps=int(steps), guidance_scale=guidance,
         height=size, width=size,
         generator=gen,
     ).images[0]
