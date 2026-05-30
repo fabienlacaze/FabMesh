@@ -4829,13 +4829,17 @@ ipcMain.handle('generate-back-view', async (_event, { frontImage, promptHint, nu
   let resolvedMode = mode;
   if (!resolvedMode) {
     if (assetType === 'character') resolvedMode = 'realvis';
-    else if (assetType === 'creature' || assetType === 'animal') resolvedMode = 'mvadapter';
+    else if (assetType === 'creature') resolvedMode = 'mvadapter';
+    // ANIMAL: MV-Adapter is humanoid-biased and reinterprets quadrupeds
+    // as bipeds in the back-view (see fabmesh#alligator-bipede bug). Use
+    // the sheet pipeline instead — it preserves the 4-leg stance.
+    else if (assetType === 'animal') resolvedMode = 'sheet';
     else resolvedMode = 'sheet';
   } else if (resolvedMode === 'mvadapter' && assetType
-             && assetType !== 'character' && assetType !== 'creature'
-             && assetType !== 'animal') {
+             && assetType !== 'character' && assetType !== 'creature') {
     // Explicit mvadapter request on a non-organic asset — fall back to
-    // sheet to avoid the documented car/object distortions.
+    // sheet to avoid the documented car/object distortions AND the
+    // quadruped-to-biped reinterpretation on `animal`.
     log.info('generate-back-view',
       `mvadapter requested on assetType=${assetType}, falling back to sheet`);
     resolvedMode = 'sheet';
