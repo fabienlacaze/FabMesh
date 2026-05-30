@@ -136,8 +136,8 @@ const ENGINE_LABELS = {
   'trellis2_native':'MyFabmesh.AI 3D Native',
   'trellis':        'MyFabmesh.AI 3D Engine',
   // Rigging engine labels (user-visible in job details)
-  'magicarticulate':'MyFabmesh.AI Rig (local, fast)',
-  'unirig':         'MyFabmesh.AI Rig (local, legacy)',
+  'puppeteer':      'MyFabmesh.AI Rig (local)',
+  'unirig':         'MyFabmesh.AI Rig (legacy)',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
@@ -9859,7 +9859,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
     || rigSrcMeshPath;
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
-  const rigEngine = document.getElementById('ws-rig-engine')?.value || 'magicarticulate';
+  const rigEngine = document.getElementById('ws-rig-engine')?.value || 'puppeteer';
   const engineLabel = 'MyFabmesh.AI Rig (local, neural)';
   const expectedMs = 90000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {
