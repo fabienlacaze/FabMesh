@@ -1184,6 +1184,21 @@ function _applyAssetOptionsProfile(assetType) {
   const sel = document.getElementById('ws-asset-type');
   if (sel) {
     sel.addEventListener('change', applyVisibility);
+    // Also re-pick a default skeleton when the user changes asset_type
+    // (unless they have already pinned a custom rigTarget for this project).
+    sel.addEventListener('change', () => {
+      try {
+        if (state && state.currentProject) {
+          // Clear any auto-picked default so populateRigSkeletonDropdown
+          // recomputes from the NEW asset_type. We only clear if the
+          // current rigTarget matches what the OLD asset_type would have
+          // produced — otherwise we respect the user's explicit pick.
+          if (typeof populateRigSkeletonDropdown === 'function') {
+            populateRigSkeletonDropdown();
+          }
+        }
+      } catch (_) {}
+    });
     // Run once on load so default view is correct
     applyVisibility();
   }
@@ -1537,6 +1552,10 @@ function populateWorkspace(p) {
   }
 
   loadRigTemplatesIntoSelect();
+  // Re-pick a sensible default skeleton target based on the project's
+  // asset_type (character -> orc_m1, animal -> wolf, avion -> crow,
+  // bateau/vehicle/prop -> puppeteer_raw, etc.).
+  try { populateRigSkeletonDropdown(); } catch (_) {}
 }
 
 function setStepStatus(stepNum, status) {
@@ -3512,6 +3531,25 @@ const SKELETON_TARGETS = [
   { value: "puppeteer_raw",  emoji: "⚪",  label: "Puppeteer raw (no remap)", variete: "Raw" },
 ];
 
+// Map an asset_type to the most appropriate default skeleton target.
+// Returns a value matching one of SKELETON_TARGETS[*].value.
+// User can still override via the dropdown after auto-fill.
+function _pickDefaultSkeletonForAsset(assetType) {
+  const a = String(assetType || '').toLowerCase();
+  if (a === 'character')           return 'orc_m1';
+  if (a === 'creature')            return 'orc_m1';     // most creatures are humanoid-ish
+  if (a === 'animal')              return 'wolf';        // generic quadruped
+  if (a === 'avion')               return 'crow';        // bird/wing skeleton closest to plane
+  if (a === 'bateau')              return 'puppeteer_raw';
+  if (a === 'vehicle')             return 'puppeteer_raw';
+  if (a === 'weapon')              return 'puppeteer_raw';
+  if (a === 'prop')                return 'puppeteer_raw';
+  if (a === 'building')            return 'puppeteer_raw';
+  if (a === 'environment')         return 'puppeteer_raw';
+  if (a === 'icon')                return 'puppeteer_raw';
+  return 'orc_m1'; // safe default (humanoid)
+}
+
 async function populateRigSkeletonDropdown() {
   const sel = document.getElementById('ws-rig-skeleton');
   if (!sel) return;
@@ -3526,7 +3564,18 @@ async function populateRigSkeletonDropdown() {
     opt.dataset.variete = t.variete;
     sel.appendChild(opt);
   }
-  sel.value = 'orc_m1';
+  // Auto-pick default skeleton based on project asset_type unless the
+  // user has already pinned a choice via state.currentProject.rigTarget.
+  try {
+    const p = (typeof state !== 'undefined' && state && state.currentProject) ? state.currentProject : null;
+    let want = (p && p.rigTarget)
+      ? p.rigTarget
+      : _pickDefaultSkeletonForAsset(p && p.assetType);
+    if (![...sel.options].some(o => o.value === want)) want = 'orc_m1';
+    sel.value = want;
+  } catch (_) {
+    sel.value = 'orc_m1';
+  }
   // Fetch bone counts (best-effort).
   const hasReader = API && typeof API.readBonesJson === 'function';
   await Promise.all(SKELETON_TARGETS.map(async (t, i) => {
@@ -3534,8 +3583,11 @@ async function populateRigSkeletonDropdown() {
     if (hasReader) {
       try {
         const data = await API.readBonesJson(t.value);
-        if (data && typeof data.bone_count === 'number') count = data.bone_count;
-        else if (data && Array.isArray(data.bones))      count = data.bones.length;
+        // main.js IPC returns { ok, count, name }; bones_json files
+        // themselves store { bone_count, bones[] }. Accept all shapes.
+        if (data && typeof data.count === 'number')       count = data.count;
+        else if (data && typeof data.bone_count === 'number') count = data.bone_count;
+        else if (data && Array.isArray(data.bones))       count = data.bones.length;
       } catch (_) { /* fallback */ }
     }
     const opt = sel.options[i];
