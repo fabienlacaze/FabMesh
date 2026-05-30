@@ -2492,39 +2492,54 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
       return { success: false, error: errMsg, stdout: step1.stdout, stderr: step1.stderr };
     }
 
-    // Step 2: Swap skeleton to orc_m1 (117 bones) → temp swap GLB
-    const step2 = await runStep('SwapSkeleton', [swapScript, tempUnirigGlb, orcBones, tempSwapGlb]);
-    // Clean up UniRig temp
-    try { fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
-
-    if (step2.error || !fs.existsSync(tempSwapGlb)) {
-      const dur2 = ((Date.now() - _t0) / 1000).toFixed(2);
-      console.log(`[auto-rig-ai] Step 2 FAILED duration=${dur2}s`);
-      try {
-        fs.writeFileSync(
-          path.join(__dirname, '..', '..', 'last_error.log'),
-          `[${new Date().toISOString()}] auto-rig-ai step2 (duration=${dur2}s)\nmesh: ${meshPath}\n\n=== STEP1 STDOUT ===\n${step1.stdout || ''}\n=== STEP1 STDERR ===\n${step1.stderr || ''}\n\n=== STEP2 STDOUT ===\n${step2.stdout || ''}\n=== STEP2 STDERR ===\n${step2.stderr || ''}\n`
-        );
-      } catch (_e) {}
-      const errMsg = extractErrorDetail(step2) || (step2.error && step2.error.message) || 'Skeleton swap failed - no output';
-      return { success: false, error: errMsg, stdout: step2.stdout, stderr: step2.stderr };
-    }
-
-    // Step 3: Bake procedural Idle/Walk/Run (CC0) animations into final GLB
+    // Skip Step 2 (swap_skeleton to orc_m1) and Step 3 (bake CC0 anims)
+    // for the Puppeteer engine: Puppeteer emits its OWN topology +
+    // bind matrices, and swap_skeleton was authored for UniRig's 34-bone
+    // generic skeleton. Forcing the orc_m1 117-bone remap onto Puppeteer
+    // produces broken bind matrices (bones float detached from the mesh).
+    // For now ship the Puppeteer GLB as-is; revisit when we have a
+    // Puppeteer-aware retargeter and an anim library keyed to its
+    // skeleton structure.
+    let step2 = { error: null, stdout: '', stderr: '' };
     let step3 = { error: null, stdout: '', stderr: '' };
-    if (fs.existsSync(bakeAnimScript)) {
-      step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, orcBones, outputGlb]);
-      if (step3.error || !fs.existsSync(outputGlb)) {
-        // Bake failed - fall back to the swap output so the user still gets a rigged mesh
-        console.log('[auto-rig-ai] Step 3 (bake anims) failed, falling back to non-animated rig');
+
+    if (rigEngine === 'puppeteer') {
+      try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
+      try { fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
+    } else {
+      // Step 2: Swap skeleton to orc_m1 (117 bones) → temp swap GLB
+      step2 = await runStep('SwapSkeleton', [swapScript, tempUnirigGlb, orcBones, tempSwapGlb]);
+      // Clean up UniRig temp
+      try { fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
+
+      if (step2.error || !fs.existsSync(tempSwapGlb)) {
+        const dur2 = ((Date.now() - _t0) / 1000).toFixed(2);
+        console.log(`[auto-rig-ai] Step 2 FAILED duration=${dur2}s`);
+        try {
+          fs.writeFileSync(
+            path.join(__dirname, '..', '..', 'last_error.log'),
+            `[${new Date().toISOString()}] auto-rig-ai step2 (duration=${dur2}s)\nmesh: ${meshPath}\n\n=== STEP1 STDOUT ===\n${step1.stdout || ''}\n=== STEP1 STDERR ===\n${step1.stderr || ''}\n\n=== STEP2 STDOUT ===\n${step2.stdout || ''}\n=== STEP2 STDERR ===\n${step2.stderr || ''}\n`
+          );
+        } catch (_e) {}
+        const errMsg = extractErrorDetail(step2) || (step2.error && step2.error.message) || 'Skeleton swap failed - no output';
+        return { success: false, error: errMsg, stdout: step2.stdout, stderr: step2.stderr };
+      }
+
+      // Step 3: Bake procedural Idle/Walk/Run (CC0) animations into final GLB
+      if (fs.existsSync(bakeAnimScript)) {
+        step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, orcBones, outputGlb]);
+        if (step3.error || !fs.existsSync(outputGlb)) {
+          // Bake failed - fall back to the swap output so the user still gets a rigged mesh
+          console.log('[auto-rig-ai] Step 3 (bake anims) failed, falling back to non-animated rig');
+          try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+        }
+      } else {
+        // No bake script - ship the swap output as-is
         try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
       }
-    } else {
-      // No bake script - ship the swap output as-is
-      try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+      // Clean up swap temp
+      try { if (fs.existsSync(tempSwapGlb)) fs.unlinkSync(tempSwapGlb); } catch (_e) {}
     }
-    // Clean up swap temp
-    try { if (fs.existsSync(tempSwapGlb)) fs.unlinkSync(tempSwapGlb); } catch (_e) {}
 
     const dur = ((Date.now() - _t0) / 1000).toFixed(2);
     console.log(`[auto-rig-ai] END duration=${dur}s error=${!!step3.error}`);
