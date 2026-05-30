@@ -137,7 +137,6 @@ const ENGINE_LABELS = {
   'trellis':        'MyFabmesh.AI 3D Engine',
   // Rigging engine labels (user-visible in job details)
   'unirig':         'MyFabmesh.AI Rig (local)',
-  'meshy':          'MyFabmesh.AI Rig (cloud)',
 };
 function engineLabel(v) {
   return ENGINE_LABELS[v] || v;
@@ -257,9 +256,6 @@ function customErrorWithAction(message, title, actionLabel) {
 // surface the "API key not configured" error the same way.
 function reportPipelineError(errMsg, title) {
   const raw = String(errMsg || '').trim();
-  if (/meshy.*api key not configured/i.test(raw)) {
-    return showMeshyKeyMissingError(title);
-  }
   // Extract the most useful error line from a potentially huge Python dump.
   // Python tracebacks end with the actual error on the last non-empty line
   // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")
@@ -278,25 +274,6 @@ function reportPipelineError(errMsg, title) {
     );
   }
   return customError(raw || 'unknown', title);
-}
-
-// Show a "Meshy API key not configured" error with a shortcut button to the
-// Settings modal. Dedicated helper because this error is raised from 3
-// different code paths (image gen, mesh gen, rigging).
-async function showMeshyKeyMissingError(errorTitle) {
-  const wantsOpen = await customErrorWithAction(
-    'MyFabmesh.AI cloud API key not configured.\n\nOpen Settings and paste your key, then try again.',
-    errorTitle || 'MyFabmesh.AI cloud API key missing',
-    'Open Settings'
-  );
-  if (wantsOpen) {
-    openSettings();
-    // Focus the API key field after the modal has rendered
-    setTimeout(() => {
-      const el = document.getElementById('set-meshy-api-key');
-      if (el) { el.focus(); el.select?.(); }
-    }, 120);
-  }
 }
 
 // Inline toast banner — appears at the bottom of the screen for 3s then fades.
@@ -449,13 +426,13 @@ async function refreshProjectsPage() {
       // Remove trailing timestamp (_<10+ digits>)
       base = base.replace(/_\d{10,}$/, '');
     } while (base !== prev);
-    // Remove trailing engine suffix added by main.js: _sf3d / _meshy / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _trellis2_native
+    // Remove trailing engine suffix added by main.js: _sf3d / _hunyuan / _local / _trellis / _trellis2 / _triposg / _ai / _trellis2_native
     // Optionally followed by arbitrary short tags like _apilive, _test, _v2,
     // each possibly followed by its own timestamp. This handles ad-hoc CLI
     // names like test_e2e_sf3d_apilive_1776274212 that would otherwise form
     // their own phantom projects.
     base = base.replace(
-      /_(sf3d|meshy|hunyuan|local|trellis2_native|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
+      /_(sf3d|hunyuan|local|trellis2_native|trellis2|trellis|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i,
       ''
     );
     // Remove a trailing _<number> if any (legacy index naming)
@@ -2110,7 +2087,7 @@ _wsMvSync();
 // ----------------------------------------------------------------
 // 3D engine selector — toggles visibility of legacy-only fields.
 // trellis2_native generates its own native PBR resolution so we hide
-// texture-res / triangles unless the legacy Meshy.ai engine is picked.
+// texture-res / triangles unless a legacy engine is picked.
 // ----------------------------------------------------------------
 function _ws3dEngineSync() {
   const eng = document.getElementById('ws-3d-engine')?.value || 'trellis2_native';
@@ -2119,7 +2096,7 @@ function _ws3dEngineSync() {
   const qHint = document.getElementById('ws-3d-quality-hint');
   const sf3dHint = document.getElementById('ws-3d-sf3d-hint');
   const trellis2Opts = document.getElementById('ws-3d-trellis2-opts');
-  const legacy = ['sf3d', 'meshy'].includes(eng);
+  const legacy = ['sf3d'].includes(eng);
   if (qRow) qRow.style.display = legacy ? '' : 'none';
   if (tRow) tRow.style.display = legacy ? '' : 'none';
   if (qHint) qHint.style.display = legacy ? '' : 'none';
@@ -6377,8 +6354,6 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     //   - export GLB (bake Kaolin): ~25s
     // Total ~100s (~10-20s with warm cache).
     expectedMs = 110000;
-  } else if (engine === 'meshy') {
-    expectedMs = 240000;
   } else {
     expectedMs = 60000;
   }
@@ -9874,7 +9849,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
   });
 });
 
-// AUTO-RIG AI button handler — engine selected via #ws-rig-engine (unirig | meshy)
+// AUTO-RIG AI button handler — engine selected via #ws-rig-engine (unirig)
 document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p) return;
@@ -9884,10 +9859,10 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
   const rigEngine = document.getElementById('ws-rig-engine')?.value || 'unirig';
-  const engineLabel = rigEngine === 'meshy' ? 'MyFabmesh.AI Rig (cloud)' : 'MyFabmesh.AI Rig (local, neural)';
-  const expectedMs = rigEngine === 'meshy' ? 120000 : 90000;
+  const engineLabel = 'MyFabmesh.AI Rig (local, neural)';
+  const expectedMs = 90000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {
-    const job = pushJob(`Auto-rig AI (${rigEngine === 'meshy' ? 'cloud' : 'local'}): ${p.name}`, null, {
+    const job = pushJob(`Auto-rig AI (local): ${p.name}`, null, {
       Engine: engineLabel,
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
     }, expectedMs, { projectName: p.name });

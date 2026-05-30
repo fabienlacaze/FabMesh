@@ -87,7 +87,6 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   getConfig: () => ipcRenderer.invoke('get-config'),
   getControlApiToken: () => ipcRenderer.invoke('get-control-api-token'),
   setConfig: (patch) => ipcRenderer.invoke('set-config', patch),
-  testMeshyKey: (apiKey) => ipcRenderer.invoke('test-meshy-key', apiKey),
   setBlenderPath: () => ipcRenderer.invoke('set-blender-path'),
   runBlenderScript: (opts) => ipcRenderer.invoke('run-blender-script', opts),
   openInBlender: (opts) => ipcRenderer.invoke('open-in-blender', opts),
