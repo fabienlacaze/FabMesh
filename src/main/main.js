@@ -2533,8 +2533,14 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
           console.log(`[auto-rig-ai] Step 2a (puppeteer_to_skeleton --target ${rigSkeleton}) failed, shipping raw Puppeteer GLB`);
           try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
         } else {
-          // Step 3: bake CC0 anims onto the renamed skeleton
-          const skelBones = path.join(scriptsDir, 'rig_templates', 'skm', `${rigSkeleton}.bones.json`);
+          // Step 3: bake CC0 anims onto the renamed skeleton.
+          // Puppeteer outputs a 34-bone skeleton (joint0..joint33 renamed to a
+          // 34-name anatomical subset of orc_m1). The orc_m1 117-bone template
+          // contains bones absent from the rigged GLB -> bake would emit tracks
+          // for missing bones and the mesh would explode. Use the dedicated
+          // puppeteer_default.bones.json (34 bones, same anatomical names with
+          // proper parent hierarchy for the 34-bone reality) instead.
+          const skelBones = path.join(scriptsDir, 'rig_templates', 'skm', 'puppeteer_default.bones.json');
           if (fs.existsSync(bakeAnimScript) && fs.existsSync(skelBones)) {
             step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, skelBones, outputGlb], 'python');
             if (step3.error || !fs.existsSync(outputGlb)) {

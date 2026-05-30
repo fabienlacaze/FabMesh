@@ -1,5 +1,41 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (Rig anim fix — puppeteer_default 34-bone template)
+
+- Bug: rigged mesh exploded during Run animation playback even though
+  bind pose (Idle) was clean. Auto-rig pipeline produces a 34-bone
+  Puppeteer skeleton via `puppeteer_to_skeleton.py --target orc_m1`
+  (anatomical naming from 117-bone orc_m1 template), but Step 3
+  `bake_procedural_anims.py` was reading the FULL 117-bone orc_m1.bones.json
+  for its bone[].head base translations. For bones present in both
+  (`pelvis`, `spine_03`, `thigh_l` …) the .head values from orc_m1's full
+  anatomical layout did not match the rigged GLB's actual node
+  translations — so Hips translation track (hip_bob vertical) started
+  from a wrong base and dragged the skeleton along.
+- Workflow extracted the 34-bone hierarchy directly from the rigged GLB
+  (`meshes/orc_marron_trellis2_native_*_rigged_puppeteer_*.glb`) and
+  produced `scripts/rig_templates/skm/puppeteer_default.bones.json`
+  (34 bones, single root `pelvis`, parent chain unbroken, every .head =
+  real GLB local translation).
+- Fixes applied:
+  - New file `scripts/rig_templates/skm/puppeteer_default.bones.json`
+    (34 bones with matching .head values).
+  - `scripts/rig_templates/skm/registry.json`: appended `puppeteer_default`
+    entry to `skm_templates` (with humanoid variete + label).
+  - `src/main/main.js` (auto-rig handler around lines 2536-2548):
+    Step 3 bake now reads `puppeteer_default.bones.json` instead of
+    `${rigSkeleton}.bones.json` when engine=puppeteer. Step 2a rename
+    still uses `rigSkeleton` (e.g. orc_m1) so anatomical naming stays
+    consistent.
+- Bake smoke test (workflow verify phase): 3 clips (Idle/Walk/Run) baked
+  cleanly against test GLB, **0 orphan tracks**, all 12 anim targets
+  resolved to existing joints. UniRig branch (117-bone path) unchanged.
+- Open follow-ups: legacy fallback branch (`puppeteer_to_orc_m1.py` +
+  orcBones) still uses 117-bone template — not fixed in this commit since
+  it's a transitional path. Non-humanoid Puppeteer targets (wolf/dragon)
+  will now silently fall back to non-animated rig — acceptable since
+  Puppeteer's HF model is humanoid-trained.
+
 ## 2026-05-30 (TRELLIS-2 attention: flash_attn uninstalled, sdpa authoritative end-to-end)
 
 - Windows SAC was blocking `flash_attn_2_cuda.dll` on the target machine
