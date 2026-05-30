@@ -33,6 +33,18 @@
       "default_height_cm": 30,
       "description": "Generic 25-bone 6-legged insect-like skeleton (CC0)",
       "license": "CC0"
+    },
+    {
+      "id": "puppeteer_default",
+      "name": "🤖 Humanoide bipede 34 bones (Puppeteer)",
+      "category": "humanoid",
+      "type": "json",
+      "json": "skm/puppeteer_default.bones.json",
+      "animations_dir": null,
+      "default_height_cm": 180,
+      "description": "Reduced 34-bone humanoid skeleton matching exactly what Puppeteer produces (UE5 mannequin naming: pelvis root, 4 spine, neck_01 only, clavicle/upperarm/lowerarm/hand chain, thumb+index 3-segment fingers, thigh/calf/foot/ball legs). Bind pose extracted from orc_marron_trellis2_rigged_puppeteer GLB.",
+      "license": "CC0",
+      "bone_count": 34
     }
   ],
   "generic_templates": [
