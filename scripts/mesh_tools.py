@@ -20,30 +20,90 @@ import time
 import numpy as np
 
 
+# ---------------------------------------------------------------------------
+# Cloud-parity preset registry.
+# Activated via env var `FABMESH_MESH_PRESET=cloud_parity` (or
+# `FABMESH_MESH_PRESET=cloud`) or the `--preset cloud_parity` CLI flag.
+# Default 'desktop' preserves existing behavior — DO NOT change defaults
+# silently because the renderer's UI buttons pass explicit positional args
+# for the "Quick" preset (smooth 3 iter, decimate 5000 faces) that we must
+# keep honoring.
+# ---------------------------------------------------------------------------
+PRESETS = {
+    'desktop': {
+        'smooth_iterations': 3, 'smooth_lamb': 0.5,
+        'decimate_target_faces': 5000,
+        'subdivide_mode': 'midpoint', 'subdivide_levels': 1,
+        'extension_webp': False,
+    },
+    'cloud_parity': {
+        'smooth_iterations': 5, 'smooth_lamb': 0.5,
+        'decimate_target_faces': 50_000,
+        'subdivide_mode': 'loop', 'subdivide_levels': 1,
+        'extension_webp': True,
+    },
+}
+# Accept 'cloud' as an alias for 'cloud_parity'.
+_env_preset = os.environ.get('FABMESH_MESH_PRESET', 'desktop').strip().lower()
+if _env_preset == 'cloud':
+    _env_preset = 'cloud_parity'
+ACTIVE_PRESET = _env_preset if _env_preset in PRESETS else 'desktop'
+
+
 def log(msg):
     print(f'[mesh_tools] {msg}', flush=True)
 
 
-def smooth(input_path, output_path, iterations=3, lamb=0.5):
-    """Laplacian smoothing."""
+def _preset(key, override=None):
+    """Resolve a preset value: explicit override wins, else active preset."""
+    if override is not None:
+        return override
+    return PRESETS[ACTIVE_PRESET][key]
+
+
+def smooth(input_path, output_path, iterations=None, lamb=None):
+    """Laplacian smoothing.
+
+    When `iterations` / `lamb` are None, values come from the active
+    preset (desktop: 3/0.5, cloud_parity: 5/0.5)."""
     import trimesh
+    iterations = _preset('smooth_iterations', iterations)
+    lamb = _preset('smooth_lamb', lamb)
     scene = trimesh.load(input_path)
     geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
     for g in geoms:
         trimesh.smoothing.filter_laplacian(g, iterations=int(iterations), lamb=float(lamb))
     _export(scene, geoms, output_path)
-    log(f'smoothed ({iterations} iterations, lambda={lamb})')
+    log(f'smoothed ({iterations} iterations, lambda={lamb}, preset={ACTIVE_PRESET})')
 
 
-def decimate(input_path, output_path, target_faces=5000):
-    """Reduce triangle count."""
+def decimate(input_path, output_path, target_faces=None):
+    """Reduce triangle count.
+
+    When `target_faces` is None, value comes from the active preset
+    (desktop: 5000, cloud_parity: 50_000). Cloud-parity safety rails
+    (early-out when already below target, ratio clamp, skip tiny meshes)
+    are applied unconditionally — they only kick in for edge cases."""
     import trimesh
-    target_faces = int(target_faces)
+    target_faces = int(_preset('decimate_target_faces', target_faces))
     scene = trimesh.load(input_path)
     geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
+    # Cloud-parity early-out: if the biggest mesh is already at or below
+    # target, copy through untouched (matches cloud's behavior).
+    if geoms:
+        max_faces = max((len(g.faces) for g in geoms if hasattr(g, 'faces')),
+                        default=0)
+        if 0 < max_faces <= target_faces:
+            log(f'decimate skipped — already at {max_faces} <= target {target_faces}')
+            _export(scene, geoms, output_path)
+            return
     for g in geoms:
+        # Cloud-parity safety rail: skip meshes with < 100 faces.
+        if not hasattr(g, 'faces') or len(g.faces) < 100:
+            continue
         if len(g.faces) > target_faces:
-            ratio = target_faces / len(g.faces)
+            # Cloud-parity ratio clamp [0.05, 1.0].
+            ratio = max(0.05, min(1.0, target_faces / len(g.faces)))
             try:
                 import fast_simplification
                 points, faces_out = fast_simplification.simplify(
@@ -55,16 +115,49 @@ def decimate(input_path, output_path, target_faces=5000):
                 g.faces = faces_out
             except ImportError:
                 # Fallback: use trimesh's built-in (slower, less quality)
-                g_new = g.simplify_quadric_decimation(target_faces)
+                n = max(50, int(len(g.faces) * ratio))
+                g_new = g.simplify_quadric_decimation(n)
                 g.vertices = g_new.vertices
                 g.faces = g_new.faces
-            log(f'decimated to {len(g.faces)} faces (target: {target_faces})')
+            log(f'decimated to {len(g.faces)} faces (target: {target_faces}, preset={ACTIVE_PRESET})')
     _export(scene, geoms, output_path)
 
 
-def subdivide_mesh(input_path, output_path, levels=1):
-    """Midpoint subdivision."""
-    # Use the existing subdivide.py
+def subdivide_mesh(input_path, output_path, levels=1, mode=None):
+    """Subdivision — midpoint by default, Loop when preset=cloud_parity.
+
+    `mode` ('midpoint' or 'loop') overrides the preset choice.
+    Loop subdivision (smoother, used by the cloud worker) is run in-process
+    via trimesh's `subdivide_loop`; midpoint shells out to subdivide.py.
+    """
+    mode = _preset('subdivide_mode', mode)
+    levels = int(levels) if levels is not None else _preset('subdivide_levels')
+
+    if mode == 'loop':
+        # Cloud-parity Loop subdivision — in-process via trimesh.
+        # Safety rails ported verbatim from cloud: cap to 2 iterations max,
+        # bail when a mesh already exceeds 500_000 faces.
+        import trimesh
+        scene = trimesh.load(input_path)
+        geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
+        for g in geoms:
+            if not hasattr(g, 'subdivide_loop'):
+                continue
+            try:
+                for _ in range(max(1, min(2, int(levels)))):
+                    if hasattr(g, 'faces') and len(g.faces) > 500_000:
+                        log(f'subdivide_loop bail — mesh already at {len(g.faces)} faces')
+                        break
+                    sub = g.subdivide_loop()
+                    g.vertices = sub.vertices
+                    g.faces = sub.faces
+            except Exception as e:
+                log(f'subdivide_loop skipped: {e}')
+        _export(scene, geoms, output_path)
+        log(f'loop-subdivided ({levels} levels, preset={ACTIVE_PRESET})')
+        return True
+
+    # Default: midpoint via the existing subdivide.py
     import subprocess
     script = os.path.join(os.path.dirname(__file__), 'subdivide.py')
     r = subprocess.run([sys.executable, script, input_path, output_path, str(levels)],
@@ -182,15 +275,40 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
 
 
 def _export(scene, geoms, output_path):
-    """Export mesh(es) to GLB."""
+    """Export mesh(es) to GLB.
+
+    When the active preset enables `extension_webp` AND the target is a
+    .glb, we pass `extension_webp=True` so trimesh writes WebP textures
+    (EXT_texture_webp glTF extension). Cloud parity — smaller GLBs.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    webp = bool(PRESETS[ACTIVE_PRESET].get('extension_webp', False))
+    kwargs = {}
+    if webp and output_path.lower().endswith('.glb'):
+        kwargs['extension_webp'] = True
+        kwargs.setdefault('file_type', 'glb')
     if len(geoms) == 1:
-        geoms[0].export(output_path)
+        geoms[0].export(output_path, **kwargs)
     else:
-        scene.export(output_path)
+        scene.export(output_path, **kwargs)
 
 
 if __name__ == '__main__':
+    # Strip `--preset <name>` BEFORE positional parsing so `op` stays the
+    # operation name. Accepts 'desktop', 'cloud_parity', or alias 'cloud'.
+    if '--preset' in sys.argv:
+        i = sys.argv.index('--preset')
+        if i + 1 < len(sys.argv):
+            _cli_preset = sys.argv[i + 1].strip().lower()
+            if _cli_preset == 'cloud':
+                _cli_preset = 'cloud_parity'
+            if _cli_preset in PRESETS:
+                ACTIVE_PRESET = _cli_preset
+                log(f'preset = {ACTIVE_PRESET} (via --preset)')
+            else:
+                log(f'WARN: unknown preset {_cli_preset!r}, keeping {ACTIVE_PRESET}')
+            del sys.argv[i:i + 2]
+
     if len(sys.argv) < 4:
         print(__doc__)
         sys.exit(1)

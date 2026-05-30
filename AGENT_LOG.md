@@ -1,6 +1,22 @@
 # FabMesh Agent Log
 
-## 2026-05-31 (multiview_sheet_gen — generic-subject prompt port from cloud `_sheet.py`)
+## 2026-05-31 (Cat 14 mesh-op cloud parity — preset selector in `scripts/mesh_tools.py`)
+
+- Port Cat 14: aligned desktop mesh tools with cloud `modal_app/_mesh_op.py`
+  via a `PRESETS` registry + selector (env `FABMESH_MESH_PRESET` or CLI
+  `--preset cloud_parity` / alias `cloud`). Default `desktop` preserves
+  existing behavior — `smooth iterations=3 / decimate target_faces=5000`
+  — so the renderer's UI Quick buttons keep working unchanged.
+- Cloud-parity preset values: `smooth iterations=5`, `decimate
+  target_faces=50_000`, Loop subdivision (`subdivide_loop`, with the
+  cloud's `len(faces) > 500_000` bail and 2-iter cap), GLB export with
+  `extension_webp=True`.
+- Decimate now also gains 3 safety rails ported from cloud unconditionally
+  (no behavior change for non-edge cases): early-out when biggest mesh is
+  already ≤ target, ratio clamp `[0.05, 1.0]`, skip meshes < 100 faces.
+- Files: `scripts/mesh_tools.py` only. `scripts/subdivide.py` untouched —
+  midpoint path still shells out to it for the default desktop preset.
+- No NSFW / GPU-throttle code paths touched.
 
 - Port Cat 5: removed humanoid-specific tokens from `build_prompt()` in
   `scripts/multiview_sheet_gen.py` so the 2x2 multi-view sheet works for
