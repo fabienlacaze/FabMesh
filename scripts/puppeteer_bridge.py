@@ -98,7 +98,9 @@ VENV_BIN = os.path.join(PUP_DIR, "venv", "Scripts")
 
 SKELETON_DIR = os.path.join(PUP_DIR, "skeleton")
 SKINNING_DIR = os.path.join(PUP_DIR, "skinning")
-FINAL_DIR = os.path.join(PUP_DIR, "final_rigging")
+# Puppeteer ships export.py at the repo top-level (NOT under a
+# final_rigging/ subdir as the earlier audit incorrectly claimed).
+FINAL_DIR = PUP_DIR
 
 SKELETON_DEMO = os.path.join(SKELETON_DIR, "demo.py")
 SKINNING_MAIN = os.path.join(SKINNING_DIR, "main.py")
