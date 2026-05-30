@@ -2492,20 +2492,46 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine }) => {
       return { success: false, error: errMsg, stdout: step1.stdout, stderr: step1.stderr };
     }
 
-    // Skip Step 2 (swap_skeleton to orc_m1) and Step 3 (bake CC0 anims)
-    // for the Puppeteer engine: Puppeteer emits its OWN topology +
-    // bind matrices, and swap_skeleton was authored for UniRig's 34-bone
-    // generic skeleton. Forcing the orc_m1 117-bone remap onto Puppeteer
-    // produces broken bind matrices (bones float detached from the mesh).
-    // For now ship the Puppeteer GLB as-is; revisit when we have a
-    // Puppeteer-aware retargeter and an anim library keyed to its
-    // skeleton structure.
+    // Puppeteer pipeline (new):
+    //   Step 2a: puppeteer_to_orc_m1.py renames joint0..joint33 -> orc_m1
+    //            anatomical names (pelvis, spine_01, upperarm_l, ...) by
+    //            walking the IBM-derived bind world positions. Keeps Puppeteer's
+    //            own bind matrices + skin weights intact (no skeleton swap).
+    //   Step 3:  bake_procedural_anims.py bakes CC0 Idle/Walk/Run onto the
+    //            renamed skeleton (lookup by exact bone name).
+    // UniRig pipeline (legacy): swap_skeleton.py + bake_procedural_anims.py.
+    const puppeteerRenameScript = path.join(scriptsDir, 'puppeteer_to_orc_m1.py');
     let step2 = { error: null, stdout: '', stderr: '' };
     let step3 = { error: null, stdout: '', stderr: '' };
 
     if (rigEngine === 'puppeteer') {
-      try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
-      try { fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
+      if (fs.existsSync(puppeteerRenameScript)) {
+        // Step 2a: rename Puppeteer joints to orc_m1 convention
+        step2 = await runStep('PuppeteerToOrcM1', [puppeteerRenameScript, tempUnirigGlb, tempSwapGlb], 'python');
+        if (step2.error || !fs.existsSync(tempSwapGlb)) {
+          // Fallback: ship raw Puppeteer output (un-renamed); anims skipped.
+          console.log('[auto-rig-ai] Step 2a (puppeteer_to_orc_m1) failed, shipping raw Puppeteer GLB');
+          try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
+        } else {
+          // Step 3: bake CC0 anims onto the renamed skeleton
+          if (fs.existsSync(bakeAnimScript)) {
+            step3 = await runStep('BakeAnims', [bakeAnimScript, tempSwapGlb, orcBones, outputGlb], 'python');
+            if (step3.error || !fs.existsSync(outputGlb)) {
+              console.log('[auto-rig-ai] Step 3 (bake anims) failed on Puppeteer, falling back to non-animated rig');
+              try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+            }
+          } else {
+            try { fs.copyFileSync(tempSwapGlb, outputGlb); } catch (_e) {}
+          }
+        }
+      } else {
+        // Script not yet deployed: ship raw Puppeteer output as before.
+        console.log('[auto-rig-ai] puppeteer_to_orc_m1.py not found, shipping raw Puppeteer GLB');
+        try { fs.copyFileSync(tempUnirigGlb, outputGlb); } catch (_e) {}
+      }
+      // Cleanup temps
+      try { if (fs.existsSync(tempUnirigGlb)) fs.unlinkSync(tempUnirigGlb); } catch (_e) {}
+      try { if (fs.existsSync(tempSwapGlb)) fs.unlinkSync(tempSwapGlb); } catch (_e) {}
     } else {
       // Step 2: Swap skeleton to orc_m1 (117 bones) → temp swap GLB
       step2 = await runStep('SwapSkeleton', [swapScript, tempUnirigGlb, orcBones, tempSwapGlb]);

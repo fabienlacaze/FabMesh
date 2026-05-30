@@ -1,5 +1,12 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (rigging: Puppeteer joints renamed to orc_m1 + anims re-enabled)
+
+- Added scripts/puppeteer_to_orc_m1.py — anatomical classifier that renames Puppeteer 34 generic joints (joint0..joint33) to orc_m1/UE5 conventions (pelvis, spine_01, clavicle_l/r, upperarm_l/r, hand_l/r, thigh_l/r, foot_l/r, etc.). World-space positions, not local — avoids the swap_skeleton.py classifier bug.
+- main.js auto-rig-ai puppeteer path: puppeteer_bridge -> puppeteer_to_orc_m1 -> bake_procedural_anims -> final GLB. CC0 Idle/Walk/Run are now re-enabled (target the renamed skeleton).
+- Backup branch: backup-pre-puppeteer-bone-remap-20260530-154204.
+- Fallback: if classifier or bake fails, ships the raw Puppeteer GLB (current behaviour).
+
 ## 2026-05-30 (rigging: Puppeteer end-to-end SUCCESS on orc_marron)
 
 - Live-debug session walked the Puppeteer pipeline through 10+ runtime
