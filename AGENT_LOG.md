@@ -1,5 +1,13 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (cloud: Puppeteer rigging deployed to Modal)
+
+- Added modal_app/_puppeteer_rig.py: Modal Labs container with Puppeteer + all upstream patches replicated on Linux (no Windows-specific workarounds needed). HF ckpts baked into image. A10G GPU. ~3 min cold / ~1.5 min warm.
+- Added /api/auto-rig worker endpoint: auth + 5-credit spend + Modal dispatch + R2 persist + sanitised error.
+- Cloud renderer autoRigAI shim wired to the new endpoint (no more NOT_AVAIL).
+- Cloud rig step UNHIDDEN — hideById removed from cloud-overrides.js.
+- REQUIRED USER ACTION: modal deploy modal_app/_puppeteer_rig.py + wrangler secret put MODAL_PUPPETEER_RIG_URL. Full walkthrough in modal_app/PUPPETEER_DEPLOY.md.
+
 ## 2026-05-30 (rig UI: remove UniRig legacy option)
 
 - Dropped the "MyFabmesh.AI Rig (legacy)" UniRig option from the rig engine dropdown. UniRig is confirmed broken upstream (skin writer Issue #20) and incompatible with RTX 5080 sm_120. Only Puppeteer remains. UniRig branch in main.js stays as dead code in case of future resurrection.

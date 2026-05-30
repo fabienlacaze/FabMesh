@@ -271,10 +271,11 @@
     hideById('set-open-logs');
     hideById('set-live-logs');
 
-    // Rigging is debugged on the desktop build (free, local). Hide the
-    // whole Step 3 Rig card on cloud — no need for the under-construction
-    // overlay since the section itself is gone.
-    hideById('step-card-rig');
+    // Rigging is now fully functional on cloud: Puppeteer is deployed on
+    // Modal (L40S) and exposed via /api/auto-rig. The Step 3 Rig card
+    // stays visible — autoRigAI in meshyAPI-cloud.js posts the mesh URL +
+    // target skeleton to the worker, which spawns the Modal job and
+    // returns the rigged GLB.
 
     // Defensive — if the Control API box ends up outside the AI Assistant
     // section in a future refactor, hide it explicitly too.

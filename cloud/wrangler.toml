@@ -50,6 +50,18 @@ bucket_name = "myfabmesh-meshes"
 #                                              #   myfabmesh-shared
 #                                              #   SHARED_SECRET=<hex>`
 # Rollback to Replicate: `wrangler secret delete MODAL_TEXT2IMAGE_URL`.
+#
+# MODAL PUPPETEER RIG (auto-rigging on uploaded GLBs):
+#   wrangler secret put MODAL_PUPPETEER_RIG_URL  # paste the URL Modal
+#                                                # printed on `modal deploy
+#                                                # modal_app/_puppeteer_rig.py`
+#                                                # (looks like https://<ws>--
+#                                                #  myfabmesh-puppeteer-...-modal.run)
+#   # Reuses the same MODAL_SHARED_SECRET as text2image — no extra secret
+#   # needed unless you want to isolate the rig endpoint.
+# Rollback (disable rig button on the cloud UI):
+#   `wrangler secret delete MODAL_PUPPETEER_RIG_URL`.
+# See modal_app/PUPPETEER_DEPLOY.md for the full walkthrough.
 ###############################################################################
 # Pre-warm cron — DISABLED for now.
 #

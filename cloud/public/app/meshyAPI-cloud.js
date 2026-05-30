@@ -1433,6 +1433,29 @@
       // Blender (Desktop-only).
       return impl.exportMesh({ sourcePath, targetFormat: 'glb' });
     },
+    // Auto-rig AI via Puppeteer on Modal. Posts the mesh URL +
+    // selected target skeleton to /api/auto-rig (which spawns a
+    // rig-start Modal job and polls rig-status), then returns the
+    // rigged GLB. Matches the desktop contract
+    // ({ meshPath, engine, skeleton } → { success, error? }) and
+    // additionally surfaces glb_url so the renderer can hot-swap.
+    autoRigAI: async ({ meshPath, meshUrl, engine, skeleton } = {}) => {
+      const url = meshUrl || meshPath;
+      if (!url) return { success: false, ok: false, error: 'meshPath or meshUrl required' };
+      try {
+        const r = await postJSON('/api/auto-rig', {
+          mesh_url: url, skeleton: skeleton || 'orc_m1', engine: engine || 'puppeteer',
+        });
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        const glbUrl = r?.glb_url || r?.url || r?.path || null;
+        if (r?.success && glbUrl) {
+          return { success: true, ok: true, glb_url: glbUrl, path: glbUrl };
+        }
+        return { success: false, ok: false, error: r?.error || 'unknown' };
+      } catch (e) {
+        return { success: false, ok: false, error: e?.message || String(e) };
+      }
+    },
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.
     // Anything else returns Desktop-only (Blender etc.).
@@ -1543,8 +1566,10 @@
     'calibRun', 'calibLastReport', 'calibOpenReport', 'calibListReports',
     'calibDiagnose', 'calibTiered', 'calibV3', 'calibCancel',
     'calibReadLog', 'calibClearLog',
-    // UniRig + landmarks (Desktop-only for now)
-    'autoRig', 'autoRigAI', 'listRigTemplates', 'listRigAnimations',
+    // UniRig + landmarks (Desktop-only for now). autoRigAI is wired
+    // above to /api/auto-rig (Puppeteer on Modal) — keep it OUT of
+    // the stubs list so the real implementation isn't overwritten.
+    'autoRig', 'listRigTemplates', 'listRigAnimations',
     'saveLandmarks', 'loadLandmarks', 'analyzeSkeleton',
   ];
   const STUB_EVENTS = [

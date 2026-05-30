@@ -83,6 +83,11 @@ export interface Env {
   MODAL_MESH_START_URL?: string;
   MODAL_MESH_STATUS_URL?: string;
   MODAL_MESH_URL?: string;  // legacy sync url — kept so old deploys don't break
+  // Puppeteer auto-rigging on uploaded GLB. Sync endpoint: takes a mesh
+  // HTTPS URL + optional target skeleton, returns base64 GLB bytes.
+  // Set via `wrangler secret put MODAL_PUPPETEER_RIG_URL`; unset to
+  // disable /api/auto-rig (503).
+  MODAL_PUPPETEER_RIG_URL?: string;
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -6034,6 +6039,142 @@ async function handleUploadMesh(req: Request, env: Env): Promise<Response> {
   return json({ success: true, path: key, url: `${env.R2_PUBLIC_URL}/${key}` });
 }
 
+/** POST /api/auto-rig — Puppeteer auto-rigging on an uploaded GLB.
+ *
+ *  Body: { mesh_url: string, skeleton?: string }
+ *    - mesh_url : HTTPS URL of the source GLB (must pass isTrustedAssetHost)
+ *    - skeleton : optional target skeleton name passed straight to Modal
+ *                 (e.g. "orc_m1", "ue5_mannequin"). Ignored by the current
+ *                 Modal class but reserved for the skeleton-injection step.
+ *
+ *  Modal (`MODAL_PUPPETEER_RIG_URL`) runs the Puppeteer skeleton + skinning
+ *  pipeline on an L40S GPU (~2 min) and returns base64-encoded GLB bytes.
+ *  We decode, persist to R2 under `${user.id}/rigged/`, return the public URL.
+ *
+ *  Credits: RIG_COST flat (5 credits, same as full-mesh ops). Refunded on
+ *  Modal failure so a transient outage doesn't burn the user's balance.
+ *  Server-side errors are logged in full; the client gets a generic
+ *  message to avoid leaking upstream stack traces or Modal URLs. */
+async function handleAutoRig(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_PUPPETEER_RIG_URL) return err(503, 'auto-rig backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let body: { mesh_url?: string; skeleton?: string };
+  try {
+    body = await req.json() as { mesh_url?: string; skeleton?: string };
+  } catch {
+    return err(400, 'invalid JSON body');
+  }
+  const meshUrl = body.mesh_url;
+  if (!meshUrl || typeof meshUrl !== 'string') return err(400, 'mesh_url required');
+  // SSRF guard — same allow-list as handleGenerate. Without this an
+  // authenticated user could make Modal fetch arbitrary hosts.
+  if (!isTrustedAssetHost(env, meshUrl)) {
+    return err(400, 'mesh_url host not allowed');
+  }
+  const skeleton = typeof body.skeleton === 'string' ? body.skeleton : undefined;
+
+  // Flat cost — Puppeteer rig is a single GPU pass (~2 min L40S), same
+  // order of magnitude as the existing mesh ops (5 credits).
+  const RIG_COST = 5;
+  const ESTIMATED_USD_RIG = 0.05;  // L40S ~$0.000542/s × ~90s + R2 ops
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_RIG);
+  if (remainingBudget == null) {
+    return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
+  }
+  const refundRigSpend = async () => {
+    await refundModalSpend(env, ESTIMATED_USD_RIG);
+  };
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundRigSpend();
+    return err(429, 'you have reached the per-user daily generation limit.');
+  }
+  const remaining = await spendCredits(env, user.id, RIG_COST);
+  if (remaining == null) {
+    await refundRigSpend();
+    return err(402, 'insufficient credits');
+  }
+
+  // Derive a stable base name for the R2 key from the source URL so the
+  // user can recognise the file in their R2 listing. Strip extension +
+  // sanitise to the same character class as handleUploadMesh.
+  let baseName = 'mesh';
+  try {
+    const last = new URL(meshUrl).pathname.split('/').pop() || '';
+    baseName = last.replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'mesh';
+  } catch { /* keep default */ }
+
+  let glbBytes: Uint8Array;
+  try {
+    const t0 = Date.now();
+    const r = await fetch(env.MODAL_PUPPETEER_RIG_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET,
+        mesh_url: meshUrl,
+        ...(skeleton ? { skeleton } : {}),
+      }),
+      // Puppeteer ~2 min hot, plus ~60-120s cold start. 8 min budget.
+      signal: AbortSignal.timeout(480_000),
+    });
+    if (!r.ok) {
+      throw new Error(`Modal puppeteer HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    // Modal returns base64 GLB inside JSON: { glb_base64: "...", bytes: N }.
+    const resp = await r.json() as { glb_base64?: string; error?: string };
+    if (resp.error) throw new Error(`Modal puppeteer error: ${resp.error}`);
+    if (!resp.glb_base64) throw new Error('Modal puppeteer returned no glb_base64');
+    const bin = atob(resp.glb_base64);
+    glbBytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) glbBytes[i] = bin.charCodeAt(i);
+    console.log(`[auto-rig] dt=${Date.now() - t0}ms bytes=${glbBytes.byteLength}`);
+  } catch (e: unknown) {
+    await addCredits(env, user.id, RIG_COST);
+    await refundRigSpend();
+    // Log the full upstream error server-side; return a sanitised generic
+    // message to the client so we don't leak Modal URLs / stack traces.
+    console.error('[auto-rig]', e instanceof Error ? e.message : String(e), e);
+    return err(502, 'auto-rig failed (credits refunded)');
+  }
+
+  // Magic-byte check — refuse anything that isn't a GLB so we don't
+  // pollute R2 with malformed bytes Modal might have produced on a
+  // partial failure.
+  const magicOk = glbBytes.byteLength >= 4
+    && glbBytes[0] === 0x67 && glbBytes[1] === 0x6C
+    && glbBytes[2] === 0x54 && glbBytes[3] === 0x46;
+  if (!magicOk) {
+    await addCredits(env, user.id, RIG_COST);
+    await refundRigSpend();
+    console.error('[auto-rig] Modal returned non-GLB bytes', glbBytes.byteLength);
+    return err(502, 'auto-rig failed (credits refunded)');
+  }
+
+  const key = `${user.id}/rigged/${baseName}_rigged_puppeteer_${Date.now()}.glb`;
+  try {
+    await env.MESHES.put(key, glbBytes, {
+      httpMetadata: { contentType: 'model/gltf-binary' },
+    });
+  } catch (e) {
+    await addCredits(env, user.id, RIG_COST);
+    await refundRigSpend();
+    console.error('[auto-rig.r2]', e instanceof Error ? e.message : String(e), e);
+    return err(500, 'auto-rig storage failed (credits refunded)');
+  }
+  return json({
+    success: true,
+    mesh_url: `${env.R2_PUBLIC_URL}/${key}`,
+    path: key,
+    creditsRemaining: remaining,
+  });
+}
+
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
  *  URL, returned as-is so the browser sees a same-origin response and
  *  bypasses CORS entirely. Used by every canvas tool that needs to
@@ -7840,6 +7981,7 @@ export default {
         '/api/rectify-image', '/api/modify-image', '/api/auto-inpaint',
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
+        '/api/auto-rig',
       ]);
       // /api/stripe-webhook MUST stay reachable even when Site is OFF.
       // Stripe has already charged the card by the time it calls us; a
@@ -7979,6 +8121,7 @@ export default {
         if (pathname === '/api/proxy-image'           && method === 'GET')  return await handleProxyImage(req, env);
         if (pathname === '/api/upload-image'          && method === 'POST') return await handleUploadImage(req, env);
         if (pathname === '/api/upload-mesh'           && method === 'POST') return await handleUploadMesh(req, env);
+        if (pathname === '/api/auto-rig'              && method === 'POST') return await handleAutoRig(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);
