@@ -149,6 +149,9 @@ def _venv_env():
     env = os.environ.copy()
     env["PATH"] = VENV_BIN + os.pathsep + env.get("PATH", "")
     env["CUDA_VISIBLE_DEVICES"] = env.get("CUDA_VISIBLE_DEVICES", "0")
+    # PyTorch's Windows wheels are built WITHOUT libuv, but torch.distributed
+    # opts in by default since 2.4 — gives DistStoreError on torchrun. Force off.
+    env["USE_LIBUV"] = "0"
     # Make sure Puppeteer's repo root is importable (some sub-modules
     # do ``from skeleton.foo import ...``).
     pp = env.get("PYTHONPATH", "")
@@ -222,14 +225,12 @@ def _run_skeleton(input_obj, work_dir, run_name):
 
 
 def _run_skinning(skel_results_dir, mesh_examples_dir, work_dir):
-    """Step 2 — skinning/main.py via torchrun (DDP, single GPU)."""
+    """Step 2 — skinning/main.py direct (DDP env vars manually set,
+    bypassing torchrun which hits libuv issues on Windows PyTorch 2.7)."""
     skin_out = os.path.join(work_dir, "skin_results")
     os.makedirs(skin_out, exist_ok=True)
     cmd = [
-        VENV_PY, "-m", "torch.distributed.run",
-        "--nproc_per_node=1",
-        "--master_port=10009",
-        SKINNING_MAIN,
+        VENV_PY, SKINNING_MAIN,
         "--num_workers", "1",
         "--batch_size", "1",
         "--generate",
@@ -241,11 +242,18 @@ def _run_skinning(skel_results_dir, mesh_examples_dir, work_dir):
         "--depth", "1",
         "--save_folder", skin_out.replace("\\", "/"),
     ]
+    # Single-process DDP env vars — replaces what torchrun would set.
+    skin_env = _venv_env()
+    skin_env["RANK"] = "0"
+    skin_env["LOCAL_RANK"] = "0"
+    skin_env["WORLD_SIZE"] = "1"
+    skin_env["MASTER_ADDR"] = "127.0.0.1"
+    skin_env["MASTER_PORT"] = "10009"
     log(f"exec: {' '.join(cmd)}")
     proc = subprocess.Popen(
         cmd,
         cwd=SKINNING_DIR,
-        env=_venv_env(),
+        env=skin_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -321,7 +329,9 @@ def _fbx_to_glb(fbx_path, glb_path):
         os.remove(tmp_py)
     except Exception:
         pass
-    return rc == 0 and os.path.exists(glb_path) and os.path.getsize(glb_path) > 0
+    # bpy emits a non-zero rc on harmless Draco-missing warnings even when
+    # the GLB was written successfully. Trust the file existence + size.
+    return os.path.exists(glb_path) and os.path.getsize(glb_path) > 0
 
 
 def _preflight():
@@ -429,14 +439,36 @@ def main():
         # Puppeteer's export.py expects a single rig text file combining
         # joints + weights. demo_rigging.sh concatenates _pred.txt and
         # _skin.txt into final_rigging/<name>.txt.
+        # Concat pred_txt + skin_txt for export.py. Both files contain
+        # 'joints'/'hier'/'root' lines and export.py blindly increments a
+        # tot counter on every 'joints' line — duplicates bump tot past
+        # len(joint_pos), poisoning id_mapping with out-of-range ids. So
+        # from pred we keep joints/hier/root, and from skin we keep ONLY
+        # the 'skin' lines. Also strip blank lines (export.py L165 does
+        # word[0] without bounds check on split()).
         final_txt = os.path.join(tmp_dir, "final_rig.txt")
         with open(final_txt, "w", encoding="utf-8") as out:
             with open(pred_txt, "r", encoding="utf-8") as src:
-                out.write(src.read())
-            out.write("\n")
+                for line in src:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    head = s.split(None, 1)[0]
+                    if head in ("joints", "hier", "root"):
+                        out.write(line if line.endswith("\n") else line + "\n")
             with open(skin_txt, "r", encoding="utf-8") as src:
-                out.write(src.read())
-        bake_mesh = mesh_obj_out if mesh_obj_out else staged_obj
+                for line in src:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    head = s.split(None, 1)[0]
+                    if head == "skin":
+                        out.write(line if line.endswith("\n") else line + "\n")
+        # Skin indices target the mesh passed to skinning (mesh_folder =
+        # staged_obj), NOT the marching-cubes mesh produced by skeleton/.
+        # demo_rigging.sh confirms: export.py is called on the ORIGINAL
+        # input mesh (e.g. examples/deer.obj), not the MC mesh.
+        bake_mesh = staged_obj
         out_fbx = os.path.join(tmp_dir, "rigged.fbx")
         rc = _run_export(bake_mesh, final_txt, out_fbx)
         if rc != 0 or not os.path.exists(out_fbx):
