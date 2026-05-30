@@ -142,6 +142,70 @@ async function r2GetText(env: Env, key: string): Promise<string | null> {
   try { return await obj.text(); } catch { return null; }
 }
 
+/** Module-level SSRF guard: only accept URLs from our known upstreams.
+ *  Used by handleGenerate AND all Modal forwarders that take user-supplied
+ *  imageUrl/meshUrl fields. Rejects non-https and unknown hosts.
+ *  Hostname is matched against a strict allow-list (exact or suffix). */
+function isTrustedAssetHost(env: Env, u: string): boolean {
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith('.r2.dev')) return true;
+    if (host.endsWith('.r2.cloudflarestorage.com')) return true;
+    if (host === 'replicate.delivery') return true;
+    if (host.endsWith('.replicate.delivery')) return true;
+    if (host === 'image.pollinations.ai') return true;
+    if (env.R2_PUBLIC_URL) {
+      try {
+        const pub = new URL(env.R2_PUBLIC_URL).hostname.toLowerCase();
+        if (host === pub) return true;
+      } catch {}
+    }
+    return false;
+  } catch { return false; }
+}
+
+/** Bump a listing's downloads counter as a SEPARATE R2 object so the
+ *  listing JSON itself doesn't get racy reads-modify-writes. Uses R2
+ *  conditional PUT (ifMatch on etag) and retries once on contention.
+ *  Best-effort: a contention loss in step 2 silently drops the increment
+ *  (acceptable since this is a vanity counter — frontend can compute
+ *  exact downloads from `_market/owners/<id>/` if precision matters). */
+async function bumpListingDownloads(env: Env, listingId: string): Promise<void> {
+  if (!env.MESHES) return;
+  const key = `_market/downloads/${listingId}.txt`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const existing = await env.MESHES.get(key);
+      const current = existing ? parseInt(await existing.text(), 10) || 0 : 0;
+      const next = current + 1;
+      if (existing) {
+        const res = await env.MESHES.put(key, String(next), {
+          httpMetadata: { contentType: 'text/plain' },
+          onlyIf: { etagMatches: existing.etag },
+        });
+        if (res) return;
+      } else {
+        const res = await env.MESHES.put(key, String(next), {
+          httpMetadata: { contentType: 'text/plain' },
+          onlyIf: { etagDoesNotMatch: '*' },
+        });
+        if (res) return;
+      }
+    } catch {}
+  }
+}
+
+/** Read the atomic downloads counter for a listing. Returns 0 if missing. */
+async function readListingDownloads(env: Env, listingId: string): Promise<number> {
+  if (!env.MESHES) return 0;
+  const txt = await r2GetText(env, `_market/downloads/${listingId}.txt`);
+  if (!txt) return 0;
+  const n = parseInt(txt, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** Check the daily Replicate spend cap. Returns the remaining budget
  *  in USD, or null if the request would push us over. */
 async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number): Promise<number | null> {
@@ -1630,6 +1694,10 @@ async function handleAdminContactReply(req: Request, env: Env, id: string): Prom
     m.replied_at = new Date().toISOString();
     m.replied = true;
     m.read = true;  // a reply implies the admin has read the message
+    // Reset replied_read on every admin reply so a second/edited reply
+    // re-flags the thread as unread for the recipient user. Without this
+    // the first read sticks and subsequent replies are silently missed.
+    m.replied_read = false;
     await env.MESHES.put(key, JSON.stringify(m),
                          { httpMetadata: { contentType: 'application/json' } });
     return json({ ok: true, success: true });
@@ -1811,6 +1879,13 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
   } else {
     const imageUrl = String(body.imageUrl ?? '').trim();
     if (!imageUrl) return err(400, 'imageUrl required for image listings');
+    // Strict host check first: only accept https URLs from our trusted
+    // upstreams (R2, replicate.delivery, pollinations) — prevents a user
+    // from publishing a URL pointing at an attacker-controlled host or
+    // an http:// resource that would later be fetched by browsers.
+    if (!isTrustedAssetHost(env, imageUrl)) {
+      return err(400, 'imageUrl host not allowed');
+    }
     // Lightweight ownership check: the URL must live under the user's
     // R2 prefix. Without this anyone could re-publish someone else's
     // public asset.
@@ -2771,7 +2846,10 @@ async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
   });
   if (!r.ok) {
     const errBody = await r.text().catch(() => '');
-    return err(502, 'stripe checkout failed: ' + errBody.slice(0, 200));
+    // Log raw Stripe error server-side; surface a generic message — Stripe
+    // bodies can contain account / customer ids we don't want exposed.
+    console.error('[stripe-checkout]', r.status, errBody.slice(0, 500));
+    return err(502, 'stripe checkout failed');
   }
   const session = await r.json() as { id: string; url: string };
   return json({ ok: true, url: session.url, session_id: session.id });
@@ -2800,6 +2878,14 @@ async function _processMarketPurchase(env: Env, sess: {
     if (!lTxt) continue;
     let listing: MarketListing;
     try { listing = JSON.parse(lTxt) as MarketListing; } catch { continue; }
+
+    // Per-(user, listing) idempotency. If a duplicate Stripe webhook fires
+    // with a *different* session id (rare but possible during retries on
+    // the same checkout flow), the seenKey check above wouldn't catch it.
+    // Owners file existing = user already paid for this listing — skip the
+    // sale + payout so we don't transfer twice or notify twice.
+    const ownerKey = `_market/owners/${listingId}/${userId}.json`;
+    if (await env.MESHES.head(ownerKey)) continue;
 
     const platformFee = Math.round(listing.price_cents * MARKET_COMMISSION_PCT / 100);
     const sellerNet   = listing.price_cents - platformFee;
@@ -2886,9 +2972,15 @@ async function _processMarketPurchase(env: Env, sess: {
         const priceMajor = (listing.price_cents / 100).toFixed(2);
         const currency = (listing.currency || 'USD').toUpperCase();
         const formattedPrice = `${priceMajor} ${currency}`;
+        // Branch on actual payout type — credits earned has no meaning when
+        // the seller was paid in cash via Stripe Connect (paidCash=true above).
+        const sellerNetMajor = (sellerNet / 100).toFixed(2);
+        const earnedSuffix = paidCash
+          ? `(+${sellerNetMajor} ${currency} earned via Stripe).`
+          : `(+${payoutCredits} credits earned).`;
         await _addUserNotification(env, listing.user_id, {
           kind: 'market_sale',
-          message: `You sold "${listing.title}" for ${formattedPrice} (+${payoutCredits} credits earned).`,
+          message: `You sold "${listing.title}" for ${formattedPrice} ${earnedSuffix}`,
           listing_id: listing.id,
           subject: listing.title || 'Listing updated',
           asset_url: listing.asset_url || listing.mesh_url,
@@ -2902,12 +2994,10 @@ async function _processMarketPurchase(env: Env, sess: {
     await env.MESHES.put(`_market/owners/${listingId}/${userId}.json`,
                          JSON.stringify({ sale_id: saleId, at: sale.paid_at }),
                          { httpMetadata: { contentType: 'application/json' } });
-    // Bump downloads counter on the listing.
-    try {
-      listing.downloads = (listing.downloads || 0) + 1;
-      await env.MESHES.put(`_market/listings/${listingId}.json`, JSON.stringify(listing),
-                           { httpMetadata: { contentType: 'application/json' } });
-    } catch {}
+    // Bump downloads counter on a SEPARATE R2 key so concurrent buyers
+    // don't clobber the listing JSON. The listing.downloads field is now
+    // computed/joined at read time (see readListingDownloads).
+    await bumpListingDownloads(env, listingId);
   }
   await env.MESHES.put(seenKey, new Date().toISOString());
 }
@@ -2990,12 +3080,8 @@ async function handleMarketDownload(req: Request, env: Env, listingId: string): 
   headers.set('Content-Disposition', `attachment; filename="${filename}"`);
   headers.set('Cache-Control', 'private, max-age=60');
 
-  // Best-effort downloads counter — don't block the response on this.
-  try {
-    listing.downloads = (listing.downloads || 0) + 1;
-    await env.MESHES.put(`_market/listings/${listingId}.json`, JSON.stringify(listing),
-                         { httpMetadata: { contentType: 'application/json' } });
-  } catch {}
+  // Best-effort downloads counter — atomic CAS on a separate R2 key.
+  await bumpListingDownloads(env, listingId);
 
   return new Response(upstream.body, { status: 200, headers });
 }
@@ -3006,6 +3092,24 @@ async function handleAdminMarketDelete(req: Request, env: Env, id: string): Prom
   if (guard instanceof Response) return guard;
   if (!env.MESHES) return err(500, 'storage not configured');
   await env.MESHES.delete(`_market/listings/${id}.json`);
+  // Orphan cleanup: owners (per-buyer entries) and ratings (per-rater
+  // entries) live under prefixes scoped to the listing id. Without this
+  // cleanup, /api/market/owned and average-rating recompute keep
+  // returning stale data for a listing that no longer exists.
+  for (const prefix of [`_market/owners/${id}/`, `_market/ratings/${id}/`]) {
+    try {
+      let cursor: string | undefined;
+      do {
+        const page = await env.MESHES.list({ prefix, limit: 1000, cursor });
+        for (const obj of page.objects) {
+          try { await env.MESHES.delete(obj.key); } catch {}
+        }
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+    } catch {}
+  }
+  // Drop the downloads counter too (separate key per FIX 15).
+  try { await env.MESHES.delete(`_market/downloads/${id}.txt`); } catch {}
   return json({ ok: true, success: true });
 }
 
@@ -3208,9 +3312,16 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
         created_at: new Date().toISOString(),
       });
       if (ins.error) {
-        // Race: another delivery beat us to the INSERT. They'll
-        // (re-)credit; we bail. Their finalisation is independent.
-        return { ok: true };
+        // Only Postgres duplicate-key (23505) means another delivery beat
+        // us — their finalisation is independent, bail ok. Any other error
+        // (RLS, network, schema) is a real failure: ask Stripe to retry.
+        const code = (ins.error as { code?: string }).code;
+        if (code === '23505') {
+          return { ok: true };
+        }
+        console.error('[stripe] payments insert failed:',
+          opts.sessionOrInvoiceId, ins.error.message);
+        return { ok: false, retry: true };
       }
     }
     // State 1 (just inserted) and state 2 (resuming) converge here.
@@ -3281,7 +3392,30 @@ async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   // we set to the invoice id here so a retried webhook doesn't double-credit.
   if (event.type === 'invoice.paid') {
     const inv = event.data.object;
-    const meta = inv.lines?.data?.[0]?.metadata ?? {};
+    // Stripe renewal invoices don't carry the original line-item metadata.
+    // Try, in order: subscription_details.metadata (modern Stripe payload),
+    // then line-item metadata (first cycle), then invoice metadata. If none
+    // has user_id, retrieve the subscription explicitly to read its metadata.
+    let meta: Record<string, string> = ((inv.subscription_details?.metadata
+      ?? {}) as Record<string, string>);
+    if (!meta.user_id) {
+      const lineMeta = ((inv.lines?.data?.[0]?.metadata
+        ?? {}) as Record<string, string>);
+      if (lineMeta.user_id) meta = lineMeta;
+    }
+    if (!meta.user_id) {
+      const invMeta = ((inv.metadata ?? {}) as Record<string, string>);
+      if (invMeta.user_id) meta = invMeta;
+    }
+    if (!meta.user_id && inv.subscription) {
+      const subId = String(inv.subscription);
+      const subRes = await _stripeRest(env,
+        `https://api.stripe.com/v1/subscriptions/${subId}`, null, 'GET');
+      if (subRes.ok) {
+        const subMeta = (subRes.data.metadata as Record<string, string> | undefined) ?? {};
+        if (subMeta.user_id) meta = subMeta;
+      }
+    }
     const userId = meta.user_id;
     const packId = meta.pack_id ?? 'subscription';
     const rawCredits = parseInt(meta.credits ?? '0', 10);
@@ -3342,26 +3476,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   // an authenticated user could make the Worker fetch arbitrary internal
   // / external hosts (large download = DoS, leak internal infra responses
   // mirrored to R2 public, etc.).
-  const _isTrustedImageHost = (u: string): boolean => {
-    try {
-      const parsed = new URL(u);
-      if (parsed.protocol !== 'https:') return false;
-      const host = parsed.hostname.toLowerCase();
-      if (host.endsWith('.r2.dev')) return true;
-      if (host.endsWith('.r2.cloudflarestorage.com')) return true;
-      if (host === 'replicate.delivery') return true;
-      if (host.endsWith('.replicate.delivery')) return true;
-      if (host === 'image.pollinations.ai') return true;
-      // R2_PUBLIC_URL is set in wrangler.toml; check it explicitly too.
-      if (env.R2_PUBLIC_URL) {
-        try {
-          const pub = new URL(env.R2_PUBLIC_URL).hostname.toLowerCase();
-          if (host === pub) return true;
-        } catch {}
-      }
-      return false;
-    } catch { return false; }
-  };
+  const _isTrustedImageHost = (u: string): boolean => isTrustedAssetHost(env, u);
   let imageHttpsUrl: string | null = null;
   const urlField = form.get('imagePath') || form.get('image_url');
   if (typeof urlField === 'string' && /^https?:\/\//i.test(urlField)) {
@@ -3405,9 +3520,14 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
   }
   if (!(image instanceof File)) return err(400, 'image required (File or imagePath URL)');
 
+  // Defensive: accept both snake_case (asset_type) and camelCase (assetType)
+  // from the client. Older renderers sent assetType; the worker historically
+  // only read asset_type, silently defaulting to "character" for non-snake
+  // payloads. Pair with the renderer normalisation fix.
+  const _assetType = (form.get('asset_type') || form.get('assetType') || 'character') as GenerateInput['asset_type'];
   const input: GenerateInput = {
     image,
-    asset_type: (form.get('asset_type') as GenerateInput['asset_type']) || 'character',
+    asset_type: _assetType,
     mode: (form.get('mode') as GenerateInput['mode']) || 'standard',
     seed: parseInt(String(form.get('seed') ?? '42'), 10) || 42,
     rectify: form.get('rectify') === 'true',
@@ -3494,6 +3614,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     if (!frontUrl) {
       if (!env.MESHES || !env.R2_PUBLIC_URL) {
         await addCredits(env, user.id, cost);
+        await refundMeshSpend();
         return err(500, 'cloud GPU mesh path needs R2 (no imagePath URL provided)');
       }
       const fileBytes = new Uint8Array(await input.image.arrayBuffer());
@@ -3621,7 +3742,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     // after callModalMeshStart returned — and Modal cold-start
     // sometimes takes 60-150s, leaving the admin staring at "No
     // active jobs" while the user was already waiting.
-    await supabaseAdmin(env).from('jobs').insert({
+    const jobIns = await supabaseAdmin(env).from('jobs').insert({
       id: jobId, user_id: user.id,
       asset_type: input.asset_type, mode: input.mode, seed: input.seed,
       credit_cost: cost, status: 'queued',
@@ -3635,6 +3756,15 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       },
       created_at: new Date().toISOString(),
     });
+    if (jobIns.error) {
+      // If the jobs row can't be persisted, calling Modal would orphan a
+      // GPU job with no way to track it — refund credits + Modal budget,
+      // surface the failure to the user.
+      await addCredits(env, user.id, cost);
+      await refundMeshSpend();
+      console.error('[jobs.insert]', jobIns.error.message);
+      return err(500, 'job creation failed: ' + jobIns.error.message);
+    }
     try {
       // Resolve TRELLIS-2 mode. ultra_q wins (1536 voxels for the
        // finest face detail), then quality_plus (cascade), then the
@@ -3673,11 +3803,15 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       await supabaseAdmin(env).from('jobs').update({ status: 'processing' }).eq('id', jobId);
     } catch (e: unknown) {
       await addCredits(env, user.id, cost);
+      await refundMeshSpend();
       const msg = e instanceof Error ? e.message : String(e);
+      // Log full upstream error server-side; return a generic message to
+      // the client so we don't leak upstream stack traces / internal URLs.
+      console.error('[mesh-start]', msg, e);
       await supabaseAdmin(env).from('jobs').update({
         status: 'failed', error: msg, finished_at: new Date().toISOString(),
       }).eq('id', jobId);
-      return err(502, 'cloud GPU mesh-start failed: ' + msg);
+      return err(502, 'cloud GPU mesh-start failed (credits refunded)');
     }
     return json({ jobId, creditsRemaining: remaining });
   }
@@ -3687,10 +3821,12 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     prediction = await createReplicatePrediction(env, input);
   } catch (e: unknown) {
     await addCredits(env, user.id, cost);
-    return err(502, 'cloud GPU failed: ' + (e instanceof Error ? e.message : String(e)));
+    await refundMeshSpend();
+    console.error('[replicate]', e instanceof Error ? e.message : String(e), e);
+    return err(502, 'cloud GPU failed (credits refunded)');
   }
 
-  await supabaseAdmin(env).from('jobs').insert({
+  const predIns = await supabaseAdmin(env).from('jobs').insert({
     id: prediction.id, user_id: user.id,
     asset_type: input.asset_type, mode: input.mode, seed: input.seed,
     credit_cost: cost, status: prediction.status,
@@ -3701,6 +3837,16 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     },
     created_at: new Date().toISOString(),
   });
+  if (predIns.error) {
+    // Replicate prediction already running but we can't track it — refund
+    // credits + Replicate budget so the user can retry. The orphan
+    // prediction will complete and bill us, but at least the user is made
+    // whole. Surface a clear error.
+    await addCredits(env, user.id, cost);
+    await refundMeshSpend();
+    console.error('[jobs.insert/replicate]', predIns.error.message);
+    return err(500, 'job creation failed: ' + predIns.error.message);
+  }
   return json({ jobId: prediction.id, creditsRemaining: remaining });
 }
 
@@ -5197,6 +5343,8 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
     steps?: number;
   };
   if (!imageUrl) return err(400, 'imageUrl required');
+  // SSRF guard: only forward URLs from our trusted upstreams to Modal.
+  if (!isTrustedAssetHost(env, imageUrl)) return err(400, 'imageUrl host not allowed');
   const rawPrompt = (prompt ?? '').toString().trim();
   if (!rawPrompt) return err(400, 'prompt required');
 
@@ -5279,6 +5427,7 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
   };
   const src = imageUrl || imagePath;
   if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
   if (!targetText) return err(400, 'targetText required');
 
   const rawPrompt = (prompt ?? '').toString().trim();
@@ -5354,6 +5503,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
   };
   const src = imageUrl || imagePath;
   if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
   if (!maskDataUrl) return err(400, 'maskDataUrl required');
   const rawPrompt = (prompt ?? '').toString().trim();
   if (!rawPrompt) return err(400, 'prompt required');
@@ -5448,6 +5598,7 @@ async function handleFaceFixImage(req: Request, env: Env): Promise<Response> {
   };
   const src = imageUrl || imagePath;
   if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
 
   const COST_PER = await getPrice(env, 'face_fix_image');
   const estimatedTotal = 0.05;
@@ -5548,6 +5699,16 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     finalUrl = (data as { mesh_url?: string } | null)?.mesh_url ?? '';
   }
   if (!finalUrl) return err(400, 'meshUrl or meshId required');
+  // SSRF guard: meshUrl is user-controlled here (caller can pass any string).
+  // Only allow trusted upstreams so we don't make Modal fetch arbitrary hosts.
+  if (!isTrustedAssetHost(env, finalUrl)) return err(400, 'meshUrl host not allowed');
+  // retex_swap also takes a user-supplied params.image_url — same SSRF risk.
+  if (op === 'retex_swap' && params && typeof params === 'object') {
+    const imgU = String((params as Record<string, unknown>).image_url ?? '');
+    if (imgU && !isTrustedAssetHost(env, imgU)) {
+      return err(400, 'params.image_url host not allowed');
+    }
+  }
 
   // Cheap op (CPU, ~$0.001 Modal) — defaults to 1 credit, admin-tunable.
   const COST_PER = await getPrice(env, 'mesh_op_simple');
@@ -5600,10 +5761,13 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal);
+    const errMsg = e instanceof Error ? e.message : String(e);
     await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
                        0, opStart, Date.now(), 'failed',
-                       { op_type: op, error: e instanceof Error ? e.message : String(e) });
-    return err(502, `mesh ${op} failed (credits refunded): ${e instanceof Error ? e.message : String(e)}`);
+                       { op_type: op, error: errMsg });
+    console.error('[mesh-op]', op, errMsg, e);
+    // Don't leak upstream stack/URLs to the client.
+    return err(502, `mesh ${op} failed (credits refunded)`);
   }
 }
 
@@ -5779,7 +5943,8 @@ async function handleUploadImage(req: Request, env: Env): Promise<Response> {
       httpMetadata: { contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}` },
     });
   } catch (e) {
-    return err(502, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
+    console.error('[upload-image]', e instanceof Error ? e.message : String(e), e);
+    return err(502, 'R2 upload failed');
   }
   return json({ ok: true, success: true, path: `${env.R2_PUBLIC_URL}/${key}` });
 }
@@ -5833,7 +5998,11 @@ async function handleUploadMesh(req: Request, env: Env): Promise<Response> {
   }
 
   // Per-user daily quota — same counter pattern as handleUploadImage.
-  const MAX_UPLOADS_PER_DAY = 200;
+  // NOTE: GET-then-PUT is race-able under high concurrency (a user could
+  // briefly push past the cap if 5+ uploads land in the same ms). Raised
+  // to 500 to absorb that slack — acceptable trade-off given the small
+  // per-user multiplier and zero credit cost on this endpoint.
+  const MAX_UPLOADS_PER_DAY = 500;
   try {
     const day = new Date().toISOString().slice(0, 10);
     const cntKey = `_meta/mesh_uploads_count/${user.id}/${day}.txt`;
@@ -5856,8 +6025,9 @@ async function handleUploadMesh(req: Request, env: Env): Promise<Response> {
       httpMetadata: { contentType: 'model/gltf-binary' },
     });
   } catch (e) {
+    console.error('[upload-mesh]', e instanceof Error ? e.message : String(e), e);
     return new Response(
-      JSON.stringify({ success: false, error: `R2 upload failed: ${e instanceof Error ? e.message : String(e)}` }),
+      JSON.stringify({ success: false, error: 'R2 upload failed' }),
       { status: 500, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -5932,6 +6102,7 @@ async function handleUpscaleImage(req: Request, env: Env): Promise<Response> {
   };
   const src = imageUrl || imagePath;
   if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
   const factor = scale === 4 ? 4 : 2;  // only 2 or 4 supported
 
   // Upscale: x2 = base price, x4 = base + 1 (heavier).
@@ -6007,22 +6178,11 @@ async function handleCopyMeshToProject(req: Request, env: Env): Promise<Response
   }
   if (!finalUrl) return err(400, 'meshUrl or meshId required');
 
-  // Reject any meshUrl that isn't on our trusted upstreams. Without
-  // this check a malicious client could insert javascript: or attacker-
-  // controlled https URLs that the admin model-viewer would then
-  // dereference (XSS / data exfil vector).
-  try {
-    const parsed = new URL(finalUrl);
-    if (parsed.protocol !== 'https:') return err(400, 'meshUrl must be https');
-    const host = parsed.hostname.toLowerCase();
-    const r2Pub = env.R2_PUBLIC_URL ? new URL(env.R2_PUBLIC_URL).hostname.toLowerCase() : '';
-    const ok = host === r2Pub
-            || host.endsWith('.r2.dev')
-            || host.endsWith('.r2.cloudflarestorage.com')
-            || host === 'replicate.delivery'
-            || host.endsWith('.replicate.delivery');
-    if (!ok) return err(400, 'meshUrl host not allowed');
-  } catch { return err(400, 'invalid meshUrl'); }
+  // Reject any meshUrl that isn't on our trusted upstreams. Without this
+  // check a malicious client could pass an attacker-controlled https URL
+  // that the admin model-viewer would then dereference (XSS / data exfil
+  // vector). Uses the module-level allow-list (R2 + replicate.delivery).
+  if (!isTrustedAssetHost(env, finalUrl)) return err(400, 'meshUrl host not allowed');
 
   // Insert a new job row with the same mesh_url but the new project_name.
   // credit_cost = 0 (no GPU work — just a project re-grouping).

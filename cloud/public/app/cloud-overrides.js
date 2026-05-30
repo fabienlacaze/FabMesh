@@ -255,6 +255,9 @@
   }
 
   function applyOverrides() {
+    // Cheap DOM patches — safe to re-run every time the Settings/About
+    // modal lazy-injects its content. Idempotent (hide* / prune* check
+    // before mutating).
     document.body.classList.add('cloud-mode');
 
     // Whole sections (header + all its boxes)
@@ -271,6 +274,26 @@
     // Defensive — if the Control API box ends up outside the AI Assistant
     // section in a future refactor, hide it explicitly too.
     hideById('set-control-api-box');
+
+    // Adapt engine dropdowns to what Cloud actually wires.
+    pruneEngineSelectors();
+
+    // Strip Desktop-only bits from the About modal.
+    pruneAboutModal();
+
+    // Hide buttons that need a Three.js sculpting/selection editor in
+    // the browser (Sculpt, Paint vertex, Select) — not feasible to
+    // port in cloud without a major UI effort. Same for Re-Texture
+    // (TRELLIS-2 full): cloud uses the regular Generate-3D path.
+    _hideDesktopOnlyButtons();
+
+    // Idempotency guard — everything below installs listeners, observers,
+    // setInterval timers, or wraps __cloudCreditsRefresh into a closure.
+    // Re-running them on every Settings/About click leaked N+1 chained
+    // /api/me calls, accumulated MutationObservers per modal, and
+    // stacked focus/visibilitychange listeners.
+    if (window.__cloudOverridesApplied) return;
+    window.__cloudOverridesApplied = true;
 
     // Inject the credits pill into the topbar (Cloud-only — desktop has
     // unlimited local GPU and doesn't need this).
@@ -290,12 +313,6 @@
     // and read by worker.ts:getSessionUser) so JS can delete them.
     installLogoutButton();
 
-    // Adapt engine dropdowns to what Cloud actually wires.
-    pruneEngineSelectors();
-
-    // Strip Desktop-only bits from the About modal.
-    pruneAboutModal();
-
     // Wire the live cost meter on the "Generate 3D" button so users
     // see the total credit cost change as they toggle options.
     installMeshCostMeter();
@@ -312,11 +329,14 @@
     // the pattern instead of editing each modal HTML by hand.
     installModalCreditBadges();
     // Chain: a spend (handled by the topbar refresh) now also kicks
-    // the modal pills.
+    // the modal pills. MUST run only once — every call wraps the
+    // previous wrapper into a new closure, producing N chained calls
+    // to /api/me per credit refresh.
     _wrapTopbarRefresh();
     // Refresh modal balance pills the first time any tool modal opens
     // (cheaper than polling) — picks up balance changes from other
-    // tabs/devices the user might have running.
+    // tabs/devices the user might have running. MUST run only once —
+    // each call attaches a new MutationObserver per modal.
     _watchModalOpens();
 
     // Pull the live prices set by the admin via /admin > Pricing and
@@ -361,12 +381,6 @@
     };
     document.addEventListener('visibilitychange', _refreshIfStale);
     window.addEventListener('focus', _refreshIfStale);
-
-    // Hide buttons that need a Three.js sculpting/selection editor in
-    // the browser (Sculpt, Paint vertex, Select) — not feasible to
-    // port in cloud without a major UI effort. Same for Re-Texture
-    // (TRELLIS-2 full): cloud uses the regular Generate-3D path.
-    _hideDesktopOnlyButtons();
 
     // Cold-start indicator. Polls /api/modal-status periodically and
     // exposes the result globally so the AI tool buttons / job

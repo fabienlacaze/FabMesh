@@ -1,5 +1,36 @@
 # FabMesh Agent Log
 
+## 2026-05-30 (audit: apply 20+ fixes from AUDIT_2026-05-29.md)
+
+### HIGH (user-visible bug / blocking)
+- **worker.ts invoice.paid metadata**: read from `subscription_details.metadata` first, then line items, then invoice, then `stripe.subscriptions.retrieve` — fixes zero-credit recurring renewals.
+- **worker.ts handleGenerate catch arms**: added `refundMeshSpend()` on Modal/Replicate mesh-start failures so the daily GPU budget isn't permanently burned by a single failed start.
+- **worker.ts asset_type contract**: now accepts both `asset_type` and `assetType` from FormData (defensive); paired with renderer-side rename below.
+- **index2.js (cloud) asset_type rename**: `assetType` → `asset_type` in `/api/generate` payload — restores asset-type-aware pipeline (rectify mode, back-view dispatch, credit defaults) for every non-character cloud generation.
+- **meshyAPI-cloud.js meshTool params**: positional arrays from `MESH_TOOL_SCHEMAS[*].build()` now translated to named objects matching `modal_app/_mesh_op.py` contract (smooth → iterations+lamb, decimate → target_faces, subdivide → iterations, retex_swap → image_url) — sliders are no longer silent no-ops.
+- **index2.js (cloud) cancelJob**: captures `r.jobId` (worker side) into `job.workerJobId` and forwards that to `/api/jobs/cancel` instead of the local UI counter — cancel now actually stops the Replicate prediction.
+- **index2.js (cloud) Add back photo**: routed through `API.saveImageDataUrl` (uploads to R2 and returns HTTPS URL) instead of the legacy `saveBuffer` download branch — multi-ref TRELLIS-2 now works on cloud.
+- **cloud-overrides.js applyOverrides idempotent**: cheap DOM patches stay re-runnable; `_wrapTopbarRefresh`, `_watchModalOpens`, `installModalStatusPoll`, focus/visibilitychange listeners, and credits-refresh wrapping now gated behind `window.__cloudOverridesApplied` — stops N+1 chained `/api/me` calls and MutationObserver leaks on every Settings/About open.
+
+### MEDIUM (impact present but not blocking)
+- **worker.ts _processPayment INSERT**: only Postgres `23505` (duplicate key) is treated as the benign race; any other error returns `{ok:false, retry:true}` so Stripe retries — no more silent payment loss.
+- **worker.ts handleMarketPublish**: image listings now pass through `isTrustedAssetHost()` (R2 / replicate.delivery / pollinations only) before the ownership check — kills the bait-and-switch laundering vector through `/api/market/download`.
+- **worker.ts SSRF guard hoisted**: `isTrustedAssetHost` moved to module scope; called by `handleModifyImage`, `handleAutoInpaint`, `handleMaskInpaint`, `handleMaskInpaintXL`, `handleImageQuickEdit`, `handleMeshOp`, `handleStartMeshOp` Modal forwarders.
+- **src/renderer/index2.js pushJob source snapshot**: 6-arg signature `(name, onCancel, params, expectedMs, opts)` with `opts.sourceImageUrl`/`projectName`/`assetKind`. `refreshJobDetailsModal` now prefers the snapshot — Job Details modal no longer shows the wrong thumbnail when user switches selected image mid-job (desktop parity with cloud).
+- **index2.js (cloud) uploadClientMeshResult helper**: extracted the three chunked-base64 → `/api/mesh-op/client-result` POST blocks (mesh tools, paint emissive, paint mesh) into one function with explicit `opType` parameter — divergence stopped.
+
+### LOW / cleanup
+- **worker.ts market_sale notification**: branches on `paidCash` → "+X CURRENCY earned via Stripe" vs "+X credits earned" — no more support-ticket bait when seller is on Stripe Connect.
+- **worker.ts listing.downloads**: moved counter to separate R2 key `_market/downloads/<id>.txt` with `etagMatches`/`etagDoesNotMatch` CAS (`bumpListingDownloads` + `readListingDownloads`) — fixes lost increments and the "resurrect freshly-rejected listing" window. Old race in `handleMarketDownload` and `_processMarketPurchase` retired.
+- **worker.ts handleAdminMarketDelete**: now lists+deletes orphan `_market/owners/<id>/*`, `_market/ratings/<id>/*`, and `_market/downloads/<id>.txt` keys after the listing JSON.
+- **worker.ts handleGenerate jobs INSERT**: captures `{error}` from the jobs row insert; on failure refunds credits + Modal/Replicate budget before returning 500 (previously Modal was called regardless).
+- **worker.ts handleAdminContactReply**: sets `m.replied_read = false` on every reply write so a second admin reply re-flags the thread as unread.
+- **worker.ts handleMarketCheckout**: Stripe error body logged server-side; client gets generic `'stripe checkout failed'` — no more upstream-body infra fingerprinting.
+- **worker.ts mesh-start/replicate error returns**: log full error server-side; return generic `'cloud GPU … failed (credits refunded)'` to the client.
+- **worker.ts _processMarketPurchase per-(user, listing) idempotency**: HEAD `_market/owners/<id>/<userId>.json` before writing sale/payout — duplicate Stripe webhooks no longer double-payout.
+
+Worker Version ID: d7f4cf5d-f0ae-4d67-b1ea-e4ebf01869b6.
+
 ## 2026-05-29 (sculpt: fix save path + add job popup)
 - Fixed sculpt save 404 on cloud: caller was unshifting the locally-built path (mesh/<orig>_edited_<ts>.glb) into p.meshes, but the worker writes to <userid>/edited/<name>_<ts>.glb (per-user scope) and returns its actual URL in r.url. Now the caller uses r.url (with fallback to r.path then locally-built path for desktop compat).
 - Replaced 2-second "Saving new version..." toast with a proper job entry in the jobs bubble (kind: mesh_edit) — user sees a progress popup like for mesh generation, transitioning to done/error.

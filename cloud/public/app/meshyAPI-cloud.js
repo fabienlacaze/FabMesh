@@ -1465,8 +1465,48 @@
       }
       const url = meshUrl || meshPath;
       if (!url && !meshId) return { success: false, error: 'meshPath, meshUrl or meshId required' };
-      // retex_swap needs the image_url in params.
-      const finalParams = Object.assign({}, params || {});
+      // Normalize params → named object matching modal_app/_mesh_op.py
+      // contract. The renderer's MESH_TOOL_SCHEMAS[*].build(vals) returns
+      // a POSITIONAL array (e.g. smooth → ["5","0.5"]); `Object.assign({},
+      // arr)` produced {0:"5",1:"0.5"} which Modal silently ignored, so
+      // sliders were no-ops while still burning 1 credit. Map by op
+      // explicitly here. If a caller already passes a named object
+      // (Object, non-array), pass it through as-is.
+      let finalParams;
+      if (Array.isArray(params)) {
+        const a = params;
+        switch (realOp) {
+          case 'smooth':
+            // build → [iterations, lambda]; Modal reads `iterations` + `lamb`
+            finalParams = {};
+            if (a[0] != null) finalParams.iterations = Number(a[0]);
+            if (a[1] != null) finalParams.lamb = Number(a[1]);
+            break;
+          case 'decimate':
+            // build → [target_faces]
+            finalParams = {};
+            if (a[0] != null) finalParams.target_faces = Number(a[0]);
+            break;
+          case 'subdivide':
+            // build → [levels]; Modal reads `iterations`
+            finalParams = {};
+            if (a[0] != null) finalParams.iterations = Number(a[0]);
+            break;
+          case 'retex_swap':
+            // build (retexture) → [image_url] or empty; fall back to
+            // imagePath arg below.
+            finalParams = {};
+            if (a[0]) finalParams.image_url = String(a[0]);
+            break;
+          // center/fix_normals/fill_holes/align_texture/material take
+          // no params on the Modal side — drop positional values.
+          default:
+            finalParams = {};
+            break;
+        }
+      } else {
+        finalParams = Object.assign({}, params || {});
+      }
       if (realOp === 'retex_swap' && !finalParams.image_url) {
         if (!imagePath) return { success: false, error: 'imagePath required for retexture' };
         finalParams.image_url = imagePath;
