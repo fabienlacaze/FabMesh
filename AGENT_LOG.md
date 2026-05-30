@@ -8,6 +8,7 @@
 - Updated stale comments in cloud/public/app/meshyAPI-cloud.js.
 - Updated ROADMAP.md M5 status.
 - PRESERVED: internal `window.meshyAPI` / `MeshyAPI` shim object (our local wrapper, NOT the external service).
+- Follow-up: closed 6 Meshy.ai stragglers — orphaned main.js paths to deleted bridge script (4 sites), Settings UI key field + test button in src/renderer/index2.js (5 sites), testMeshyKey STUB entry in meshyAPI-cloud.js. App no longer throws "script not found" when Meshy-era code paths are mistakenly reached.
 
 ## 2026-05-30 (audit: apply 20+ fixes from AUDIT_2026-05-29.md)
 

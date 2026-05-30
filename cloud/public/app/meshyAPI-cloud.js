@@ -1535,7 +1535,7 @@
     // Claude Desktop MCP bridge
     'connectClaudeDesktop', 'disconnectClaudeDesktop', 'checkClaudeDesktop',
     // Internal config tools
-    'getControlApiToken', 'testMeshyKey',
+    'getControlApiToken',
     // Blender pipeline (no Blender in cloud)
     'setBlenderPath', 'runBlenderScript', 'openInBlender',
     'materialAdjust', 'alignTexture',

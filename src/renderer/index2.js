@@ -10145,8 +10145,7 @@ function completeJob(id, success, errorMessage) {
   }
   renderJobs();
   // Failed jobs linger longer than successful ones so the user has time to
-  // open the details modal and click the recovery button (e.g. "Open Settings"
-  // when a Meshy API key is missing).
+  // open the details modal and click the recovery button (e.g. "Open Settings").
   const ttl = success ? 4000 : 30000;
   setTimeout(() => {
     state.jobs = state.jobs.filter(x => x.id !== id);
@@ -10470,11 +10469,6 @@ document.getElementById('job-details-close').addEventListener('click', closeJobD
 document.getElementById('job-details-open-settings')?.addEventListener('click', () => {
   closeJobDetails();
   openSettings();
-  // Focus the Meshy API key field after the Settings modal has rendered
-  setTimeout(() => {
-    const el = document.getElementById('set-meshy-api-key');
-    if (el) { el.focus(); el.select?.(); }
-  }, 120);
 });
 document.getElementById('job-details-cancel').addEventListener('click', async () => {
   const id = state._jobDetailsOpenId;
@@ -11022,8 +11016,6 @@ async function openSettings() {
     const cfg = await API.getConfig();
     const blenderEl = document.getElementById('set-blender-path');
     if (blenderEl) blenderEl.value = cfg?.blenderPath || '';
-    const meshyInput = document.getElementById('set-meshy-api-key');
-    if (meshyInput) meshyInput.value = cfg?.meshyApiKey || '';
   } catch (e) {}
   applyGpuLimitMarkers();
   setupGpuLimitDragging();
@@ -12370,47 +12362,6 @@ document.getElementById('set-blender-browse')?.addEventListener('click', async (
       if (el) el.value = r.blenderPath || r;
     }
   } catch (e) {}
-});
-
-// ----------- Meshy.ai API key: persist on blur, test via button ----------
-const meshyKeyEl = document.getElementById('set-meshy-api-key');
-if (meshyKeyEl) {
-  // Persist the key to config.json as soon as the user leaves the field.
-  meshyKeyEl.addEventListener('change', async () => {
-    const key = meshyKeyEl.value.trim();
-    try {
-      await API.setConfig({ meshyApiKey: key });
-    } catch (e) {
-      console.warn('setConfig(meshyApiKey) failed', e);
-    }
-  });
-}
-document.getElementById('set-meshy-test')?.addEventListener('click', async () => {
-  const btn = document.getElementById('set-meshy-test');
-  const key = document.getElementById('set-meshy-api-key').value.trim();
-  if (!key) { alert('Enter your MyFabmesh.AI cloud API key first.'); return; }
-  const orig = btn.textContent;
-  btn.textContent = 'Testing...';
-  btn.disabled = true;
-  try {
-    // Persist before testing so the user doesn't lose the typed key if the test roundtrips.
-    await API.setConfig({ meshyApiKey: key });
-    const r = await API.testMeshyKey(key);
-    if (r && r.ok) {
-      btn.textContent = 'OK';
-      btn.style.background = '#1f6f3a';
-      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 1800);
-    } else {
-      btn.textContent = 'Failed';
-      btn.style.background = '#7f1d1d';
-      alert('MyFabmesh.AI cloud key test failed: ' + (r?.error || 'unknown error'));
-      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 1800);
-    }
-  } catch (e) {
-    btn.textContent = 'Error';
-    alert('Test error: ' + e.message);
-    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
-  }
 });
 
 // ----------- Claude Desktop: connect button + status check ----------
