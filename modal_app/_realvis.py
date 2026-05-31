@@ -42,14 +42,18 @@ def build_prompts(prompt: str) -> tuple[str, str]:
         "extra limbs, bad anatomy, distorted, cropped, worst quality, "
         "flat profile, "
         # Anti-portrait composition tokens — SDXL's default for animals/
-        # creatures/characters tends toward head shots. Without this,
-        # prompting "dragon" produces a dragon-head portrait instead of
-        # the full-body asset we need for 3D reconstruction.
-        "(close-up:1.5), (portrait:1.5), (headshot:1.5), "
-        "(head only:1.5), (head close-up:1.5), (face only:1.4), "
-        "(bust shot:1.4), (head and shoulders:1.4), "
-        "(face close-up:1.4), (head crop:1.4), (cropped to head:1.4), "
-        "(zoomed in on face:1.4), (extreme close-up:1.5), "
+        # creatures/characters tends toward head shots. The base diffusers
+        # SDXL pipeline does NOT parse Compel parens (no compel library
+        # installed), so weights like (token:1.5) are stripped — only the
+        # word itself counts. We repeat the strongest tokens multiple
+        # times to brute-force the negative emphasis CLIP would otherwise
+        # get from compel weighting.
+        "close-up, close-up, close-up, portrait, portrait, portrait, "
+        "headshot, headshot, headshot, head only, head only, "
+        "head close-up, face only, face only, bust shot, bust shot, "
+        "head and shoulders, head and shoulders, face close-up, "
+        "head crop, cropped to head, zoomed in on face, extreme close-up, "
+        "macro shot, dragon head, animal head close-up, "
         "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
         "(set of two:1.5), (multiple instances:1.5), "
         "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
@@ -73,11 +77,16 @@ def generate(pipe, prompt: str, seed: int, steps: int = 30) -> _PImage.Image:
     responsible for NSFW filtering and PNG encoding.
     """
     optimized, negative = build_prompts(prompt)
+    # Guidance 7.0 left RealVis V4 free to ignore anti-portrait negatives
+    # on fantasy creatures (dragons/animals would still come out as
+    # headshots). 9.5 forces both positive (full body / long shot tokens)
+    # AND negative (close-up / portrait / headshot) to weigh much heavier
+    # in classifier-free guidance.
     result = pipe(
         prompt=optimized,
         negative_prompt=negative,
         num_inference_steps=int(steps),
-        guidance_scale=7.0,
+        guidance_scale=9.5,
         height=1024,
         width=1024,
         generator=torch.Generator("cuda").manual_seed(int(seed)),
