@@ -4390,7 +4390,49 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     console.warn('[handleListMeshes] R2 mesh-op list failed:', e instanceof Error ? e.message : String(e));
   }
 
-  // No-store so the client always sees fresh rigged + mesh-op files
+  // Append animation GLBs from <user.id>/animations/. Same trick as
+  // rigs: extract the source-mesh hex slug from the filename and find
+  // the matching mesh to inherit its projectName.
+  try {
+    const listed = await env.MESHES.list({ prefix: `${user.id}/animations/`, limit: 200 });
+    console.log(`[handleListMeshes] user=${user.id} anim_count=${listed.objects.length}`);
+    for (const obj of listed.objects) {
+      const filename = obj.key.split('/').pop() || 'anim.glb';
+      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      // Anim filename pattern (worker.ts handleAutoAnimStatus l. 6890):
+      //   <baseName>_<animType>_<timestamp>.glb
+      // where baseName comes from the rig URL — typically
+      //   modal_<hex>_rigged_puppeteer_<rigTs>_<animType>_<animTs>.glb
+      // Strip _<animType>_<ts>.glb to recover the rig basename, then
+      // strip _rigged_.* to recover the source mesh slug.
+      const beforeAnim = filename.replace(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_\d{10,}\.glb$/i, '');
+      const beforeRigged = beforeAnim.replace(/_rigged_.*$/i, '');
+      const cleanSlug = beforeRigged.replace(/^modal_/i, '').toLowerCase();
+      const source = meshes.find(m => {
+        const u = (m.url || '').toLowerCase();
+        const id = (m.id || '').toLowerCase().replace(/-/g, '');
+        return cleanSlug && (u.includes(cleanSlug) || id === cleanSlug || id.includes(cleanSlug));
+      });
+      const inheritedProject = source?.projectName || meshes[0]?.projectName || null;
+      meshes.push({
+        filename,
+        path: url,
+        url,
+        size: obj.size,
+        created: obj.uploaded.toISOString(),
+        format: 'GLB',
+        thumb: null,
+        sourceImage: null,
+        asset_type: 'animation',
+        projectName: inheritedProject,
+        id: filename.replace(/\.glb$/i, ''),
+      });
+    }
+  } catch (e) {
+    console.warn('[handleListMeshes] R2 animations list failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  // No-store so the client always sees fresh rigged + mesh-op + anim
   return new Response(JSON.stringify({ meshes }), {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
