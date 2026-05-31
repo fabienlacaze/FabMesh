@@ -344,13 +344,14 @@ def run(rig_glb: str, out_glb: str, anim_type: str, prompt: str) -> int:
                 f"AnyTop checkpoint '{family}' not found. Run "
                 f"`python -m utils.download_dependencies` in the AnyTop venv."
             )
-        object_type = _pick_object_type(family)
-        _log("info", f"using checkpoint family={family} ckpt={ckpt} object_type={object_type}")
+        _log("info", f"using checkpoint family={family} ckpt={ckpt}")
         rc = _run_subprocess(
             [
                 venv_py, "-m", "sample.generate",
                 "--model_path", ckpt,
-                "--object_type", object_type,
+                # MUST equal --object_name from process_new_skeleton —
+                # cond_dict[object_type] lookup in OUR cond.npy.
+                "--object_type", skel_name,
                 "--cond_path", str(ds_dir / "cond.npy"),
                 "--num_repetitions", "1",
                 "--motion_length", "5.0",
