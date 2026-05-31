@@ -344,18 +344,19 @@ def animate_mesh(
         ckpt = _resolve_checkpoint_path(ckpt_name)
         if not ckpt:
             raise RuntimeError(f"checkpoint not found: {ckpt_name}")
-        object_type = _pick_object_type(ckpt_name)
         # ── Step 4: sample.generate ───────────────────────────────
-        # --object_type MUST be one of the 70 canonical class names from
-        # AnyTop's param_utils.py registry. Passing our synthetic
-        # skel_name (job_<hex>) silently produced a zero embedding and
-        # the diffusion sampler conditioned on nothing → degenerate
-        # output. _pick_object_type maps the checkpoint family to a
-        # representative trained class (Ostrich, Horse, Dragon, etc.).
+        # --object_type MUST equal --object_name from process_new_skeleton:
+        # sample.generate looks up cond_dict[object_type]['parents'] in
+        # OUR cond.npy (which has only ONE key — the skel_name we wrote
+        # in step 2). The 70-class param_utils.py registry is for
+        # AnyTop's training-time skeleton lookup, not the runtime
+        # condition dict — passing 'Ostrich' or 'Dragon' here triggers
+        # KeyError on cond_dict because that class wasn't written by
+        # OUR process_new_skeleton run.
         cmd = [
             sys.executable, "-m", "sample.generate",
             "--model_path", ckpt,
-            "--object_type", object_type,
+            "--object_type", skel_name,
             "--cond_path", os.path.join(ds_dir, "cond.npy"),
             "--num_repetitions", "1",
             "--motion_length", "5.0",
