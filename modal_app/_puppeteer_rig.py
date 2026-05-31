@@ -511,52 +511,112 @@ def _retexture_rigged_glb(
     leaves out_glb_path untouched)."""
     try:
         import bpy
+    except Exception as exc:
+        _log(f"retexture: bpy import failed: {exc}")
+        return False
+    try:
+        # Single bpy session — DO NOT read_factory_settings between
+        # imports. That invalidates StructRNA pointers of copied
+        # materials and the next access raises 'StructRNA of type
+        # Material has been removed'.
         bpy.ops.wm.read_factory_settings(use_empty=True)
-        # 1. Import the source textured GLB.
+
+        # 1. Import source GLB (textured).
         bpy.ops.import_scene.gltf(filepath=source_glb_path)
-        src_mat = None
-        for obj in bpy.data.objects:
-            if obj.type == "MESH" and obj.data.materials:
-                src_mat = obj.data.materials[0]
-                if src_mat:
+        src_objs = list(bpy.data.objects)
+        # Find a material that actually carries an image texture.
+        kept_mat = None
+        for obj in src_objs:
+            if obj.type != "MESH":
+                continue
+            for mat in obj.data.materials:
+                if mat is None:
+                    continue
+                if _material_has_image(mat):
+                    kept_mat = mat
                     break
-        if src_mat is None:
-            _log("retexture: source GLB has no material; skipping")
+            if kept_mat is not None:
+                break
+        if kept_mat is None:
+            # Fallback: any material on a mesh
+            for obj in src_objs:
+                if obj.type != "MESH":
+                    continue
+                if obj.data.materials and obj.data.materials[0] is not None:
+                    kept_mat = obj.data.materials[0]
+                    break
+        if kept_mat is None:
+            _log("retexture: source GLB has no usable material; skipping")
             return False
-        # The material we copy must survive the next factory-reset, so
-        # copy it into a fresh datablock with a stable name.
-        src_mat_copy = src_mat.copy()
-        src_mat_copy.name = "FabMesh_RigTex"
-        # 2. Reset the scene then import the rigged GLB.
-        bpy.ops.wm.read_factory_settings(use_empty=True)
-        # Re-link the material we stashed: bpy.data.materials persists
-        # across read_factory_settings(use_empty=True) when an external
-        # reference holds it, but to be safe we re-create the material
-        # via the linked copy and append to data.materials.
-        if src_mat_copy.name not in bpy.data.materials:
-            bpy.data.materials.new(name=src_mat_copy.name)
-        kept_mat = bpy.data.materials.get(src_mat_copy.name) or src_mat_copy
+        kept_mat.name = "FabMesh_RigTex"
+        kept_mat.use_fake_user = True  # survive object deletion
+        kept_mat_name = kept_mat.name
+
+        # 2. Delete source objects so they don't end up in the export.
+        # Materials in bpy.data.materials persist independently as long
+        # as use_fake_user is set.
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in src_objs:
+            try: obj.select_set(True)
+            except Exception: pass
+        try: bpy.ops.object.delete()
+        except Exception as exc: _log(f"retexture: source cleanup warn: {exc}")
+
+        # 3. Import the rigged GLB on top (same session).
         bpy.ops.import_scene.gltf(filepath=rigged_glb_path)
+
+        # 4. Re-fetch the material by NAME (not by held reference — the
+        # second import may have renamed/replaced datablocks).
+        kept_mat = bpy.data.materials.get(kept_mat_name)
+        if kept_mat is None:
+            _log("retexture: kept material vanished after second import; skipping")
+            return False
+
+        # 5. Assign material to every rigged mesh.
         n_assigned = 0
         for obj in bpy.data.objects:
-            if obj.type == "MESH":
-                obj.data.materials.clear()
-                obj.data.materials.append(kept_mat)
-                n_assigned += 1
+            if obj.type != "MESH":
+                continue
+            obj.data.materials.clear()
+            obj.data.materials.append(kept_mat)
+            n_assigned += 1
         if n_assigned == 0:
             _log("retexture: rigged GLB has no mesh; skipping")
             return False
-        # 3. Re-export.
+
+        # 6. Re-export.
         bpy.ops.export_scene.gltf(
             filepath=out_glb_path,
             export_format="GLB",
             export_skins=True,
             export_animations=False,
         )
-        return os.path.exists(out_glb_path) and os.path.getsize(out_glb_path) > 0
+        ok = os.path.exists(out_glb_path) and os.path.getsize(out_glb_path) > 0
+        if ok:
+            _log(f"retexture: assigned '{kept_mat_name}' to {n_assigned} mesh(es)")
+        return ok
     except Exception as exc:
-        _log(f"retexture failed: {exc}")
+        import traceback as _tb
+        _log(f"retexture failed: {exc}\n{_tb.format_exc()[:800]}")
         return False
+
+
+def _material_has_image(mat) -> bool:
+    """True if `mat` has any image-texture node connected in its node
+    tree. We use this to prefer the 'best' source material (one carrying
+    an albedo image) over a default flat-color material."""
+    try:
+        if not mat or not getattr(mat, "use_nodes", False) or not mat.node_tree:
+            return False
+        for node in mat.node_tree.nodes:
+            try:
+                if node.type == "TEX_IMAGE" and getattr(node, "image", None):
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
 
 
 # ---------------------------------------------------------------------------
