@@ -7039,6 +7039,7 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
   const rig = p.rigs[idx] || p.rigs[0];
   if (!rig) return;
   p.selectedRigPath = rig.path;
+  p.selectedRigUrl = rig.url || rig.path; // ensure both shapes available
   const strip = document.getElementById('ws-rig-versions');
   if (strip) {
     strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('used-for-anim'));
@@ -7050,6 +7051,33 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
     btn.classList.add('used-state');
     btn.textContent = '✓ Used for Animation generation →';
   }
+  // Populate the Step 4 SOURCE RIG preview + enable the Generate button.
+  // Without this the user sees "No rig selected" in Step 4 even though
+  // they just handed off a rig.
+  try {
+    const placeholder = document.getElementById('ws-anim-source-placeholder');
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+    const preview = document.getElementById('ws-anim-source-preview');
+    if (preview) {
+      // Replace the canvas with a small model-viewer + filename label.
+      // Lightweight: model-viewer is already loaded for Step 3.
+      const filename = (rig.filename || rig.url || '').split(/[/\\]/).pop() || 'rig.glb';
+      preview.innerHTML = `
+        <model-viewer src="${rig.url || rig.path}" camera-controls touch-action="pan-y"
+                      shadow-intensity="1" exposure="1"
+                      style="width:100%; height:180px; background:#0a0a0e; border-radius:6px;">
+        </model-viewer>
+        <div style="font-size:11px; color:var(--text-2); text-align:center; padding-top:4px;">${filename}</div>
+      `;
+    }
+    const genBtn = document.getElementById('ws-generate-anim');
+    if (genBtn) {
+      genBtn.disabled = false;
+      genBtn.title = '';
+    }
+  } catch (e) { console.warn('[anim-source] preview populate failed:', e); }
   const step4Card = document.getElementById('step-card-animation');
   if (step4Card) {
     step4Card.classList.remove('collapsed', 'disabled');
@@ -12907,9 +12935,13 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     customError('You need a rigged mesh first. Generate a Rig in Step 3, then come back.', 'No rig available');
     return;
   }
-  const rig = p.rigs.find(r => r.url === p.selectedRigPath) || p.rigs[0];
+  // selectedRigUrl is set by "Use this rig for Animation"; selectedRigPath
+  // is its desktop-style alias. Either match accepts since on cloud
+  // rig.url === rig.path.
+  const sel = p.selectedRigUrl || p.selectedRigPath || '';
+  const rig = p.rigs.find(r => r.url === sel || r.path === sel) || p.rigs[0];
   if (!rig?.url) {
-    customError('Selected rig has no URL. Try regenerating it.', 'Rig URL missing');
+    customError('No rig selected. Click "Use this rig for Animation" in Step 3 first.', 'No rig selected');
     return;
   }
   const engine = document.getElementById('ws-anim-engine')?.value || 'anytop';
