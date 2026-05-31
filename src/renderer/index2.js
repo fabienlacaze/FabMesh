@@ -10208,12 +10208,14 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
 // UI scaffold only — backend wiring in follow-up commit.
 // ============================================================
 function _wsAnimEngineSync() {
-  const engine = document.getElementById('ws-anim-engine')?.value || 'seed3d_puppeteer';
+  const engine = document.getElementById('ws-anim-engine')?.value || 'anytop';
   const animType = document.getElementById('ws-anim-type')?.value || 'idle';
   const promptRow = document.getElementById('ws-anim-prompt-row');
   const videoRow = document.getElementById('ws-anim-video-row');
-  const showPrompt = (animType === 'custom') || (engine === 'anytop');
-  const showVideo = (engine === 'seed3d_puppeteer');
+  // Prompt only when animType === 'custom'. AnyTop itself ignores
+  // free-text prompts at inference (T5 is for joint-name embedding only).
+  const showPrompt = (animType === 'custom');
+  const showVideo = false && (engine === 'seed3d_puppeteer');
   if (promptRow) promptRow.style.display = showPrompt ? '' : 'none';
   if (videoRow) videoRow.style.display = showVideo ? '' : 'none';
 }

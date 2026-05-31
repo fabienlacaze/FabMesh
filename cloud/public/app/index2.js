@@ -12903,14 +12903,17 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
 // ============================================================
 // Anim engine dropdown drives which sub-fields are visible.
 function _wsAnimEngineSync() {
-  const engine = document.getElementById('ws-anim-engine')?.value || 'seed3d_puppeteer';
+  const engine = document.getElementById('ws-anim-engine')?.value || 'anytop';
   const animType = document.getElementById('ws-anim-type')?.value || 'idle';
   const promptRow = document.getElementById('ws-anim-prompt-row');
   const videoRow = document.getElementById('ws-anim-video-row');
-  // Custom anim type always shows prompt.
-  const showPrompt = (animType === 'custom') || (engine === 'anytop');
-  // Seed3D requires a reference video.
-  const showVideo = (engine === 'seed3d_puppeteer');
+  // Prompt only when animType === 'custom'. AnyTop itself ignores
+  // free-text prompts at inference (T5 is for joint-name embedding only),
+  // so the row stays hidden for the standard anim types.
+  const showPrompt = (animType === 'custom');
+  // Seed3D would require a reference video, but it's deferred (no wired
+  // engine consumes it).
+  const showVideo = false && (engine === 'seed3d_puppeteer');
   if (promptRow) promptRow.style.display = showPrompt ? '' : 'none';
   if (videoRow) videoRow.style.display = showVideo ? '' : 'none';
 }
