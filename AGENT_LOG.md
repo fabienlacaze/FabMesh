@@ -1,5 +1,28 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Async rig — deploy + e2e smoke test)
+
+- Deployed `myfabmesh-rig` to Modal — new `rig_router` ASGI web function
+  available at
+  `https://fabienlacaze--myfabmesh-rig-rig-router.modal.run`
+  (alongside the legacy `rig_mesh_endpoint` kept for curl tests).
+- Updated Cloudflare Worker secret
+  `MODAL_PUPPETEER_RIG_URL` → rig_router base URL (the Worker appends
+  `/rig-start` and `/rig-status` itself, per the refactor contract).
+- Rebuilt `cloud` (`npm run build`) and ran `npx wrangler deploy` so
+  the worker bundle that knows about `/api/auto-rig-status` is live —
+  new Version ID `2aeff95a-376a-4102-9225-738e421c218c`.
+- E2E smoke test (`modal_app/_test_async_rig.py`, deleted after
+  passing): from inside a Modal container with SHARED_SECRET injected,
+  POSTed `/rig-start` with the cloud-hosted `mock/sample.glb`, polled
+  `/rig-status` every 5 s until `ready:true`. Result:
+    - `wall_seconds = 89.1`, `polls = 17`
+    - `bytes = 13_367_244`, `magic = "glTF"` (valid GLB)
+    - `ok = true`
+  The rig pipeline now never holds an open Worker subrequest — `/rig-start`
+  returned in 2.7 s (well under CF's 100 s cap) and the heavy 86 s rig
+  work happens on a separate GPU container reachable via the volume.
+
 ## 2026-05-31 (Async spawn+poll rig refactor — Puppeteer rig no longer blocks the Worker)
 
 - **`modal_app/_puppeteer_rig.py`** — wrapped the existing sync
