@@ -2711,7 +2711,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     wireframe: false,
     pbr: true,
     grid: true,
-    bones: false,
+    bones: true, // on by default — users land on a rig viewer wanting to see the skeleton; toggle off if they want plain mesh
     shadows: false, // off by default — the renderer has no shadow map configured until applyShadows sets it up
     xray: false, // when true, mesh becomes semi-transparent so the rig/landmarks show through
     bg: 'dark',
@@ -11797,6 +11797,58 @@ document.addEventListener('DOMContentLoaded', () => {
   _wireLicenceSellable('exp-licence',    'exp-licence-sellable');
   _wireLicenceSellable('expimg-licence', 'expimg-licence-sellable');
   _wireLicenceSellable('pub-licence',    'pub-licence-sellable');
+  // Pending rigs left over from a previous tab/refresh. autoRigAI stashes
+  // {jobId, projectName, meshUrl, createdAt} in localStorage so this page
+  // can surface the orphan and resume polling instead of silently losing
+  // the user's credit. We keep at most the 10 most recent entries.
+  try {
+    const raw = localStorage.getItem('fabmesh_pending_rigs') || '[]';
+    const pending = JSON.parse(raw);
+    if (!Array.isArray(pending) || pending.length === 0) return;
+    const now = Date.now();
+    // Drop anything >30 min old — likely already completed and visible in
+    // Projects, or definitively timed out.
+    const fresh = pending.filter(p => p && p.jobId && (now - (p.createdAt || 0)) < 30 * 60 * 1000);
+    if (fresh.length !== pending.length) {
+      localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(fresh));
+    }
+    if (fresh.length === 0) return;
+    // Show a non-blocking toast — the user can click Projects to refresh.
+    const projectNames = fresh.map(p => p.projectName || p.jobId).join(', ');
+    showToast(
+      `${fresh.length} rig job(s) left over from a previous session (${projectNames}). They may have completed — check Projects.`,
+      'info', 10000,
+    );
+    // Attempt one-shot status check per pending — if 'done', the rig is in R2
+    // and /api/meshes/projects already lists it; we just need to nudge the UI.
+    fresh.forEach(async (p) => {
+      try {
+        const resp = await fetch(`/api/auto-rig-status?job_id=${encodeURIComponent(p.jobId)}`, {
+          method: 'GET', credentials: 'same-origin',
+        });
+        if (!resp.ok) return;
+        const st = await resp.json();
+        if (st?.status === 'done') {
+          showToast(`Rig "${p.projectName || p.jobId}" completed — refreshing Projects.`, 'success', 4000);
+          // Drop from pending list now that we've confirmed completion.
+          try {
+            const after = (JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]') || [])
+              .filter(x => x.jobId !== p.jobId);
+            localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(after));
+          } catch (e) { /* ignore */ }
+          if (typeof refreshProjectsPage === 'function') refreshProjectsPage();
+        } else if (st?.status === 'failed') {
+          showToast(`Rig "${p.projectName || p.jobId}" failed: ${st.error || 'unknown'} — credits refunded.`, 'error', 8000);
+          try {
+            const after = (JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]') || [])
+              .filter(x => x.jobId !== p.jobId);
+            localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(after));
+          } catch (e) { /* ignore */ }
+        }
+        // 'pending' → leave in the list; user can refresh later.
+      } catch (e) { /* network blip, leave entry */ }
+    });
+  } catch (e) { /* localStorage parse fail, ignore */ }
 });
 
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {
@@ -12588,15 +12640,37 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
   if (!meshPathToUse) { alert('No mesh available — generate or pick one first.'); return; }
   if (!API.autoRigAI) { alert('Rigging bridge not available.'); return; }
   const rigEngine = document.getElementById('ws-rig-engine')?.value || 'unirig';
-  const engineLabel = 'MyFabmesh.AI Rig (local, neural)';
-  const expectedMs = 90000;
+  const engineLabel = 'MyFabmesh.AI Rig (cloud GPU)';
+  // Realistic budget: Modal A10G cold-start 60-120s + Puppeteer pipeline 120-180s.
+  // 1m30s was the pre-cloud desktop figure and made the bar look dead within 90s.
+  const expectedMs = 240000;
   gatedRun('rig', `Auto-rig AI: ${p.name}`, async () => {
     const job = pushJob(`Auto-rig AI (${rigEngine}): ${p.name}`, null, {
       Engine: engineLabel,
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
     }, expectedMs);
     try {
-      const r = await API.autoRigAI({ meshPath: meshPathToUse, engine: rigEngine });
+      // Wire onProgress so the synthetic ticker stops fighting the real poll.
+      // Without this the bar parks at 90 and looks frozen even though /api/auto-rig-status
+      // is still being polled successfully every 5s.
+      const r = await API.autoRigAI({
+        meshPath: meshPathToUse,
+        engine: rigEngine,
+        onProgress: ({ polls, elapsedMs, lastWarn }) => {
+          const j = state.jobs.find(x => x.id === job.id);
+          if (!j || j.status !== 'running') return;
+          j.bridgeReporting = true; // stops the synthetic min(90,...) cap
+          // Past expectedMs we creep 90 → 99 at +1% per 20s overshoot.
+          const overTime = Math.max(0, elapsedMs - expectedMs);
+          const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
+          if (target > (j.progress || 0)) j.progress = target;
+          j.subtitle = (elapsedMs > expectedMs)
+            ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s (Modal cold start probable)`
+            : `Polling Modal (${polls} polls)`;
+          if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
+          renderJobs();
+        },
+      });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
@@ -12708,7 +12782,7 @@ const JOB_EXPECTED_MS = {
   'img2img': 30000,
   'bg':      8000,
   'mesh':    90000,   // ~90 s for TripoSR 512 + bake_texture (baked UV)
-  'rig':     120000,  // ~2 min: UniRig skel + swap + voxel skin + anims bake
+  'rig':     240000,  // ~4 min cloud (Modal A10G cold-start + Puppeteer pipeline); desktop ~2 min
   'inpaint': 180000,
 };
 

@@ -4037,7 +4037,32 @@ async function handleProjects(req: Request, env: Env): Promise<Response> {
   const { data } = await supabaseAdmin(env).from('jobs')
     .select('*').eq('user_id', user.id)
     .order('created_at', { ascending: false }).limit(100);
-  return json({ projects: ((data ?? []) as Parameters<typeof toProject>[0][]).map(toProject) });
+  const projects = ((data ?? []) as Parameters<typeof toProject>[0][]).map(toProject);
+
+  // Merge rigged GLBs from R2 (uploaded by handleAutoRigStatus) into the
+  // most recent project's meshes[] so the client picks them up as p.rigs
+  // (it matches /_rigged_/i on m.filename). Files live under
+  // <user.id>/rigged/<baseName>_rigged_puppeteer_<ts>.glb.
+  try {
+    const listed = await env.MESHES.list({ prefix: `${user.id}/rigged/`, limit: 50 });
+    console.log(`[handleProjects] user=${user.id} rigged listed=${listed.objects.length} projects=${projects.length}`);
+    for (const obj of listed.objects) {
+      const filename = obj.key.split('/').pop() || '';
+      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      // Append to the most recent project that doesn't already have it.
+      // Cheap heuristic — the renderer just needs ONE project to expose it.
+      if (projects.length > 0) {
+        const target = projects[0];
+        if (!target.meshes.some((m: { url?: string }) => m.url === url)) {
+          target.meshes.push({ url, name: filename });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[handleProjects] R2 rigged list failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  return json({ projects });
 }
 
 async function handleProjectsDelete(req: Request, env: Env): Promise<Response> {
@@ -4245,7 +4270,53 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     projectName: j.project_name ?? (j.options?.project_name as string | undefined) ?? null,
     id: j.id,
   });});
-  return json({ meshes });
+
+  // Append rigged GLBs from R2 (uploaded by handleAutoRigStatus). The
+  // client regex /_rigged_/i on m.filename will pick them up and push
+  // to p.rigs[]. Inherit projectName from the most recently created mesh
+  // (heuristic — the user just rigged it, so it's the active project).
+  try {
+    const listed = await env.MESHES.list({ prefix: `${user.id}/rigged/`, limit: 100 });
+    console.log(`[handleListMeshes] user=${user.id} rigged_count=${listed.objects.length} mesh_count=${meshes.length}`);
+    for (const obj of listed.objects) {
+      const filename = obj.key.split('/').pop() || 'rigged.glb';
+      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      // Extract the modal job ID from the rigged filename to find the
+      // matching source mesh and inherit its projectName.
+      // Filename pattern: modal_<hex32>_rigged_puppeteer_<ts>.glb
+      // Or: <jobid_hex>_rigged_puppeteer_<ts>.glb
+      const beforeRigged = filename.replace(/_rigged_.*$/i, '');
+      const cleanSlug = beforeRigged.replace(/^modal_/i, '').toLowerCase();
+      // Look for a source mesh whose URL or id contains this hex slug.
+      const source = meshes.find(m => {
+        const u = (m.url || '').toLowerCase();
+        const id = (m.id || '').toLowerCase().replace(/-/g, '');
+        return cleanSlug && (u.includes(cleanSlug) || id === cleanSlug || id.includes(cleanSlug));
+      });
+      const inheritedProject = source?.projectName || meshes[0]?.projectName || null;
+      meshes.push({
+        filename,
+        path: url,
+        url,
+        size: obj.size,
+        created: obj.uploaded.toISOString(),
+        format: 'GLB',
+        thumb: null,
+        sourceImage: null,
+        asset_type: 'rig',
+        projectName: inheritedProject,
+        id: filename.replace(/\.glb$/i, ''),
+      });
+    }
+  } catch (e) {
+    console.warn('[handleListMeshes] R2 rigged list failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  // No-store so the client always sees fresh rigged files
+  return new Response(JSON.stringify({ meshes }), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
 }
 
 /**
@@ -6386,7 +6457,7 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
 
   // ── Still running ──
   if (modalResp?.ready === false && !modalResp?.error) {
-    return json({ status: 'pending' });
+    return json({ status: 'pending', stage: 'running' });
   }
 
   // ── Failed ──
@@ -6456,8 +6527,14 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   }
 
   // Unknown shape — treat as pending and log so we can investigate.
+  // Surface the unexpected shape to the client so the UI can show
+  // "Modal returned unknown shape" instead of an opaque pending.
   console.warn('[auto-rig-status] unexpected modal response', modalResp);
-  return json({ status: 'pending' });
+  return json({
+    status: 'pending',
+    stage: 'unknown-response',
+    last_error: `Modal returned unexpected shape: ${JSON.stringify(modalResp).slice(0, 200)}`,
+  });
 }
 
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
