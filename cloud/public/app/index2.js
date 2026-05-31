@@ -13033,14 +13033,103 @@ function renderAnimVersions(p) {
     strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
     return;
   }
-  strip.innerHTML = anims.map((a, i) => `
-    <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}" style="width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === 0 ? 'var(--accent)' : 'transparent'};">
-      <span style="font-size:18px;">${a.type === 'idle' ? '😴' : a.type === 'walk' ? '🚶' : a.type === 'run' ? '🏃' : a.type === 'attack' ? '⚔️' : a.type === 'death' ? '💀' : a.type === 'fly' ? '✈️' : '🎬'}</span>
-      <span style="font-size:11px; font-weight:600;">${a.type || 'clip'}</span>
-      <span style="font-size:9px; color:var(--text-2);">v${i}</span>
-    </div>
-  `).join('');
+  // Same .versions-strip class as rig — picks up the existing grid + thumb styles.
+  strip.innerHTML = anims.map((a, i) => {
+    const icon = a.type === 'idle' ? '😴' : a.type === 'walk' ? '🚶'
+      : a.type === 'run' ? '🏃' : a.type === 'attack' ? '⚔️'
+      : a.type === 'death' ? '💀' : a.type === 'fly' ? '✈️' : '🎬';
+    return `
+      <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}">
+        <div class="version-thumb-icon" style="font-size:24px; display:flex; align-items:center; justify-content:center; height:48px;">${icon}</div>
+        <div class="version-thumb-label">${a.type || 'clip'}</div>
+        <div class="version-thumb-sub">v${i}</div>
+      </div>`;
+  }).join('');
+  // Wire click → show in viewer; auto-show v0 (the most recent generation).
+  const thumbs = strip.querySelectorAll('.version-thumb');
+  thumbs.forEach(t => {
+    t.addEventListener('click', () => {
+      thumbs.forEach(o => o.classList.remove('selected'));
+      t.classList.add('selected');
+      const idx = parseInt(t.dataset.animIdx, 10);
+      showStep4AnimPreview(anims[idx]);
+    });
+  });
+  if (anims[0]) showStep4AnimPreview(anims[0]);
 }
+
+// Renders the selected animation GLB into the Step 4 viewer using
+// <model-viewer> (already loaded for the source-rig preview). It
+// auto-plays embedded animations, so no separate Three.js mixer needed.
+let _step4ActiveAnim = null;
+function showStep4AnimPreview(anim) {
+  _step4ActiveAnim = anim || null;
+  const card = document.getElementById('step4-preview');
+  if (!card) return;
+  const placeholder = document.getElementById('step4-placeholder');
+  const canvas = document.getElementById('ws-anim-canvas');
+  // Remove any previous model-viewer overlay.
+  const prev = card.querySelector('model-viewer.anim-mv');
+  if (prev) prev.remove();
+  if (!anim) {
+    if (placeholder) placeholder.style.display = '';
+    if (canvas) canvas.style.display = '';
+    setViewerFilename('ws-anim-filename', '');
+    return;
+  }
+  if (placeholder) placeholder.style.display = 'none';
+  if (canvas) canvas.style.display = 'none';
+  setViewerFilename('ws-anim-filename', anim.filename || anim.path || anim.url || '');
+  const mv = document.createElement('model-viewer');
+  mv.className = 'anim-mv';
+  mv.setAttribute('src', anim.url || anim.path || '');
+  mv.setAttribute('camera-controls', '');
+  mv.setAttribute('autoplay', '');
+  mv.setAttribute('animation-name', '*');
+  mv.setAttribute('loop', '');
+  mv.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; background:#0a0a0e; --poster-color:transparent;';
+  card.appendChild(mv);
+}
+
+// Play / Loop / Export FBX / Show in folder — operate on the
+// currently-loaded model-viewer in step4-preview (anim.mv).
+function _getStep4MV() {
+  return document.querySelector('#step4-preview model-viewer.anim-mv');
+}
+document.getElementById('ws-anim-play-btn')?.addEventListener('click', () => {
+  const mv = _getStep4MV();
+  if (!mv) return;
+  if (mv.paused) mv.play(); else mv.pause();
+});
+document.getElementById('ws-anim-loop-btn')?.addEventListener('click', (e) => {
+  const mv = _getStep4MV();
+  if (!mv) return;
+  const next = !mv.hasAttribute('loop');
+  if (next) mv.setAttribute('loop', '');
+  else mv.removeAttribute('loop');
+  e.currentTarget.classList.toggle('active', next);
+});
+document.getElementById('ws-anim-export-btn')?.addEventListener('click', async () => {
+  const a = _step4ActiveAnim;
+  if (!a?.url && !a?.path) { showToast('Select an animation first', 'error'); return; }
+  // FBX export not available on cloud; offer the raw GLB download instead.
+  const url = a.url || a.path;
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = (a.filename || url.split('/').pop() || 'animation.glb');
+    document.body.appendChild(link); link.click(); link.remove();
+    showToast('Animation GLB downloaded (FBX export requires desktop)', 'info', 4000);
+  } catch (e) {
+    showToast(`Download failed: ${e.message}`, 'error');
+  }
+});
+document.getElementById('ws-anim-folder-btn')?.addEventListener('click', () => {
+  const a = _step4ActiveAnim;
+  if (!a?.url && !a?.path) { showToast('Select an animation first', 'error'); return; }
+  // On cloud this opens the R2 URL in a new tab; desktop overrides this.
+  window.open(a.url || a.path, '_blank');
+});
 
 document.getElementById('ws-generate-anim')?.addEventListener('click', async () => {
   const p = state.currentProject;
