@@ -6755,7 +6755,11 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
         anim_type: animType,
         prompt,
       }),
-      signal: AbortSignal.timeout(30_000),
+      // 90s — covers Modal cold-start (~20-40s on the AnyTop image)
+      // plus the GLB download from R2 inside the endpoint (up to 60s
+      // urlopen timeout). 30s was tripping the Worker before Modal
+      // had time to spawn.
+      signal: AbortSignal.timeout(90_000),
     });
     if (!r.ok) {
       await addCredits(env, user.id, ANIM_COST);
