@@ -182,6 +182,22 @@ def _pick_checkpoint(anim_type: str) -> str:
     return "all"
 
 
+_OBJECT_TYPE_BY_FAMILY = {
+    "bipeds": "Ostrich",
+    "quadropeds": "Horse",
+    "millipeds_snakes": "Spider",
+    "flying": "Dragon",
+    "all": "Flamingo",
+}
+
+
+def _pick_object_type(ckpt_family: str) -> str:
+    """--object_type must match one of AnyTop's 70 trained classes
+    (param_utils.py registry). Synthetic skel_name yields a zero
+    embedding → degenerate output."""
+    return _OBJECT_TYPE_BY_FAMILY.get(ckpt_family, "Flamingo")
+
+
 def _resolve_checkpoint_path(family: str) -> str:
     folder = CHECKPOINTS.get(family) or CHECKPOINTS["all"]
     save_dir = ANYTOP_DIR / "save" / folder
@@ -328,12 +344,13 @@ def run(rig_glb: str, out_glb: str, anim_type: str, prompt: str) -> int:
                 f"AnyTop checkpoint '{family}' not found. Run "
                 f"`python -m utils.download_dependencies` in the AnyTop venv."
             )
-        _log("info", f"using checkpoint family={family}: {ckpt}")
+        object_type = _pick_object_type(family)
+        _log("info", f"using checkpoint family={family} ckpt={ckpt} object_type={object_type}")
         rc = _run_subprocess(
             [
                 venv_py, "-m", "sample.generate",
                 "--model_path", ckpt,
-                "--object_type", skel_name,
+                "--object_type", object_type,
                 "--cond_path", str(ds_dir / "cond.npy"),
                 "--num_repetitions", "1",
                 "--motion_length", "5.0",
