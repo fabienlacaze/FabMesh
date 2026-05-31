@@ -4066,6 +4066,28 @@ async function handleProjects(req: Request, env: Env): Promise<Response> {
     console.warn('[handleProjects] R2 rigged list failed:', e instanceof Error ? e.message : String(e));
   }
 
+  // Same for mesh-op outputs — attach to the project whose sanitized
+  // name matches the slug segment in the R2 key.
+  try {
+    const slugify = (s: string) => (s || 'untitled').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled';
+    const projectBySlug = new Map<string, typeof projects[number]>();
+    for (const p of projects) projectBySlug.set(slugify(p.name), p);
+    const listed = await env.MESHES.list({ prefix: `${user.id}/mesh-op/`, limit: 500 });
+    for (const obj of listed.objects) {
+      const filename = obj.key.split('/').pop() || 'mesh-op.glb';
+      const parts = obj.key.split('/');
+      const projectSlug = parts.length >= 4 ? parts[2] : null;
+      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const target = projectSlug ? projectBySlug.get(projectSlug) : projects[0];
+      if (!target) continue;
+      if (!target.meshes.some((m: { url?: string }) => m.url === url)) {
+        target.meshes.push({ url, name: filename });
+      }
+    }
+  } catch (e) {
+    console.warn('[handleProjects] R2 mesh-op list failed:', e instanceof Error ? e.message : String(e));
+  }
+
   return json({ projects });
 }
 
@@ -4316,7 +4338,56 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     console.warn('[handleListMeshes] R2 rigged list failed:', e instanceof Error ? e.message : String(e));
   }
 
-  // No-store so the client always sees fresh rigged files
+  // Append mesh-op outputs (material_adjust, fill_holes, smooth, etc.)
+  // from R2 so they survive a page reload. Keys live at
+  //   <user.id>/mesh-op/<projectSlug>/<ts>_<op>.glb
+  // where <projectSlug> is the sanitized project name written by
+  // handleMeshOp at upload time. We map the slug back to the original
+  // project by sanitizing every known projectName with the same rule
+  // and looking it up.
+  try {
+    const slugify = (s: string) => (s || 'untitled').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled';
+    const projectBySlug = new Map<string, string>();
+    for (const m of meshes) {
+      if (m.projectName) projectBySlug.set(slugify(m.projectName), m.projectName);
+    }
+    const listed = await env.MESHES.list({ prefix: `${user.id}/mesh-op/`, limit: 500 });
+    console.log(`[handleListMeshes] user=${user.id} mesh_op_count=${listed.objects.length}`);
+    for (const obj of listed.objects) {
+      const filename = obj.key.split('/').pop() || 'mesh-op.glb';
+      // Key layout: <uid>/mesh-op/<projectSlug>/<filename>. Legacy
+      // (pre-persistence) keys are <uid>/mesh-op/<filename> with no
+      // project segment → fall back to the most recent project.
+      const parts = obj.key.split('/');
+      const projectSlug = parts.length >= 4 ? parts[2] : null;
+      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const inheritedProject = projectSlug
+        ? (projectBySlug.get(projectSlug) ?? meshes[0]?.projectName ?? null)
+        : (meshes[0]?.projectName ?? null);
+      // Detect op type from filename for the asset_type field. Defaults
+      // to 'mesh' so the renderer treats it as a regular mesh version.
+      let assetType = 'mesh';
+      if (/_material_adjust\.glb$/i.test(filename)) assetType = 'mesh';
+      else if (/_fill_holes\.glb$/i.test(filename))  assetType = 'mesh';
+      meshes.push({
+        filename,
+        path: url,
+        url,
+        size: obj.size,
+        created: obj.uploaded.toISOString(),
+        format: 'GLB',
+        thumb: null,
+        sourceImage: null,
+        asset_type: assetType,
+        projectName: inheritedProject,
+        id: filename.replace(/\.glb$/i, ''),
+      });
+    }
+  } catch (e) {
+    console.warn('[handleListMeshes] R2 mesh-op list failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  // No-store so the client always sees fresh rigged + mesh-op files
   return new Response(JSON.stringify({ meshes }), {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -5836,10 +5907,18 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
   if (!env.MODAL_MESH_START_URL) return err(503, 'mesh-op backend unavailable');
 
-  const { meshUrl, meshId, opType, params } = await req.json() as {
+  const { meshUrl, meshId, opType, params, projectName } = await req.json() as {
     meshUrl?: string; meshId?: string; opType?: string;
     params?: Record<string, unknown>;
+    projectName?: string;
   };
+  // Sanitize the project slug so it's safe as an R2 key segment AND
+  // round-trips back to the same name on listing. Allowed: ASCII
+  // letters, digits, -, _, dot. Everything else becomes _. Empty
+  // projectName falls back to 'untitled' so the listing endpoint can
+  // still attach the file to *some* project.
+  const projectSlug = ((projectName || 'untitled').toString()
+    .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled');
   const allowed = new Set([
     'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
     'subdivide', 'align_texture', 'material', 'material_adjust', 'retex_swap',
@@ -5933,7 +6012,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (!env.MESHES || !env.R2_PUBLIC_URL) throw new Error('R2 binding required');
-    const key = `${user.id}/mesh-op/${Date.now()}_${op}.glb`;
+    const key = `${user.id}/mesh-op/${projectSlug}/${Date.now()}_${op}.glb`;
     await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
     const url = `${env.R2_PUBLIC_URL}/${key}`;
     await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,

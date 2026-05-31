@@ -7450,7 +7450,7 @@ async function runMeshTool(operation, params = []) {
       }, expectedMs)
     : null;
   try {
-    const result = await API.meshTool({ operation, meshPath, imagePath: meshImagePath, params });
+    const result = await API.meshTool({ operation, meshPath, imagePath: meshImagePath, params, projectName: p?.name || null });
     if (result && result.success) {
       showToast(`${operation} done!`, 'success');
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
@@ -11201,6 +11201,7 @@ document.getElementById('mat-apply-btn')?.addEventListener('click', async () => 
   try {
     const r = await API.materialAdjust({
       meshPath: p.selectedMeshPath,
+      projectName: p?.name || null,
       ...params,
     });
     if (r?.success) {
