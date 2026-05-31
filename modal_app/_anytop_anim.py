@@ -1,0 +1,542 @@
+"""Modal app: AnyTop (Apache-2.0 / MIT, SIGGRAPH 2025) animation
+generation, exposed via the same async spawn-poll-stream pattern as
+the Puppeteer rig router.
+
+Independent app `myfabmesh-anim`: AnyTop requires Python 3.8 + torch
+2.4.1 which conflicts with the rig stack (Python 3.11 + torch 2.7).
+Trying to share an image would force one or the other to break.
+
+Endpoints exposed by `anim_router` ASGI app:
+  POST /anim-start         — spawn animate_mesh() ; persists call_id
+  POST /anim-status        — reload volume ; report ready/error
+  POST /anim-fetch         — stream the animated GLB
+  GET  /healthz            — liveness probe
+
+Each call writes:
+  /anim_data/<job_id>.glb   on success
+  /anim_data/<job_id>.err   on failure (JSON with error string)
+  /anim_data/<job_id>.call_id — FunctionCall object_id for cancellation
+
+Mirrors `modal_app/_puppeteer_rig.py` 1:1 in structure; only the GPU
+work inside `animate_mesh()` differs.
+"""
+import base64
+import json
+import os
+import subprocess
+import sys
+import time
+import uuid
+
+import modal
+
+
+# ============================================================
+# App + Image
+# ============================================================
+app = modal.App("myfabmesh-anim")
+
+# AnyTop ships requirements via environment.yaml in their repo. We
+# replicate the pinned subset that matters at the python level here.
+ANYTOP_REPO = "https://github.com/Anytop2025/Anytop"
+ANYTOP_COMMIT = "main"  # pinned to main; bump to a SHA before prod
+MOTION_LIB = "git+https://github.com/inbar-2344/Motion.git"
+
+image = (
+    modal.Image.debian_slim(python_version="3.8")
+    .apt_install(
+        "git", "wget", "build-essential",
+        # ffmpeg + libsndfile sometimes pulled in by moviepy / imageio
+        "ffmpeg", "libsndfile1",
+        "libgl1", "libglib2.0-0",
+    )
+    .pip_install(
+        "torch==2.4.1",
+        "torchvision==0.19.1",
+        "torchaudio==2.4.1",
+        index_url="https://download.pytorch.org/whl/cu121",
+    )
+    .pip_install(
+        "transformers==4.46.3",
+        "numpy==1.24.4",
+        "scipy==1.10.1",
+        "spacy==3.7.2",
+        "huggingface-hub==0.30.1",
+        "tokenizers==0.20.3",
+        "matplotlib==3.1.3",
+        "pillow==10.4.0",
+        "requests==2.32.3",
+        "pyyaml==6.0.2",
+        "sympy==1.13.3",
+        "tqdm==4.67.1",
+        "imageio==2.35.1",
+        "moviepy==1.0.3",
+        "bvhsdk>=0.2",
+        "pygltflib>=1.16",
+        "fastapi[standard]",
+    )
+    .pip_install(MOTION_LIB)
+    # Clone the AnyTop repo into the container.
+    .run_commands(
+        f"git clone {ANYTOP_REPO} /AnyTop && cd /AnyTop && git checkout {ANYTOP_COMMIT}",
+    )
+    # Pre-download the checkpoint snapshot to bake it into the image
+    # (avoids a 30-60s cold-start hit fetching ~120 MB on every container).
+    .run_commands(
+        "cd /AnyTop && python -m utils.download_dependencies || "
+        "(echo 'WARN: download_dependencies failed at build, will retry at runtime' && true)",
+    )
+    # Embed our own glTF helpers + BVH→glTF converter so the GPU function
+    # can do all post-processing inline (no extra Modal hop).
+    .add_local_file(
+        "scripts/bvh_to_gltf_anim.py",
+        remote_path="/tmp/bvh_to_gltf_anim.py",
+    )
+    .add_local_file(
+        "scripts/puppeteer_to_skeleton.py",
+        remote_path="/tmp/puppeteer_to_skeleton.py",
+    )
+)
+
+anim_output_volume = modal.Volume.from_name(
+    "myfabmesh-anim-output", create_if_missing=True,
+)
+
+# Mount our helper scripts so /tmp imports work inside animate_mesh.
+ANYTOP_DIR = "/AnyTop"
+HELPERS = ["/tmp/bvh_to_gltf_anim.py", "/tmp/puppeteer_to_skeleton.py"]
+
+
+# ============================================================
+# Logging utility (mirrors _puppeteer_rig.py)
+# ============================================================
+def _log(msg: str) -> None:
+    print(f"[anim] {msg}", flush=True)
+
+
+# ============================================================
+# Skeleton extraction from a Puppeteer GLB
+# ============================================================
+def _extract_bvh_from_glb(glb_path: str, out_bvh: str) -> None:
+    """Read a Puppeteer-rigged GLB and write a 1-frame T-pose BVH the
+    AnyTop preprocessing pipeline can ingest. Per-joint Euler order
+    defaults to ZXY.
+
+    The bone hierarchy + offsets are taken from the first skin in the
+    GLB; rest rotations are baked from the local TRS of each joint node.
+    """
+    sys.path.insert(0, "/tmp")
+    from puppeteer_to_skeleton import _read_glb  # type: ignore
+    gltf, bin_blob, _tail = _read_glb(glb_path)
+    skins = gltf.get("skins") or []
+    if not skins:
+        raise RuntimeError("GLB has no skin (no skeleton to extract)")
+    skin = skins[0]
+    joint_idxs = skin["joints"]
+    nodes = gltf["nodes"]
+    name_by_idx = {i: (nodes[i].get("name") or f"joint_{i}") for i in joint_idxs}
+    parent_by_idx = {i: -1 for i in joint_idxs}
+    for parent_idx in joint_idxs:
+        for child in (nodes[parent_idx].get("children") or []):
+            if child in joint_idxs:
+                parent_by_idx[child] = parent_idx
+    root = next((i for i in joint_idxs if parent_by_idx[i] == -1), joint_idxs[0])
+    lines = ["HIERARCHY"]
+    _emit_bvh_node(
+        root, joint_idxs, parent_by_idx, name_by_idx, nodes,
+        indent=0, lines=lines, is_root=True,
+    )
+    lines += [
+        "MOTION",
+        "Frames: 1",
+        "Frame Time: 0.033333",
+        " ".join(["0"] * (3 + 3 * sum(1 for i in joint_idxs if i != -1))),
+    ]
+    with open(out_bvh, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def _emit_bvh_node(node_idx, joint_idxs, parent_by_idx, name_by_idx, nodes,
+                   indent: int, lines: list, is_root: bool) -> None:
+    pad = "  " * indent
+    name = name_by_idx[node_idx]
+    keyword = "ROOT" if is_root else "JOINT"
+    lines.append(f"{pad}{keyword} {name}")
+    lines.append(f"{pad}{{")
+    tr = nodes[node_idx].get("translation") or [0.0, 0.0, 0.0]
+    lines.append(f"{pad}  OFFSET {tr[0]} {tr[1]} {tr[2]}")
+    if is_root:
+        lines.append(f"{pad}  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation")
+    else:
+        lines.append(f"{pad}  CHANNELS 3 Zrotation Xrotation Yrotation")
+    kids = [c for c in (nodes[node_idx].get("children") or [])
+            if c in joint_idxs]
+    has_kids = False
+    for c in kids:
+        _emit_bvh_node(c, joint_idxs, parent_by_idx, name_by_idx, nodes,
+                       indent + 1, lines, is_root=False)
+        has_kids = True
+    if not has_kids:
+        # End Site (required by BVH spec for leaf joints)
+        lines.append(f"{pad}  End Site")
+        lines.append(f"{pad}  {{")
+        lines.append(f"{pad}    OFFSET 0 0 0")
+        lines.append(f"{pad}  }}")
+    lines.append(f"{pad}}}")
+
+
+# ============================================================
+# GPU function — runs AnyTop sample.generate + BVH→GLB embed
+# ============================================================
+@app.function(
+    image=image,
+    gpu="A10G",
+    timeout=600,
+    volumes={"/anim_data": anim_output_volume},
+)
+def animate_mesh(
+    rig_glb_bytes: bytes,
+    anim_type: str = "idle",
+    prompt: str = "",
+    job_id: str = "",
+) -> int:
+    """Generate a new animation clip on the given Puppeteer-rigged GLB.
+
+    Writes /anim_data/<job_id>.glb on success, /anim_data/<job_id>.err
+    on failure. Returns the number of bytes written.
+    """
+    if not job_id:
+        job_id = uuid.uuid4().hex
+    out_path = f"/anim_data/{job_id}.glb"
+    err_path = f"/anim_data/{job_id}.err"
+
+    work_dir = f"/tmp/anim_{job_id}"
+    os.makedirs(work_dir, exist_ok=True)
+    rig_path = os.path.join(work_dir, "rig.glb")
+    bvh_extract = os.path.join(work_dir, "rig.bvh")
+    bvh_anim = os.path.join(work_dir, "anim.bvh")
+
+    sys.path.insert(0, "/tmp")
+    sys.path.insert(0, ANYTOP_DIR)
+
+    t0 = time.time()
+    try:
+        _log(f"job_id={job_id} anim_type={anim_type} prompt={prompt[:60]!r}")
+        with open(rig_path, "wb") as f:
+            f.write(rig_glb_bytes)
+
+        # ── Step 1: extract BVH skeleton from the GLB ─────────────
+        _log("step 1: extracting BVH skeleton from rig GLB")
+        _extract_bvh_from_glb(rig_path, bvh_extract)
+
+        # ── Step 2: preprocess for AnyTop (process_new_skeleton) ──
+        # process_new_skeleton needs face_joints_names; for now we pick
+        # the 4 joints whose names contain 'thigh' / 'hip' / 'shoulder'
+        # as a generic heuristic. v2 will accept a JSON override.
+        face_joints = _guess_face_joints(bvh_extract)
+        skel_name = f"job_{job_id[:8]}"
+        ds_dir = os.path.join(ANYTOP_DIR, "dataset", "truebones", "zoo", skel_name)
+        os.makedirs(ds_dir, exist_ok=True)
+        cmd = [
+            sys.executable, "-m", "utils.process_new_skeleton",
+            "--object_name", skel_name,
+            "--bvh_dir", work_dir,
+            "--save_dir", ds_dir,
+            "--face_joints_names", *face_joints,
+            "--tpos_bvh", bvh_extract,
+        ]
+        _log(f"step 2: {' '.join(cmd)}")
+        rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
+        if rc != 0:
+            raise RuntimeError(f"process_new_skeleton exit {rc}")
+
+        # ── Step 3: pick a checkpoint based on anim_type ──────────
+        ckpt_name = _pick_checkpoint(anim_type)
+        ckpt = _resolve_checkpoint_path(ckpt_name)
+        if not ckpt:
+            raise RuntimeError(f"checkpoint not found: {ckpt_name}")
+        # ── Step 4: sample.generate ───────────────────────────────
+        cmd = [
+            sys.executable, "-m", "sample.generate",
+            "--model_path", ckpt,
+            "--object_type", skel_name,
+            "--cond_path", os.path.join(ds_dir, "cond.npy"),
+            "--num_repetitions", "1",
+            "--motion_length", "5.0",
+            "--device", "0",
+        ]
+        _log(f"step 4: {' '.join(cmd)}")
+        rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
+        if rc != 0:
+            raise RuntimeError(f"sample.generate exit {rc}")
+        # AnyTop writes outputs under save/<ckpt_dir>/samples_*/<...>.bvh
+        gen_bvh = _find_latest_bvh(ckpt)
+        if not gen_bvh or not os.path.isfile(gen_bvh):
+            raise RuntimeError("sample.generate produced no BVH")
+        os.replace(gen_bvh, bvh_anim)
+        _log(f"step 4 done: bvh={bvh_anim} ({os.path.getsize(bvh_anim)} bytes)")
+
+        # ── Step 5: BVH → glTF animation tracks injected in rig ───
+        from bvh_to_gltf_anim import bvh_to_gltf_anim  # type: ignore
+        _log("step 5: embedding BVH as glTF tracks on the rig GLB")
+        bvh_to_gltf_anim(
+            rig_path, bvh_anim, out_path,
+            clip_name=anim_type or "clip",
+            target_fps=30.0,
+        )
+        sz = os.path.getsize(out_path)
+        _log(f"DONE dt={time.time()-t0:.1f}s out_bytes={sz}")
+        anim_output_volume.commit()
+        return sz
+    except Exception as e:
+        import traceback
+        err_msg = {
+            "error": str(e),
+            "type": type(e).__name__,
+            "trace": traceback.format_exc()[:4000],
+        }
+        try:
+            with open(err_path, "w") as f:
+                json.dump(err_msg, f)
+            anim_output_volume.commit()
+        except Exception as we:
+            _log(f"failed writing .err sentinel: {we}")
+        _log(f"FAILED {type(e).__name__}: {e}")
+        raise
+
+
+# ============================================================
+# Helpers — checkpoint picker, BVH discovery, subprocess runner
+# ============================================================
+_CHECKPOINTS = {
+    "all": "all_model_dataset_truebones_bs_16_latentdim_128",
+    "bipeds": "bipeds_model_dataset_truebones_bs_16_latentdim_128",
+    "quadropeds": "quadropeds_model_dataset_truebones_bs_16_latentdim_128",
+    "millipeds_snakes": "millipeds_snakes_model_dataset_truebones_bs_16_latentdim_128",
+    "flying": "flying_model_dataset_truebones_bs_16_latentdim_128",
+}
+
+
+def _pick_checkpoint(anim_type: str) -> str:
+    """Map a user-facing anim_type ('walk', 'fly', 'attack', etc.) to
+    one of the 5 AnyTop checkpoint families."""
+    t = (anim_type or "").lower()
+    if any(k in t for k in ("fly", "wing", "soar", "glide")):
+        return "flying"
+    if any(k in t for k in ("crawl", "snake", "slither")):
+        return "millipeds_snakes"
+    if any(k in t for k in ("quad", "wolf", "dog", "horse", "cat")):
+        return "quadropeds"
+    if any(k in t for k in ("idle", "walk", "run", "attack", "death", "humanoid", "biped")):
+        return "bipeds"
+    return "all"
+
+
+def _resolve_checkpoint_path(ckpt_family: str) -> str:
+    folder = _CHECKPOINTS.get(ckpt_family) or _CHECKPOINTS["all"]
+    save_dir = os.path.join(ANYTOP_DIR, "save", folder)
+    if not os.path.isdir(save_dir):
+        return ""
+    # Pick the .pt with the largest step count.
+    best = ""
+    best_step = -1
+    for fn in os.listdir(save_dir):
+        if not fn.startswith("model") or not fn.endswith(".pt"):
+            continue
+        try:
+            step = int(fn.replace("model", "").replace(".pt", ""))
+            if step > best_step:
+                best_step = step
+                best = os.path.join(save_dir, fn)
+        except ValueError:
+            continue
+    return best
+
+
+def _find_latest_bvh(ckpt_path: str) -> str:
+    """AnyTop writes outputs alongside the checkpoint dir."""
+    ckpt_dir = os.path.dirname(ckpt_path)
+    # Walk samples_*/<...>.bvh subdirs
+    best = ""
+    best_mtime = -1.0
+    for root, _, files in os.walk(ckpt_dir):
+        for fn in files:
+            if fn.endswith(".bvh"):
+                p = os.path.join(root, fn)
+                try:
+                    mt = os.path.getmtime(p)
+                    if mt > best_mtime:
+                        best_mtime = mt
+                        best = p
+                except OSError:
+                    continue
+    return best
+
+
+def _guess_face_joints(bvh_path: str) -> list:
+    """Pick 4 joints from the BVH that look like LR/forward markers for
+    AnyTop's face_joints_names heuristic. Looks for thigh/hip/shoulder."""
+    candidates_l = []
+    candidates_r = []
+    candidates_fl = []
+    candidates_fr = []
+    with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln.startswith(("JOINT ", "ROOT ")):
+                continue
+            name = ln.split(maxsplit=1)[1]
+            nl = name.lower()
+            if "thigh" in nl or "leg" in nl or "hip" in nl:
+                (candidates_l if ("l_" in nl or "_l" in nl or "left" in nl) else candidates_r).append(name)
+            elif "shoulder" in nl or "arm" in nl or "finger" in nl:
+                (candidates_fl if ("l_" in nl or "_l" in nl or "left" in nl) else candidates_fr).append(name)
+    out = []
+    if candidates_r:
+        out.append(candidates_r[0])
+    if candidates_l:
+        out.append(candidates_l[0])
+    if candidates_fr:
+        out.append(candidates_fr[0])
+    if candidates_fl:
+        out.append(candidates_fl[0])
+    while len(out) < 4:
+        # Fallback: pad with the root name to avoid argparse failure.
+        out.append(out[0] if out else "root")
+    return out[:4]
+
+
+def _run_subprocess(cmd, cwd=None) -> int:
+    p = subprocess.Popen(
+        cmd, cwd=cwd,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
+    for line in p.stdout:  # type: ignore[union-attr]
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    return p.wait()
+
+
+# ============================================================
+# ASGI router exposing the async spawn / poll / fetch endpoints
+# ============================================================
+@app.function(
+    image=image,
+    cpu=1,
+    timeout=120,
+    volumes={"/anim_data": anim_output_volume},
+    secrets=[modal.Secret.from_name("modal-shared-secret")],
+)
+@modal.asgi_app()
+def anim_router():
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import JSONResponse, FileResponse
+    import urllib.request
+
+    api = FastAPI(title="myfabmesh-anim router")
+
+    async def _read_json(request: Request):
+        try:
+            return await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    def _check_auth(payload: dict) -> None:
+        expected = os.environ.get("MODAL_SHARED_SECRET")
+        if not expected:
+            return
+        if str(payload.get("_auth") or "") != expected:
+            raise HTTPException(status_code=401, detail="auth")
+
+    @api.get("/healthz")
+    async def healthz():
+        return {"ok": True, "fn": "anim_router"}
+
+    @api.post("/anim-start")
+    async def anim_start(request: Request):
+        payload = await _read_json(request)
+        _check_auth(payload)
+        op = (payload.get("op_type") or "").strip().lower()
+        if op == "cancel":
+            jid = (payload.get("job_id") or "").strip()
+            call_id_path = f"/anim_data/{jid}.call_id"
+            if jid and os.path.isfile(call_id_path):
+                try:
+                    with open(call_id_path) as f:
+                        cid = f.read().strip()
+                    modal.FunctionCall.from_id(cid).cancel(terminate_containers=True)
+                    return {"job_id": jid, "status": "cancelled"}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"cancel failed: {e}")
+            raise HTTPException(status_code=404, detail="no call_id for job_id")
+        rig_url = (payload.get("rig_url") or "").strip()
+        if not rig_url:
+            raise HTTPException(status_code=400, detail="rig_url required")
+        anim_type = (payload.get("anim_type") or "idle").strip().lower()
+        prompt = (payload.get("prompt") or "").strip()
+        try:
+            req = urllib.request.Request(
+                rig_url, headers={"User-Agent": "myfabmesh-anim/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                in_bytes = resp.read()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"rig fetch failed: {e}")
+        if not in_bytes or in_bytes[:4] != b"glTF":
+            raise HTTPException(status_code=400, detail="rig_url did not return a GLB")
+        job_id = (payload.get("job_id") or "").strip() or uuid.uuid4().hex
+        call = animate_mesh.spawn(in_bytes, anim_type, prompt, job_id=job_id)
+        try:
+            with open(f"/anim_data/{job_id}.call_id", "w") as f:
+                f.write(call.object_id)
+            anim_output_volume.commit()
+        except Exception as e:
+            print(f"[anim-start] WARN persist call_id {job_id}: {e}", flush=True)
+        return {"job_id": job_id, "status": "queued"}
+
+    @api.post("/anim-status")
+    async def anim_status(request: Request):
+        payload = await _read_json(request)
+        _check_auth(payload)
+        job_id = (payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id required")
+        anim_output_volume.reload()
+        out_path = f"/anim_data/{job_id}.glb"
+        err_path = f"/anim_data/{job_id}.err"
+        if os.path.isfile(err_path):
+            with open(err_path) as f:
+                raw = f.read()
+            msg = raw
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and parsed.get("error"):
+                    msg = str(parsed["error"])
+            except Exception:
+                pass
+            return JSONResponse({"ready": False, "error": msg[:500]})
+        if os.path.isfile(out_path):
+            sz = os.path.getsize(out_path)
+            return JSONResponse({"ready": True, "bytes": sz, "fetch_endpoint": "/anim-fetch"})
+        return JSONResponse({"ready": False})
+
+    @api.post("/anim-fetch")
+    async def anim_fetch(request: Request):
+        payload = await _read_json(request)
+        _check_auth(payload)
+        job_id = (payload.get("job_id") or "").strip()
+        if not job_id or "/" in job_id or ".." in job_id:
+            raise HTTPException(status_code=400, detail="job_id required (hex-ish)")
+        anim_output_volume.reload()
+        out_path = f"/anim_data/{job_id}.glb"
+        err_path = f"/anim_data/{job_id}.err"
+        if os.path.isfile(err_path):
+            raise HTTPException(status_code=410, detail="animation failed; see /anim-status")
+        if not os.path.isfile(out_path):
+            raise HTTPException(status_code=404, detail="animation not ready yet")
+        return FileResponse(out_path,
+                            media_type="model/gltf-binary",
+                            filename=f"{job_id}.glb")
+
+    return api

@@ -12900,13 +12900,81 @@ function renderAnimVersions(p) {
   `).join('');
 }
 
-document.getElementById('ws-generate-anim')?.addEventListener('click', () => {
-  const engine = document.getElementById('ws-anim-engine')?.value || 'seed3d_puppeteer';
-  customError(
-    `The ${engine === 'seed3d_puppeteer' ? 'Seed3D Puppeteer' : engine === 'anytop' ? 'AnyTop' : 'Procedural'} animation backend is not wired yet. ` +
-    `Step 4 UI is scaffolded; the Modal endpoint and integration will come in a follow-up commit.`,
-    'Animation backend not ready',
-  );
+document.getElementById('ws-generate-anim')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p) return;
+  if (!p.rigs || p.rigs.length === 0) {
+    customError('You need a rigged mesh first. Generate a Rig in Step 3, then come back.', 'No rig available');
+    return;
+  }
+  const rig = p.rigs.find(r => r.url === p.selectedRigPath) || p.rigs[0];
+  if (!rig?.url) {
+    customError('Selected rig has no URL. Try regenerating it.', 'Rig URL missing');
+    return;
+  }
+  const engine = document.getElementById('ws-anim-engine')?.value || 'anytop';
+  const animType = document.getElementById('ws-anim-type')?.value || 'idle';
+  const prompt = (document.getElementById('ws-anim-prompt')?.value || '').trim();
+  if (engine !== 'anytop') {
+    customError(
+      `Only the AnyTop engine is wired in this build. Procedural / Seed3D Puppeteer engines come later.`,
+      'Engine not yet wired',
+    );
+    return;
+  }
+  if (!API.autoAnimAI) {
+    customError('autoAnimAI not exposed on this build', 'API missing');
+    return;
+  }
+  gatedRun('anim', `Animate (${animType}): ${p.name}`, async () => {
+    const job = pushJob(`Animate ${animType}: ${p.name}`, null, {
+      Engine: 'AnyTop (cloud GPU)',
+      Type: animType,
+      Prompt: prompt || '—',
+      'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),
+    }, 180000);
+    try {
+      const r = await API.autoAnimAI({
+        rigUrl: rig.url,
+        animType,
+        prompt,
+        engine,
+        onProgress: ({ polls, elapsedMs, lastWarn }) => {
+          const j = state.jobs.find(x => x.id === job.id);
+          if (!j || j.status !== 'running') return;
+          j.bridgeReporting = true;
+          const overTime = Math.max(0, elapsedMs - 180000);
+          const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
+          if (target > (j.progress || 0)) j.progress = target;
+          j.subtitle = (elapsedMs > 180000)
+            ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s (Modal cold start probable)`
+            : `Polling Modal (${polls} polls)`;
+          if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
+          renderJobs();
+        },
+      });
+      if (r?.success) {
+        completeJob(job.id, true);
+        renderAnimVersions(p);
+        await reloadCurrentProject();
+        const animCard = document.getElementById('step-card-animation');
+        if (animCard) {
+          animCard.classList.remove('collapsed', 'disabled');
+          const editStage = animCard.querySelector('.stage-edit');
+          if (editStage) editStage.open = true;
+          animCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          animCard.classList.add('pulse-highlight');
+          setTimeout(() => animCard.classList.remove('pulse-highlight'), 1500);
+        }
+      } else {
+        completeJob(job.id, false, r?.error || 'unknown');
+        if (!job.cancelled) reportPipelineError(r?.error, 'Animate failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false, e?.error || e?.message || String(e));
+      if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), 'Animate error');
+    }
+  });
 });
 
 // ============================================================

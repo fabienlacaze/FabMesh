@@ -93,6 +93,10 @@ export interface Env {
   // Set via `wrangler secret put MODAL_PUPPETEER_RIG_URL`; unset to
   // disable /api/auto-rig (503).
   MODAL_PUPPETEER_RIG_URL?: string;
+  // AnyTop animation generation on a rigged GLB. Async spawn+poll+stream
+  // pattern identical to rig. Set via `wrangler secret put
+  // MODAL_ANYTOP_ANIM_URL`; unset to disable /api/animate (503).
+  MODAL_ANYTOP_ANIM_URL?: string;
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -6262,6 +6266,50 @@ async function deleteRigJobRecord(env: Env, jobId: string): Promise<void> {
   try { await env.MESHES.delete(`_meta/rig_jobs/${jobId}.json`); } catch {}
 }
 
+/** Flat per-anim cost. Higher than rig because AnyTop generates motion
+ *  from learned distribution + we do a BVH->glTF embed step. */
+const ANIM_COST = 5;
+const ESTIMATED_USD_ANIM = 0.06;  // A10G ~60s + checkpoint download amortised
+
+interface AnimJobRecord {
+  user_id: string;
+  modal_spend: number;
+  credits: number;
+  rig_url: string;
+  anim_type: string;
+  created_at: number;
+}
+
+async function putAnimJobRecord(
+  env: Env, jobId: string, record: AnimJobRecord,
+): Promise<void> {
+  if (!env.MESHES) return;
+  await env.MESHES.put(
+    `_meta/anim_jobs/${jobId}.json`,
+    JSON.stringify(record),
+    { httpMetadata: { contentType: 'application/json' } },
+  );
+}
+
+async function getAnimJobRecord(
+  env: Env, jobId: string,
+): Promise<AnimJobRecord | null> {
+  if (!env.MESHES) return null;
+  try {
+    const obj = await env.MESHES.get(`_meta/anim_jobs/${jobId}.json`);
+    if (!obj) return null;
+    const txt = await obj.text();
+    return JSON.parse(txt) as AnimJobRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteAnimJobRecord(env: Env, jobId: string): Promise<void> {
+  if (!env.MESHES) return;
+  try { await env.MESHES.delete(`_meta/anim_jobs/${jobId}.json`); } catch {}
+}
+
 /** POST /api/auto-rig — spawn a Puppeteer auto-rig job on Modal.
  *
  *  Body: { mesh_url: string, skeleton?: string }
@@ -6561,6 +6609,210 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     stage: 'unknown-response',
     last_error: `Modal returned unexpected shape: ${JSON.stringify(modalResp).slice(0, 200)}`,
   });
+}
+
+/** POST /api/animate — spawn an AnyTop animation job on Modal.
+ *  Body: { rig_url: string, anim_type?: string, prompt?: string, engine?: string }
+ *  Returns: { success, job_id, status:'queued', creditsRemaining }
+ *  Mirrors handleAutoRig 1:1 in shape; only the upstream Modal endpoint differs. */
+async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_ANYTOP_ANIM_URL) return err(503, 'animation backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let body: { rig_url?: string; anim_type?: string; prompt?: string; engine?: string };
+  try {
+    body = await req.json() as typeof body;
+  } catch {
+    return err(400, 'invalid JSON body');
+  }
+  const rigUrl = body.rig_url;
+  if (!rigUrl || typeof rigUrl !== 'string') return err(400, 'rig_url required');
+  if (!isTrustedAssetHost(env, rigUrl)) return err(400, 'rig_url host not allowed');
+  const animType = typeof body.anim_type === 'string' ? body.anim_type.slice(0, 32) : 'idle';
+  const prompt = typeof body.prompt === 'string' ? body.prompt.slice(0, 400) : '';
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM);
+  if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
+  const refundAnimSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM); };
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundAnimSpend();
+    return err(429, 'you have reached the per-user daily generation limit.');
+  }
+  const remaining = await spendCredits(env, user.id, ANIM_COST);
+  if (remaining == null) {
+    await refundAnimSpend();
+    return err(402, 'insufficient credits');
+  }
+
+  const baseUrl = env.MODAL_ANYTOP_ANIM_URL.replace(/\/$/, '');
+  const startUrl = `${baseUrl}/anim-start`;
+  let jobId: string;
+  try {
+    const r = await fetch(startUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET,
+        rig_url: rigUrl,
+        anim_type: animType,
+        prompt,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!r.ok) {
+      await addCredits(env, user.id, ANIM_COST);
+      await refundAnimSpend();
+      const txt = await r.text().catch(() => '');
+      console.error('[animate] Modal anim-start', r.status, txt.slice(0, 200));
+      return err(502, `Modal animation backend HTTP ${r.status}`);
+    }
+    const j = await r.json() as { job_id?: string };
+    if (!j?.job_id) {
+      await addCredits(env, user.id, ANIM_COST);
+      await refundAnimSpend();
+      return err(502, 'Modal anim-start: no job_id');
+    }
+    jobId = j.job_id;
+  } catch (e: unknown) {
+    await addCredits(env, user.id, ANIM_COST);
+    await refundAnimSpend();
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[animate] spawn threw', msg);
+    return err(502, `Modal animation backend unreachable: ${msg.slice(0, 200)}`);
+  }
+
+  await putAnimJobRecord(env, jobId, {
+    user_id: user.id,
+    modal_spend: ESTIMATED_USD_ANIM,
+    credits: ANIM_COST,
+    rig_url: rigUrl,
+    anim_type: animType,
+    created_at: Date.now(),
+  });
+  return json({ success: true, job_id: jobId, status: 'queued', creditsRemaining: remaining });
+}
+
+/** POST or GET /api/animate-status?job_id=<id> — poll the Modal anim
+ *  output volume. Stream the GLB into R2 on done. Mirror of
+ *  handleAutoRigStatus + the rig-fetch streaming pattern (commit 9dacdd0). */
+async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_ANYTOP_ANIM_URL) return err(503, 'animation backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let jobId = '';
+  try {
+    const u = new URL(req.url);
+    jobId = (u.searchParams.get('job_id') || '').trim();
+  } catch {}
+  if (!jobId && req.method === 'POST') {
+    try {
+      const b = await req.json() as { job_id?: string };
+      jobId = String(b?.job_id || '').trim();
+    } catch {}
+  }
+  if (!jobId) return err(400, 'job_id required');
+
+  const record = await getAnimJobRecord(env, jobId);
+  if (record && record.user_id !== user.id) return err(403, 'forbidden');
+
+  const refundOnFailure = async () => {
+    if (!record) return;
+    await addCredits(env, user.id, record.credits).catch(() => {});
+    await refundModalSpend(env, record.modal_spend).catch(() => {});
+    await deleteAnimJobRecord(env, jobId).catch(() => {});
+  };
+
+  const baseUrl = env.MODAL_ANYTOP_ANIM_URL.replace(/\/$/, '');
+  const statusUrl = `${baseUrl}/anim-status`;
+  const fetchUrl = `${baseUrl}/anim-fetch`;
+  let modalResp: { ready?: boolean; error?: string; bytes?: number; fetch_endpoint?: string };
+  try {
+    const r = await fetch(statusUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) {
+      throw new Error(`Modal anim-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    modalResp = await r.json() as typeof modalResp;
+  } catch (e: unknown) {
+    console.warn('[animate-status] transient', e instanceof Error ? e.message : String(e));
+    return json({ status: 'pending', warn: e instanceof Error ? e.message : String(e) });
+  }
+
+  if (modalResp?.ready === false && !modalResp?.error) {
+    return json({ status: 'pending', stage: 'running' });
+  }
+  if (modalResp?.ready === false && modalResp?.error) {
+    await refundOnFailure();
+    console.log(`[animate-status] job_id=${jobId} FAILED: ${String(modalResp.error).slice(0, 200)}`);
+    return json({ status: 'failed', error: String(modalResp.error).slice(0, 500) });
+  }
+  if (modalResp?.ready === true) {
+    let fetchResp: Response;
+    try {
+      fetchResp = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e: unknown) {
+      return json({ status: 'pending', warn: 'anim-fetch transient: ' + (e instanceof Error ? e.message : String(e)) });
+    }
+    if (fetchResp.status === 404) return json({ status: 'pending', stage: 'race-volume-not-ready' });
+    if (fetchResp.status === 410) {
+      await refundOnFailure();
+      const txt = await fetchResp.text().catch(() => '');
+      return json({ status: 'failed', error: txt.slice(0, 500) || 'animation failed' });
+    }
+    if (!fetchResp.ok || !fetchResp.body) {
+      await refundOnFailure();
+      return json({ status: 'failed', error: `anim-fetch HTTP ${fetchResp.status}` });
+    }
+
+    let baseName = 'anim';
+    const sourceUrl = record?.rig_url || '';
+    if (sourceUrl) {
+      try {
+        const last = new URL(sourceUrl).pathname.split('/').pop() || '';
+        baseName = last.replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'anim';
+      } catch {}
+    }
+    const animType = record?.anim_type || 'clip';
+    const key = `${user.id}/animations/${baseName}_${animType}_${Date.now()}.glb`;
+    try {
+      await env.MESHES.put(key, fetchResp.body, {
+        httpMetadata: { contentType: 'model/gltf-binary' },
+      });
+    } catch (e) {
+      await refundOnFailure();
+      console.error('[animate-status.r2]', e instanceof Error ? e.message : String(e));
+      return json({ status: 'failed', error: 'animation storage failed (credits refunded)' });
+    }
+    await deleteAnimJobRecord(env, jobId).catch(() => {});
+    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    console.log(`[animate-status] job_id=${jobId} DONE url=${publicUrl}`);
+    return json({
+      status: 'done',
+      success: true,
+      anim_url: publicUrl,
+      url: publicUrl,
+      path: key,
+      anim_type: animType,
+      bytes: modalResp?.bytes ?? null,
+    });
+  }
+  return json({ status: 'pending', stage: 'unknown-response' });
 }
 
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
@@ -8599,6 +8851,8 @@ export default {
         if (pathname === '/api/upload-mesh'           && method === 'POST') return await handleUploadMesh(req, env);
         if (pathname === '/api/auto-rig'              && method === 'POST') return await handleAutoRig(req, env);
         if (pathname === '/api/auto-rig-status'       && (method === 'GET' || method === 'POST')) return await handleAutoRigStatus(req, env);
+        if (pathname === '/api/animate'               && method === 'POST') return await handleAutoAnim(req, env);
+        if (pathname === '/api/animate-status'        && (method === 'GET' || method === 'POST')) return await handleAutoAnimStatus(req, env);
         if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
