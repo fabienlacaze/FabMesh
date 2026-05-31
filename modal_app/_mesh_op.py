@@ -409,13 +409,21 @@ def material_adjust(glb_bytes: bytes,
             if float(contrast) != 1.0:
                 img = ImageEnhance.Contrast(img).enhance(float(contrast))
             if float(hue_shift) != 0.0:
-                # PIL's HSV mode uses 0-255 for H; 360deg maps to 256
-                # (full wraparound). Add the offset modulo 256.
+                # PIL HSV uses 0-255 for H; 360deg maps to 256 units.
+                # We also floor the saturation by abs(hue_shift)/360 *
+                # 0.5 * 255 so grey/dark pixels pick up the tint
+                # (otherwise only the saturated parts of the texture
+                # change colour and the rest stays grey). Same logic
+                # as the live shader so preview ≈ save.
+                import numpy as _np
                 shift_units = int(round((float(hue_shift) / 360.0) * 256.0)) % 256
+                sat_floor = int(round(abs(float(hue_shift) / 360.0) * 0.5 * 255))
                 hsv = img.convert('HSV')
-                h, s, v = hsv.split()
-                h = h.point(lambda px: (px + shift_units) % 256)
-                img = Image.merge('HSV', (h, s, v)).convert('RGB')
+                arr = _np.array(hsv, dtype=_np.int16)
+                arr[..., 0] = (arr[..., 0] + shift_units) % 256
+                arr[..., 1] = _np.maximum(arr[..., 1], sat_floor)
+                hsv = Image.fromarray(arr.astype(_np.uint8), mode='HSV')
+                img = hsv.convert('RGB')
         except Exception as e:
             print(f'[mesh-op] material_adjust enhancer failed: {e}', flush=True)
 

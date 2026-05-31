@@ -60,12 +60,18 @@ def adjust(in_glb, out_glb, brightness=1.2, saturation=1.0, contrast=1.0,
     if contrast != 1.0:
         img = ImageEnhance.Contrast(img).enhance(contrast)
     if hue_shift != 0.0:
-        # PIL HSV uses 0-255 for H. 360 degrees = 256 units, wrap modulo 256.
+        # PIL HSV uses 0-255. 360 deg = 256 H units. Also floor saturation
+        # by abs(hue_shift)/360 * 0.5 * 255 so grey/dark pixels pick up
+        # the tint (matches the live shader on cloud/desktop).
+        import numpy as _np
         shift_units = int(round((hue_shift / 360.0) * 256.0)) % 256
+        sat_floor = int(round(abs(hue_shift / 360.0) * 0.5 * 255))
         hsv = img.convert('HSV')
-        h, s, v = hsv.split()
-        h = h.point(lambda px: (px + shift_units) % 256)
-        img = Image.merge('HSV', (h, s, v)).convert('RGB')
+        arr = _np.array(hsv, dtype=_np.int16)
+        arr[..., 0] = (arr[..., 0] + shift_units) % 256
+        arr[..., 1] = _np.maximum(arr[..., 1], sat_floor)
+        hsv = Image.fromarray(arr.astype(_np.uint8), mode='HSV')
+        img = hsv.convert('RGB')
 
     # Rebuild material with the adjusted texture + PBR factors.
     material = trimesh.visual.material.PBRMaterial(

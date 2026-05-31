@@ -11136,10 +11136,15 @@ function _matInjectShader(mat) {
       float _matLuma = dot(_matCol, vec3(0.299, 0.587, 0.114));
       _matCol = mix(vec3(_matLuma), _matCol, uSaturation);
       _matCol = (_matCol - 0.5) * uContrast + 0.5;
-      // True HSV hue rotation — same path as PIL on save so preview matches.
+      // True HSV hue rotation + saturation floor so grey/dark pixels
+      // also pick up the tint (otherwise only the saturated parts of
+      // the mesh change colour and the rest stays grey). PIL on save
+      // uses the same floor so preview ≈ save.
       if (abs(uHueShift) > 0.001) {
+        float _hueNorm = uHueShift / 6.28318530718;
         vec3 _hsv = _matRgb2Hsv(clamp(_matCol, 0.0, 1.0));
-        _hsv.x = fract(_hsv.x + uHueShift / 6.28318530718);
+        _hsv.x = fract(_hsv.x + _hueNorm);
+        _hsv.y = max(_hsv.y, abs(_hueNorm) * 0.5);
         _matCol = _matHsv2Rgb(_hsv);
       }
       gl_FragColor.rgb = clamp(_matCol, 0.0, 1.0);
