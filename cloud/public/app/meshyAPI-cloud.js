@@ -1433,28 +1433,88 @@
       // Blender (Desktop-only).
       return impl.exportMesh({ sourcePath, targetFormat: 'glb' });
     },
-    // Auto-rig AI via Puppeteer on Modal. Posts the mesh URL +
-    // selected target skeleton to /api/auto-rig (which spawns a
-    // rig-start Modal job and polls rig-status), then returns the
-    // rigged GLB. Matches the desktop contract
-    // ({ meshPath, engine, skeleton } → { success, error? }) and
-    // additionally surfaces glb_url so the renderer can hot-swap.
-    autoRigAI: async ({ meshPath, meshUrl, engine, skeleton } = {}) => {
+    // Auto-rig AI via Puppeteer on Modal — async spawn + poll.
+    //
+    // The Worker no longer waits for the rig to finish (CF subrequest
+    // cap = 100 s, rig takes ~120-150 s on A10G + cold start). Flow:
+    //   1. POST /api/auto-rig → { job_id, status: 'queued' } in <2 s.
+    //   2. Poll GET /api/auto-rig-status?job_id=… every 5 s.
+    //      The Worker returns 'pending' until Modal writes either an
+    //      error file or the rigged GLB to its Volume. On 'done' it
+    //      uploads the GLB to R2 and returns the public URL.
+    //
+    // Same return contract as the desktop bridge:
+    //   { success, ok, glb_url, path, error? }
+    // so callers can hot-swap the mesh in the viewer without knowing
+    // anything changed under the hood.
+    autoRigAI: async ({ meshPath, meshUrl, engine, skeleton, onProgress } = {}) => {
       const url = meshUrl || meshPath;
       if (!url) return { success: false, ok: false, error: 'meshPath or meshUrl required' };
+
+      // ── 1. Spawn ──
+      let jobId;
       try {
-        const r = await postJSON('/api/auto-rig', {
+        const spawn = await postJSON('/api/auto-rig', {
           mesh_url: url, skeleton: skeleton || 'orc_m1', engine: engine || 'puppeteer',
         });
         if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-        const glbUrl = r?.glb_url || r?.url || r?.path || null;
-        if (r?.success && glbUrl) {
-          return { success: true, ok: true, glb_url: glbUrl, path: glbUrl };
+        if (!spawn?.success || !spawn?.job_id) {
+          return { success: false, ok: false, error: spawn?.error || 'auto-rig spawn failed' };
         }
-        return { success: false, ok: false, error: r?.error || 'unknown' };
+        jobId = String(spawn.job_id);
       } catch (e) {
         return { success: false, ok: false, error: e?.message || String(e) };
       }
+
+      // ── 2. Poll ──
+      // 5 s cadence × 120 polls = 10 min hard cap. Typical rig is ~2
+      // min hot / ~5 min cold start; anything past 10 min is dead.
+      const POLL_INTERVAL_MS = 5000;
+      const MAX_POLLS = 120;
+      const t0 = Date.now();
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        let st;
+        try {
+          const resp = await fetch(
+            `/api/auto-rig-status?job_id=${encodeURIComponent(jobId)}`,
+            { method: 'GET', credentials: 'same-origin' },
+          );
+          if (!resp.ok) {
+            // Soft-retry on transient HTTP errors (502/504). The
+            // Worker itself returns 'pending' on Modal hiccups, so a
+            // non-200 here is genuinely the Worker being unreachable.
+            console.warn(`[auto-rig] status HTTP ${resp.status} poll=${i + 1}`);
+            continue;
+          }
+          st = await resp.json();
+        } catch (e) {
+          console.warn(`[auto-rig] status fetch threw poll=${i + 1}`, e);
+          continue;
+        }
+
+        if (st?.status === 'pending') {
+          if (typeof onProgress === 'function') {
+            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0 }); } catch {}
+          }
+          continue;
+        }
+        if (st?.status === 'failed') {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: false, ok: false, error: st.error || 'auto-rig failed' };
+        }
+        if (st?.status === 'done') {
+          const glbUrl = st.mesh_url || st.url || st.path || null;
+          if (!glbUrl) {
+            return { success: false, ok: false, error: 'auto-rig done but no URL returned' };
+          }
+          return { success: true, ok: true, glb_url: glbUrl, path: glbUrl };
+        }
+        // Unknown status — log and keep polling.
+        console.warn(`[auto-rig] unexpected status poll=${i + 1}`, st);
+      }
+
+      return { success: false, ok: false, error: `auto-rig timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s)` };
     },
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.

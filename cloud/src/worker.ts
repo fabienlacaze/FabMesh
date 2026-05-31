@@ -6141,22 +6141,79 @@ async function handleUploadMesh(req: Request, env: Env): Promise<Response> {
   return json({ success: true, path: key, url: `${env.R2_PUBLIC_URL}/${key}` });
 }
 
-/** POST /api/auto-rig — Puppeteer auto-rigging on an uploaded GLB.
+/** Flat per-rig cost. Same order of magnitude as the existing mesh ops
+ *  (5 credits). Refunded if the spawn fails OR rig-status surfaces an
+ *  error so a transient Modal outage never burns the user's balance. */
+const RIG_COST = 5;
+const ESTIMATED_USD_RIG = 0.05;  // ~A10G $0.000542/s × ~90 s + R2 ops
+
+/** Job record persisted by /api/auto-rig and read by /api/auto-rig-status.
+ *  Stored in R2 (not a separate KV namespace) to stay consistent with the
+ *  existing _meta/* pattern and avoid forcing a wrangler KV-create step
+ *  on deploy. Key: `_meta/rig_jobs/<job_id>.json`. TTL is enforced
+ *  manually via `created_at` — anything older than 20 minutes is treated
+ *  as stale and refunded silently if surfaced. */
+interface RigJobRecord {
+  user_id: string;
+  modal_spend: number;
+  credits: number;
+  mesh_url: string;
+  created_at: number;
+}
+
+async function putRigJobRecord(
+  env: Env, jobId: string, record: RigJobRecord,
+): Promise<void> {
+  if (!env.MESHES) return;
+  await env.MESHES.put(
+    `_meta/rig_jobs/${jobId}.json`,
+    JSON.stringify(record),
+    { httpMetadata: { contentType: 'application/json' } },
+  );
+}
+
+async function getRigJobRecord(
+  env: Env, jobId: string,
+): Promise<RigJobRecord | null> {
+  if (!env.MESHES) return null;
+  try {
+    const obj = await env.MESHES.get(`_meta/rig_jobs/${jobId}.json`);
+    if (!obj) return null;
+    const txt = await obj.text();
+    return JSON.parse(txt) as RigJobRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteRigJobRecord(env: Env, jobId: string): Promise<void> {
+  if (!env.MESHES) return;
+  try { await env.MESHES.delete(`_meta/rig_jobs/${jobId}.json`); } catch {}
+}
+
+/** POST /api/auto-rig — spawn a Puppeteer auto-rig job on Modal.
  *
  *  Body: { mesh_url: string, skeleton?: string }
- *    - mesh_url : HTTPS URL of the source GLB (must pass isTrustedAssetHost)
- *    - skeleton : optional target skeleton name passed straight to Modal
- *                 (e.g. "orc_m1", "ue5_mannequin"). Ignored by the current
- *                 Modal class but reserved for the skeleton-injection step.
+ *    - mesh_url : HTTPS URL of the source GLB (must pass isTrustedAssetHost).
+ *    - skeleton : optional target skeleton name (e.g. "orc_m1"). Currently
+ *                 ignored by the Modal pipeline but kept on the contract
+ *                 for the upcoming skeleton-injection step.
  *
- *  Modal (`MODAL_PUPPETEER_RIG_URL`) runs the Puppeteer skeleton + skinning
- *  pipeline on an L40S GPU (~2 min) and returns base64-encoded GLB bytes.
- *  We decode, persist to R2 under `${user.id}/rigged/`, return the public URL.
+ *  Behaviour: this route NO LONGER waits for the rig to finish. The CF
+ *  Worker has a 100 s subrequest cap and a typical Puppeteer rig is
+ *  ~120-150 s on A10G (plus ~60-120 s cold start). Instead:
+ *    1. Debit credits + modal-spend up front.
+ *    2. POST to Modal `rig_router.rig_start` which `.spawn()`s rig_mesh
+ *       and returns {job_id} in <2 s.
+ *    3. Persist a R2 record `{user_id, modal_spend, credits, mesh_url}`
+ *       so /api/auto-rig-status can refund + know the owner.
+ *    4. Return {job_id, status: 'queued'} to the client.
+ *  The renderer then polls /api/auto-rig-status every 5 s until 'done'
+ *  or 'failed'. On failure (either at spawn or surfaced by status), the
+ *  credits + modal_spend are refunded so a flaky GPU never bills the
+ *  user.
  *
- *  Credits: RIG_COST flat (5 credits, same as full-mesh ops). Refunded on
- *  Modal failure so a transient outage doesn't burn the user's balance.
- *  Server-side errors are logged in full; the client gets a generic
- *  message to avoid leaking upstream stack traces or Modal URLs. */
+ *  See modal_app/_puppeteer_rig.py:rig_router for the Modal side. */
 async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -6179,11 +6236,6 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   }
   const skeleton = typeof body.skeleton === 'string' ? body.skeleton : undefined;
 
-  // Flat cost — Puppeteer rig is a single GPU pass (~2 min L40S), same
-  // order of magnitude as the existing mesh ops (5 credits).
-  const RIG_COST = 5;
-  const ESTIMATED_USD_RIG = 0.05;  // L40S ~$0.000542/s × ~90s + R2 ops
-
   const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_RIG);
   if (remainingBudget == null) {
     return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
@@ -6202,19 +6254,16 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
     return err(402, 'insufficient credits');
   }
 
-  // Derive a stable base name for the R2 key from the source URL so the
-  // user can recognise the file in their R2 listing. Strip extension +
-  // sanitise to the same character class as handleUploadMesh.
-  let baseName = 'mesh';
-  try {
-    const last = new URL(meshUrl).pathname.split('/').pop() || '';
-    baseName = last.replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'mesh';
-  } catch { /* keep default */ }
-
-  let glbBytes: Uint8Array;
+  // MODAL_PUPPETEER_RIG_URL is the BASE of the Modal app (rig_router).
+  // We append /rig-start (spawn) here and /rig-status (poll) in
+  // handleAutoRigStatus. The trailing-slash strip keeps the join robust
+  // whether the secret was set with or without one.
+  const baseUrl = env.MODAL_PUPPETEER_RIG_URL.replace(/\/$/, '');
+  const startUrl = `${baseUrl}/rig-start`;
+  let jobId: string;
   try {
     const t0 = Date.now();
-    const r = await fetch(env.MODAL_PUPPETEER_RIG_URL, {
+    const r = await fetch(startUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -6222,59 +6271,193 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
         mesh_url: meshUrl,
         ...(skeleton ? { skeleton } : {}),
       }),
-      // Puppeteer ~2 min hot, plus ~60-120s cold start. 8 min budget.
-      signal: AbortSignal.timeout(480_000),
+      // rig-start downloads the source GLB + .spawn()s — should return
+      // in ~1-2 s. 30 s budget covers a cold CPU container start.
+      signal: AbortSignal.timeout(30_000),
     });
     if (!r.ok) {
-      throw new Error(`Modal puppeteer HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      throw new Error(`Modal rig-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
     }
-    // Modal returns base64 GLB inside JSON: { glb_base64: "...", bytes: N }.
-    const resp = await r.json() as { glb_base64?: string; error?: string };
-    if (resp.error) throw new Error(`Modal puppeteer error: ${resp.error}`);
-    if (!resp.glb_base64) throw new Error('Modal puppeteer returned no glb_base64');
-    const bin = atob(resp.glb_base64);
-    glbBytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) glbBytes[i] = bin.charCodeAt(i);
-    console.log(`[auto-rig] dt=${Date.now() - t0}ms bytes=${glbBytes.byteLength}`);
+    const j = await r.json() as { job_id?: string };
+    jobId = String(j?.job_id || '').trim();
+    if (!jobId) throw new Error('rig-start returned no job_id');
+    console.log(`[auto-rig] spawn dt=${Date.now() - t0}ms job_id=${jobId} user=${user.id}`);
   } catch (e: unknown) {
     await addCredits(env, user.id, RIG_COST);
     await refundRigSpend();
-    // Log the full upstream error server-side; return a sanitised generic
-    // message to the client so we don't leak Modal URLs / stack traces.
-    console.error('[auto-rig]', e instanceof Error ? e.message : String(e), e);
-    return err(502, 'auto-rig failed (credits refunded)');
+    console.error('[auto-rig.spawn]', e instanceof Error ? e.message : String(e), e);
+    return err(502, 'auto-rig spawn failed (credits refunded)');
   }
 
-  // Magic-byte check — refuse anything that isn't a GLB so we don't
-  // pollute R2 with malformed bytes Modal might have produced on a
-  // partial failure.
-  const magicOk = glbBytes.byteLength >= 4
-    && glbBytes[0] === 0x67 && glbBytes[1] === 0x6C
-    && glbBytes[2] === 0x54 && glbBytes[3] === 0x46;
-  if (!magicOk) {
-    await addCredits(env, user.id, RIG_COST);
-    await refundRigSpend();
-    console.error('[auto-rig] Modal returned non-GLB bytes', glbBytes.byteLength);
-    return err(502, 'auto-rig failed (credits refunded)');
-  }
-
-  const key = `${user.id}/rigged/${baseName}_rigged_puppeteer_${Date.now()}.glb`;
+  // Persist job → user mapping so the status route can refund on
+  // failure and verify ownership on poll. Non-fatal: if R2 is briefly
+  // unavailable the status route falls back to a best-effort refund.
   try {
-    await env.MESHES.put(key, glbBytes, {
-      httpMetadata: { contentType: 'model/gltf-binary' },
+    await putRigJobRecord(env, jobId, {
+      user_id: user.id,
+      modal_spend: ESTIMATED_USD_RIG,
+      credits: RIG_COST,
+      mesh_url: meshUrl,
+      created_at: Date.now(),
     });
   } catch (e) {
-    await addCredits(env, user.id, RIG_COST);
-    await refundRigSpend();
-    console.error('[auto-rig.r2]', e instanceof Error ? e.message : String(e), e);
-    return err(500, 'auto-rig storage failed (credits refunded)');
+    console.warn('[auto-rig] could not persist job record', e);
   }
+
   return json({
     success: true,
-    mesh_url: `${env.R2_PUBLIC_URL}/${key}`,
-    path: key,
+    job_id: jobId,
+    status: 'queued',
     creditsRemaining: remaining,
   });
+}
+
+/** POST /api/auto-rig-status?job_id=<id> — one poll tick.
+ *
+ *  Calls Modal's rig-status; on terminal state, finalises the job:
+ *    - 'pending'  → still running, browser keeps polling.
+ *    - 'failed'   → refunds credits + modal spend, deletes the record.
+ *    - 'done'     → decodes base64 GLB, magic-byte check, uploads to R2
+ *                   under `${user.id}/rigged/`, returns the public URL.
+ *
+ *  Accepts job_id from either the query string (GET-friendly) or a JSON
+ *  body (POST-friendly). Owner is verified against the persisted record.
+ *  Transient Modal/Network errors return 'pending' (NOT 'failed') so the
+ *  browser keeps polling — only an explicit error file from Modal is a
+ *  real failure. */
+async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_PUPPETEER_RIG_URL) return err(503, 'auto-rig backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  // Accept job_id from query string OR JSON body.
+  let jobId = '';
+  try {
+    const u = new URL(req.url);
+    jobId = (u.searchParams.get('job_id') || '').trim();
+  } catch { /* keep empty */ }
+  if (!jobId && req.method === 'POST') {
+    try {
+      const b = await req.json() as { job_id?: string };
+      jobId = String(b?.job_id || '').trim();
+    } catch { /* keep empty */ }
+  }
+  if (!jobId) return err(400, 'job_id required');
+
+  // Look up the persisted record (owner check + refund context). If
+  // R2 lost it (TTL purge, eventual consistency) we proceed but skip
+  // the refund + ownership steps — the rig still produces a public URL.
+  const record = await getRigJobRecord(env, jobId);
+  if (record && record.user_id !== user.id) {
+    return err(403, 'forbidden');
+  }
+
+  // Refund helper — called on terminal failure or upload error. Safe to
+  // call with no record (just becomes a no-op).
+  const refundOnFailure = async () => {
+    if (!record) return;
+    await addCredits(env, user.id, record.credits).catch(() => {});
+    await refundModalSpend(env, record.modal_spend).catch(() => {});
+    await deleteRigJobRecord(env, jobId).catch(() => {});
+  };
+
+  // Poll Modal rig-status. Transient errors → 'pending' so the browser
+  // keeps polling; do NOT refund here, because the rig may still finish.
+  const baseUrl = env.MODAL_PUPPETEER_RIG_URL.replace(/\/$/, '');
+  const statusUrl = `${baseUrl}/rig-status`;
+  let modalResp: { ready?: boolean; error?: string; glb_base64?: string; bytes?: number };
+  try {
+    const r = await fetch(statusUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) {
+      throw new Error(`Modal rig-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    modalResp = await r.json() as typeof modalResp;
+  } catch (e: unknown) {
+    console.warn('[auto-rig-status] transient', e instanceof Error ? e.message : String(e));
+    return json({ status: 'pending', warn: e instanceof Error ? e.message : String(e) });
+  }
+
+  // ── Still running ──
+  if (modalResp?.ready === false && !modalResp?.error) {
+    return json({ status: 'pending' });
+  }
+
+  // ── Failed ──
+  if (modalResp?.ready === false && modalResp?.error) {
+    await refundOnFailure();
+    console.log(`[auto-rig-status] job_id=${jobId} FAILED: ${String(modalResp.error).slice(0, 200)}`);
+    return json({
+      status: 'failed',
+      error: String(modalResp.error).slice(0, 500),
+    });
+  }
+
+  // ── Done: decode + magic-byte check + R2 upload ──
+  if (modalResp?.ready === true && modalResp?.glb_base64) {
+    let glbBytes: Uint8Array;
+    try {
+      const bin = atob(modalResp.glb_base64);
+      glbBytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) glbBytes[i] = bin.charCodeAt(i);
+    } catch (e) {
+      await refundOnFailure();
+      console.error('[auto-rig-status] base64 decode', e);
+      return json({ status: 'failed', error: 'invalid base64 from modal' });
+    }
+
+    const magicOk = glbBytes.byteLength >= 4
+      && glbBytes[0] === 0x67 && glbBytes[1] === 0x6C
+      && glbBytes[2] === 0x54 && glbBytes[3] === 0x46;
+    if (!magicOk) {
+      await refundOnFailure();
+      console.error('[auto-rig-status] non-GLB bytes', glbBytes.byteLength);
+      return json({ status: 'failed', error: 'rigged output not a GLB' });
+    }
+
+    // Derive a stable base name for the R2 key from the original URL.
+    let baseName = 'mesh';
+    const sourceUrl = record?.mesh_url || '';
+    if (sourceUrl) {
+      try {
+        const last = new URL(sourceUrl).pathname.split('/').pop() || '';
+        baseName = last.replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'mesh';
+      } catch { /* keep default */ }
+    }
+
+    const key = `${user.id}/rigged/${baseName}_rigged_puppeteer_${Date.now()}.glb`;
+    try {
+      await env.MESHES.put(key, glbBytes, {
+        httpMetadata: { contentType: 'model/gltf-binary' },
+      });
+    } catch (e) {
+      await refundOnFailure();
+      console.error('[auto-rig-status.r2]', e instanceof Error ? e.message : String(e), e);
+      return json({ status: 'failed', error: 'auto-rig storage failed (credits refunded)' });
+    }
+
+    await deleteRigJobRecord(env, jobId).catch(() => {});
+    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    console.log(`[auto-rig-status] job_id=${jobId} DONE bytes=${glbBytes.byteLength} url=${publicUrl}`);
+    return json({
+      status: 'done',
+      success: true,
+      mesh_url: publicUrl,
+      url: publicUrl,
+      path: key,
+      bytes: glbBytes.byteLength,
+    });
+  }
+
+  // Unknown shape — treat as pending and log so we can investigate.
+  console.warn('[auto-rig-status] unexpected modal response', modalResp);
+  return json({ status: 'pending' });
 }
 
 /** GET /api/proxy-image?url=<encoded> — server-side fetch of an image
@@ -8083,7 +8266,7 @@ export default {
         '/api/rectify-image', '/api/modify-image', '/api/auto-inpaint',
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
-        '/api/auto-rig',
+        '/api/auto-rig', '/api/auto-rig-status',
       ]);
       // /api/stripe-webhook MUST stay reachable even when Site is OFF.
       // Stripe has already charged the card by the time it calls us; a
@@ -8224,6 +8407,7 @@ export default {
         if (pathname === '/api/upload-image'          && method === 'POST') return await handleUploadImage(req, env);
         if (pathname === '/api/upload-mesh'           && method === 'POST') return await handleUploadMesh(req, env);
         if (pathname === '/api/auto-rig'              && method === 'POST') return await handleAutoRig(req, env);
+        if (pathname === '/api/auto-rig-status'       && (method === 'GET' || method === 'POST')) return await handleAutoRigStatus(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);

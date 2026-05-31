@@ -48,6 +48,7 @@ License: Puppeteer is Apache-2.0 (Seed3D), Michelangelo is Apache-2.0
 """
 import base64
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -56,6 +57,7 @@ import tempfile
 import time
 import traceback
 import urllib.request
+import uuid
 
 import modal
 
@@ -173,8 +175,17 @@ image = (
         "pyrender",
         # Misc deps pulled by upstream's requirements.txt.
         "h5py", "plyfile", "timm", "loguru", "lightning",
+        # PartField (skinning third_party) deps — discovered via failed deploys
+        "pytz",
+        "vtk",  # Linux only — SAC is Windows-only
+        "pymeshlab",
+        "psutil",
+        "scipy",
+        "scikit-image",
+        "scikit-learn",
+        "yacs",
         "boto3", "einops", "opencv-python", "omegaconf",
-        "transformers>=4.40,<4.56",
+        "transformers==4.46.1",  # exact pin: desktop venv version, Puppeteer-compatible
         "accelerate>=0.30",
         "huggingface_hub>=0.34",
         "pillow>=10",
@@ -191,6 +202,14 @@ image = (
         # secret will populate at runtime.
         "HF_HOME": "/root/.cache/huggingface",
     })
+    # ---- Patcher script for torch.load weights_only=False ----
+    # Uploaded once, reused in the next run_commands. Avoids inline-heredoc
+    # quoting hell with bash + cat.
+    .add_local_file(
+        "modal_app/_patch_torch_load.py",
+        "/tmp/_patch_torch_load.py",
+        copy=True,
+    )
     # ---- Puppeteer source tree (HEAD of master, Apache-2.0) ----
     .run_commands(
         # `--recursive` pulls Michelangelo as a submodule under
@@ -199,17 +218,13 @@ image = (
         "git clone --depth 1 --recursive "
         "https://github.com/Seed3D/Puppeteer.git /Puppeteer",
         # ---- Upstream patches (mirror of AGENT_LOG 2026-05-30 SUCCESS) ----
-        # 1. weights_only=False at the 3 torch.load sites — torch 2.6+
-        #    flipped the default and the Puppeteer checkpoints contain
-        #    non-tensor objects (PyTorch Lightning metadata) that the
-        #    new default rejects.
-        # Correct path: asl_pl_module.py lives in the Michelangelo submodule
-        "sed -i 's/torch.load(\\(.*\\.pth.*\\))/torch.load(\\1, weights_only=False)/g' "
-        "/Puppeteer/skeleton/third_partys/Michelangelo/michelangelo/models/tsal/asl_pl_module.py",
-        "sed -i 's/torch.load(\\(.*\\.pth.*\\))/torch.load(\\1, weights_only=False)/g' "
-        "/Puppeteer/skeleton/demo.py",
-        "sed -i 's/torch.load(\\(.*\\.pth.*\\))/torch.load(\\1, weights_only=False)/g' "
-        "/Puppeteer/skinning/main.py",
+        # 1. weights_only=False at EVERY torch.load site via _patch_torch_load.py
+        #    (uploaded as a local file below) — torch 2.6+ flipped the default
+        #    to True, which rejects checkpoints with PyTorch Lightning /
+        #    numpy.core.multiarray.scalar globals. Python script does PROPER
+        #    paren matching (sed can't handle nested parens like
+        #    torch.device("cpu") inside torch.load).
+        "python /tmp/_patch_torch_load.py /Puppeteer",
         # 2. Copy Michelangelo into skinning/third_partys/ (skinning
         #    expects it at that path; upstream submodule lives only
         #    under skeleton/third_partys/).
@@ -354,7 +369,9 @@ def _run_skeleton(input_obj: str, work_dir: str, run_name: str):
         "--output_dir", results_dir,
         "--save_name", run_name,
         "--input_pc_num", "8192",
-        "--save_render",
+        # Skip --save_render: pyrender needs EGL which crashes headless
+        # on Linux container without display, killing subprocess with
+        # FileNotFoundError before _pred.txt is written.
         "--apply_marching_cubes",
         "--joint_token",
         "--seq_shuffle",
@@ -483,15 +500,23 @@ def _fbx_to_glb(fbx_path: str, glb_path: str) -> bool:
     image=image,
     gpu="A10G",
     timeout=600,
+    volumes={"/rig_data": rig_output_volume},
     secrets=[
         modal.Secret.from_name(
             "huggingface", required_keys=["HF_TOKEN"],
         ),
     ],
 )
-def rig_mesh(glb_bytes: bytes) -> bytes:
+def rig_mesh(glb_bytes: bytes, job_id: str | None = None) -> bytes:
     """Run the full Puppeteer pipeline on `glb_bytes` and return the
     rigged GLB bytes.
+
+    When `job_id` is supplied, also persist the result (or error) to
+    `/rig_data/<job_id>.glb` (or `<job_id>.err`) on the rig_output
+    Volume so `rig_router.rig_status` can serve the result back to the
+    Worker after `.spawn()` returns control immediately. When `job_id`
+    is None (e.g. the legacy `rig_mesh_endpoint` curl test path), the
+    Volume is left untouched.
 
     Stages (mirror of puppeteer_bridge.main()):
       1. recenter → .obj
@@ -507,99 +532,156 @@ def rig_mesh(glb_bytes: bytes) -> bytes:
     t_total = time.time()
     tmp_dir = tempfile.mkdtemp(prefix="puppeteer_")
     try:
-        # Step 1 — recenter + .obj conversion.
-        _log("== Step 1: convert + recenter ==")
-        t0 = time.time()
-        input_obj = _recenter_to_obj(glb_bytes, tmp_dir)
-        _log(f"step 1 done in {time.time() - t0:.1f}s")
+        # ── Inner try/except wraps the whole pipeline so that, when
+        # `job_id` is set, ANY failure persists a `.err` marker on the
+        # rig_output Volume. Without this, async callers (rig_status)
+        # would poll forever after a rig crash.
+        try:
+            out_bytes = _run_rig_pipeline(glb_bytes, tmp_dir, t_total)
+        except Exception as e:
+            if job_id:
+                try:
+                    err_path = f"/rig_data/{job_id}.err"
+                    with open(err_path, "w") as f:
+                        f.write(json.dumps({
+                            "error": str(e),
+                            "type": type(e).__name__,
+                            "trace": traceback.format_exc(),
+                        })[:8000])
+                    rig_output_volume.commit()
+                    print(
+                        f"[rig_mesh] wrote {err_path}",
+                        flush=True,
+                    )
+                except Exception as e2:
+                    print(
+                        f"[rig_mesh] WARN err-file write failed for "
+                        f"{job_id}: {e2}",
+                        flush=True,
+                    )
+            raise
 
-        # Step 2 — skeleton prediction.
-        _log("== Step 2: skeleton prediction ==")
-        t0 = time.time()
-        run_name = "fabmesh"
-        rc, results_dir, staged_obj = _run_skeleton(
-            input_obj, tmp_dir, run_name)
-        skel_run_dir = os.path.join(results_dir, run_name)
-        if not os.path.isdir(skel_run_dir):
-            raise RuntimeError(
-                f"skeleton stage produced no output dir. rc={rc}")
-        pred_txt = None
-        for fname in os.listdir(skel_run_dir):
-            if fname.endswith("_pred.txt"):
-                pred_txt = os.path.join(skel_run_dir, fname)
-                break
-        if pred_txt is None:
-            raise RuntimeError(
-                f"no _pred.txt in {skel_run_dir}. rc={rc}")
-        _log(f"step 2 done in {time.time() - t0:.1f}s "
-             f"(pred={os.path.basename(pred_txt)})")
+        # Persist the rigged GLB to the Volume so async pollers can
+        # fetch it via rig_status. Non-fatal on write error: the sync
+        # endpoint still returns the bytes inline.
+        if job_id:
+            try:
+                out_path = f"/rig_data/{job_id}.glb"
+                with open(out_path, "wb") as f:
+                    f.write(out_bytes)
+                rig_output_volume.commit()
+                print(
+                    f"[rig_mesh] wrote {out_path} ({len(out_bytes)} bytes)",
+                    flush=True,
+                )
+            except Exception as e:
+                print(
+                    f"[rig_mesh] WARN volume write failed for "
+                    f"{job_id}: {e}",
+                    flush=True,
+                )
 
-        # Step 3 — skinning (DDP, single-GPU, manual env vars).
-        _log("== Step 3: skinning ==")
-        t0 = time.time()
-        mesh_examples_dir = os.path.dirname(staged_obj)
-        skel_flat = os.path.join(tmp_dir, "skeletons")
-        os.makedirs(skel_flat, exist_ok=True)
-        shutil.copyfile(
-            pred_txt,
-            os.path.join(skel_flat, os.path.basename(pred_txt)),
-        )
-        base_no_pred = os.path.basename(pred_txt).replace(
-            "_pred.txt", ".txt")
-        shutil.copyfile(
-            pred_txt, os.path.join(skel_flat, base_no_pred))
-        rc, skin_out = _run_skinning(
-            skel_flat, mesh_examples_dir, tmp_dir)
-        skin_gen = os.path.join(skin_out, "generate")
-        if not os.path.isdir(skin_gen):
-            skin_gen = skin_out
-        skin_txt = None
-        for fname in os.listdir(skin_gen):
-            if fname.endswith("_skin.txt"):
-                skin_txt = os.path.join(skin_gen, fname)
-                break
-        if skin_txt is None:
-            raise RuntimeError(
-                f"skinning produced no *_skin.txt in {skin_gen}. rc={rc}")
-        _log(f"step 3 done in {time.time() - t0:.1f}s "
-             f"(skin={os.path.basename(skin_txt)})")
-
-        # Step 4 — build final rig text (filtered concat).
-        _log("== Step 4: build final_rig.txt ==")
-        final_txt = os.path.join(tmp_dir, "final_rig.txt")
-        _build_final_rig_txt(pred_txt, skin_txt, final_txt)
-
-        # Step 5 — bake mesh + rig into FBX. We pass the ORIGINAL staged
-        # .obj (NOT the marching-cubes mesh emitted by step 2) because
-        # demo_rigging.sh upstream confirms that's what export.py expects.
-        _log("== Step 5: FBX export ==")
-        t0 = time.time()
-        out_fbx = os.path.join(tmp_dir, "rigged.fbx")
-        rc = _run_export(staged_obj, final_txt, out_fbx)
-        if not os.path.exists(out_fbx) or os.path.getsize(out_fbx) == 0:
-            raise RuntimeError(f"export.py produced no FBX. rc={rc}")
-        _log(f"step 5 done in {time.time() - t0:.1f}s "
-             f"(fbx={os.path.getsize(out_fbx)} bytes)")
-
-        # Step 6 — FBX → GLB.
-        _log("== Step 6: FBX → GLB ==")
-        t0 = time.time()
-        out_glb = os.path.join(tmp_dir, "rigged.glb")
-        if not _fbx_to_glb(out_fbx, out_glb):
-            raise RuntimeError("FBX → GLB conversion failed (both paths)")
-        with open(out_glb, "rb") as f:
-            out_bytes = f.read()
-        _log(f"step 6 done in {time.time() - t0:.1f}s "
-             f"(glb={len(out_bytes)} bytes)")
-
-        _log(f"TOTAL dt={time.time() - t_total:.1f}s "
-             f"out_bytes={len(out_bytes)}")
         return out_bytes
     finally:
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+def _run_rig_pipeline(glb_bytes: bytes, tmp_dir: str, t_total: float) -> bytes:
+    """The original sync pipeline body, extracted so `rig_mesh` can
+    wrap it in async-aware error handling without losing the existing
+    stage-by-stage logging structure. `tmp_dir` cleanup is the
+    caller's responsibility (`rig_mesh`'s outer finally)."""
+    # Step 1 — recenter + .obj conversion.
+    _log("== Step 1: convert + recenter ==")
+    t0 = time.time()
+    input_obj = _recenter_to_obj(glb_bytes, tmp_dir)
+    _log(f"step 1 done in {time.time() - t0:.1f}s")
+
+    # Step 2 — skeleton prediction.
+    _log("== Step 2: skeleton prediction ==")
+    t0 = time.time()
+    run_name = "fabmesh"
+    rc, results_dir, staged_obj = _run_skeleton(
+        input_obj, tmp_dir, run_name)
+    skel_run_dir = os.path.join(results_dir, run_name)
+    if not os.path.isdir(skel_run_dir):
+        raise RuntimeError(
+            f"skeleton stage produced no output dir. rc={rc}")
+    pred_txt = None
+    for fname in os.listdir(skel_run_dir):
+        if fname.endswith("_pred.txt"):
+            pred_txt = os.path.join(skel_run_dir, fname)
+            break
+    if pred_txt is None:
+        raise RuntimeError(
+            f"no _pred.txt in {skel_run_dir}. rc={rc}")
+    _log(f"step 2 done in {time.time() - t0:.1f}s "
+         f"(pred={os.path.basename(pred_txt)})")
+
+    # Step 3 — skinning (DDP, single-GPU, manual env vars).
+    _log("== Step 3: skinning ==")
+    t0 = time.time()
+    mesh_examples_dir = os.path.dirname(staged_obj)
+    skel_flat = os.path.join(tmp_dir, "skeletons")
+    os.makedirs(skel_flat, exist_ok=True)
+    shutil.copyfile(
+        pred_txt,
+        os.path.join(skel_flat, os.path.basename(pred_txt)),
+    )
+    base_no_pred = os.path.basename(pred_txt).replace(
+        "_pred.txt", ".txt")
+    shutil.copyfile(
+        pred_txt, os.path.join(skel_flat, base_no_pred))
+    rc, skin_out = _run_skinning(
+        skel_flat, mesh_examples_dir, tmp_dir)
+    skin_gen = os.path.join(skin_out, "generate")
+    if not os.path.isdir(skin_gen):
+        skin_gen = skin_out
+    skin_txt = None
+    for fname in os.listdir(skin_gen):
+        if fname.endswith("_skin.txt"):
+            skin_txt = os.path.join(skin_gen, fname)
+            break
+    if skin_txt is None:
+        raise RuntimeError(
+            f"skinning produced no *_skin.txt in {skin_gen}. rc={rc}")
+    _log(f"step 3 done in {time.time() - t0:.1f}s "
+         f"(skin={os.path.basename(skin_txt)})")
+
+    # Step 4 — build final rig text (filtered concat).
+    _log("== Step 4: build final_rig.txt ==")
+    final_txt = os.path.join(tmp_dir, "final_rig.txt")
+    _build_final_rig_txt(pred_txt, skin_txt, final_txt)
+
+    # Step 5 — bake mesh + rig into FBX. We pass the ORIGINAL staged
+    # .obj (NOT the marching-cubes mesh emitted by step 2) because
+    # demo_rigging.sh upstream confirms that's what export.py expects.
+    _log("== Step 5: FBX export ==")
+    t0 = time.time()
+    out_fbx = os.path.join(tmp_dir, "rigged.fbx")
+    rc = _run_export(staged_obj, final_txt, out_fbx)
+    if not os.path.exists(out_fbx) or os.path.getsize(out_fbx) == 0:
+        raise RuntimeError(f"export.py produced no FBX. rc={rc}")
+    _log(f"step 5 done in {time.time() - t0:.1f}s "
+         f"(fbx={os.path.getsize(out_fbx)} bytes)")
+
+    # Step 6 — FBX → GLB.
+    _log("== Step 6: FBX → GLB ==")
+    t0 = time.time()
+    out_glb = os.path.join(tmp_dir, "rigged.glb")
+    if not _fbx_to_glb(out_fbx, out_glb):
+        raise RuntimeError("FBX → GLB conversion failed (both paths)")
+    with open(out_glb, "rb") as f:
+        out_bytes = f.read()
+    _log(f"step 6 done in {time.time() - t0:.1f}s "
+         f"(glb={len(out_bytes)} bytes)")
+
+    _log(f"TOTAL dt={time.time() - t_total:.1f}s "
+         f"out_bytes={len(out_bytes)}")
+    return out_bytes
 
 
 # ---------------------------------------------------------------------------
@@ -673,7 +755,214 @@ def rig_mesh_endpoint(payload: dict):
             detail=f"rig_mesh failed: {type(e).__name__}: {e}",
         )
 
-    return JSONResponse(content={
-        "glb_base64": base64.b64encode(glb_bytes).decode("ascii"),
-        "bytes": len(glb_bytes),
-    })
+    # Return raw GLB bytes (model/gltf-binary) instead of base64 JSON.
+    # Avoids 33% bloat + JSON parse cost on the Worker side AND avoids
+    # Modal runtime SIGSEGV on large JSON payloads (53 MB+ rigged GLBs).
+    from fastapi.responses import Response
+    return Response(
+        content=glb_bytes,
+        media_type="model/gltf-binary",
+        headers={"X-Rigged-Bytes": str(len(glb_bytes))},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Async spawn+poll router — mirrors `mesh_router` in modal_app/app.py.
+#
+# Cloudflare workers have a 100 s subrequest cap; a Puppeteer rig job
+# takes ~120-150 s on A10G (and longer on cold start), so we CANNOT keep
+# the HTTP request open from the Worker side. Instead:
+#
+#   POST /rig-start  → spawns rig_mesh() in the background, returns
+#                       {"job_id": "...", "status": "queued"} in <2 s.
+#   POST /rig-status → reads the rig_output Volume, returns
+#                       {"ready": false}                  (still running),
+#                       {"ready": false, "error": "..."} (failed), or
+#                       {"ready": true, "glb_base64": "...", "bytes": N}.
+#
+# The Worker exposes /api/auto-rig (spawn) and /api/auto-rig-status (one
+# poll tick); the browser does the actual polling loop every 5 s. This
+# matches the existing mesh pipeline (mesh_router → mesh_start +
+# mesh_status) verbatim.
+# ---------------------------------------------------------------------------
+@app.function(
+    # Lightweight CPU container — no GPU for the router itself; the
+    # GPU work happens inside rig_mesh's separate container via .spawn().
+    image=image,
+    timeout=120,
+    volumes={"/rig_data": rig_output_volume},
+    secrets=[
+        modal.Secret.from_name(
+            "myfabmesh-shared", required_keys=["SHARED_SECRET"],
+        ),
+    ],
+)
+@modal.asgi_app()
+def rig_router():
+    """ASGI router exposing /rig-start, /rig-status and /healthz.
+
+    Designed to be called from a Cloudflare Worker which has a 100 s
+    sub-request cap — each call returns in well under 1 s so the worker
+    can hand control back to the browser, which polls /rig-status every
+    5 s until the rigged GLB is ready (or an error file shows up).
+    """
+    from fastapi import FastAPI, HTTPException, Request
+
+    api = FastAPI(title="myfabmesh-rig")
+
+    async def _read_json(request: Request) -> dict:
+        try:
+            return await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    def _check_auth(payload: dict) -> None:
+        expected = os.environ.get("SHARED_SECRET", "")
+        provided = (payload or {}).get("_auth") or ""
+        if not expected or provided != expected:
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    @api.get("/healthz")
+    async def healthz():
+        return {"ok": True, "fn": "rig_router"}
+
+    @api.post("/rig-start")
+    async def rig_start(request: Request):
+        """Dual-purpose route:
+
+        - op_type unset or 'rig' → async rig job. Downloads the source
+          GLB on this CPU container (cheap), then `.spawn()`s rig_mesh
+          on a GPU container, returns {job_id, status: 'queued'} in
+          ~1-2 s. The browser then polls /rig-status.
+
+        - op_type == 'cancel' → cancel a running spawn by job_id.
+
+        Body for the normal spawn:
+            {
+              "_auth": "...",
+              "mesh_url": "https://.../mesh.glb",
+              "skeleton": "orc_m1"   // optional, ignored by rig_mesh today
+            }
+        Returns: {"job_id": "...", "status": "queued"}
+        """
+        payload = await _read_json(request)
+        _check_auth(payload)
+
+        op_type = (payload.get("op_type") or "rig").strip().lower()
+
+        # ── Cancel a running spawn ─────────────────────────────────
+        if op_type == "cancel":
+            job_id = (payload.get("job_id") or "").strip()
+            if not job_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="job_id required for cancel",
+                )
+            call_id_path = f"/rig_data/{job_id}.call_id"
+            try:
+                with open(call_id_path) as f:
+                    call_id = f.read().strip()
+            except FileNotFoundError:
+                return {
+                    "ok": True, "cancelled": False,
+                    "reason": "no call_id on file",
+                }
+            try:
+                modal.FunctionCall.from_id(call_id).cancel(
+                    terminate_containers=True,
+                )
+                return {"ok": True, "cancelled": True, "call_id": call_id}
+            except Exception as e:
+                # Already finished / already cancelled / transient —
+                # don't fail hard so the UI can still mark canceled.
+                return {"ok": True, "cancelled": False, "error": str(e)}
+
+        # ── Normal rig spawn ─────────────────────────────────────
+        mesh_url = (payload.get("mesh_url") or "").strip()
+        if not mesh_url:
+            raise HTTPException(status_code=400, detail="mesh_url required")
+
+        # Download the GLB here (cheap CPU container) rather than inside
+        # rig_mesh on the GPU container — saves ~60 s of A10G time per
+        # job when the source URL is slow.
+        try:
+            req = urllib.request.Request(
+                mesh_url,
+                headers={"User-Agent": "myfabmesh-rig/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                in_bytes = resp.read()
+        except Exception as e:
+            raise HTTPException(
+                status_code=502, detail=f"mesh fetch failed: {e}",
+            )
+
+        if not in_bytes or in_bytes[:4] != b"glTF":
+            raise HTTPException(
+                status_code=400,
+                detail="mesh_url did not return a GLB",
+            )
+
+        job_id = (payload.get("job_id") or "").strip() or uuid.uuid4().hex
+
+        # `.spawn()` returns a FunctionCall; persist its object_id so a
+        # subsequent op_type='cancel' call can find and terminate it.
+        call = rig_mesh.spawn(in_bytes, job_id=job_id)
+        try:
+            with open(f"/rig_data/{job_id}.call_id", "w") as f:
+                f.write(call.object_id)
+            rig_output_volume.commit()
+        except Exception as e:
+            print(
+                f"[rig-start] WARN could not persist call_id for "
+                f"{job_id}: {e}",
+                flush=True,
+            )
+
+        return {"job_id": job_id, "status": "queued"}
+
+    @api.post("/rig-status")
+    async def rig_status(request: Request):
+        """One poll tick. Returns {"ready": false} if the rig is still
+        running, {"ready": false, "error": "..."} if the GPU worker
+        wrote an err file, or {"ready": true, "glb_base64": "...",
+        "bytes": N} when the rigged GLB lands on the Volume."""
+        payload = await _read_json(request)
+        _check_auth(payload)
+        job_id = (payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id required")
+
+        # Reload so we see the GPU worker's latest commits — the rig_mesh
+        # function runs in a SEPARATE container and the Volume is the
+        # only synchronisation point.
+        rig_output_volume.reload()
+        out_path = f"/rig_data/{job_id}.glb"
+        err_path = f"/rig_data/{job_id}.err"
+
+        if os.path.isfile(err_path):
+            with open(err_path) as f:
+                raw = f.read()
+            # rig_mesh writes JSON; the legacy mesh_router writes plain
+            # text. Try JSON first, fall back to raw text.
+            err_msg = raw
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and parsed.get("error"):
+                    err_msg = str(parsed["error"])
+            except Exception:
+                pass
+            return {"ready": False, "error": err_msg[:500]}
+
+        if os.path.isfile(out_path):
+            with open(out_path, "rb") as f:
+                glb = f.read()
+            return {
+                "ready": True,
+                "glb_base64": base64.b64encode(glb).decode("ascii"),
+                "bytes": len(glb),
+            }
+
+        return {"ready": False}
+
+    return api
