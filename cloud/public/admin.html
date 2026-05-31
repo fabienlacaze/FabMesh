@@ -1298,6 +1298,9 @@
             <button class="btn btn-user-meshes"
                     data-uid="${escapeHtml(u.id)}"
                     data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🧊 Meshes (${u.meshes_count ?? 0})</button>
+            <button class="btn btn-user-rigs"
+                    data-uid="${escapeHtml(u.id)}"
+                    data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}">🦴 Rigs (${u.rigs_count ?? 0})</button>
             <button class="btn btn-user-ban"
                     data-uid="${escapeHtml(u.id)}"
                     data-uwho="${escapeHtml(u.email || u.id.slice(0,8))}"
@@ -1319,6 +1322,9 @@
       });
       tbody.querySelectorAll('.btn-user-meshes').forEach((b) => {
         b.addEventListener('click', () => viewUserMeshes(b.dataset.uid, b.dataset.uwho));
+      });
+      tbody.querySelectorAll('.btn-user-rigs').forEach((b) => {
+        b.addEventListener('click', () => viewUserRigs(b.dataset.uid, b.dataset.uwho));
       });
       tbody.querySelectorAll('.btn-user-ban').forEach((b) => {
         b.addEventListener('click', () => toggleBan(b.dataset.uid, b.dataset.uwho, b.dataset.uban === 'true'));
@@ -1621,6 +1627,45 @@
         _indexAdminUserListings(listings);
         if (!_adminAllMeshes.length) {
           grid.innerHTML = '<div style="color:var(--text-2);">No succeeded meshes.</div>';
+          return;
+        }
+        _renderAdminMeshGrid();
+      } catch (e) {
+        grid.innerHTML = `<div style="color:var(--err)">${escapeHtml(e.message || e)}</div>`;
+      }
+    }
+
+    // Same modal as meshes but pulls from /api/admin/users/<uid>/rigs
+    // (R2 listing of <uid>/rigged/). Rigs are GLBs with embedded skeletons —
+    // the model-viewer cards in the existing meshes grid render them fine.
+    async function viewUserRigs(userId, who) {
+      const grid = document.getElementById('meshes-grid');
+      document.getElementById('meshes-title').textContent = 'Rigs for ' + who;
+      grid.innerHTML = '<div style="color:var(--text-2);">Loading…</div>';
+      document.getElementById('meshes-overlay').style.display = 'flex';
+      _adminAllMeshes = [];
+      _adminMeshPageSize = ADMIN_MESH_PAGE_SIZE;
+      _indexAdminUserListings([]);
+      try {
+        const [r, listings] = await Promise.all([
+          fetch(`/api/admin/users/${encodeURIComponent(userId)}/rigs`, { credentials: 'include' }),
+          _fetchAdminUserListings(userId),
+        ]);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        // Normalise rig records into the mesh-card shape the existing grid
+        // expects: { id, mesh_url, project_name, asset_type, created_at }.
+        _adminAllMeshes = (data.rigs || []).map((r) => ({
+          id: r.id,
+          mesh_url: r.mesh_url,
+          project_name: r.project_name,
+          asset_type: 'rig',
+          created_at: r.created_at,
+          options: { _rig: true, key: r.key, size: r.size },
+        }));
+        _indexAdminUserListings(listings);
+        if (!_adminAllMeshes.length) {
+          grid.innerHTML = '<div style="color:var(--text-2);">No rigs yet.</div>';
           return;
         }
         _renderAdminMeshGrid();

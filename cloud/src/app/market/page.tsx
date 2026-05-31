@@ -48,7 +48,7 @@ interface Listing {
   price_cents: number;
   currency: string;
   licence: string;
-  asset_kind?: 'mesh' | 'image';
+  asset_kind?: 'mesh' | 'image' | 'rig';
   asset_type: string | null;
   asset_url?: string;
   mesh_url: string;
@@ -102,7 +102,7 @@ function saveCart(ids: string[]) {
 
 interface MineItem {
   listing_id: string;
-  kind: 'mesh' | 'image';
+  kind: 'mesh' | 'image' | 'rig';
   job_id: string | null;
   asset_url: string;
   mesh_url: string;
@@ -214,7 +214,7 @@ function MarketPageInner() {
   const [filtered, setFiltered] = useState<Listing[]>([]);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<'all' | 'free' | 'paid' | 'owned' | 'mine'>('all');
-  const [kindFilter, setKindFilter] = useState<'all' | 'mesh' | 'image'>('all');
+  const [kindFilter, setKindFilter] = useState<'all' | 'mesh' | 'image' | 'rig'>('all');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Listing | null>(null);
   const [cart, setCart] = useState<string[]>([]);
@@ -326,6 +326,7 @@ function MarketPageInner() {
       const kind = l.asset_kind || (l.mesh_url ? 'mesh' : 'image');
       if (kindFilter === 'mesh' && kind !== 'mesh') return false;
       if (kindFilter === 'image' && kind !== 'image') return false;
+      if (kindFilter === 'rig' && kind !== 'rig') return false;
       if (q && !`${l.title} ${l.description} ${l.author_display}`.toLowerCase().includes(q)) return false;
       return true;
     }));
@@ -416,13 +417,14 @@ function MarketPageInner() {
     const eff = k || 'mesh';
     if (kindFilter === 'mesh' && eff !== 'mesh') return false;
     if (kindFilter === 'image' && eff !== 'image') return false;
+    if (kindFilter === 'rig' && eff !== 'rig') return false;
     return true;
   };
   const displayItems: Listing[] = tab === 'owned'
     ? owned.filter((o) => kindMatch(o.asset_kind)).map((o) => ({
         id: o.id, title: o.title, description: o.description,
         price_cents: o.price_cents, currency: o.currency, licence: o.licence,
-        asset_kind: (o.asset_kind as 'mesh' | 'image' | undefined) || 'mesh',
+        asset_kind: (o.asset_kind as 'mesh' | 'image' | 'rig' | undefined) || 'mesh',
         asset_type: null,
         asset_url: o.asset_url, mesh_url: o.mesh_url,
         author_display: o.author_display, user_id: o.user_id,
@@ -596,7 +598,7 @@ function MarketPageInner() {
       )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        {(['all', 'mesh', 'image'] as const).map((k) => (
+        {(['all', 'mesh', 'image', 'rig'] as const).map((k) => (
           <button
             key={k}
             onClick={() => setKindFilter(k)}
@@ -605,7 +607,8 @@ function MarketPageInner() {
           >
             {k === 'all' ? '🎴 All kinds'
               : k === 'mesh' ? '🧊 3D Meshes'
-              : '🖼 2D Images'}
+              : k === 'image' ? '🖼 2D Images'
+              : '🦴 Rigs'}
           </button>
         ))}
       </div>
