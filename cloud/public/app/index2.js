@@ -1687,6 +1687,9 @@ function populateWorkspace(p) {
     setStepStatus(3, 'done');
     showStep3Preview(p.rigs[0]);
   }
+  // Enable / disable the 4 rig tool buttons (Export to Unreal, Re-skin
+  // only, Landmarks, Test animation) based on whether a rig exists.
+  _updateRigToolButtons();
   // Auto-populate the source-mesh preview in the Rig Create new section.
   // Force-open the Rig Create new stage briefly so the canvas gets a real
   // size before three.js tries to fit the camera. We snapshot BOTH the
@@ -12509,6 +12512,32 @@ function renderRigVersions(p) {
 }
 
 // ----- Rig edit tools -----
+// Toggle the 4 EDIT SELECTED rig tool buttons based on whether a rig
+// is selectable. Each button has class="rig-tool-btn" so we can flip
+// the whole set in one query. Without this, all 4 buttons sit disabled
+// in markup forever and the user can never click them, even after a
+// successful rig generation.
+function _updateRigToolButtons() {
+  const hasRig = !!(state.currentProject?.rigs?.length);
+  document.querySelectorAll('.rig-tool-btn').forEach((btn) => {
+    btn.disabled = !hasRig;
+    btn.style.opacity = hasRig ? '' : '0.5';
+    btn.style.cursor = hasRig ? '' : 'not-allowed';
+    btn.title = hasRig ? '' : 'Generate a rig first';
+  });
+  // Test animation needs an in-viewer mixer + clips loaded — separate gate.
+  const testBtn = document.getElementById('ws-rig-test-btn');
+  if (testBtn && hasRig) {
+    const haveClips = !!(window.rigVwMixer && window.rigVwClips && window.rigVwClips.length > 0);
+    if (!haveClips) {
+      testBtn.title = 'Loading rig animations…';
+    } else {
+      testBtn.title = `Play ${window.rigVwClips.length} embedded clip(s)`;
+    }
+  }
+}
+window._updateRigToolButtons = _updateRigToolButtons;
+
 function getCurrentRigObj() {
   const p = state.currentProject;
   if (!p || p.rigs.length === 0) return null;
@@ -15496,6 +15525,20 @@ if (skinSlider && skinSliderVal) {
 document.getElementById('ws-rig-reskin-btn')?.addEventListener('click', async () => {
   const r = getCurrentRigObj();
   if (!r) { showToast('No rig yet.', 'error'); return; }
+  // Cloud short-circuit: Re-skin requires the Puppeteer skinning step
+  // to be reachable as a standalone Modal endpoint, which isn't deployed
+  // yet. For now route the user back to "Generate new rig version" which
+  // re-runs the full pipeline and produces a new rig variant — they get
+  // a different skinning result via a different seed rather than a
+  // targeted re-skin. When MODAL_PUPPETEER_RIG_URL gains a /rig-reskin
+  // endpoint this short-circuit can come out.
+  if (window.__isCloud) {
+    customError(
+      'Re-skin only is not yet wired on the cloud build. Click "Generate new rig version" to re-roll the rig — you will get a fresh skinning attempt as a side effect. (Tracking: needs a /rig-reskin endpoint on Modal.)',
+      'Re-skin (cloud)',
+    );
+    return;
+  }
   const ok = await customConfirm('Re-skin this rig with current skinning options? The rig structure stays unchanged.', 'Re-skin', 'Re-skin');
   if (!ok) return;
   const skinMethod = document.getElementById('ws-rig-skin-method')?.value || 'auto';

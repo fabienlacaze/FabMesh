@@ -1596,6 +1596,12 @@
                   asset_type: 'rig', size: 0, created: new Date().toISOString(),
                 });
               }
+              // Activate the 4 EDIT SELECTED tool buttons now that a
+              // rig exists. Without this nudge the buttons stay
+              // disabled until the next full reloadCurrentProject().
+              if (typeof window._updateRigToolButtons === 'function') {
+                try { window._updateRigToolButtons(); } catch (e) {}
+              }
             } else {
               // Project switched mid-rig — fire a dom event so anyone listening
               // (page-load resume handler, projects list) can pick it up. The
@@ -1713,6 +1719,35 @@
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
     },
+
+    // Landmarks persistence — JSON keyed by mesh slug, stored in R2 at
+    // <user_id>/landmarks/<slug>.json via the Worker. Slug derived from
+    // the mesh URL/filename (last path segment minus .glb/.gltf).
+    saveLandmarks: async ({ meshPath, meshUrl, landmarks } = {}) => {
+      const target = meshUrl || meshPath;
+      if (!target) return { ok: false, error: 'meshPath or meshUrl required' };
+      if (!landmarks || typeof landmarks !== 'object') return { ok: false, error: 'landmarks object required' };
+      try {
+        const r = await postJSON('/api/landmarks', {
+          mesh_url: target,
+          landmarks,
+          op: 'save',
+        });
+        return r?.ok ? { ok: true, success: true, count: r.count } : { ok: false, error: r?.error || 'save failed' };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    },
+    loadLandmarks: async ({ meshPath, meshUrl } = {}) => {
+      const target = meshUrl || meshPath;
+      if (!target) return { ok: false, error: 'meshPath or meshUrl required' };
+      try {
+        const r = await postJSON('/api/landmarks', {
+          mesh_url: target,
+          op: 'load',
+        });
+        if (r?.ok) return { ok: true, success: true, landmarks: r.landmarks || {} };
+        return { ok: false, landmarks: {}, error: r?.error || 'not found' };
+      } catch (e) { return { ok: false, landmarks: {}, error: String(e) }; }
+    },
   });
 
   /* ──────────────────────────────────────────────────────────────────
@@ -1734,11 +1769,11 @@
     'calibRun', 'calibLastReport', 'calibOpenReport', 'calibListReports',
     'calibDiagnose', 'calibTiered', 'calibV3', 'calibCancel',
     'calibReadLog', 'calibClearLog',
-    // UniRig + landmarks (Desktop-only for now). autoRigAI is wired
-    // above to /api/auto-rig (Puppeteer on Modal) — keep it OUT of
-    // the stubs list so the real implementation isn't overwritten.
+    // UniRig (Desktop-only for now). autoRigAI is wired above to
+    // /api/auto-rig (Puppeteer on Modal). saveLandmarks / loadLandmarks
+    // are implemented further down via /api/landmarks (R2-backed).
     'autoRig', 'listRigTemplates', 'listRigAnimations',
-    'saveLandmarks', 'loadLandmarks', 'analyzeSkeleton',
+    'analyzeSkeleton',
   ];
   const STUB_EVENTS = [
     'onMcpJobStart', 'onMcpJobEnd', 'onMcpRefresh', 'onCalibProgress',

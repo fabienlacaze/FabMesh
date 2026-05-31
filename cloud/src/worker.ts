@@ -8082,6 +8082,60 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
   return json({ meshes: data || [] });
 }
 
+/** POST /api/landmarks — JSON-only landmarks persistence keyed by mesh slug.
+ *  Body: { mesh_url, landmarks?, op: 'save' | 'load' }
+ *  Stored under R2 at `<user.id>/landmarks/<slug>.json`. Slug = the mesh
+ *  URL's basename minus extension, sanitised. Bounded to 64 KB per file
+ *  so a malicious client can't fill the bucket. */
+async function handleLandmarks(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  let body: { mesh_url?: string; landmarks?: unknown; op?: string };
+  try { body = await req.json() as typeof body; }
+  catch { return err(400, 'invalid JSON body'); }
+  const meshUrl = String(body?.mesh_url || '').trim();
+  if (!meshUrl) return err(400, 'mesh_url required');
+  // Derive slug from URL basename. Strip query, then last path segment,
+  // then extension, then non-alphanumeric.
+  let slug = 'mesh';
+  try {
+    const last = (new URL(meshUrl, 'https://x.invalid')).pathname.split('/').pop() || '';
+    slug = last.replace(/\.(glb|gltf|obj|fbx|ply)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'mesh';
+  } catch {
+    slug = meshUrl.split(/[/\\]/).pop()?.replace(/\.(glb|gltf|obj|fbx|ply)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'mesh';
+  }
+  const key = `${user.id}/landmarks/${slug}.json`;
+  const op = String(body?.op || '').toLowerCase();
+  if (op === 'load') {
+    try {
+      const obj = await env.MESHES.get(key);
+      if (!obj) return json({ ok: false, error: 'no landmarks for this mesh', landmarks: {} });
+      const txt = await obj.text();
+      let parsed: unknown = {};
+      try { parsed = JSON.parse(txt); } catch { parsed = {}; }
+      return json({ ok: true, landmarks: parsed });
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : String(e), landmarks: {} });
+    }
+  }
+  if (op === 'save') {
+    const lm = body?.landmarks;
+    if (!lm || typeof lm !== 'object') return err(400, 'landmarks object required');
+    const payload = JSON.stringify(lm);
+    if (payload.length > 64 * 1024) return err(413, 'landmarks payload too large (>64 KB)');
+    try {
+      await env.MESHES.put(key, payload, {
+        httpMetadata: { contentType: 'application/json' },
+      });
+      return json({ ok: true, count: Object.keys(lm as Record<string, unknown>).length });
+    } catch (e) {
+      return err(502, 'storage write failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+  return err(400, 'op must be "save" or "load"');
+}
+
 /** GET /api/admin/users/<userId>/rigs — ADMIN ONLY. Lists every rigged
  *  GLB the user has produced by walking R2 under <userId>/rigged/. Rigs
  *  don't have a Supabase jobs row (they're side-effects of the rig spawn
@@ -8545,6 +8599,7 @@ export default {
         if (pathname === '/api/upload-mesh'           && method === 'POST') return await handleUploadMesh(req, env);
         if (pathname === '/api/auto-rig'              && method === 'POST') return await handleAutoRig(req, env);
         if (pathname === '/api/auto-rig-status'       && (method === 'GET' || method === 'POST')) return await handleAutoRigStatus(req, env);
+        if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);
