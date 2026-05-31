@@ -8587,9 +8587,13 @@ function _matInjectShader(mat) {
     shader.uniforms.uSaturation = mat.userData._matUniforms.uSaturation;
     shader.uniforms.uContrast   = mat.userData._matUniforms.uContrast;
     shader.uniforms.uHueShift   = mat.userData._matUniforms.uHueShift;
-    // Inject uniforms into the fragment shader header.
+    // Inject uniforms + RGB/HSV helpers into the fragment shader header.
+    // Hue rotation uses a real RGB→HSV→shift→RGB roundtrip so it matches
+    // PIL's behaviour on save (previous YIQ-style matrix had bad coefs).
     shader.fragmentShader =
       'uniform float uBrightness;\nuniform float uSaturation;\nuniform float uContrast;\nuniform float uHueShift;\n' +
+      'vec3 _matRgb2Hsv(vec3 c){vec4 K=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0);vec4 p=mix(vec4(c.bg,K.wz),vec4(c.gb,K.xy),step(c.b,c.g));vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r));float d=q.x-min(q.w,q.y);float e=1.0e-10;return vec3(abs(q.z+(q.w-q.y)/(6.0*d+e)),d/(q.x+e),q.x);}\n' +
+      'vec3 _matHsv2Rgb(vec3 c){vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www);return c.z*mix(K.xxx,clamp(p-K.xxx,0.0,1.0),c.y);}\n' +
       shader.fragmentShader;
     // Inject the post-process step before output_fragment include.
     // The include name varies between three.js versions; we cover both
@@ -8602,20 +8606,9 @@ function _matInjectShader(mat) {
       _matCol = mix(vec3(_matLuma), _matCol, uSaturation);
       _matCol = (_matCol - 0.5) * uContrast + 0.5;
       if (abs(uHueShift) > 0.001) {
-        float _c = cos(uHueShift);
-        float _s = sin(uHueShift);
-        mat3 _hueM = mat3(
-          0.299 + 0.701 * _c + 0.168 * _s,
-          0.587 - 0.587 * _c + 0.330 * _s,
-          0.114 - 0.114 * _c - 0.497 * _s,
-          0.299 - 0.299 * _c - 0.328 * _s,
-          0.587 + 0.413 * _c + 0.035 * _s,
-          0.114 - 0.114 * _c + 0.292 * _s,
-          0.299 - 0.300 * _c + 1.250 * _s,
-          0.587 - 0.588 * _c - 1.050 * _s,
-          0.114 + 0.886 * _c - 0.203 * _s
-        );
-        _matCol = _hueM * _matCol;
+        vec3 _hsv = _matRgb2Hsv(clamp(_matCol, 0.0, 1.0));
+        _hsv.x = fract(_hsv.x + uHueShift / 6.28318530718);
+        _matCol = _matHsv2Rgb(_hsv);
       }
       gl_FragColor.rgb = clamp(_matCol, 0.0, 1.0);
     `;

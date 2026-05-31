@@ -7452,21 +7452,36 @@ async function runMeshTool(operation, params = []) {
   try {
     const result = await API.meshTool({ operation, meshPath, imagePath: meshImagePath, params, projectName: p?.name || null });
     if (result && result.success) {
-      showToast(`${operation} done!`, 'success');
+      // fill_holes returns a verdict — drive a smarter toast and
+      // optionally suppress the new-version push when nothing was filled.
+      let toastMsg = `${operation} done!`, toastKind = 'success', suppressPush = false;
+      if (operation === 'fill_holes' && result.stats) {
+        const s = result.stats;
+        const d = s.holes_filled_delta_faces || 0;
+        switch (s.verdict) {
+          case 'CLOSED_OK':
+            if (d > 0) toastMsg = `Filled holes: +${d} faces, mesh is watertight.`;
+            else { toastMsg = 'Mesh already watertight — no holes to fill. Dark patches are texture/back-faces; try Fix Normals or Re-Texture.'; toastKind = 'info'; suppressPush = true; }
+            break;
+          case 'OPEN_HOLES':
+            toastMsg = `Filled some holes (+${d} faces); some remain unpatched. Re-run with a higher max or run Fix Normals first.`; break;
+          case 'WINDING_INCONSISTENT':
+            toastMsg = 'Winding inconsistent — run Fix Normals first, then Fill Holes again.'; toastKind = 'warning'; break;
+          case 'NONMANIFOLD_OR_DOUBLE_SKINNED':
+            toastMsg = 'Mesh is non-manifold / double-skinned — Fill Holes can\'t help. Re-mesh from source (Generate 3D).'; toastKind = 'warning'; break;
+        }
+      }
+      showToast(toastMsg, toastKind, toastKind === 'success' ? 3000 : 6000);
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
-      // populateWorkspace re-renders from p.meshes — it doesn't refetch
-      // from the server, so the new R2 URL has to be pushed into the
-      // project's mesh list explicitly before we re-render. Without
-      // this the version strip stayed frozen on the old mesh.
       const newUrl = result.newPath || result.path || result.mesh_url;
-      if (newUrl) {
+      if (newUrl && !suppressPush) {
         const filename = String(newUrl).split('/').pop() || `${operation}.glb`;
         p.meshes = p.meshes || [];
         p.meshes.unshift({ path: newUrl, filename, size: 0, mtime: Date.now() });
         p.selectedMeshPath = newUrl;
         p.previewMeshPath = newUrl;
       }
-      populateWorkspace(p);
+      if (!suppressPush) populateWorkspace(p);
     } else {
       const msg = (result && result.error) || 'unknown';
       showToast(`${operation} failed: ${msg}`, 'error', 5000);
@@ -8189,7 +8204,7 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Cap mesh holes — green outlines will be filled, grey are smaller than the min, red are bigger than the max. If nothing highlights, the dark patches are texture/back-faces, not geometry holes.',
+    subtitle: 'Cap mesh holes. Reports one of four outcomes: CLOSED_OK (watertight), OPEN_HOLES (some remain — re-run with a higher max), WINDING_INCONSISTENT (run Fix Normals first), NONMANIFOLD_OR_DOUBLE_SKINNED (re-mesh from source). Preview: green outlines will be filled, grey are smaller than min, red bigger than max.',
     needsImage: false,
     supportsClientApply: true,
     params: [
@@ -11102,9 +11117,14 @@ function _matInjectShader(mat) {
     shader.uniforms.uSaturation = mat.userData._matUniforms.uSaturation;
     shader.uniforms.uContrast   = mat.userData._matUniforms.uContrast;
     shader.uniforms.uHueShift   = mat.userData._matUniforms.uHueShift;
-    // Inject uniforms into the fragment shader header.
+    // Inject uniforms + RGB/HSV helpers into the fragment shader header.
+    // The hue rotation uses a real RGB→HSV→shift→RGB roundtrip so it
+    // matches PIL's behaviour exactly (the previous YIQ-style matrix
+    // had bad coefficients and produced wrong colours).
     shader.fragmentShader =
       'uniform float uBrightness;\nuniform float uSaturation;\nuniform float uContrast;\nuniform float uHueShift;\n' +
+      'vec3 _matRgb2Hsv(vec3 c){vec4 K=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0);vec4 p=mix(vec4(c.bg,K.wz),vec4(c.gb,K.xy),step(c.b,c.g));vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r));float d=q.x-min(q.w,q.y);float e=1.0e-10;return vec3(abs(q.z+(q.w-q.y)/(6.0*d+e)),d/(q.x+e),q.x);}\n' +
+      'vec3 _matHsv2Rgb(vec3 c){vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www);return c.z*mix(K.xxx,clamp(p-K.xxx,0.0,1.0),c.y);}\n' +
       shader.fragmentShader;
     // Inject the post-process step before output_fragment include.
     // The include name varies between three.js versions; we cover both
@@ -11116,23 +11136,11 @@ function _matInjectShader(mat) {
       float _matLuma = dot(_matCol, vec3(0.299, 0.587, 0.114));
       _matCol = mix(vec3(_matLuma), _matCol, uSaturation);
       _matCol = (_matCol - 0.5) * uContrast + 0.5;
-      // Hue rotation in YIQ-ish space — cheap and matches PIL HSV closely
-      // enough for a live preview. Matrix from standard hue-rotation form.
+      // True HSV hue rotation — same path as PIL on save so preview matches.
       if (abs(uHueShift) > 0.001) {
-        float _c = cos(uHueShift);
-        float _s = sin(uHueShift);
-        mat3 _hueM = mat3(
-          0.299 + 0.701 * _c + 0.168 * _s,
-          0.587 - 0.587 * _c + 0.330 * _s,
-          0.114 - 0.114 * _c - 0.497 * _s,
-          0.299 - 0.299 * _c - 0.328 * _s,
-          0.587 + 0.413 * _c + 0.035 * _s,
-          0.114 - 0.114 * _c + 0.292 * _s,
-          0.299 - 0.300 * _c + 1.250 * _s,
-          0.587 - 0.588 * _c - 1.050 * _s,
-          0.114 + 0.886 * _c - 0.203 * _s
-        );
-        _matCol = _hueM * _matCol;
+        vec3 _hsv = _matRgb2Hsv(clamp(_matCol, 0.0, 1.0));
+        _hsv.x = fract(_hsv.x + uHueShift / 6.28318530718);
+        _matCol = _matHsv2Rgb(_hsv);
       }
       gl_FragColor.rgb = clamp(_matCol, 0.0, 1.0);
     `;

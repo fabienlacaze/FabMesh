@@ -1837,7 +1837,7 @@
         });
         if (r?.success && (r.path || r.newPath || r.mesh_url)) {
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-          return { success: true, newPath: r.path || r.newPath || r.mesh_url };
+          return { success: true, newPath: r.path || r.newPath || r.mesh_url, stats: r.stats || null };
         }
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
