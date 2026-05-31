@@ -166,8 +166,17 @@ def main():
     # If that dir exists for the current source image, we feed the full
     # view set into TRELLIS-2's conditioning for both mesh shape and
     # texture (via get_cond([list]) + internal stages instead of run()).
+    #
+    # AUTO-DETECT IS OPT-IN: the TRELLIS-2 4B base checkpoint
+    # ('microsoft/TRELLIS.2-4B') does NOT natively support multi-image
+    # conditioning — the cross_attn layer is sized for 1 view per query,
+    # so feeding 6 views causes a dim mismatch deep in modulated.py
+    # ('tensor a (768) must match tensor b (128) at dim 3' = 6 * 128
+    # features vs 128-dim query). Gate on FABMESH_USE_EXTRA_VIEWS=1 so
+    # users who generated multi-views just for visualisation don't get
+    # surprise crashes; explicit env var to opt in.
     mv_dir = os.environ.get('FABMESH_TRELLIS2_MULTIVIEW_DIR')
-    if not mv_dir:
+    if not mv_dir and (os.environ.get('FABMESH_USE_EXTRA_VIEWS') or '').strip().lower() in ('1', 'true', 'yes'):
         # Auto-detect: <image_stem>_multiview/ next to the source image
         from PIL import Image as _PILImage
         guess = os.path.join(
@@ -175,7 +184,7 @@ def main():
             os.path.splitext(os.path.basename(image_path))[0] + '_multiview')
         if os.path.isdir(guess):
             mv_dir = guess
-            log(f'multi-view auto-detected: {mv_dir}')
+            log(f'multi-view auto-detected (FABMESH_USE_EXTRA_VIEWS=1): {mv_dir}')
     mv_images = [img]
     if mv_dir and os.path.isdir(mv_dir):
         from PIL import Image as _PILImage
@@ -214,51 +223,72 @@ def main():
     log(f'inference (pipeline_type={mode}, n_views={len(mv_images)})...')
     t_inf = time.time()
     print('LOCAL_HI3DGEN_PROGRESS: 40 sparse_struct', flush=True)
+    # Multi-view path is gated upstream (FABMESH_USE_EXTRA_VIEWS=1) but
+    # may still raise at runtime if the loaded checkpoint doesn't
+    # support multi-image cross-attention. Catch RuntimeError shape
+    # mismatches and fall back to single-view rather than killing the
+    # whole 3D generation.
+    _mv_path_failed = False
     try:
         if len(mv_images) > 1:
-            # Multi-view path: replicate pipeline.run() internals with a
-            # multi-image cond. Same code as trellis2_image_to_3d.py:540-595
-            # except `[image]` -> `mv_images`.
-            torch.manual_seed(seed)
-            cond_512 = pipeline.get_cond(mv_images, 512)
-            cond_1024 = (pipeline.get_cond(mv_images, 1024)
-                         if mode != '512' else None)
-            ss_res = {'512': 32, '1024': 64,
-                      '1024_cascade': 32, '1536_cascade': 32}[mode]
-            coords = pipeline.sample_sparse_structure(
-                cond_512, ss_res, 1, {})
-            if mode == '512':
-                shape_slat = pipeline.sample_shape_slat(
-                    cond_512,
-                    pipeline.models['shape_slat_flow_model_512'],
-                    coords, {})
-                tex_slat = pipeline.sample_tex_slat(
-                    cond_512,
-                    pipeline.models['tex_slat_flow_model_512'],
-                    shape_slat, {})
-                res = 512
-            elif mode == '1024':
-                shape_slat = pipeline.sample_shape_slat(
-                    cond_1024,
-                    pipeline.models['shape_slat_flow_model_1024'],
-                    coords, {})
-                tex_slat = pipeline.sample_tex_slat(
-                    cond_1024,
-                    pipeline.models['tex_slat_flow_model_1024'],
-                    shape_slat, {})
-                res = 1024
-            else:
-                # Cascade modes: fall back to single-image run() for now
-                # (cascade needs both sample_shape_slat_cascade which has
-                # extra constraints we'd need to thread through).
-                log(f'cascade mode not yet multi-view; falling back to single view')
-                outputs = pipeline.run(img, num_samples=1, seed=seed,
-                                       pipeline_type=mode,
-                                       preprocess_image=False)
-                shape_slat = None  # marker for the branch below
-            if shape_slat is not None:
+            try:
+                # Multi-view path: replicate pipeline.run() internals with a
+                # multi-image cond. Same code as trellis2_image_to_3d.py:540-595
+                # except `[image]` -> `mv_images`.
+                torch.manual_seed(seed)
+                cond_512 = pipeline.get_cond(mv_images, 512)
+                cond_1024 = (pipeline.get_cond(mv_images, 1024)
+                             if mode != '512' else None)
+                ss_res = {'512': 32, '1024': 64,
+                          '1024_cascade': 32, '1536_cascade': 32}[mode]
+                coords = pipeline.sample_sparse_structure(
+                    cond_512, ss_res, 1, {})
+                if mode == '512':
+                    shape_slat = pipeline.sample_shape_slat(
+                        cond_512,
+                        pipeline.models['shape_slat_flow_model_512'],
+                        coords, {})
+                    tex_slat = pipeline.sample_tex_slat(
+                        cond_512,
+                        pipeline.models['tex_slat_flow_model_512'],
+                        shape_slat, {})
+                    res = 512
+                elif mode == '1024':
+                    shape_slat = pipeline.sample_shape_slat(
+                        cond_1024,
+                        pipeline.models['shape_slat_flow_model_1024'],
+                        coords, {})
+                    tex_slat = pipeline.sample_tex_slat(
+                        cond_1024,
+                        pipeline.models['tex_slat_flow_model_1024'],
+                        shape_slat, {})
+                    res = 1024
+                else:
+                    # Cascade modes: fall back to single-image run() for now
+                    # (cascade needs both sample_shape_slat_cascade which has
+                    # extra constraints we'd need to thread through).
+                    log(f'cascade mode not yet multi-view; falling back to single view')
+                    outputs = pipeline.run(img, num_samples=1, seed=seed,
+                                           pipeline_type=mode,
+                                           preprocess_image=False)
+                    shape_slat = None  # marker for the branch below
+                if shape_slat is not None:
+                    torch.cuda.empty_cache()
+                    outputs = [pipeline.decode_latent(shape_slat, tex_slat, res)]
+            except RuntimeError as _mv_err:
+                # Multi-view shape mismatch — the TRELLIS-2 4B checkpoint's
+                # cross_attn is sized for 1 view per query. Fall back to
+                # single-image rather than killing the whole 3D gen.
+                log(f'multi-view conditioning failed ({_mv_err}); falling back to single-view')
+                _mv_path_failed = True
                 torch.cuda.empty_cache()
-                outputs = [pipeline.decode_latent(shape_slat, tex_slat, res)]
+                outputs = pipeline.run(
+                    img,
+                    num_samples=1,
+                    seed=seed,
+                    pipeline_type=mode,
+                    preprocess_image=False,
+                )
         else:
             outputs = pipeline.run(
                 img,
