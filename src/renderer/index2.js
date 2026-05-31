@@ -548,10 +548,11 @@ async function _runNsfwBackgroundScan() {
  * Home view toggle — Projects / Images / Meshes
  * --------------------------------------------------------------------- */
 function _updateHomeViewCounts() {
-  let imgN = 0, meshN = 0;
+  let imgN = 0, meshN = 0, rigN = 0;
   for (const p of state.projects || []) {
     imgN += (p.images || []).length;
     meshN += (p.meshes || []).length;
+    rigN += (p.rigs || []).length;
   }
   const projN = (state.projects || []).length;
   const set = (k, n) => {
@@ -561,6 +562,7 @@ function _updateHomeViewCounts() {
   set('projects', projN);
   set('images', imgN);
   set('meshes', meshN);
+  set('rigs', rigN);
 }
 
 let _homeView = 'projects';
@@ -575,11 +577,14 @@ function _setHomeView(view) {
   const pg = document.getElementById('projects-grid');
   const ig = document.getElementById('all-images-grid');
   const mg = document.getElementById('all-meshes-grid');
+  const rg = document.getElementById('all-rigs-grid');
   if (pg) pg.classList.toggle('hidden', view !== 'projects');
   if (ig) ig.classList.toggle('hidden', view !== 'images');
   if (mg) mg.classList.toggle('hidden', view !== 'meshes');
+  if (rg) rg.classList.toggle('hidden', view !== 'rigs');
   if (view === 'images') renderAllImagesGrid();
   else if (view === 'meshes') renderAllMeshesGrid();
+  else if (view === 'rigs') renderAllRigsGrid();
 }
 document.addEventListener('click', (e) => {
   const btn = e.target?.closest?.('.home-view-btn');
@@ -752,6 +757,47 @@ function renderAllMeshesGrid() {
       renderAllMeshesGrid();
     });
   }
+}
+
+// Desktop sibling of the cloud renderAllRigsGrid — same shape, walks the
+// per-project p.rigs[] array. Click opens the project.
+function renderAllRigsGrid() {
+  const grid = document.getElementById('all-rigs-grid');
+  if (!grid) return;
+  const items = [];
+  for (const p of state.projects || []) {
+    for (const r of (p.rigs || [])) {
+      items.push({ project: p, rig: r });
+    }
+  }
+  if (!items.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1; color:var(--text-2); text-align:center; padding:40px;">No rigs yet. Open a project, generate a mesh, then click "Generate Rig".</div>';
+    return;
+  }
+  grid.innerHTML = items.map((it) => {
+    const url = it.rig.url || it.rig.path || '';
+    const fname = String(it.rig.filename || url).split(/[\\/]/).pop();
+    return `
+      <div class="project-card" style="cursor:pointer; padding:8px;" data-project="${escapeHtml(it.project.name)}">
+        <div style="display:flex; align-items:center; gap:6px; padding:4px 4px 6px;">
+          <span style="font-size:14px;">🦴</span>
+          <span style="font-size:13px; font-weight:600;">${escapeHtml(it.project.name)}</span>
+        </div>
+        ${/^https?:/i.test(url)
+          ? `<model-viewer src="${escapeHtml(url)}" camera-controls touch-action="pan-y" shadow-intensity="1" exposure="1" style="width:100%; height:200px; background:#0a0a0e; border-radius:6px;"></model-viewer>`
+          : `<div style="height:200px; background:#0a0a0e; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:11px; border-radius:6px;">${escapeHtml(fname || '(no preview)')}</div>`}
+        <div class="project-card-meta" style="font-size:11px; padding:6px 4px 0;">${escapeHtml(fname)}</div>
+      </div>
+    `;
+  }).join('');
+  grid.querySelectorAll('[data-project]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      if (e.target.tagName === 'MODEL-VIEWER') return;
+      const name = el.dataset.project;
+      const p = (state.projects || []).find((x) => x.name === name);
+      if (p) openProject(p);
+    });
+  });
 }
 
 async function renderProjectsGrid() {

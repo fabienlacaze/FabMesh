@@ -8056,6 +8056,40 @@ async function handleAdminUserMeshes(req: Request, env: Env, userId: string): Pr
   return json({ meshes: data || [] });
 }
 
+/** GET /api/admin/users/<userId>/rigs — ADMIN ONLY. Lists every rigged
+ *  GLB the user has produced by walking R2 under <userId>/rigged/. Rigs
+ *  don't have a Supabase jobs row (they're side-effects of the rig spawn
+ *  flow), so the R2 listing is the only source of truth. */
+async function handleAdminUserRigs(req: Request, env: Env, userId: string): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+  const prefix = `${userId}/rigged/`;
+  const base = env.R2_PUBLIC_URL.replace(/\/$/, '');
+  const rigs: Array<{ id: string; key: string; mesh_url: string; size: number; created_at: string; project_name: string | null }> = [];
+  try {
+    const page = await env.MESHES.list({ prefix, limit: 200 });
+    for (const obj of page.objects) {
+      const filename = obj.key.split('/').pop() || '';
+      // Filename pattern: <baseName>_rigged_puppeteer_<timestamp>.glb
+      // The baseName is the source mesh name minus extension — use it as
+      // a best-effort project guess for the admin grid.
+      const projectGuess = filename.replace(/_rigged_.*$/i, '').replace(/^modal_/i, '');
+      rigs.push({
+        id: obj.key,
+        key: obj.key,
+        mesh_url: `${base}/${obj.key}`,
+        size: obj.size,
+        created_at: obj.uploaded?.toISOString() || new Date(0).toISOString(),
+        project_name: projectGuess || null,
+      });
+    }
+  } catch (e) {
+    return err(500, `R2 list failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ rigs });
+}
+
 /** GET /api/admin/users/<userId>/listings — ADMIN ONLY. Returns every
  *  marketplace listing (any status) owned by this user. Used by the
  *  admin Images/Meshes modals to badge cards with their marketplace
@@ -8528,6 +8562,10 @@ export default {
         // /api/admin/users/<userId>/meshes — dynamic
         const adminMeshes = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/?$/);
         if (adminMeshes && method === 'GET') return await handleAdminUserMeshes(req, env, decodeURIComponent(adminMeshes[1]));
+
+        // /api/admin/users/<userId>/rigs — dynamic, lists R2 <userId>/rigged/
+        const adminRigs = pathname.match(/^\/api\/admin\/users\/([^/]+)\/rigs\/?$/);
+        if (adminRigs && method === 'GET') return await handleAdminUserRigs(req, env, decodeURIComponent(adminRigs[1]));
 
         // /api/admin/users/<userId>/meshes/<jobId> — delete one mesh
         const adminMeshDel = pathname.match(/^\/api\/admin\/users\/([^/]+)\/meshes\/([^/]+)\/?$/);
