@@ -6473,13 +6473,19 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
     const preview = document.getElementById('ws-anim-source-preview');
     if (preview) {
       const filename = (rig.filename || rig.path || '').split(/[/\\]/).pop() || 'rig.glb';
+      const url = (typeof _toFileUrl === 'function')
+        ? _toFileUrl(rig.path)
+        : 'file:///' + (rig.path || '').replace(/\\/g, '/');
+      preview.style.position = 'relative';
+      preview.style.minHeight = '200px';
       preview.innerHTML = `
-        <div style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px; text-align:center;">
-          <span style="font-size:36px;">🦴</span>
-          <div style="font-size:13px; font-weight:600; color:var(--accent);">Rig locked in</div>
-          <div style="font-size:11px; color:var(--text-2); word-break:break-all; max-width:90%;">${filename}</div>
-          <div style="font-size:10px; color:var(--text-3); padding-top:4px;">${p.rigs.length} version${p.rigs.length > 1 ? 's' : ''} available</div>
-        </div>
+        <model-viewer src="${url}"
+                      camera-controls touch-action="pan-y"
+                      shadow-intensity="1" exposure="1"
+                      auto-rotate auto-rotate-delay="3000"
+                      style="position:absolute; inset:0; width:100%; height:100%; background:#0a0a0e; border-radius:6px;">
+        </model-viewer>
+        <div style="position:absolute; bottom:6px; left:0; right:0; text-align:center; font-size:10px; color:var(--text-2); pointer-events:none; padding:0 8px; word-break:break-all;">${filename}</div>
       `;
     }
     const genBtn = document.getElementById('ws-generate-anim');
