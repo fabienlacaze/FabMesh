@@ -1630,6 +1630,128 @@
         error: `auto-rig timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — the rig may have completed; refresh Projects to check.`,
       };
     },
+    // AnyTop animation on a rigged GLB via Modal — async spawn + poll.
+    // Mirrors autoRigAI: spawn /api/animate, poll /api/animate-status
+    // every 5s. Worker uploads the animated GLB to R2 on done; we push
+    // it into state.currentProject.animations[].
+    autoAnimAI: async ({ rigPath, rigUrl, animType, prompt, engine, onProgress } = {}) => {
+      const url = rigUrl || rigPath;
+      if (!url) return { success: false, ok: false, error: 'rigPath or rigUrl required' };
+      let jobId;
+      try {
+        const spawn = await postJSON('/api/animate', {
+          rig_url: url,
+          anim_type: animType || 'idle',
+          prompt: prompt || '',
+          engine: engine || 'anytop',
+        });
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        if (!spawn?.success || !spawn?.job_id) {
+          return { success: false, ok: false, error: spawn?.error || 'animate spawn failed' };
+        }
+        jobId = String(spawn.job_id);
+      } catch (e) {
+        return { success: false, ok: false, error: e?.message || String(e) };
+      }
+      try {
+        const pending = JSON.parse(localStorage.getItem('fabmesh_pending_anims') || '[]');
+        const projectId = window.state?.currentProject?.id || null;
+        const projectName = window.state?.currentProject?.name || null;
+        pending.push({ jobId, projectId, projectName, rigUrl: url, animType, createdAt: Date.now() });
+        localStorage.setItem('fabmesh_pending_anims', JSON.stringify(pending.slice(-10)));
+      } catch (e) {}
+      const clearPending = () => {
+        try {
+          const pending = JSON.parse(localStorage.getItem('fabmesh_pending_anims') || '[]');
+          const filtered = pending.filter(p => p.jobId !== jobId);
+          localStorage.setItem('fabmesh_pending_anims', JSON.stringify(filtered));
+        } catch (e) {}
+      };
+
+      const POLL_INTERVAL_MS = 5000;
+      const MAX_POLLS = 180;
+      const MAX_CONSECUTIVE_AUTH_ERRORS = 3;
+      const MAX_CONSECUTIVE_SERVER_ERRORS = 12;
+      const t0 = Date.now();
+      let consecutiveAuthErrors = 0;
+      let consecutiveServerErrors = 0;
+      let lastWarn = null;
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        let st;
+        try {
+          const resp = await fetch(
+            `/api/animate-status?job_id=${encodeURIComponent(jobId)}`,
+            { method: 'GET', credentials: 'same-origin' },
+          );
+          if (!resp.ok) {
+            lastWarn = `HTTP ${resp.status}`;
+            if (resp.status === 401 || resp.status === 403) {
+              consecutiveAuthErrors++;
+              if (consecutiveAuthErrors >= MAX_CONSECUTIVE_AUTH_ERRORS) {
+                clearPending();
+                return { success: false, ok: false, error: 'session expired during animate', authLost: true };
+              }
+            } else if (resp.status >= 500) {
+              consecutiveServerErrors++;
+              if (consecutiveServerErrors >= MAX_CONSECUTIVE_SERVER_ERRORS) {
+                clearPending();
+                return { success: false, ok: false, error: `Cloud backend returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} polls` };
+              }
+            }
+            if (typeof onProgress === 'function') {
+              try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+            }
+            continue;
+          }
+          consecutiveAuthErrors = 0;
+          consecutiveServerErrors = 0;
+          st = await resp.json();
+        } catch (e) {
+          lastWarn = e?.message || String(e);
+          continue;
+        }
+        if (st?.status === 'pending') {
+          if (st.warn || st.last_error) lastWarn = st.warn || st.last_error;
+          if (typeof onProgress === 'function') {
+            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+          }
+          continue;
+        }
+        if (st?.status === 'failed') {
+          clearPending();
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          return { success: false, ok: false, error: st.error || 'animate failed' };
+        }
+        if (st?.status === 'done') {
+          clearPending();
+          const animUrl = st.anim_url || st.url || st.path || null;
+          if (!animUrl) return { success: false, ok: false, error: 'animate done but no URL returned' };
+          try {
+            if (window.state?.currentProject) {
+              const p = window.state.currentProject;
+              p.animations = p.animations || [];
+              const filename = animUrl.split('/').pop() || 'anim.glb';
+              const already = p.animations.some(a => a.url === animUrl);
+              if (!already) {
+                p.animations.push({
+                  filename, url: animUrl, path: animUrl,
+                  type: st.anim_type || animType || 'clip',
+                  asset_type: 'animation', size: 0,
+                  created: new Date().toISOString(),
+                });
+              }
+            }
+          } catch (e) { console.warn('[autoAnimAI] state push failed:', e); }
+          return { success: true, ok: true, anim_url: animUrl, path: animUrl, type: st.anim_type || animType };
+        }
+      }
+      clearPending();
+      return {
+        success: false, ok: false,
+        error: `autoAnimAI timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — refresh Projects to check.`,
+      };
+    },
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.
     // Anything else returns Desktop-only (Blender etc.).
