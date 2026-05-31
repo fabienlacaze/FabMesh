@@ -1,6 +1,28 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // ----------------------------------------------------------
+// _stripFns — defense-in-depth for IPC payloads
+// ----------------------------------------------------------
+// Electron's ipcRenderer.invoke uses the structured-clone algorithm
+// which throws DataCloneError on Function values. A caller that
+// accidentally embeds a callback (onProgress, onCancel, etc.) inside
+// opts crashes the IPC with "An object could not be cloned". This
+// helper walks the object 2 levels deep and drops any function-valued
+// property before invoke. Used by IPC bridges that take arbitrary
+// caller-shaped opts (autoRigAI, etc.).
+function _stripFns(val) {
+  if (val == null || typeof val !== 'object') return val;
+  if (Array.isArray(val)) return val.map(_stripFns);
+  const out = {};
+  for (const k of Object.keys(val)) {
+    const v = val[k];
+    if (typeof v === 'function') continue; // drop
+    out[k] = (v && typeof v === 'object') ? _stripFns(v) : v;
+  }
+  return out;
+}
+
+// ----------------------------------------------------------
 // Sentry — renderer-side error capture
 // ----------------------------------------------------------
 // The main process initializes Sentry. The renderer SDK auto-attaches
@@ -152,7 +174,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
   exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
   autoRig: (opts) => ipcRenderer.invoke('auto-rig', opts),
-  autoRigAI: (opts) => ipcRenderer.invoke('auto-rig-ai', opts),
+  autoRigAI: (opts) => ipcRenderer.invoke('auto-rig-ai', _stripFns(opts)),
   readBonesJson: (name) => ipcRenderer.invoke('read-bones-json', name),
   listRigTemplates: () => ipcRenderer.invoke('list-rig-templates'),
   listRigAnimations: (opts) => ipcRenderer.invoke('list-rig-animations', opts),

@@ -10132,27 +10132,19 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
       const skeleton = state.currentProject?.rigTarget
         || document.getElementById('ws-rig-skeleton')?.value
         || 'orc_m1';
-      // Wire onProgress so the bar can rise past the synthetic min(90,...) cap
-      // on long local UniRig runs. If the local bridge never fires the callback
-      // the lambda is a no-op — harmless. expectedMs stays at the local budget,
-      // NOT cloud's 240000.
+      // NOTE: do NOT pass onProgress here on desktop. API.autoRigAI is
+      // exposed through Electron preload as a thin wrapper around
+      // ipcRenderer.invoke('auto-rig-ai', opts), and structured clone
+      // refuses functions -> "An object could not be cloned" crash.
+      // Desktop progress already arrives via the LOCAL_*_PROGRESS bridge
+      // listener (Python bridge prints, main.js webContents.send, the
+      // global onAI3DProgress listener bumps job.progress). The cloud
+      // path keeps its own onProgress because it stays in-process (no
+      // IPC crossing).
       const r = await API.autoRigAI({
         meshPath: meshPathToUse,
         engine: rigEngine,
         skeleton,
-        onProgress: ({ polls, elapsedMs, lastWarn }) => {
-          const j = state.jobs.find(x => x.id === job.id);
-          if (!j || j.status !== 'running') return;
-          j.bridgeReporting = true; // stops the synthetic min(90,...) cap
-          const overTime = Math.max(0, elapsedMs - expectedMs);
-          const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
-          if (target > (j.progress || 0)) j.progress = target;
-          j.subtitle = (elapsedMs > expectedMs)
-            ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s`
-            : `Polling local rig bridge (${polls} polls)`;
-          if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
-          renderJobs();
-        },
       });
       if (r?.success) {
         completeJob(job.id, true);
