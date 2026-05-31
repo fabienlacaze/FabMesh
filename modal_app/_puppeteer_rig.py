@@ -73,8 +73,10 @@ image = (
     # runtime libs (no nvcc) -> flash-attn build fails with
     # "CUDA_HOME environment variable is not set".
     modal.Image.from_registry(
+        # Python 3.11: bpy has ONLY a cp311 Linux wheel (no cp310). All other
+        # deps (torch 2.7+cu128, flash-attn 2.7.4, pytorch3d 0.7.6) support cp311.
         "nvidia/cuda:12.8.1-devel-ubuntu22.04",
-        add_python="3.10",
+        add_python="3.11",
     )
     .env({"CUDA_HOME": "/usr/local/cuda"})
     .apt_install(
@@ -90,6 +92,9 @@ image = (
         # Common shared libs used by trimesh / opencv (kept here to
         # avoid surprise ImportErrors on Modal's slim base).
         "libglib2.0-0", "libsm6", "libxext6", "libxrender1",
+        # bpy headless needs libXi, libXxf86vm, libXfixes for X11 inputs
+        # even when no display is attached.
+        "libxi6", "libxxf86vm1", "libxfixes3", "libxkbcommon0",
         # wget required to pull the Michelangelo VAE checkpoint that
         # upstream's submodule pulls via LFS (not bundled with pip).
         "wget", "ca-certificates",
@@ -145,12 +150,19 @@ image = (
         "pip install --no-build-isolation "
         "'git+https://github.com/facebookresearch/pytorch3d.git@v0.7.6'",
     )
+    # ---- bpy: wget cp311 Linux wheel directly from files.pythonhosted.org ----
+    # Modal pypi mirror blocks bpy and PyPI external is firewalled from build
+    # containers. files.pythonhosted.org IS reachable. bpy 4.2.0 cp311 is the
+    # ONLY Linux wheel that exists on PyPI.
+    .run_commands(
+        "wget -q -P /tmp "
+        "https://files.pythonhosted.org/packages/0b/bc/5245f98dafa39166a4d4701d64077d281a36110e780011de5c38135089aa/"
+        "bpy-4.2.0-cp311-cp311-manylinux_2_28_x86_64.whl",
+        "pip install /tmp/bpy-4.2.0-cp311-cp311-manylinux_2_28_x86_64.whl",
+        "rm /tmp/bpy-4.2.0-cp311-cp311-manylinux_2_28_x86_64.whl",
+    )
     # ---- Puppeteer requirements + the bits the desktop venv ships ----
     .pip_install(
-        # bpy 4.2 wheel — pure Python wheel of Blender 4.2 for headless
-        # FBX → GLB conversion in the final export stage. No system
-        # Blender needed.
-        "bpy==4.2.0",
         # Core mesh / geometry utilities used by the bridge.
         "trimesh>=4.0",
         "numpy<2",   # bpy 4.2 + torch-scatter both prefer numpy 1.x
@@ -191,8 +203,9 @@ image = (
         #    flipped the default and the Puppeteer checkpoints contain
         #    non-tensor objects (PyTorch Lightning metadata) that the
         #    new default rejects.
+        # Correct path: asl_pl_module.py lives in the Michelangelo submodule
         "sed -i 's/torch.load(\\(.*\\.pth.*\\))/torch.load(\\1, weights_only=False)/g' "
-        "/Puppeteer/skeleton/models/asl_pl_module.py",
+        "/Puppeteer/skeleton/third_partys/Michelangelo/michelangelo/models/tsal/asl_pl_module.py",
         "sed -i 's/torch.load(\\(.*\\.pth.*\\))/torch.load(\\1, weights_only=False)/g' "
         "/Puppeteer/skeleton/demo.py",
         "sed -i 's/torch.load(\\(.*\\.pth.*\\))/torch.load(\\1, weights_only=False)/g' "
@@ -208,28 +221,28 @@ image = (
         # 4. NO vtk stub — Smart App Control is Windows-only.
     )
     # ---- HuggingFace checkpoints (Seed3D/Puppeteer, Apache-2.0) ----
+    # Use hf_hub_download which handles auth + retries properly.
+    # HF_TOKEN is required because Seed3D/Puppeteer is gated.
     .run_commands(
-        # Skeleton checkpoint.
-        "mkdir -p /Puppeteer/skeleton/skeleton_ckpts",
-        "wget -q -O /Puppeteer/skeleton/skeleton_ckpts/"
-        "puppeteer_skeleton_w_diverse_pose.pth "
-        "https://huggingface.co/Seed3D/Puppeteer/resolve/main/"
-        "puppeteer_skeleton_w_diverse_pose.pth",
-        # Skinning checkpoint.
-        "mkdir -p /Puppeteer/skinning/skinning_ckpts",
-        "wget -q -O /Puppeteer/skinning/skinning_ckpts/"
-        "puppeteer_skin_w_diverse_pose_depth1.pth "
-        "https://huggingface.co/Seed3D/Puppeteer/resolve/main/"
-        "puppeteer_skin_w_diverse_pose_depth1.pth",
-        # Michelangelo VAE checkpoint — required by both stages'
-        # point-cloud encoder. The submodule pulls only the source, the
-        # weights live separately on HF (maikou/Michelangelo).
-        "mkdir -p /Puppeteer/skeleton/third_partys/Michelangelo/"
-        "checkpoints/aligned_shape_latents",
-        "wget -q -O /Puppeteer/skeleton/third_partys/Michelangelo/"
-        "checkpoints/aligned_shape_latents/shapevae-256.ckpt "
-        "https://huggingface.co/Maikou/Michelangelo/resolve/main/"
-        "checkpoints/aligned_shape_latents/shapevae-256.ckpt",
+        # Skeleton + skinning + michelangelo VAE — all in one Python call.
+        "python -c \""
+        "from huggingface_hub import hf_hub_download; "
+        "import os, shutil; "
+        "tok = os.environ.get('HF_TOKEN'); "
+        # Files live under skeleton_ckpts/ + skinning_ckpts/ in the HF repo.
+        # hf_hub_download recreates that structure under local_dir, so we
+        # download to /Puppeteer/skeleton and /Puppeteer/skinning roots.
+        "hf_hub_download(repo_id='Seed3D/Puppeteer', "
+        "filename='skeleton_ckpts/puppeteer_skeleton_w_diverse_pose.pth', "
+        "local_dir='/Puppeteer/skeleton', token=tok); "
+        "hf_hub_download(repo_id='Seed3D/Puppeteer', "
+        "filename='skinning_ckpts/puppeteer_skin_w_diverse_pose_depth1.pth', "
+        "local_dir='/Puppeteer/skinning', token=tok); "
+        "hf_hub_download(repo_id='Maikou/Michelangelo', "
+        "filename='checkpoints/aligned_shape_latents/shapevae-256.ckpt', "
+        "local_dir='/Puppeteer/skeleton/third_partys/Michelangelo', token=tok); "
+        "print('all checkpoints downloaded')"
+        "\"",
         # Mirror the same VAE under skinning's tree (mirrors the
         # third_partys copy we made for the Michelangelo source).
         "mkdir -p /Puppeteer/skinning/third_partys/Michelangelo/"
@@ -255,6 +268,9 @@ image = (
         "python -c \"import torch, flash_attn, torch_scatter, bpy, "
         "trimesh; print('torch', torch.__version__, "
         "'flash_attn', flash_attn.__version__, 'bpy', bpy.app.version_string)\"",
+        secrets=[
+            modal.Secret.from_name("huggingface", required_keys=["HF_TOKEN"]),
+        ],
     )
 )
 
