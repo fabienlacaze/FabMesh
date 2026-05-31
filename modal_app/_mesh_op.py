@@ -133,6 +133,70 @@ def fill_holes(glb_bytes: bytes) -> bytes:
     return _export(scene)
 
 
+def material_adjust(glb_bytes: bytes,
+                    brightness: float = 1.0,
+                    saturation: float = 1.0,
+                    contrast: float = 1.0,
+                    emissive: float = 0.0,
+                    metallic: float = 0.0,
+                    roughness: float = 0.7) -> bytes:
+    """Re-bake the GLB's baseColorTexture with PIL ImageEnhance
+    (brightness/saturation/contrast) and overwrite the PBR factors
+    (emissiveFactor/metallicFactor/roughnessFactor). Mirrors
+    scripts/mesh_material_adjust.py exactly so cloud + desktop output
+    matches. No bpy — pure trimesh + PIL."""
+    import io
+    import trimesh
+    from PIL import Image, ImageEnhance
+
+    scene = _load_scene(glb_bytes)
+    target_mesh = None
+    for m in _meshes(scene):
+        if hasattr(m, 'faces'):
+            target_mesh = m
+            break
+    if target_mesh is None:
+        print('[mesh-op] material_adjust: no mesh found', flush=True)
+        return _export(scene)
+
+    # Pull the source texture: from the GLB's embedded baseColorTexture,
+    # or if missing, return the original GLB unchanged with PBR factors
+    # overwritten (no texture pipeline if there's nothing to enhance).
+    img = None
+    try:
+        mat = getattr(target_mesh.visual, 'material', None)
+        if mat is not None and getattr(mat, 'baseColorTexture', None) is not None:
+            img = mat.baseColorTexture.convert('RGB')
+    except Exception as e:
+        print(f'[mesh-op] material_adjust texture read failed: {e}', flush=True)
+    if img is not None:
+        try:
+            if float(brightness) != 1.0:
+                img = ImageEnhance.Brightness(img).enhance(float(brightness))
+            if float(saturation) != 1.0:
+                img = ImageEnhance.Color(img).enhance(float(saturation))
+            if float(contrast) != 1.0:
+                img = ImageEnhance.Contrast(img).enhance(float(contrast))
+        except Exception as e:
+            print(f'[mesh-op] material_adjust enhancer failed: {e}', flush=True)
+
+    try:
+        new_mat = trimesh.visual.material.PBRMaterial(
+            name='fabmesh_adjusted',
+            baseColorTexture=img,
+            emissiveTexture=img,
+            emissiveFactor=[float(emissive)] * 3,
+            metallicFactor=float(metallic),
+            roughnessFactor=float(roughness),
+        )
+        uv = getattr(target_mesh.visual, 'uv', None)
+        target_mesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=new_mat)
+    except Exception as e:
+        print(f'[mesh-op] material_adjust material rebuild failed: {e}', flush=True)
+
+    return _export(scene)
+
+
 def subdivide(glb_bytes: bytes, iterations: int = 1) -> bytes:
     """Loop subdivision — quadruples face count per iteration. Cap to
     1 iteration by default; >1 can balloon memory on dense meshes."""
@@ -226,15 +290,16 @@ def normalize_material(glb_bytes: bytes) -> bytes:
 
 # Dispatch table for the mesh_start endpoint.
 OPS = {
-    'smooth':       smooth,
-    'decimate':     decimate,
-    'center':       center,
-    'fix_normals':  fix_normals,
-    'fill_holes':   fill_holes,
-    'subdivide':    subdivide,
-    'align_texture': align_texture,
-    'material':     normalize_material,
-    'retex_swap':   retex_swap_atlas,
+    'smooth':          smooth,
+    'decimate':        decimate,
+    'center':          center,
+    'fix_normals':     fix_normals,
+    'fill_holes':      fill_holes,
+    'subdivide':       subdivide,
+    'align_texture':   align_texture,
+    'material':        normalize_material,
+    'material_adjust': material_adjust,  # 6-slider PBR tweak (mirror of scripts/mesh_material_adjust.py)
+    'retex_swap':      retex_swap_atlas,
 }
 
 
