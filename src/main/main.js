@@ -3837,7 +3837,7 @@ ipcMain.handle('generate-build-stages', async (event, { prompt, outputName, engi
 // WITHOUT any style/type decoration — this is what we persist to prompt.txt so
 // that re-opening the project rehydrates the textarea cleanly (no repeated
 // "single isolated 3D character, ..." suffixes each time).
-ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction }) => {
+ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages, projectName, engine, quality, steps, vramFraction, assetType }) => {
   try {
     // Parental control: check prompt for blocked content
     const safety = checkPromptSafety(prompt);
@@ -3879,9 +3879,11 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     const _ramLimitMB = process.env.FABMESH_RAM_LIMIT_MB || '';
     const _gpuLimit = process.env.FABMESH_GPU_LIMIT || '';
     const _tempLimit = process.env.FABMESH_TEMP_LIMIT || '';
+    const _assetType = (typeof assetType === 'string' && assetType.trim()) ? assetType.trim().toLowerCase() : 'character';
     const childEnv = {
       ...process.env,
       FABMESH_VRAM_FRACTION: String(fracVal),
+      FABMESH_ASSET_TYPE: _assetType,
       PYTORCH_CUDA_ALLOC_CONF: _allocConf,
       ..._ramLimitMB ? { FABMESH_RAM_LIMIT_MB: _ramLimitMB } : {},
       ..._gpuLimit   ? { FABMESH_GPU_LIMIT:   _gpuLimit   } : {},

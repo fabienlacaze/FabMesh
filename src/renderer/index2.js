@@ -3879,7 +3879,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
       Prompt: userPrompt,
     }, expectedMs, { projectName: p.name, assetKind: assetType });
     try {
-      const r = await API.generateImages({ prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100 });
+      const r = await API.generateImages({ prompt, userPrompt, engine, numImages: count, projectName: p.name, steps, multiView, buildStages, jobId: job.id, vramFraction: (gpuLimits?.vram || 90) / 100, assetType });
       if (r?.success) {
         // Save the creation style for each generated image so the Style
         // dropdown shows the correct style when selecting any of them.
