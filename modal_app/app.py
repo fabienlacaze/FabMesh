@@ -32,6 +32,81 @@ import time
 
 import modal
 
+
+# ---------------------------------------------------------------------------
+# DRY helpers for the ASGI routers below. Each router (predictor / backview
+# / mesh) wraps multiple POST routes that share the SAME auth pattern, body
+# parsing and PNG encoding — we factor them once here so each route body
+# stays focused on the heavy AI call.
+#
+# Why ASGI consolidation? Modal Starter caps web functions at 8. We had 8
+# `@modal.fastapi_endpoint`s (text2image + back_view + tpose + rectify +
+# image_op + sheet + mesh_start + mesh_status). One `@modal.asgi_app` is
+# ONE endpoint slot regardless of how many internal routes it serves, so
+# we collapse to 3 routers and free 5 slots for future endpoints (puppeteer
+# rig, animation, retopo…) without ever needing a plan upgrade.
+#
+# Critical: `@modal.asgi_app()` on a `@app.cls` method runs the ASGI server
+# INSIDE the same GPU container as the class — `self.pipe` is on the local
+# GPU, no `.remote()` hop needed (that would double-bill and double cold
+# start). Only `mesh_start` keeps `.spawn()` because it really crosses a
+# container boundary (CPU front-end → separate GPU MyFabmeshMesh class).
+# ---------------------------------------------------------------------------
+def _check_auth(payload: dict) -> None:
+    """401 immediately if the shared secret is missing/wrong.
+
+    Raises BEFORE any heavy work — keeps the abuse story identical to the
+    legacy `@modal.fastapi_endpoint` paths. Each route called this inline;
+    factored here so a worker secret rotation only touches one place.
+    """
+    from fastapi import HTTPException
+    expected = os.environ.get("SHARED_SECRET", "")
+    provided = (payload.get("_auth") or "").strip()
+    if not expected or provided != expected:
+        raise HTTPException(status_code=401, detail="auth")
+
+
+async def _read_json(request) -> dict:
+    """FastAPI hands us a `Request`; legacy endpoints used `payload: dict`.
+
+    We restore the legacy contract by reading + parsing the body once here.
+    A malformed body → 400 (same status FastAPI would give for a bad
+    `payload: dict` argument before).
+    """
+    from fastapi import HTTPException
+    try:
+        return await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json body")
+
+
+def _png_response(img):
+    """Encode a PIL.Image → PNG → fastapi.Response with image/png type.
+
+    Matches the tail of every legacy endpoint — `buf = io.BytesIO();
+    img.save(buf, format='PNG', …); Response(content=buf.getvalue(), …)`.
+    """
+    from fastapi.responses import Response
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=False)
+    return Response(content=buf.getvalue(), media_type="image/png")
+
+
+def _fetch_image(url: str, mode: str = "RGB"):
+    """Browser-UA GET → PIL.Image. Required because Cloudflare R2 returns
+    403 to the default urllib UA — every legacy endpoint reimplemented this
+    same `urllib.request.Request(..., headers={'User-Agent': ...})` dance.
+    """
+    import urllib.request
+    from PIL import Image
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent":
+                 "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return Image.open(io.BytesIO(r.read())).convert(mode)
+
 # ---------------------------------------------------------------------------
 # Image: CUDA 12.4 + torch 2.4 (same stack as the desktop & the Cog) so
 # diffusers loads identical weights and produces byte-identical output
@@ -415,48 +490,54 @@ class MyFabmeshPredictor:
         )
         return png
 
-    @modal.fastapi_endpoint(method="POST")
-    def text2image(self, payload: dict):
-        """HTTPS endpoint hit by the Cloudflare Worker.
-
-        Request body (JSON):
-            {
-              "prompt": "medieval orc warrior",
-              "asset_type": "character",
-              "asset_style": "realistic",
-              "seed": 424242,
-              "steps": 30
-            }
-        Auth: Authorization: Bearer <SHARED_SECRET> (env on Modal side).
-        Response: raw PNG bytes (Content-Type image/png).
+    @modal.asgi_app()
+    def router(self):
+        """ASGI router consolidating MyFabmeshPredictor routes under a
+        single Modal web-function slot. Previously `text2image` was its
+        own `@modal.fastapi_endpoint` — moving it inside an ASGI app lets
+        us add `/healthz` (and any future predictor-only routes such as
+        `/text2image-anime`) without burning more of Modal's 8-endpoint
+        cap. Lives INSIDE the GPU container, so `self.pipe` is local —
+        no `.remote()` hop.
         """
-        from fastapi import HTTPException, Request
+        from fastapi import FastAPI, HTTPException, Request
         from fastapi.responses import Response
+        api = FastAPI(title="myfabmesh-predictor")
 
-        # Auth check — the secret is injected by modal.Secret.from_name.
-        # The Worker MUST send this header; without it we 401 immediately.
-        # (FastAPI gives us the request via dependency injection — but
-        # since we're decorated with @fastapi_endpoint and have no Request
-        # param, we read the header from a Modal-provided context.)
-        # Modal's web endpoints expose the raw request via modal.current_input_id
-        # and similar; the easier path is to keep auth simple: the Worker
-        # passes the secret IN the body too.
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
+        @api.post("/text2image")
+        async def text2image(request: Request):
+            """HTTPS route hit by the Cloudflare Worker.
 
-        prompt = (payload.get("prompt") or "").strip()
-        if not prompt:
-            raise HTTPException(status_code=400, detail="prompt required")
-        png = self._generate_png(
-            prompt=prompt,
-            asset_type=payload.get("asset_type") or "character",
-            asset_style=payload.get("asset_style") or "realistic",
-            seed=int(payload.get("seed") or 0),
-            steps=int(payload.get("steps") or 30),
-        )
-        return Response(content=png, media_type="image/png")
+            Request body (JSON):
+                {
+                  "_auth": "<shared_secret>",
+                  "prompt": "medieval orc warrior",
+                  "asset_type": "character",
+                  "asset_style": "realistic",
+                  "seed": 424242,
+                  "steps": 30
+                }
+            Response: raw PNG bytes (Content-Type image/png).
+            """
+            payload = await _read_json(request)
+            _check_auth(payload)
+            prompt = (payload.get("prompt") or "").strip()
+            if not prompt:
+                raise HTTPException(status_code=400, detail="prompt required")
+            png = self._generate_png(
+                prompt=prompt,
+                asset_type=payload.get("asset_type") or "character",
+                asset_style=payload.get("asset_style") or "realistic",
+                seed=int(payload.get("seed") or 0),
+                steps=int(payload.get("steps") or 30),
+            )
+            return Response(content=png, media_type="image/png")
+
+        @api.get("/healthz")
+        async def healthz():
+            return {"ok": True, "class": "MyFabmeshPredictor"}
+
+        return api
 
 
 # ===========================================================================
@@ -582,42 +663,25 @@ class MyFabmeshBackview:
             print(f"[backview/ready] xformers skipped: {e}", flush=True)
         print(f"[backview/ready] GPU move done in {time.time() - t0:.1f}s", flush=True)
 
-    @modal.fastapi_endpoint(method="POST")
-    def back_view(self, payload: dict):
-        """HTTPS endpoint for back-view generation.
+    def _route_back_view(self, payload: dict):
+        """Back-view generation core — called from the ASGI router below.
 
-        Request body (JSON):
-            {
-              "_auth": "<shared_secret>",
-              "front_image_url": "https://.../front.png",
-              "prompt_hint": "wearing red robe",  // optional
-              "ip_scale": 0.65,                   // optional
-              "steps": 30,                        // optional
-              "seed": 424242,                     // optional
-              "n_candidates": 4                   // optional
-            }
-        Response: raw PNG bytes (the best of N candidates by outfit color).
+        Verbatim port of the legacy `back_view` `@modal.fastapi_endpoint`
+        body (auth + fetch + generate). Kept as a method (not a closure)
+        so the heavy `self.pipe` / `self.florence_*` references read
+        naturally.
         """
         from fastapi import HTTPException
         from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
         from modal_app._backview import generate
 
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
-
+        _check_auth(payload)
         front_url = (payload.get("front_image_url") or "").strip()
         if not front_url:
             raise HTTPException(status_code=400, detail="front_image_url required")
 
-        # Pull the front image (R2 public URL or any HTTPS URL).
         try:
-            with urllib.request.urlopen(front_url, timeout=30) as r:
-                front_bytes = r.read()
-            front_img = Image.open(io.BytesIO(front_bytes)).convert("RGB")
+            front_img = _fetch_image(front_url)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"front download: {e}")
 
@@ -639,9 +703,8 @@ class MyFabmeshBackview:
         print(f"[backview] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
-    @modal.fastapi_endpoint(method="POST")
-    def tpose(self, payload: dict):
-        """HTTPS endpoint for strict T-pose FRONT view generation.
+    def _route_tpose(self, payload: dict):
+        """T-pose FRONT view generation core — called from the ASGI router.
 
         Verbatim port of `scripts/generate_front_tpose.py`. Reuses the
         SAME pipeline as back_view (RealVisXL + ControlNet OpenPose +
@@ -651,29 +714,14 @@ class MyFabmeshBackview:
           - img2img (ref_image_url provided): re-pose an existing image
             in T-pose while preserving identity/outfit via IP-Adapter
 
-        Request body (JSON):
-            {
-              "_auth": "<shared_secret>",
-              "prompt": "medieval orc warrior",      // text mode
-              "ref_image_url": "https://.../img.png",// img2img mode (optional)
-              "seed": 42,                            // optional
-              "cn_scale": 1.15,                      // optional
-              "ip_scale": 0.75,                      // optional, img2img only
-              "steps": 30                            // optional
-            }
-        Response: raw PNG bytes — already rembg'd + centered on white.
+        Returns: raw PNG bytes — already rembg'd + centered on white.
         """
         from fastapi import HTTPException
         from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
         from modal_app._tpose import generate as tpose_generate
         from modal_app._nsfw import is_safe, make_blocked_placeholder
 
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
+        _check_auth(payload)
 
         prompt = (payload.get("prompt") or "").strip()
         ref_url = (payload.get("ref_image_url") or "").strip()
@@ -683,13 +731,7 @@ class MyFabmeshBackview:
         ref_img = None
         if ref_url:
             try:
-                req = urllib.request.Request(
-                    ref_url,
-                    headers={"User-Agent":
-                             "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
-                )
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    ref_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+                ref_img = _fetch_image(ref_url)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"ref download: {e}")
             # Same caption fallback as desktop generate_front_tpose.py:run_from_image
@@ -723,39 +765,21 @@ class MyFabmeshBackview:
               f"dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
-    @modal.fastapi_endpoint(method="POST")
-    def rectify(self, payload: dict):
-        """HTTPS endpoint for strict orthographic FRONT (or 3/4 ISO) view
-        rectification. Verbatim port of `scripts/generate_front_strict.py`.
+    def _route_rectify(self, payload: dict):
+        """Strict orthographic FRONT (or 3/4 ISO) view rectification.
 
-        Runs the SAME pipeline as back_view/tpose but with ControlNet
-        neutralized (cn_scale=0 + black image). Multi-seed (default 3),
-        picks the best candidate by horizontal-symmetry IoU on the rembg
-        silhouette.
+        Verbatim port of `scripts/generate_front_strict.py`. Runs the SAME
+        pipeline as back_view/tpose but with ControlNet neutralized
+        (cn_scale=0 + black image). Multi-seed (default 3), picks the
+        best candidate by horizontal-symmetry IoU on the rembg silhouette.
 
-        Request body (JSON):
-            {
-              "_auth": "<shared_secret>",
-              "prompt": "concept-art warrior",        // optional in img2img
-              "ref_image_url": "https://.../img.png", // optional, enables IPAdapter
-              "mode": "front" | "iso",                // default "front"
-              "seeds": 3,                             // optional
-              "steps": 30,                            // optional
-              "guidance": 7.0,                        // optional
-              "ip_scale": 0.7                         // optional
-            }
-        Response: raw PNG bytes (rembg + centered).
+        Returns: raw PNG bytes (rembg + centered).
         """
         from fastapi import HTTPException
         from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
         from modal_app._rectify import generate as rectify_generate
 
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
+        _check_auth(payload)
 
         prompt = (payload.get("prompt") or "").strip()
         ref_url = (payload.get("ref_image_url") or "").strip()
@@ -765,13 +789,7 @@ class MyFabmeshBackview:
         ref_img = None
         if ref_url:
             try:
-                req = urllib.request.Request(
-                    ref_url,
-                    headers={"User-Agent":
-                             "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
-                )
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    ref_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+                ref_img = _fetch_image(ref_url)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"ref download: {e}")
             if not prompt:
@@ -831,38 +849,21 @@ class MyFabmeshBackview:
         print(f'[auto-inpaint] models ready in {time.time() - t0:.1f}s', flush=True)
         return self._ai_seg_processor, self._ai_seg_model, self._ai_inpaint_pipe
 
-    @modal.fastapi_endpoint(method="POST")
-    def image_op(self, payload: dict):
-        """Unified img2img/auto-inpaint dispatcher.
+    def _route_image_op(self, payload: dict):
+        """Unified img2img/auto-inpaint dispatcher core — called from the
+        ASGI router below.
 
-        Modal Starter caps web functions at 8 per app; rather than ask
-        the user to upgrade their plan we route both AI-edit operations
-        through this single endpoint and dispatch on `op` in the body.
+        Kept as a single multi-op handler (vs. one route per op) because
+        the dispatcher already lived in the legacy `image_op` endpoint and
+        the worker calls it with `op=...` in the body — splitting would
+        require a worker-side migration we DON'T want here.
 
-        Request body:
-          { "_auth": "<secret>",
-            "op": "modify" | "auto_inpaint",
-            "image_url": "https://.../source.png",
-            ...op-specific fields... }
-
-        For op="modify":
-          prompt (required), strength (default 0.55), seed, steps
-
-        For op="auto_inpaint":
-          target_text (required), prompt (optional, empty=remove),
-          dilate (default 15)
-
-        Response: raw PNG bytes.
+        Returns: raw PNG bytes.
         """
         from fastapi import HTTPException
         from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
 
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
+        _check_auth(payload)
 
         op        = (payload.get("op") or "").strip()
         image_url = (payload.get("image_url") or "").strip()
@@ -873,13 +874,7 @@ class MyFabmeshBackview:
                 detail="op must be 'modify', 'auto_inpaint', 'mask_inpaint', 'face_fix_image' or 'upscale'")
 
         try:
-            req = urllib.request.Request(
-                image_url,
-                headers={"User-Agent":
-                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as r:
-                src_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+            src_img = _fetch_image(image_url)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"image download: {e}")
 
@@ -923,10 +918,7 @@ class MyFabmeshBackview:
             if not mask_url: raise HTTPException(status_code=400, detail="mask_url required for mask_inpaint")
             if not prompt:   raise HTTPException(status_code=400, detail="prompt required for mask_inpaint")
             try:
-                req = urllib.request.Request(mask_url, headers={
-                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    mask_img = Image.open(io.BytesIO(r.read())).convert("L")
+                mask_img = _fetch_image(mask_url, mode="L")
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"mask download: {e}")
             _, _, inpaint_pipe = self._get_auto_inpaint_models()
@@ -968,8 +960,7 @@ class MyFabmeshBackview:
         print(f"[{tag}] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
 
-    @modal.fastapi_endpoint(method="POST")
-    def sheet(self, payload: dict):
+    def _route_sheet(self, payload: dict):
         """4-view orthographic model-sheet generator (front/right/back/left).
         Verbatim port of `scripts/multiview_sheet_gen.py` — single SDXL
         pass with IPAdapter Plus on RealVisXL produces a 2x2 grid where
@@ -982,41 +973,19 @@ class MyFabmeshBackview:
 
         Returns ONLY the BACK view as PNG (cloud doesn't yet consume the
         other 3 views — multi-view texture refine is a future Wave).
-
-        Request body (JSON):
-            {
-              "_auth": "<shared_secret>",
-              "front_image_url": "https://.../front.png",
-              "prompt_hint": "off-road jeep, sand color",  // optional
-              "ip_scale": 0.6,                              // optional
-              "seed": 424242,                               // optional
-              "steps": 30                                   // optional
-            }
-        Response: raw PNG bytes — the back-view cell from the 2x2 grid.
         """
         from fastapi import HTTPException
         from fastapi.responses import Response
-        import urllib.request
-        from PIL import Image
         from modal_app._sheet import generate as sheet_generate
 
-        expected = os.environ.get("SHARED_SECRET", "")
-        provided = (payload.get("_auth") or "").strip()
-        if not expected or provided != expected:
-            raise HTTPException(status_code=401, detail="auth")
+        _check_auth(payload)
 
         front_url = (payload.get("front_image_url") or "").strip()
         if not front_url:
             raise HTTPException(status_code=400, detail="front_image_url required")
 
         try:
-            req = urllib.request.Request(
-                front_url,
-                headers={"User-Agent":
-                         "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as r:
-                front_img = Image.open(io.BytesIO(r.read())).convert("RGB")
+            front_img = _fetch_image(front_url)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"front download: {e}")
 
@@ -1038,6 +1007,49 @@ class MyFabmeshBackview:
         png = buf.getvalue()
         print(f"[sheet] DONE dt={time.time() - t0:.1f}s bytes={len(png)}", flush=True)
         return Response(content=png, media_type="image/png")
+
+    @modal.asgi_app()
+    def router(self):
+        """ASGI router consolidating the 5 back-view family routes
+        (back_view + tpose + rectify + image_op + sheet) plus /healthz
+        under a single Modal web-function slot.
+
+        Why ASGI here? Each of these routes shares the SAME heavy CPU+GPU
+        snapshot (~15 GB: RealVisXL + ControlNet + IPAdapter + Florence-2),
+        so running them in the SAME container is correct — the alternative
+        (one endpoint per route, each in its own container) would mean
+        re-paying the snapshot restore 5× when the worker bursts through
+        all of them in an editing session. Lives INSIDE the GPU container
+        so `self.pipe` is local — no `.remote()` hop needed.
+        """
+        from fastapi import FastAPI, Request
+        api = FastAPI(title="myfabmesh-backview")
+
+        @api.post("/back_view")
+        async def back_view(request: Request):
+            return self._route_back_view(await _read_json(request))
+
+        @api.post("/tpose")
+        async def tpose(request: Request):
+            return self._route_tpose(await _read_json(request))
+
+        @api.post("/rectify")
+        async def rectify(request: Request):
+            return self._route_rectify(await _read_json(request))
+
+        @api.post("/image_op")
+        async def image_op(request: Request):
+            return self._route_image_op(await _read_json(request))
+
+        @api.post("/sheet")
+        async def sheet(request: Request):
+            return self._route_sheet(await _read_json(request))
+
+        @api.get("/healthz")
+        async def healthz():
+            return {"ok": True, "class": "MyFabmeshBackview"}
+
+        return api
 
 
 # ===========================================================================
@@ -1279,145 +1291,162 @@ class MyFabmeshMesh:
         modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
     ],
 )
-@modal.fastapi_endpoint(method="POST")
-def mesh_start(payload: dict):
-    """Dual-purpose endpoint:
+@modal.asgi_app()
+def mesh_router():
+    """ASGI router consolidating the two CPU front-end mesh endpoints
+    (mesh_start + mesh_status) into ONE Modal web-function slot.
 
-    - op_type unset OR 'generate'   → async TRELLIS-2 mesh job. Spawns
-      MyFabmeshMesh, returns {job_id, status: 'queued'} in <1s; the
-      Worker polls mesh_status until the GLB is ready.
+    These run on the lightweight `image` (no GPU) for two reasons:
 
-    - op_type ∈ {smooth, decimate, center, fix_normals, fill_holes} →
-      synchronous CPU mesh edit via trimesh. Caller supplies a
-      `mesh_url` (R2 / public HTTPS) we fetch, transform, and return
-      as base64-encoded GLB. ~1s wall-clock for typical meshes, no GPU.
-      We hijack this endpoint instead of adding a new one because
-      Modal Starter caps web functions at 8 and we're already at 8.
+      1. mesh_start MUST respond < 1 s — it only enqueues work via
+         `MyFabmeshMesh().generate_to_volume.spawn(...)` (THE real
+         .remote()-style call in this file, untouched by this refactor).
+         Putting the front-end on the GPU `mesh_image` would force a
+         170 s TRELLIS-2 cold start before we could acknowledge the
+         enqueue, blowing past Modal's 150 s HTTP cap.
 
-    Body for the sync ops:
-        {
-          "_auth": "...",
-          "op_type": "smooth" | "decimate" | "center" | "fix_normals" | "fill_holes",
-          "mesh_url": "https://.../mesh.glb",
-          "params": { ... }   // op-specific (e.g. iterations, target_faces)
-        }
-    Returns: { "glb_base64": "...", "bytes": N }
+      2. mesh_status is a pure Volume.reload() + file read — no GPU
+         needed, and sharing the CPU container with mesh_start means
+         the polling loop hits a warm container after the first call.
     """
-    from fastapi import HTTPException
-    import uuid
-    expected = os.environ.get("SHARED_SECRET", "")
-    provided = (payload.get("_auth") or "").strip()
-    if not expected or provided != expected:
-        raise HTTPException(status_code=401, detail="auth")
+    from fastapi import FastAPI, HTTPException, Request
+    api = FastAPI(title="myfabmesh-mesh")
 
-    op_type = (payload.get("op_type") or "generate").strip().lower()
+    @api.post("/mesh_start")
+    async def mesh_start(request: Request):
+        """Dual-purpose route:
 
-    # ── Synchronous CPU mesh edits ──────────────────────────────────
-    if op_type != "generate":
-        from modal_app._mesh_op import OPS, run as run_mesh_op
-        if op_type not in OPS:
-            raise HTTPException(status_code=400,
-                detail=f"unknown op_type '{op_type}' (allowed: generate, {', '.join(OPS.keys())})")
-        mesh_url = (payload.get("mesh_url") or "").strip()
-        if not mesh_url:
-            raise HTTPException(status_code=400, detail="mesh_url required for op_type=" + op_type)
-        import urllib.request, base64
+        - op_type unset OR 'generate'   → async TRELLIS-2 mesh job. Spawns
+          MyFabmeshMesh, returns {job_id, status: 'queued'} in <1s; the
+          Worker polls mesh_status until the GLB is ready.
+
+        - op_type ∈ {smooth, decimate, center, fix_normals, fill_holes} →
+          synchronous CPU mesh edit via trimesh. Caller supplies a
+          `mesh_url` (R2 / public HTTPS) we fetch, transform, and return
+          as base64-encoded GLB. ~1s wall-clock for typical meshes, no GPU.
+
+        - op_type == 'cancel' → cancel a running spawn by job_id.
+
+        Body for the sync ops:
+            {
+              "_auth": "...",
+              "op_type": "smooth" | "decimate" | "center" | "fix_normals" | "fill_holes",
+              "mesh_url": "https://.../mesh.glb",
+              "params": { ... }   // op-specific (e.g. iterations, target_faces)
+            }
+        Returns: { "glb_base64": "...", "bytes": N }
+        """
+        import uuid
+        payload = await _read_json(request)
+        _check_auth(payload)
+
+        op_type = (payload.get("op_type") or "generate").strip().lower()
+
+        # ── Synchronous CPU mesh edits ──────────────────────────────
+        if op_type != "generate" and op_type != "cancel":
+            from modal_app._mesh_op import OPS, run as run_mesh_op
+            if op_type not in OPS:
+                raise HTTPException(status_code=400,
+                    detail=f"unknown op_type '{op_type}' (allowed: generate, {', '.join(OPS.keys())})")
+            mesh_url = (payload.get("mesh_url") or "").strip()
+            if not mesh_url:
+                raise HTTPException(status_code=400, detail="mesh_url required for op_type=" + op_type)
+            import urllib.request, base64
+            try:
+                req = urllib.request.Request(mesh_url, headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    src = r.read()
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"mesh download: {e}")
+            try:
+                out = run_mesh_op(op_type, src, payload.get("params") or {})
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            return {
+                "ok": True,
+                "op_type": op_type,
+                "bytes": len(out),
+                "glb_base64": base64.b64encode(out).decode("ascii"),
+            }
+
+        # ── Cancel a running spawn ─────────────────────────────────
+        if op_type == "cancel":
+            job_id = (payload.get("job_id") or "").strip()
+            if not job_id:
+                raise HTTPException(status_code=400, detail="job_id required for cancel")
+            call_id_path = f"/data/{job_id}.call_id"
+            try:
+                with open(call_id_path) as f:
+                    call_id = f.read().strip()
+            except FileNotFoundError:
+                # Job finished before we could cancel, or never spawned.
+                return {"ok": True, "cancelled": False, "reason": "no call_id on file"}
+            try:
+                modal.FunctionCall.from_id(call_id).cancel(terminate_containers=True)
+                return {"ok": True, "cancelled": True, "call_id": call_id}
+            except Exception as e:
+                # Already finished, already cancelled, or transient — surface
+                # the error but don't fail hard so the admin UI can still
+                # mark the job canceled in Supabase.
+                return {"ok": True, "cancelled": False, "error": str(e)}
+
+        # ── Async TRELLIS-2 generate (original behaviour) ─────────────
+        if not payload.get("front_image_url"):
+            raise HTTPException(status_code=400, detail="front_image_url required")
+
+        job_id = payload.get("job_id") or uuid.uuid4().hex
+        # .spawn() returns a FunctionCall; save its object_id in the shared
+        # volume so mesh_start with op_type='cancel' can find it and call
+        # .cancel(). Without this we can mark the job canceled in Supabase
+        # but the GPU keeps running to completion.
+        # NOTE: this is the ONLY true cross-container .remote()-style call
+        # in the file. It STAYS because mesh_start runs in a CPU container
+        # and MyFabmeshMesh truly is a separate GPU container.
+        call = MyFabmeshMesh().generate_to_volume.spawn(job_id, payload)
         try:
-            req = urllib.request.Request(mesh_url, headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) myfabmesh-cloud/1.0"})
-            with urllib.request.urlopen(req, timeout=60) as r:
-                src = r.read()
+            with open(f"/data/{job_id}.call_id", "w") as f:
+                f.write(call.object_id)
+            mesh_output_volume.commit()
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"mesh download: {e}")
-        try:
-            out = run_mesh_op(op_type, src, payload.get("params") or {})
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        return {
-            "ok": True,
-            "op_type": op_type,
-            "bytes": len(out),
-            "glb_base64": base64.b64encode(out).decode("ascii"),
-        }
+            print(f"[mesh_start] WARN could not persist call_id for {job_id}: {e}", flush=True)
+        return {"job_id": job_id, "status": "queued"}
 
-    # ── Cancel a running spawn ─────────────────────────────────────
-    if op_type == "cancel":
+    @api.post("/mesh_status")
+    async def mesh_status(request: Request):
+        """Worker polls this endpoint to know whether a mesh job is ready.
+        Returns base64-encoded GLB inline once the worker container has
+        written it to the Volume. No GPU needed — just a Volume read.
+        """
+        import base64
+        payload = await _read_json(request)
+        _check_auth(payload)
         job_id = (payload.get("job_id") or "").strip()
         if not job_id:
-            raise HTTPException(status_code=400, detail="job_id required for cancel")
-        call_id_path = f"/data/{job_id}.call_id"
-        try:
-            with open(call_id_path) as f:
-                call_id = f.read().strip()
-        except FileNotFoundError:
-            # Job finished before we could cancel, or never spawned.
-            return {"ok": True, "cancelled": False, "reason": "no call_id on file"}
-        try:
-            modal.FunctionCall.from_id(call_id).cancel(terminate_containers=True)
-            return {"ok": True, "cancelled": True, "call_id": call_id}
-        except Exception as e:
-            # Already finished, already cancelled, or transient — surface
-            # the error but don't fail hard so the admin UI can still
-            # mark the job canceled in Supabase.
-            return {"ok": True, "cancelled": False, "error": str(e)}
+            raise HTTPException(status_code=400, detail="job_id required")
 
-    # ── Async TRELLIS-2 generate (original behaviour) ───────────────
-    if not payload.get("front_image_url"):
-        raise HTTPException(status_code=400, detail="front_image_url required")
+        # Reload so we see the latest commits from the GPU worker container.
+        mesh_output_volume.reload()
+        out_path = f"/data/{job_id}.glb"
+        err_path = f"/data/{job_id}.err"
+        if os.path.isfile(err_path):
+            with open(err_path) as f:
+                return {"ready": False, "error": f.read()[:500]}
+        if os.path.isfile(out_path):
+            with open(out_path, "rb") as f:
+                glb = f.read()
+            return {
+                "ready": True,
+                "glb_base64": base64.b64encode(glb).decode("ascii"),
+                "bytes": len(glb),
+            }
+        return {"ready": False}
 
-    job_id = payload.get("job_id") or uuid.uuid4().hex
-    # .spawn() returns a FunctionCall; save its object_id in the shared
-    # volume so mesh_start with op_type='cancel' can find it and call
-    # .cancel(). Without this we can mark the job canceled in Supabase
-    # but the GPU keeps running to completion.
-    call = MyFabmeshMesh().generate_to_volume.spawn(job_id, payload)
-    try:
-        with open(f"/data/{job_id}.call_id", "w") as f:
-            f.write(call.object_id)
-        mesh_output_volume.commit()
-    except Exception as e:
-        print(f"[mesh_start] WARN could not persist call_id for {job_id}: {e}", flush=True)
-    return {"job_id": job_id, "status": "queued"}
+    @api.get("/healthz")
+    async def healthz():
+        return {"ok": True, "fn": "mesh_router"}
 
-
-@app.function(
-    image=image,
-    volumes={"/data": mesh_output_volume},
-    secrets=[
-        modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"]),
-    ],
-)
-@modal.fastapi_endpoint(method="POST")
-def mesh_status(payload: dict):
-    """Worker polls this endpoint to know whether a mesh job is ready.
-    Returns base64-encoded GLB inline once the worker container has
-    written it to the Volume. No GPU needed — just a Volume read."""
-    from fastapi import HTTPException
-    import base64
-    expected = os.environ.get("SHARED_SECRET", "")
-    provided = (payload.get("_auth") or "").strip()
-    if not expected or provided != expected:
-        raise HTTPException(status_code=401, detail="auth")
-    job_id = (payload.get("job_id") or "").strip()
-    if not job_id:
-        raise HTTPException(status_code=400, detail="job_id required")
-
-    # Reload so we see the latest commits from the GPU worker container.
-    mesh_output_volume.reload()
-    out_path = f"/data/{job_id}.glb"
-    err_path = f"/data/{job_id}.err"
-    if os.path.isfile(err_path):
-        with open(err_path) as f:
-            return {"ready": False, "error": f.read()[:500]}
-    if os.path.isfile(out_path):
-        with open(out_path, "rb") as f:
-            glb = f.read()
-        return {
-            "ready": True,
-            "glb_base64": base64.b64encode(glb).decode("ascii"),
-            "bytes": len(glb),
-        }
-    return {"ready": False}
+    return api
 
 
 # ===========================================================================

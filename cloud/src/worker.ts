@@ -4530,9 +4530,15 @@ async function resolveMyfabmeshCogVersion(token: string): Promise<string> {
  * Memory Snapshots, so cold start drops from ~90s → ~5s and we no
  * longer get billed the setup_time (~78% of the Replicate invoice).
  *
- * The Modal app exposes ONE HTTPS endpoint per @modal.fastapi_endpoint
- * decorator. URL pattern (set by Modal at deploy time):
- *   https://<workspace>--myfabmesh-cloud-myfabmeshpredictor-text2image.modal.run
+ * The Modal app exposes 3 ASGI routers (consolidated from 8 legacy
+ * @modal.fastapi_endpoint decorators to stay under the Modal Starter
+ * 8-Web-Function cap). URL pattern (set by Modal at deploy time):
+ *   https://<workspace>--myfabmesh-cloud-myfabmeshpredictor-router.modal.run/text2image
+ *   https://<workspace>--myfabmesh-cloud-myfabmeshbackview-router.modal.run/{back_view,tpose,rectify,image_op,sheet}
+ *   https://<workspace>--myfabmesh-cloud-mesh-router.modal.run/{mesh_start,mesh_status}
+ * Each MODAL_*_URL env var holds the FULL URL including the route path,
+ * so no worker-code change was needed to migrate — only `wrangler secret
+ * put` to point at the new router URLs.
  *
  * The Worker:
  *   1. POSTs JSON { prompt, asset_type, asset_style, seed, steps, _auth }

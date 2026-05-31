@@ -1,5 +1,34 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Modal slot consolidation — 8 fastapi_endpoints → 3 asgi_app routers)
+
+- **`modal_app/app.py`** — refactored 8 legacy `@modal.fastapi_endpoint`
+  decorators into 3 consolidated `@modal.asgi_app()` routers to free
+  Modal Starter Web-Function slots (cap = 8/app, was at the cap):
+    - `MyFabmeshPredictor.router` → `POST /text2image`
+    - `MyFabmeshBackview.router` → `POST /{back_view,tpose,rectify,image_op,sheet}`
+    - top-level `mesh_router` → `POST /{mesh_start,mesh_status}`
+    - Each router also exposes a free `GET /healthz`.
+- Added 4 DRY helpers (`_check_auth`, `_read_json`, `_png_response`,
+  `_fetch_image`) — 8 inline shared-secret checks collapsed to a single
+  central `_check_auth` call site (1455 → 1484 lines, net +29).
+- Preserved: NSFW filter, `.spawn()` for cross-container mesh GPU
+  dispatch, all `@modal.enter(snap=True/False)` lifecycle, image
+  bindings, snapshot/scaledown config. R2 upload untouched (worker-side).
+- AST parse OK on `external/TRELLIS2_win/.venv` python. 0 fastapi_endpoint
+  decorators remain; 3 asgi_app decorators present.
+- **`cloud/src/worker.ts`** — documentation-only update to the Modal
+  backend comment block (callsite at line 4528) to reflect the new 3-router
+  layout. NO CODE CHANGE: each `MODAL_*_URL` env var holds the FULL URL
+  including the route path, so the migration is operational only —
+  `wrangler secret put MODAL_TEXT2IMAGE_URL` etc. with the new ASGI URLs
+  (`…-predictor-router.modal.run/text2image`, etc.).
+- `tsc --noEmit -p cloud/tsconfig.json` passes clean.
+- **5 endpoint slots freed** for future endpoints (Puppeteer rig already
+  deployed in its own app; future animation / retopology / MV-Adapter
+  front-end can now land in the main `myfabmesh-cloud` app without
+  hitting the Starter cap or requiring plan upgrade).
+
 ## 2026-05-31 (Wave 2.4 — MVAdapter Modal endpoint deployable wrap)
 
 - **`modal_app/_mvadapter.py`** — added 517-line self-contained Modal wrap
