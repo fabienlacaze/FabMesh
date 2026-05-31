@@ -290,9 +290,12 @@ def run(rig_glb: str, out_glb: str, anim_type: str, prompt: str) -> int:
         motion_bvh = work / "idle.bvh"  # 30-frame motion
         bvh_anim = work / "anim.bvh"
 
-        # Step 1 — extract T-pose BVH from the GLB (twice, different frames)
-        _log("info", f"extracting BVH skeleton from {rig_glb} (tpos + idle)")
-        _extract_bvh_from_glb(rig_glb, str(tpos_bvh), n_frames=1)
+        # Step 1 — extract T-pose BVH from the GLB. Both files get 30
+        # frames so AnyTop's tpos_first_frame indexing doesn't crash
+        # (motion_process.py:361 does t_pos_motion[0] after statistics
+        # rejection — a 1-frame tpos becomes 0-frames after the drop).
+        _log("info", f"extracting BVH skeleton from {rig_glb} (tpos + idle, 30 frames each)")
+        _extract_bvh_from_glb(rig_glb, str(tpos_bvh), n_frames=30)
         _extract_bvh_from_glb(rig_glb, str(motion_bvh), n_frames=30)
         _progress(12, "skeleton_bvh_extracted")
 
