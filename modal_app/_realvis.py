@@ -41,6 +41,15 @@ def build_prompts(prompt: str) -> tuple[str, str]:
         "blurry, low quality, text, watermark, signature, deformed, "
         "extra limbs, bad anatomy, distorted, cropped, worst quality, "
         "flat profile, "
+        # Anti-portrait composition tokens — SDXL's default for animals/
+        # creatures/characters tends toward head shots. Without this,
+        # prompting "dragon" produces a dragon-head portrait instead of
+        # the full-body asset we need for 3D reconstruction.
+        "(close-up:1.5), (portrait:1.5), (headshot:1.5), "
+        "(head only:1.5), (head close-up:1.5), (face only:1.4), "
+        "(bust shot:1.4), (head and shoulders:1.4), "
+        "(face close-up:1.4), (head crop:1.4), (cropped to head:1.4), "
+        "(zoomed in on face:1.4), (extreme close-up:1.5), "
         "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
         "(set of two:1.5), (multiple instances:1.5), "
         "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
