@@ -1870,6 +1870,42 @@
         return { ok: false, landmarks: {}, error: r?.error || 'not found' };
       } catch (e) { return { ok: false, landmarks: {}, error: String(e) }; }
     },
+    // Material Adjust — applies 6 PBR sliders to the GLB via Modal
+    // mesh-op (trimesh + PIL, no bpy needed). Mirrors the desktop
+    // scripts/mesh_material_adjust.py output. Returns { success, filename }
+    // shape so the existing UI Save handler refreshes the workspace.
+    materialAdjust: async ({ meshPath, meshUrl,
+                            brightness = 1.0, saturation = 1.0, contrast = 1.0,
+                            emissive = 0.0, metallic = 0.0, roughness = 0.7,
+                            projectName } = {}) => {
+      const url = meshUrl || meshPath;
+      if (!url) return { success: false, ok: false, error: 'meshPath or meshUrl required' };
+      try {
+        const r = await postJSON('/api/mesh-op', {
+          meshUrl: url,
+          opType: 'material_adjust',
+          params: {
+            brightness: Number(brightness),
+            saturation: Number(saturation),
+            contrast: Number(contrast),
+            emissive: Number(emissive),
+            metallic: Number(metallic),
+            roughness: Number(roughness),
+          },
+        });
+        if (r?.success) {
+          if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+          const newPath = r.path || r.newPath || r.mesh_url || r.url;
+          // The mesh-op endpoint uploads the new GLB to R2; surface its
+          // filename so the workspace UI can append it to the meshes list.
+          const filename = (newPath || '').split('/').pop() || `${(url.split('/').pop() || 'mesh').replace(/\.glb$/i, '')}_mat_${Date.now()}.glb`;
+          return { success: true, ok: true, newPath, filename, mesh_url: newPath };
+        }
+        return { success: false, ok: false, error: r?.error || 'material_adjust failed' };
+      } catch (e) {
+        return { success: false, ok: false, error: String(e) };
+      }
+    },
   });
 
   /* ──────────────────────────────────────────────────────────────────
@@ -1886,7 +1922,9 @@
     'getControlApiToken',
     // Blender pipeline (no Blender in cloud)
     'setBlenderPath', 'runBlenderScript', 'openInBlender',
-    'materialAdjust', 'alignTexture',
+    // materialAdjust + alignTexture have REAL implementations below
+    // (Modal mesh-op trimesh+PIL). NOT stubs anymore.
+    // 'materialAdjust', 'alignTexture',
     // Calibration (Desktop diagnostics tool)
     'calibRun', 'calibLastReport', 'calibOpenReport', 'calibListReports',
     'calibDiagnose', 'calibTiered', 'calibV3', 'calibCancel',
