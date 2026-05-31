@@ -6473,22 +6473,24 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
     const preview = document.getElementById('ws-anim-source-preview');
     if (preview) {
       const filename = (rig.filename || rig.path || '').split(/[/\\]/).pop() || 'rig.glb';
-      // Desktop: rig.path is a local fs path -> use file:/// via _toFileUrl.
-      const url = (typeof _toFileUrl === 'function')
-        ? _toFileUrl(rig.path)
-        : 'file:///' + (rig.path || '').replace(/\\/g, '/');
       preview.innerHTML = `
-        <model-viewer src="${url}" camera-controls touch-action="pan-y"
-                      shadow-intensity="1" exposure="1"
-                      style="width:100%; height:180px; background:#0a0a0e; border-radius:6px;">
-        </model-viewer>
-        <div style="font-size:11px; color:var(--text-2); text-align:center; padding-top:4px;">${filename}</div>
+        <div style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px; text-align:center;">
+          <span style="font-size:36px;">🦴</span>
+          <div style="font-size:13px; font-weight:600; color:var(--accent);">Rig locked in</div>
+          <div style="font-size:11px; color:var(--text-2); word-break:break-all; max-width:90%;">${filename}</div>
+          <div style="font-size:10px; color:var(--text-3); padding-top:4px;">${p.rigs.length} version${p.rigs.length > 1 ? 's' : ''} available</div>
+        </div>
       `;
     }
     const genBtn = document.getElementById('ws-generate-anim');
     if (genBtn) {
       genBtn.disabled = false;
       genBtn.title = '';
+    }
+    const engineSel = document.getElementById('ws-anim-engine');
+    if (engineSel && engineSel.value !== 'anytop') {
+      engineSel.value = 'anytop';
+      engineSel.dispatchEvent(new Event('change'));
     }
   } catch (e) { console.warn('[anim-source] preview populate failed:', e); }
   // Activate Step 4 (Animation) card and scroll to it.

@@ -492,6 +492,73 @@ def _fbx_to_glb(fbx_path: str, glb_path: str) -> bool:
     return os.path.exists(glb_path) and os.path.getsize(glb_path) > 0
 
 
+def _retexture_rigged_glb(
+    source_glb_path: str,
+    rigged_glb_path: str,
+    out_glb_path: str,
+) -> bool:
+    """Re-attach the source GLB's PBR material + albedo texture onto the
+    rigged GLB. The Puppeteer pipeline strips materials because it goes
+    GLB → OBJ → … → FBX → GLB and OBJ doesn't carry textures.
+
+    Strategy: load both GLBs in bpy, copy the source mesh's active material
+    onto every mesh of the rigged GLB armature, then re-export. Keeps the
+    armature + skin from the rigged GLB and the materials/textures from
+    the source GLB.
+
+    On success the rigged GLB has the original albedo/PBR back. On failure
+    we keep the original untextured rigged GLB (returns False, caller
+    leaves out_glb_path untouched)."""
+    try:
+        import bpy
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        # 1. Import the source textured GLB.
+        bpy.ops.import_scene.gltf(filepath=source_glb_path)
+        src_mat = None
+        for obj in bpy.data.objects:
+            if obj.type == "MESH" and obj.data.materials:
+                src_mat = obj.data.materials[0]
+                if src_mat:
+                    break
+        if src_mat is None:
+            _log("retexture: source GLB has no material; skipping")
+            return False
+        # The material we copy must survive the next factory-reset, so
+        # copy it into a fresh datablock with a stable name.
+        src_mat_copy = src_mat.copy()
+        src_mat_copy.name = "FabMesh_RigTex"
+        # 2. Reset the scene then import the rigged GLB.
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        # Re-link the material we stashed: bpy.data.materials persists
+        # across read_factory_settings(use_empty=True) when an external
+        # reference holds it, but to be safe we re-create the material
+        # via the linked copy and append to data.materials.
+        if src_mat_copy.name not in bpy.data.materials:
+            bpy.data.materials.new(name=src_mat_copy.name)
+        kept_mat = bpy.data.materials.get(src_mat_copy.name) or src_mat_copy
+        bpy.ops.import_scene.gltf(filepath=rigged_glb_path)
+        n_assigned = 0
+        for obj in bpy.data.objects:
+            if obj.type == "MESH":
+                obj.data.materials.clear()
+                obj.data.materials.append(kept_mat)
+                n_assigned += 1
+        if n_assigned == 0:
+            _log("retexture: rigged GLB has no mesh; skipping")
+            return False
+        # 3. Re-export.
+        bpy.ops.export_scene.gltf(
+            filepath=out_glb_path,
+            export_format="GLB",
+            export_skins=True,
+            export_animations=False,
+        )
+        return os.path.exists(out_glb_path) and os.path.getsize(out_glb_path) > 0
+    except Exception as exc:
+        _log(f"retexture failed: {exc}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Core function — synchronous version called by the simple web endpoint.
 # Returns the rigged GLB bytes, raises on failure.
@@ -674,10 +741,30 @@ def _run_rig_pipeline(glb_bytes: bytes, tmp_dir: str, t_total: float) -> bytes:
     out_glb = os.path.join(tmp_dir, "rigged.glb")
     if not _fbx_to_glb(out_fbx, out_glb):
         raise RuntimeError("FBX → GLB conversion failed (both paths)")
+    _log(f"step 6 done in {time.time() - t0:.1f}s "
+         f"(glb={os.path.getsize(out_glb)} bytes)")
+
+    # Step 7 — re-attach the source GLB's materials/textures onto the
+    # rigged GLB. The Puppeteer pipeline strips textures because OBJ
+    # doesn't carry them and the FBX export doesn't bake them either.
+    # This step is best-effort: on failure we keep the untextured rig
+    # rather than crashing the whole job.
+    _log("== Step 7: re-texture rigged GLB from source ==")
+    t0 = time.time()
+    src_glb_path = os.path.join(tmp_dir, "input.glb")
+    final_glb = os.path.join(tmp_dir, "rigged_textured.glb")
+    if os.path.isfile(src_glb_path):
+        retex_ok = _retexture_rigged_glb(src_glb_path, out_glb, final_glb)
+        if retex_ok:
+            _log(f"step 7 done in {time.time() - t0:.1f}s "
+                 f"(textured glb={os.path.getsize(final_glb)} bytes)")
+            out_glb = final_glb
+        else:
+            _log("step 7 skipped (retexture failed) — keeping untextured rig")
+    else:
+        _log(f"step 7 skipped (no source GLB at {src_glb_path})")
     with open(out_glb, "rb") as f:
         out_bytes = f.read()
-    _log(f"step 6 done in {time.time() - t0:.1f}s "
-         f"(glb={len(out_bytes)} bytes)")
 
     _log(f"TOTAL dt={time.time() - t_total:.1f}s "
          f"out_bytes={len(out_bytes)}")
