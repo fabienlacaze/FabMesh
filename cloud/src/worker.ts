@@ -4077,9 +4077,10 @@ async function handleProjects(req: Request, env: Env): Promise<Response> {
       const filename = obj.key.split('/').pop() || 'mesh-op.glb';
       const parts = obj.key.split('/');
       const projectSlug = parts.length >= 4 ? parts[2] : null;
+      if (!projectSlug) continue; // legacy key with no project tag → ignore
       const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
-      const target = projectSlug ? projectBySlug.get(projectSlug) : projects[0];
-      if (!target) continue;
+      const target = projectBySlug.get(projectSlug);
+      if (!target) continue; // slug doesn't match any project
       if (!target.meshes.some((m: { url?: string }) => m.url === url)) {
         target.meshes.push({ url, name: filename });
       }
@@ -4357,13 +4358,15 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
       const filename = obj.key.split('/').pop() || 'mesh-op.glb';
       // Key layout: <uid>/mesh-op/<projectSlug>/<filename>. Legacy
       // (pre-persistence) keys are <uid>/mesh-op/<filename> with no
-      // project segment → fall back to the most recent project.
+      // project segment → SKIPPED: attaching them to "most recent
+      // project" was polluting unrelated projects with old test
+      // outputs (e.g. an orc fill_holes appearing in a dragon project).
       const parts = obj.key.split('/');
       const projectSlug = parts.length >= 4 ? parts[2] : null;
+      if (!projectSlug) continue;
       const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
-      const inheritedProject = projectSlug
-        ? (projectBySlug.get(projectSlug) ?? meshes[0]?.projectName ?? null)
-        : (meshes[0]?.projectName ?? null);
+      const inheritedProject = projectBySlug.get(projectSlug);
+      if (!inheritedProject) continue; // slug doesn't match any project
       // Detect op type from filename for the asset_type field. Defaults
       // to 'mesh' so the renderer treats it as a regular mesh version.
       let assetType = 'mesh';
