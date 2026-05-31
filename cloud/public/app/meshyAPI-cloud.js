@@ -1755,7 +1755,7 @@
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.
     // Anything else returns Desktop-only (Blender etc.).
-    meshTool: async ({ operation, meshPath, meshUrl, meshId, imagePath, params } = {}) => {
+    meshTool: async ({ operation, meshPath, meshUrl, meshId, imagePath, params, projectName } = {}) => {
       // 'retexture' is the desktop's quick re-texture (UV reproject via
       // Blender). Cloud has no Blender → we do a best-effort
       // baseColorTexture swap, which works when the new image was
@@ -1833,6 +1833,7 @@
       try {
         const r = await postJSON('/api/mesh-op', {
           meshUrl: url, meshId, opType: realOp, params: finalParams,
+          projectName: projectName || null,
         });
         if (r?.success && (r.path || r.newPath || r.mesh_url)) {
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
@@ -1884,6 +1885,7 @@
         const r = await postJSON('/api/mesh-op', {
           meshUrl: url,
           opType: 'material_adjust',
+          projectName: projectName || null,
           params: {
             brightness: Number(brightness),
             saturation: Number(saturation),

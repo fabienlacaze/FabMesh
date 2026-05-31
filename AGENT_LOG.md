@@ -1,5 +1,43 @@
 # FabMesh Agent Log
 
+## 2026-06-01 (Cloud — mesh-op outputs now survive page reload)
+
+`Material Adjust` (and any future mesh-op output) survived only inside
+the JS session: R2 had the GLB but `/api/projects` + `/api/meshes`
+weren't listing the `mesh-op/` prefix, so a refresh wiped the new
+version. Fixed by tagging mesh-op uploads with the project slug and
+extending both list endpoints.
+
+**Worker — upload-side** `cloud/src/worker.ts`
+- `handleMeshOp` now reads `projectName` from the request body and
+  derives `projectSlug = sanitize(projectName || 'untitled')` (only
+  `[A-Za-z0-9._-]`, max 120 chars). The R2 key changes from
+  `<uid>/mesh-op/<ts>_<op>.glb` →
+  `<uid>/mesh-op/<projectSlug>/<ts>_<op>.glb`.
+
+**Worker — listing-side** `cloud/src/worker.ts`
+- `handleListMeshes` lists `<uid>/mesh-op/`, parses the slug segment
+  from each R2 key, sanitizes every known `projectName` with the same
+  rule, and attaches the file to the matching project (fallback to
+  most recent project if slug doesn't match).
+- `handleProjects` does the same when assembling `projects[*].meshes`.
+
+**Client wiring** `cloud/public/app/meshyAPI-cloud.js`,
+`cloud/public/app/index2.js`
+- `materialAdjust` + `meshTool` now accept a `projectName` arg and
+  forward it in the POST body.
+- Both callers in index2.js pass `p?.name`.
+
+Same sanitize rule on both sides means the slug round-trips cleanly.
+Legacy `mesh-op/` keys (no slug segment, written before this commit)
+still attach to the most recent project via the fallback.
+
+**Deploy** `cd cloud && npm run build && npx wrangler deploy` →
+version c95fe7d8-e699-4666-8298-56905bc71769.
+
+Desktop unchanged — its mesh-op output already lives in the local
+project folder, so the filesystem persists it.
+
 ## 2026-05-31 (Desktop SDXL parity — guidance 9.5 + repeated negatives for animal/creature)
 
 Ported cloud Modal `_realvis.py` tuning (commit `c7593ad`) to the
