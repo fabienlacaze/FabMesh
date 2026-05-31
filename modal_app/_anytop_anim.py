@@ -131,9 +131,10 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str) -> None:
     The bone hierarchy + offsets are taken from the first skin in the
     GLB; rest rotations are baked from the local TRS of each joint node.
     """
+    import numpy as np
     sys.path.insert(0, "/tmp")
-    from puppeteer_to_skeleton import _read_glb  # type: ignore
-    gltf, _json_blob, _bin_blob, _tail = _read_glb(glb_path)
+    from puppeteer_to_skeleton import _read_glb, _read_accessor  # type: ignore
+    gltf, _json_blob, bin_blob, _tail = _read_glb(glb_path)
     skins = gltf.get("skins") or []
     if not skins:
         raise RuntimeError("GLB has no skin (no skeleton to extract)")
@@ -147,30 +148,77 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str) -> None:
             if child in joint_idxs:
                 parent_by_idx[child] = parent_idx
     root = next((i for i in joint_idxs if parent_by_idx[i] == -1), joint_idxs[0])
+
+    # Compute WORLD bind positions from inverseBindMatrices.
+    # ibm = inverse(joint_to_world_bind) -> joint_to_world_bind = inverse(ibm).
+    # The translation column of that matrix is the joint's world position
+    # in the bind pose. Puppeteer GLBs don't set node.translation on joints
+    # (the rest pose lives entirely in inverseBindMatrices), so we MUST
+    # use this — otherwise every BVH OFFSET is zero and AnyTop's
+    # process_skeleton collapses the skeleton to the origin and crashes
+    # with IndexError on an empty t_pos_motion.
+    ibm_acc = skin.get("inverseBindMatrices")
+    world_by_idx = {}
+    if ibm_acc is not None:
+        ibm_flat = _read_accessor(gltf, bin_blob, ibm_acc)
+        ibm_mats = np.asarray(ibm_flat).reshape(len(joint_idxs), 4, 4)
+        # glTF stores matrices in COLUMN-major order; numpy is row-major.
+        # Transpose each 4x4 so the translation lives at mat[:3, 3].
+        ibm_mats = np.transpose(ibm_mats, (0, 2, 1))
+        for k, jidx in enumerate(joint_idxs):
+            try:
+                world_mat = np.linalg.inv(ibm_mats[k])
+                world_by_idx[jidx] = world_mat[:3, 3]
+            except Exception:
+                world_by_idx[jidx] = np.array([0.0, 0.0, 0.0])
+    # Fallback for joints with no IBM (rare): use node.translation.
+    for jidx in joint_idxs:
+        if jidx not in world_by_idx:
+            tr = nodes[jidx].get("translation") or [0.0, 0.0, 0.0]
+            world_by_idx[jidx] = np.asarray(tr, dtype=np.float32)
+
     lines = ["HIERARCHY"]
     _emit_bvh_node(
-        root, joint_idxs, parent_by_idx, name_by_idx, nodes,
+        root, joint_idxs, parent_by_idx, name_by_idx, nodes, world_by_idx,
         indent=0, lines=lines, is_root=True,
     )
+
+    # Generate 30 frames of identical T-pose. A single frame sometimes
+    # gets dropped by AnyTop's statistics-gathering preprocessing
+    # (motion_process.py expects at least a few frames to compute means
+    # and variances). 30 is cheap and safe.
+    n_frames = 30
+    n_joints = sum(1 for _ in joint_idxs)
+    n_chans_per_frame = 6 + 3 * (n_joints - 1)  # root has 6, others 3
+    zero_frame = " ".join(["0"] * n_chans_per_frame)
     lines += [
         "MOTION",
-        "Frames: 1",
+        f"Frames: {n_frames}",
         "Frame Time: 0.033333",
-        " ".join(["0"] * (3 + 3 * sum(1 for i in joint_idxs if i != -1))),
+        *[zero_frame for _ in range(n_frames)],
     ]
     with open(out_bvh, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
 
 def _emit_bvh_node(node_idx, joint_idxs, parent_by_idx, name_by_idx, nodes,
-                   indent: int, lines: list, is_root: bool) -> None:
+                   world_by_idx, indent: int, lines: list, is_root: bool) -> None:
+    import numpy as np
     pad = "  " * indent
     name = name_by_idx[node_idx]
     keyword = "ROOT" if is_root else "JOINT"
     lines.append(f"{pad}{keyword} {name}")
     lines.append(f"{pad}{{")
-    tr = nodes[node_idx].get("translation") or [0.0, 0.0, 0.0]
-    lines.append(f"{pad}  OFFSET {tr[0]} {tr[1]} {tr[2]}")
+    # OFFSET = joint_world - parent_world (parent-relative).
+    # For ROOT, OFFSET is its absolute world position (since there's no parent).
+    world = world_by_idx.get(node_idx, np.array([0.0, 0.0, 0.0]))
+    if is_root:
+        offset = world
+    else:
+        parent_idx = parent_by_idx.get(node_idx, -1)
+        parent_world = world_by_idx.get(parent_idx, np.array([0.0, 0.0, 0.0]))
+        offset = world - parent_world
+    lines.append(f"{pad}  OFFSET {float(offset[0])} {float(offset[1])} {float(offset[2])}")
     if is_root:
         lines.append(f"{pad}  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation")
     else:
@@ -180,13 +228,15 @@ def _emit_bvh_node(node_idx, joint_idxs, parent_by_idx, name_by_idx, nodes,
     has_kids = False
     for c in kids:
         _emit_bvh_node(c, joint_idxs, parent_by_idx, name_by_idx, nodes,
-                       indent + 1, lines, is_root=False)
+                       world_by_idx, indent + 1, lines, is_root=False)
         has_kids = True
     if not has_kids:
-        # End Site (required by BVH spec for leaf joints)
+        # End Site (required by BVH spec for leaf joints).
+        # Give it a small non-zero offset along the parent->joint axis
+        # so AnyTop's IK has something to work with even on leaves.
         lines.append(f"{pad}  End Site")
         lines.append(f"{pad}  {{")
-        lines.append(f"{pad}    OFFSET 0 0 0")
+        lines.append(f"{pad}    OFFSET 0 0.1 0")
         lines.append(f"{pad}  }}")
     lines.append(f"{pad}}}")
 

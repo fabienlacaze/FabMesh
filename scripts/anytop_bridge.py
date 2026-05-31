@@ -77,13 +77,11 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
     """Use the same GLB->BVH extraction as the Modal side, but importable
     from this script. We re-import from bvh_to_gltf_anim (which loads
     puppeteer_to_skeleton helpers via sys.path)."""
+    import numpy as np
     sys.path.insert(0, str(HERE))
-    # The full implementation lives in modal_app/_anytop_anim.py but
-    # we re-do a slim version here so the desktop bridge doesn't need
-    # Modal SDK installed.
-    from puppeteer_to_skeleton import _read_glb  # type: ignore
+    from puppeteer_to_skeleton import _read_glb, _read_accessor  # type: ignore
 
-    gltf, _json_blob, _bin, _tail = _read_glb(rig_glb_path)
+    gltf, _json_blob, bin_blob, _tail = _read_glb(rig_glb_path)
     skins = gltf.get("skins") or []
     if not skins:
         raise RuntimeError("GLB has no skin/skeleton")
@@ -98,6 +96,25 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
                 parent_by_idx[child] = parent_idx
     root = next((i for i in joint_idxs if parent_by_idx[i] == -1), joint_idxs[0])
 
+    # World bind positions from inverseBindMatrices (see modal_app/_anytop_anim.py
+    # for rationale — Puppeteer GLBs don't carry rest pose in node.translation).
+    ibm_acc = skin.get("inverseBindMatrices")
+    world_by_idx = {}
+    if ibm_acc is not None:
+        ibm_flat = _read_accessor(gltf, bin_blob, ibm_acc)
+        ibm_mats = np.asarray(ibm_flat).reshape(len(joint_idxs), 4, 4)
+        ibm_mats = np.transpose(ibm_mats, (0, 2, 1))  # glTF is column-major
+        for k, jidx in enumerate(joint_idxs):
+            try:
+                w = np.linalg.inv(ibm_mats[k])
+                world_by_idx[jidx] = w[:3, 3]
+            except Exception:
+                world_by_idx[jidx] = np.array([0.0, 0.0, 0.0])
+    for jidx in joint_idxs:
+        if jidx not in world_by_idx:
+            tr = nodes[jidx].get("translation") or [0.0, 0.0, 0.0]
+            world_by_idx[jidx] = np.asarray(tr, dtype=np.float32)
+
     lines = ["HIERARCHY"]
 
     def emit(node_idx: int, indent: int, is_root: bool):
@@ -106,8 +123,13 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
         kw = "ROOT" if is_root else "JOINT"
         lines.append(f"{pad}{kw} {name}")
         lines.append(f"{pad}{{")
-        tr = nodes[node_idx].get("translation") or [0.0, 0.0, 0.0]
-        lines.append(f"{pad}  OFFSET {tr[0]} {tr[1]} {tr[2]}")
+        world = world_by_idx.get(node_idx, np.array([0.0, 0.0, 0.0]))
+        if is_root:
+            offset = world
+        else:
+            parent_world = world_by_idx.get(parent_by_idx.get(node_idx, -1), np.array([0.0, 0.0, 0.0]))
+            offset = world - parent_world
+        lines.append(f"{pad}  OFFSET {float(offset[0])} {float(offset[1])} {float(offset[2])}")
         if is_root:
             lines.append(f"{pad}  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation")
         else:
@@ -118,18 +140,22 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
         if not kids:
             lines.append(f"{pad}  End Site")
             lines.append(f"{pad}  {{")
-            lines.append(f"{pad}    OFFSET 0 0 0")
+            lines.append(f"{pad}    OFFSET 0 0.1 0")
             lines.append(f"{pad}  }}")
         lines.append(f"{pad}}}")
 
     emit(root, 0, True)
-    # 1-frame motion (all zeros, T-pose)
+    # 30 frames of identical T-pose: AnyTop's preprocessing needs a few
+    # frames for statistics. A single frame sometimes gets dropped.
+    n_frames = 30
     n_joints = sum(1 for _ in joint_idxs)
+    n_chans_per_frame = 6 + 3 * (n_joints - 1)
+    zero_frame = " ".join(["0"] * n_chans_per_frame)
     lines += [
         "MOTION",
-        "Frames: 1",
+        f"Frames: {n_frames}",
         "Frame Time: 0.033333",
-        " ".join(["0"] * (3 + 3 * n_joints)),
+        *[zero_frame for _ in range(n_frames)],
     ]
     with open(bvh_out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
