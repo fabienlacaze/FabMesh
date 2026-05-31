@@ -1,5 +1,52 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Async spawn+poll rig refactor — Puppeteer rig no longer blocks the Worker)
+
+- **`modal_app/_puppeteer_rig.py`** — wrapped the existing sync
+  `rig_mesh` in async-aware error handling and added a `rig_router`
+  `@modal.asgi_app()` exposing `/rig-start`, `/rig-status`, `/healthz`.
+  - `rig_mesh(glb_bytes, job_id=None)` now mounts `/rig_data`
+    (Volume `myfabmesh-rig-output`); when `job_id` is set it persists
+    the rigged GLB to `/rig_data/<job_id>.glb` on success or writes a
+    JSON `<job_id>.err` on failure.
+  - Pipeline body extracted into `_run_rig_pipeline()` so both the
+    legacy sync `rig_mesh_endpoint` (curl test path) and the new
+    async router share the same staging logic with no copy-paste.
+  - `rig_router.rig-start` downloads the source GLB on the CPU
+    container (saves ~60 s of A10G time) and `.spawn()`s `rig_mesh`,
+    returning `{job_id, status: 'queued'}` in ~1-2 s. Persists the
+    FunctionCall id for cancel support.
+  - `rig_router.rig-status` reloads the Volume and returns either
+    `{ready: false}`, `{ready: false, error: ...}`, or
+    `{ready: true, glb_base64, bytes}`.
+- **`cloud/src/worker.ts`** — split the old blocking `handleAutoRig`
+  into two routes:
+  - `POST /api/auto-rig` (renamed contract → returns `{job_id,
+    status: 'queued'}` instead of the rigged URL). Debits credits +
+    modal-spend up front, calls Modal `rig-start`, persists the job
+    record in R2 (`_meta/rig_jobs/<job_id>.json`, no new KV
+    namespace) so the status route can refund + verify owner.
+  - `POST/GET /api/auto-rig-status` (NEW). Polls Modal `rig-status`;
+    on `'failed'` refunds credits + modal-spend; on `'done'` decodes
+    the base64 GLB, magic-byte checks, uploads to R2 under
+    `${user.id}/rigged/`, returns the public URL. Transient HTTP
+    errors return `'pending'` so the browser keeps polling without
+    burning the user's balance.
+  - Added `RIG_COST` / `ESTIMATED_USD_RIG` constants and three R2
+    job-record helpers (`putRigJobRecord`, `getRigJobRecord`,
+    `deleteRigJobRecord`).
+  - Registered the new route and added it to `MODAL_PATHS` so admin
+    Modal-kill switch still gates it.
+- **`cloud/public/app/meshyAPI-cloud.js`** — rewrote `autoRigAI` to
+  spawn + poll (5 s cadence, 10 min hard cap, optional `onProgress`
+  callback). Return contract unchanged (`{success, ok, glb_url,
+  path, error?}`) so the canvas/viewer code is untouched.
+- `MODAL_PUPPETEER_RIG_URL` semantics now: the BASE of the rig_router
+  (e.g. `https://<ws>--myfabmesh-rig-rig-router.modal.run`). Worker
+  appends `/rig-start` and `/rig-status` itself. Re-deploy Modal +
+  update the secret, no `wrangler kv namespace create` needed.
+- Type-check OK (`tsc --noEmit` exit 0). Python AST parse OK.
+
 ## 2026-05-31 (Modal slot consolidation — 8 fastapi_endpoints → 3 asgi_app routers)
 
 - **`modal_app/app.py`** — refactored 8 legacy `@modal.fastapi_endpoint`
