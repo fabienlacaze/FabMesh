@@ -33,6 +33,7 @@ from PIL import Image, ImageEnhance
 
 def adjust(in_glb, out_glb, brightness=1.2, saturation=1.0, contrast=1.0,
            emissive=0.6, metallic=0.0, roughness=0.7,
+           hue_shift=0.0,
            source_atlas=None):
     m = trimesh.load(in_glb, force='mesh', process=False)
     if isinstance(m, trimesh.Scene):
@@ -58,6 +59,13 @@ def adjust(in_glb, out_glb, brightness=1.2, saturation=1.0, contrast=1.0,
         img = ImageEnhance.Color(img).enhance(saturation)
     if contrast != 1.0:
         img = ImageEnhance.Contrast(img).enhance(contrast)
+    if hue_shift != 0.0:
+        # PIL HSV uses 0-255 for H. 360 degrees = 256 units, wrap modulo 256.
+        shift_units = int(round((hue_shift / 360.0) * 256.0)) % 256
+        hsv = img.convert('HSV')
+        h, s, v = hsv.split()
+        h = h.point(lambda px: (px + shift_units) % 256)
+        img = Image.merge('HSV', (h, s, v)).convert('RGB')
 
     # Rebuild material with the adjusted texture + PBR factors.
     material = trimesh.visual.material.PBRMaterial(
@@ -82,6 +90,7 @@ def adjust(in_glb, out_glb, brightness=1.2, saturation=1.0, contrast=1.0,
             'emissive': emissive,
             'metallic': metallic,
             'roughness': roughness,
+            'hue_shift': hue_shift,
         },
     }
 
@@ -96,6 +105,8 @@ def main():
     ap.add_argument('--emissive', type=float, default=0.6)
     ap.add_argument('--metallic', type=float, default=0.0)
     ap.add_argument('--roughness', type=float, default=0.7)
+    ap.add_argument('--hue-shift', type=float, default=0.0,
+                    help='Hue rotation in degrees (-180..+180), 0 = no change')
     ap.add_argument('--source-atlas', default=None)
     args = ap.parse_args()
     result = adjust(args.in_glb, args.out_glb,
@@ -105,6 +116,7 @@ def main():
                     emissive=args.emissive,
                     metallic=args.metallic,
                     roughness=args.roughness,
+                    hue_shift=args.hue_shift,
                     source_atlas=args.source_atlas)
     print('MATERIAL_ADJUST_RESULT: ' + json.dumps(result), flush=True)
 
