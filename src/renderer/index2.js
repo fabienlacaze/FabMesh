@@ -1572,6 +1572,9 @@ function populateWorkspace(p) {
     setStepStatus(3, 'done');
     showStep3Preview(p.rigs[0]);
   }
+  // Enable / disable the 4 rig tool buttons (Export to Unreal, Re-skin
+  // only, Landmarks, Test animation) based on whether a rig exists.
+  _updateRigToolButtons();
   // Auto-populate the source-mesh preview in the Rig Create new section.
   // Force-open the Rig Create new stage briefly so the canvas gets a real
   // size before three.js tries to fit the camera. We snapshot BOTH the
@@ -2454,7 +2457,7 @@ function createMeshViewerControls(toolbarEl, getViewer) {
     wireframe: false,
     pbr: true,
     grid: true,
-    bones: false,
+    bones: true, // on by default — users land on a rig viewer wanting to see the skeleton; toggle off if they want plain mesh
     shadows: false, // off by default — the renderer has no shadow map configured until applyShadows sets it up
     xray: false, // when true, mesh becomes semi-transparent so the rig/landmarks show through
     bg: 'dark',
@@ -3534,12 +3537,12 @@ const ASSET_TYPE_PROMPTS = {
   vehicle: 'ONE car only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second car, no twin, no rear view inset',
   weapon: 'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
   prop: 'ONE prop only, single instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
-  creature: 'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
+  creature: '3D game asset reference sheet, full body character sheet, long shot, full figure shot, wide establishing shot, distant camera, entire creature visible from head to feet to tail, body fills 60 percent of frame, ONE creature only, single instance, isolated, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot',
   environment: 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
   icon: 'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
   avion: 'ONE complete passenger aircraft only, single plane, only one instance, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI, no duplicate, no second plane, no formation',
   bateau: 'ONE complete boat only, single vessel, only one instance, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI, no duplicate, no second boat',
-  animal: 'wildlife photography of ONE animal only, single creature with ONE single tail only, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, low camera angle eye-level with the animal, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, exactly one tail, no extra tails, no multiple tails, no extra limbs, no humanoid anthropomorphism, no second animal, no duplicate, no text, no UI',
+  animal: '3D game asset reference sheet, full body character reference, long shot, full figure shot, wide establishing shot, distant camera, entire animal visible from nose to tail to feet, body fills 60 percent of frame, ONE animal only, single creature with ONE single tail only, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, exactly one tail, no extra tails, no multiple tails, no extra limbs, no humanoid anthropomorphism, no second animal, no duplicate, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot, NOT head and shoulders',
   custom: '',
 };
 
@@ -9824,6 +9827,31 @@ function renderRigVersions(p) {
 }
 
 // ----- Rig edit tools -----
+// Toggle the EDIT SELECTED rig tool buttons based on whether a rig is
+// available in the current project. Each button has class="rig-tool-btn"
+// so we can flip the whole set in one query. Without this, the buttons
+// stay at their HTML default forever and don't reflect rig presence.
+function _updateRigToolButtons() {
+  const hasRig = !!(state.currentProject?.rigs?.length);
+  document.querySelectorAll('.rig-tool-btn').forEach((btn) => {
+    btn.disabled = !hasRig;
+    btn.style.opacity = hasRig ? '' : '0.5';
+    btn.style.cursor = hasRig ? '' : 'not-allowed';
+    btn.title = hasRig ? '' : 'Generate a rig first';
+  });
+  // Test animation needs an in-viewer mixer + clips loaded — separate gate.
+  const testBtn = document.getElementById('ws-rig-test-btn');
+  if (testBtn && hasRig) {
+    const haveClips = !!(window.rigVwMixer && window.rigVwClips && window.rigVwClips.length > 0);
+    if (!haveClips) {
+      testBtn.title = 'Loading rig animations…';
+    } else {
+      testBtn.title = `Play ${window.rigVwClips.length} embedded clip(s)`;
+    }
+  }
+}
+window._updateRigToolButtons = _updateRigToolButtons;
+
 function getCurrentRigObj() {
   const p = state.currentProject;
   if (!p || p.rigs.length === 0) return null;
@@ -10032,7 +10060,28 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
       const skeleton = state.currentProject?.rigTarget
         || document.getElementById('ws-rig-skeleton')?.value
         || 'orc_m1';
-      const r = await API.autoRigAI({ meshPath: meshPathToUse, engine: rigEngine, skeleton });
+      // Wire onProgress so the bar can rise past the synthetic min(90,...) cap
+      // on long local UniRig runs. If the local bridge never fires the callback
+      // the lambda is a no-op — harmless. expectedMs stays at the local budget,
+      // NOT cloud's 240000.
+      const r = await API.autoRigAI({
+        meshPath: meshPathToUse,
+        engine: rigEngine,
+        skeleton,
+        onProgress: ({ polls, elapsedMs, lastWarn }) => {
+          const j = state.jobs.find(x => x.id === job.id);
+          if (!j || j.status !== 'running') return;
+          j.bridgeReporting = true; // stops the synthetic min(90,...) cap
+          const overTime = Math.max(0, elapsedMs - expectedMs);
+          const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
+          if (target > (j.progress || 0)) j.progress = target;
+          j.subtitle = (elapsedMs > expectedMs)
+            ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s`
+            : `Polling local rig bridge (${polls} polls)`;
+          if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
+          renderJobs();
+        },
+      });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
