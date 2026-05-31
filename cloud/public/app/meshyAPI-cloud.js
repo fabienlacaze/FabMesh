@@ -1494,7 +1494,11 @@
       const POLL_INTERVAL_MS = 5000;
       const MAX_POLLS = 180;
       const MAX_CONSECUTIVE_AUTH_ERRORS = 3;  // abort on 401/403 streak (session expired)
-      const MAX_CONSECUTIVE_SERVER_ERRORS = 6; // abort on 5xx streak (Worker truly down)
+      const MAX_CONSECUTIVE_SERVER_ERRORS = 12; // abort on 5xx streak ~1 min — tolerates
+                                                // CF secret-propagation windows after a deploy
+                                                // (a fresh deploy can take 30-60s to settle
+                                                // across all PoPs and would otherwise fire a
+                                                // misleading "backend unreachable" popup)
       const t0 = Date.now();
       let consecutiveAuthErrors = 0;
       let consecutiveServerErrors = 0;
