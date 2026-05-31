@@ -4824,7 +4824,7 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
 // Manual Tools > Material slider modal in the renderer.
 ipcMain.handle('material-adjust', async (_event, {
   meshPath, brightness, saturation, contrast,
-  emissive, metallic, roughness,
+  emissive, metallic, roughness, hue_shift,
 }) => {
   const script = path.join(__dirname, '..', '..', 'scripts', 'mesh_material_adjust.py');
   const timestamp = Date.now();
@@ -4839,6 +4839,7 @@ ipcMain.handle('material-adjust', async (_event, {
     '--emissive',   String(emissive),
     '--metallic',   String(metallic),
     '--roughness',  String(roughness),
+    '--hue-shift',  String(hue_shift ?? 0),
   ];
   return new Promise((resolve) => {
     execFile('python', args, {

@@ -1878,6 +1878,7 @@
     materialAdjust: async ({ meshPath, meshUrl,
                             brightness = 1.0, saturation = 1.0, contrast = 1.0,
                             emissive = 0.0, metallic = 0.0, roughness = 0.7,
+                            hue_shift = 0.0,
                             projectName } = {}) => {
       const url = meshUrl || meshPath;
       if (!url) return { success: false, ok: false, error: 'meshPath or meshUrl required' };
@@ -1893,6 +1894,7 @@
             emissive: Number(emissive),
             metallic: Number(metallic),
             roughness: Number(roughness),
+            hue_shift: Number(hue_shift),
           },
         });
         if (r?.success) {

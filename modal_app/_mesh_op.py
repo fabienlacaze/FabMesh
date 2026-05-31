@@ -164,12 +164,12 @@ def material_adjust(glb_bytes: bytes,
                     contrast: float = 1.0,
                     emissive: float = 0.0,
                     metallic: float = 0.0,
-                    roughness: float = 0.7) -> bytes:
+                    roughness: float = 0.7,
+                    hue_shift: float = 0.0) -> bytes:
     """Re-bake the GLB's baseColorTexture with PIL ImageEnhance
-    (brightness/saturation/contrast) and overwrite the PBR factors
-    (emissiveFactor/metallicFactor/roughnessFactor). Mirrors
-    scripts/mesh_material_adjust.py exactly so cloud + desktop output
-    matches. No bpy — pure trimesh + PIL."""
+    (brightness/saturation/contrast) + optional hue rotation, and
+    overwrite the PBR factors. hue_shift is in DEGREES (-180..+180),
+    0 = no change. Mirrors scripts/mesh_material_adjust.py."""
     import io
     import trimesh
     from PIL import Image, ImageEnhance
@@ -202,6 +202,14 @@ def material_adjust(glb_bytes: bytes,
                 img = ImageEnhance.Color(img).enhance(float(saturation))
             if float(contrast) != 1.0:
                 img = ImageEnhance.Contrast(img).enhance(float(contrast))
+            if float(hue_shift) != 0.0:
+                # PIL's HSV mode uses 0-255 for H; 360deg maps to 256
+                # (full wraparound). Add the offset modulo 256.
+                shift_units = int(round((float(hue_shift) / 360.0) * 256.0)) % 256
+                hsv = img.convert('HSV')
+                h, s, v = hsv.split()
+                h = h.point(lambda px: (px + shift_units) % 256)
+                img = Image.merge('HSV', (h, s, v)).convert('RGB')
         except Exception as e:
             print(f'[mesh-op] material_adjust enhancer failed: {e}', flush=True)
 
@@ -344,4 +352,13 @@ def run(op_type: str, glb_bytes: bytes, params: dict | None = None) -> bytes:
         return subdivide(glb_bytes, iterations=int(p.get('iterations', 1)))
     if op_type == 'retex_swap':
         return retex_swap_atlas(glb_bytes, str(p.get('image_url') or ''))
+    if op_type == 'material_adjust':
+        return material_adjust(glb_bytes,
+            brightness=float(p.get('brightness', 1.0)),
+            saturation=float(p.get('saturation', 1.0)),
+            contrast=float(p.get('contrast', 1.0)),
+            emissive=float(p.get('emissive', 0.0)),
+            metallic=float(p.get('metallic', 0.0)),
+            roughness=float(p.get('roughness', 0.7)),
+            hue_shift=float(p.get('hue_shift', 0.0)))
     return OPS[op_type](glb_bytes)

@@ -1,5 +1,54 @@
 # FabMesh Agent Log
 
+## 2026-06-01 (Material Adjust — new Tint (hue rotation) slider + dispatch fix)
+
+Added a 7th slider to Material Adjust: **Tint** (hue rotation in
+degrees, -180..+180, step 5, default 0). Pipeline mirrors the existing
+brightness/sat/contrast sliders end-to-end:
+
+- **Modal** `modal_app/_mesh_op.py`
+  - `material_adjust` gains `hue_shift` param. PIL HSV path: convert
+    RGB→HSV, point-shift H by `int(round(hue_shift/360*256)) % 256`,
+    convert back. Range 0-255 because PIL HSV uses 8-bit channels.
+  - **BUG FIX** in `run()` dispatch: `material_adjust` was falling
+    through to `OPS[op_type](glb_bytes)` which DISCARDED params. So
+    brightness/sat/contrast sliders were silently no-ops on cloud
+    (only emissive/metallic/roughness were visible because they're
+    forced to defaults `0/0/0.7` on every call). Added explicit
+    `material_adjust` branch that reads all 7 params.
+
+- **Desktop script** `scripts/mesh_material_adjust.py`
+  - Added `hue_shift` arg + `--hue-shift` CLI flag. Same PIL HSV
+    point-shift. Recorded in result JSON's `applied` block.
+
+- **Desktop IPC** `src/main/main.js`
+  - `material-adjust` handler now reads `hue_shift` from payload and
+    passes `--hue-shift` to the script.
+
+- **Live preview** `cloud/public/app/index2.js`, `src/renderer/index2.js`
+  - Three.js shader injection extended with `uHueShift` uniform
+    (radians). Hue rotation matrix in YIQ-ish basis (standard form):
+    cheap GPU op, matches PIL output closely enough for preview.
+  - Skipped when `abs(uHueShift) < 0.001` to keep the no-tint case
+    free of matrix multiplies.
+
+- **HTML** `cloud/public/app/index.html`, `src/renderer/index2.html`
+  - New slider row `mat-hue_shift` (`min=-180 max=180 step=5 value=0`),
+    label "Tint (hue °)" with int + ° formatter.
+
+- **MAT_DEFAULTS + _matSetSliderLabel + _matReadParams + _matBindSlider**
+  - All extended with `hue_shift` on both cloud and desktop. Label
+    formatter conditional: `°` suffix for hue_shift, 2-decimal for the
+    others.
+
+- **meshyAPI-cloud.js** `materialAdjust` — forwards `hue_shift` in the
+  POST body.
+
+Deploys:
+- Modal: `myfabmesh-cloud` (PYTHONIOENCODING=utf-8 to avoid the cp1252
+  charmap error on the Modal CLI's `✓` glyph in the deploy summary).
+- Cloud worker: `96ba562b-bbc4-42ed-bb8c-5fb500adde80`.
+
 ## 2026-06-01 (Cloud — mesh-op outputs now survive page reload)
 
 `Material Adjust` (and any future mesh-op output) survived only inside

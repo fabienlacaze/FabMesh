@@ -8453,11 +8453,14 @@ document.getElementById('ws-mesh-paint-emissive-btn')?.addEventListener('click',
 const MAT_DEFAULTS = {
   brightness: 1.0, saturation: 1.0, contrast: 1.0,
   emissive: 0.0,   metallic: 0.0,    roughness: 0.7,
+  hue_shift: 0,
 };
 
 function _matSetSliderLabel(id, value) {
   const el = document.getElementById(`mat-${id}-val`);
-  if (el) el.textContent = Number(value).toFixed(2);
+  if (!el) return;
+  if (id === 'hue_shift') el.textContent = `${Math.round(Number(value))}°`;
+  else el.textContent = Number(value).toFixed(2);
 }
 
 function _matBindSlider(id) {
@@ -8478,6 +8481,7 @@ function _matReadParams() {
     emissive:   parseFloat(document.getElementById('mat-emissive').value),
     metallic:   parseFloat(document.getElementById('mat-metallic').value),
     roughness:  parseFloat(document.getElementById('mat-roughness').value),
+    hue_shift:  parseFloat(document.getElementById('mat-hue_shift')?.value ?? 0),
   };
 }
 
@@ -8574,6 +8578,7 @@ function _matInjectShader(mat) {
     uBrightness: { value: 1.2 },
     uSaturation: { value: 1.0 },
     uContrast:   { value: 1.0 },
+    uHueShift:   { value: 0.0 }, // radians
   };
   const prevOBC = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
@@ -8581,9 +8586,10 @@ function _matInjectShader(mat) {
     shader.uniforms.uBrightness = mat.userData._matUniforms.uBrightness;
     shader.uniforms.uSaturation = mat.userData._matUniforms.uSaturation;
     shader.uniforms.uContrast   = mat.userData._matUniforms.uContrast;
+    shader.uniforms.uHueShift   = mat.userData._matUniforms.uHueShift;
     // Inject uniforms into the fragment shader header.
     shader.fragmentShader =
-      'uniform float uBrightness;\nuniform float uSaturation;\nuniform float uContrast;\n' +
+      'uniform float uBrightness;\nuniform float uSaturation;\nuniform float uContrast;\nuniform float uHueShift;\n' +
       shader.fragmentShader;
     // Inject the post-process step before output_fragment include.
     // The include name varies between three.js versions; we cover both
@@ -8595,6 +8601,22 @@ function _matInjectShader(mat) {
       float _matLuma = dot(_matCol, vec3(0.299, 0.587, 0.114));
       _matCol = mix(vec3(_matLuma), _matCol, uSaturation);
       _matCol = (_matCol - 0.5) * uContrast + 0.5;
+      if (abs(uHueShift) > 0.001) {
+        float _c = cos(uHueShift);
+        float _s = sin(uHueShift);
+        mat3 _hueM = mat3(
+          0.299 + 0.701 * _c + 0.168 * _s,
+          0.587 - 0.587 * _c + 0.330 * _s,
+          0.114 - 0.114 * _c - 0.497 * _s,
+          0.299 - 0.299 * _c - 0.328 * _s,
+          0.587 + 0.413 * _c + 0.035 * _s,
+          0.114 - 0.114 * _c + 0.292 * _s,
+          0.299 - 0.300 * _c + 1.250 * _s,
+          0.587 - 0.588 * _c - 1.050 * _s,
+          0.114 + 0.886 * _c - 0.203 * _s
+        );
+        _matCol = _hueM * _matCol;
+      }
       gl_FragColor.rgb = clamp(_matCol, 0.0, 1.0);
     `;
     if (shader.fragmentShader.includes('#include <output_fragment>')) {
@@ -8645,11 +8667,12 @@ function _matApplyLivePBR() {
         mat.emissiveMap = null;
         mat.needsUpdate = true;
       }
-      // Update injected shader uniforms for brightness/sat/contrast.
+      // Update injected shader uniforms for brightness/sat/contrast/hue.
       if (mat.userData?._matUniforms) {
         mat.userData._matUniforms.uBrightness.value = params.brightness;
         mat.userData._matUniforms.uSaturation.value = params.saturation;
         mat.userData._matUniforms.uContrast.value   = params.contrast;
+        mat.userData._matUniforms.uHueShift.value   = (params.hue_shift || 0) * Math.PI / 180;
       }
     }
   });
@@ -8660,7 +8683,7 @@ function closeMaterialAdjust() {
 }
 
 // Bind sliders + buttons once.
-['brightness', 'saturation', 'contrast', 'emissive', 'metallic', 'roughness']
+['brightness', 'saturation', 'contrast', 'emissive', 'metallic', 'roughness', 'hue_shift']
   .forEach(_matBindSlider);
 document.getElementById('mat-reset-btn')?.addEventListener('click', () =>
   _matWriteSliders(MAT_DEFAULTS));
