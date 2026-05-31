@@ -8230,7 +8230,11 @@ const MESH_TOOL_SCHEMAS = {
         if (s.rawCandidates > 0 && s.unmatched === 0) {
           return `Detector found ${s.rawCandidates} boundary edges but merged them ALL as seam pairs — likely a false positive on the merge pass. (try Fix Normals first; then re-run)${diag}`;
         }
-        return 'No boundary edges found — the mesh is closed (the dark patches are probably texture or back-faces, not geometry holes — try Fix Normals or Re-Texture instead).' + diag;
+        // The cloud pipeline runs T-junction splitting + winding fix
+        // that the local preview doesn't — it can find holes the JS
+        // detector misses. Surface that explicitly so the user clicks
+        // Apply instead of giving up.
+        return 'Local preview found 0 boundary edges, but the cloud detector has extra steps (T-junction split, winding repair) that may find holes this preview misses. Try "Apply on cloud" — you\'ll get one of 4 verdicts: CLOSED_OK / OPEN_HOLES / WINDING_INCONSISTENT / NONMANIFOLD.' + diag;
       }
       if (s.filled === s.loops) {
         return `Filled ${s.filled} hole${s.filled > 1 ? 's' : ''} (range ${s.smallest}–${s.biggest} edges).${diag}`;
