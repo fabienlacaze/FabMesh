@@ -123,10 +123,15 @@ def _log(msg: str) -> None:
 # ============================================================
 # Skeleton extraction from a Puppeteer GLB
 # ============================================================
-def _extract_bvh_from_glb(glb_path: str, out_bvh: str) -> None:
-    """Read a Puppeteer-rigged GLB and write a 1-frame T-pose BVH the
-    AnyTop preprocessing pipeline can ingest. Per-joint Euler order
-    defaults to ZXY.
+def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30) -> None:
+    """Read a Puppeteer-rigged GLB and write a BVH the AnyTop pipeline
+    can ingest. Per-joint Euler order defaults to ZXY.
+
+    n_frames controls how many T-pose frames are emitted:
+      - 1  → use as --tpos_bvh (the reference rest pose)
+      - 30 → use as the motion file inside --bvh_dir (process_object
+             lists this dir and needs at least one entry AFTER removing
+             the tpos basename, else its iteration is empty → exit 1)
 
     The bone hierarchy + offsets are taken from the first skin in the
     GLB; rest rotations are baked from the local TRS of each joint node.
@@ -183,19 +188,18 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str) -> None:
         indent=0, lines=lines, is_root=True,
     )
 
-    # Generate 30 frames of identical T-pose. A single frame sometimes
-    # gets dropped by AnyTop's statistics-gathering preprocessing
-    # (motion_process.py expects at least a few frames to compute means
-    # and variances). 30 is cheap and safe.
-    n_frames = 30
+    # Emit n_frames of identical T-pose (caller picks 1 for tpos_bvh,
+    # 30 for the motion file in bvh_dir). A single frame is fine as
+    # the reference pose; the motion needs ≥ a few frames so AnyTop's
+    # motion_process.py can compute statistics over them.
     n_joints = sum(1 for _ in joint_idxs)
     n_chans_per_frame = 6 + 3 * (n_joints - 1)  # root has 6, others 3
     zero_frame = " ".join(["0"] * n_chans_per_frame)
     lines += [
         "MOTION",
-        f"Frames: {n_frames}",
+        f"Frames: {int(n_frames)}",
         "Frame Time: 0.033333",
-        *[zero_frame for _ in range(n_frames)],
+        *[zero_frame for _ in range(int(n_frames))],
     ]
     with open(out_bvh, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -267,9 +271,20 @@ def animate_mesh(
     err_path = f"/anim_data/{job_id}.err"
 
     work_dir = f"/tmp/anim_{job_id}"
+    # AnyTop's process_object does:
+    #   bvh_files = os.listdir(bvh_dir)
+    #   bvh_files.remove(os.path.basename(t_pos_path))
+    #   for f in bvh_files: ...
+    # If both files share the same dir AND tpos basename matches one
+    # of them, the loop iterates empty → exit 1. To keep them in the
+    # same work_dir (cheaper than subdirs, no path arg explosion) we
+    # write DIFFERENT basenames: tpos.bvh (1 frame) + idle.bvh (30
+    # frames). listdir → ['tpos.bvh', 'idle.bvh']; remove tpos.bvh
+    # → ['idle.bvh']; the motion loop runs.
     os.makedirs(work_dir, exist_ok=True)
     rig_path = os.path.join(work_dir, "rig.glb")
-    bvh_extract = os.path.join(work_dir, "rig.bvh")
+    tpos_bvh = os.path.join(work_dir, "tpos.bvh")    # 1-frame ref pose
+    motion_bvh = os.path.join(work_dir, "idle.bvh")  # 30-frame motion
     bvh_anim = os.path.join(work_dir, "anim.bvh")
 
     sys.path.insert(0, "/tmp")
@@ -282,14 +297,17 @@ def animate_mesh(
             f.write(rig_glb_bytes)
 
         # ── Step 1: extract BVH skeleton from the GLB ─────────────
-        _log("step 1: extracting BVH skeleton from rig GLB")
-        _extract_bvh_from_glb(rig_path, bvh_extract)
+        # Two files: a 1-frame T-pose for --tpos_bvh and a 30-frame
+        # motion file that --bvh_dir's listdir will iterate over.
+        _log("step 1: extracting BVH skeleton from rig GLB (tpos.bvh + idle.bvh)")
+        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=1)
+        _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30)
 
         # ── Step 2: preprocess for AnyTop (process_new_skeleton) ──
-        # process_new_skeleton needs face_joints_names; for now we pick
-        # the 4 joints whose names contain 'thigh' / 'hip' / 'shoulder'
-        # as a generic heuristic. v2 will accept a JSON override.
-        face_joints = _guess_face_joints(bvh_extract)
+        # process_new_skeleton needs face_joints_names. We pick from
+        # the actual BVH joint names so the heuristic never returns a
+        # label that doesn't exist.
+        face_joints = _guess_face_joints(motion_bvh)
         skel_name = f"job_{job_id[:8]}"
         ds_dir = os.path.join(ANYTOP_DIR, "dataset", "truebones", "zoo", skel_name)
         os.makedirs(ds_dir, exist_ok=True)
@@ -299,7 +317,7 @@ def animate_mesh(
             "--bvh_dir", work_dir,
             "--save_dir", ds_dir,
             "--face_joints_names", *face_joints,
-            "--tpos_bvh", bvh_extract,
+            "--tpos_bvh", tpos_bvh,
         ]
         _log(f"step 2: {' '.join(cmd)}")
         rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)

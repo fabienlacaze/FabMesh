@@ -73,7 +73,7 @@ def _venv_python() -> str:
     return str(py)
 
 
-def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
+def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str, n_frames: int = 30) -> None:
     """Use the same GLB->BVH extraction as the Modal side, but importable
     from this script. We re-import from bvh_to_gltf_anim (which loads
     puppeteer_to_skeleton helpers via sys.path)."""
@@ -145,17 +145,16 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
         lines.append(f"{pad}}}")
 
     emit(root, 0, True)
-    # 30 frames of identical T-pose: AnyTop's preprocessing needs a few
-    # frames for statistics. A single frame sometimes gets dropped.
-    n_frames = 30
+    # n_frames T-pose frames: 1 for the tpos reference, 30 for the
+    # motion file (AnyTop's stats need ≥ a few frames).
     n_joints = sum(1 for _ in joint_idxs)
     n_chans_per_frame = 6 + 3 * (n_joints - 1)
     zero_frame = " ".join(["0"] * n_chans_per_frame)
     lines += [
         "MOTION",
-        f"Frames: {n_frames}",
+        f"Frames: {int(n_frames)}",
         "Frame Time: 0.033333",
-        *[zero_frame for _ in range(n_frames)],
+        *[zero_frame for _ in range(int(n_frames))],
     ]
     with open(bvh_out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -283,19 +282,25 @@ def run(rig_glb: str, out_glb: str, anim_type: str, prompt: str) -> int:
 
     work = Path(tempfile.mkdtemp(prefix="anytop_"))
     try:
-        bvh_extract = work / "rig.bvh"
+        # Two BVH files in the same dir so process_object's
+        # listdir(bvh_dir) → remove(basename(tpos)) → iterate motion
+        # actually has something to iterate. Single-file work_dir was
+        # leaving an empty list → process_new_skeleton exit 1.
+        tpos_bvh = work / "tpos.bvh"    # 1-frame reference pose
+        motion_bvh = work / "idle.bvh"  # 30-frame motion
         bvh_anim = work / "anim.bvh"
 
-        # Step 1 — extract T-pose BVH from the GLB
-        _log("info", f"extracting BVH skeleton from {rig_glb}")
-        _extract_bvh_from_glb(rig_glb, str(bvh_extract))
+        # Step 1 — extract T-pose BVH from the GLB (twice, different frames)
+        _log("info", f"extracting BVH skeleton from {rig_glb} (tpos + idle)")
+        _extract_bvh_from_glb(rig_glb, str(tpos_bvh), n_frames=1)
+        _extract_bvh_from_glb(rig_glb, str(motion_bvh), n_frames=30)
         _progress(12, "skeleton_bvh_extracted")
 
         # Step 2 — process_new_skeleton
         skel_name = f"job_{int(time.time())}"
         ds_dir = ANYTOP_DIR / "dataset" / "truebones" / "zoo" / skel_name
         ds_dir.mkdir(parents=True, exist_ok=True)
-        face_joints = _guess_face_joints(str(bvh_extract))
+        face_joints = _guess_face_joints(str(motion_bvh))
         _log("info", f"face_joints heuristic: {face_joints}")
         rc = _run_subprocess(
             [
@@ -304,7 +309,7 @@ def run(rig_glb: str, out_glb: str, anim_type: str, prompt: str) -> int:
                 "--bvh_dir", str(work),
                 "--save_dir", str(ds_dir),
                 "--face_joints_names", *face_joints,
-                "--tpos_bvh", str(bvh_extract),
+                "--tpos_bvh", str(tpos_bvh),
             ],
             cwd=str(ANYTOP_DIR),
         )
