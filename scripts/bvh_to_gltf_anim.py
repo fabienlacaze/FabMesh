@@ -457,7 +457,7 @@ def bvh_to_gltf_anim(
     framerate (e.g. 30) regardless of BVH dt. Useful to match Three.js /
     UE5 timebase.
     """
-    gltf, bin_blob, tail = _read_glb(rig_glb_path)
+    gltf, _json_blob, bin_blob, tail = _read_glb(rig_glb_path)
     glb_bones = _glb_skin_joint_names(gltf)
     if not glb_bones:
         raise RuntimeError(f"No skin/joints found in {rig_glb_path}")

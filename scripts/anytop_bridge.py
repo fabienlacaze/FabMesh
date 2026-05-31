@@ -83,7 +83,7 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str) -> None:
     # Modal SDK installed.
     from puppeteer_to_skeleton import _read_glb  # type: ignore
 
-    gltf, _bin, _tail = _read_glb(rig_glb_path)
+    gltf, _json_blob, _bin, _tail = _read_glb(rig_glb_path)
     skins = gltf.get("skins") or []
     if not skins:
         raise RuntimeError("GLB has no skin/skeleton")

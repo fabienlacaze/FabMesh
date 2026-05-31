@@ -133,7 +133,7 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str) -> None:
     """
     sys.path.insert(0, "/tmp")
     from puppeteer_to_skeleton import _read_glb  # type: ignore
-    gltf, bin_blob, _tail = _read_glb(glb_path)
+    gltf, _json_blob, _bin_blob, _tail = _read_glb(glb_path)
     skins = gltf.get("skins") or []
     if not skins:
         raise RuntimeError("GLB has no skin (no skeleton to extract)")
