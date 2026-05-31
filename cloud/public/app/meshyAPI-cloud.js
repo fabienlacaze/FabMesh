@@ -1494,11 +1494,12 @@
       const POLL_INTERVAL_MS = 5000;
       const MAX_POLLS = 180;
       const MAX_CONSECUTIVE_AUTH_ERRORS = 3;  // abort on 401/403 streak (session expired)
-      const MAX_CONSECUTIVE_SERVER_ERRORS = 12; // abort on 5xx streak ~1 min — tolerates
-                                                // CF secret-propagation windows after a deploy
-                                                // (a fresh deploy can take 30-60s to settle
-                                                // across all PoPs and would otherwise fire a
-                                                // misleading "backend unreachable" popup)
+      const SOFT_WARN_SERVER_ERRORS = 6;       // ~30s of 5xx → just nudge the UI
+      const MAX_CONSECUTIVE_SERVER_ERRORS = 30; // abort only at ~2.5 min of solid 5xx —
+                                                // CF edge PoP issues + secret propagation
+                                                // can cause brief 5xx windows that resolve
+                                                // on their own. Premature abort makes us
+                                                // give up on a rig that is actually running.
       const t0 = Date.now();
       let consecutiveAuthErrors = 0;
       let consecutiveServerErrors = 0;
@@ -1531,11 +1532,18 @@
               }
             } else if (resp.status >= 500) {
               consecutiveServerErrors++;
+              // Soft warn at SOFT_WARN_SERVER_ERRORS (30s of 5xx): surface
+              // to UI via lastWarn so the user sees something is off, but
+              // KEEP polling — CF edge hiccups usually resolve within a
+              // minute and the rig may still be alive on Modal.
+              if (consecutiveServerErrors === SOFT_WARN_SERVER_ERRORS) {
+                lastWarn = `Cloud backend returned ${resp.status} for ${SOFT_WARN_SERVER_ERRORS} polls — still trying (rig may be running on Modal). Refresh Projects later to check.`;
+              }
               if (consecutiveServerErrors >= MAX_CONSECUTIVE_SERVER_ERRORS) {
                 clearPending();
                 return {
                   success: false, ok: false,
-                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls — backend unreachable`,
+                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls (~${Math.round(MAX_CONSECUTIVE_SERVER_ERRORS * POLL_INTERVAL_MS / 1000)}s) — backend unreachable. Your rig may still complete on Modal; check Projects.`,
                 };
               }
             }
