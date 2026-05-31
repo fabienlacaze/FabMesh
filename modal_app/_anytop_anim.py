@@ -297,10 +297,15 @@ def animate_mesh(
             f.write(rig_glb_bytes)
 
         # ── Step 1: extract BVH skeleton from the GLB ─────────────
-        # Two files: a 1-frame T-pose for --tpos_bvh and a 30-frame
-        # motion file that --bvh_dir's listdir will iterate over.
+        # Two BVH files with DIFFERENT names (so process_object's
+        # listdir-minus-tpos still has motion to iterate) and BOTH
+        # 30-frames-long: AnyTop's stats path needs ≥ a few frames in
+        # the tpos file too (it indexes t_pos_motion[0] after
+        # statistics rejection), and the motion file needs them for
+        # Mean/Std. A 1-frame tpos crashed with IndexError on
+        # t_pos_motion[0] (motion_process.py:361). 30 frames is cheap.
         _log("step 1: extracting BVH skeleton from rig GLB (tpos.bvh + idle.bvh)")
-        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=1)
+        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=30)
         _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30)
 
         # ── Step 2: preprocess for AnyTop (process_new_skeleton) ──
