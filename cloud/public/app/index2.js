@@ -11181,21 +11181,57 @@ document.getElementById('mat-apply-btn')?.addEventListener('click', async () => 
     showToast('Pick a mesh first.', 'error'); return;
   }
   const params = _matReadParams();
-  showToast('Applying material adjustments…', 'info', 2000);
+  // Use a real job popup so the user sees progress + can cancel, instead
+  // of a 2s toast. Mirrors the rig/anim pattern.
+  const sourceFn = (p.selectedMeshPath || '').split(/[/\\]/).pop() || 'mesh.glb';
+  const job = pushJob(`Material Adjust: ${p.name}`, null, {
+    Brightness: params.brightness?.toFixed(2),
+    Saturation: params.saturation?.toFixed(2),
+    Contrast: params.contrast?.toFixed(2),
+    Emissive: params.emissive?.toFixed(2),
+    Metallic: params.metallic?.toFixed(2),
+    Roughness: params.roughness?.toFixed(2),
+    'Source mesh': sourceFn,
+  }, 30000); // Modal mesh-op typically returns in 10-20s
+  closeMaterialAdjust();
   try {
     const r = await API.materialAdjust({
       meshPath: p.selectedMeshPath,
       ...params,
     });
     if (r?.success) {
-      showToast(`Material saved → ${r.filename}`, 'success');
-      closeMaterialAdjust();
-      populateWorkspace(p);
+      completeJob(job.id, true);
+      // Push the new GLB into p.meshes so it shows up as a new version
+      // immediately, without waiting for a project reload. Then refresh
+      // from R2 in the background to pick up any server-side metadata.
+      try {
+        const newUrl = r.mesh_url || r.newPath || r.path;
+        if (newUrl && p) {
+          p.meshes = p.meshes || [];
+          const filename = (r.filename || newUrl.split('/').pop() || 'mesh.glb');
+          const already = p.meshes.some(m => m.url === newUrl || m.path === newUrl);
+          if (!already) {
+            p.meshes.unshift({
+              filename, url: newUrl, path: newUrl,
+              asset_type: 'mesh', size: 0,
+              created: new Date().toISOString(),
+            });
+            // Auto-select the new version so the user sees the result.
+            p.selectedMeshPath = newUrl;
+          }
+        }
+      } catch (e) { console.warn('[material-adjust] state push failed:', e); }
+      showToast(`Material applied → new version saved`, 'success', 4000);
+      // Render the project so the new mesh thumb appears in the strip.
+      try { populateWorkspace(p); } catch (_) {}
+      try { await reloadCurrentProject(); } catch (_) {}
     } else {
-      showToast('Material adjust failed: ' + (r?.error || 'unknown'), 'error', 5000);
+      completeJob(job.id, false, r?.error || 'unknown');
+      if (!job.cancelled) reportPipelineError(r?.error, 'Material Adjust failed');
     }
   } catch (e) {
-    showToast('Material adjust error: ' + e.message, 'error', 5000);
+    completeJob(job.id, false, e?.message || String(e));
+    if (!job.cancelled) reportPipelineError(e?.message || String(e), 'Material Adjust error');
   }
 });
 document.getElementById('ws-mesh-material-btn')?.addEventListener('click', openMaterialAdjust);
