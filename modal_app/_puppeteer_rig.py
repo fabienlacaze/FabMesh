@@ -923,10 +923,16 @@ def rig_router():
 
     @api.post("/rig-status")
     async def rig_status(request: Request):
-        """One poll tick. Returns {"ready": false} if the rig is still
-        running, {"ready": false, "error": "..."} if the GPU worker
-        wrote an err file, or {"ready": true, "glb_base64": "...",
-        "bytes": N} when the rigged GLB lands on the Volume."""
+        """One poll tick. Three response shapes:
+        - JSON {"ready": false} : rig still running
+        - JSON {"ready": false, "error": "..."} : .err sentinel found
+        - JSON {"ready": true, "fetch_path": "/rig-fetch?job_id=…", "bytes": N}
+          : rigged GLB landed; client should call /rig-fetch to STREAM the
+          bytes. We no longer return glb_base64 inline — a 63 MB GLB
+          base64-encoded blew CF Worker memory (128 MB hard cap) when the
+          Worker tried to atob() the response, producing sustained 503s.
+        """
+        from fastapi.responses import JSONResponse
         payload = await _read_json(request)
         _check_auth(payload)
         job_id = (payload.get("job_id") or "").strip()
@@ -943,8 +949,6 @@ def rig_router():
         if os.path.isfile(err_path):
             with open(err_path) as f:
                 raw = f.read()
-            # rig_mesh writes JSON; the legacy mesh_router writes plain
-            # text. Try JSON first, fall back to raw text.
             err_msg = raw
             try:
                 parsed = json.loads(raw)
@@ -952,17 +956,54 @@ def rig_router():
                     err_msg = str(parsed["error"])
             except Exception:
                 pass
-            return {"ready": False, "error": err_msg[:500]}
+            return JSONResponse({"ready": False, "error": err_msg[:500]})
 
         if os.path.isfile(out_path):
-            with open(out_path, "rb") as f:
-                glb = f.read()
-            return {
+            sz = os.path.getsize(out_path)
+            return JSONResponse({
                 "ready": True,
-                "glb_base64": base64.b64encode(glb).decode("ascii"),
-                "bytes": len(glb),
-            }
+                "bytes": sz,
+                "fetch_endpoint": "/rig-fetch",
+            })
 
-        return {"ready": False}
+        return JSONResponse({"ready": False})
+
+    @api.post("/rig-fetch")
+    async def rig_fetch(request: Request):
+        """Stream the rigged GLB bytes for the given job_id. Replaces the
+        base64-in-JSON path from rig_status — the Worker consumes this
+        response.body as a ReadableStream and pipes it directly into
+        env.MESHES.put(key, stream), never materialising 63 MB in memory.
+
+        Body: {"_auth": "...", "job_id": "..."}
+        Response: raw GLB bytes (Content-Type: model/gltf-binary) on
+        success, 404 if the GLB hasn't landed yet (caller should keep
+        polling /rig-status), 410 if a .err sentinel exists (caller
+        should treat as terminal failure).
+        """
+        from fastapi.responses import FileResponse
+        payload = await _read_json(request)
+        _check_auth(payload)
+        job_id = (payload.get("job_id") or "").strip()
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id required")
+        # Defensive: refuse path-traversal job_ids before we open(<volume>/…).
+        if "/" in job_id or ".." in job_id or not all(c in "0123456789abcdef" for c in job_id.lower()):
+            raise HTTPException(status_code=400, detail="job_id must be hex")
+        rig_output_volume.reload()
+        out_path = f"/rig_data/{job_id}.glb"
+        err_path = f"/rig_data/{job_id}.err"
+        if os.path.isfile(err_path):
+            raise HTTPException(status_code=410, detail="rig failed — see /rig-status for error message")
+        if not os.path.isfile(out_path):
+            raise HTTPException(status_code=404, detail="rig not ready yet")
+        # FileResponse streams the file in chunks rather than buffering
+        # the full 63 MB into memory — works both on Modal (container
+        # memory) and on the Worker side (it just proxies the stream).
+        return FileResponse(
+            out_path,
+            media_type="model/gltf-binary",
+            filename=f"{job_id}.glb",
+        )
 
     return api

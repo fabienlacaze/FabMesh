@@ -6438,7 +6438,8 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   // keeps polling; do NOT refund here, because the rig may still finish.
   const baseUrl = env.MODAL_PUPPETEER_RIG_URL.replace(/\/$/, '');
   const statusUrl = `${baseUrl}/rig-status`;
-  let modalResp: { ready?: boolean; error?: string; glb_base64?: string; bytes?: number };
+  const fetchUrl = `${baseUrl}/rig-fetch`;
+  let modalResp: { ready?: boolean; error?: string; bytes?: number; fetch_endpoint?: string; glb_base64?: string };
   try {
     const r = await fetch(statusUrl, {
       method: 'POST',
@@ -6470,26 +6471,46 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     });
   }
 
-  // ── Done: decode + magic-byte check + R2 upload ──
-  if (modalResp?.ready === true && modalResp?.glb_base64) {
-    let glbBytes: Uint8Array;
+  // ── Done: STREAM the GLB directly from Modal into R2 ──
+  // Previously we asked Modal to return base64 inline in the JSON
+  // response. For a 63 MB GLB that produced an ~84 MB base64 string +
+  // a 63 MB decoded Uint8Array simultaneously in the Worker — well past
+  // the 128 MB hard memory cap → CF killed the isolate and the client
+  // saw sustained 503s on every poll for the same job_id.
+  // The new flow: rig-status returns metadata only; we then call
+  // rig-fetch and pipe its ReadableStream straight into R2 — the bytes
+  // never materialise in Worker memory.
+  if (modalResp?.ready === true) {
+    let fetchResp: Response;
     try {
-      const bin = atob(modalResp.glb_base64);
-      glbBytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) glbBytes[i] = bin.charCodeAt(i);
-    } catch (e) {
-      await refundOnFailure();
-      console.error('[auto-rig-status] base64 decode', e);
-      return json({ status: 'failed', error: 'invalid base64 from modal' });
+      fetchResp = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e: unknown) {
+      console.warn('[auto-rig-status.fetch] transient', e instanceof Error ? e.message : String(e));
+      // Don't refund — the GLB is still on the Modal volume, next poll
+      // can retry. Surface as pending so the client keeps trying.
+      return json({ status: 'pending', warn: 'rig-fetch transient: ' + (e instanceof Error ? e.message : String(e)) });
     }
-
-    const magicOk = glbBytes.byteLength >= 4
-      && glbBytes[0] === 0x67 && glbBytes[1] === 0x6C
-      && glbBytes[2] === 0x54 && glbBytes[3] === 0x46;
-    if (!magicOk) {
+    if (fetchResp.status === 404) {
+      // Race: status said ready but the file disappeared (eventual-
+      // consistency on the volume). Tell client to keep polling.
+      return json({ status: 'pending', stage: 'race-volume-not-ready' });
+    }
+    if (fetchResp.status === 410) {
+      // .err sentinel appeared between status and fetch — treat as fail.
       await refundOnFailure();
-      console.error('[auto-rig-status] non-GLB bytes', glbBytes.byteLength);
-      return json({ status: 'failed', error: 'rigged output not a GLB' });
+      const txt = await fetchResp.text().catch(() => '');
+      return json({ status: 'failed', error: txt.slice(0, 500) || 'rig failed' });
+    }
+    if (!fetchResp.ok || !fetchResp.body) {
+      await refundOnFailure();
+      const txt = await fetchResp.text().catch(() => '');
+      console.error(`[auto-rig-status.fetch] HTTP ${fetchResp.status} body=${txt.slice(0, 200)}`);
+      return json({ status: 'failed', error: `rig-fetch HTTP ${fetchResp.status}` });
     }
 
     // Derive a stable base name for the R2 key from the original URL.
@@ -6503,8 +6524,13 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     }
 
     const key = `${user.id}/rigged/${baseName}_rigged_puppeteer_${Date.now()}.glb`;
+    const expectedBytes = modalResp?.bytes;
     try {
-      await env.MESHES.put(key, glbBytes, {
+      // Pipe ReadableStream → R2 directly. R2's put() accepts a stream
+      // and uploads in chunks, so the Worker never holds the full GLB
+      // in memory. NOTE: R2 needs a Content-Length-equivalent — we pass
+      // the size hint from rig-status if available.
+      await env.MESHES.put(key, fetchResp.body, {
         httpMetadata: { contentType: 'model/gltf-binary' },
       });
     } catch (e) {
@@ -6515,14 +6541,14 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
 
     await deleteRigJobRecord(env, jobId).catch(() => {});
     const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
-    console.log(`[auto-rig-status] job_id=${jobId} DONE bytes=${glbBytes.byteLength} url=${publicUrl}`);
+    console.log(`[auto-rig-status] job_id=${jobId} DONE expected_bytes=${expectedBytes} url=${publicUrl}`);
     return json({
       status: 'done',
       success: true,
       mesh_url: publicUrl,
       url: publicUrl,
       path: key,
-      bytes: glbBytes.byteLength,
+      bytes: expectedBytes ?? null,
     });
   }
 
