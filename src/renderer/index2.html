@@ -597,7 +597,12 @@
                       <option value="puppeteer" selected>MyFabmesh.AI Rig</option>
                     </select>
                   </div>
-                  <div class="form-row">
+                  <!-- SKELETON dropdown hidden: Puppeteer predicts its own
+                       skeleton from the mesh and ignores this value. Will
+                       come back once "skeleton template injection" lands
+                       (force-skinning onto e.g. SK_Mannequin / SK_MOUNTAIN_DRAGON
+                       for animation reuse). -->
+                  <div class="form-row" style="display:none;">
                     <label for="ws-rig-skeleton">SKELETON</label>
                     <select id="ws-rig-skeleton" style="width:100%;">
                       <option value="orc_m1" selected>🤖 Humanoide bipède (loading...)</option>
