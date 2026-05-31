@@ -89,6 +89,13 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         except Exception as e:
             print(f"LOCAL_REALVIS: RAM check error: {e}", flush=True)
 
+    # Read asset_type signal from env (set by main.js childEnv when the
+    # 'generate-images' IPC is triggered). Falls back to 'character' so
+    # CLI/legacy callers behave exactly as before. Drives the cloud-parity
+    # anti-portrait negative + CFG=9.5 branch below (animal/creature only).
+    _asset_type = (os.environ.get('FABMESH_ASSET_TYPE') or 'character').strip().lower()
+    print(f"LOCAL_REALVIS: asset_type={_asset_type}", flush=True)
+
     # Detect whether the user asked for a T-pose front-facing character.
     # Drives both (a) the model choice — DreamShaper XL Lightning + ControlNet
     # OpenPose gives a GUARANTEED T-pose that RealVisXL cannot match, and
@@ -107,6 +114,12 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         'rts unit',                    # character template token
         'neutral stance',              # character/creature templates only
     ))
+    # Animal/creature never go through the T-pose / DreamShaper path — that
+    # branch is wired for humanoid skeletons (OpenPose). Force-disable to
+    # protect against keyword bleed from prompt templates.
+    if _asset_type in ('animal', 'creature') and _is_tpose:
+        print("LOCAL_REALVIS: asset_type=animal/creature -> forcing _is_tpose=False (cloud parity)", flush=True)
+        _is_tpose = False
 
     _ctrl_pipe = None
     _tpose_skeleton = None
@@ -231,28 +244,62 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
             f"masterpiece, no text, no watermark"
         )
-        negative_prompt = (
-            "blurry, low quality, text, watermark, signature, deformed, "
-            "extra limbs, bad anatomy, distorted, cropped, worst quality, "
-            "flat profile, "
-            # Anti-doubling: product/vehicle/kitchenware datasets often pair
-            # 2 angles of the same item OR show a "set" of 2-3 items
-            # side-by-side. We weighted-block the doubling pattern across
-            # all common subject categories.
-            # WEIGHTED tokens (parenthesis+:1.4) get extra strength from
-            # the SDXL prompt parser; we go aggressive on duplication.
-            "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
-            "(set of two:1.5), (multiple instances:1.5), "
-            "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
-            "(two cars:1.5), (two vehicles:1.5), (two knives:1.5), "
-            "(two characters:1.5), (two props:1.5), (two weapons:1.5), "
-            "(second instance:1.5), (second copy:1.4), (companion item:1.4), "
-            "(side by side:1.5), (paired:1.4), (matched set:1.4), "
-            "(rear view inset:1.4), (front and back:1.4), "
-            "split image, stacked vertically, stacked horizontally, "
-            "collage, grid layout, comparison view, "
-            "product comparison, kitchenware set, catalog grid"
-        )
+        # Asset-type-aware negative — mirrors cloud modal_app/_realvis.py.
+        # For animal/creature, RealVis V4 tends to default to portrait /
+        # headshot framing (dragon head, animal head close-up). The cloud
+        # path prepends a brute-force-repeated anti-portrait block (x2/x3
+        # of each token, since the base diffusers SDXL pipeline strips
+        # Compel-style (token:weight) parentheses — only the bare repeated
+        # word counts in CLIP weighting). Combined with guidance_scale=9.5
+        # (set below) this forces the full-body / long-shot framing.
+        # Other asset_types keep the existing hard-surface anti-doubling
+        # block unchanged for parity with prior commits.
+        if _asset_type in ('animal', 'creature'):
+            negative_prompt = (
+                "blurry, low quality, text, watermark, signature, deformed, "
+                "extra limbs, bad anatomy, distorted, cropped, worst quality, "
+                "flat profile, "
+                "close-up, close-up, close-up, portrait, portrait, portrait, "
+                "headshot, headshot, headshot, head only, head only, "
+                "head close-up, face only, face only, bust shot, bust shot, "
+                "head and shoulders, head and shoulders, face close-up, "
+                "head crop, cropped to head, zoomed in on face, extreme close-up, "
+                "macro shot, dragon head, animal head close-up, "
+                "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
+                "(set of two:1.5), (multiple instances:1.5), "
+                "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
+                "(two cars:1.5), (two vehicles:1.5), (two knives:1.5), "
+                "(two characters:1.5), (two props:1.5), (two weapons:1.5), "
+                "(second instance:1.5), (second copy:1.4), (companion item:1.4), "
+                "(side by side:1.5), (paired:1.4), (matched set:1.4), "
+                "(rear view inset:1.4), (front and back:1.4), "
+                "split image, stacked vertically, stacked horizontally, "
+                "collage, grid layout, comparison view, "
+                "product comparison, kitchenware set, catalog grid"
+            )
+        else:
+            negative_prompt = (
+                "blurry, low quality, text, watermark, signature, deformed, "
+                "extra limbs, bad anatomy, distorted, cropped, worst quality, "
+                "flat profile, "
+                # Anti-doubling: product/vehicle/kitchenware datasets often pair
+                # 2 angles of the same item OR show a "set" of 2-3 items
+                # side-by-side. We weighted-block the doubling pattern across
+                # all common subject categories.
+                # WEIGHTED tokens (parenthesis+:1.4) get extra strength from
+                # the SDXL prompt parser; we go aggressive on duplication.
+                "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
+                "(set of two:1.5), (multiple instances:1.5), "
+                "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
+                "(two cars:1.5), (two vehicles:1.5), (two knives:1.5), "
+                "(two characters:1.5), (two props:1.5), (two weapons:1.5), "
+                "(second instance:1.5), (second copy:1.4), (companion item:1.4), "
+                "(side by side:1.5), (paired:1.4), (matched set:1.4), "
+                "(rear view inset:1.4), (front and back:1.4), "
+                "split image, stacked vertically, stacked horizontally, "
+                "collage, grid layout, comparison view, "
+                "product comparison, kitchenware set, catalog grid"
+            )
 
     _throttle_cb = make_throttle_callback()  # None if disabled
 
@@ -261,11 +308,16 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         print(f"LOCAL_REALVIS_PROGRESS: Generating image {i+1}/{num_images}...")
         sys.stdout.flush()
 
+        # CFG: 7.0 for hard-surface/character (preserves prior behavior),
+        # 9.5 for animal/creature so the repeated anti-portrait negative
+        # actually bites in classifier-free guidance. Mirrors cloud
+        # modal_app/_realvis.py. T-pose override (=2.0) still wins below.
+        _cfg = 9.5 if _asset_type in ('animal', 'creature') else 7.0
         _pipe_kwargs = dict(
             prompt=optimized_prompt,
             negative_prompt=negative_prompt,
             num_inference_steps=int(steps),
-            guidance_scale=7.0,
+            guidance_scale=_cfg,
             height=1024,
             width=1024,
             generator=torch.Generator("cuda").manual_seed(int(time.time()) + i),
@@ -352,7 +404,7 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                 full_prompt=optimized_prompt,
                 negative_prompt=negative_prompt,
                 steps=int(steps),
-                guidance_scale=7.0,
+                guidance_scale=float(_pipe_kwargs.get('guidance_scale', 7.0)),
                 seed=int(_pipe_kwargs['generator'].initial_seed())
                      if hasattr(_pipe_kwargs.get('generator'), 'initial_seed') else None,
                 width=1024, height=1024,

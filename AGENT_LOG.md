@@ -1,5 +1,58 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Desktop SDXL parity — guidance 9.5 + repeated negatives for animal/creature)
+
+Ported cloud Modal `_realvis.py` tuning (commit `c7593ad`) to the
+desktop SDXL bridge so animal/creature prompts get the same
+anti-portrait treatment locally.
+
+**Plumbing (3 files)** — `assetType` now flows renderer → main.js → env:
+- `src/renderer/index2.js:3882` — add `assetType` to the
+  `API.generateImages({...})` payload (computed earlier from the
+  `#ws-asset-type` dropdown, was previously dropped before IPC).
+- `src/main/main.js:3840` — destructure `assetType` from the
+  `generate-images` IPC payload.
+- `src/main/main.js:3882-3889` — inject `FABMESH_ASSET_TYPE` into
+  `childEnv`. Trimmed + lowercased, defaults to `'character'`.
+
+**Bridge (`scripts/local_juggernaut_bridge.py`, 4 edits)**:
+- Lines 92-128 — read `FABMESH_ASSET_TYPE` from env into `_asset_type`,
+  print to log. Also defensively force `_is_tpose=False` for
+  `animal|creature` so prompt-keyword bleed (e.g. `neutral stance`)
+  can't push them onto the DreamShaper+OpenPose path.
+- Lines 234-289 — branch `negative_prompt` on `_asset_type`. The
+  `animal|creature` branch mirrors `_realvis.py` verbatim: brute-force
+  repeated anti-portrait tokens (close-up ×3, portrait ×3, headshot
+  ×3, head only ×2, face only ×2, bust shot ×2, head and shoulders
+  ×2, head close-up, head crop, cropped to head, zoomed in on face,
+  extreme close-up, macro shot, dragon head, animal head close-up)
+  plus the existing anti-doubling block. Other asset_types keep the
+  existing tuning untouched.
+- Line 268 → 272 — `guidance_scale` becomes `_cfg = 9.5 if animal|
+  creature else 7.0`. T-pose override (=2.0) still wins below.
+- Line 355 — manifest logging bugfix: `guidance_scale` was hard-coded
+  to 7.0, now reads from `_pipe_kwargs.get('guidance_scale', 7.0)`.
+
+**Skipped intentionally**:
+- T-pose path (DreamShaper XL Lightning + ControlNet OpenPose) — kept
+  separate at CFG=2.0; animal/creature forced off it.
+- `scripts/sdxl_server.py` (img2img / inpaint endpoints) — out of
+  scope for the text2image port.
+- Other asset_types (character, vehicle, weapon, prop, building, env)
+  — cloud applies the tuning unconditionally but the desktop path was
+  retuned recently (commit `ca7086c`) so we preserve that.
+
+**Risk notes**:
+- CLI / sheet-gen / multiview callers that re-invoke the bridge
+  without `FABMESH_ASSET_TYPE` set fall back to `'character'` (no
+  regression but no benefit either).
+- CFG 9.5 is aggressive — may crisp small-creature prompts.
+- The Compel-style `(token:weight)` tokens kept in the negative are
+  cosmetic (base diffusers pipeline strips them) — repetitions do
+  the actual work.
+
+Backup branch: `backup-pre-sdxl-tuning-port-20260531-212224`.
+
 ## 2026-05-31 (Cloud rig UI stall + bones-default)
 
 Two user-facing issues on cloud rig flow:
