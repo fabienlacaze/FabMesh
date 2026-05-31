@@ -1,4 +1,5 @@
 # Cloudflare Workers config for MyFabmesh.AI Cloud.
+account_id = "a74e8ad01c363d77acec95c7f2123d9a"
 #
 # Build chain (no more @opennextjs/cloudflare — esbuild "Invalid alias name"
 # bug blocked it on CI). New flow:
