@@ -80,6 +80,11 @@ image = (
         "bvhsdk>=0.2",
         "pygltflib>=1.16",
         "fastapi[standard]",
+        # Imported at top of AnyTop's model/conditioners.py (T5Conditioner
+        # path) even when we don't use text-to-motion. Without it,
+        # sample.generate ModuleNotFoundError's before it ever loads
+        # the checkpoint.
+        "num2words==0.5.13",
     )
     .pip_install(MOTION_LIB)
     # Clone the AnyTop repo into the container.
