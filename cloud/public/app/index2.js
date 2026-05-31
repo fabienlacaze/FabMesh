@@ -584,8 +584,19 @@ async function refreshProjectsPage() {
     const project = (m.projectName && String(m.projectName).trim())
                  || meshProject(m.filename);
     const p = ensure(project);
-    if (/_rigged_/i.test(m.filename)) p.rigs.push(m);
-    else p.meshes.push(m);
+    if (m.asset_type === 'animation' || /_anim_|_animation_/i.test(m.filename)) {
+      // Extract anim type from filename: <base>_<type>_<ts>.glb where
+      // <type> is one of idle/walk/run/attack/death/fly (matches
+      // worker.ts handleAutoAnimStatus naming at line 6890).
+      const typeMatch = m.filename.match(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_\d{10,}\.glb$/i);
+      const animType = (typeMatch ? typeMatch[1] : 'clip').toLowerCase();
+      p.animations = p.animations || [];
+      p.animations.push({ ...m, type: animType });
+    } else if (/_rigged_/i.test(m.filename)) {
+      p.rigs.push(m);
+    } else {
+      p.meshes.push(m);
+    }
     // Use mesh's source image as project thumb if no image folder
     if (!p.thumb && m.sourceImage) p.thumb = m.sourceImage;
     if (m.created) {
@@ -1718,11 +1729,20 @@ function populateWorkspace(p) {
     });
   }
 
+  // Anim step — render the version strip so prior generations survive
+  // a reload, and auto-load v0 into the viewer if any.
+  renderAnimVersions(p);
+  if (p.animations && p.animations.length > 0) {
+    setStepStatus(4, 'done');
+    const animCard = document.getElementById('step-card-animation');
+    if (animCard) animCard.classList.remove('disabled', 'collapsed');
+  }
+
   loadRigTemplatesIntoSelect();
 }
 
 function setStepStatus(stepNum, status) {
-  const card = document.getElementById(`step-card-${['', 'image', 'mesh', 'rig'][stepNum]}`);
+  const card = document.getElementById(`step-card-${['', 'image', 'mesh', 'rig', 'animation'][stepNum]}`);
   if (!card) return;
   card.classList.remove('active', 'done', 'disabled');
   if (status === 'done') card.classList.add('done');
