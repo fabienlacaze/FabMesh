@@ -178,28 +178,46 @@ def _resolve_checkpoint_path(family: str) -> str:
 
 
 def _guess_face_joints(bvh_path: str) -> list:
-    L = []
-    R = []
-    FL = []
-    FR = []
+    """Mirror of the Modal-side heuristic; falls back to the first 4
+    distinct BVH joint names rather than 'root' on no match. See
+    modal_app/_anytop_anim.py:_guess_face_joints for rationale."""
+    all_joints: list = []
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
         for ln in f:
             ln = ln.strip()
             if not ln.startswith(("JOINT ", "ROOT ")):
                 continue
             name = ln.split(maxsplit=1)[1]
-            nl = name.lower()
-            if "thigh" in nl or "leg" in nl or "hip" in nl:
-                (L if ("l_" in nl or "_l" in nl or "left" in nl) else R).append(name)
-            elif "shoulder" in nl or "arm" in nl or "finger" in nl:
-                (FL if ("l_" in nl or "_l" in nl or "left" in nl) else FR).append(name)
-    out = []
-    if R: out.append(R[0])
-    if L: out.append(L[0])
-    if FR: out.append(FR[0])
-    if FL: out.append(FL[0])
-    while len(out) < 4:
-        out.append(out[0] if out else "root")
+            if name not in all_joints:
+                all_joints.append(name)
+    if not all_joints:
+        raise RuntimeError("BVH has no joints")
+
+    def is_left(nl: str) -> bool:
+        return any(t in nl for t in ("_l_", "_l.", "left", "_l ", "_lf", "l_"))
+    def is_right(nl: str) -> bool:
+        return any(t in nl for t in ("_r_", "_r.", "right", "_r ", "_rt", "r_"))
+
+    leg_l, leg_r, arm_l, arm_r = [], [], [], []
+    for n in all_joints:
+        nl = n.lower()
+        if any(t in nl for t in ("thigh", "leg", "hip", "hindleg", "rearleg", "femur")):
+            (leg_l if is_left(nl) else leg_r if is_right(nl) else []).append(n)
+        elif any(t in nl for t in ("shoulder", "arm", "wing", "forearm", "scapula", "clavicle", "humerus", "elbow", "foreleg", "frontleg")):
+            (arm_l if is_left(nl) else arm_r if is_right(nl) else []).append(n)
+    out: list = []
+    if leg_r: out.append(leg_r[0])
+    if leg_l: out.append(leg_l[0])
+    if arm_r: out.append(arm_r[0])
+    if arm_l: out.append(arm_l[0])
+    if len(out) < 4:
+        for n in all_joints:
+            if n not in out:
+                out.append(n)
+                if len(out) >= 4:
+                    break
+    while len(out) < 4 and all_joints:
+        out.append(all_joints[0])
     return out[:4]
 
 
