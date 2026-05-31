@@ -1,5 +1,67 @@
 # FabMesh Agent Log
 
+## 2026-05-31 (Cloud rig UI stall + bones-default)
+
+Two user-facing issues on cloud rig flow:
+
+**1. Bones toggle should be ON by default in the rig viewer.**
+- `cloud/public/app/index2.js:2714` — `bones: false` → `true` in the
+  per-viewer state defaults. `ensureSkeletonHelper(viewer)` is already
+  called from `refreshAll()` so the skeleton renders on first frame.
+- `cloud/public/app/index.html:659` and `:892` — added `class="active"`
+  to the Bones buttons (rig viewer toolbar + lightbox 3D) so the button
+  visually matches the new default.
+
+**2. Cloud rig UI looked stuck at 90 % for 9 m+ when ETA was 1 m 30 s.**
+Diagnosis (workflow + Modal volume cross-check): the underlying poll
+loop was healthy, but two independent UI bugs converged.
+- `cloud/public/app/index2.js:12592` — `expectedMs = 90000` (1 m 30 s)
+  was the desktop figure. Real cloud time = 60-120 s Modal A10G cold
+  start + 120-180 s rig pipeline ⇒ raised to 240 000 (4 min).
+- `cloud/public/app/index2.js:12711` — `JOB_EXPECTED_MS.rig`
+  120 000 → 240 000 for consistency.
+- `cloud/public/app/index2.js:12599` — click handler now passes
+  `onProgress` to `API.autoRigAI`. Each poll flips
+  `job.bridgeReporting = true` (stops the synthetic `min(90,…)` cap)
+  and creeps the bar 90 → 99 at +1 % per 20 s overshoot. Adds a
+  textual subtitle "Still running… Xm Ys (Modal cold start probable)"
+  past expectedMs so the user sees the job is alive.
+- `cloud/public/app/index2.js:12591` and `cloud/public/app/index.html:606`
+  — engine label "(local, neural)" / "(local)" was misleading: the
+  compute runs on Modal cloud. Renamed to "(cloud GPU)".
+
+**3. Rig resilience hardening** (silent failure modes flagged in workflow):
+- `cloud/public/app/meshyAPI-cloud.js` autoRigAI:
+  - `MAX_POLLS` 120 → 180 (10 min → 15 min hard cap) to cover dense-mesh
+    rigs that empirically exceed 10 min.
+  - Track consecutive 401/403 (≥ 3 → abort early with `authLost:true`
+    and helpful "session expired" error instead of burning 15 min and
+    returning a generic timeout — was the #1 hidden cause).
+  - Track consecutive ≥ 500 (≥ 6 → abort with "Worker unreachable").
+  - Persist pending rig job in `localStorage.fabmesh_pending_rigs`
+    on spawn; clear on terminal status. Lets a refresh resume polling
+    instead of stranding the GLB in R2 with no UI handoff.
+  - Forward `st.warn` / `st.last_error` from Worker into `onProgress`
+    so the UI can show "last warn: Modal HTTP 502 (will retry)" instead
+    of an opaque pending.
+  - On `status:'done'` with no `currentProject` (project switched
+    mid-rig), dispatch `fabmesh:rig-done-orphan` DOM event with the
+    GLB URL instead of silently returning success.
+- `cloud/src/worker.ts:6460` and `:6531` — pending responses now carry
+  `stage` and `last_error` so the client can surface real diagnostics.
+- `cloud/public/app/index2.js` DOMContentLoaded — on page load, scans
+  `localStorage.fabmesh_pending_rigs`, prunes entries > 30 min old,
+  and probes `/api/auto-rig-status` for each. Toasts "rig completed,
+  refreshing Projects" or "rig failed, credits refunded" so a refresh
+  during a long rig no longer loses the result.
+
+Modal-side FunctionCall termination check (synthetic .err sentinel on
+OOM/SIGKILL where the outer except can't write) is deferred — needs
+another Modal redeploy.
+
+Build + deploy: `cd cloud && npm run build && npx wrangler deploy`.
+New Version ID `ea8308d8-3e86-44fc-b57d-8180e5eb06c2`.
+
 ## 2026-05-31 (Async rig — deploy + e2e smoke test)
 
 - Deployed `myfabmesh-rig` to Modal — new `rig_router` ASGI web function

@@ -1466,55 +1466,151 @@
         return { success: false, ok: false, error: e?.message || String(e) };
       }
 
+      // Register the job in localStorage so a page reload can pick it up.
+      // Without this, refreshing during a 5-15 min poll strands the rig:
+      // the GLB still lands in R2 but the active UI never gets the "done"
+      // handoff (the closure is gone) — the user's only recovery is to
+      // open the project later when /api/meshes lists the rigged file.
+      try {
+        const pending = JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]');
+        const projectId = window.state?.currentProject?.id || null;
+        const projectName = window.state?.currentProject?.name || null;
+        pending.push({ jobId, projectId, projectName, meshUrl: url, createdAt: Date.now() });
+        localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(pending.slice(-10)));
+      } catch (e) { /* localStorage may be disabled */ }
+
+      const clearPending = () => {
+        try {
+          const pending = JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]');
+          const filtered = pending.filter(p => p.jobId !== jobId);
+          localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(filtered));
+        } catch (e) { /* ignore */ }
+      };
+
       // ── 2. Poll ──
-      // 5 s cadence × 120 polls = 10 min hard cap. Typical rig is ~2
-      // min hot / ~5 min cold start; anything past 10 min is dead.
+      // 5 s cadence × 180 polls = 15 min hard cap. Typical rig is ~2
+      // min hot / 4-6 min cold start. Empirically a dense-mesh rig with
+      // unlucky Modal queue can exceed 10 min — 15 min is the new ceiling.
       const POLL_INTERVAL_MS = 5000;
-      const MAX_POLLS = 120;
+      const MAX_POLLS = 180;
+      const MAX_CONSECUTIVE_AUTH_ERRORS = 3;  // abort on 401/403 streak (session expired)
+      const MAX_CONSECUTIVE_SERVER_ERRORS = 6; // abort on 5xx streak (Worker truly down)
       const t0 = Date.now();
+      let consecutiveAuthErrors = 0;
+      let consecutiveServerErrors = 0;
+      let lastWarn = null;
       for (let i = 0; i < MAX_POLLS; i++) {
         await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
         let st;
+        let httpStatus = 0;
         try {
           const resp = await fetch(
             `/api/auto-rig-status?job_id=${encodeURIComponent(jobId)}`,
             { method: 'GET', credentials: 'same-origin' },
           );
+          httpStatus = resp.status;
           if (!resp.ok) {
-            // Soft-retry on transient HTTP errors (502/504). The
-            // Worker itself returns 'pending' on Modal hiccups, so a
-            // non-200 here is genuinely the Worker being unreachable.
             console.warn(`[auto-rig] status HTTP ${resp.status} poll=${i + 1}`);
+            lastWarn = `HTTP ${resp.status}`;
+            // Auth errors: session expired during the long poll. Abort
+            // early with a typed error so the caller can prompt re-login
+            // instead of burning the full 15 min.
+            if (resp.status === 401 || resp.status === 403) {
+              consecutiveAuthErrors++;
+              if (consecutiveAuthErrors >= MAX_CONSECUTIVE_AUTH_ERRORS) {
+                clearPending();
+                return {
+                  success: false, ok: false,
+                  error: 'session expired during auto-rig — please log in and check Projects (the rig may have completed and be visible there)',
+                  authLost: true,
+                };
+              }
+            } else if (resp.status >= 500) {
+              consecutiveServerErrors++;
+              if (consecutiveServerErrors >= MAX_CONSECUTIVE_SERVER_ERRORS) {
+                clearPending();
+                return {
+                  success: false, ok: false,
+                  error: `Cloudflare Worker returned ${resp.status} on ${MAX_CONSECUTIVE_SERVER_ERRORS} consecutive polls — backend unreachable`,
+                };
+              }
+            }
+            if (typeof onProgress === 'function') {
+              try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+            }
             continue;
           }
+          consecutiveAuthErrors = 0;
+          consecutiveServerErrors = 0;
           st = await resp.json();
         } catch (e) {
           console.warn(`[auto-rig] status fetch threw poll=${i + 1}`, e);
+          lastWarn = e?.message || String(e);
+          if (typeof onProgress === 'function') {
+            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+          }
           continue;
         }
 
         if (st?.status === 'pending') {
+          if (st.warn || st.last_error) lastWarn = st.warn || st.last_error;
           if (typeof onProgress === 'function') {
-            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0 }); } catch {}
+            try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
           }
           continue;
         }
         if (st?.status === 'failed') {
+          clearPending();
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
           return { success: false, ok: false, error: st.error || 'auto-rig failed' };
         }
         if (st?.status === 'done') {
+          clearPending();
           const glbUrl = st.mesh_url || st.url || st.path || null;
           if (!glbUrl) {
             return { success: false, ok: false, error: 'auto-rig done but no URL returned' };
           }
+          // Force-push the new rig into state so the workspace re-renders
+          // immediately, even if reloadCurrentProject doesn't pick it up
+          // from /api/meshes (browser cache, stale state, etc.).
+          try {
+            if (window.state?.currentProject) {
+              const filename = glbUrl.split('/').pop() || 'rigged_puppeteer.glb';
+              window.state.currentProject.rigs = window.state.currentProject.rigs || [];
+              const already = window.state.currentProject.rigs.some(r => r.url === glbUrl);
+              if (!already) {
+                window.state.currentProject.rigs.push({
+                  filename, url: glbUrl, path: glbUrl,
+                  asset_type: 'rig', size: 0, created: new Date().toISOString(),
+                });
+              }
+            } else {
+              // Project switched mid-rig — fire a dom event so anyone listening
+              // (page-load resume handler, projects list) can pick it up. The
+              // GLB is already in R2 so /api/meshes will list it on next load.
+              try {
+                window.dispatchEvent(new CustomEvent('fabmesh:rig-done-orphan', {
+                  detail: { jobId, glbUrl },
+                }));
+              } catch (e) { /* ignore */ }
+              console.warn('[auto-rig] done but no currentProject — dispatched fabmesh:rig-done-orphan');
+            }
+          } catch (e) { console.warn('[auto-rig] state push failed:', e); }
           return { success: true, ok: true, glb_url: glbUrl, path: glbUrl };
         }
-        // Unknown status — log and keep polling.
+        // Unknown status — log and keep polling, but expose to caller via lastWarn.
         console.warn(`[auto-rig] unexpected status poll=${i + 1}`, st);
+        lastWarn = `unexpected status: ${JSON.stringify(st).slice(0, 80)}`;
+        if (typeof onProgress === 'function') {
+          try { onProgress({ polls: i + 1, elapsedMs: Date.now() - t0, lastWarn }); } catch {}
+        }
       }
 
-      return { success: false, ok: false, error: `auto-rig timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s)` };
+      clearPending();
+      return {
+        success: false, ok: false,
+        error: `auto-rig timeout after ${MAX_POLLS} polls (${Math.round((Date.now() - t0) / 1000)} s) — the rig may have completed; refresh Projects to check.`,
+      };
     },
     // CPU mesh quick edits via /api/mesh-op → trimesh on Modal.
     // Supports: smooth, decimate, center, fix_normals, fill_holes.
