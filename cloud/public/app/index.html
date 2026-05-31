@@ -705,6 +705,91 @@
             </details>
           </div>
         </article>
+
+        <!-- ============================================================
+             STEP 4: ANIMATION (Seed3D Puppeteer animation mode)
+             Generate idle/walk/run/attack clips for the rigged mesh.
+             Backend: Modal Seed3D Puppeteer animation endpoint (TBD)
+             ============================================================ -->
+        <article class="step-card disabled" id="step-card-animation" style="position:relative;">
+          <header class="step-card-header">
+            <span class="step-badge" data-step="4">4</span>
+            <h3>Animation</h3>
+            <span class="step-status" id="step4-status">Pending</span>
+          </header>
+          <div class="step-card-body two-stage">
+            <details class="stage stage-create" open>
+              <summary>
+                <span class="stage-icon">&#10010;</span>
+                <span class="stage-title">Create new</span>
+                <span class="stage-hint">Generate animation clips for your rig via AI</span>
+              </summary>
+              <div class="stage-body stage-create-with-source">
+                <div class="stage-create-form">
+                  <div class="form-row">
+                    <label>Engine</label>
+                    <select id="ws-anim-engine">
+                      <option value="seed3d_puppeteer" selected>Seed3D Puppeteer AI (video-guided)</option>
+                      <option value="procedural">Procedural (idle / walk / run baked)</option>
+                      <option value="anytop">AnyTop (text-to-motion, any topology)</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label for="ws-anim-type">Animation</label>
+                    <select id="ws-anim-type" style="width:100%;">
+                      <option value="idle" selected>Idle</option>
+                      <option value="walk">Walk</option>
+                      <option value="run">Run</option>
+                      <option value="attack">Attack</option>
+                      <option value="death">Death</option>
+                      <option value="fly">Fly</option>
+                      <option value="custom">Custom (text prompt)</option>
+                    </select>
+                  </div>
+                  <div class="form-row" id="ws-anim-prompt-row" style="display:none;">
+                    <label for="ws-anim-prompt">Prompt</label>
+                    <input id="ws-anim-prompt" type="text" placeholder="e.g. dragon breathes fire" style="width:100%; padding:6px;">
+                  </div>
+                  <div class="form-row" id="ws-anim-video-row" style="display:none;">
+                    <label for="ws-anim-video">Reference video (Seed3D)</label>
+                    <input id="ws-anim-video" type="file" accept="video/mp4,video/webm,video/quicktime" style="width:100%;">
+                  </div>
+                  <button id="ws-generate-anim" class="primary-btn" disabled title="Backend not wired yet — Seed3D Puppeteer animation endpoint TBD">Generate Animation</button>
+                </div>
+                <div class="stage-create-source">
+                  <div class="stage-source-label">Source rig</div>
+                  <div id="ws-anim-source-preview" class="stage-source-img stage-source-mesh">
+                    <canvas id="ws-anim-source-canvas"></canvas>
+                    <div class="preview-placeholder" id="ws-anim-source-placeholder">No rig selected</div>
+                  </div>
+                </div>
+              </div>
+            </details>
+            <details class="stage stage-edit">
+              <summary>
+                <span class="stage-icon">&#9998;</span>
+                <span class="stage-title">Edit selected</span>
+                <span class="stage-hint">Pick a clip, preview or export</span>
+              </summary>
+              <div class="stage-body">
+                <div id="ws-anim-versions" class="version-strip" style="display:flex; gap:8px; padding:8px; flex-wrap:wrap;"></div>
+                <div id="ws-anim-preview-area" style="display:flex; gap:12px; padding:8px;">
+                  <div style="flex:1; min-height:200px; background:#0a0a0e; border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:12px;">
+                    No animation selected
+                  </div>
+                  <div style="width:200px; display:flex; flex-direction:column; gap:8px;">
+                    <div class="step-tools-label">File</div>
+                    <button id="ws-anim-export-btn" class="ghost-btn tool-btn rig-tool-btn">&#128229; Export FBX</button>
+                    <button id="ws-anim-folder-btn" class="ghost-btn tool-btn rig-tool-btn">&#128193; Show in folder</button>
+                    <div class="step-tools-label">Playback</div>
+                    <button id="ws-anim-play-btn" class="ghost-btn tool-btn rig-tool-btn">&#9654; Play</button>
+                    <button id="ws-anim-loop-btn" class="ghost-btn tool-btn rig-tool-btn">&#128257; Loop</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </article>
       </div>
     </section>
 
