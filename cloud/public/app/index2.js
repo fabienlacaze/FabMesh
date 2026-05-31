@@ -7028,6 +7028,47 @@ document.getElementById('ws-use-for-rig-btn')?.addEventListener('click', () => {
   setTimeout(() => step3Card?.classList.remove('pulse-highlight'), 1500);
 });
 
+// "Use this rig for Animation ->" — mirrors the mesh→rig handover.
+// Pins the currently-previewed rig as the animation source, marks the
+// thumb selected, then expands + scrolls to Step 4 (Animation).
+document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.rigs || p.rigs.length === 0) return;
+  const sel = document.querySelector('#ws-rig-versions .version-thumb.selected');
+  const idx = sel ? Array.from(sel.parentElement.children).indexOf(sel) : 0;
+  const rig = p.rigs[idx] || p.rigs[0];
+  if (!rig) return;
+  p.selectedRigPath = rig.path;
+  const strip = document.getElementById('ws-rig-versions');
+  if (strip) {
+    strip.querySelectorAll('.version-thumb').forEach(x => x.classList.remove('used-for-anim'));
+    if (strip.children[idx]) strip.children[idx].classList.add('used-for-anim');
+  }
+  const btn = document.getElementById('ws-use-for-anim-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.add('used-state');
+    btn.textContent = '✓ Used for Animation generation →';
+  }
+  const step4Card = document.getElementById('step-card-animation');
+  if (step4Card) {
+    step4Card.classList.remove('collapsed', 'disabled');
+    setStepStatus(4, 'active');
+    document.getElementById('step-card-image')?.classList.add('collapsed');
+    document.getElementById('step-card-mesh')?.classList.add('collapsed');
+    document.getElementById('step-card-rig')?.classList.add('collapsed');
+    const step4CreateStage = step4Card.querySelector('.stage-create');
+    const step4EditStage = step4Card.querySelector('.stage-edit');
+    requestAnimationFrame(() => {
+      if (step4EditStage) step4EditStage.open = false;
+      if (step4CreateStage) step4CreateStage.open = true;
+    });
+    step4Card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    step4Card.classList.add('pulse-highlight');
+    setTimeout(() => step4Card.classList.remove('pulse-highlight'), 1500);
+  }
+});
+
 // Wrap a generate handler so it goes through the queue if VRAM is tight
 function gatedRun(kind, displayName, runFn) {
   enqueueJob(kind, displayName, runFn);
@@ -12150,6 +12191,19 @@ function initRigViewer() {
 async function showStep3Preview(rig) {
   const placeholder = document.getElementById('step3-placeholder');
   setViewerFilename('ws-rig-filename', rig?.path || rig?.filename);
+  // Toggle the "Use this rig for Animation -> " bar based on rig presence.
+  const useAnimBar = document.getElementById('ws-use-for-anim-bar');
+  if (useAnimBar) useAnimBar.classList.toggle('hidden', !rig);
+  if (rig) {
+    const animBtn = document.getElementById('ws-use-for-anim-btn');
+    const p = state.currentProject;
+    if (animBtn) {
+      const isSelected = p && p.selectedRigPath === rig.path;
+      animBtn.disabled = false;
+      animBtn.classList.toggle('used-state', isSelected);
+      animBtn.textContent = isSelected ? '✓ Used for Animation generation →' : 'Use this rig for Animation →';
+    }
+  }
   if (!rig) {
     if (placeholder) placeholder.style.display = '';
     if (rigVwModel && rigVwScene) { rigVwScene.remove(rigVwModel); rigVwModel = null; }
