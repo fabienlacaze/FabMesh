@@ -8606,8 +8606,10 @@ function _matInjectShader(mat) {
       _matCol = mix(vec3(_matLuma), _matCol, uSaturation);
       _matCol = (_matCol - 0.5) * uContrast + 0.5;
       if (abs(uHueShift) > 0.001) {
+        float _hueNorm = uHueShift / 6.28318530718;
         vec3 _hsv = _matRgb2Hsv(clamp(_matCol, 0.0, 1.0));
-        _hsv.x = fract(_hsv.x + uHueShift / 6.28318530718);
+        _hsv.x = fract(_hsv.x + _hueNorm);
+        _hsv.y = max(_hsv.y, abs(_hueNorm) * 0.5);
         _matCol = _matHsv2Rgb(_hsv);
       }
       gl_FragColor.rgb = clamp(_matCol, 0.0, 1.0);
