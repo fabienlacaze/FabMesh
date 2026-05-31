@@ -379,7 +379,8 @@ async function refreshProjectsPage() {
         images: [],
         meshes: [],
         rigs: [],
-        thumb: null,
+        animations: [],
+                thumb: null,
         latestTimestamp: 0,
       });
     }
@@ -1054,7 +1055,8 @@ document.getElementById('np-create').addEventListener('click', async () => {
     images: [],
     meshes: [],
     rigs: [],
-    thumb: null,
+    animations: [],
+        thumb: null,
     initialPrompt: prompt,
     assetType,
     assetStyle,
@@ -1292,9 +1294,10 @@ async function openProject(p) {
   // own setStageOpenState calls first (otherwise they'd clobber ours).
   requestAnimationFrame(() => {
     const steps = [
-      { id: 'step-card-image', has: (p.images && p.images.length > 0) },
-      { id: 'step-card-mesh',  has: (p.meshes && p.meshes.length > 0) },
-      { id: 'step-card-rig',   has: (p.rigs   && p.rigs.length   > 0) },
+      { id: 'step-card-image',     has: (p.images     && p.images.length     > 0) },
+      { id: 'step-card-mesh',      has: (p.meshes     && p.meshes.length     > 0) },
+      { id: 'step-card-rig',       has: (p.rigs       && p.rigs.length       > 0) },
+      { id: 'step-card-animation', has: (p.animations && p.animations.length > 0) },
     ];
     let scrollTargetId = null;
     for (const s of steps) {
@@ -10123,6 +10126,50 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
 });
 
 // ============================================================
+// STEP 4: ANIMATION (Seed3D Puppeteer / procedural / AnyTop)
+// UI scaffold only — backend wiring in follow-up commit.
+// ============================================================
+function _wsAnimEngineSync() {
+  const engine = document.getElementById('ws-anim-engine')?.value || 'seed3d_puppeteer';
+  const animType = document.getElementById('ws-anim-type')?.value || 'idle';
+  const promptRow = document.getElementById('ws-anim-prompt-row');
+  const videoRow = document.getElementById('ws-anim-video-row');
+  const showPrompt = (animType === 'custom') || (engine === 'anytop');
+  const showVideo = (engine === 'seed3d_puppeteer');
+  if (promptRow) promptRow.style.display = showPrompt ? '' : 'none';
+  if (videoRow) videoRow.style.display = showVideo ? '' : 'none';
+}
+document.getElementById('ws-anim-engine')?.addEventListener('change', _wsAnimEngineSync);
+document.getElementById('ws-anim-type')?.addEventListener('change', _wsAnimEngineSync);
+_wsAnimEngineSync();
+
+function renderAnimVersions(p) {
+  const strip = document.getElementById('ws-anim-versions');
+  if (!strip) return;
+  const anims = p?.animations || [];
+  if (!anims.length) {
+    strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
+    return;
+  }
+  strip.innerHTML = anims.map((a, i) => `
+    <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}" style="width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === 0 ? 'var(--accent)' : 'transparent'};">
+      <span style="font-size:18px;">${a.type === 'idle' ? '😴' : a.type === 'walk' ? '🚶' : a.type === 'run' ? '🏃' : a.type === 'attack' ? '⚔️' : a.type === 'death' ? '💀' : a.type === 'fly' ? '✈️' : '🎬'}</span>
+      <span style="font-size:11px; font-weight:600;">${a.type || 'clip'}</span>
+      <span style="font-size:9px; color:var(--text-2);">v${i}</span>
+    </div>
+  `).join('');
+}
+
+document.getElementById('ws-generate-anim')?.addEventListener('click', () => {
+  const engine = document.getElementById('ws-anim-engine')?.value || 'seed3d_puppeteer';
+  customError(
+    `The ${engine === 'seed3d_puppeteer' ? 'Seed3D Puppeteer' : engine === 'anytop' ? 'AnyTop' : 'Procedural'} animation backend is not wired yet. ` +
+    `Step 4 UI is scaffolded; the Modal endpoint and integration will come in a follow-up commit.`,
+    'Animation backend not ready',
+  );
+});
+
+// ============================================================
 // HELPER: reload current project from disk
 // ============================================================
 async function reloadCurrentProject() {
@@ -10146,7 +10193,8 @@ async function reloadCurrentProject() {
     const emptyShell = {
       name: state.currentProject.name,
       images: [], meshes: [], rigs: [],
-      _reloadTs: Date.now(),
+      animations: [],
+            _reloadTs: Date.now(),
     };
     state.currentProject = emptyShell;
     populateWorkspace(emptyShell);
@@ -10167,9 +10215,10 @@ async function reloadCurrentProject() {
     // Use a short timeout (not rAF) so populateWorkspace's own rAFs finish first.
     setTimeout(() => {
       const steps = [
-        { id: 'step-card-image', has: refreshed.images?.length > 0 },
-        { id: 'step-card-mesh',  has: refreshed.meshes?.length > 0 },
-        { id: 'step-card-rig',   has: refreshed.rigs?.length > 0 },
+        { id: 'step-card-image',     has: refreshed.images?.length     > 0 },
+        { id: 'step-card-mesh',      has: refreshed.meshes?.length     > 0 },
+        { id: 'step-card-rig',       has: refreshed.rigs?.length       > 0 },
+        { id: 'step-card-animation', has: refreshed.animations?.length > 0 },
       ];
       for (const s of steps) {
         if (!s.has) continue;
