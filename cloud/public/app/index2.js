@@ -2630,21 +2630,30 @@ const _mvViewMap = {
   'fl':   'view_1',   // 330° -> right (closest front-right equiv)
 };
 
-function _showMultiviewBar(multiviewDir) {
+function _showMultiviewBar(multiviewDir, availableViews) {
   const bar = document.getElementById('ws-multiview-bar');
   console.log('[mv-show] bar found?', !!bar, 'current classes:', bar?.className);
   if (!bar) return;
   bar.classList.remove('hidden');
   bar.dataset.dir = multiviewDir;
   bar.querySelectorAll('.mv-btn').forEach(b => b.classList.remove('mv-active'));
-  // 2-view mode (no full multiview dir): hide right/left/top/bottom, keep
-  // only front + back. With a full <stem>_multiview/ dir we have 6 ortho
-  // views and show them all.
-  const has6 = !!multiviewDir;
+  // Dynamic visibility based on what views actually exist for this image.
+  // availableViews is an array like ['front'] (1-view), ['front','back']
+  // (2-view backview), or ['front','right','back','left','top','bottom']
+  // (6-view sheet). When omitted, fall back to legacy heuristic: 2 views
+  // (front+back) by default, all 6 if multiviewDir is set.
+  let views = Array.isArray(availableViews) && availableViews.length
+    ? availableViews.map(v => String(v).toLowerCase())
+    : (multiviewDir ? ['front', 'right', 'back', 'left', 'top', 'bottom'] : ['front', 'back']);
+  if (views.length <= 1) {
+    bar.classList.add('hidden');
+    console.log('[mv-show] only 1 view -> hiding bar');
+    return;
+  }
+  const _viewSet = new Set(views);
   bar.querySelectorAll('.mv-btn').forEach(b => {
     const v = b.dataset.view;
-    const shouldShow = (v === 'front' || v === 'back') || has6;
-    b.style.display = shouldShow ? '' : 'none';
+    b.style.display = _viewSet.has(v) ? '' : 'none';
   });
   // Restore the previously selected angle if the user has one pinned.
   // Multi-views use the same 6 standardized keys (front/fr/right/br/bl/
