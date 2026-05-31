@@ -380,35 +380,64 @@ def _find_latest_bvh(ckpt_path: str) -> str:
 
 
 def _guess_face_joints(bvh_path: str) -> list:
-    """Pick 4 joints from the BVH that look like LR/forward markers for
-    AnyTop's face_joints_names heuristic. Looks for thigh/hip/shoulder."""
-    candidates_l = []
-    candidates_r = []
-    candidates_fl = []
-    candidates_fr = []
+    """Pick 4 joints from the BVH that define the skeleton's facing
+    plane (AnyTop's `--face_joints_names` arg). AnyTop expects 4 ACTUAL
+    joint names that exist in the skeleton — at
+    motion_process.py:115 it does `[t_pos_names.index(n) for n in face_joints]`
+    and raises ValueError on any missing name.
+
+    The Puppeteer skeleton predicts bones with arbitrary anatomical names
+    (e.g. `spine_0`, `wing_l_1`, `leg_r_2`, `tail_3`). The heuristic must
+    therefore be flexible enough to also match wing / tail / spine
+    patterns. If we still can't find LR markers, fall back to the first
+    4 unique joint names from the BVH (NEVER 'root' — that's a literal
+    string that doesn't appear in Puppeteer output)."""
+    all_joints: list = []
     with open(bvh_path, "r", encoding="utf-8", errors="ignore") as f:
         for ln in f:
             ln = ln.strip()
             if not ln.startswith(("JOINT ", "ROOT ")):
                 continue
             name = ln.split(maxsplit=1)[1]
-            nl = name.lower()
-            if "thigh" in nl or "leg" in nl or "hip" in nl:
-                (candidates_l if ("l_" in nl or "_l" in nl or "left" in nl) else candidates_r).append(name)
-            elif "shoulder" in nl or "arm" in nl or "finger" in nl:
-                (candidates_fl if ("l_" in nl or "_l" in nl or "left" in nl) else candidates_fr).append(name)
-    out = []
-    if candidates_r:
-        out.append(candidates_r[0])
-    if candidates_l:
-        out.append(candidates_l[0])
-    if candidates_fr:
-        out.append(candidates_fr[0])
-    if candidates_fl:
-        out.append(candidates_fl[0])
-    while len(out) < 4:
-        # Fallback: pad with the root name to avoid argparse failure.
-        out.append(out[0] if out else "root")
+            if name not in all_joints:
+                all_joints.append(name)
+    if not all_joints:
+        raise RuntimeError("BVH has no joints — skeleton extraction failed")
+
+    # Patterns expanded to cover bipeds AND dragons / quadrupeds / wings.
+    # The 'L' / 'R' detection looks for explicit side markers.
+    def is_left(nl: str) -> bool:
+        return any(t in nl for t in ("_l_", "_l.", "left", "_l ", "_lf", "l_"))
+    def is_right(nl: str) -> bool:
+        return any(t in nl for t in ("_r_", "_r.", "right", "_r ", "_rt", "r_"))
+
+    leg_l, leg_r, arm_l, arm_r = [], [], [], []
+    for n in all_joints:
+        nl = n.lower()
+        if any(t in nl for t in ("thigh", "leg", "hip", "hindleg", "rearleg", "femur")):
+            (leg_l if is_left(nl) else leg_r if is_right(nl) else []).append(n)
+        elif any(t in nl for t in ("shoulder", "arm", "wing", "forearm", "scapula", "clavicle", "humerus", "elbow", "foreleg", "frontleg")):
+            (arm_l if is_left(nl) else arm_r if is_right(nl) else []).append(n)
+
+    out: list = []
+    if leg_r: out.append(leg_r[0])
+    if leg_l: out.append(leg_l[0])
+    if arm_r: out.append(arm_r[0])
+    if arm_l: out.append(arm_l[0])
+
+    # If we couldn't find 4 LR-markered joints, fall back to the first 4
+    # DISTINCT joint names from the BVH. Better an arbitrary face plane
+    # (motion may look wonky) than a hard crash on missing 'root'.
+    if len(out) < 4:
+        for n in all_joints:
+            if n not in out:
+                out.append(n)
+                if len(out) >= 4:
+                    break
+    # Last-resort: if still <4 (very small skeleton?), pad with the
+    # first joint name. Avoids argparse / list-index errors.
+    while len(out) < 4 and all_joints:
+        out.append(all_joints[0])
     return out[:4]
 
 

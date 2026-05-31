@@ -120,6 +120,13 @@ def fill_holes(glb_bytes: bytes) -> bytes:
         if not hasattr(m, 'faces'):
             continue
         try:
+            # use_fan=True triangulates holes >4 edges via centroid-fan.
+            # Default (False) only patches triangle/quad boundary loops
+            # — every real TRELLIS-2 hole is larger and would be silently
+            # skipped, producing the 'fill holes does nothing' bug.
+            trimesh.repair.fill_holes(m, use_fan=True)
+        except TypeError:
+            # Older trimesh versions don't accept use_fan kwarg.
             trimesh.repair.fill_holes(m)
         except Exception as e:
             print(f'[mesh-op] fill_holes skipped: {e}', flush=True)
