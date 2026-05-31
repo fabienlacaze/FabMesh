@@ -85,6 +85,11 @@ image = (
         # sample.generate ModuleNotFoundError's before it ever loads
         # the checkpoint.
         "num2words==0.5.13",
+        # T5Tokenizer.from_pretrained() requires sentencepiece — even
+        # when we don't actually feed text to the model, generate.py
+        # instantiates the conditioner at startup, which imports T5
+        # which needs SentencePiece for its vocab.
+        "sentencepiece==0.2.0",
     )
     .pip_install(MOTION_LIB)
     # Clone the AnyTop repo into the container.
@@ -339,11 +344,18 @@ def animate_mesh(
         ckpt = _resolve_checkpoint_path(ckpt_name)
         if not ckpt:
             raise RuntimeError(f"checkpoint not found: {ckpt_name}")
+        object_type = _pick_object_type(ckpt_name)
         # ── Step 4: sample.generate ───────────────────────────────
+        # --object_type MUST be one of the 70 canonical class names from
+        # AnyTop's param_utils.py registry. Passing our synthetic
+        # skel_name (job_<hex>) silently produced a zero embedding and
+        # the diffusion sampler conditioned on nothing → degenerate
+        # output. _pick_object_type maps the checkpoint family to a
+        # representative trained class (Ostrich, Horse, Dragon, etc.).
         cmd = [
             sys.executable, "-m", "sample.generate",
             "--model_path", ckpt,
-            "--object_type", skel_name,
+            "--object_type", object_type,
             "--cond_path", os.path.join(ds_dir, "cond.npy"),
             "--num_repetitions", "1",
             "--motion_length", "5.0",
@@ -414,6 +426,34 @@ def _pick_checkpoint(anim_type: str) -> str:
     if any(k in t for k in ("idle", "walk", "run", "attack", "death", "humanoid", "biped")):
         return "bipeds"
     return "all"
+
+
+# Map each checkpoint family to ONE canonical AnyTop class the model
+# was trained on. The class embedding registry lives in AnyTop's
+# data_loaders/truebones/truebones_utils/param_utils.py — 70 classes
+# total. Passing our synthetic skel_name ('job_<hex>') as --object_type
+# silently produces a zero/garbage embedding because the lookup misses,
+# so the diffusion sampler conditions on nothing → degenerate output
+# (or KeyError, depending on how the lookup is done).
+# Picked class per family is the most "neutral" one for retargeting:
+#   bipeds   → Ostrich  (vertical biped, no T-Rex tail bias)
+#   quadropeds → Horse  (well-trained, balanced quadruped gait)
+#   millipeds_snakes → Spider (most-used in TruBones tests)
+#   flying   → Dragon  (winged biped — closest topology to our rigged dragons)
+#   all      → Flamingo (AnyTop's argparse default)
+_OBJECT_TYPE_BY_FAMILY = {
+    "bipeds": "Ostrich",
+    "quadropeds": "Horse",
+    "millipeds_snakes": "Spider",
+    "flying": "Dragon",
+    "all": "Flamingo",
+}
+
+
+def _pick_object_type(ckpt_family: str) -> str:
+    """Pick the --object_type class string the AnyTop checkpoint was
+    actually trained on. Falls back to Flamingo (AnyTop default)."""
+    return _OBJECT_TYPE_BY_FAMILY.get(ckpt_family, "Flamingo")
 
 
 def _resolve_checkpoint_path(ckpt_family: str) -> str:
