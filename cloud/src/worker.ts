@@ -6007,7 +6007,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
       signal: AbortSignal.timeout(120_000),
     });
     if (!r.ok) throw new Error(`Modal mesh_op HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const data = await r.json() as { glb_base64?: string };
+    const data = await r.json() as { glb_base64?: string; stats?: Record<string, unknown> };
     if (!data.glb_base64) throw new Error('Modal mesh_op missing glb_base64');
 
     // Decode base64 → R2 → return URL.
@@ -6018,10 +6018,22 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     const key = `${user.id}/mesh-op/${projectSlug}/${Date.now()}_${op}.glb`;
     await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
     const url = `${env.R2_PUBLIC_URL}/${key}`;
+    // Forward fill_holes verdict + delta-faces into telemetry so we can
+    // measure the diagnostic-first rollout via Supabase SELECT later.
+    const logCtx: Record<string, unknown> = { op_type: op, mesh_url_in: finalUrl };
+    if (data.stats) {
+      const s = data.stats as Record<string, unknown>;
+      if (s.verdict) logCtx.verdict = s.verdict;
+      if (typeof s.holes_filled_delta_faces === 'number') logCtx.holes_filled_delta_faces = s.holes_filled_delta_faces;
+    }
     await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
-                       COST_PER, opStart, Date.now(), 'succeeded',
-                       { op_type: op, mesh_url_in: finalUrl });
-    return json({ ok: true, success: true, path: url, newPath: url, mesh_url: url, creditsRemaining: remaining });
+                       COST_PER, opStart, Date.now(), 'succeeded', logCtx);
+    return json({
+      ok: true, success: true,
+      path: url, newPath: url, mesh_url: url,
+      stats: data.stats ?? null,
+      creditsRemaining: remaining,
+    });
   } catch (e) {
     await addCredits(env, user.id, COST_PER);
     await refundModalSpend(env, estimatedTotal);

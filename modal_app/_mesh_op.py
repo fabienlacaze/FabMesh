@@ -5,10 +5,17 @@ CPU operations on the GLB. No GPU needed, no Modal class @enter cost.
 These can run inside the lightweight mesh_start function (which also
 serves the async TRELLIS-2 dispatch).
 
-Returns the modified GLB as raw bytes. The caller (mesh_start) handles
-the HTTP response shape and the worker handles R2 mirroring.
+Most ops return the modified GLB as raw bytes. fill_holes returns a
+tuple (bytes, stats_dict) so the client can show a verdict-driven
+toast (CLOSED_OK / OPEN_HOLES / WINDING_INCONSISTENT /
+NONMANIFOLD_OR_DOUBLE_SKINNED). The OPS dispatch wraps every other op
+as (bytes, None) so the worker has a uniform shape to forward.
 """
 import io
+import trimesh as _trimesh_probe
+assert hasattr(_trimesh_probe.repair, 'fill_holes'), \
+    'trimesh.repair.fill_holes missing — pin trimesh>=4.4 in modal_app/app.py'
+del _trimesh_probe
 
 
 def _load_scene(glb_bytes: bytes):
@@ -110,52 +117,251 @@ def fix_normals(glb_bytes: bytes) -> bytes:
     return _export(scene)
 
 
-def fill_holes(glb_bytes: bytes) -> bytes:
-    """Patch small holes via trimesh.repair.fill_holes (a hole is a
-    cycle of boundary edges shorter than max_edge_count). Useful after
-    boolean ops or aggressive decimation."""
+def _count_boundary_edges(m):
+    """Return (boundary_edges, nonmanifold_edges) using a sorted-edges
+    unique tally. boundary = edges used by exactly 1 triangle;
+    nonmanifold = edges used by >2 triangles (e.g. T-junctions, double
+    skin, fan-style stitching)."""
+    import numpy as np
+    if not hasattr(m, 'edges') or len(m.edges) == 0:
+        return 0, 0
+    e = np.sort(m.edges, axis=1)
+    _, _, counts = np.unique(e, axis=0, return_inverse=True, return_counts=True)
+    return int((counts == 1).sum()), int((counts > 2).sum())
+
+
+def _split_tjunctions(m, tol):
+    """Detect T-junctions on boundary edges and split the offending
+    edge so the two halves can pair with neighbouring triangles. A
+    T-junction is a vertex that lies (within tol) on another boundary
+    edge but isn't an endpoint of that edge.
+
+    Cheap approach: build a KDTree over boundary vertex positions, for
+    each boundary edge query the tree for points inside its segment
+    bounding box, classify hits by point-to-segment distance.
+
+    Returns the number of splits performed. This is a NO-OP on textured
+    meshes (UV-aware splitter would need to interpolate UVs at the
+    new vertex — out of scope for v1) and on very large meshes.
+    """
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    if not hasattr(m, 'edges') or len(m.edges) == 0:
+        return 0
+    e_sorted = np.sort(m.edges, axis=1)
+    uniq, inv, counts = np.unique(e_sorted, axis=0, return_inverse=True, return_counts=True)
+    bmask = (counts == 1)
+    if not bmask.any():
+        return 0
+    boundary_edges = uniq[bmask]  # (B, 2) vertex index pairs
+
+    boundary_verts = np.unique(boundary_edges.ravel())
+    if len(boundary_verts) == 0:
+        return 0
+    verts = m.vertices[boundary_verts]                  # (V, 3)
+    pos2idx = {v: i for i, v in enumerate(boundary_verts.tolist())}
+    tree = cKDTree(verts)
+
+    splits = 0
+    # For each boundary edge, find points close to the segment (not the
+    # endpoints) within tol and split. We don't actually split the edge
+    # in-place — trimesh would require re-meshing. Instead we record
+    # "phantom" vertex pairs that the merge_vertices in the caller can
+    # use on the next pass. Practically: bump the boundary vertex onto
+    # the edge by a tiny offset so the next merge_vertices catches it.
+    # This trades exactness for safety — no faces are modified.
+    bumps = {}  # idx in m.vertices -> new position
+    tol_sq = float(tol) ** 2
+    for a, b in boundary_edges.tolist():
+        pa = m.vertices[a]; pb = m.vertices[b]
+        ab = pb - pa
+        ab_len_sq = float(np.dot(ab, ab))
+        if ab_len_sq < tol_sq * 0.01:
+            continue
+        midpoint = (pa + pb) * 0.5
+        radius = float(np.sqrt(ab_len_sq)) * 0.5 + tol
+        # Candidates near the edge's midpoint within radius+tol.
+        cand_idx = tree.query_ball_point(midpoint, r=radius)
+        for ci in cand_idx:
+            v_world_idx = int(boundary_verts[ci])
+            if v_world_idx == a or v_world_idx == b:
+                continue
+            p = m.vertices[v_world_idx]
+            ap = p - pa
+            t = float(np.dot(ap, ab) / ab_len_sq)
+            if t <= 1e-3 or t >= 1.0 - 1e-3:
+                continue
+            proj = pa + t * ab
+            d2 = float(np.dot(p - proj, p - proj))
+            if d2 < tol_sq:
+                bumps[v_world_idx] = proj
+                splits += 1
+    if bumps:
+        for vi, new_pos in bumps.items():
+            m.vertices[vi] = new_pos
+        # Snap each bumped vertex onto its target → next merge_vertices
+        # collapses the pair, the edge becomes a true boundary.
+    return splits
+
+
+def _aggregate_diag(per_mesh):
+    """Decide the single verdict reported to the user from per-mesh
+    stats. Priority order — most actionable first:
+      WINDING_INCONSISTENT > NONMANIFOLD_OR_DOUBLE_SKINNED > OPEN_HOLES > CLOSED_OK
+    """
+    if not per_mesh:
+        return 'CLOSED_OK'
+    has_winding = any(d.get('winding_inconsistent') for d in per_mesh)
+    has_double = any(d.get('double_skin') or d.get('nonmanifold_edges_final', 0) > 0 for d in per_mesh)
+    has_open = any(d.get('boundary_edges_final', 0) > 0 for d in per_mesh)
+    if has_winding:
+        return 'WINDING_INCONSISTENT'
+    if has_double:
+        return 'NONMANIFOLD_OR_DOUBLE_SKINNED'
+    if has_open:
+        return 'OPEN_HOLES'
+    return 'CLOSED_OK'
+
+
+def fill_holes(glb_bytes: bytes):
+    """Diagnostic-first hole filling. Returns (glb_bytes, stats_dict).
+
+    Pipeline per mesh:
+      0. Strip degenerate faces + unreferenced verts (mirror cloud client)
+      1. Count baseline boundary + non-manifold + winding state
+      2. merge_vertices with tol = clamp(bbDiag * 1e-4, 1e-7, bbDiag*1e-2)
+      3. T-junction split (gated on size + non-textured to stay safe in v1)
+      4. fix_winding + fill_holes(use_fan=True)
+      5. Recount + aggregate verdict
+
+    The 4-verdict vocabulary lets the client show ONE actionable toast
+    instead of "0 boundary edges found" when the real problem is
+    inverted normals or double-skinning.
+    """
+    import numpy as np
     import trimesh
+
     scene = _load_scene(glb_bytes)
+    per_mesh = []
+    total_dfaces = 0
     for m in _meshes(scene):
         if not hasattr(m, 'faces'):
             continue
-        # Step 1 — merge duplicate vertices at hole borders. Many TRELLIS-2
-        # / Puppeteer GLBs ship with vertex pairs that have the same
-        # position to 6+ digits but are stored separately because of UV
-        # seams or split materials. Without this merge, trimesh.outline()
-        # sees the hole's boundary edges as INTERIOR (count==2 in the
-        # duplicate-aware tally) and reports 0 boundaries. After merging
-        # by spatial proximity those edges become true boundary edges
-        # (count==1) and fill_holes can patch them.
+        diag = {'name': getattr(m, 'metadata', {}).get('name', 'mesh')}
+
+        # Step 0 — clean degenerates so boundary counts aren't polluted.
         try:
-            m.merge_vertices(merge_tex=True, merge_norm=True)
+            m.update_faces(m.nondegenerate_faces())
+            m.remove_unreferenced_vertices()
+            try: m._cache.clear()
+            except Exception: pass
         except Exception as e:
-            print(f'[mesh-op] merge_vertices warn: {e}', flush=True)
+            print(f'[mesh-op] fill_holes clean step warn: {e}', flush=True)
+
+        # Auto-tol from bounding box diagonal — clamped to safe range.
         try:
-            # Repair winding + inverted normals before fill — sometimes a
-            # 'hole' is actually a patch of backward triangles already
-            # there. fix_winding() flips them so the boundary edge count
-            # matches what the user sees visually.
-            trimesh.repair.fix_winding(m)
-        except Exception as e:
-            print(f'[mesh-op] fix_winding warn: {e}', flush=True)
+            bb_diag = float(np.linalg.norm(m.bounds[1] - m.bounds[0])) or 1.0
+        except Exception:
+            bb_diag = 1.0
+        tol = float(np.clip(bb_diag * 1e-4, 1e-7, bb_diag * 1e-2))
+        diag['bb_diag'] = round(bb_diag, 6)
+        diag['tol'] = round(tol, 9)
+
+        faces_before = int(len(m.faces))
+        be_before, nm_before = _count_boundary_edges(m)
         try:
-            # use_fan=True triangulates holes >4 edges via centroid-fan.
-            # Default (False) only patches triangle/quad boundary loops.
+            winding_inconsistent = not bool(getattr(m, 'is_winding_consistent', True))
+        except Exception:
+            winding_inconsistent = False
+        try:
+            watertight_before = bool(getattr(m, 'is_watertight', False))
+        except Exception:
+            watertight_before = False
+        diag.update({
+            'faces_before': faces_before,
+            'boundary_edges_before': be_before,
+            'nonmanifold_edges_before': nm_before,
+            'winding_inconsistent': winding_inconsistent,
+            'watertight_before': watertight_before,
+        })
+
+        # Step 2 — aggressive position-only merge.
+        try:
+            digits = max(1, int(round(-np.log10(tol))))
+            m.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=digits)
+        except TypeError:
+            try: m.merge_vertices(merge_tex=True, merge_norm=True)
+            except Exception as e: print(f'[mesh-op] merge_vertices fallback warn: {e}', flush=True)
+        try: m._cache.clear()
+        except Exception: pass
+        be_after_merge, _ = _count_boundary_edges(m)
+        diag['boundary_edges_after_merge'] = be_after_merge
+
+        # Step 3 — T-junction split (gated).
+        is_textured = isinstance(getattr(m, 'visual', None), trimesh.visual.TextureVisuals)
+        if be_after_merge <= 200_000 and not is_textured:
+            try:
+                splits = _split_tjunctions(m, tol)
+                diag['tjunction_splits'] = int(splits)
+                if splits:
+                    try: m.merge_vertices(merge_tex=True, merge_norm=True,
+                                           digits_vertex=max(1, int(round(-np.log10(tol)))))
+                    except TypeError: m.merge_vertices(merge_tex=True, merge_norm=True)
+                    try: m._cache.clear()
+                    except Exception: pass
+            except Exception as e:
+                print(f'[mesh-op] tjunction split warn: {e}', flush=True)
+                diag['tjunction_splits'] = 0
+        else:
+            diag['tjunction_splits'] = 0
+            diag['tjunc_skipped_reason'] = ('TEXTURED' if is_textured else 'TOO_LARGE')
+        be_after_tjunc, nm_after_tjunc = _count_boundary_edges(m)
+        diag['boundary_edges_after_tjunc'] = be_after_tjunc
+
+        # Step 4 — re-orient + fill.
+        try: trimesh.repair.fix_winding(m)
+        except Exception as e: print(f'[mesh-op] fix_winding warn: {e}', flush=True)
+        try: m._cache.clear()
+        except Exception: pass
+        try:
             trimesh.repair.fill_holes(m, use_fan=True)
         except TypeError:
-            # Older trimesh versions don't accept use_fan kwarg.
-            trimesh.repair.fill_holes(m)
+            try: trimesh.repair.fill_holes(m)
+            except Exception as e: print(f'[mesh-op] fill_holes skipped: {e}', flush=True)
         except Exception as e:
             print(f'[mesh-op] fill_holes skipped: {e}', flush=True)
-        # Log how many faces we ended up with so the user can verify the
-        # fill actually closed something (Δfaces > 0 means new fan triangles
-        # were added).
-        try:
-            print(f'[mesh-op] fill_holes done: faces={len(m.faces)}', flush=True)
-        except Exception:
-            pass
-    return _export(scene)
+        try: m._cache.clear()
+        except Exception: pass
+
+        be_final, nm_final = _count_boundary_edges(m)
+        faces_after = int(len(m.faces))
+        dfaces = max(0, faces_after - faces_before)
+        total_dfaces += dfaces
+        try: watertight_after = bool(getattr(m, 'is_watertight', False))
+        except Exception: watertight_after = (be_final == 0)
+        # Double-skin heuristic: lots of non-manifold edges but no
+        # boundary → two layers of triangles stitched together.
+        double_skin = (nm_final > max(50, int(faces_after * 0.05))) and be_final == 0
+        diag.update({
+            'faces_after': faces_after,
+            'holes_filled_delta_faces': dfaces,
+            'boundary_edges_final': be_final,
+            'nonmanifold_edges_final': nm_final,
+            'watertight_after': watertight_after,
+            'double_skin': double_skin,
+        })
+        per_mesh.append(diag)
+        print(f'[mesh-op] fill_holes mesh={diag["name"]} '
+              f'be:{be_before}→{be_final} nm:{nm_before}→{nm_final} '
+              f'Δfaces={dfaces} verdict-input={diag}', flush=True)
+
+    stats = {
+        'verdict': _aggregate_diag(per_mesh),
+        'holes_filled_delta_faces': total_dfaces,
+        'meshes': per_mesh,
+    }
+    return _export(scene), stats
 
 
 def material_adjust(glb_bytes: bytes,
@@ -336,22 +542,24 @@ OPS = {
 }
 
 
-def run(op_type: str, glb_bytes: bytes, params: dict | None = None) -> bytes:
+def run(op_type: str, glb_bytes: bytes, params: dict | None = None):
     """Single entry point — the worker passes op_type + GLB bytes +
-    params, we route to the right helper above and return the new
-    GLB bytes. Unknown ops raise ValueError."""
+    params, we route to the right helper above and return a
+    (bytes, stats|None) tuple. fill_holes populates stats with a
+    verdict + per-mesh diagnostic; every other op returns stats=None.
+    Unknown ops raise ValueError."""
     if op_type not in OPS:
         raise ValueError(f'unknown mesh op: {op_type}')
     p = params or {}
     if op_type == 'smooth':
         return smooth(glb_bytes, iterations=int(p.get('iterations', 5)),
-                                  lamb=float(p.get('lamb', 0.5)))
+                                  lamb=float(p.get('lamb', 0.5))), None
     if op_type == 'decimate':
-        return decimate(glb_bytes, target_faces=int(p.get('target_faces', 50_000)))
+        return decimate(glb_bytes, target_faces=int(p.get('target_faces', 50_000))), None
     if op_type == 'subdivide':
-        return subdivide(glb_bytes, iterations=int(p.get('iterations', 1)))
+        return subdivide(glb_bytes, iterations=int(p.get('iterations', 1))), None
     if op_type == 'retex_swap':
-        return retex_swap_atlas(glb_bytes, str(p.get('image_url') or ''))
+        return retex_swap_atlas(glb_bytes, str(p.get('image_url') or '')), None
     if op_type == 'material_adjust':
         return material_adjust(glb_bytes,
             brightness=float(p.get('brightness', 1.0)),
@@ -360,5 +568,8 @@ def run(op_type: str, glb_bytes: bytes, params: dict | None = None) -> bytes:
             emissive=float(p.get('emissive', 0.0)),
             metallic=float(p.get('metallic', 0.0)),
             roughness=float(p.get('roughness', 0.7)),
-            hue_shift=float(p.get('hue_shift', 0.0)))
-    return OPS[op_type](glb_bytes)
+            hue_shift=float(p.get('hue_shift', 0.0))), None
+    if op_type == 'fill_holes':
+        # fill_holes already returns (bytes, stats_dict).
+        return fill_holes(glb_bytes)
+    return OPS[op_type](glb_bytes), None

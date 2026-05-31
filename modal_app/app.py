@@ -1360,15 +1360,18 @@ def mesh_router():
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"mesh download: {e}")
             try:
-                out = run_mesh_op(op_type, src, payload.get("params") or {})
+                out, stats = run_mesh_op(op_type, src, payload.get("params") or {})
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-            return {
+            resp = {
                 "ok": True,
                 "op_type": op_type,
                 "bytes": len(out),
                 "glb_base64": base64.b64encode(out).decode("ascii"),
             }
+            if stats is not None:
+                resp["stats"] = stats
+            return resp
 
         # ── Cancel a running spawn ─────────────────────────────────
         if op_type == "cancel":
