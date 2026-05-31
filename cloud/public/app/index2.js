@@ -733,8 +733,22 @@ function _imgSrc(path) {
   if (/^(?:https?|blob|data):/i.test(path)) {
     return /^https?:/i.test(path) ? '/api/proxy-image?url=' + encodeURIComponent(path) : path;
   }
-  return 'file:///' + String(path).replace(/\\/g, '/');
+  return _toFileUrl(path);
 }
+
+// Universal path-to-URL helper. Desktop bundle gets bare filesystem paths
+// ('C:\Users\...\img.png') and needs the file:/// prefix. Cloud bundle
+// gets HTTPS URLs already and just needs them returned as-is — without
+// this guard the prefix concatenates as 'file:///https://...' which the
+// browser refuses with "Not allowed to load local resource". Used by
+// every viewer / lightbox / preview that loads a path-or-URL.
+function _toFileUrl(path) {
+  if (!path) return '';
+  const s = String(path);
+  if (/^(?:https?|blob|data|file):/i.test(s)) return s;
+  return _toFileUrl(s);
+}
+window._toFileUrl = _toFileUrl;
 
 function renderAllImagesGrid() {
   const grid = document.getElementById('all-images-grid');
@@ -861,7 +875,7 @@ async function renderProjectsGrid() {
       <button class="card-delete-btn" title="Delete project">&#10005;</button>
       <div class="project-card-thumb">
         ${p.thumb
-          ? `<img src="file:///${p.thumb.replace(/\\/g, '/')}" alt="${p.name}">`
+          ? `<img src="${_toFileUrl(p.thumb)}" alt="${p.name}">`
           : `<span class="project-card-thumb-empty">No image</span>`}
       </div>
       <div class="project-card-body">
@@ -1839,7 +1853,7 @@ async function showStep2SourceImage(imgPath) {
   const target = document.getElementById('ws-3d-source-preview');
   if (!target) return;
   if (imgPath) {
-    target.innerHTML = `<img src="file:///${imgPath.replace(/\\/g, '/')}">`;
+    target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
   } else {
     target.innerHTML = '<div class="preview-placeholder">No image selected</div>';
   }
@@ -1909,7 +1923,7 @@ function showStep2BackImage(imgPath) {
   const clearBtn = document.getElementById('ws-3d-source-back-clear');
   if (!target) return;
   if (imgPath) {
-    target.innerHTML = `<img src="file:///${imgPath.replace(/\\/g, '/')}">`;
+    target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
     if (clearBtn) clearBtn.style.display = 'inline-block';
   } else {
     target.innerHTML = '<div class="preview-placeholder">+ Add back photo</div>';
@@ -2075,7 +2089,7 @@ async function showRigSourceMesh(meshPath) {
   };
   if (ext === 'fbx') {
     // FBXLoader needs a URL so it can resolve textures relative to the file
-    const url = 'file:///' + meshPath.replace(/\\/g, '/');
+    const url = _toFileUrl(meshPath);
     new FBXLoader().load(url, applyLoadedModel, undefined, (err) => {
       console.error('FBX load error in rig source viewer', err);
     });
@@ -2602,7 +2616,7 @@ function _showMultiviewBar(multiviewDir) {
       const preview = document.getElementById('step1-preview');
       const imgEl = preview?.querySelector('img');
       if (imgEl) {
-        imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+        imgEl.src = _toFileUrl(imgPath) + '?t=' + Date.now();
       }
     }
   }
@@ -2696,7 +2710,7 @@ document.getElementById('ws-multiview-bar')?.addEventListener('click', (e) => {
   const preview = document.getElementById('step1-preview');
   const imgEl = preview?.querySelector('img');
   if (imgEl) {
-    imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+    imgEl.src = _toFileUrl(imgPath) + '?t=' + Date.now();
   }
 });
 
@@ -2792,7 +2806,11 @@ function createMeshViewerControls(toolbarEl, getViewer) {
         });
         console.log('[bones] count=', bones.length, 'world bbox min=', bbb.min, 'max=', bbb.max, 'size=', bbb.getSize(new THREE.Vector3()));
       } else {
-        console.warn('[bones] NO BONES FOUND in model — the rig has no skeleton');
+        // Common + harmless: we now default state.bones=true so the rig viewer
+        // shows the skeleton out-of-the-box, but the same toggle applies to
+        // the lightbox / source-mesh viewers where there's no rig to render.
+        // Demoted to debug to avoid alarming users opening a plain mesh.
+        console.debug('[bones] no bones in this model (rig viewer with non-rigged mesh, or rig output missing skeleton)');
       }
       bones.forEach(b => {
         const s = new THREE.Mesh(jointGeo, jointMat);
@@ -3426,7 +3444,7 @@ async function _lb3dLoadAt(meshPath) {
   try {
     if (ext === 'fbx') {
       // FBXLoader needs a URL so it can resolve textures relative to the file
-      const url = 'file:///' + meshPath.replace(/\\/g, '/');
+      const url = _toFileUrl(meshPath);
       const loader = new FBXLoader();
       loader.load(url, fitAndApply, undefined, (err) => {
         console.error('FBX load error in lightbox', err);
@@ -3538,7 +3556,7 @@ async function openLightbox(imgPath) {
   const p = state.currentProject;
   _lightboxImages = (p && p.images) ? p.images.map(i => i.path) : [imgPath];
   _lightboxIndex = Math.max(0, _lightboxImages.indexOf(imgPath));
-  img.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  img.src = _toFileUrl(imgPath) + '?t=' + Date.now();
   updateLightboxBottom(imgPath);
   updateLightboxNavButtons();
   // Show multiview bar in lightbox if available for this image
@@ -3574,7 +3592,7 @@ async function openLightbox(imgPath) {
         if (viewPath) {
           setTimeout(() => {
             const lbImg = document.getElementById('lightbox-2-img');
-            if (lbImg) lbImg.src = 'file:///' + viewPath.replace(/\\/g, '/') + '?t=' + Date.now();
+            if (lbImg) lbImg.src = _toFileUrl(viewPath) + '?t=' + Date.now();
           }, 0);
         }
       }
@@ -3613,14 +3631,14 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     if (p) { p._activeMultiview = imgPath; p._activeMultiviewKey = view; }
   }
   if (!imgPath) return;
-  document.getElementById('lightbox-2-img').src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  document.getElementById('lightbox-2-img').src = _toFileUrl(imgPath) + '?t=' + Date.now();
   // Also sync the SMALL preview so when the lightbox closes the
   // user sees the same view they were looking at.
   try {
     const smallPreview = document.getElementById('step1-preview');
     const smallImg = smallPreview?.querySelector('img');
     if (smallImg) {
-      smallImg.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+      smallImg.src = _toFileUrl(imgPath) + '?t=' + Date.now();
     }
     // Mirror active button state in the small bar too.
     const smallBar = document.getElementById('ws-multiview-bar');
@@ -3679,7 +3697,7 @@ function lightboxShowAt(idx) {
   if (idx < 0 || idx >= _lightboxImages.length) return;
   _lightboxIndex = idx;
   const path_ = _lightboxImages[idx];
-  document.getElementById('lightbox-2-img').src = 'file:///' + path_.replace(/\\/g, '/') + '?t=' + Date.now();
+  document.getElementById('lightbox-2-img').src = _toFileUrl(path_) + '?t=' + Date.now();
   updateLightboxBottom(path_);
   updateLightboxNavButtons();
 }
@@ -4296,7 +4314,7 @@ document.getElementById('ws-modify-btn').addEventListener('click', () => {
   if (!target) { showToast('Pick an image first.', 'error'); return; }
   // Show the source image inside the modal
   const srcImg = document.getElementById('mod-source-img');
-  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (srcImg) srcImg.src = _toFileUrl(target) + '?t=' + Date.now();
   modifyModal.dataset.targetPath = target;
   modifyModal.classList.remove('hidden');
   setTimeout(() => document.getElementById('mod-prompt').focus(), 50);
@@ -4656,7 +4674,7 @@ function openSymmetrize() {
     }
   } else {
     // Desktop filesystem path.
-    loadFrom('file:///' + src.replace(/\\/g, '/') + '?t=' + Date.now());
+    loadFrom(_toFileUrl(src) + '?t=' + Date.now());
   }
 }
 
@@ -5016,7 +5034,7 @@ function openResolutionModal() {
   const current = document.getElementById('res-current');
   const target = document.getElementById('res-target');
   if (!modal) return;
-  preview.src = 'file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now();
+  preview.src = _toFileUrl(tgt) + '?t=' + Date.now();
   const img = new Image();
   img.onload = () => {
     _resW = img.naturalWidth; _resH = img.naturalHeight;
@@ -5091,7 +5109,7 @@ document.getElementById('ws-brightness-btn')?.addEventListener('click', () => {
   const preview = document.getElementById('bright-preview');
   if (!modal || !preview) return;
   modal.dataset.targetPath = tgt;
-  preview.src = 'file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now();
+  preview.src = _toFileUrl(tgt) + '?t=' + Date.now();
   // Reset sliders
   ['brightness', 'contrast', 'saturation', 'sharpness'].forEach(k => {
     const sl = document.getElementById('bright-' + k);
@@ -5252,7 +5270,7 @@ document.getElementById('ws-crop-btn')?.addEventListener('click', () => {
     document.querySelectorAll('[id^="crop-preset-"]').forEach(b => b.classList.remove('tool-active'));
     document.getElementById('crop-preset-free')?.classList.add('tool-active');
   };
-  img.src = 'file:///' + cropState.imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  img.src = _toFileUrl(cropState.imgPath) + '?t=' + Date.now();
 });
 
 function _cropDrawOverlay() {
@@ -5561,7 +5579,7 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
   } else if (/^(?:blob|data):/i.test(tgt)) {
     loadFrom(tgt);
   } else {
-    loadFrom('file:///' + tgt.replace(/\\/g, '/') + '?t=' + Date.now());
+    loadFrom(_toFileUrl(tgt) + '?t=' + Date.now());
   }
 });
 (() => {
@@ -5723,7 +5741,7 @@ document.getElementById('ws-blur-btn')?.addEventListener('click', async () => {
   // fetches them as blob: to bypass CORS). file:/// only for local paths.
   const blurSrc = /^(?:https?|blob|data|file):/i.test(tgt)
     ? tgt
-    : 'file:///' + tgt.replace(/\\/g, '/');
+    : _toFileUrl(tgt);
   try {
     await _blurMgr.loadImage(blurSrc);
   } catch (e) {
@@ -6330,7 +6348,7 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
   requestAnimationFrame(() => {
     const paintSrc = /^(?:https?|blob|data|file):/i.test(paintState.imgPath)
       ? paintState.imgPath
-      : 'file:///' + paintState.imgPath.replace(/\\/g, '/');
+      : _toFileUrl(paintState.imgPath);
     _paintMgr.loadImage(paintSrc).catch(e => {
       showToast('paint: image load failed: ' + (e?.message || e), 'error', 5000);
     });
@@ -6830,11 +6848,11 @@ async function renderMeshVersions(p) {
     // fall back to the source image used to generate this mesh, then to the project thumb.
     let thumbSrc = '';
     if (m.thumb) {
-      thumbSrc = m.thumb.startsWith('file:') ? m.thumb : 'file:///' + m.thumb.replace(/\\/g, '/');
+      thumbSrc = m.thumb.startsWith('file:') ? m.thumb : _toFileUrl(m.thumb);
     } else if (m.sourceImage) {
-      thumbSrc = 'file:///' + m.sourceImage.replace(/\\/g, '/');
+      thumbSrc = _toFileUrl(m.sourceImage);
     } else if (p.thumb) {
-      thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
+      thumbSrc = _toFileUrl(p.thumb);
     }
     // Show 💡 when the mesh's source image (or, if missing on cloud,
     // ANY project image) has a saved emissive layer in the cache. The
@@ -8558,7 +8576,7 @@ function _mtLoadMesh(meshPath) {
   // viewport stayed empty (just the grid).
   const url = /^(?:https?|blob|data|file):/i.test(meshPath)
     ? meshPath
-    : 'file:///' + meshPath.replace(/\\/g, '/');
+    : _toFileUrl(meshPath);
   fetch(url, { credentials: 'omit' })
     .then((r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -9199,7 +9217,7 @@ function _atUpdateProjectiveUniforms() {
 // (R2 URLs) as well as desktop.
 function _atResolveUrl(path) {
   if (!path) return '';
-  return /^[a-z]+:/i.test(path) ? path : 'file:///' + String(path).replace(/\\/g, '/');
+  return /^[a-z]+:/i.test(path) ? path : _toFileUrl(path);
 }
 
 function _atMakeOverlayPlane(imgPath, opacity) {
@@ -9591,7 +9609,7 @@ function _peLoadMesh(meshPath) {
   peState.meshes = [];
   const url = (typeof meshPath === 'string' && /^[a-z]+:/i.test(meshPath))
     ? meshPath
-    : 'file:///' + String(meshPath).replace(/\\/g, '/');
+    : _toFileUrl(meshPath);
   fetch(url, { credentials: 'omit' })
     .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
     .then((buffer) => {
@@ -10408,7 +10426,7 @@ async function _pmLoadMesh(meshPath) {
   pmState.meshes = [];
   const url = (typeof meshPath === 'string' && /^[a-z]+:/i.test(meshPath))
     ? meshPath
-    : 'file:///' + String(meshPath).replace(/\\/g, '/');
+    : _toFileUrl(meshPath);
   try {
     const r = await fetch(url, { credentials: 'omit' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -12096,7 +12114,7 @@ async function showStep3Preview(rig) {
   try {
     if (ext === 'fbx') {
       // FBXLoader needs a URL because it loads textures relative to the file
-      const url = 'file:///' + rig.path.replace(/\\/g, '/');
+      const url = _toFileUrl(rig.path);
       const loader = new FBXLoader();
       loader.load(url, async (obj) => {
         rigVwModel = obj;
@@ -12163,7 +12181,7 @@ async function showStep3Preview(rig) {
               const fbxLoader2 = new FBXLoader();
               for (const af of animFiles) {
                 await new Promise((resolveLoad) => {
-                  const aurl = 'file:///' + af.path.replace(/\\/g, '/');
+                  const aurl = _toFileUrl(af.path);
                   fbxLoader2.load(aurl, (animObj) => {
                     if (animObj.animations && animObj.animations.length > 0) {
                       animObj.animations.forEach((clip, ci) => {
@@ -12415,11 +12433,11 @@ function renderRigVersions(p) {
     if (i === 0) t.classList.add('selected');
     let thumbSrc = '';
     if (r.thumb) {
-      thumbSrc = r.thumb.startsWith('file:') ? r.thumb : 'file:///' + r.thumb.replace(/\\/g, '/');
+      thumbSrc = r.thumb.startsWith('file:') ? r.thumb : _toFileUrl(r.thumb);
     } else if (r.sourceImage) {
-      thumbSrc = 'file:///' + r.sourceImage.replace(/\\/g, '/');
+      thumbSrc = _toFileUrl(r.sourceImage);
     } else if (p.thumb) {
-      thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
+      thumbSrc = _toFileUrl(p.thumb);
     }
     t.innerHTML = `
       ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
@@ -13223,7 +13241,7 @@ async function refreshJobDetailsModal(id) {
     if (/^https?:|^file:|^data:|^blob:/i.test(u)) {
       thumbUrl = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now();
     } else {
-      thumbUrl = 'file:///' + String(u).replace(/\\/g, '/') + '?t=' + Date.now();
+      thumbUrl = _toFileUrl(u) + '?t=' + Date.now();
     }
     thumbSource = 'job.sourceImageUrl';
   }
@@ -13239,7 +13257,7 @@ async function refreshJobDetailsModal(id) {
   if (!thumbUrl && p && !isImageGenJob) {
     const imgPath = p.selectedImagePath || p.previewImagePath || p.thumb;
     if (imgPath) {
-      thumbUrl = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+      thumbUrl = _toFileUrl(imgPath) + '?t=' + Date.now();
       thumbSource = 'state.currentProject (fallback)';
     }
   }
@@ -13386,7 +13404,7 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   // (multiview angle if selected, else front) so the preview matches
   // what the user is looking at in the workspace.
   const srcImg = document.getElementById('ai-source-img');
-  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (srcImg) srcImg.src = _toFileUrl(target) + '?t=' + Date.now();
   document.getElementById('modal-auto-inpaint').classList.remove('hidden');
 });
 const aiDilate = document.getElementById('ai-dilate');
@@ -14700,7 +14718,7 @@ document.getElementById('set-uninstall')?.addEventListener('click', async () => 
     const bg = ratio >= 0.83 ? '#1a5c1a' : ratio >= 0.5 ? '#8a6a1a' : '#8a1a1a';
     const rows = score.results.map(r => {
       const got = 'file:///' + (reportDir + sep + r.got_img).replace(/\\/g, '/');
-      const gt = 'file:///' + reportDir.replace(/\\/g, '/').replace(/\/reports\/[^/]+$/, '/ref_0_perfect_axes/') + r.axis + '.png';
+      const gt = _toFileUrl(reportDir).replace(/\/reports\/[^/]+$/, '/ref_0_perfect_axes/') + r.axis + '.png';
       const cls = r.correct ? '#1a3c1a' : '#3c1a1a';
       const mark = r.correct ? '<span style="color:#6f6">OK</span>' : '<span style="color:#f66">XX</span>';
       return `<tr style="background:${cls};">
@@ -16422,7 +16440,7 @@ async function openLandmarksFullscreen() {
   }
   try {
     if (ext === 'fbx') {
-      const url = 'file:///' + sourcePath.replace(/\\/g, '/');
+      const url = _toFileUrl(sourcePath);
       new FBXLoader().load(url, fitFs, undefined, (err) => console.error('FBX load failed', err));
     } else {
       const buffer = await API.readMeshFile(sourcePath);
