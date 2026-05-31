@@ -11208,6 +11208,12 @@ document.getElementById('mat-apply-btn')?.addEventListener('click', async () => 
       // Push the new GLB into p.meshes so it shows up as a new version
       // immediately, without waiting for a project reload. Then refresh
       // from R2 in the background to pick up any server-side metadata.
+      // Push the new GLB into p.meshes so it shows up as a new version
+      // immediately. We do NOT call reloadCurrentProject() because the
+      // server's /api/projects + /api/meshes only list under <user.id>/
+      // projects/ and <user.id>/rigged/ — mesh-op outputs live under
+      // <user.id>/mesh-op/ and would not be picked up by a reload,
+      // wiping our locally-pushed version.
       try {
         const newUrl = r.mesh_url || r.newPath || r.path;
         if (newUrl && p) {
@@ -11220,15 +11226,24 @@ document.getElementById('mat-apply-btn')?.addEventListener('click', async () => 
               asset_type: 'mesh', size: 0,
               created: new Date().toISOString(),
             });
-            // Auto-select the new version so the user sees the result.
             p.selectedMeshPath = newUrl;
           }
         }
       } catch (e) { console.warn('[material-adjust] state push failed:', e); }
       showToast(`Material applied → new version saved`, 'success', 4000);
-      // Render the project so the new mesh thumb appears in the strip.
-      try { populateWorkspace(p); } catch (_) {}
-      try { await reloadCurrentProject(); } catch (_) {}
+      // Re-render the mesh version strip directly. populateWorkspace
+      // would normally do this but it re-runs a bunch of stage logic;
+      // we only need the version strip to repaint with the new entry.
+      try { renderMeshVersions(p); } catch (_) {}
+      // Auto-select the new version in the viewer so the user sees the
+      // result immediately. The version-strip click handler does this
+      // when the user clicks a thumb; we do it programmatically here.
+      try {
+        const strip = document.getElementById('ws-mesh-versions');
+        if (strip && strip.children && strip.children[0]) {
+          strip.children[0].click();
+        }
+      } catch (_) {}
     } else {
       completeJob(job.id, false, r?.error || 'unknown');
       if (!job.cancelled) reportPipelineError(r?.error, 'Material Adjust failed');
