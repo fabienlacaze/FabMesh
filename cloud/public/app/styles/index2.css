@@ -2002,6 +2002,58 @@ button.tool-active {
   width: 100%;
   accent-color: var(--accent);
 }
+
+/* Tint (hue rotation) slider — rainbow track so the user sees the
+   colour each shift maps red toward. -180 ↔ +180 wraps to the same
+   cyan-ish hue, hence the symmetric gradient around red at 0°. */
+#mat-hue_shift {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(to right,
+    hsl(180, 85%, 50%) 0%,
+    hsl(225, 85%, 50%) 12.5%,
+    hsl(270, 85%, 50%) 25%,
+    hsl(315, 85%, 50%) 37.5%,
+    hsl(0,   85%, 50%) 50%,
+    hsl(45,  85%, 50%) 62.5%,
+    hsl(90,  85%, 50%) 75%,
+    hsl(135, 85%, 50%) 87.5%,
+    hsl(180, 85%, 50%) 100%);
+  outline: none;
+}
+#mat-hue_shift::-webkit-slider-runnable-track {
+  height: 10px;
+  background: transparent;
+  border-radius: 5px;
+}
+#mat-hue_shift::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #222;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+  margin-top: -4px;
+  cursor: pointer;
+}
+#mat-hue_shift::-moz-range-track {
+  height: 10px;
+  background: transparent;
+  border-radius: 5px;
+}
+#mat-hue_shift::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #222;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
 .modal-card select {
   width: 100%;
   background: var(--bg-0);
