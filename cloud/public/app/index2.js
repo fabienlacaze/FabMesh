@@ -7635,10 +7635,14 @@ function _jsFillHoles(geom, minHoleSize, maxHoleSize) {
   }
   const triCount = Math.floor(indices.length / 3);
 
-  // ── Step 3: Weld vertices by quantized position (tolerance =
-  // bbox/1e5) so identical positions land in one group. UV seams
-  // become count===2 interior edges; isolated boundaries stay count===1.
-  const tol = bbDiag / 1e5;
+  // ── Step 3: Weld vertices by quantized position. Tolerance bumped
+  // from bbDiag/1e5 to bbDiag/1e4 (10x more aggressive) so meshes whose
+  // hole borders store 4-5 digit drift on the same conceptual position
+  // (very common in Puppeteer / TRELLIS-2 output) merge correctly. The
+  // previous strict value reported 'mesh is closed' on rigs that
+  // clearly had visible holes because the duplicate-vertex pairs at
+  // the hole border never merged into the same group.
+  const tol = bbDiag / 1e4;
   const Q = 1 / tol;
   const groupKeyToId = new Map();
   const groupOfVertex = new Int32Array(n);

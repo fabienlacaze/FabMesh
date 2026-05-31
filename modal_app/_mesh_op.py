@@ -119,17 +119,42 @@ def fill_holes(glb_bytes: bytes) -> bytes:
     for m in _meshes(scene):
         if not hasattr(m, 'faces'):
             continue
+        # Step 1 — merge duplicate vertices at hole borders. Many TRELLIS-2
+        # / Puppeteer GLBs ship with vertex pairs that have the same
+        # position to 6+ digits but are stored separately because of UV
+        # seams or split materials. Without this merge, trimesh.outline()
+        # sees the hole's boundary edges as INTERIOR (count==2 in the
+        # duplicate-aware tally) and reports 0 boundaries. After merging
+        # by spatial proximity those edges become true boundary edges
+        # (count==1) and fill_holes can patch them.
+        try:
+            m.merge_vertices(merge_tex=True, merge_norm=True)
+        except Exception as e:
+            print(f'[mesh-op] merge_vertices warn: {e}', flush=True)
+        try:
+            # Repair winding + inverted normals before fill — sometimes a
+            # 'hole' is actually a patch of backward triangles already
+            # there. fix_winding() flips them so the boundary edge count
+            # matches what the user sees visually.
+            trimesh.repair.fix_winding(m)
+        except Exception as e:
+            print(f'[mesh-op] fix_winding warn: {e}', flush=True)
         try:
             # use_fan=True triangulates holes >4 edges via centroid-fan.
-            # Default (False) only patches triangle/quad boundary loops
-            # — every real TRELLIS-2 hole is larger and would be silently
-            # skipped, producing the 'fill holes does nothing' bug.
+            # Default (False) only patches triangle/quad boundary loops.
             trimesh.repair.fill_holes(m, use_fan=True)
         except TypeError:
             # Older trimesh versions don't accept use_fan kwarg.
             trimesh.repair.fill_holes(m)
         except Exception as e:
             print(f'[mesh-op] fill_holes skipped: {e}', flush=True)
+        # Log how many faces we ended up with so the user can verify the
+        # fill actually closed something (Δfaces > 0 means new fan triangles
+        # were added).
+        try:
+            print(f'[mesh-op] fill_holes done: faces={len(m.faces)}', flush=True)
+        except Exception:
+            pass
     return _export(scene)
 
 
