@@ -43,7 +43,11 @@ ANYTOP_COMMIT = "main"  # pinned to main; bump to a SHA before prod
 MOTION_LIB = "git+https://github.com/inbar-2344/Motion.git"
 
 image = (
-    modal.Image.debian_slim(python_version="3.8")
+    # Modal's 2025.06 image builder dropped Python 3.8 (EOL). AnyTop's
+    # original environment.yaml pins 3.8 + torch 2.4.1 because that's
+    # what the authors tested on. We try torch 2.4.1 on Python 3.10
+    # (still supported wheels) and patch any 3.8-only syntax we hit.
+    modal.Image.debian_slim(python_version="3.10")
     .apt_install(
         "git", "wget", "build-essential",
         # ffmpeg + libsndfile sometimes pulled in by moviepy / imageio
@@ -58,12 +62,14 @@ image = (
     )
     .pip_install(
         "transformers==4.46.3",
+        # numpy 1.24 has wheels for Python 3.10 — keep AnyTop's pinned
+        # ABI to avoid downstream import errors in their utils.*
         "numpy==1.24.4",
         "scipy==1.10.1",
         "spacy==3.7.2",
         "huggingface-hub==0.30.1",
         "tokenizers==0.20.3",
-        "matplotlib==3.1.3",
+        "matplotlib==3.7.5",  # 3.1.3 has no py3.10 wheel
         "pillow==10.4.0",
         "requests==2.32.3",
         "pyyaml==6.0.2",
@@ -426,7 +432,7 @@ def _run_subprocess(cmd, cwd=None) -> int:
     cpu=1,
     timeout=120,
     volumes={"/anim_data": anim_output_volume},
-    secrets=[modal.Secret.from_name("modal-shared-secret")],
+    secrets=[modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"])],
 )
 @modal.asgi_app()
 def anim_router():
@@ -443,7 +449,10 @@ def anim_router():
             raise HTTPException(status_code=400, detail="invalid JSON body")
 
     def _check_auth(payload: dict) -> None:
-        expected = os.environ.get("MODAL_SHARED_SECRET")
+        # Modal injects SHARED_SECRET from the myfabmesh-shared secret.
+        # The Worker forwards env.MODAL_SHARED_SECRET in the body as
+        # `_auth`. Names match the existing _puppeteer_rig.py convention.
+        expected = os.environ.get("SHARED_SECRET", "")
         if not expected:
             return
         if str(payload.get("_auth") or "") != expected:

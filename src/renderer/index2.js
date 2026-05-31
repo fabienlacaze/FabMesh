@@ -6453,6 +6453,7 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
   const rig = p.rigs[idx] || p.rigs[0];
   if (!rig) return;
   p.selectedRigPath = rig.path;
+  p.selectedRigUrl = rig.url || rig.path;
   // Mark the used-for-anim thumb visually.
   const strip = document.getElementById('ws-rig-versions');
   if (strip) {
@@ -6465,6 +6466,31 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
     btn.classList.add('used-state');
     btn.textContent = '✓ Used for Animation generation →';
   }
+  // Populate the Step 4 SOURCE RIG preview + enable the Generate button.
+  try {
+    const placeholder = document.getElementById('ws-anim-source-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+    const preview = document.getElementById('ws-anim-source-preview');
+    if (preview) {
+      const filename = (rig.filename || rig.path || '').split(/[/\\]/).pop() || 'rig.glb';
+      // Desktop: rig.path is a local fs path -> use file:/// via _toFileUrl.
+      const url = (typeof _toFileUrl === 'function')
+        ? _toFileUrl(rig.path)
+        : 'file:///' + (rig.path || '').replace(/\\/g, '/');
+      preview.innerHTML = `
+        <model-viewer src="${url}" camera-controls touch-action="pan-y"
+                      shadow-intensity="1" exposure="1"
+                      style="width:100%; height:180px; background:#0a0a0e; border-radius:6px;">
+        </model-viewer>
+        <div style="font-size:11px; color:var(--text-2); text-align:center; padding-top:4px;">${filename}</div>
+      `;
+    }
+    const genBtn = document.getElementById('ws-generate-anim');
+    if (genBtn) {
+      genBtn.disabled = false;
+      genBtn.title = '';
+    }
+  } catch (e) { console.warn('[anim-source] preview populate failed:', e); }
   // Activate Step 4 (Animation) card and scroll to it.
   const step4Card = document.getElementById('step-card-animation');
   if (step4Card) {

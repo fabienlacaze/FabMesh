@@ -2628,6 +2628,98 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
   }
 });
 
+// AnyTop animation on a rigged GLB (desktop side). Spawns
+// scripts/anytop_bridge.py via Python and writes the animated GLB
+// under the project's animations/ folder.
+ipcMain.handle('animate-ai', async (event, { rigPath, animType, prompt, engine, projectName }) => {
+  const _t0 = Date.now();
+  const safeAnim = (animType || 'idle').replace(/[^a-z0-9_-]/gi, '').slice(0, 32) || 'idle';
+  console.log(`[animate-ai] START rig=${rigPath} engine=${engine || 'anytop'} animType=${safeAnim} @${new Date(_t0).toISOString()}`);
+  try {
+    if (!rigPath || !fs.existsSync(rigPath)) {
+      return { success: false, error: 'Rig file not found' };
+    }
+    if (!isPathAllowed(rigPath)) {
+      return { success: false, error: 'Rig path not allowed' };
+    }
+    if ((engine || 'anytop') !== 'anytop') {
+      return { success: false, error: `Engine '${engine}' not implemented on desktop yet — only 'anytop' is wired` };
+    }
+    // Build output path: <project_dir>/animations/<animType>_<ts>.glb
+    const rigDir = path.dirname(rigPath);
+    // Prefer the project root (one up from meshes/ rigs/) if recognisable.
+    let projectDir = rigDir;
+    const parent = path.dirname(rigDir);
+    if (path.basename(rigDir) === 'rigs' || path.basename(rigDir) === 'meshes') {
+      projectDir = parent;
+    }
+    const animsDir = path.join(projectDir, 'animations');
+    try { fs.mkdirSync(animsDir, { recursive: true }); } catch (_) {}
+    const outPath = path.join(animsDir, `${safeAnim}_${Date.now()}.glb`);
+
+    const bridge = path.join(__dirname, '..', '..', 'scripts', 'anytop_bridge.py');
+    if (!fs.existsSync(bridge)) {
+      return { success: false, error: 'anytop_bridge.py missing — reinstall FabMesh' };
+    }
+    const args = [
+      bridge,
+      '--rig', rigPath,
+      '--out', outPath,
+      '--anim-type', safeAnim,
+    ];
+    if (prompt && typeof prompt === 'string') {
+      args.push('--prompt', prompt.slice(0, 400));
+    }
+    const { spawn } = require('child_process');
+    const proc = spawn('python', args, { cwd: path.dirname(bridge) });
+    let stderrBuf = '';
+    let lastStdoutJson = null;
+    proc.stdout?.on('data', (d) => {
+      const txt = d.toString();
+      safeSend('ai3d-progress', `[anytop] ${txt}`);
+      // Capture last JSON line (error path prints a JSON dict on a single line).
+      const lines = txt.split(/\r?\n/);
+      for (const ln of lines) {
+        const s = ln.trim();
+        if (s.startsWith('{') && s.endsWith('}')) {
+          try { lastStdoutJson = JSON.parse(s); } catch (_) {}
+        }
+      }
+    });
+    proc.stderr?.on('data', (d) => {
+      const txt = d.toString();
+      stderrBuf += txt;
+      safeSend('ai3d-progress', `[anytop][stderr] ${txt}`);
+    });
+    const exitCode = await new Promise((resolve) => proc.on('close', resolve));
+    if (exitCode !== 0) {
+      const errMsg = lastStdoutJson?.error
+        || stderrBuf.split(/\r?\n/).filter(Boolean).slice(-3).join(' | ')
+        || `python exit ${exitCode}`;
+      // setup_required: surface as a friendlier error so the renderer can hint.
+      if (lastStdoutJson?.setup_required) {
+        return { success: false, error: errMsg, setupRequired: true };
+      }
+      return { success: false, error: errMsg };
+    }
+    if (!fs.existsSync(outPath)) {
+      return { success: false, error: 'AnyTop ran but no output GLB was produced' };
+    }
+    console.log(`[animate-ai] DONE dt=${((Date.now()-_t0)/1000).toFixed(1)}s out=${outPath}`);
+    return {
+      success: true,
+      ok: true,
+      anim_url: outPath,
+      path: outPath,
+      animPath: outPath,
+      type: safeAnim,
+    };
+  } catch (e) {
+    console.error('[animate-ai] error:', e);
+    return { success: false, error: e?.message || String(e) };
+  }
+});
+
 // Extract last meaningful error line from a step's output
 function extractErrorDetail(step) {
   const combined = (step.stdout || '') + '\n' + (step.stderr || '');

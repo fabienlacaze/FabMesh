@@ -175,6 +175,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
   autoRig: (opts) => ipcRenderer.invoke('auto-rig', opts),
   autoRigAI: (opts) => ipcRenderer.invoke('auto-rig-ai', _stripFns(opts)),
+  animateAI: (opts) => ipcRenderer.invoke('animate-ai', _stripFns(opts)),
   readBonesJson: (name) => ipcRenderer.invoke('read-bones-json', name),
   listRigTemplates: () => ipcRenderer.invoke('list-rig-templates'),
   listRigAnimations: (opts) => ipcRenderer.invoke('list-rig-animations', opts),
