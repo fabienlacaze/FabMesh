@@ -729,12 +729,14 @@
               </summary>
               <div class="stage-body stage-create-with-source">
                 <div class="stage-create-form">
-                  <div class="form-row">
+                  <!-- Engine dropdown hidden: AnyTop is the only wired
+                       engine. Re-show when Procedural / Seed3D land. -->
+                  <div class="form-row" style="display:none;">
                     <label>Engine</label>
                     <select id="ws-anim-engine">
-                      <option value="seed3d_puppeteer" selected>Seed3D Puppeteer AI (video-guided)</option>
-                      <option value="procedural">Procedural (idle / walk / run baked)</option>
-                      <option value="anytop">AnyTop (text-to-motion, any topology)</option>
+                      <option value="anytop" selected>AnyTop (skeleton-adaptive, BVH)</option>
+                      <option value="seed3d_puppeteer" disabled>Seed3D Puppeteer (deferred — outputs frames not BVH)</option>
+                      <option value="procedural" disabled>Procedural (deferred — humanoid only)</option>
                     </select>
                   </div>
                   <div class="form-row">
@@ -749,6 +751,12 @@
                       <option value="custom">Custom (text prompt)</option>
                     </select>
                   </div>
+                  <!-- Prompt + reference video hidden by default: AnyTop
+                       ignores text prompts (T5 is internal joint-name
+                       embedding only), and the only video-conditioned
+                       engine (Seed3D) is deferred. _wsAnimEngineSync()
+                       can re-show them if/when a text-conditioned engine
+                       comes online. -->
                   <div class="form-row" id="ws-anim-prompt-row" style="display:none;">
                     <label for="ws-anim-prompt">Prompt</label>
                     <input id="ws-anim-prompt" type="text" placeholder="e.g. dragon breathes fire" style="width:100%; padding:6px;">

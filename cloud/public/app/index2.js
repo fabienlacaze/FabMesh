@@ -7056,26 +7056,34 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
   // they just handed off a rig.
   try {
     const placeholder = document.getElementById('ws-anim-source-placeholder');
-    if (placeholder) {
-      placeholder.style.display = 'none';
-    }
+    if (placeholder) placeholder.style.display = 'none';
     const preview = document.getElementById('ws-anim-source-preview');
     if (preview) {
-      // Replace the canvas with a small model-viewer + filename label.
-      // Lightweight: model-viewer is already loaded for Step 3.
+      // Clean status indicator (no model-viewer here — the Step 3 viewer
+      // above already shows the rig with bones; this panel just needs to
+      // confirm 'rig is locked in'). Without it the user sees an empty
+      // black box and panics.
       const filename = (rig.filename || rig.url || '').split(/[/\\]/).pop() || 'rig.glb';
       preview.innerHTML = `
-        <model-viewer src="${rig.url || rig.path}" camera-controls touch-action="pan-y"
-                      shadow-intensity="1" exposure="1"
-                      style="width:100%; height:180px; background:#0a0a0e; border-radius:6px;">
-        </model-viewer>
-        <div style="font-size:11px; color:var(--text-2); text-align:center; padding-top:4px;">${filename}</div>
+        <div style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:12px; text-align:center;">
+          <span style="font-size:36px;">🦴</span>
+          <div style="font-size:13px; font-weight:600; color:var(--accent);">Rig locked in</div>
+          <div style="font-size:11px; color:var(--text-2); word-break:break-all; max-width:90%;">${filename}</div>
+          <div style="font-size:10px; color:var(--text-3); padding-top:4px;">${p.rigs.length} version${p.rigs.length > 1 ? 's' : ''} available</div>
+        </div>
       `;
     }
     const genBtn = document.getElementById('ws-generate-anim');
     if (genBtn) {
       genBtn.disabled = false;
       genBtn.title = '';
+    }
+    // Force the engine dropdown to AnyTop (the only wired engine) and
+    // collapse the Seed3D / Procedural options behind a disabled state.
+    const engineSel = document.getElementById('ws-anim-engine');
+    if (engineSel && engineSel.value !== 'anytop') {
+      engineSel.value = 'anytop';
+      engineSel.dispatchEvent(new Event('change'));
     }
   } catch (e) { console.warn('[anim-source] preview populate failed:', e); }
   const step4Card = document.getElementById('step-card-animation');

@@ -728,12 +728,14 @@
               </summary>
               <div class="stage-body stage-create-with-source">
                 <div class="stage-create-form">
-                  <div class="form-row">
+                  <!-- Engine dropdown hidden: AnyTop is the only wired
+                       engine. Re-show when Procedural / Seed3D land. -->
+                  <div class="form-row" style="display:none;">
                     <label>Engine</label>
                     <select id="ws-anim-engine">
-                      <option value="seed3d_puppeteer" selected>Seed3D Puppeteer AI (video-guided)</option>
-                      <option value="procedural">Procedural (idle / walk / run baked)</option>
-                      <option value="anytop">AnyTop (text-to-motion, any topology)</option>
+                      <option value="anytop" selected>AnyTop (skeleton-adaptive, BVH)</option>
+                      <option value="seed3d_puppeteer" disabled>Seed3D Puppeteer (deferred — outputs frames not BVH)</option>
+                      <option value="procedural" disabled>Procedural (deferred — humanoid only)</option>
                     </select>
                   </div>
                   <div class="form-row">
