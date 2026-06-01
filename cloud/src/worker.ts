@@ -7095,7 +7095,11 @@ async function handleUserAssetsMigrateFromJobs(req: Request, env: Env): Promise<
   if (error) return err(500, error.message);
   let migrated = 0;
   let scanned = 0;
+  let fromJobsOptions = 0;
+  let fromR2Listing = 0;
   const seen = new Set<string>();
+
+  // Step A: pull image URLs from every jobs.options field we know of.
   for (const j of (data ?? []) as Array<{
     id: string; project_name: string | null;
     options: Record<string, unknown> | null;
@@ -7105,29 +7109,77 @@ async function handleUserAssetsMigrateFromJobs(req: Request, env: Env): Promise<
     const project = j.project_name
       || (j.options?.project_name as string | undefined)
       || `Project ${j.id.slice(-6)}`;
-    const srcImage = j.options?.sourceImage as string | undefined;
-    if (srcImage && typeof srcImage === 'string') {
-      const r2_path = r2PathFromPublicUrl(env, srcImage) ?? srcImage;
-      if (r2_path && !r2_path.startsWith('http') && !seen.has(`${project}|${r2_path}`)) {
-        seen.add(`${project}|${r2_path}`);
-        await insertUserAsset(env, user.id, project, 'image-front', r2_path, null,
-          { migrated_from_job: j.id, asset_type: j.asset_type });
-        migrated++;
-      }
+    // Common option keys that store URLs of associated images.
+    const candidateKeys = ['sourceImage', 'source_image', 'imagePath', 'image_path',
+                           'frontImage', 'front_image', 'imageUrl', 'image_url',
+                           'frontImageUrl', 'refImageUrl'];
+    for (const k of candidateKeys) {
+      const v = j.options?.[k];
+      if (typeof v !== 'string' || !v) continue;
+      const r2_path = r2PathFromPublicUrl(env, v) ?? v;
+      if (!r2_path || r2_path.startsWith('http')) continue;
+      const dedupKey = `${project}|${r2_path}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      await insertUserAsset(env, user.id, project, 'image-front', r2_path, null,
+        { migrated_from_job: j.id, asset_type: j.asset_type, source_key: k });
+      migrated++;
+      fromJobsOptions++;
     }
-    // Also recover back-images if logged in options.
     const backImage = j.options?.backImage as string | undefined;
-    if (backImage && typeof backImage === 'string') {
+    if (typeof backImage === 'string' && backImage) {
       const r2_path = r2PathFromPublicUrl(env, backImage) ?? backImage;
-      if (r2_path && !r2_path.startsWith('http') && !seen.has(`${project}|${r2_path}|back`)) {
-        seen.add(`${project}|${r2_path}|back`);
-        await insertUserAsset(env, user.id, project, 'image-back', r2_path,
-          srcImage as string | null, { migrated_from_job: j.id });
-        migrated++;
+      if (r2_path && !r2_path.startsWith('http')) {
+        const dedupKey = `${project}|${r2_path}|back`;
+        if (!seen.has(dedupKey)) {
+          seen.add(dedupKey);
+          await insertUserAsset(env, user.id, project, 'image-back', r2_path, null,
+            { migrated_from_job: j.id });
+          migrated++;
+          fromJobsOptions++;
+        }
       }
     }
   }
-  return json({ ok: true, scanned, migrated });
+
+  // Step B: scan R2 directly under <uid>/front/, <uid>/back/, etc.
+  // Images that survived without an attached project go into a synthetic
+  // "_orphans" project so the user can at least find them (vs. losing
+  // them forever). The renderer can let the user re-assign them later.
+  if (env.MESHES) {
+    const folderToKind: Array<[string, string]> = [
+      ['front', 'image-front'],
+      ['back', 'image-back'],
+      ['modified', 'image-modified'],
+      ['removebg', 'image-removebg'],
+      ['rectified', 'image-rectified'],
+      ['upscaled', 'image-upscaled'],
+      ['inpainted', 'image-inpainted'],
+      ['facefixed', 'image-facefixed'],
+    ];
+    for (const [folder, kind] of folderToKind) {
+      const prefix = `${user.id}/${folder}/`;
+      let cursor: string | undefined;
+      do {
+        const listed = await env.MESHES.list({ prefix, limit: 1000, cursor });
+        for (const obj of (listed.objects || [])) {
+          const r2_path = obj.key;
+          // Skip if we already inserted this exact path under any project.
+          // (Step A may have inserted it under the right project; Step B
+          // would otherwise add it again under _orphans.)
+          const anyProj = Array.from(seen).some(k => k.endsWith(`|${r2_path}`));
+          if (anyProj) continue;
+          await insertUserAsset(env, user.id, '_orphans', kind, r2_path, null,
+            { migrated_from_r2_scan: true, folder });
+          migrated++;
+          fromR2Listing++;
+        }
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    }
+  }
+
+  return json({ ok: true, scanned, migrated, fromJobsOptions, fromR2Listing });
 }
 
 /** POST /api/thumbs/upload — stores a mesh thumbnail in R2 instead of

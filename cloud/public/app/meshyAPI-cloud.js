@@ -2156,10 +2156,16 @@
   // Step 3 — drop the heavy legacy keys (dataURL thumbs, the now-
   // migrated cloudimages cache, back-photos). Skips if Step 1 fails.
   (async function _migrateAndCleanup() {
-    const guardKey = 'myfm:migration:v1';
+    // Guard bumped v1 → v2 to force re-run on existing users: v1 was
+    // shipped before the worker's jobs+R2 backfill existed, so users
+    // who already ran v1 got marked 'done' without ever pulling in
+    // their historical images. v2 re-runs the full pipeline.
+    const guardKey = 'myfm:migration:v2';
     try {
       if (localStorage.getItem(guardKey) === 'done') return;
-      log('migration: starting one-shot Supabase backfill + cleanup');
+      // Also clear the legacy v1 guard so future builds can iterate.
+      try { localStorage.removeItem('myfm:migration:v1'); } catch (_) {}
+      log('migration: starting one-shot Supabase backfill + cleanup (v2)');
 
       // Step 1: migrate per-project image caches (if still present).
       const migrationCalls = [];
@@ -2191,13 +2197,16 @@
         await Promise.allSettled(migrationCalls);
       }
 
-      // Step 2: backfill from jobs.options.sourceImage on the worker.
+      // Step 2: backfill from jobs.options AND R2 listing on the worker.
       try {
         const r = await fetch('/api/user-assets/migrate-from-jobs', {
           method: 'POST', credentials: 'include',
         });
         const j = await r.json().catch(() => ({}));
-        log('migrate-from-jobs: scanned=', j?.scanned, 'migrated=', j?.migrated);
+        log('migrate-from-jobs: scanned=', j?.scanned,
+            'migrated=', j?.migrated,
+            'fromJobsOptions=', j?.fromJobsOptions,
+            'fromR2Listing=', j?.fromR2Listing);
       } catch (e) { console.warn('[migration] jobs backfill failed:', e?.message || e); }
 
       // Step 3: drop heavy legacy keys (safe now that Steps 1+2 ran).
