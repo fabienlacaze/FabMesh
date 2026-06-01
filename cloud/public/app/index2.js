@@ -2984,7 +2984,16 @@ function createMeshViewerControls(toolbarEl, getViewer) {
         viewer.model.traverse(c => {
           if (c.isMesh && c.material) {
             const mats = Array.isArray(c.material) ? c.material : [c.material];
-            mats.forEach(m => { m.transparent = false; m.opacity = 1.0; });
+            mats.forEach(m => {
+              m.transparent = false; m.opacity = 1.0;
+              m.depthWrite = true; m.depthTest = true;
+              if (m.alphaMap) m.alphaMap = null;
+              if ('alphaTest' in m) m.alphaTest = 0;
+              if ('transmission' in m) m.transmission = 0;
+              if ('transmissionMap' in m) m.transmissionMap = null;
+              if (m.map) { m.map.premultiplyAlpha = false; m.map.needsUpdate = true; }
+              m.needsUpdate = true;
+            });
           }
         });
       }
@@ -6922,20 +6931,44 @@ function _applyMeshTextureFilter(root) {
       // Force DoubleSide rendering so reversed-winding triangles
       // (Trellis2 sometimes emits them) don't show up as black voids.
       mat.side = THREE.DoubleSide;
-      // FORCE OPAQUE: GLTFLoader sometimes carries alphaMode='BLEND' or
-      // a stray alpha map from Trellis2/SF3D output that makes the
-      // mesh look semi-transparent (red car shows through itself). Real
-      // see-through materials (glass) aren't a primary use case here,
+      // FORCE OPAQUE — applied UNCONDITIONALLY because Trellis2/SF3D
+      // outputs commonly land with transparent=false BUT carry one of:
+      //   - alphaMap texture        → cutout / see-through holes
+      //   - alphaTest > 0           → fragment discard, looks like swiss cheese
+      //   - transmission > 0        → PBR physical "glass"
+      //   - the baseColor texture's alpha channel < 1 in some pixels →
+      //     even with transparent=false, alphaTest=0, three.js may still
+      //     mix in transparency if the canvas blend mode picks it up.
+      // Real see-through materials (glass) aren't a primary use case here,
       // so default to opaque. If user needs transparency they can flip
       // the baseColor alpha in Material Adjust.
-      if (mat.transparent || (mat.opacity != null && mat.opacity < 1)) {
-        mat.transparent = false;
-        mat.opacity = 1.0;
-        if (mat.alphaMap) mat.alphaMap = null;
-        if ('alphaTest' in mat) mat.alphaTest = 0;
-        mat.depthWrite = true;
-        mat.needsUpdate = true;
+      mat.transparent = false;
+      mat.opacity = 1.0;
+      mat.depthWrite = true;
+      mat.depthTest = true;
+      if (mat.alphaMap)  mat.alphaMap = null;
+      if ('alphaTest' in mat) mat.alphaTest = 0;
+      // MeshPhysicalMaterial properties — if undefined the assigns are no-ops.
+      if ('transmission' in mat)      mat.transmission = 0;
+      if ('thickness' in mat)         mat.thickness = 0;
+      if ('transmissionMap' in mat)   mat.transmissionMap = null;
+      if ('attenuationDistance' in mat) mat.attenuationDistance = Infinity;
+      // If the baseColor (mat.map) has an alpha channel that's <1 in
+      // some pixels, force the GPU to read it as fully opaque via
+      // premultipliedAlpha=false + format swap on next upload. Stripping
+      // the alpha channel itself would require canvas roundtrip; cheaper
+      // is to disable premultiplied + alphaTest as belt-and-braces.
+      if (mat.map) {
+        mat.map.premultiplyAlpha = false;
+        mat.map.needsUpdate = true;
       }
+      // Some PBR materials carry an emissive that's tinted by a black
+      // alpha — strip the emissive alpha contribution as well.
+      if (mat.emissiveMap) {
+        mat.emissiveMap.premultiplyAlpha = false;
+        mat.emissiveMap.needsUpdate = true;
+      }
+      mat.needsUpdate = true;
       const slots = [mat.map, mat.normalMap, mat.roughnessMap,
                      mat.metalnessMap, mat.aoMap, mat.emissiveMap];
       for (const tex of slots) {

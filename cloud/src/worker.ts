@@ -4651,6 +4651,31 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
  * The jobs themselves stay around so the user can still see/download
  * the meshes individually.
  */
+/** POST /api/me/wipe-all-projects — nuclear reset for the current user.
+ *  Sets project_name=NULL on every jobs row + DELETEs every user_assets
+ *  row. Does NOT touch R2 blobs (they stay accessible in _orphans on
+ *  next migration, or remain harmlessly orphaned). Use when caches
+ *  resist normal cleanup. */
+async function handleMeWipeAllProjects(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (isMock(env)) return json({ ok: true, mock: true });
+  const sb = supabaseAdmin(env);
+  const { error: jErr, count: jUpd } = await sb.from('jobs')
+    .update({ project_name: null }, { count: 'exact' })
+    .eq('user_id', user.id)
+    .not('project_name', 'is', null);
+  const { error: aErr, count: aDel } = await sb.from('user_assets')
+    .delete({ count: 'exact' })
+    .eq('user_id', user.id);
+  return json({
+    ok: true,
+    jobs_detached: jUpd ?? 0,
+    user_assets_deleted: aDel ?? 0,
+    errors: [jErr?.message, aErr?.message].filter(Boolean),
+  });
+}
+
 async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -6736,8 +6761,9 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   } catch (e: unknown) {
     await addCredits(env, user.id, RIG_COST);
     await refundRigSpend();
-    console.error('[auto-rig.spawn]', e instanceof Error ? e.message : String(e), e);
-    return err(502, 'auto-rig spawn failed (credits refunded)');
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[auto-rig.spawn]', msg, e);
+    return err(502, `auto-rig spawn failed (credits refunded): ${msg.slice(0, 200)}`);
   }
 
   // Persist job → user mapping so the status route can refund on
@@ -9959,6 +9985,7 @@ export default {
         if (pathname === '/api/projects/delete'       && method === 'POST') return await handleProjectsDelete(req, env);
         if (pathname === '/api/cloud-projects'        && method === 'GET')  return await handleCloudProjects(req, env);
         if (pathname === '/api/cloud-projects/delete' && method === 'POST') return await handleCloudProjectsDelete(req, env);
+        if (pathname === '/api/me/wipe-all-projects'  && method === 'POST') return await handleMeWipeAllProjects(req, env);
         if (pathname === '/api/meshes'                && method === 'GET')  return await handleListMeshes(req, env);
         if (pathname === '/api/meshes/delete'         && method === 'POST') return await handleMeshesDelete(req, env);
         if (pathname === '/api/jobs/cancel'           && method === 'POST') return await handleJobCancel(req, env);
