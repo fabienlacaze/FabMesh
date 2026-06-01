@@ -7051,6 +7051,21 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
       httpMetadata: { contentType: 'text/plain; charset=utf-8' },
       customMetadata: { kind, status, project: project || '', userId: user?.id || '' },
     });
+    // ALSO overwrite stable paths so Claude can fetch the latest log
+    // without having to discover the timestamped filename:
+    //   _logs/latest/<uid>.log      — per-user latest (anyone in solo dev)
+    //   _logs/latest/_any.log       — global latest (overwritten by ANY user;
+    //                                  fine for solo dev, racy for prod)
+    if (user) {
+      await env.MESHES.put(`_logs/latest/${user.id}.log`, payload, {
+        httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+        customMetadata: { kind, status, project: project || '', userId: user.id },
+      });
+    }
+    await env.MESHES.put(`_logs/latest/_any.log`, payload, {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+      customMetadata: { kind, status, project: project || '', userId: user?.id || '' },
+    });
   } catch (e) {
     return err(500, `R2 put failed: ${e instanceof Error ? e.message : String(e)}`);
   }
