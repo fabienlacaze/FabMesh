@@ -18110,17 +18110,24 @@ function initLmFullscreen() {
   // Shared scene + lights
   lmFsScene = new THREE.Scene();
   lmFsScene.background = new THREE.Color(0x0b0b14);
-  lmFsScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  // Bright lighting — user reported the dragon was nearly invisible
+  // with the previous defaults. Match the main 3D Mesh viewer rig.
+  lmFsScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.8));
+  const dir = new THREE.DirectionalLight(0xffffff, 2.0);
   dir.position.set(5, 8, 5);
   lmFsScene.add(dir);
-  lmFsScene.add(new THREE.DirectionalLight(0xffffff, 0.5).translateX(-5).translateY(3).translateZ(-5));
-  lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  fill.position.set(-5, 3, -5);
+  lmFsScene.add(fill);
+  const back = new THREE.DirectionalLight(0xffffff, 0.7);
+  back.position.set(0, 5, -8);
+  lmFsScene.add(back);
+  lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.6));
   // Pane A (Front by default)
   lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: true });
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
   lmFsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  lmFsRenderer.toneMappingExposure = 1.0;
+  lmFsRenderer.toneMappingExposure = 1.4;
   lmFsCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
   lmFsControls = new OrbitControls(lmFsCamera, canvasA);
   lmFsControls.enableDamping = true;
