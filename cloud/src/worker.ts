@@ -7057,6 +7057,64 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, path: key, lines: lines.length });
 }
 
+/** POST /api/user-assets/migrate-from-jobs — one-shot backfill that
+ *  recovers per-project image associations from existing jobs.options
+ *  (which holds `sourceImage` for every mesh generated from an image).
+ *
+ *  Why this exists: before user_assets, the client kept the image↔project
+ *  mapping in localStorage (`myfm:cloudimages:<project>`). When that cache
+ *  was dropped at boot in the migration, users lost the mapping for older
+ *  images. But every mesh has its sourceImage in jobs.options, so we can
+ *  rebuild the mapping from there.
+ *
+ *  Idempotent: insertUserAsset upserts ON CONFLICT (user_id, r2_path)
+ *  do nothing, so calling this twice doesn't duplicate. */
+async function handleUserAssetsMigrateFromJobs(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .select('id, project_name, options, asset_type, created_at')
+    .eq('user_id', user.id)
+    .limit(5000);
+  if (error) return err(500, error.message);
+  let migrated = 0;
+  let scanned = 0;
+  const seen = new Set<string>();
+  for (const j of (data ?? []) as Array<{
+    id: string; project_name: string | null;
+    options: Record<string, unknown> | null;
+    asset_type: string; created_at: string;
+  }>) {
+    scanned++;
+    const project = j.project_name
+      || (j.options?.project_name as string | undefined)
+      || `Project ${j.id.slice(-6)}`;
+    const srcImage = j.options?.sourceImage as string | undefined;
+    if (srcImage && typeof srcImage === 'string') {
+      const r2_path = r2PathFromPublicUrl(env, srcImage) ?? srcImage;
+      if (r2_path && !r2_path.startsWith('http') && !seen.has(`${project}|${r2_path}`)) {
+        seen.add(`${project}|${r2_path}`);
+        await insertUserAsset(env, user.id, project, 'image-front', r2_path, null,
+          { migrated_from_job: j.id, asset_type: j.asset_type });
+        migrated++;
+      }
+    }
+    // Also recover back-images if logged in options.
+    const backImage = j.options?.backImage as string | undefined;
+    if (backImage && typeof backImage === 'string') {
+      const r2_path = r2PathFromPublicUrl(env, backImage) ?? backImage;
+      if (r2_path && !r2_path.startsWith('http') && !seen.has(`${project}|${r2_path}|back`)) {
+        seen.add(`${project}|${r2_path}|back`);
+        await insertUserAsset(env, user.id, project, 'image-back', r2_path,
+          srcImage as string | null, { migrated_from_job: j.id });
+        migrated++;
+      }
+    }
+  }
+  return json({ ok: true, scanned, migrated });
+}
+
 /** POST /api/thumbs/upload — stores a mesh thumbnail in R2 instead of
  *  the client's localStorage (where a single PNG dataURL was eating
  *  100-200 KB and saturating the 5 MB origin cap). Body: {meshKey,
@@ -9518,6 +9576,7 @@ export default {
         if (pathname === '/api/client-log'            && method === 'POST') return await handleClientLog(req, env);
         if (pathname === '/api/client-log/list'       && method === 'GET')  return await handleClientLogList(req, env);
         if (pathname === '/api/user-assets/record'    && method === 'POST') return await handleUserAssetsRecord(req, env);
+        if (pathname === '/api/user-assets/migrate-from-jobs' && method === 'POST') return await handleUserAssetsMigrateFromJobs(req, env);
         if (pathname === '/api/thumbs/upload'         && method === 'POST') return await handleThumbsUpload(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);

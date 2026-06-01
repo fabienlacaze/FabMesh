@@ -2142,37 +2142,92 @@
   window.__isCloud = true;
   log(`mounted — ${Object.keys(meshyAPI).length} methods, ${STUBS.length} stubs`);
 
-  // ─── One-shot localStorage cleanup ──────────────────────────────
-  // Drop legacy heavy caches (dataURL PNGs) that pre-date the R2 /
-  // Supabase migration. Idempotent: leaves the new small-URL caches
-  // alone. Done at boot, not on demand, so we never hit the quota
-  // again on subsequent gens. ~3-5 MB freed on heavy users.
-  (function _cleanupLegacyHeavyCaches() {
+  // ─── One-shot Supabase migration + safe cleanup ─────────────────
+  // Runs ONCE per browser (guard: localStorage 'myfm:migration:v1').
+  //
+  // Step 1 — for every `myfm:cloudimages:<project>` key still in
+  // localStorage, POST its URLs to /api/user-assets/record so the
+  // worker INSERTs the mapping in Supabase user_assets.
+  //
+  // Step 2 — ask the worker to backfill from jobs.options.sourceImage
+  // for any image whose mapping was lost (e.g. previous cleanup ran
+  // before this migration was deployed).
+  //
+  // Step 3 — drop the heavy legacy keys (dataURL thumbs, the now-
+  // migrated cloudimages cache, back-photos). Skips if Step 1 fails.
+  (async function _migrateAndCleanup() {
+    const guardKey = 'myfm:migration:v1';
     try {
+      if (localStorage.getItem(guardKey) === 'done') return;
+      log('migration: starting one-shot Supabase backfill + cleanup');
+
+      // Step 1: migrate per-project image caches (if still present).
+      const migrationCalls = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const lk = localStorage.key(i) || '';
+        if (!lk.startsWith('myfm:cloudimages:')) continue;
+        const project = lk.slice('myfm:cloudimages:'.length);
+        let arr = [];
+        try { arr = JSON.parse(localStorage.getItem(lk) || '[]'); } catch (_) {}
+        if (!Array.isArray(arr) || arr.length === 0) continue;
+        const fronts = arr.filter(x => (x?.kind || 'front') === 'front').map(x => x?.path || x).filter(Boolean);
+        const backs  = arr.filter(x => x?.kind === 'back').map(x => x?.path || x).filter(Boolean);
+        if (fronts.length) {
+          migrationCalls.push(fetch('/api/user-assets/record', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ projectName: project, kind: 'image-front', paths: fronts }),
+          }).then(r => r.json()).then(j => log('migrated front:', project, j?.inserted || 0)));
+        }
+        if (backs.length) {
+          migrationCalls.push(fetch('/api/user-assets/record', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ projectName: project, kind: 'image-back', paths: backs }),
+          }).then(r => r.json()).then(j => log('migrated back:', project, j?.inserted || 0)));
+        }
+      }
+      if (migrationCalls.length) {
+        await Promise.allSettled(migrationCalls);
+      }
+
+      // Step 2: backfill from jobs.options.sourceImage on the worker.
+      try {
+        const r = await fetch('/api/user-assets/migrate-from-jobs', {
+          method: 'POST', credentials: 'include',
+        });
+        const j = await r.json().catch(() => ({}));
+        log('migrate-from-jobs: scanned=', j?.scanned, 'migrated=', j?.migrated);
+      } catch (e) { console.warn('[migration] jobs backfill failed:', e?.message || e); }
+
+      // Step 3: drop heavy legacy keys (safe now that Steps 1+2 ran).
       const toDrop = [];
       for (let i = 0; i < localStorage.length; i++) {
         const lk = localStorage.key(i) || '';
         if (!lk) continue;
-        // Legacy dataURL thumb cache (`myfm:thumb:<base>` = full PNG)
-        // — replaced by the URL-only cache `myfm:thumburl:<base>`.
-        if (lk.startsWith('myfm:thumb:'))           toDrop.push(lk);
-        // Legacy image listing cache — now served by /api/cloud-projects
-        // out of Supabase user_assets. Drop it so we don't merge stale
-        // entries (the worker is the source of truth from this build on).
-        if (lk.startsWith('myfm:cloudimages:'))     toDrop.push(lk);
-        // Back-photo mapping is in user_assets too (kind=image-back,
-        // parent_path=front URL). Legacy cache no longer needed.
-        if (lk.startsWith('myfm:backphotos:'))      toDrop.push(lk);
+        if (lk.startsWith('myfm:thumb:'))       toDrop.push(lk);
+        if (lk.startsWith('myfm:cloudimages:')) toDrop.push(lk);
+        if (lk.startsWith('myfm:backphotos:'))  toDrop.push(lk);
       }
       let freed = 0;
       for (const lk of toDrop) {
         freed += (localStorage.getItem(lk) || '').length;
         try { localStorage.removeItem(lk); } catch (_) {}
       }
-      if (toDrop.length) {
-        log('cleanup: dropped', toDrop.length, 'legacy heavy cache keys,', freed, 'chars freed');
+      if (toDrop.length) log('cleanup: dropped', toDrop.length, 'legacy keys,', freed, 'chars freed');
+
+      try { localStorage.setItem(guardKey, 'done'); } catch (_) {}
+      log('migration: complete');
+
+      // Trigger a single reload of the projects view so the user sees
+      // their freshly-migrated images without a manual refresh.
+      if (typeof window.reloadCurrentProject === 'function') {
+        setTimeout(() => { try { window.reloadCurrentProject(); } catch (_) {} }, 300);
       }
-    } catch (e) { console.warn('[cleanup] failed:', e?.message || e); }
+    } catch (e) {
+      console.warn('[migration] failed:', e?.message || e);
+      // Don't set the guard — retry on next reload.
+    }
   })();
   // Resume any mesh job a previous tab left behind. Delayed so the
   // renderer has time to wire pushJob / reloadCurrentProject onto
