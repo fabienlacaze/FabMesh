@@ -6793,6 +6793,56 @@ async function handleAnimUpload(req: Request, env: Env): Promise<Response> {
 }
 
 
+/** POST /api/animations/copy — body { sourceUrl, animType, projectName,
+ *  batchId? }. Copies an existing R2 animation blob to a new key without
+ *  the GLB ever touching the client (which was hitting Cloudflare's
+ *  100 MB request body cap on large animated meshes via /upload).
+ *  Source must live under <user.id>/animations/ to prevent cross-user
+ *  copies. */
+async function handleAnimCopy(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+  const body = await req.json() as { sourceUrl?: string; animType?: string; projectName?: string; batchId?: string };
+  const sourceUrl = body.sourceUrl;
+  if (!sourceUrl) return err(400, 'sourceUrl required');
+  // Parse the source key from the URL and validate it belongs to this user.
+  let sourceKey: string;
+  try {
+    const u = new URL(sourceUrl);
+    if (u.host !== new URL(env.R2_PUBLIC_URL).host) return err(400, 'sourceUrl host not allowed');
+    sourceKey = u.pathname.replace(/^\/+/, '');
+  } catch { return err(400, 'invalid sourceUrl'); }
+  if (!sourceKey.startsWith(`${user.id}/animations/`)) {
+    return err(403, 'can only copy your own animation files');
+  }
+  // Read the source body from R2 and stream into the new key.
+  const src = await env.MESHES.get(sourceKey);
+  if (!src) return err(404, 'source not found in R2');
+  const animType = (String(body.animType || 'clip').toLowerCase().replace(/[^a-z]/g, '') || 'clip').slice(0, 16);
+  const projectName = String(body.projectName || '');
+  const projectSlug = (projectName || 'untitled').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled';
+  const incomingBatch = String(body.batchId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+  const batchId = incomingBatch || `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  // Recover the base name from the source filename so the new key
+  // preserves the rig stem.
+  const srcName = sourceKey.split('/').pop() || 'copy.glb';
+  const baseName = srcName.replace(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_.*\.glb$/i, '')
+                          .replace(/^.*_rigged_/i, 'rigged_')
+                          .replace(/[^A-Za-z0-9._-]/g, '_')
+                          .slice(0, 80) || 'copy';
+  const key = `${user.id}/animations/${projectSlug}/${baseName}_${animType}_${batchId}_${Date.now()}.glb`;
+  try {
+    await env.MESHES.put(key, src.body, {
+      httpMetadata: { contentType: 'model/gltf-binary' },
+    });
+  } catch (e) {
+    return err(500, `R2 copy failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ ok: true, url: `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`, key });
+}
+
+
 /** POST /api/animations/delete — body { url }. Removes the R2 blob
  *  if and only if the URL points under <user.id>/animations/ (so a
  *  hostile body can't nuke unrelated R2 keys). Always idempotent —
@@ -9082,6 +9132,7 @@ export default {
         if (pathname === '/api/animate-status'        && (method === 'GET' || method === 'POST')) return await handleAutoAnimStatus(req, env);
         if (pathname === '/api/animations/delete'     && method === 'POST') return await handleAnimDelete(req, env);
         if (pathname === '/api/animations/upload'     && method === 'POST') return await handleAnimUpload(req, env);
+        if (pathname === '/api/animations/copy'       && method === 'POST') return await handleAnimCopy(req, env);
         if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
