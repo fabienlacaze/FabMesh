@@ -808,12 +808,15 @@
                     <div class="preview-placeholder" id="step4-placeholder">No animation selected</div>
                   </div>
                   <div id="ws-anim-filename" class="viewer-filename"></div>
-                  <!-- Versions strip moved UNDER the viewer (like the
-                       mesh strip), so the user picks which version to
-                       play directly below the preview. -->
-                  <div id="ws-anim-versions" class="versions-strip" style="margin-top:8px;"></div>
+                  <!-- Type selector UNDER the viewer: each animation TYPE
+                       is a button. Clicking a type filters the right
+                       Versions strip to show v0/v1/v2 of THAT type. -->
+                  <div id="ws-anim-type-buttons" class="anim-type-buttons" style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;"></div>
                 </div>
                 <div class="stage-edit-side">
+                  <!-- Versions OF the currently-selected type — managed
+                       like rig versions (v0 = newest of that type). -->
+                  <div id="ws-anim-versions" class="versions-strip"></div>
                   <div class="step-tools-scroll">
                     <div class="step-tools-group">
                       <div class="step-tools-label">File</div>
