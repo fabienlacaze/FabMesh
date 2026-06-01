@@ -876,11 +876,15 @@
   function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */, parentPath) {
     console.log('[_appendCloudImages] CALLED name=', projectName, 'urls=', urls, 'kind=', kind);
     if (!projectName) { console.warn('[_appendCloudImages] no projectName, skip'); return; }
-    // Primary path: tell the worker to record in Supabase user_assets.
+    // Server is the source of truth: POST /api/user-assets/record.
+    // The legacy localStorage write was removed in v2026-06-01 because
+    // it created duplicate thumbnails in listImageFolders (the merge
+    // there was already removed).
     _recordUserAsset(projectName, urls, kind, parentPath);
-    // Legacy localStorage path — kept for now as a transient fallback
-    // (worker-side row appears in /api/cloud-projects on next reload;
-    // the local cache fills the gap between gen and reload).
+    return;
+    // (Dead code below kept on purpose so a future build can revive
+    // the local write if Supabase ever has hiccups.)
+    // eslint-disable-next-line no-unreachable
     const k = _imgKey(projectName);
     const payload = urls || [];
     function tryWrite() {
@@ -992,29 +996,20 @@
                        saveBack: _saveBackPhoto, readBack: _readBackPhotos };
 
   Object.assign(impl, {
-    /* ── projects / meshes (Worker-backed + localStorage cache) ──── */
+    /* ── projects / meshes (Worker-backed only) ──────────────────
+       Server is now the source of truth for image listings (Supabase
+       user_assets). localStorage merge was creating duplicate thumbs
+       when both the server INSERT and the legacy local push hit the
+       same URL. */
     listImageFolders: async () => {
       let projects = [];
       try {
         const r = await getJSON('/api/cloud-projects');
         projects = Array.isArray(r) ? r : (r.projects || []);
       } catch (e) { log('listImageFolders failed:', e); }
-      // Merge in projects that only exist in localStorage (just generated).
-      const byName = new Map(projects.map(p => [p.name, p]));
-      for (const localName of _projectsFromLocalCache()) {
-        if (!byName.has(localName)) {
-          byName.set(localName, { name: localName, images: [], imagesData: [], path: '', created: new Date().toISOString(), prompt: '', backPhotos: {} });
-        }
-      }
-      return Array.from(byName.values()).map(p => {
-        const local = _readCloudImages(p.name);
-        const frontUrls = local.filter(x => x.kind === 'front' || x.kind === 'view').map(x => x.path);
+      return projects.map(p => {
         const backCache = _readBackPhotos(p.name);
-        // Merge: server images first, then locally-cached ones we don't
-        // already have. Dedup on URL.
-        const seen = new Set(p.images || []);
         const merged = [...(p.images || [])];
-        for (const u of frontUrls) if (!seen.has(u)) { seen.add(u); merged.push(u); }
         // Desktop convention: index2.js labels versions as
         // `v${images.length - 1 - i}`, expecting the most recent image at
         // i=0 (label = max version number). On desktop main.js sorts
@@ -1034,14 +1029,7 @@
           // float to the left. Picks the max(mtime) over every cached
           // local image, falling back to the server-side timestamp or
           // "now" for projects that have no local trace yet.
-          created: (function () {
-            let latest = 0;
-            for (const x of local) {
-              if (x && typeof x.mtime === 'number' && x.mtime > latest) latest = x.mtime;
-            }
-            if (latest > 0) return new Date(latest).toISOString();
-            return p.created || new Date().toISOString();
-          })(),
+          created: p.created || new Date().toISOString(),
           // Prefer server-side prompt (from a mesh job's options); fall
           // back to the localStorage cache populated by generateImages.
           // Either source feeds the "Copy prompt" button in the UI.
