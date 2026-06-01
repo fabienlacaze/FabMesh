@@ -4663,10 +4663,21 @@ async function handleMeWipeAllProjects(req: Request, env: Env): Promise<Response
   const wipeR2 = url.searchParams.get('wipeR2') === 'true'
               || url.searchParams.get('wipeR2') === '1';
   const sb = supabaseAdmin(env);
-  const { error: jErr, count: jUpd } = await sb.from('jobs')
-    .update({ project_name: null }, { count: 'exact' })
-    .eq('user_id', user.id)
-    .not('project_name', 'is', null);
+  // When ?wipeR2=true we treat it as a FULL reset and DELETE the jobs
+  // rows too — otherwise their mesh_url keeps surfacing the binaries
+  // we just deleted from R2 as broken phantom projects.
+  let jUpd = 0, jDel = 0;
+  let jErr: { message: string } | null = null;
+  if (wipeR2) {
+    const res = await sb.from('jobs').delete({ count: 'exact' }).eq('user_id', user.id);
+    jErr = res.error; jDel = res.count ?? 0;
+  } else {
+    const res = await sb.from('jobs')
+      .update({ project_name: null }, { count: 'exact' })
+      .eq('user_id', user.id)
+      .not('project_name', 'is', null);
+    jErr = res.error; jUpd = res.count ?? 0;
+  }
   const { error: aErr, count: aDel } = await sb.from('user_assets')
     .delete({ count: 'exact' })
     .eq('user_id', user.id);
@@ -4700,7 +4711,8 @@ async function handleMeWipeAllProjects(req: Request, env: Env): Promise<Response
   }
   return json({
     ok: true,
-    jobs_detached: jUpd ?? 0,
+    jobs_detached: jUpd,
+    jobs_deleted: jDel,
     user_assets_deleted: aDel ?? 0,
     r2_objects_deleted: r2Deleted,
     r2_wipe_requested: wipeR2,
