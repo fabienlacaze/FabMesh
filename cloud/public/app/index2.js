@@ -16379,7 +16379,14 @@ async function refreshParentalStatus() {
       lockIcon.style.display = '';
       lockIcon.innerHTML = r.unrestricted ? '&#128275;' : '&#128274;';
       lockIcon.title = r.unrestricted ? 'Unrestricted mode — click to lock' : 'Parental control active — click to unlock';
-      lockIcon.style.opacity = r.unrestricted ? '0.4' : '0.8';
+      // Always fully opaque + clickable. Use an amber tint when unrestricted
+      // to signal 'danger zone' instead of dimming the icon (which read as
+      // disabled / unclickable to the user).
+      lockIcon.style.opacity = '1';
+      lockIcon.style.cursor = 'pointer';
+      lockIcon.style.pointerEvents = 'auto';
+      lockIcon.style.background = r.unrestricted ? 'rgba(245, 158, 11, 0.18)' : '';
+      lockIcon.style.borderColor = r.unrestricted ? 'var(--warning, #f59e0b)' : '';
     }
     if (r.unrestricted) {
       statusEl.textContent = '🔓 Unrestricted';
