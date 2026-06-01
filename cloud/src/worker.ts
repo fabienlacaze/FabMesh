@@ -4801,13 +4801,21 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
  *  endpoint returns a content-filter placeholder (small PNG with text
  *  rendered into it, or a JSON error) with HTTP 200 — silently saving
  *  it to R2 yields a poisoned image the user sees but can't recover
- *  from. Magic-byte sniffing covers PNG / JPEG / WEBP; anything else
- *  surfaces as a clear error to the caller. */
+ *  from.
+ *  Three layers:
+ *  1. Magic bytes — covers PNG / JPEG / WEBP; non-image bodies (JSON
+ *     errors, HTML pages) throw immediately.
+ *  2. Size floor — a Modal RealVisXL 1024×1024 PNG is ALWAYS > 100 KB,
+ *     usually 600 KB – 2 MB. A 'blocked by content filter' placeholder
+ *     is ~5-30 KB (small canvas with rendered text). Anything below
+ *     50 KB is almost certainly a placeholder, not a real generation.
+ *  3. PNG IHDR width check (when PNG) — placeholders are often 256x or
+ *     512x; real outputs are always 1024x or 1024+. Reject < 768. */
 function _assertImageBytes(buf: ArrayBuffer, source: string): void {
   if (buf.byteLength < 256) {
     throw new Error(`${source} returned ${buf.byteLength} bytes — too small to be a real image (likely content-filtered placeholder).`);
   }
-  const head = new Uint8Array(buf, 0, Math.min(16, buf.byteLength));
+  const head = new Uint8Array(buf, 0, Math.min(32, buf.byteLength));
   const isPng  = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
   const isJpeg = head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF;
   const isWebp = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
@@ -4816,6 +4824,22 @@ function _assertImageBytes(buf: ArrayBuffer, source: string): void {
     const preview = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 200));
     console.warn(`[${source}] non-image bytes (${buf.byteLength}): "${preview.slice(0, 120)}"`);
     throw new Error(`${source} returned non-image content (likely 'blocked by content filter' placeholder).`);
+  }
+  // Size floor — 50 KB. A real 1024² PNG never falls under 100 KB even
+  // at the highest compression. Placeholders top out around 30 KB.
+  if (buf.byteLength < 50_000) {
+    const preview = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 256));
+    console.warn(`[${source}] suspiciously small image (${buf.byteLength} bytes): "${preview.slice(0, 100)}"`);
+    throw new Error(`${source} returned a ${(buf.byteLength / 1024).toFixed(1)} KB image — Modal returned a content-filter placeholder instead of a real generation. Re-run; if it keeps happening the prompt is flagged by Modal's internal NSFW classifier (common false-positive on animals).`);
+  }
+  // PNG IHDR width sanity check. IHDR follows the 8-byte signature at
+  // bytes 8-12 (length+'IHDR'), then width at bytes 16-19 big-endian.
+  if (isPng && buf.byteLength >= 24) {
+    const v = new DataView(buf, 16, 4);
+    const w = v.getUint32(0, false);
+    if (w > 0 && w < 768) {
+      throw new Error(`${source} returned a ${w}px wide PNG — too small for a real generation (placeholder size). Re-run or rephrase the prompt.`);
+    }
   }
 }
 
