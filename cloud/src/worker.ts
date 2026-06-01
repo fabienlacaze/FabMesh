@@ -4875,16 +4875,51 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
     .eq('user_id', user.id)
     .eq('project_name', projectName);
   if (error) return err(500, error.message);
-  // Also DELETE the user_assets rows for this project — otherwise a
-  // future project of the SAME name would resurrect old images on
-  // handleCloudProjects merge. The R2 blobs stay (cheap to keep,
-  // user might recover via _orphans later).
+  // Fetch the r2_paths of all user_assets we're about to delete so
+  // we can also wipe the matching R2 blobs (especially important for
+  // '_orphans' which lives only here — keeping the R2 files would
+  // resurrect the project on next /api/meshes scan).
+  let r2Deleted = 0;
+  try {
+    const { data: assets } = await sb.from('user_assets')
+      .select('r2_path')
+      .eq('user_id', user.id)
+      .eq('project', projectName);
+    if (env.MESHES && assets && assets.length) {
+      await Promise.allSettled(assets.map(a =>
+        env.MESHES.delete(a.r2_path as string).then(() => { r2Deleted++; }).catch(() => {})
+      ));
+    }
+  } catch (e) { console.warn('[cloud-projects/delete] R2 cleanup failed:', e); }
+  // DELETE the user_assets rows for this project.
   const { error: aErr, count: aDel } = await sb.from('user_assets')
     .delete({ count: 'exact' })
     .eq('user_id', user.id)
     .eq('project', projectName);
   if (aErr) console.warn('[cloud-projects/delete] user_assets cleanup failed:', aErr.message);
-  return json({ ok: true, user_assets_deleted: aDel ?? 0 });
+  // For '_orphans' specifically: also list R2 prefixes that produce
+  // synthetic phantom projects (mesh-op/, rigged/, animations/ with
+  // no jobs row) and delete any object whose key matches a name that
+  // would resolve to _orphans client-side. This drains the visible
+  // mesh/rig/anim count to zero so the card actually disappears.
+  if (projectName === '_orphans' && env.MESHES) {
+    const orphanPrefixes = [
+      `${user.id}/mesh-op/`,
+      `${user.id}/rigged/`,
+      `${user.id}/animations/`,
+    ];
+    for (const prefix of orphanPrefixes) {
+      let cursor: string | undefined;
+      do {
+        const listed = await env.MESHES.list({ prefix, limit: 1000, cursor });
+        await Promise.allSettled((listed.objects || []).map(o =>
+          env.MESHES.delete(o.key).then(() => { r2Deleted++; }).catch(() => {})
+        ));
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    }
+  }
+  return json({ ok: true, user_assets_deleted: aDel ?? 0, r2_deleted: r2Deleted });
 }
 
 /**
