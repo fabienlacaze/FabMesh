@@ -7436,8 +7436,17 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     fast:     { steps: 12, texSize: 2048, imgRes: 1024 },
     balanced: { steps: 24, texSize: 2048, imgRes: 1024 },
     quality:  { steps: 32, texSize: 4096, imgRes: 2048 },
+    // Ultra 8K = Quality (TRELLIS atlas 4096) + forced Real-ESRGAN x2
+    // post-process → 8192px final. Cheaper than re-running TRELLIS at
+    // 8K (would OOM on A10G 24GB) and quality-comparable.
+    ultra_8k: { steps: 32, texSize: 4096, imgRes: 2048, forceUltraHd: true },
   };
   const t2cfg = TRELLIS2_PRESETS[trellis2Preset] || TRELLIS2_PRESETS.fast;
+  // Ultra 8K forces ultra_hd ON regardless of the checkbox.
+  const effectiveUltraHD = trellis2UltraHD || !!t2cfg.forceUltraHd;
+  if (t2cfg.forceUltraHd && !trellis2UltraHD) {
+    expectedMs += 280000; // add Real-ESRGAN x2 time not yet accounted for
+  }
 
   const params = {
     imagePath: p.selectedImagePath,
@@ -7466,7 +7475,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     quality_plus: trellis2QualityPlus,
     ultra_q:      trellis2UltraQ,
     face_fix:     trellis2FaceFix,
-    ultra_hd:     trellis2UltraHD,
+    ultra_hd:     effectiveUltraHD,
     preset:       trellis2Preset,
     // Keep the legacy keys around in case the desktop main process or
     // any other listener reads them. They're harmless on cloud.
@@ -7477,7 +7486,7 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2QualityPlus,
     trellis2UltraQ,
     trellis2FaceFix,
-    trellis2UltraHD,
+    trellis2UltraHD: effectiveUltraHD,
     trellis2Preset,
     // Network-boundary key: the Worker (/api/generate) reads `asset_type`.
     // Sending `assetType` here was a silent no-op that disabled the
