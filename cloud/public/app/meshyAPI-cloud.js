@@ -2156,16 +2156,16 @@
   // Step 3 — drop the heavy legacy keys (dataURL thumbs, the now-
   // migrated cloudimages cache, back-photos). Skips if Step 1 fails.
   (async function _migrateAndCleanup() {
-    // Guard bumped v1 → v2 to force re-run on existing users: v1 was
-    // shipped before the worker's jobs+R2 backfill existed, so users
-    // who already ran v1 got marked 'done' without ever pulling in
-    // their historical images. v2 re-runs the full pipeline.
-    const guardKey = 'myfm:migration:v2';
+    // Guard bumped v2 → v3 to add Step 2b (reassign-orphans by
+    // timestamp matching). Users on v2 saw all their images dumped
+    // into a single _orphans project because jobs.options.sourceImage
+    // was empty; v3 redistributes them to the right project.
+    const guardKey = 'myfm:migration:v3';
     try {
       if (localStorage.getItem(guardKey) === 'done') return;
-      // Also clear the legacy v1 guard so future builds can iterate.
       try { localStorage.removeItem('myfm:migration:v1'); } catch (_) {}
-      log('migration: starting one-shot Supabase backfill + cleanup (v2)');
+      try { localStorage.removeItem('myfm:migration:v2'); } catch (_) {}
+      log('migration: starting one-shot Supabase backfill + cleanup (v3)');
 
       // Step 1: migrate per-project image caches (if still present).
       const migrationCalls = [];
@@ -2208,6 +2208,22 @@
             'fromJobsOptions=', j?.fromJobsOptions,
             'fromR2Listing=', j?.fromR2Listing);
       } catch (e) { console.warn('[migration] jobs backfill failed:', e?.message || e); }
+
+      // Step 2b: reassign _orphans → real projects by timestamp
+      // proximity to mesh jobs.created_at. Catches the case where
+      // jobs.options.sourceImage was empty (so Step 2 dumped everything
+      // into _orphans) but the image's R2 filename timestamp matches
+      // a mesh creation within ±5 min.
+      try {
+        const r = await fetch('/api/user-assets/reassign-orphans?windowSec=600', {
+          method: 'POST', credentials: 'include',
+        });
+        const j = await r.json().catch(() => ({}));
+        log('reassign-orphans: scanned=', j?.scanned,
+            'reassigned=', j?.reassigned,
+            'kept_orphan=', j?.kept_orphan,
+            'byProject=', j?.byProject);
+      } catch (e) { console.warn('[migration] reassign-orphans failed:', e?.message || e); }
 
       // Step 3: drop heavy legacy keys (safe now that Steps 1+2 ran).
       const toDrop = [];
