@@ -384,6 +384,12 @@ def animate_mesh(
         _log(f"step 4 done: bvh={bvh_anim} ({os.path.getsize(bvh_anim)} bytes)")
 
         # ── Step 5: BVH → glTF animation tracks injected in rig ───
+        # FORCE fresh import: Modal warm containers cache the module in
+        # sys.modules; new file content from add_local_file is on disk
+        # but the cached module isn't reloaded. Drop it from sys.modules
+        # before the import so the latest bvh_to_gltf_anim.py is read.
+        if 'bvh_to_gltf_anim' in sys.modules:
+            del sys.modules['bvh_to_gltf_anim']
         from bvh_to_gltf_anim import bvh_to_gltf_anim  # type: ignore
         _log("step 5: embedding BVH as glTF tracks on the rig GLB")
         bvh_to_gltf_anim(
