@@ -13275,19 +13275,38 @@ function showStep4AnimPreview(anim) {
       _animVw.controls?.target?.copy(center);
       _animVw.controls?.update?.();
     } catch (e) { console.warn('[anim-vw] fit camera failed:', e); }
-    // Mixer + play first clip.
+    // Inventory diagnostics.
+    let skinCount = 0, totalBones = 0;
+    _animModel.traverse(o => {
+      if (o.isSkinnedMesh) {
+        skinCount++;
+        totalBones += o.skeleton?.bones?.length || 0;
+      }
+    });
+    console.log('[anim-vw] loaded GLB:',
+      'animations=', gltf.animations?.length || 0,
+      'tracks0=', gltf.animations?.[0]?.tracks?.length || 0,
+      'duration=', gltf.animations?.[0]?.duration || 0,
+      'skinnedMeshes=', skinCount, 'totalBones=', totalBones);
+    // Mixer + play first clip — bound to the GLB scene root so every
+    // track's nodePath resolves correctly.
     if (gltf.animations?.length) {
       _animMixer = new THREE.AnimationMixer(_animModel);
       _animAction = _animMixer.clipAction(gltf.animations[0]);
       _animAction.setLoop(_animLooping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
       _animAction.clampWhenFinished = !_animLooping;
+      _animAction.enabled = true;
+      _animAction.reset();
       _animAction.play();
-      console.log('[anim-vw] tracks:', gltf.animations.map(a => a.name),
-                  'duration:', gltf.animations[0].duration);
+      _animLastTime = 0; // reset dt so the first frame isn't a huge jump
+      console.log('[anim-vw] mixer started, action.isRunning =', _animAction.isRunning(),
+                  'paused =', _animAction.paused);
     } else {
       showToast('⚠ This GLB has no animation tracks embedded.', 'warning', 6000);
     }
-    // Hidden SkeletonHelper for the Bones toggle.
+    // SkeletonHelper — attached to scene root for proper world transform.
+    // Made visible by default so the user sees something on first load;
+    // can be toggled off via the Bones button.
     let firstSkin = null;
     _animModel.traverse(o => { if (!firstSkin && o.isSkinnedMesh) firstSkin = o; });
     if (firstSkin) {
@@ -13297,11 +13316,16 @@ function showStep4AnimPreview(anim) {
         helper.material.depthTest = false;
         helper.material.transparent = true;
         helper.material.opacity = 1.0;
+        helper.material.linewidth = 3;
       } catch (e) {}
       helper.renderOrder = 999;
-      helper.visible = _step4BonesOn;
+      helper.visible = _step4BonesOn; // respect existing toggle state
       _animVw.scene.add(helper);
       _animHelper = helper;
+      console.log('[anim-vw] SkeletonHelper added, bones=',
+        firstSkin.skeleton?.bones?.length || 0);
+    } else {
+      console.warn('[anim-vw] no SkinnedMesh found in GLB — bones unsupported on this clip');
     }
   }, undefined, (err) => {
     console.error('[anim-vw] GLB load failed:', err);
