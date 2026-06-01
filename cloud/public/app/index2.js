@@ -18217,24 +18217,36 @@ async function openLandmarksFullscreen() {
   function fitFs(obj) {
     lmFsModel = obj;
     lmFsScene.add(lmFsModel);
-    // 2026-06-01: when the loaded model is a RIG (has bones), add a
-    // SkeletonHelper so the user can SEE the actual AI-generated
-    // bone chains and drag landmark markers directly onto them.
-    // The helper is auto-removed by the next openLandmarksFullscreen
-    // because the whole lmFsModel is removed and re-added.
+    // 2026-06-01: visualise the AI-generated bone chains over the
+    // mesh so the user can drag landmark markers onto them.
+    // SkeletonHelper accepts either a SkinnedMesh OR any object whose
+    // descendant tree contains Bones — the dragon rig from AnyTop has
+    // floating bones (no SkinnedMesh) so we pass the lmFsModel itself
+    // when no skin is found.
     try {
       let firstSkin = null;
-      obj.traverse((c) => { if (!firstSkin && c.isSkinnedMesh && c.skeleton) firstSkin = c; });
-      if (firstSkin) {
-        const helper = new THREE.SkeletonHelper(firstSkin);
-        helper.material.linewidth = 2;
-        helper.material.color.set(0x00ffd0);
+      let anyBone = false;
+      obj.traverse((c) => {
+        if (!firstSkin && c.isSkinnedMesh && c.skeleton) firstSkin = c;
+        if (c.isBone) anyBone = true;
+      });
+      let helper = null;
+      if (firstSkin) helper = new THREE.SkeletonHelper(firstSkin);
+      else if (anyBone) helper = new THREE.SkeletonHelper(lmFsModel);
+      if (helper) {
+        helper.material.linewidth = 3;
+        // Bright magenta — far higher contrast against a black dragon
+        // than the previous cyan, which was lost in shadow.
+        helper.material.color.set(0xff00ff);
         helper.material.depthTest = false;
         helper.material.transparent = true;
-        helper.material.opacity = 0.9;
+        helper.material.opacity = 1.0;
         helper.renderOrder = 998;
-        lmFsModel.add(helper);
+        lmFsScene.add(helper);
         lmFsModel.userData._skelHelper = helper;
+        console.log('[lm] SkeletonHelper added with', helper.bones?.length || 0, 'bones (skinned=', !!firstSkin, ')');
+      } else {
+        console.warn('[lm] no SkinnedMesh and no bones — no SkeletonHelper');
       }
     } catch (e) { console.warn('[lm] SkeletonHelper failed:', e); }
     const box = new THREE.Box3().setFromObject(lmFsModel);
