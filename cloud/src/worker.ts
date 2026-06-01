@@ -6870,14 +6870,16 @@ async function handleParentalToggle(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   const { pin, enable } = await req.json() as { pin?: string; enable?: boolean };
+  // Re-lock without PIN — the renderer sends pin:'lock' + enable:false.
+  // Done BEFORE the length check because 'lock' is 4 chars and would
+  // otherwise route into the normal PIN validation and 403.
+  if (enable === false && pin === 'lock') {
+    const cur = await getParentalState(env, user.id);
+    cur.unrestricted = false;
+    await putParentalState(env, user.id, cur);
+    return json({ ok: true, success: true, unrestricted: false });
+  }
   if (typeof pin !== 'string' || pin.length < 4) {
-    if (enable === false && pin === 'lock') {
-      // Re-lock — no PIN needed.
-      const cur = await getParentalState(env, user.id);
-      cur.unrestricted = false;
-      await putParentalState(env, user.id, cur);
-      return json({ ok: true, success: true, unrestricted: false });
-    }
     return err(400, 'PIN must be ≥ 4 chars');
   }
   const cur = await getParentalState(env, user.id);
