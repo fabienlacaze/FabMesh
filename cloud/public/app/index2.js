@@ -13050,38 +13050,47 @@ function renderAnimVersions(p) {
   if (!strip) return;
   const anims = p?.animations || [];
   if (!anims.length) {
-    strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
+    strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick a type and click Generate Animation.</div>';
     return;
   }
-  // Same .versions-strip class as rig — picks up the existing grid + thumb styles.
-  strip.innerHTML = anims.map((a, i) => {
-    const icon = a.type === 'idle' ? '😴' : a.type === 'walk' ? '🚶'
-      : a.type === 'run' ? '🏃' : a.type === 'attack' ? '⚔️'
-      : a.type === 'death' ? '💀' : a.type === 'fly' ? '✈️' : '🎬';
+  // Newest-first ordering (worker returns chronological). Numbered v0..vN
+  // top-down so v0 = the most recent generation. Each thumb shows the
+  // anim type as a small label + v-number; the icon hints at the type.
+  const sorted = [...anims].sort((a, b) => {
+    const at = new Date(a.created || 0).getTime();
+    const bt = new Date(b.created || 0).getTime();
+    return bt - at;
+  });
+  const iconFor = (t) => t === 'idle' ? '😴' : t === 'walk' ? '🚶'
+    : t === 'run' ? '🏃' : t === 'attack' ? '⚔️'
+    : t === 'death' ? '💀' : t === 'fly' ? '✈️' : '🎬';
+  strip.innerHTML = sorted.map((a, i) => {
+    const icon = iconFor(a.type);
     return `
       <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}">
-        <div class="version-thumb-icon" style="font-size:24px; display:flex; align-items:center; justify-content:center; height:48px;">${icon}</div>
-        <div class="version-thumb-label">${a.type || 'clip'}</div>
+        <div class="version-thumb-icon" style="font-size:22px; display:flex; align-items:center; justify-content:center; height:42px;">${icon}</div>
+        <div class="version-thumb-label" style="font-size:10px; text-transform:uppercase;">${a.type || 'clip'}</div>
         <div class="version-thumb-sub">v${i}</div>
       </div>`;
   }).join('');
-  // Wire click → show in viewer; auto-show v0 (the most recent generation).
   const thumbs = strip.querySelectorAll('.version-thumb');
   thumbs.forEach(t => {
     t.addEventListener('click', () => {
       thumbs.forEach(o => o.classList.remove('selected'));
       t.classList.add('selected');
       const idx = parseInt(t.dataset.animIdx, 10);
-      showStep4AnimPreview(anims[idx]);
+      showStep4AnimPreview(sorted[idx]);
     });
   });
-  if (anims[0]) showStep4AnimPreview(anims[0]);
+  // Auto-show v0 (newest) immediately.
+  if (sorted[0]) showStep4AnimPreview(sorted[0]);
 }
 
 // Renders the selected animation GLB into the Step 4 viewer using
-// <model-viewer> (already loaded for the source-rig preview). It
-// auto-plays embedded animations, so no separate Three.js mixer needed.
+// <model-viewer>. It auto-plays embedded animations and exposes
+// .play()/.pause()/.availableAnimations for the Play button.
 let _step4ActiveAnim = null;
+let _step4MV = null;
 function showStep4AnimPreview(anim) {
   _step4ActiveAnim = anim || null;
   const card = document.getElementById('step4-preview');
@@ -13091,6 +13100,7 @@ function showStep4AnimPreview(anim) {
   // Remove any previous model-viewer overlay.
   const prev = card.querySelector('model-viewer.anim-mv');
   if (prev) prev.remove();
+  _step4MV = null;
   if (!anim) {
     if (placeholder) placeholder.style.display = '';
     if (canvas) canvas.style.display = '';
@@ -13105,21 +13115,45 @@ function showStep4AnimPreview(anim) {
   mv.setAttribute('src', anim.url || anim.path || '');
   mv.setAttribute('camera-controls', '');
   mv.setAttribute('autoplay', '');
-  mv.setAttribute('animation-name', '*');
   mv.setAttribute('loop', '');
   mv.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; background:#0a0a0e; --poster-color:transparent;';
   card.appendChild(mv);
+  _step4MV = mv;
+  // Diagnostic — if the GLB has NO animation tracks, model-viewer's
+  // availableAnimations stays empty and play() is a no-op. Surface
+  // that explicitly so the user knows the bug is server-side
+  // (bvh_to_gltf_anim.py wrote no tracks) and not "I forgot to click Play".
+  mv.addEventListener('load', () => {
+    const tracks = mv.availableAnimations || [];
+    if (tracks.length === 0) {
+      showToast('⚠ This GLB has no animation tracks embedded — the mesh is at its bind pose. (server-side bvh→glTF retarget produced an empty animation)', 'warning', 8000);
+      console.warn('[anim-viewer] no tracks in', anim.url, 'availableAnimations:', tracks);
+    } else {
+      console.log('[anim-viewer] tracks:', tracks, 'duration:', mv.duration, 'currentAnim:', mv.animationName);
+    }
+  }, { once: true });
 }
 
 // Play / Loop / Export FBX / Show in folder — operate on the
 // currently-loaded model-viewer in step4-preview (anim.mv).
 function _getStep4MV() {
-  return document.querySelector('#step4-preview model-viewer.anim-mv');
+  return _step4MV || document.querySelector('#step4-preview model-viewer.anim-mv');
 }
-document.getElementById('ws-anim-play-btn')?.addEventListener('click', () => {
+document.getElementById('ws-anim-play-btn')?.addEventListener('click', (e) => {
   const mv = _getStep4MV();
-  if (!mv) return;
-  if (mv.paused) mv.play(); else mv.pause();
+  if (!mv) { showToast('Pick a clip first', 'error'); return; }
+  const tracks = mv.availableAnimations || [];
+  if (tracks.length === 0) {
+    showToast('No animation tracks in this GLB — nothing to play.', 'warning', 5000);
+    return;
+  }
+  if (mv.paused) {
+    mv.play();
+    e.currentTarget.classList.add('active');
+  } else {
+    mv.pause();
+    e.currentTarget.classList.remove('active');
+  }
 });
 document.getElementById('ws-anim-loop-btn')?.addEventListener('click', (e) => {
   const mv = _getStep4MV();
