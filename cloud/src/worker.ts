@@ -4765,9 +4765,13 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
       seed: input.seed,
       steps: input.steps,
     }),
-    // Modal cold-start can hit ~30s on first call before the snapshot
-    // is warm. We give it 4 min before timing out — generous but safe.
-    signal: AbortSignal.timeout(240_000),
+    // Modal cold-start on the RealVis container can hit 90-120s when
+    // the GPU snapshot is fully cold (first call of the day). Plus the
+    // actual generation runs 25-45s. 4 min was tight; user hit
+    // 'operation aborted due to timeout' on a real cold start. Bumped
+    // to 6 min — generous but still bounded so a stuck endpoint
+    // doesn't hang the user UI forever.
+    signal: AbortSignal.timeout(360_000),
   });
   if (!r.ok) {
     throw new Error(`Modal HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
