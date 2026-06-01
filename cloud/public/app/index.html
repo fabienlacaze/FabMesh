@@ -2082,19 +2082,9 @@
       </div>
     </div>
 
-    <!-- ============================================================
-         CONFIRM MODAL (custom-styled replacement for window.confirm)
-         ============================================================ -->
-    <div id="modal-confirm" class="modal-overlay hidden">
-      <div class="modal-card" style="max-width: 400px;">
-        <h2 id="confirm-title">Confirm</h2>
-        <p class="modal-subtitle" id="confirm-message">Are you sure?</p>
-        <div class="modal-actions">
-          <button class="ghost-btn" id="confirm-cancel">Cancel</button>
-          <button class="primary-btn danger" id="confirm-ok">Delete</button>
-        </div>
-      </div>
-    </div>
+    <!-- (Legacy modal-confirm removed — duplicate id of the one at line ~1736
+         was causing getElementById to be ambiguous and the delete-mesh
+         confirm dialog never wired up listeners on the right buttons.) -->
 
     <!-- ============================================================
          MODIFY IMAGE MODAL (img2img)

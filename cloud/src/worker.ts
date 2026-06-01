@@ -4586,6 +4586,12 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     console.warn('[handleListMeshes] R2 animations list failed:', e instanceof Error ? e.message : String(e));
   }
 
+  // Final sort: newest first across ALL appended sources (jobs +
+  // rigged + mesh-op + animations). Without this, the per-source
+  // appends bunch by category, breaking the renderer convention that
+  // i=0 in the array = newest version → v(N-1).
+  meshes.sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+
   // No-store so the client always sees fresh rigged + mesh-op + anim
   return new Response(JSON.stringify({ meshes }), {
     status: 200,
