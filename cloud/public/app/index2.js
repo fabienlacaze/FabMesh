@@ -17550,17 +17550,14 @@ async function extractLandmarksFromRig() {
       placeLandmarkMarker(id, pos, colorById[id] || '#ffffff');
       matched++;
     }
-    // Hierarchical fallback for rigs with opaque names (AnyTop's
-    // joint22 etc.). Instead of placing markers at canonical Y%
-    // positions (which is wrong for dragons because ailes inflate the
-    // bbox), we walk the bone tree:
-    //   - root = bone with no parent OR with a non-bone parent
-    //   - spine chain = longest path UP from root that stays roughly
-    //     on the centerline
-    //   - head = TOP of spine chain
-    //   - hips = root
-    //   - other limbs = chains branching off the spine
-    if (matched === 0) {
+    // Removed the geometric / hierarchical fallback — it was unreliable
+    // on non-humanoid rigs (dragon wings, multi-leg creatures, tails…)
+    // and placed markers at confusingly wrong positions. When name
+    // matching gives 0 results we now just SHOW THE SKELETON via the
+    // SkeletonHelper added in openLandmarksFullscreen and ask the user
+    // to manually click each landmark button → bone, which is what they
+    // wanted to do anyway.
+    if (false && matched === 0) {
       // Pre-compute every bone world position once.
       const boneWorld = bones.map(b => {
         const p = new THREE.Vector3(); b.getWorldPosition(p); return { bone: b, pos: p };
@@ -17671,15 +17668,20 @@ async function extractLandmarksFromRig() {
       placeChain(legRights[0] || limbs[1], ['hip_r', 'knee_r', 'ankle_r', 'foot_r']);
     }
     if (matched === 0) {
-      customError(
-        `Found ${bones.length} bone(s) but none matched a known landmark name or canonical position.\n\nFirst few names: ${bones.slice(0, 8).map(b => b.name).join(', ')}`,
-        'From rig',
-      );
+      // Non-humanoid rig (joint<N> / opaque names). Don't auto-place
+      // markers — they end up confusingly off-bone. Just tell the
+      // user to use the SkeletonHelper visible and place markers
+      // manually by clicking each landmark button → bone.
+      if (typeof showToast === 'function') {
+        showToast(
+          `${bones.length} bones detected but the rig uses opaque names (${bones.slice(0, 3).map(b => b.name).join(', ')}…). Click a landmark button on the right, then click on a bone to place it.`,
+          'info', 8000,
+        );
+      }
       return;
     }
     if (typeof showToast === 'function') {
-      const mode = seen.size > 0 ? 'name-matched' : 'geometric';
-      showToast(`Imported ${matched} landmark(s) from rig (${mode}) — drag them to adjust, then click "Re-generate rig".`, 'success', 5000);
+      showToast(`Imported ${matched} landmark(s) from rig (name-matched) — drag them to adjust, then click "Re-generate rig".`, 'success', 5000);
     }
   } catch (e) {
     console.error('[extractLandmarksFromRig]', e);
@@ -17928,7 +17930,39 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
         const btn = document.querySelector(`.lm-btn[data-lm="${lmActive}"]`);
         const colorHex = btn?.dataset.color || '#ffffff';
         const color = parseInt(colorHex.replace('#', ''), 16);
-        placeLandmarkMarker(lmActive, pt, color);
+        // Snap to the CLOSEST bone if a rig is loaded — the user
+        // is usually trying to target a specific bone visible via
+        // the SkeletonHelper. Without this, markers stick to the
+        // mesh surface, sometimes far from the bone they meant.
+        let placePt = pt;
+        try {
+          const bones = [];
+          model.traverse(c => {
+            if (c.isBone) bones.push(c);
+            else if (c.isSkinnedMesh && c.skeleton) {
+              for (const b of c.skeleton.bones) if (!bones.includes(b)) bones.push(b);
+            }
+          });
+          if (bones.length) {
+            let best = null;
+            let bestD = Infinity;
+            const bp = new THREE.Vector3();
+            for (const b of bones) {
+              b.getWorldPosition(bp);
+              const d = bp.distanceTo(pt);
+              if (d < bestD) { bestD = d; best = bp.clone(); }
+            }
+            // Only snap if the closest bone is reasonably close to the
+            // click (within 1/8 of the model size) — otherwise the user
+            // is trying to click in empty space and we keep the raw pt.
+            if (best) {
+              const bbox = new THREE.Box3().setFromObject(model);
+              const sz = bbox.getSize(new THREE.Vector3()).length();
+              if (bestD < sz * 0.125) placePt = best;
+            }
+          }
+        } catch (_) { /* fall through to raw pt */ }
+        placeLandmarkMarker(lmActive, placePt, color);
         saveLandmarksForCurrentMesh();
         btn?.classList.remove('armed');
         lmActive = null;
