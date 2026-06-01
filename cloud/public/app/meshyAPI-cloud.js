@@ -266,9 +266,9 @@
     deleteProject: async ({ projectName, id } = {}) => {
       // Cloud projects are virtual — they're just a group of jobs sharing
       // a `project_name`. The Worker exposes /api/cloud-projects/delete
-      // which nulls the project_name on every job belonging to the user.
-      // The renderer calls this with `projectName`; older callers may
-      // still pass `id` (= projectName in their semantics).
+      // which nulls jobs.project_name + deletes user_assets rows. The
+      // renderer calls this with `projectName`; older callers may still
+      // pass `id` (= projectName in their semantics).
       const name = projectName || id;
       if (!name) {
         console.warn('[deleteProject] no name provided');
@@ -278,9 +278,17 @@
       let result;
       try { result = await postJSON('/api/cloud-projects/delete', { projectName: name }); }
       catch (e) { result = { ok: false, error: String(e) }; }
+      // Also purge the LOCAL caches for this project so listImageFolders
+      // doesn't resurrect it via _projectsFromLocalCache. Without this,
+      // the server may have wiped the rows but the client recreates the
+      // project name from the stale localStorage key.
+      try {
+        localStorage.removeItem(_imgKey(name));
+        localStorage.removeItem(_backKey(name));
+        localStorage.removeItem(_promptKey(name));
+      } catch (_) { /* ignore */ }
       console.log('[deleteProject] result=', result);
-      // Force-flush the console buffer so the next page reload by the
-      // admin can see exactly what happened (R2 path: <uid>/logs/...).
+      // Force-flush so the admin can see exactly what happened.
       try {
         if (window.__consoleCapture && typeof window.__consoleCapture.flush === 'function') {
           window.__consoleCapture.flush({
