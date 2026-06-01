@@ -13662,20 +13662,45 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     return;
   }
   // Skip types that already exist in the CURRENT selected batch so
-  // we don't re-burn credits regenerating something the user already
-  // has in this version. (We DO allow regenerating into a NEW batch,
-  // i.e. when the modal's selection differs from the batch's clips.)
-  const currentBatchTypes = new Set(((p.animations || [])
-    .filter(a => a.batchId === _step4SelectedBatch))
-    .map(a => (a.type || '').toLowerCase()));
-  const skipped = animTypes.filter(t => currentBatchTypes.has(t));
+  // Diff the modal's checked types against what currently exists in
+  // the selected batch:
+  //   - toRun = checked - existing → new types to generate
+  //   - toRemove = existing - checked → types the user UNCHECKED,
+  //     meaning they want them out of this version
+  const currentBatchClips = ((p.animations || [])
+    .filter(a => a.batchId === _step4SelectedBatch));
+  const currentBatchTypes = new Set(currentBatchClips.map(a => (a.type || '').toLowerCase()));
+  const checkedSet = new Set(animTypes);
   const toRun = animTypes.filter(t => !currentBatchTypes.has(t));
-  if (!toRun.length) {
-    showToast('All checked types already exist in this version — nothing to generate.', 'info', 5000);
-    return;
+  const toRemove = [...currentBatchTypes].filter(t => !checkedSet.has(t));
+  // Remove unchecked existing types first (delete their R2 blobs).
+  if (toRemove.length) {
+    const ok = await customConfirm(
+      `Remove ${toRemove.join(', ')} from version v${(p.animations||[]).filter(a => a.batchId === _step4SelectedBatch).length}? This deletes the clip${toRemove.length > 1 ? 's' : ''}.`,
+      'Remove animation',
+      'Remove',
+    );
+    if (!ok) return;
+    const clipsToDelete = currentBatchClips.filter(c => toRemove.includes((c.type || '').toLowerCase()));
+    await Promise.all(clipsToDelete.map(c =>
+      fetch('/api/animations/delete', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: c.url || c.path }),
+      }).catch(err => console.warn('[anim del]', c.url, err))
+    ));
+    // Drop locally so the UI reflects the change immediately.
+    p.animations = (p.animations || []).filter(a => !clipsToDelete.includes(a));
+    renderAnimVersions(p);
+    showToast(`Removed ${toRemove.join(', ')}`, 'success', 3000);
   }
-  if (skipped.length) {
-    showToast(`Skipping ${skipped.join(', ')} (already in this version)`, 'info', 4000);
+  // If nothing else to generate, stop here (removals already applied).
+  if (!toRun.length) {
+    if (!toRemove.length) {
+      showToast('All checked types already exist in this version — nothing to generate.', 'info', 5000);
+    }
+    return;
   }
   // batchId shared across all clips of this Generate click → server
   // groups them into ONE version (v0) instead of N versions.
