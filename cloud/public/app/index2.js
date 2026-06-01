@@ -18025,10 +18025,17 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
       // the marker's — i.e. keep the marker on its original slice plane.
       const corrected = pt.clone().addScaledVector(camDir, markerDepth - hitDepth);
       marker.position.copy(corrected);
-      // If this marker is linked to an AI bone, move the bone too so
-      // the skinned mesh deforms in real time. Convert the new world
-      // position back to the bone's local space (relative to its
-      // parent) before assigning bone.position.
+      // If this marker is linked to an AI bone, move the bone.
+      // Two modes (controlled by the "Freeze mesh" checkbox):
+      //   - DEFORM  (unchecked): skinning follows bone → mesh warps.
+      //                          Use when posing the model.
+      //   - FREEZE  (checked, default): mesh stays put, bone moves
+      //                          alone. Use when realigning bones to
+      //                          a mesh that the AI got wrong.
+      // Freeze works by recalculating the boneInverse for this bone:
+      // new_inverse = inverse(new_world_matrix). The skinning formula
+      // boneMatrix · boneInverse · vertex_bind then produces the same
+      // vertex_world it did before the move → mesh appears unchanged.
       const linkedBone = marker.userData?._linkedBone;
       if (linkedBone && linkedBone.parent) {
         try {
@@ -18036,6 +18043,20 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
           const localPos = linkedBone.parent.worldToLocal(corrected.clone());
           linkedBone.position.copy(localPos);
           linkedBone.updateMatrixWorld(true);
+          // Freeze the mesh: recompute boneInverse so skinning yields
+          // the same world position the vertex had before the move.
+          const freezeMesh = document.getElementById('lm-fs-freeze-mesh')?.checked;
+          if (freezeMesh && lmFsModel) {
+            lmFsModel.traverse((c) => {
+              if (!c.isSkinnedMesh || !c.skeleton) return;
+              const boneIdx = c.skeleton.bones.indexOf(linkedBone);
+              if (boneIdx < 0) return;
+              if (!c.skeleton.boneInverses[boneIdx]) return;
+              const newInv = new THREE.Matrix4();
+              newInv.copy(linkedBone.matrixWorld).invert();
+              c.skeleton.boneInverses[boneIdx].copy(newInv);
+            });
+          }
         } catch (e) { /* ignore */ }
       }
       try { refreshLmFsSilhouetteDots && refreshLmFsSilhouetteDots(); } catch (_e) {}
