@@ -350,6 +350,7 @@
          { success: bool, images: [path, path, ...], error?: string }
        so the renderer's caller works unchanged. */
     generateImages: async ({ prompt, userPrompt, projectName, numImages = 1, steps, jobId } = {}) => {
+      console.log('[generateImages] ENTER projectName=', projectName, 'numImages=', numImages);
       log(`generateImages via /api/generate-image (Cog myfabmesh-cloud) — ${numImages}× "${(userPrompt || prompt || '').slice(0, 60)}…"`);
       window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
       // Read asset type / style from the workspace dropdowns so the
@@ -377,12 +378,14 @@
         if (!j?.success || !Array.isArray(j?.paths) || !j.paths.length) {
           const msg = j?.error || 'no images returned';
           log('generateImages EMPTY:', msg, j);
+          console.warn('[generateImages] EMPTY/FAIL', { success: j?.success, paths: j?.paths, msg });
           return { success: false, images: [], error: msg };
         }
         window.__meshyEmit('image-progress', { jobId, index: numImages, total: numImages, status: 'done' });
         // C1: persist generated URLs in localStorage so listImageFolders
         // returns them on the next refresh (the Worker doesn't store rows
         // for individual PNGs).
+        console.log('[generateImages] success, about to _appendCloudImages name=', projectName, 'paths=', j.paths);
         _appendCloudImages(projectName, j.paths, 'front');
         // Persist the prompt so the "Copy prompt" button (index2.js:1808-1830)
         // can appear on the project after a reload. userPrompt is the user
@@ -800,6 +803,7 @@
     } catch (_) { /* ignore */ }
   }
   function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */) {
+    console.log('[_appendCloudImages] CALLED name=', projectName, 'urls=', urls, 'kind=', kind);
     if (!projectName) { console.warn('[_appendCloudImages] no projectName, skip'); return; }
     const k = _imgKey(projectName);
     const payload = urls || [];
