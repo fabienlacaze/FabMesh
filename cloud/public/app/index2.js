@@ -2237,7 +2237,28 @@ function showStep1Preview(imgPath) {
   // Loading overlay until <img> fires 'load' (or 'error').
   setViewerLoading('step1-preview', true, 'Loading image…');
   imgEl.onload = () => setViewerLoading('step1-preview', false);
-  imgEl.onerror = () => setViewerLoading('step1-preview', false);
+  imgEl.onerror = () => {
+    setViewerLoading('step1-preview', false);
+    // Replace the broken <img> with our own DOM placeholder so the
+    // browser / family-safety extension can't inject 'Blocked by content
+    // filter' text on the empty image slot. The image is genuinely
+    // missing on R2 (failed upload, deleted, network blocked by DNS
+    // filter on *.r2.dev — all surface as 404 here).
+    try {
+      imgEl.style.display = 'none';
+      let fallback = preview.querySelector('.viewer-img-error');
+      if (!fallback) {
+        fallback = document.createElement('div');
+        fallback.className = 'viewer-img-error';
+        fallback.style.cssText = 'position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:var(--text-3); font-size:13px; text-align:center; padding:20px; pointer-events:none;';
+        fallback.innerHTML = '<span style="font-size:36px;">⚠</span><span>Image unavailable</span><span style="font-size:11px; color:var(--text-3); max-width:80%;">The file is missing from storage or your network blocks the R2 domain.</span>';
+        preview.appendChild(fallback);
+      }
+    } catch (_) {}
+  };
+  // Clear any prior fallback so a successful reload re-shows the img.
+  preview.querySelectorAll('.viewer-img-error').forEach(el => el.remove());
+  imgEl.style.display = '';
   {
     const _src = _imgSrc(imgPath);
     imgEl.src = /^(blob|data):/i.test(imgPath) ? _src : (_src + '?t=' + Date.now());
@@ -14557,14 +14578,21 @@ async function refreshJobDetailsModal(id) {
     // sticking around forever. Reuses the `elapsed` value computed
     // above (L13033) so we don't re-invoke Date.now() here.
     const isCloudCold = isRunning && window.__modalWarm === false && elapsed < 60000;
-    try {
-      console.log('[coldstart-hint]', {
-        __modalWarm: window.__modalWarm,
-        kind: j.kind,
-        status: j.status,
-        decision: isCloudCold,
-      });
-    } catch (_e) { /* console may be locked down in some embed contexts */ }
+    // Rate-limit the diag log: only print when the decision FLIPS, not
+    // on every render tick. Otherwise long-running jobs (60s+) flood
+    // the console with hundreds of identical entries.
+    if (!window.__coldstartHintLast || window.__coldstartHintLast.kind !== j.kind
+        || window.__coldstartHintLast.decision !== isCloudCold) {
+      window.__coldstartHintLast = { kind: j.kind, decision: isCloudCold };
+      try {
+        console.log('[coldstart-hint]', {
+          __modalWarm: window.__modalWarm,
+          kind: j.kind,
+          status: j.status,
+          decision: isCloudCold,
+        });
+      } catch (_e) {}
+    }
     const isLocalEarly = isRunning && isLocalGpu && elapsed < 15000;
     const showHint = isCloudCold || isLocalEarly;
     hintEl.classList.toggle('hidden', !showHint);

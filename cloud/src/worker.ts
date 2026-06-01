@@ -7120,7 +7120,6 @@ async function handleProxyImage(req: Request, env: Env): Promise<Response> {
   // Allow R2 public buckets + a few known image-serving hosts. Add to
   // this list as new generation backends are wired in.
   const allowed = new Set<string>([
-    'pub-ca633fb6a3334d0ea29be5fe53cae66c.r2.dev',  // myfabmesh-meshes public
     'replicate.delivery',
     'pbxt.replicate.delivery',
     'image.pollinations.ai',
@@ -7128,7 +7127,13 @@ async function handleProxyImage(req: Request, env: Env): Promise<Response> {
   if (env.R2_PUBLIC_URL) {
     try { allowed.add(new URL(env.R2_PUBLIC_URL).host); } catch { /* ignore */ }
   }
-  if (!allowed.has(parsed.host)) {
+  // Wildcard *.r2.dev — R2 public bucket subdomains rotate when the
+  // bucket is recreated, and hardcoding a specific one means every
+  // rotation breaks the proxy. The *.r2.dev space is Cloudflare-only
+  // (anyone abusing it is on a different account), so the open-proxy
+  // risk is bounded by Cloudflare's account-level controls.
+  const isR2 = parsed.host.endsWith('.r2.dev');
+  if (!allowed.has(parsed.host) && !isR2) {
     return err(403, `proxy: host ${parsed.host} not allowed`);
   }
 
