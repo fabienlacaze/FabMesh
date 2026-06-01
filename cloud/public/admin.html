@@ -347,6 +347,7 @@
           <button class="tab" data-tab="market">🛒 Marketplace <span class="tab-badge" id="badge-market" style="display:none;">0</span></button>
           <button class="tab" data-tab="services">🚨 Services <span id="services-badge" class="tab-badge" style="display:none;">!</span></button>
           <button class="tab" data-tab="audit">📜 Audit log</button>
+          <button class="tab" data-tab="debuglogs">🐛 Debug logs</button>
         </div>
       </div>
     </div>
@@ -622,6 +623,56 @@
       </div>
       <div id="messages-list" style="display:flex; flex-direction:column; gap:10px;">
         <div style="color:var(--text-2); text-align:center; padding:24px;">Click Refresh to load.</div>
+      </div>
+    </div>
+
+    <!-- Tab: Debug logs — fetch browser-console logs of any user.
+         Logs are auto-flushed to R2 at every completeJob() so admins
+         can investigate bug reports without copy-paste from F12. -->
+    <div class="tab-panel" data-panel="debuglogs">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
+        <span style="color:var(--text-2); font-size:12px;">
+          Browser-console logs auto-captured at every Generate event.
+          Leave blank to see the latest logs from ALL users; or filter
+          by email / user ID.
+        </span>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="debuglogs-email" placeholder="user@example.com (optional)"
+                 style="padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:12px; width:240px;" />
+          <input type="text" id="debuglogs-uid" placeholder="or user_id (optional)"
+                 style="padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:12px; width:280px;" />
+          <input type="number" id="debuglogs-limit" value="50" min="1" max="200"
+                 style="padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:12px; width:70px;" />
+          <button class="btn" onclick="loadDebugLogs()">🔄 Fetch</button>
+          <button class="btn" onclick="fetchLatestAnonLog()" title="Get _logs/latest/_any.log (last global flush — dev only)">⚡ Latest</button>
+        </div>
+      </div>
+      <div id="debuglogs-result" style="display:none; margin-bottom:8px; padding:8px 10px; background:var(--bg-2); border:1px solid var(--border); border-radius:8px; font-size:12px; color:var(--text-2);"></div>
+      <table id="debuglogs-table">
+        <thead>
+          <tr>
+            <th style="width:170px;">When (UTC)</th>
+            <th>Email</th>
+            <th style="width:80px;">Kind</th>
+            <th style="width:80px;">Status</th>
+            <th>Project</th>
+            <th style="width:70px;">Size</th>
+            <th style="width:90px;">Action</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="7" style="color:var(--text-2)">Click Fetch to load logs.</td></tr></tbody>
+      </table>
+      <!-- Viewer for the selected log file content -->
+      <div id="debuglogs-viewer-wrap" style="display:none; margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong id="debuglogs-viewer-title" style="font-size:12px; color:var(--text-1);">—</strong>
+          <div style="display:flex; gap:6px;">
+            <button class="btn" onclick="copyDebugLog()" style="font-size:11px; padding:4px 10px;">📋 Copy</button>
+            <button class="btn" onclick="downloadDebugLog()" style="font-size:11px; padding:4px 10px;">⬇ Download</button>
+            <button class="btn" onclick="closeDebugLogViewer()" style="font-size:11px; padding:4px 10px;">✕ Close</button>
+          </div>
+        </div>
+        <pre id="debuglogs-viewer" style="background:#0a0a0f; color:#cfd0d8; padding:12px; border:1px solid var(--border); border-radius:8px; max-height:500px; overflow:auto; font-family:Consolas,Monaco,monospace; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-all;"></pre>
       </div>
     </div>
 
@@ -2777,6 +2828,115 @@
         if (active?.dataset?.tab === 'finance') loadModalCredits();
       }, 60_000);
     });
+    /* ─── Debug logs tab (remote browser-console retrieval) ─── */
+    let _debugLogCurrentText = '';
+    let _debugLogCurrentName = '';
+    async function loadDebugLogs() {
+      const tbody = document.querySelector('#debuglogs-table tbody');
+      const result = document.getElementById('debuglogs-result');
+      const email = document.getElementById('debuglogs-email').value.trim();
+      const uid = document.getElementById('debuglogs-uid').value.trim();
+      const limit = Math.max(1, Math.min(200, parseInt(document.getElementById('debuglogs-limit').value || '50', 10)));
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-2)">Loading...</td></tr>';
+      result.style.display = 'none';
+      const qs = new URLSearchParams({ limit: String(limit) });
+      if (uid) qs.set('uid', uid);
+      else if (email) qs.set('email', email);
+      try {
+        const r = await fetch('/api/admin/logs/list?' + qs.toString(), { credentials: 'include' });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          tbody.innerHTML = `<tr><td colspan="7" style="color:#ff6b6b;">Error ${r.status}: ${j.error || r.statusText}</td></tr>`;
+          return;
+        }
+        const data = await r.json();
+        const logs = data.logs || [];
+        result.style.display = '';
+        result.textContent = `Found ${data.count} log file(s). Showing ${logs.length}.`;
+        if (logs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-2)">No logs found for this filter.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = logs.map(l => {
+          const when = l.uploaded ? l.uploaded.replace('T', ' ').replace('Z', '').slice(0, 19) : '—';
+          const sizeKb = (l.size / 1024).toFixed(1) + ' KB';
+          const emailCell = l.email ? l.email : `<span style="color:var(--text-3);">${l.uid.slice(0,8)}…</span>`;
+          const statusColor = l.status === 'error' ? '#ff6b6b' : (l.status === 'done' ? '#4caf50' : 'var(--text-2)');
+          return `<tr>
+            <td style="font-family:Consolas,monospace; font-size:11px;">${when}</td>
+            <td>${emailCell}</td>
+            <td><span style="background:var(--bg-2); padding:2px 6px; border-radius:4px; font-size:11px;">${l.kind || '—'}</span></td>
+            <td style="color:${statusColor};">${l.status || '—'}</td>
+            <td style="font-size:11px; color:var(--text-2);">${l.project || '—'}</td>
+            <td style="font-size:11px;">${sizeKb}</td>
+            <td>
+              <button class="btn" style="font-size:11px; padding:3px 10px;"
+                onclick="viewDebugLog(${JSON.stringify(l.key).replace(/"/g, '&quot;')})">👁 View</button>
+            </td>
+          </tr>`;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" style="color:#ff6b6b;">Fetch failed: ${e?.message || e}</td></tr>`;
+      }
+    }
+
+    async function viewDebugLog(key) {
+      const wrap = document.getElementById('debuglogs-viewer-wrap');
+      const viewer = document.getElementById('debuglogs-viewer');
+      const title = document.getElementById('debuglogs-viewer-title');
+      viewer.textContent = 'Loading…';
+      title.textContent = key;
+      wrap.style.display = '';
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      try {
+        const r = await fetch('/api/admin/logs/get?key=' + encodeURIComponent(key), { credentials: 'include' });
+        if (!r.ok) {
+          viewer.textContent = `Error ${r.status}: ${r.statusText}`;
+          return;
+        }
+        const text = await r.text();
+        _debugLogCurrentText = text;
+        _debugLogCurrentName = key.replace(/[/\\]/g, '_');
+        viewer.textContent = text;
+      } catch (e) {
+        viewer.textContent = `Fetch failed: ${e?.message || e}`;
+      }
+    }
+
+    async function fetchLatestAnonLog() {
+      // Convenience shortcut: fetch _logs/latest/_any.log (last global flush).
+      await viewDebugLog('_logs/latest/_any.log');
+    }
+
+    function copyDebugLog() {
+      if (!_debugLogCurrentText) return;
+      navigator.clipboard.writeText(_debugLogCurrentText).then(() => {
+        const title = document.getElementById('debuglogs-viewer-title');
+        const orig = title.textContent;
+        title.textContent = '✓ Copied to clipboard';
+        setTimeout(() => { title.textContent = orig; }, 1500);
+      });
+    }
+
+    function downloadDebugLog() {
+      if (!_debugLogCurrentText) return;
+      const blob = new Blob([_debugLogCurrentText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = _debugLogCurrentName || 'client.log';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function closeDebugLogViewer() {
+      document.getElementById('debuglogs-viewer-wrap').style.display = 'none';
+      _debugLogCurrentText = '';
+      _debugLogCurrentName = '';
+    }
+
     async function loadAuditLog() {
       const tbody = document.querySelector('#audit-table tbody');
       const day = document.getElementById('audit-day-input').value
