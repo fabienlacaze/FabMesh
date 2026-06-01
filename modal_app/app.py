@@ -455,6 +455,7 @@ class MyFabmeshPredictor:
         asset_style: str,
         seed: int,
         steps: int,
+        unrestricted: bool = False,
     ) -> bytes:
         """Internal: do the generation and return PNG bytes."""
         from modal_app._prompts import build_enriched_prompt
@@ -472,11 +473,13 @@ class MyFabmeshPredictor:
         )
         img = generate(self.pipe, enriched, seed=seed, steps=steps)
 
-        # Parental control — matches desktop policy (FABMESH_UNRESTRICTED
-        # env var bypass). Pass asset_type so the skin-ratio fallback is
-        # skipped for animals/creatures/vehicles (which were tripping
-        # false-positives on lion fur, red cars, etc.).
-        if os.environ.get("FABMESH_UNRESTRICTED") != "1":
+        # Parental control. Two bypass paths:
+        #  - server-wide FABMESH_UNRESTRICTED env var (test environments)
+        #  - per-user `unrestricted` flag forwarded from the Worker
+        #    (user toggled parental lock off via PIN in the UI)
+        # Pass asset_type so the skin-ratio fallback is skipped for
+        # animals/creatures/vehicles (false-positives on lion fur etc.).
+        if not unrestricted and os.environ.get("FABMESH_UNRESTRICTED") != "1":
             safe, nsfw_score = is_safe(img, self.nsfw_clf1, self.nsfw_clf2,
                                         asset_type=asset_type)
             if not safe:
@@ -533,6 +536,7 @@ class MyFabmeshPredictor:
                 asset_style=payload.get("asset_style") or "realistic",
                 seed=int(payload.get("seed") or 0),
                 steps=int(payload.get("steps") or 30),
+                unrestricted=bool(payload.get("unrestricted")),
             )
             return Response(content=png, media_type="image/png")
 

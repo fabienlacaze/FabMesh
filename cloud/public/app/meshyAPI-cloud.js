@@ -624,8 +624,34 @@
     /* parental / NSFW (passthrough lenient defaults) */
     // Desktop contract is `unrestricted`, not `unlocked`. Cloud beta has
     // no PIN flow yet, so we report no restrictions by default.
-    getParentalStatus: async () => ({ enabled: false, unrestricted: true, unlocked: true }),
-    toggleUnrestricted: async () => ({ ok: true }),
+    getParentalStatus: async () => {
+      try {
+        const r = await fetch('/api/parental/status', { credentials: 'same-origin' });
+        const data = await r.json();
+        return {
+          enabled: !data.unrestricted,
+          unrestricted: !!data.unrestricted,
+          unlocked: !!data.unrestricted,
+          hasPin: !!data.hasPin,
+        };
+      } catch (e) {
+        return { enabled: true, unrestricted: false, unlocked: false, hasPin: false };
+      }
+    },
+    toggleUnrestricted: async ({ pin, enable } = {}) => {
+      try {
+        const r = await fetch('/api/parental/toggle', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ pin, enable }),
+        });
+        const data = await r.json();
+        return { ok: r.ok, success: !!data.success, unrestricted: !!data.unrestricted, error: data.error };
+      } catch (e) {
+        return { ok: false, success: false, error: String(e) };
+      }
+    },
     checkProjectNsfw: async () => ({ ok: true, safe: true }),
     checkImagesNsfwTags: async () => ({ ok: true, safe: true }),
     // Renderer does `keywords.find(...)` directly on the return value,
