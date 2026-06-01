@@ -4711,18 +4711,40 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
   if (!job) {
     if (!env.MESHES) return err(404, 'not found and no R2 binding');
     // Direct path: if the caller sent a full public R2 URL, extract
-    // the key and delete it. This is the most reliable path for
-    // mesh-op outputs that live under <uid>/mesh-op/<projectSlug>/.
+    // the key and delete it. Two acceptance rules so we cover all
+    // pipelines:
+    //  1) Path-safe: key starts with <user.id>/ (mesh-op, rigged,
+    //     animations, front, modified, …). User can only delete
+    //     within their own namespace.
+    //  2) Shared mesh/ prefix: persistModalGlb writes Modal mesh
+    //     output to a USER-LESS path 'mesh/<jobId>.glb'. We verify
+    //     ownership by looking up the jobId in jobs WHERE
+    //     user_id=us before allowing the delete.
     const directKey = r2PathFromPublicUrl(env, id);
-    if (directKey && directKey.startsWith(`${user.id}/`)) {
-      try {
-        const obj = await env.MESHES.head(directKey);
-        if (obj) {
-          await env.MESHES.delete(directKey);
-          console.log(`[meshes/delete] fallback-R2 direct-URL deleted ${directKey}`);
-          return json({ ok: true, fallback: 'r2-direct-url' });
+    if (directKey) {
+      let allow = false;
+      if (directKey.startsWith(`${user.id}/`)) {
+        allow = true;
+      } else if (directKey.startsWith('mesh/')) {
+        // Extract jobId from 'mesh/<jobId>.glb' and verify ownership.
+        const m = directKey.match(/^mesh\/([^/]+)\.(glb|gltf|fbx)$/i);
+        const possibleJobId = m ? m[1] : null;
+        if (possibleJobId) {
+          const { data } = await sb.from('jobs')
+            .select('id').eq('id', possibleJobId).eq('user_id', user.id).maybeSingle();
+          if (data) allow = true;
         }
-      } catch (_) { /* try the candidate list */ }
+      }
+      if (allow) {
+        try {
+          const obj = await env.MESHES.head(directKey);
+          if (obj) {
+            await env.MESHES.delete(directKey);
+            console.log(`[meshes/delete] fallback-R2 direct-URL deleted ${directKey}`);
+            return json({ ok: true, fallback: 'r2-direct-url' });
+          }
+        } catch (_) { /* try the candidate list */ }
+      }
     }
     // Candidate R2 keys to try, in priority order. We attempt each and
     // delete whichever matches an actually-existing object.
