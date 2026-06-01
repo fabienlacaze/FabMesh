@@ -594,6 +594,7 @@ const PRICING_DEFAULTS = {
   mesh_fast:        1,
   mesh_balanced:    2,
   mesh_quality:     4,
+  mesh_ultra_8k:    8,
   mesh_multiref:    1,
   mesh_refine:      2,
   mesh_rectify:     1,
@@ -964,7 +965,8 @@ async function creditCost(env: Env, i: GenerateInput): Promise<number> {
   const p = await _getPricing(env);
   // Preset base cost — fast (default) / balanced / quality
   let n: number;
-  if (i.preset === 'quality')       n = p.mesh_quality   ?? 4;
+  if (i.preset === 'ultra_8k')      n = p.mesh_ultra_8k  ?? 8;
+  else if (i.preset === 'quality')  n = p.mesh_quality   ?? 4;
   else if (i.preset === 'balanced') n = p.mesh_balanced  ?? 2;
   else                              n = p.mesh_fast      ?? 1;
 
@@ -974,7 +976,9 @@ async function creditCost(env: Env, i: GenerateInput): Promise<number> {
   if (i.rectify)      n += p.mesh_rectify      ?? 1;
   if (i.quality_plus) n += p.mesh_quality_plus ?? 1;
   if (i.ultra_q)      n += p.mesh_ultra_q      ?? 2;
-  if (i.ultra_hd)     n += p.mesh_ultra_hd     ?? 3;
+  // ultra_hd add-on is INCLUDED in the ultra_8k preset price (8 cr),
+  // so don't double-charge for it when the preset already covers it.
+  if (i.ultra_hd && i.preset !== 'ultra_8k') n += p.mesh_ultra_hd ?? 3;
   if (i.face_fix)     n += p.mesh_face_fix     ?? 2;
 
   // Legacy: old clients still send mode=full without preset.

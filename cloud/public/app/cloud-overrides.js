@@ -842,6 +842,7 @@
     mesh_fast:        'ws-trellis2-preset:fast',
     mesh_balanced:    'ws-trellis2-preset:balanced',
     mesh_quality:     'ws-trellis2-preset:quality',
+    mesh_ultra_8k:    'ws-trellis2-preset:ultra_8k',
     mesh_multiref:    'ws-trellis2-multiref',
     mesh_refine:      'ws-trellis2-refine',
     mesh_rectify:     'ws-trellis2-rectify',
