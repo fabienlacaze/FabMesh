@@ -13704,23 +13704,25 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   // groups them into ONE new version (v(N+1)) so the user gets a
   // cohesive new batch with whatever they checked.
   const batchId = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  // STEP A — copy existing clips into the new batch (server-side blob
-  // copy via the upload endpoint). No credit cost.
+  // STEP A — copy existing clips into the new batch via the
+  // server-side /copy endpoint. The GLB never touches the client →
+  // sidesteps Cloudflare's 100 MB body cap and uses R2-to-R2 streaming.
   if (toCopy.length) {
     showToast(`Copying ${toCopy.length} existing clip${toCopy.length > 1 ? 's' : ''}...`, 'info', 2000);
     for (const t of toCopy) {
       const src = currentByType.get(t);
       if (!src?.url) continue;
       try {
-        const blob = await (await fetch(src.url, { credentials: 'omit' })).blob();
-        const f = new File([blob], `${t}.glb`, { type: 'model/gltf-binary' });
-        const form = new FormData();
-        form.append('file', f);
-        form.append('animType', t);
-        form.append('projectName', p.name || '');
-        form.append('batchId', batchId);
-        const r = await fetch('/api/animations/upload', {
-          method: 'POST', credentials: 'same-origin', body: form,
+        const r = await fetch('/api/animations/copy', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sourceUrl: src.url,
+            animType: t,
+            projectName: p.name || '',
+            batchId,
+          }),
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       } catch (err) {
