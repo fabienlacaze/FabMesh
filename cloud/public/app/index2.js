@@ -17524,15 +17524,73 @@ async function extractLandmarksFromRig() {
       placeLandmarkMarker(id, pos, colorById[id] || '#ffffff');
       matched++;
     }
+    // Geometric fallback for rigs with opaque names (AnyTop's joint22,
+    // joint41, …; some Puppeteer outputs). For each canonical landmark
+    // position (head = 94% height centerline, shoulders = 82% with
+    // lateral offset, etc.) find the closest bone world-position and
+    // assign it. This loses semantic precision but is dramatically
+    // better than 'no match → no markers'.
+    if (matched === 0) {
+      const rbox = new THREE.Box3().setFromObject(rigScene);
+      const minU = rbox.min.y, maxU = rbox.max.y, sU = maxU - minU;
+      const cX = (rbox.min.x + rbox.max.x) / 2;
+      const cZ = (rbox.min.z + rbox.max.z) / 2;
+      const sL = rbox.max.x - rbox.min.x;
+      const Y = (f) => minU + sU * f;
+      // [id, expectedPos]. Mirror these values to autoDetectLandmarks
+      // semantics so users get a familiar layout.
+      const TARGETS = [
+        ['head',       new THREE.Vector3(cX,            Y(0.94), cZ)],
+        ['neck',       new THREE.Vector3(cX,            Y(0.86), cZ)],
+        ['spine_top',  new THREE.Vector3(cX,            Y(0.78), cZ)],
+        ['spine_mid',  new THREE.Vector3(cX,            Y(0.62), cZ)],
+        ['hips',       new THREE.Vector3(cX,            Y(0.52), cZ)],
+        ['shoulder_l', new THREE.Vector3(cX + sL*0.25,  Y(0.82), cZ)],
+        ['elbow_l',    new THREE.Vector3(cX + sL*0.32,  Y(0.62), cZ)],
+        ['hand_l',     new THREE.Vector3(cX + sL*0.37,  Y(0.46), cZ)],
+        ['shoulder_r', new THREE.Vector3(cX - sL*0.25,  Y(0.82), cZ)],
+        ['elbow_r',    new THREE.Vector3(cX - sL*0.32,  Y(0.62), cZ)],
+        ['hand_r',     new THREE.Vector3(cX - sL*0.37,  Y(0.46), cZ)],
+        ['hip_l',      new THREE.Vector3(cX + sL*0.10,  Y(0.50), cZ)],
+        ['knee_l',     new THREE.Vector3(cX + sL*0.10,  Y(0.30), cZ)],
+        ['ankle_l',    new THREE.Vector3(cX + sL*0.10,  Y(0.06), cZ)],
+        ['foot_l',     new THREE.Vector3(cX + sL*0.10,  Y(0.02), cZ + sL*0.05)],
+        ['hip_r',      new THREE.Vector3(cX - sL*0.10,  Y(0.50), cZ)],
+        ['knee_r',     new THREE.Vector3(cX - sL*0.10,  Y(0.30), cZ)],
+        ['ankle_r',    new THREE.Vector3(cX - sL*0.10,  Y(0.06), cZ)],
+        ['foot_r',     new THREE.Vector3(cX - sL*0.10,  Y(0.02), cZ + sL*0.05)],
+      ];
+      // Pre-compute every bone world position so we don't re-walk.
+      const boneWorld = bones.map(b => {
+        const p = new THREE.Vector3(); b.getWorldPosition(p); return { bone: b, pos: p };
+      });
+      // Greedy nearest assignment, no bone used twice.
+      const used = new Set();
+      for (const [id, expected] of TARGETS) {
+        let best = null;
+        let bestD = Infinity;
+        for (let i = 0; i < boneWorld.length; i++) {
+          if (used.has(i)) continue;
+          const d = boneWorld[i].pos.distanceTo(expected);
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        if (best != null) {
+          used.add(best);
+          placeLandmarkMarker(id, boneWorld[best].pos, colorById[id] || '#ffffff');
+          matched++;
+        }
+      }
+    }
     if (matched === 0) {
       customError(
-        `Found ${bones.length} bone(s) but none matched a known landmark name.\n\nFirst few names: ${bones.slice(0, 8).map(b => b.name).join(', ')}`,
+        `Found ${bones.length} bone(s) but none matched a known landmark name or canonical position.\n\nFirst few names: ${bones.slice(0, 8).map(b => b.name).join(', ')}`,
         'From rig',
       );
       return;
     }
     if (typeof showToast === 'function') {
-      showToast(`Imported ${matched} landmark(s) from rig — drag them to adjust, then click "Re-generate rig".`, 'success', 5000);
+      const mode = seen.size > 0 ? 'name-matched' : 'geometric';
+      showToast(`Imported ${matched} landmark(s) from rig (${mode}) — drag them to adjust, then click "Re-generate rig".`, 'success', 5000);
     }
   } catch (e) {
     console.error('[extractLandmarksFromRig]', e);
