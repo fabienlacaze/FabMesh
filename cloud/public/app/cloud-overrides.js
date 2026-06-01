@@ -494,14 +494,11 @@
             let dot, color, statusText;
             if (warm === true) {
               dot = '#4cd964'; color = '#4cd964';
-              statusText = c.seconds_since_last_success != null
-                ? `warm (last ${c.seconds_since_last_success}s ago)`
-                : 'warm';
+              statusText = 'warm';
             } else if (warm === false) {
               dot = '#ffaa33'; color = '#ffaa33';
               coldCount++;
-              const eta = Math.round((c.expected_seconds_cold || 150) / 60 * 10) / 10;
-              statusText = `cold (~${eta} min on next call)`;
+              statusText = 'cold';
             } else {
               dot = '#777'; color = 'var(--text-2)';
               statusText = 'unknown';

@@ -259,12 +259,16 @@ def fill_holes(glb_bytes: bytes):
         except Exception as e:
             print(f'[mesh-op] fill_holes clean step warn: {e}', flush=True)
 
-        # Auto-tol from bounding box diagonal — clamped to safe range.
+        # Auto-tol from bounding box diagonal — bumped 1e-4 → 1e-3 so
+        # TRELLIS meshes with sub-mm vertex gaps actually weld together
+        # before fill_holes runs. The previous 1e-4 left visible holes
+        # uncounted (boundary edges not detected because the gap was
+        # below merge tolerance but still rendered as a hole).
         try:
             bb_diag = float(np.linalg.norm(m.bounds[1] - m.bounds[0])) or 1.0
         except Exception:
             bb_diag = 1.0
-        tol = float(np.clip(bb_diag * 1e-4, 1e-7, bb_diag * 1e-2))
+        tol = float(np.clip(bb_diag * 1e-3, 1e-6, bb_diag * 1e-2))
         diag['bb_diag'] = round(bb_diag, 6)
         diag['tol'] = round(tol, 9)
 
@@ -319,20 +323,40 @@ def fill_holes(glb_bytes: bytes):
         be_after_tjunc, nm_after_tjunc = _count_boundary_edges(m)
         diag['boundary_edges_after_tjunc'] = be_after_tjunc
 
-        # Step 4 — re-orient + fill.
-        try: trimesh.repair.fix_winding(m)
-        except Exception as e: print(f'[mesh-op] fix_winding warn: {e}', flush=True)
-        try: m._cache.clear()
-        except Exception: pass
+        # Step 4 — re-orient + fill, ITERATED.
+        # TRELLIS meshes often need 2-3 passes:
+        #   pass 1: fix_winding flips winding-inconsistent triangles →
+        #           previously non-manifold edges become boundary edges
+        #   pass 2: fill_holes covers those newly-revealed boundaries
+        #   pass 3: re-fix_winding catches anything flipped by fill_holes
+        # Also try fix_normals as a final hammer if boundaries remain.
+        for pass_i in range(3):
+            try: trimesh.repair.fix_winding(m)
+            except Exception as e: print(f'[mesh-op] fix_winding pass{pass_i} warn: {e}', flush=True)
+            try: m._cache.clear()
+            except Exception: pass
+            try:
+                trimesh.repair.fill_holes(m, use_fan=True)
+            except TypeError:
+                try: trimesh.repair.fill_holes(m)
+                except Exception as e: print(f'[mesh-op] fill_holes pass{pass_i} skipped: {e}', flush=True)
+            except Exception as e:
+                print(f'[mesh-op] fill_holes pass{pass_i} skipped: {e}', flush=True)
+            try: m._cache.clear()
+            except Exception: pass
+            # Early-out if mesh is watertight after this pass.
+            try:
+                if bool(getattr(m, 'is_watertight', False)):
+                    break
+            except Exception:
+                pass
+        # Final fix_normals as a last resort — flips remaining
+        # backward-facing triangles that fix_winding doesn't catch.
         try:
-            trimesh.repair.fill_holes(m, use_fan=True)
-        except TypeError:
-            try: trimesh.repair.fill_holes(m)
-            except Exception as e: print(f'[mesh-op] fill_holes skipped: {e}', flush=True)
+            m.fix_normals()
+            m._cache.clear()
         except Exception as e:
-            print(f'[mesh-op] fill_holes skipped: {e}', flush=True)
-        try: m._cache.clear()
-        except Exception: pass
+            print(f'[mesh-op] fix_normals final warn: {e}', flush=True)
 
         be_final, nm_final = _count_boundary_edges(m)
         faces_after = int(len(m.faces))
