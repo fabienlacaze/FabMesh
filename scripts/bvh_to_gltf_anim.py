@@ -497,6 +497,22 @@ def bvh_to_gltf_anim(
     UE5 timebase.
     """
     gltf, _json_blob, bin_blob, tail = _read_glb(rig_glb_path)
+    # DIAG: inventory the input rig's skin/mesh shape so we can tell
+    # whether the output is missing references the GLTFLoader needs.
+    _in_meshes = gltf.get("meshes") or []
+    _in_skins = gltf.get("skins") or []
+    _in_mesh_skin_refs = []
+    for mi, m in enumerate(_in_meshes):
+        prims = m.get("primitives") or []
+        # In glTF the skin reference lives on the NODE, not the mesh
+        # itself. Map mesh idx → node refs further down.
+        _in_mesh_skin_refs.append({"mesh_idx": mi, "prim_count": len(prims)})
+    _node_mesh_skin = []
+    for ni, n in enumerate(gltf.get("nodes") or []):
+        if "mesh" in n:
+            _node_mesh_skin.append({"node": ni, "mesh": n["mesh"], "skin": n.get("skin")})
+    print(f"[bvh→glb] INPUT rig: meshes={len(_in_meshes)} skins={len(_in_skins)} "
+          f"node->mesh->skin={_node_mesh_skin[:5]}", flush=True)
     glb_bones = _glb_skin_joint_names(gltf)
     if not glb_bones:
         raise RuntimeError(f"No skin/joints found in {rig_glb_path}")
@@ -605,6 +621,27 @@ def bvh_to_gltf_anim(
         rotations_per_node, translations_per_node,
         clip_name=clip_name,
     )
+    # DIAG: confirm the skin reference survived our injection pass.
+    _out_node_mesh_skin = []
+    for ni, n in enumerate(gltf.get("nodes") or []):
+        if "mesh" in n:
+            _out_node_mesh_skin.append({"node": ni, "mesh": n["mesh"], "skin": n.get("skin")})
+    _has_skin_ref = any(x.get("skin") is not None for x in _out_node_mesh_skin)
+    print(f"[bvh→glb] OUTPUT: meshes={len(gltf.get('meshes') or [])} "
+          f"skins={len(gltf.get('skins') or [])} animations={len(gltf.get('animations') or [])} "
+          f"node->mesh->skin={_out_node_mesh_skin[:5]} has_skin_ref={_has_skin_ref}", flush=True)
+    if not _has_skin_ref:
+        print("[bvh→glb] WARNING: no node has a skin reference in the output. "
+              "Three.js GLTFLoader will produce a plain Mesh, animation tracks "
+              "will animate Bone objects without driving any skin → mesh appears "
+              "frozen in bind pose. Repairing by copying skin index from input.", flush=True)
+        # Try to repair: if input had skin refs and they got dropped,
+        # apply them back from the input snapshot.
+        for src in _node_mesh_skin:
+            tgt = next((x for x in _out_node_mesh_skin if x["node"] == src["node"]), None)
+            if tgt and src.get("skin") is not None and tgt.get("skin") is None:
+                gltf["nodes"][src["node"]]["skin"] = src["skin"]
+                print(f"[bvh→glb]   repaired node {src['node']} skin={src['skin']}", flush=True)
     _write_glb(out_glb_path, gltf, bin_blob, tail)
     return out_glb_path
 
