@@ -1009,14 +1009,13 @@
       } catch (e) { log('listImageFolders failed:', e); }
       return projects.map(p => {
         const backCache = _readBackPhotos(p.name);
+        // /api/cloud-projects already sorts user_assets newest-first
+        // (handleCloudProjects does .sort((a,b) =>
+        // b.mtime.localeCompare(a.mtime))). The renderer labels by
+        // `v${length-1-i}` expecting i=0 = newest = vMAX. So we
+        // preserve the server order (no reverse). The legacy reverse()
+        // was for desktop main.js which returned oldest-first.
         const merged = [...(p.images || [])];
-        // Desktop convention: index2.js labels versions as
-        // `v${images.length - 1 - i}`, expecting the most recent image at
-        // i=0 (label = max version number). On desktop main.js sorts
-        // folder entries by mtime DESC; cloud accumulates them push-order
-        // (newest last) via _appendCloudImages. Reverse the merged list
-        // so the freshest generation appears as vN, not v0.
-        merged.reverse();
         return {
           name: p.name,
           path: p.path,
