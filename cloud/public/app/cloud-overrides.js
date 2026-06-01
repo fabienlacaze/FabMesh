@@ -451,31 +451,58 @@
       // Notify any listener (AI tool modals can update their pill).
       try { window.dispatchEvent(new CustomEvent('modal-status', { detail: io })); }
       catch (_) {}
-      // Drive the topbar warm-up pill: only shows COLD containers and
-      // names them explicitly so the user knows which kind of op will
-      // pay the cold-start tax. Hidden when every container is warm.
+      // Drive the topbar warm-up pill + per-service popover.
+      // Pill stays generic ('Server warming up') with a count;
+      // hover reveals the detailed list of every container's state.
       try {
-        const pill = document.getElementById('gpu-warmup-pill');
+        const wrap = document.getElementById('gpu-warmup-wrap');
         const txt  = document.getElementById('gpu-warmup-text');
-        if (pill) {
+        const list = document.getElementById('gpu-warmup-list');
+        if (wrap) {
           const C = window.__modalContainers || {};
-          const COLD_LABELS = {
-            text2image: 'image gen',
-            image_op:   'image edit',
-            back_view:  'back-view',
-            tpose:      'T-pose',
-            mesh:       '3D mesh',
-          };
-          const coldList = [];
-          for (const [k, v] of Object.entries(C)) {
-            if (v && v.warm === false) coldList.push(COLD_LABELS[k] || k);
-          }
-          if (coldList.length === 0) {
-            pill.style.display = 'none';
+          const SERVICES = [
+            { key: 'text2image', label: 'Image generation',  desc: 'Generate image from prompt' },
+            { key: 'image_op',   label: 'Image edit',        desc: 'Modify, Inpaint, Upscale, Face Fix, Remove BG' },
+            { key: 'mesh',       label: '3D mesh',           desc: 'Generate 3D from image (TRELLIS-2)' },
+            { key: 'back_view',  label: 'Back view',         desc: '2-view back photo generation' },
+            { key: 'tpose',      label: 'T-pose rectify',    desc: 'Strict T-pose front rectifier' },
+          ];
+          let coldCount = 0;
+          let allUnknown = true;
+          const rows = SERVICES.map(s => {
+            const c = C[s.key];
+            const warm = c?.warm;
+            if (warm === true || warm === false) allUnknown = false;
+            let dot, color, statusText;
+            if (warm === true) {
+              dot = '#4cd964'; color = '#4cd964';
+              statusText = c.seconds_since_last_success != null
+                ? `warm (last ${c.seconds_since_last_success}s ago)`
+                : 'warm';
+            } else if (warm === false) {
+              dot = '#ffaa33'; color = '#ffaa33';
+              coldCount++;
+              const eta = Math.round((c.expected_seconds_cold || 150) / 60 * 10) / 10;
+              statusText = `cold (~${eta} min on next call)`;
+            } else {
+              dot = '#777'; color = 'var(--text-2)';
+              statusText = 'unknown';
+            }
+            return `<div style="display:grid; grid-template-columns:10px 1fr auto; gap:8px; align-items:center;">
+                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${dot};"></span>
+                <span><strong style="color:var(--text-1);">${s.label}</strong><br>
+                  <span style="color:var(--text-2); font-size:10px;">${s.desc}</span></span>
+                <span style="color:${color}; font-size:10px; white-space:nowrap;">${statusText}</span>
+              </div>`;
+          }).join('');
+          if (list) list.innerHTML = rows;
+          // Hide pill when all warm OR all unknown (don't surface noise
+          // before we have any data).
+          if (coldCount === 0) {
+            wrap.style.display = 'none';
           } else {
-            const eta = Math.round((C.text2image?.expected_seconds_cold || 150) / 60 * 10) / 10;
-            if (txt) txt.textContent = `${coldList.join(' + ')} cold (~${eta} min on first call)`;
-            pill.style.display = 'inline-flex';
+            if (txt) txt.textContent = `Server warming up${coldCount > 1 ? ` (${coldCount} services)` : ''}`;
+            wrap.style.display = 'inline-flex';
           }
         }
       } catch (_) {}

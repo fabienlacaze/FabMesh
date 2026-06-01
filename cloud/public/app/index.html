@@ -47,13 +47,25 @@
         <span id="breadcrumb"></span>
       </div>
       <div class="topbar-right">
-        <!-- Cloud GPU warm-up status pill. Visible only while Modal is
-             cold-starting; clicking opens a tooltip with the ETA. -->
-        <span id="gpu-warmup-pill" style="display:none; align-items:center; gap:6px; padding:4px 10px; background:rgba(255,170,51,0.15); color:#ffaa33; border:1px solid rgba(255,170,51,0.35); border-radius:12px; font-size:11px; font-weight:600; cursor:default;" title="Cloud GPU is cold-starting. First generation will take ~2 min while the container warms up.">
-          <span style="display:inline-block; width:6px; height:6px; background:#ffaa33; border-radius:50%; animation:pulse 1.4s ease-in-out infinite;"></span>
-          <span id="gpu-warmup-text">Cloud GPU warming up…</span>
-        </span>
-        <style>@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}</style>
+        <!-- Server warm-up status pill. Wrapper hosts both the pill
+             AND a hover-popover that lists each service's state. -->
+        <div id="gpu-warmup-wrap" style="position:relative; display:none; align-items:center;">
+          <span id="gpu-warmup-pill" style="display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:rgba(255,170,51,0.15); color:#ffaa33; border:1px solid rgba(255,170,51,0.35); border-radius:12px; font-size:11px; font-weight:600; cursor:help;">
+            <span style="display:inline-block; width:6px; height:6px; background:#ffaa33; border-radius:50%; animation:pulse 1.4s ease-in-out infinite;"></span>
+            <span id="gpu-warmup-text">Server warming up</span>
+            <span style="color:rgba(255,170,51,0.6);">▾</span>
+          </span>
+          <!-- Hover popover with per-service status. -->
+          <div id="gpu-warmup-popover" style="display:none; position:absolute; top:100%; right:0; margin-top:6px; min-width:240px; background:var(--bg-1); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.5); padding:8px 10px; z-index:10000;">
+            <div style="font-size:10px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px; padding-bottom:6px; border-bottom:1px solid var(--border); margin-bottom:6px;">Modal containers</div>
+            <div id="gpu-warmup-list" style="display:flex; flex-direction:column; gap:4px; font-size:11px;"></div>
+            <div style="margin-top:8px; padding-top:6px; border-top:1px solid var(--border); font-size:10px; color:var(--text-2);">Each container has its own warm-up. Cold = first call takes ~2 min, then warm for ~9 min idle.</div>
+          </div>
+        </div>
+        <style>
+          @keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}
+          #gpu-warmup-wrap:hover #gpu-warmup-popover{ display:block; }
+        </style>
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
         <button id="btn-history" class="icon-btn" title="My usage history">&#128229;</button>
         <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
