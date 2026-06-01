@@ -7267,6 +7267,92 @@ async function handleUserAssetsRecord(req: Request, env: Env): Promise<Response>
   return json({ ok: true, inserted });
 }
 
+/** GET /api/admin/logs/list — lists client logs in R2, optionally
+ *  filtered by ?uid=<userId> or ?email=<email>. ADMIN-only.
+ *  Returns up to ?limit=N (default 50, max 200) most-recent log keys
+ *  with their metadata. */
+async function handleAdminLogsList(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const url = new URL(req.url);
+  const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get('limit') || '50', 10)));
+  let uid = (url.searchParams.get('uid') || '').trim();
+  const email = (url.searchParams.get('email') || '').trim();
+  // If email provided, resolve to uid via profiles.
+  if (!uid && email) {
+    const sb = supabaseAdmin(env);
+    const { data } = await sb.from('profiles').select('id, email').eq('email', email).maybeSingle();
+    if (data?.id) uid = data.id as string;
+  }
+  // Prefix: per-user if uid known, otherwise scan everyone (will be slower).
+  const prefix = uid ? `${uid}/logs/` : '';
+  // For "everyone" path we want ALL <uid>/logs/* keys. R2 list doesn't
+  // support * wildcard so we list every user prefix from profiles instead.
+  let uids: string[] = [];
+  if (uid) {
+    uids = [uid];
+  } else {
+    const sb = supabaseAdmin(env);
+    const { data } = await sb.from('profiles').select('id, email').limit(1000);
+    uids = (data ?? []).map(p => p.id as string);
+  }
+  const collected: Array<{
+    key: string; uid: string; uploaded: string | null; size: number;
+    kind: string; status: string; project: string; email: string | null;
+  }> = [];
+  // Build a uid→email map for the response.
+  const emailByUid = new Map<string, string | null>();
+  if (uids.length > 0) {
+    const sb = supabaseAdmin(env);
+    const { data } = await sb.from('profiles').select('id, email').in('id', uids);
+    for (const row of (data ?? [])) emailByUid.set(row.id as string, (row.email as string) || null);
+  }
+  for (const u of uids) {
+    const listed = await env.MESHES.list({ prefix: `${u}/logs/`, limit: Math.min(50, limit) });
+    for (const obj of (listed.objects || [])) {
+      collected.push({
+        key: obj.key,
+        uid: u,
+        uploaded: obj.uploaded?.toISOString?.() || null,
+        size: obj.size,
+        kind: obj.customMetadata?.kind || '',
+        status: obj.customMetadata?.status || '',
+        project: obj.customMetadata?.project || '',
+        email: emailByUid.get(u) ?? null,
+      });
+    }
+  }
+  // Newest first across all users.
+  collected.sort((a, b) => (b.uploaded || '').localeCompare(a.uploaded || ''));
+  return json({ ok: true, count: collected.length, logs: collected.slice(0, limit) });
+}
+
+/** GET /api/admin/logs/get?key=<key> — fetches the content of one log.
+ *  ADMIN-only. Returns text/plain. */
+async function handleAdminLogsGet(req: Request, env: Env): Promise<Response> {
+  const guard = await _requireAdmin(req, env);
+  if (guard instanceof Response) return guard;
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const url = new URL(req.url);
+  const key = (url.searchParams.get('key') || '').trim();
+  if (!key) return err(400, 'key required');
+  // Allowlist: only paths under <uid>/logs/ or _logs/ to prevent
+  // arbitrary R2 reads via this endpoint.
+  if (!(/^[a-f0-9-]{32,}\/logs\//i.test(key) || key.startsWith('_logs/') || key.startsWith('_anon/logs/'))) {
+    return err(400, 'invalid key (must be a log path)');
+  }
+  const obj = await env.MESHES.get(key);
+  if (!obj) return err(404, 'not found');
+  const text = await obj.text();
+  return new Response(text, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
 /** GET /api/client-log/list — returns the recent log keys for the
  *  current user. Useful for me (the agent) to find the latest log
  *  without listing the entire R2 bucket. Query: ?limit=20 (max 100). */
@@ -9642,6 +9728,8 @@ export default {
         if (pathname === '/api/parental/toggle'       && method === 'POST') return await handleParentalToggle(req, env);
         if (pathname === '/api/client-log'            && method === 'POST') return await handleClientLog(req, env);
         if (pathname === '/api/client-log/list'       && method === 'GET')  return await handleClientLogList(req, env);
+        if (pathname === '/api/admin/logs/list'       && method === 'GET')  return await handleAdminLogsList(req, env);
+        if (pathname === '/api/admin/logs/get'        && method === 'GET')  return await handleAdminLogsGet(req, env);
         if (pathname === '/api/user-assets/record'    && method === 'POST') return await handleUserAssetsRecord(req, env);
         if (pathname === '/api/user-assets/migrate-from-jobs' && method === 'POST') return await handleUserAssetsMigrateFromJobs(req, env);
         if (pathname === '/api/thumbs/upload'         && method === 'POST') return await handleThumbsUpload(req, env);
