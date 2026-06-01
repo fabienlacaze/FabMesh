@@ -1,5 +1,49 @@
 # FabMesh Agent Log
 
+## 2026-06-01 (Fix: localStorage QuotaExceeded silencing "no new image version")
+
+**Symptôme utilisateur**: après une génération d'image cloud,
+"Task complete" s'affiche mais la version strip reste à v9 max — aucune
+nouvelle vignette n'apparaît. Le log diag `[image-gen] post-reload strip
+rendered, images=10` confirme que le count ne bouge pas entre 2 gen
+consécutives.
+
+**Root cause** (audit workflow `wy88bzoyv`, 8 agents parallèles): le
+`localStorage.setItem(_imgKey(projectName), ...)` dans
+`_appendCloudImages` jette un `QuotaExceededError` parce que l'origine
+localStorage du renderer est saturée — principalement par
+`_emissiveLayerCache` qui sérialise des PNG dataURLs complets à chaque
+sauvegarde Paint Tools (centaines de Ko par couche), plus image-style
+cache, prompt cache, back-photo map. Limite navigateur ~5 Mo par
+origine. Le catch d'origine était silencieux (`catch(_){}`), le commit
+1ed25c9 l'a converti en `console.warn` mais sans réparer l'écriture →
+le renderer continuait avec `r.success===true`, déclenchait
+`reloadCurrentProject()` qui retombait sur l'état pré-gen (10 entrées)
+et "rendait" la strip telle quelle.
+
+**Fix** (`cloud/public/app/meshyAPI-cloud.js > _appendCloudImages`):
+- Détecte `QuotaExceededError` (name + code 22/1014 + message regex)
+- Libère l'espace: drop `myfm:emissive:*`, `myfm:imagestyle:*`,
+  `fabmesh_nsfw_cache` (rebuildables à la demande)
+- Réessaie l'écriture
+- Si retry échoue: toast `error` explicite "localStorage full, clear
+  site data"
+- Si retry réussit: toast `warn` "cache cleared to free localStorage"
+
+**Diag log enrichi** (`index2.js:4335`): ajoute `first=<URL>` à côté du
+count — permet de distinguer "count stale" vs "count grew avec
+même URL en tête" (dedup bug) en un coup d'œil.
+
+**Secondary concerns** identifiés par l'audit (à traiter ensuite):
+- Migrer emissive layers de localStorage vers IndexedDB (orders of
+  magnitude plus de place)
+- Le commit `4cdfa3e` impose un floor PNG ≥ 768px à TOUS les 7 callsites
+  de `_assertImageBytes`, dont back-view/tpose/sheet/rectify qui
+  produisent parfois 512px légitimement — à conditionner sur
+  `source === 'Modal text2image'` uniquement
+- Normaliser le shape `{path, folder, mtime, jobId}` à la frontière
+  listImageFolders pour supprimer les `img.path || img` ambiguës
+
 ## 2026-06-01 (Material Adjust — new Tint (hue rotation) slider + dispatch fix)
 
 Added a 7th slider to Material Adjust: **Tint** (hue rotation in
