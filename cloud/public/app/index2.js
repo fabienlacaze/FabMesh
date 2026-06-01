@@ -13662,51 +13662,59 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     return;
   }
   // Skip types that already exist in the CURRENT selected batch so
-  // Diff the modal's checked types against what currently exists in
-  // the selected batch:
-  //   - toRun = checked - existing → new types to generate
-  //   - toRemove = existing - checked → types the user UNCHECKED,
-  //     meaning they want them out of this version
+  // The modal lets the user COMPOSE the next version:
+  //   - checked existing types → copy from the current batch into the
+  //     new batch (no credit cost, just a server-side blob copy)
+  //   - checked new types → generate via AnyTop AI (1 credit each)
+  //   - unchecked existing types → don't appear in the new version
+  //     (current version stays intact)
   const currentBatchClips = ((p.animations || [])
     .filter(a => a.batchId === _step4SelectedBatch));
-  const currentBatchTypes = new Set(currentBatchClips.map(a => (a.type || '').toLowerCase()));
-  const checkedSet = new Set(animTypes);
-  const toRun = animTypes.filter(t => !currentBatchTypes.has(t));
-  const toRemove = [...currentBatchTypes].filter(t => !checkedSet.has(t));
-  // Remove unchecked existing types first (delete their R2 blobs).
-  if (toRemove.length) {
-    const ok = await customConfirm(
-      `Remove ${toRemove.join(', ')} from version v${(p.animations||[]).filter(a => a.batchId === _step4SelectedBatch).length}? This deletes the clip${toRemove.length > 1 ? 's' : ''}.`,
-      'Remove animation',
-      'Remove',
-    );
-    if (!ok) return;
-    const clipsToDelete = currentBatchClips.filter(c => toRemove.includes((c.type || '').toLowerCase()));
-    await Promise.all(clipsToDelete.map(c =>
-      fetch('/api/animations/delete', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: c.url || c.path }),
-      }).catch(err => console.warn('[anim del]', c.url, err))
-    ));
-    // Drop locally so the UI reflects the change immediately.
-    p.animations = (p.animations || []).filter(a => !clipsToDelete.includes(a));
-    renderAnimVersions(p);
-    showToast(`Removed ${toRemove.join(', ')}`, 'success', 3000);
-  }
-  // If nothing else to generate, stop here (removals already applied).
-  if (!toRun.length) {
-    if (!toRemove.length) {
-      showToast('All checked types already exist in this version — nothing to generate.', 'info', 5000);
-    }
+  const currentByType = new Map(currentBatchClips.map(c => [(c.type || '').toLowerCase(), c]));
+  const toCopy = animTypes.filter(t => currentByType.has(t));
+  const toRun = animTypes.filter(t => !currentByType.has(t));
+  if (!toCopy.length && !toRun.length) {
+    showToast('Check at least one type to generate.', 'info', 4000);
     return;
   }
-  // batchId shared across all clips of this Generate click → server
-  // groups them into ONE version (v0) instead of N versions.
+  // batchId shared across copies + freshly-generated clips → server
+  // groups them into ONE new version (v(N+1)) so the user gets a
+  // cohesive new batch with whatever they checked.
   const batchId = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  // ONE master batch job (instead of per-type popups) — the user sees
-  // a single Running task that walks through 1/N → N/N.
+  // STEP A — copy existing clips into the new batch (server-side blob
+  // copy via the upload endpoint). No credit cost.
+  if (toCopy.length) {
+    showToast(`Copying ${toCopy.length} existing clip${toCopy.length > 1 ? 's' : ''}...`, 'info', 2000);
+    for (const t of toCopy) {
+      const src = currentByType.get(t);
+      if (!src?.url) continue;
+      try {
+        const blob = await (await fetch(src.url, { credentials: 'omit' })).blob();
+        const f = new File([blob], `${t}.glb`, { type: 'model/gltf-binary' });
+        const form = new FormData();
+        form.append('file', f);
+        form.append('animType', t);
+        form.append('projectName', p.name || '');
+        form.append('batchId', batchId);
+        const r = await fetch('/api/animations/upload', {
+          method: 'POST', credentials: 'same-origin', body: form,
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      } catch (err) {
+        console.warn('[anim copy]', t, err);
+        showToast(`Copy of ${t} failed: ${err.message}`, 'warning', 4000);
+      }
+    }
+  }
+  // If only copies were requested (no AI generation), reload + done.
+  if (!toRun.length) {
+    await reloadCurrentProject();
+    showToast(`New version with ${toCopy.length} clip${toCopy.length > 1 ? 's' : ''}.`, 'success', 4000);
+    return;
+  }
+  // STEP B — generate the new types. ONE master batch job (instead
+  // of per-type popups) — the user sees a single Running task that
+  // walks through 1/N → N/N.
   gatedRun('anim', `Animate ${toRun.join('+')}: ${p.name}`, async () => {
     const batchJob = pushJob(`Animate ${toRun.join('+')}: ${p.name}`, null, {
       Engine: 'AnyTop (cloud GPU)',
