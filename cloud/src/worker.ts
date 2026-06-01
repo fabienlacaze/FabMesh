@@ -7182,6 +7182,105 @@ async function handleUserAssetsMigrateFromJobs(req: Request, env: Env): Promise<
   return json({ ok: true, scanned, migrated, fromJobsOptions, fromR2Listing });
 }
 
+/** POST /api/user-assets/reassign-orphans — second-pass migration that
+ *  redistributes images currently parked under project='_orphans' into
+ *  their real projects, using timestamp proximity: every image's R2
+ *  key embeds a unix_ms (e.g. <uid>/front/1779658476855_<seed>.png),
+ *  and every mesh job has a created_at — the image is reassigned to
+ *  the project of the closest mesh job within a configurable window
+ *  (default ±300s, ie. 5 min). Images with no nearby mesh stay orphans.
+ *
+ *  Update is done via direct UPDATE so existing rows don't duplicate. */
+async function handleUserAssetsReassignOrphans(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const url = new URL(req.url);
+  const windowSec = Math.max(30, Math.min(3600,
+    parseInt(url.searchParams.get('windowSec') || '300', 10)));
+  const sb = supabaseAdmin(env);
+  // Load all of the user's _orphans assets.
+  const { data: orphans, error: oErr } = await sb.from('user_assets')
+    .select('id, kind, r2_path, created_at')
+    .eq('user_id', user.id)
+    .eq('project', '_orphans')
+    .limit(5000);
+  if (oErr) return err(500, oErr.message);
+  if (!orphans || orphans.length === 0) {
+    return json({ ok: true, scanned: 0, reassigned: 0, kept_orphan: 0, note: 'no orphans to process' });
+  }
+  // Load all of the user's mesh jobs with project_name. We need ALL
+  // jobs (not just succeeded) because the image was generated when
+  // the user clicked Create regardless of mesh success.
+  const { data: jobs, error: jErr } = await sb.from('jobs')
+    .select('id, project_name, options, created_at')
+    .eq('user_id', user.id)
+    .not('project_name', 'is', null)
+    .limit(5000);
+  if (jErr) return err(500, jErr.message);
+  type J = { id: string; project_name: string | null;
+             options: Record<string, unknown> | null;
+             created_at: string };
+  const jobList = (jobs ?? []) as J[];
+  if (!jobList.length) {
+    return json({ ok: true, scanned: orphans.length, reassigned: 0, kept_orphan: orphans.length, note: 'no jobs with project_name' });
+  }
+  // Build a sorted array of {ts, project} for fast lookup.
+  type JobTs = { ts: number; project: string };
+  const jobTsArr: JobTs[] = [];
+  for (const j of jobList) {
+    if (!j.project_name) continue;
+    const t = new Date(j.created_at).getTime();
+    if (Number.isFinite(t)) jobTsArr.push({ ts: t, project: j.project_name });
+  }
+  jobTsArr.sort((a, b) => a.ts - b.ts);
+  // Binary-search the closest job for a given image timestamp.
+  function nearestProject(imgTs: number): { project: string; deltaMs: number } | null {
+    if (!jobTsArr.length) return null;
+    let lo = 0, hi = jobTsArr.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (jobTsArr[mid].ts < imgTs) lo = mid + 1; else hi = mid;
+    }
+    const candidates = [lo - 1, lo].filter(i => i >= 0 && i < jobTsArr.length);
+    let best: { project: string; deltaMs: number } | null = null;
+    for (const i of candidates) {
+      const d = Math.abs(jobTsArr[i].ts - imgTs);
+      if (!best || d < best.deltaMs) best = { project: jobTsArr[i].project, deltaMs: d };
+    }
+    return best;
+  }
+  let reassigned = 0;
+  let keptOrphan = 0;
+  const windowMs = windowSec * 1000;
+  const byProject: Record<string, number> = {};
+  for (const o of orphans as Array<{ id: number; kind: string; r2_path: string; created_at: string }>) {
+    // Parse timestamp from r2_path: <uid>/<folder>/<ms>_<seed>.png
+    const m = o.r2_path.match(/\/(\d{13})_/);
+    if (!m) { keptOrphan++; continue; }
+    const imgTs = parseInt(m[1], 10);
+    if (!Number.isFinite(imgTs)) { keptOrphan++; continue; }
+    const near = nearestProject(imgTs);
+    if (!near || near.deltaMs > windowMs) { keptOrphan++; continue; }
+    // Skip if the target project already has this exact r2_path
+    // (avoid duplicates via the unique index).
+    const { error: upErr } = await sb.from('user_assets')
+      .update({ project: near.project })
+      .eq('id', o.id)
+      .eq('user_id', user.id);
+    if (upErr) { console.warn('[reassign-orphans] update failed:', upErr.message); keptOrphan++; continue; }
+    reassigned++;
+    byProject[near.project] = (byProject[near.project] || 0) + 1;
+  }
+  return json({
+    ok: true,
+    scanned: orphans.length,
+    reassigned,
+    kept_orphan: keptOrphan,
+    windowSec,
+    byProject,
+  });
+}
+
 /** POST /api/thumbs/upload — stores a mesh thumbnail in R2 instead of
  *  the client's localStorage (where a single PNG dataURL was eating
  *  100-200 KB and saturating the 5 MB origin cap). Body: {meshKey,
@@ -9833,6 +9932,7 @@ export default {
         if (pathname === '/api/admin/logs/get'        && method === 'GET')  return await handleAdminLogsGet(req, env);
         if (pathname === '/api/user-assets/record'    && method === 'POST') return await handleUserAssetsRecord(req, env);
         if (pathname === '/api/user-assets/migrate-from-jobs' && method === 'POST') return await handleUserAssetsMigrateFromJobs(req, env);
+        if (pathname === '/api/user-assets/reassign-orphans'  && method === 'POST') return await handleUserAssetsReassignOrphans(req, env);
         if (pathname === '/api/thumbs/upload'         && method === 'POST') return await handleThumbsUpload(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);
