@@ -18082,15 +18082,24 @@ function resizeLmFullscreen() {
 }
 
 async function openLandmarksFullscreen() {
-  // Always load the SOURCE MESH (clean GLB) into the fullscreen modal — never
-  // the generated rig FBX. Landmarks are an INPUT to the rigger; they live in
-  // mesh-space coordinates, so showing them on a rig that may be in different
-  // units (cm vs m) would place them off-screen or offset.
-  const sourcePath = rigSrcMeshPath
-    || state.currentProject?.selectedMeshPath
-    || (state.currentProject?.meshes && state.currentProject.meshes[0]?.path);
+  // 2026-06-01: prefer the currently-selected RIG so the user can see
+  // the AI-generated bones and drag the landmark markers exactly onto
+  // them. Fall back to the source mesh if no rig exists yet.
+  const p = state.currentProject;
+  // Critical: only use rigSrcMeshPath if it belongs to the CURRENT
+  // project — without this check it survives project-switches and
+  // shows the wrong model.
+  const rigSrcBelongsHere = rigSrcMeshPath
+    && (p?.meshes || []).some(m => m.path === rigSrcMeshPath || m.url === rigSrcMeshPath);
+  const rigPath = p?.selectedRigPath
+               || (p?.rigs && p.rigs[0]?.url)
+               || (p?.rigs && p.rigs[0]?.path);
+  const meshPath = (rigSrcBelongsHere ? rigSrcMeshPath : null)
+                || p?.selectedMeshPath
+                || (p?.meshes && p.meshes[0]?.path);
+  const sourcePath = rigPath || meshPath;
   if (!sourcePath) {
-    customError('Load a mesh first.', 'Manual landmarks');
+    customError('Generate a mesh or rig first.', 'Manual landmarks');
     return;
   }
   initLmFullscreen();
