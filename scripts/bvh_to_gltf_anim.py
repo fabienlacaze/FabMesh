@@ -507,6 +507,8 @@ def bvh_to_gltf_anim(
     # parent_world_pos (the bone's local offset). Three.js then has a
     # proper skeleton, the helper renders correctly, and skinned
     # rotations move the mesh as expected.
+    print(f"[bvh→glb] entering bone-translation patch block "
+          f"(skins_count={len(gltf.get('skins') or [])})", flush=True)
     try:
         _skins = gltf.get("skins") or []
         if _skins:
