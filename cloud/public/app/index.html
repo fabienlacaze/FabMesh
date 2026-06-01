@@ -742,15 +742,32 @@
                     </select>
                   </div>
                   <div class="form-row">
-                    <label for="ws-anim-type">Animation</label>
-                    <select id="ws-anim-type" style="width:100%;">
+                    <label>Animations <span style="color:var(--text-2); font-weight:normal; font-size:11px;">(check 1+ types — each becomes a new version)</span></label>
+                    <div id="ws-anim-types" class="anim-types-checklist" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:6px; padding:8px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px;">
+                      <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" name="anim-type" value="idle" checked> <span>😴 Idle</span>
+                      </label>
+                      <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" name="anim-type" value="walk"> <span>🚶 Walk</span>
+                      </label>
+                      <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" name="anim-type" value="run"> <span>🏃 Run</span>
+                      </label>
+                      <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" name="anim-type" value="attack"> <span>⚔️ Attack</span>
+                      </label>
+                      <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" name="anim-type" value="death"> <span>💀 Death</span>
+                      </label>
+                      <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" name="anim-type" value="fly"> <span>✈️ Fly</span>
+                      </label>
+                    </div>
+                    <!-- Legacy single-select kept hidden for code paths that
+                         still reference it (e.g. _wsAnimEngineSync). The
+                         checkbox list above is the source of truth. -->
+                    <select id="ws-anim-type" style="display:none;">
                       <option value="idle" selected>Idle</option>
-                      <option value="walk">Walk</option>
-                      <option value="run">Run</option>
-                      <option value="attack">Attack</option>
-                      <option value="death">Death</option>
-                      <option value="fly">Fly</option>
-                      <option value="custom">Custom (text prompt)</option>
                     </select>
                   </div>
                   <!-- Prompt + reference video hidden by default: AnyTop
