@@ -2195,7 +2195,6 @@ function setViewerFilename(elId, p) {
 
 function showStep1Preview(imgPath) {
   const preview = document.getElementById('step1-preview');
-  // Remove any previous img + placeholder, but KEEP the static expand button + toolbar
   const placeholder = preview.querySelector('.preview-placeholder');
   if (placeholder) placeholder.remove();
   let imgEl = preview.querySelector('img');
@@ -2203,9 +2202,10 @@ function showStep1Preview(imgPath) {
     imgEl = document.createElement('img');
     preview.insertBefore(imgEl, preview.firstChild);
   }
-  // Cache-bust — see version-thumb notes above; Electron holds onto the
-  // previous bytes unless we change the URL. _imgSrc keeps blob:/http:/data:
-  // URLs intact (dropped-file imports), prefixes file:/// for raw fs paths.
+  // Loading overlay until <img> fires 'load' (or 'error').
+  setViewerLoading('step1-preview', true, 'Loading image…');
+  imgEl.onload = () => setViewerLoading('step1-preview', false);
+  imgEl.onerror = () => setViewerLoading('step1-preview', false);
   {
     const _src = _imgSrc(imgPath);
     imgEl.src = /^(blob|data):/i.test(imgPath) ? _src : (_src + '?t=' + Date.now());
@@ -6758,9 +6758,11 @@ async function showStep2Preview(mesh) {
     }
   }
   // Load the GLB
+  setViewerLoading('step2-preview', true, 'Loading mesh…');
   console.log('[mesh-viewer] fetching mesh:', mesh.path);
   const buffer = await API.readMeshFile(mesh.path);
   if (!buffer) {
+    setViewerLoading('step2-preview', false);
     console.error('[mesh-viewer] readMeshFile returned null for', mesh.path);
     return;
   }
@@ -6768,6 +6770,7 @@ async function showStep2Preview(mesh) {
   if (wsModel) { wsScene.remove(wsModel); wsModel = null; }
   const loader = new GLTFLoader();
   loader.parse(buffer, '', (gltf) => {
+    setViewerLoading('step2-preview', false);
     console.log('[mesh-viewer] parse OK, scene children:', gltf.scene.children.length);
     wsModel = gltf.scene;
     wsScene.add(wsModel);
@@ -12394,12 +12397,14 @@ async function showStep3Preview(rig) {
   let inferredTemplate = null;
   const _tplMatch = rig.filename && rig.filename.match(/_rigged_([a-z0-9_-]+?)(?:_\d{10,})?\.[^.]+$/i);
   if (_tplMatch) inferredTemplate = _tplMatch[1];
+  setViewerLoading('step3-preview', true, 'Loading rig…');
   try {
     if (ext === 'fbx') {
       // FBXLoader needs a URL because it loads textures relative to the file
       const url = _toFileUrl(rig.path);
       const loader = new FBXLoader();
       loader.load(url, async (obj) => {
+        setViewerLoading('step3-preview', false);
         rigVwModel = obj;
         rigVwScene.add(rigVwModel);
         // Disable frustum culling on all meshes (FBX bbox is computed from
@@ -12495,9 +12500,10 @@ async function showStep3Preview(rig) {
       });
     } else if (ext === 'glb' || ext === 'gltf') {
       const buffer = await API.readMeshFile(rig.path);
-      if (!buffer) return;
+      if (!buffer) { setViewerLoading('step3-preview', false); return; }
       const loader = new GLTFLoader();
       loader.parse(buffer, '', (gltf) => {
+        setViewerLoading('step3-preview', false);
         rigVwModel = gltf.scene;
         _applyMeshTextureFilter(rigVwModel);
         let skinnedCount = 0;
@@ -13203,6 +13209,35 @@ let _animLastTime = 0;
 let _animLooping = true;
 let _animPlaybackRate = 1;
 
+// Unified viewer-loading spinner overlay. Works on a CONTAINER id —
+// creates/removes a position:absolute overlay with the spinner CSS
+// classes. Idempotent; safe to call repeatedly. msg defaults to "Loading…".
+function setViewerLoading(containerId, on, msg) {
+  const card = document.getElementById(containerId);
+  if (!card) return;
+  // Ensure the card is a positioning context so absolute children center.
+  if (getComputedStyle(card).position === 'static') {
+    card.style.position = 'relative';
+  }
+  let overlay = card.querySelector(':scope > .viewer-loading-overlay');
+  if (on) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'preview-placeholder loading viewer-loading-overlay';
+      card.appendChild(overlay);
+    }
+    if (msg) {
+      overlay.classList.add('with-msg');
+      overlay.setAttribute('data-loading-msg', msg);
+    } else {
+      overlay.classList.remove('with-msg');
+      overlay.removeAttribute('data-loading-msg');
+    }
+  } else if (overlay) {
+    overlay.remove();
+  }
+}
+
 function _initAnimViewer() {
   if (_animVw) return;
   const canvas = document.getElementById('ws-anim-canvas');
@@ -13281,14 +13316,17 @@ function showStep4AnimPreview(anim) {
     setViewerFilename('ws-anim-filename', '');
     return;
   }
-  if (placeholder) placeholder.style.display = 'none';
   if (canvas) canvas.style.display = '';
   setViewerFilename('ws-anim-filename', anim.filename || anim.path || anim.url || '');
   _initAnimViewer();
   _disposeAnimModel();
+  // Loading overlay (purple spinner + 'Loading…') until the GLB
+  // resolves and the model lands in the scene.
+  setViewerLoading('step4-preview', true, 'Loading animation…');
   const url = anim.url || anim.path || '';
   const loader = new GLTFLoader();
   loader.load(url, (gltf) => {
+    setViewerLoading('step4-preview', false);
     _animModel = gltf.scene;
     _animVw.scene.add(_animModel);
     // Disable frustum culling — skinned bounds at rest don't include the
@@ -13399,6 +13437,7 @@ function showStep4AnimPreview(anim) {
       console.warn('[anim-vw] no SkinnedMesh found in GLB — bones unsupported on this clip');
     }
   }, undefined, (err) => {
+    setViewerLoading('step4-preview', false);
     console.error('[anim-vw] GLB load failed:', err);
     showToast(`Animation load failed: ${err?.message || err}`, 'error', 5000);
   });
