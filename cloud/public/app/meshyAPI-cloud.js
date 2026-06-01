@@ -270,9 +270,27 @@
       // The renderer calls this with `projectName`; older callers may
       // still pass `id` (= projectName in their semantics).
       const name = projectName || id;
-      if (!name) return { ok: false, error: 'projectName required' };
-      try { return await postJSON('/api/cloud-projects/delete', { projectName: name }); }
-      catch (e) { return { ok: false, error: String(e) }; }
+      if (!name) {
+        console.warn('[deleteProject] no name provided');
+        return { ok: false, error: 'projectName required' };
+      }
+      console.log('[deleteProject] CALLED name=', name);
+      let result;
+      try { result = await postJSON('/api/cloud-projects/delete', { projectName: name }); }
+      catch (e) { result = { ok: false, error: String(e) }; }
+      console.log('[deleteProject] result=', result);
+      // Force-flush the console buffer so the next page reload by the
+      // admin can see exactly what happened (R2 path: <uid>/logs/...).
+      try {
+        if (window.__consoleCapture && typeof window.__consoleCapture.flush === 'function') {
+          window.__consoleCapture.flush({
+            kind: 'delete-project',
+            status: result?.ok ? 'done' : 'error',
+            project: name,
+          });
+        }
+      } catch (_) { /* ignore */ }
+      return result;
     },
 
     /* image-to-3D (the headline feature).
