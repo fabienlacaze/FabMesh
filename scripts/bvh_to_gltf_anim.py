@@ -340,28 +340,43 @@ def _map_bvh_to_glb(
 ) -> Dict[str, str]:
     """Returns {bvh_name: glb_bone_name}. Strategy:
       1. Exact match first.
-      2. Case-insensitive contains.
-      3. _resolve_role_to_template_name on a hand-rolled anatomical role
-         derived from the BVH joint name (left/right hint + body part).
-    Anything that doesn't resolve is dropped silently."""
+      2. Case-insensitive equality.
+      3. _resolve_role_to_template_name on a hand-rolled anatomical role.
+      4. INDEX-BASED fallback: if BVH names look like 'joint_<N>' / 'j<N>'
+         (AnyTop's pattern) or 'bone_<N>', map by ordinal position in
+         the GLB bone list. This is the saviour for opaque-name rigs.
+      5. Fuzzy substring scan.
+    Anything that doesn't resolve is dropped — but we now LOG every
+    unresolved BVH name so the post-mortem is trivial. """
+    import re
     out: Dict[str, str] = {}
     glb_lower = {b.lower(): b for b in glb_bone_names}
+    unresolved: list = []
+    used_glb_by_index: set = set()
+
+    # Detect 'joint_<N>' / 'joint<N>' / 'bone_<N>' patterns. If both
+    # sides use this, we can map by index.
+    INDEX_RE = re.compile(r'^(?:joint|bone|j|b)[_\.]?(\d+)$', re.IGNORECASE)
+    def _idx_of(name: str):
+        m = INDEX_RE.match((name or '').strip())
+        return int(m.group(1)) if m else None
+
     for bvh_name in bvh_joint_names:
         if not bvh_name:
             continue
-        # Exact
+        # 1. Exact
         if bvh_name in glb_bone_names:
             out[bvh_name] = bvh_name
             continue
+        # 2. Case-insensitive
         if bvh_name.lower() in glb_lower:
             out[bvh_name] = glb_lower[bvh_name.lower()]
             continue
-        # Try the synonym resolver from puppeteer_to_skeleton.
-        # We invent a "role" string from the BVH name: lowercase, drop
-        # common prefixes/suffixes ("Bip01_", "BN_", "_End").
+        # 3. Synonym resolver (anatomical role).
         role = (bvh_name.lower()
                 .replace("bip01_", "").replace("bn_", "")
                 .replace("_end", "").replace("end_", "")
+                .replace("mixamorig:", "").replace("mixamorig_", "")
                 .replace("__", "_").strip("_"))
         try:
             tgt = _resolve_role_to_template_name(role, glb_bone_names)
@@ -370,12 +385,43 @@ def _map_bvh_to_glb(
                 continue
         except Exception:
             pass
-        # Last resort: fuzzy substring scan.
+        # 4. Index-based fallback for joint_<N> / bone_<N>.
+        bvh_idx = _idx_of(bvh_name)
+        if bvh_idx is not None and 0 <= bvh_idx < len(glb_bone_names):
+            # Prefer the same-name pattern on GLB side if available.
+            same_pattern = [g for g in glb_bone_names if _idx_of(g) == bvh_idx]
+            if same_pattern:
+                out[bvh_name] = same_pattern[0]
+                used_glb_by_index.add(same_pattern[0])
+                continue
+            # Otherwise positional fallback by global index in the GLB list.
+            cand = glb_bone_names[bvh_idx]
+            if cand not in used_glb_by_index:
+                out[bvh_name] = cand
+                used_glb_by_index.add(cand)
+                continue
+        # 5. Fuzzy substring.
         bvh_low = bvh_name.lower()
+        hit = None
         for glb_name in glb_bone_names:
-            if glb_name.lower() in bvh_low or bvh_low in glb_name.lower():
-                out[bvh_name] = glb_name
+            gl = glb_name.lower()
+            if gl in bvh_low or bvh_low in gl:
+                hit = glb_name
                 break
+        if hit:
+            out[bvh_name] = hit
+            continue
+        unresolved.append(bvh_name)
+
+    if unresolved:
+        # Verbose so the user can see WHICH names didn't map.
+        sample = unresolved[:12]
+        print(f"[bvh→glb] mapper: {len(unresolved)} BVH names unresolved. "
+              f"First {len(sample)}: {sample}. "
+              f"GLB has {len(glb_bone_names)} bones, e.g.: {glb_bone_names[:8]}",
+              flush=True)
+    print(f"[bvh→glb] mapper: resolved {len(out)}/{len(bvh_joint_names)} bvh→glb names "
+          f"(GLB has {len(glb_bone_names)} bones)", flush=True)
     return out
 
 
