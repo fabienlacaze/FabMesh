@@ -6651,8 +6651,17 @@ async function handleModalStatus(req: Request, env: Env): Promise<Response> {
   // Each Modal container is tracked separately. The renderer uses
   // this to show the correct warm/cold pill depending on which
   // operation the user is about to fire.
-  async function status(file: string, warmSec: number, coldSec: number) {
-    const last = await _readLastWarmMs(env, file).catch(() => null);
+  //
+  // We use TWO sources of truth, taking whichever is more recent:
+  //   1) Per-container R2 timestamp written on every successful
+  //      Modal call (_writeLastWarmMs).
+  //   2) Supabase jobs table: any `succeeded` job whose finished_at
+  //      is within 9 min implies that container was warm at finish.
+  //      Inference is wider (covers historical ops written before
+  //      we started tagging).
+  async function status(file: string, warmSec: number, coldSec: number, lastJobMs: number | null) {
+    const fileLast = await _readLastWarmMs(env, file).catch(() => null);
+    const last = Math.max(fileLast ?? 0, lastJobMs ?? 0) || null;
     const secondsSinceLastSuccess = last ? Math.floor((now - last) / 1000) : null;
     const warm = last != null && (now - last) < COLD_THRESHOLD_MS;
     return {
@@ -6662,12 +6671,50 @@ async function handleModalStatus(req: Request, env: Env): Promise<Response> {
       expected_seconds_cold: coldSec,
     };
   }
+  // Query the user's last successful job per container kind. We
+  // classify by asset_type and options.operation_type.
+  const sb = supabaseAdmin(env);
+  const { data: recentJobs } = await sb.from('jobs')
+    .select('asset_type, options, finished_at')
+    .eq('user_id', user.id)
+    .eq('status', 'succeeded')
+    .gte('finished_at', new Date(now - COLD_THRESHOLD_MS).toISOString())
+    .order('finished_at', { ascending: false })
+    .limit(50);
+  const lastByContainer: Record<string, number> = {};
+  function bump(key: string, t: string | null) {
+    if (!t) return;
+    const ms = new Date(t).getTime();
+    if (Number.isFinite(ms) && (lastByContainer[key] ?? 0) < ms) lastByContainer[key] = ms;
+  }
+  for (const j of ((recentJobs ?? []) as Array<{
+    asset_type: string;
+    options: Record<string, unknown> | null;
+    finished_at: string | null;
+  }>)) {
+    const opType = String(j.options?.operation_type ?? '');
+    const at = String(j.asset_type ?? '');
+    if (opType === 'text2image' || opType === 'tpose') {
+      bump(opType === 'tpose' ? 'tpose' : 'text2image', j.finished_at);
+    } else if (opType === 'mesh') {
+      bump('mesh', j.finished_at);
+    } else if (opType === 'back_view' || opType === 'back-view') {
+      bump('back_view', j.finished_at);
+    } else if (['modify','auto_inpaint','mask_inpaint','face_fix_image','remove_background','upscale'].includes(opType)) {
+      bump('image_op', j.finished_at);
+    } else if (at === 'text2image') {
+      bump('text2image', j.finished_at);
+    } else {
+      // asset_type like 'character'/'animal'/'creature' → mesh
+      bump('mesh', j.finished_at);
+    }
+  }
   const [image_op, text2image, back_view, tpose, mesh] = await Promise.all([
-    status('_meta/last_warm_image_op.txt',  30, 150),
-    status('_meta/last_warm_text2image.txt', 30, 150),
-    status('_meta/last_warm_back_view.txt',  40, 180),
-    status('_meta/last_warm_tpose.txt',      30, 150),
-    status('_meta/last_warm_mesh.txt',       60, 240),
+    status('_meta/last_warm_image_op.txt',  30, 150, lastByContainer.image_op   ?? null),
+    status('_meta/last_warm_text2image.txt', 30, 150, lastByContainer.text2image ?? null),
+    status('_meta/last_warm_back_view.txt',  40, 180, lastByContainer.back_view  ?? null),
+    status('_meta/last_warm_tpose.txt',      30, 150, lastByContainer.tpose      ?? null),
+    status('_meta/last_warm_mesh.txt',       60, 240, lastByContainer.mesh       ?? null),
   ]);
   return json({
     image_op, text2image, back_view, tpose, mesh,
