@@ -4323,6 +4323,17 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         }
         completeJob(job.id, true);
         await reloadCurrentProject();
+        // Force-await the version strip render so the new thumbnail
+        // appears before the scroll/pulse animation runs. Without this
+        // populateWorkspace fires renderImageVersions in the background
+        // and the user can see the strip stuck on the previous state.
+        if (state.currentProject) {
+          try {
+            await renderImageVersions(state.currentProject);
+            console.log('[image-gen] post-reload strip rendered, images=',
+                        state.currentProject.images?.length);
+          } catch (e) { console.warn('[image-gen] strip render failed:', e); }
+        }
         // After successful image generation, open the Edit stage and scroll
         const imgCard = document.getElementById('step-card-image');
         if (imgCard) {
