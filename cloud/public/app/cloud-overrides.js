@@ -441,6 +441,24 @@
         tpose:      d?.tpose,
         mesh:       d?.mesh,
       };
+      // Helper: which Modal container is associated with a job kind?
+      // Used by job popups / pre-flight toasts so they pick the correct
+      // warm/cold reading instead of the legacy global __modalWarm.
+      window.__modalContainerForKind = function (kind) {
+        const map = {
+          image:    'text2image',
+          view:     'back_view',
+          mesh:     'mesh',
+          modify:   'image_op',
+          inpaint:  'image_op',
+          facefix:  'image_op',
+          upscale:  'image_op',
+          removebg: 'image_op',
+          rectify:  'tpose',
+        };
+        const key = map[String(kind || '').toLowerCase()] || 'image_op';
+        return (window.__modalContainers || {})[key];
+      };
       try {
         console.log('[modalStatus]', {
           warm: window.__modalWarm,
