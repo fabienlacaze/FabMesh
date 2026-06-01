@@ -18219,36 +18219,69 @@ async function openLandmarksFullscreen() {
     lmFsScene.add(lmFsModel);
     // 2026-06-01: visualise the AI-generated bone chains over the
     // mesh so the user can drag landmark markers onto them.
-    // SkeletonHelper accepts either a SkinnedMesh OR any object whose
-    // descendant tree contains Bones — the dragon rig from AnyTop has
-    // floating bones (no SkinnedMesh) so we pass the lmFsModel itself
-    // when no skin is found.
+    // Use a custom rendering (spheres + thick cylinder bones) instead
+    // of THREE.SkeletonHelper because WebGL2 ignores material.linewidth
+    // so the helper's LineSegments rendered as 1px-wide lines that were
+    // invisible against the dark dragon.
     try {
-      let firstSkin = null;
-      let anyBone = false;
+      lmFsModel.updateMatrixWorld(true);
+      const bones = [];
       obj.traverse((c) => {
-        if (!firstSkin && c.isSkinnedMesh && c.skeleton) firstSkin = c;
-        if (c.isBone) anyBone = true;
+        if (c.isBone) bones.push(c);
+        else if (c.isSkinnedMesh && c.skeleton) {
+          for (const b of c.skeleton.bones) if (!bones.includes(b)) bones.push(b);
+        }
       });
-      let helper = null;
-      if (firstSkin) helper = new THREE.SkeletonHelper(firstSkin);
-      else if (anyBone) helper = new THREE.SkeletonHelper(lmFsModel);
-      if (helper) {
-        helper.material.linewidth = 3;
-        // Bright magenta — far higher contrast against a black dragon
-        // than the previous cyan, which was lost in shadow.
-        helper.material.color.set(0xff00ff);
-        helper.material.depthTest = false;
-        helper.material.transparent = true;
-        helper.material.opacity = 1.0;
-        helper.renderOrder = 998;
-        lmFsScene.add(helper);
-        lmFsModel.userData._skelHelper = helper;
-        console.log('[lm] SkeletonHelper added with', helper.bones?.length || 0, 'bones (skinned=', !!firstSkin, ')');
+      if (bones.length) {
+        const overlay = new THREE.Group();
+        overlay.renderOrder = 998;
+        // Size sphere/cylinder relative to model bbox.
+        const tmpBox = new THREE.Box3().setFromObject(lmFsModel);
+        const sz = tmpBox.getSize(new THREE.Vector3()).length();
+        const dotR = sz * 0.008;
+        const linR = sz * 0.0035;
+        const sphereGeo = new THREE.SphereGeometry(dotR, 8, 8);
+        const matJoint = new THREE.MeshBasicMaterial({
+          color: 0xff00ff, depthTest: false, transparent: true, opacity: 1.0,
+        });
+        const matBone = new THREE.MeshBasicMaterial({
+          color: 0x00ffd0, depthTest: false, transparent: true, opacity: 0.9,
+        });
+        // Pre-compute world positions.
+        const wp = new Map();
+        for (const b of bones) {
+          const p = new THREE.Vector3(); b.getWorldPosition(p); wp.set(b, p);
+        }
+        // Joint dots
+        for (const b of bones) {
+          const dot = new THREE.Mesh(sphereGeo, matJoint);
+          dot.position.copy(wp.get(b));
+          dot.renderOrder = 999;
+          overlay.add(dot);
+        }
+        // Bone lines as thin cylinders between parent and child bones.
+        for (const child of bones) {
+          if (!child.parent || !wp.has(child.parent)) continue;
+          const a = wp.get(child.parent), c = wp.get(child);
+          const dir = new THREE.Vector3().subVectors(c, a);
+          const len = dir.length();
+          if (len < 1e-5) continue;
+          const cyl = new THREE.Mesh(
+            new THREE.CylinderGeometry(linR, linR, len, 6),
+            matBone,
+          );
+          cyl.position.copy(a).add(dir.clone().multiplyScalar(0.5));
+          cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+          cyl.renderOrder = 998;
+          overlay.add(cyl);
+        }
+        lmFsScene.add(overlay);
+        lmFsModel.userData._skelOverlay = overlay;
+        console.log('[lm] custom skeleton overlay added —', bones.length, 'bones');
       } else {
-        console.warn('[lm] no SkinnedMesh and no bones — no SkeletonHelper');
+        console.warn('[lm] no bones found in model — no skeleton overlay');
       }
-    } catch (e) { console.warn('[lm] SkeletonHelper failed:', e); }
+    } catch (e) { console.warn('[lm] skeleton overlay failed:', e); }
     const box = new THREE.Box3().setFromObject(lmFsModel);
     const sizeVec = box.getSize(new THREE.Vector3());
     const size = sizeVec.length();
