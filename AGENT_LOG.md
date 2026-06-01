@@ -1,5 +1,30 @@
 # FabMesh Agent Log
 
+## 2026-06-01 (Mode 3 anim — routing override winged + probe step 4.5)
+
+**Pourquoi**: workflow `wtdvocwde` (3 reviewers indépendants) verdict
+unfixed-confirmed sur l'alias cond.npy seul. Les quaternions sont
+bit-identiques entre run pré-fix et post-fix → conditioning no-op.
+Root cause : `_pick_checkpoint('run')` matche `bipeds` AVANT `flying`
+dans la chaîne if/elif, donc dragon → target_class='Ostrich'
+(biped flightless) → embedding topologiquement incompatible avec
+notre rig 47-bones ailé → near-identity motion.
+
+**Changements `modal_app/_anytop_anim.py`**:
+1. **Step 3.0 routing override** : détection mots-clés winged
+   (`dragon, wing, wyvern, bat, pterodactyl, eagle, phoenix, griffin,
+   pegasus, fly`) dans prompt OU anim_type → force ckpt 'flying' →
+   target_class='Dragon' (classe trained qui match la topologie).
+2. **Step 3.5 robustness** : guard `.item()` sur 0-d object array +
+   `isinstance(dict)` assert + log keys pour debug.
+3. **Step 4.5 probe** : np.load le .npy produit par sample.generate,
+   log `shape, global_std, per_joint_std_mean, first_vs_last_l2,
+   DIAGNOSIS`. Si `global_std < 1e-3` → conditioning ignoré (chercher
+   --guidance_param manquant ou cond_mode). Sinon → motion réelle,
+   problème dans BVH→GLB.
+
+**Test**: dragon 'run' à re-générer, lire logs Modal `step 4.5 probe`.
+
 ## 2026-06-01 (Durable fix: Supabase user_assets + R2 thumbs migration)
 
 **Pourquoi**: la pré-version (purge agressive on-demand) marchait mais
