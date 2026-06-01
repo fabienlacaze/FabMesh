@@ -266,6 +266,19 @@ def _eulers_to_quats(eulers_deg: np.ndarray, order: str) -> np.ndarray:
     return q.astype(np.float32)
 
 
+def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Hamilton product (xyzw) of two quaternions. Both inputs are
+    (..., 4); result is the same shape."""
+    ax, ay, az, aw = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    bx, by, bz, bw = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
+    return np.stack([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ], axis=-1).astype(np.float32)
+
+
 # ---------------------------------------------------------------------------
 # Bone-name mapping BVH joints -> GLB bones
 # ---------------------------------------------------------------------------
@@ -480,20 +493,23 @@ def bvh_to_gltf_anim(
     col = 0
     rotations_per_node: Dict[int, np.ndarray] = {}
     translations_per_node: Dict[int, np.ndarray] = {}
+    mapped_count = 0
+    unmapped_names = []
+    nodes = gltf.get("nodes", []) or []
     for j_idx, j in enumerate(bvh_joints):
         chans = j["channels"]
         if not chans:
             continue
         rot_cols = [(i, c) for i, c in enumerate(chans) if c.endswith("rotation")]
         pos_cols = [(i, c) for i, c in enumerate(chans) if c.endswith("position")]
-        # Translations
         tgt_name = mapping.get(j["name"])
         if tgt_name is None or tgt_name not in name_to_idx:
+            unmapped_names.append(j["name"])
             col += len(chans)
             continue
         node_idx = name_to_idx[tgt_name]
+        mapped_count += 1
         if pos_cols:
-            # Reorder X,Y,Z based on channel labels.
             pos = np.zeros((n_frames, 3), dtype=np.float32)
             for i, ch in pos_cols:
                 ax = {"X": 0, "Y": 1, "Z": 2}.get(ch[0], 0)
@@ -504,8 +520,26 @@ def bvh_to_gltf_anim(
                 [frames[:, col + i] for i, _ in rot_cols], axis=1,
             )  # (n_frames, 3) in rot_order
             quats = _eulers_to_quats(eulers, j["rot_order"])
+            # COMPOSE WITH BIND POSE: BVH semantically encodes "joint
+            # rest = identity local rotation". Our rigged GLB's bind
+            # pose puts non-identity rotations on the joint nodes.
+            # Applying bvh_quat directly REPLACES bind, destroying the
+            # rest pose. Compose rest * bvh so:
+            #   - frame N with bvh = identity → rest (preserves bind)
+            #   - frame N with bvh = R       → rest applied first, then R
+            rest_rot = nodes[node_idx].get("rotation") if node_idx < len(nodes) else None
+            if rest_rot is not None and rest_rot != [0, 0, 0, 1]:
+                rest_q = np.asarray(rest_rot, dtype=np.float32).reshape(1, 4)
+                quats = _quat_mul(np.broadcast_to(rest_q, quats.shape), quats)
             rotations_per_node[node_idx] = quats
         col += len(chans)
+
+    print(f"[bvh→glb] joint mapping: {mapped_count}/{len(bvh_joints)} mapped, "
+          f"first 5 unmapped: {unmapped_names[:5]}", flush=True)
+    if rotations_per_node:
+        any_node = next(iter(rotations_per_node))
+        print(f"[bvh→glb] sample node={any_node} frame0_quat={rotations_per_node[any_node][0].tolist()} "
+              f"frame{n_frames-1}_quat={rotations_per_node[any_node][-1].tolist()}", flush=True)
 
     if not rotations_per_node:
         raise RuntimeError("No rotation channels could be mapped onto the rig")
