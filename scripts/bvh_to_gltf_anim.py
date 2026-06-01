@@ -497,6 +497,61 @@ def bvh_to_gltf_anim(
     UE5 timebase.
     """
     gltf, _json_blob, bin_blob, tail = _read_glb(rig_glb_path)
+    # PATCH bone node.translation from inverseBindMatrices. The Puppeteer
+    # rig encodes the rest pose ONLY in IBM; bone nodes have no
+    # translation set, so in Three.js every bone sits at the origin.
+    # SkeletonHelper collapses to a single point AND the bone hierarchy
+    # produces zero offsets when parent transforms cascade — animation
+    # rotations don't visibly propagate through the skin.
+    # Fix: for each bone node, set node.translation = world_pos -
+    # parent_world_pos (the bone's local offset). Three.js then has a
+    # proper skeleton, the helper renders correctly, and skinned
+    # rotations move the mesh as expected.
+    try:
+        _skins = gltf.get("skins") or []
+        if _skins:
+            skin0 = _skins[0]
+            joint_idxs = list(skin0.get("joints") or [])
+            ibm_acc = skin0.get("inverseBindMatrices")
+            if ibm_acc is not None and joint_idxs:
+                _ibm_flat = _read_accessor(gltf, bin_blob, ibm_acc)
+                _ibm_mats = np.asarray(_ibm_flat).reshape(len(joint_idxs), 4, 4)
+                # glTF stores matrices column-major; numpy is row-major.
+                _ibm_mats = np.transpose(_ibm_mats, (0, 2, 1))
+                world_by_jidx = {}
+                for k, jidx in enumerate(joint_idxs):
+                    try:
+                        world_mat = np.linalg.inv(_ibm_mats[k])
+                        world_by_jidx[jidx] = world_mat[:3, 3]
+                    except Exception:
+                        world_by_jidx[jidx] = np.array([0.0, 0.0, 0.0])
+                # Find each joint's parent. The skin's joint list is
+                # flat; we walk nodes[*].children to discover parent
+                # relations.
+                parent_by_jidx = {ji: -1 for ji in joint_idxs}
+                _all_nodes = gltf.get("nodes") or []
+                for pi in range(len(_all_nodes)):
+                    for ci in (_all_nodes[pi].get("children") or []):
+                        if ci in parent_by_jidx and parent_by_jidx[ci] == -1:
+                            parent_by_jidx[ci] = pi
+                patched = 0
+                for jidx in joint_idxs:
+                    parent_jidx = parent_by_jidx.get(jidx, -1)
+                    if parent_jidx in world_by_jidx:
+                        offset = world_by_jidx[jidx] - world_by_jidx[parent_jidx]
+                    else:
+                        offset = world_by_jidx.get(jidx, np.array([0.0, 0.0, 0.0]))
+                    # Only patch if the node lacks a translation. Don't
+                    # overwrite values the rig may have set deliberately.
+                    if not _all_nodes[jidx].get("translation"):
+                        _all_nodes[jidx]["translation"] = [
+                            float(offset[0]), float(offset[1]), float(offset[2]),
+                        ]
+                        patched += 1
+                print(f"[bvh→glb] patched node.translation on {patched}/"
+                      f"{len(joint_idxs)} bones from IBM offsets", flush=True)
+    except Exception as e:
+        print(f"[bvh→glb] bone-translation patch failed: {e}", flush=True)
     # DIAG: inventory the input rig's skin/mesh shape so we can tell
     # whether the output is missing references the GLTFLoader needs.
     _in_meshes = gltf.get("meshes") or []
