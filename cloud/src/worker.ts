@@ -4653,13 +4653,15 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
  */
 /** POST /api/me/wipe-all-projects — nuclear reset for the current user.
  *  Sets project_name=NULL on every jobs row + DELETEs every user_assets
- *  row. Does NOT touch R2 blobs (they stay accessible in _orphans on
- *  next migration, or remain harmlessly orphaned). Use when caches
- *  resist normal cleanup. */
+ *  row. With ?wipeR2=true ALSO deletes every R2 object under the user's
+ *  prefix (binaries — destructive, no recovery). */
 async function handleMeWipeAllProjects(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   if (isMock(env)) return json({ ok: true, mock: true });
+  const url = new URL(req.url);
+  const wipeR2 = url.searchParams.get('wipeR2') === 'true'
+              || url.searchParams.get('wipeR2') === '1';
   const sb = supabaseAdmin(env);
   const { error: jErr, count: jUpd } = await sb.from('jobs')
     .update({ project_name: null }, { count: 'exact' })
@@ -4668,11 +4670,41 @@ async function handleMeWipeAllProjects(req: Request, env: Env): Promise<Response
   const { error: aErr, count: aDel } = await sb.from('user_assets')
     .delete({ count: 'exact' })
     .eq('user_id', user.id);
+  let r2Deleted = 0;
+  let r2Errors: string[] = [];
+  if (wipeR2 && env.MESHES) {
+    // List every object under <user.id>/* (mesh, rigged, animations,
+    // front, back, modified, removebg, mesh-op, thumb, etc.) and delete.
+    // Iterates with cursor until R2 returns truncated=false.
+    const prefix = `${user.id}/`;
+    let cursor: string | undefined;
+    do {
+      const listed = await env.MESHES.list({ prefix, limit: 1000, cursor });
+      const keys = (listed.objects || []).map(o => o.key);
+      // Skip the _logs/* subtree under <user.id>/logs — they're not
+      // project data and we want to keep the debug history.
+      // Actually <user.id>/logs/ is already under user prefix, so to
+      // preserve we skip filenames starting with `<user.id>/logs/`.
+      const toDelete = keys.filter(k => !k.startsWith(`${user.id}/logs/`));
+      if (toDelete.length) {
+        // R2 doesn't support batch delete; loop one by one.
+        await Promise.allSettled(toDelete.map(k =>
+          env.MESHES.delete(k).catch(e => {
+            r2Errors.push(`${k}: ${e instanceof Error ? e.message : String(e)}`);
+          })
+        ));
+        r2Deleted += toDelete.length;
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor);
+  }
   return json({
     ok: true,
     jobs_detached: jUpd ?? 0,
     user_assets_deleted: aDel ?? 0,
-    errors: [jErr?.message, aErr?.message].filter(Boolean),
+    r2_objects_deleted: r2Deleted,
+    r2_wipe_requested: wipeR2,
+    errors: [jErr?.message, aErr?.message, ...r2Errors.slice(0, 5)].filter(Boolean),
   });
 }
 
