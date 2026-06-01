@@ -13202,7 +13202,13 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     return;
   }
   const engine = document.getElementById('ws-anim-engine')?.value || 'anytop';
-  const animType = document.getElementById('ws-anim-type')?.value || 'idle';
+  // Multi-select: read all checked anim-type checkboxes. Fall back to
+  // the legacy single-select for any callsite still using it.
+  const checked = Array.from(document.querySelectorAll('#ws-anim-types input[name="anim-type"]:checked'))
+    .map(cb => cb.value);
+  const animTypes = checked.length
+    ? checked
+    : [document.getElementById('ws-anim-type')?.value || 'idle'];
   const prompt = (document.getElementById('ws-anim-prompt')?.value || '').trim();
   if (engine !== 'anytop') {
     customError(
@@ -13215,53 +13221,66 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     customError('autoAnimAI not exposed on this build', 'API missing');
     return;
   }
-  gatedRun('anim', `Animate (${animType}): ${p.name}`, async () => {
-    const job = pushJob(`Animate ${animType}: ${p.name}`, null, {
-      Engine: 'AnyTop (cloud GPU)',
-      Type: animType,
-      Prompt: prompt || '—',
-      'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),
-    }, 180000);
-    try {
-      const r = await API.autoAnimAI({
-        rigUrl: rig.url,
-        animType,
-        prompt,
-        engine,
-        onProgress: ({ polls, elapsedMs, lastWarn }) => {
-          const j = state.jobs.find(x => x.id === job.id);
-          if (!j || j.status !== 'running') return;
-          j.bridgeReporting = true;
-          const overTime = Math.max(0, elapsedMs - 180000);
-          const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
-          if (target > (j.progress || 0)) j.progress = target;
-          j.subtitle = (elapsedMs > 180000)
-            ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s (Modal cold start probable)`
-            : `Polling Modal (${polls} polls)`;
-          if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
-          renderJobs();
-        },
-      });
-      if (r?.success) {
-        completeJob(job.id, true);
-        renderAnimVersions(p);
-        await reloadCurrentProject();
-        const animCard = document.getElementById('step-card-animation');
-        if (animCard) {
-          animCard.classList.remove('collapsed', 'disabled');
-          const editStage = animCard.querySelector('.stage-edit');
-          if (editStage) editStage.open = true;
-          animCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          animCard.classList.add('pulse-highlight');
-          setTimeout(() => animCard.classList.remove('pulse-highlight'), 1500);
+  // Spawn ONE job per checked type. They run sequentially so we don't
+  // saturate the Modal anim app cold start (~30s per cold container)
+  // and so the credit ledger sees N discrete charges/refunds.
+  gatedRun('anim', `Animate (${animTypes.join(',')}): ${p.name}`, async () => {
+    for (const animType of animTypes) {
+      const job = pushJob(`Animate ${animType}: ${p.name}`, null, {
+        Engine: 'AnyTop (cloud GPU)',
+        Type: animType,
+        Prompt: prompt || '—',
+        'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),
+        Batch: `${animTypes.indexOf(animType) + 1}/${animTypes.length}`,
+      }, 180000);
+      try {
+        const r = await API.autoAnimAI({
+          rigUrl: rig.url,
+          animType,
+          prompt,
+          engine,
+          onProgress: ({ polls, elapsedMs, lastWarn }) => {
+            const j = state.jobs.find(x => x.id === job.id);
+            if (!j || j.status !== 'running') return;
+            j.bridgeReporting = true;
+            const overTime = Math.max(0, elapsedMs - 180000);
+            const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
+            if (target > (j.progress || 0)) j.progress = target;
+            j.subtitle = (elapsedMs > 180000)
+              ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s (Modal cold start probable)`
+              : `Polling Modal (${polls} polls)`;
+            if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
+            renderJobs();
+          },
+        });
+        if (r?.success) {
+          completeJob(job.id, true);
+          renderAnimVersions(p);
+        } else {
+          completeJob(job.id, false, r?.error || 'unknown');
+          if (!job.cancelled) reportPipelineError(r?.error, `Animate failed (${animType})`);
+          // Stop the batch on first failure so we don't burn credits on
+          // a Modal that's clearly down. The user can re-run just the
+          // remaining types.
+          break;
         }
-      } else {
-        completeJob(job.id, false, r?.error || 'unknown');
-        if (!job.cancelled) reportPipelineError(r?.error, 'Animate failed');
+      } catch (e) {
+        completeJob(job.id, false, e?.error || e?.message || String(e));
+        if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), `Animate error (${animType})`);
+        break;
       }
-    } catch (e) {
-      completeJob(job.id, false, e?.error || e?.message || String(e));
-      if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), 'Animate error');
+    }
+    // After the batch: refresh from server so persistence picks up all
+    // new clips, then reveal Step 4 Edit panel.
+    await reloadCurrentProject();
+    const animCard = document.getElementById('step-card-animation');
+    if (animCard) {
+      animCard.classList.remove('collapsed', 'disabled');
+      const editStage = animCard.querySelector('.stage-edit');
+      if (editStage) editStage.open = true;
+      animCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      animCard.classList.add('pulse-highlight');
+      setTimeout(() => animCard.classList.remove('pulse-highlight'), 1500);
     }
   });
 });
