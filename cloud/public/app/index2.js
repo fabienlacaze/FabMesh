@@ -17548,6 +17548,8 @@ async function extractLandmarksFromRig() {
       const pos = new THREE.Vector3();
       b.getWorldPosition(pos);
       placeLandmarkMarker(id, pos, colorById[id] || '#ffffff');
+      // Link the marker to the bone so drag can move the bone too.
+      if (lmMarkers[id]) lmMarkers[id].userData._linkedBone = b;
       matched++;
     }
     // Removed the geometric / hierarchical fallback — it was unreliable
@@ -17932,9 +17934,12 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
         const color = parseInt(colorHex.replace('#', ''), 16);
         // Snap to the CLOSEST bone if a rig is loaded — the user
         // is usually trying to target a specific bone visible via
-        // the SkeletonHelper. Without this, markers stick to the
+        // the skeleton overlay. Without this, markers stick to the
         // mesh surface, sometimes far from the bone they meant.
+        // Also remember WHICH bone we snapped to, so a future drag
+        // can update that bone's position (direct rig editing).
         let placePt = pt;
+        let snappedBone = null;
         try {
           const bones = [];
           model.traverse(c => {
@@ -17944,25 +17949,26 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
             }
           });
           if (bones.length) {
+            let bestBone = null;
             let best = null;
             let bestD = Infinity;
             const bp = new THREE.Vector3();
             for (const b of bones) {
               b.getWorldPosition(bp);
               const d = bp.distanceTo(pt);
-              if (d < bestD) { bestD = d; best = bp.clone(); }
+              if (d < bestD) { bestD = d; best = bp.clone(); bestBone = b; }
             }
-            // Only snap if the closest bone is reasonably close to the
-            // click (within 1/8 of the model size) — otherwise the user
-            // is trying to click in empty space and we keep the raw pt.
             if (best) {
               const bbox = new THREE.Box3().setFromObject(model);
               const sz = bbox.getSize(new THREE.Vector3()).length();
-              if (bestD < sz * 0.125) placePt = best;
+              if (bestD < sz * 0.125) { placePt = best; snappedBone = bestBone; }
             }
           }
         } catch (_) { /* fall through to raw pt */ }
         placeLandmarkMarker(lmActive, placePt, color);
+        if (snappedBone && lmMarkers[lmActive]) {
+          lmMarkers[lmActive].userData._linkedBone = snappedBone;
+        }
         saveLandmarksForCurrentMesh();
         btn?.classList.remove('armed');
         lmActive = null;
@@ -18019,6 +18025,19 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
       // the marker's — i.e. keep the marker on its original slice plane.
       const corrected = pt.clone().addScaledVector(camDir, markerDepth - hitDepth);
       marker.position.copy(corrected);
+      // If this marker is linked to an AI bone, move the bone too so
+      // the skinned mesh deforms in real time. Convert the new world
+      // position back to the bone's local space (relative to its
+      // parent) before assigning bone.position.
+      const linkedBone = marker.userData?._linkedBone;
+      if (linkedBone && linkedBone.parent) {
+        try {
+          linkedBone.parent.updateMatrixWorld(true);
+          const localPos = linkedBone.parent.worldToLocal(corrected.clone());
+          linkedBone.position.copy(localPos);
+          linkedBone.updateMatrixWorld(true);
+        } catch (e) { /* ignore */ }
+      }
       try { refreshLmFsSilhouetteDots && refreshLmFsSilhouetteDots(); } catch (_e) {}
     }
     e.stopPropagation();
