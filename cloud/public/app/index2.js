@@ -1686,6 +1686,10 @@ function resetWorkspaceUI() {
 function populateWorkspace(p) {
   // Reset UI first so stale previews/versions from a previous project are wiped
   resetWorkspaceUI();
+  // Make sure no landmark markers leak into the 3D Mesh main viewer
+  // from a prior session — they belong only in the rig source viewer
+  // and the fullscreen landmarks modal.
+  try { clearLandmarkMarkersFromMainViewer(); } catch (_) {}
 
   // Prompt resolution priority:
   //   1. Locally edited (localStorage) — survives reloads
@@ -17425,16 +17429,26 @@ async function loadLandmarksForCurrentMesh() {
 }
 
 function getActiveLandmarkModel() {
-  // Landmarks are a rig *input*, not an overlay to display on the finished
-  // rig viewer. The rig viewer (rigVwModel) has potentially a different
-  // unit scale (cm for FBX vs m for GLB source), so showing the stored
-  // mesh-space landmarks there produces wrong positions.
-  // Priority: fullscreen modal > rig source (clean mesh preview) > ws-mesh.
+  // Landmarks are a rig *input*, not an overlay to display on the
+  // finished rig viewer or on the 3D Mesh main viewer (cluttered the
+  // dragon viewer for the user).
+  // Priority: fullscreen modal > rig source (clean mesh preview).
+  // The main 3D Mesh viewer (wsScene/wsModel) is INTENTIONALLY excluded
+  // here so markers never pollute the primary preview.
   const lmFsOpen = document.getElementById('lm-fullscreen') && !document.getElementById('lm-fullscreen').classList.contains('hidden');
   if (lmFsOpen && lmFsModel) return { model: lmFsModel, scene: lmFsScene };
   if (rigSrcModel) return { model: rigSrcModel, scene: rigSrcScene };
-  if (wsModel) return { model: wsModel, scene: wsScene };
   return null;
+}
+
+// Cleanup: ensure no marker survives in the 3D Mesh main viewer
+// scene. Called from populateWorkspace so opening a project always
+// starts with a clean dragon preview.
+function clearLandmarkMarkersFromMainViewer() {
+  if (!wsScene) return;
+  for (const id in lmMarkers) {
+    try { wsScene.remove(lmMarkers[id]); } catch (_) {}
+  }
 }
 
 // ----------------------------------------------------------------
@@ -18115,6 +18129,26 @@ async function openLandmarksFullscreen() {
   function fitFs(obj) {
     lmFsModel = obj;
     lmFsScene.add(lmFsModel);
+    // 2026-06-01: when the loaded model is a RIG (has bones), add a
+    // SkeletonHelper so the user can SEE the actual AI-generated
+    // bone chains and drag landmark markers directly onto them.
+    // The helper is auto-removed by the next openLandmarksFullscreen
+    // because the whole lmFsModel is removed and re-added.
+    try {
+      let firstSkin = null;
+      obj.traverse((c) => { if (!firstSkin && c.isSkinnedMesh && c.skeleton) firstSkin = c; });
+      if (firstSkin) {
+        const helper = new THREE.SkeletonHelper(firstSkin);
+        helper.material.linewidth = 2;
+        helper.material.color.set(0x00ffd0);
+        helper.material.depthTest = false;
+        helper.material.transparent = true;
+        helper.material.opacity = 0.9;
+        helper.renderOrder = 998;
+        lmFsModel.add(helper);
+        lmFsModel.userData._skelHelper = helper;
+      }
+    } catch (e) { console.warn('[lm] SkeletonHelper failed:', e); }
     const box = new THREE.Box3().setFromObject(lmFsModel);
     const sizeVec = box.getSize(new THREE.Vector3());
     const size = sizeVec.length();
