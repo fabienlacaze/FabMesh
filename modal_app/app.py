@@ -473,11 +473,14 @@ class MyFabmeshPredictor:
         img = generate(self.pipe, enriched, seed=seed, steps=steps)
 
         # Parental control — matches desktop policy (FABMESH_UNRESTRICTED
-        # env var bypass).
+        # env var bypass). Pass asset_type so the skin-ratio fallback is
+        # skipped for animals/creatures/vehicles (which were tripping
+        # false-positives on lion fur, red cars, etc.).
         if os.environ.get("FABMESH_UNRESTRICTED") != "1":
-            safe, nsfw_score = is_safe(img, self.nsfw_clf1, self.nsfw_clf2)
+            safe, nsfw_score = is_safe(img, self.nsfw_clf1, self.nsfw_clf2,
+                                        asset_type=asset_type)
             if not safe:
-                print(f"[predict] BLOCKED nsfw={nsfw_score:.2f}", flush=True)
+                print(f"[predict] BLOCKED nsfw={nsfw_score:.2f} asset={asset_type}", flush=True)
                 img = make_blocked_placeholder(img.size)
 
         buf = io.BytesIO()
