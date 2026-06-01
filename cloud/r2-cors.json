@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://myfabmesh-cloud.fabien65400.workers.dev",
+          "https://myfabmesh.ai",
+          "https://www.myfabmesh.ai",
+          "http://localhost:3030",
+          "http://localhost:3000"
+        ],
+        "methods": ["GET", "HEAD"],
+        "headers": ["*"]
+      },
+      "exposeHeaders": ["Content-Length", "Content-Type", "ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
