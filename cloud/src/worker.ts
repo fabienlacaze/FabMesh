@@ -373,6 +373,55 @@ function supabaseAdmin(env: Env): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+/** Insert a row in user_assets so the client doesn't have to keep a
+ *  copy in localStorage (which was capping at ~5 MB and silently
+ *  dropping new generations on heavy users).
+ *
+ *  Best-effort: errors are logged but NEVER thrown — image generation
+ *  must not fail just because the table is unreachable; the R2 put
+ *  already succeeded and the client cache still works as fallback.
+ *
+ *  `r2_path` is the R2 key (without the public URL prefix). The
+ *  client computes the full URL from R2_PUBLIC_URL at render time. */
+async function insertUserAsset(
+  env: Env,
+  userId: string,
+  project: string,
+  kind: string,
+  r2_path: string,
+  parent_path: string | null = null,
+  meta: Record<string, unknown> = {},
+): Promise<void> {
+  if (!project || !r2_path) return;
+  try {
+    const sb = supabaseAdmin(env);
+    const { error } = await sb.from('user_assets').upsert({
+      user_id: userId,
+      project: String(project).slice(0, 128),
+      kind: String(kind).slice(0, 32),
+      r2_path,
+      parent_path,
+      meta,
+    }, {
+      onConflict: 'user_id,r2_path',
+      ignoreDuplicates: true,
+    });
+    if (error) console.warn('[insertUserAsset] failed:', error.message);
+  } catch (e) {
+    console.warn('[insertUserAsset] threw:', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Convenience: extract the R2 path from a public URL the worker
+ *  already returned (e.g. https://pub-xxx.r2.dev/<uid>/front/<file>.png).
+ *  Returns null if the URL doesn't match our bucket. */
+function r2PathFromPublicUrl(env: Env, url: string): string | null {
+  if (!url) return null;
+  const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '') + '/';
+  if (!prefix || !url.startsWith(prefix)) return null;
+  return url.slice(prefix.length);
+}
+
 /* ───── MOCK in-memory store (Worker-instance scoped, ephemeral) ─────
  * NOTE: this is identical-in-spirit to src/lib/mock-store.ts but lives
  * here so we don't need to refactor lib/*. Wipes on Worker recycle —
@@ -4207,15 +4256,26 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
     return json({ projects: Array.from(map.values()) });
   }
 
-  const { data, error } = await supabaseAdmin(env)
-    .from('jobs')
-    .select('id, user_id, asset_type, mode, status, mesh_url, created_at, finished_at, project_name, options')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (error) return err(500, error.message);
+  const sb = supabaseAdmin(env);
+  // Query jobs and user_assets in parallel — jobs supplies meshes,
+  // user_assets supplies images (replaces the localStorage cache the
+  // client used to maintain, which was hitting the 5 MB quota).
+  const [jobsRes, assetsRes] = await Promise.all([
+    sb.from('jobs')
+      .select('id, user_id, asset_type, mode, status, mesh_url, created_at, finished_at, project_name, options')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    sb.from('user_assets')
+      .select('id, project, kind, r2_path, parent_path, meta, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(2000),
+  ]);
+  if (jobsRes.error)   return err(500, jobsRes.error.message);
+  if (assetsRes.error) console.warn('[handleCloudProjects] user_assets query failed:', assetsRes.error.message);
 
-  const rows = (data ?? []) as CloudJobRow[];
+  const rows = (jobsRes.data ?? []) as CloudJobRow[];
   const map = new Map<string, ProjEntry>();
   for (const j of rows) {
     const name = j.project_name
@@ -4235,6 +4295,41 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
     }
     if (j.created_at > p.created) p.created = j.created_at;
     if (!p.prompt && j.options?.prompt) p.prompt = String(j.options.prompt);
+  }
+
+  // Merge user_assets images into the project map. The renderer
+  // expects p.images = string[] of public URLs (front-images
+  // primarily; back-images are in p.backPhotos as a front→back map).
+  const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+  const assets = (assetsRes.data ?? []) as Array<{
+    project: string; kind: string; r2_path: string;
+    parent_path: string | null; meta: Record<string, unknown> | null;
+    created_at: string;
+  }>;
+  for (const a of assets) {
+    if (!a.project) continue;
+    if (!map.has(a.project)) map.set(a.project, emptyProj(a.project));
+    const p = map.get(a.project)!;
+    const url = `${prefix}/${a.r2_path}`;
+    if (a.kind === 'image-front' || a.kind === 'image-tpose' || a.kind === 'image-modified' ||
+        a.kind === 'image-removebg' || a.kind === 'image-rectified' || a.kind === 'image-upscaled' ||
+        a.kind === 'image-inpainted' || a.kind === 'image-facefixed') {
+      p.images.push(url);
+      p.imagesData.push({ path: url, created: a.created_at, size: 0, mtime: a.created_at });
+    } else if (a.kind === 'image-back' && a.parent_path) {
+      const parentUrl = a.parent_path.startsWith('http') ? a.parent_path : `${prefix}/${a.parent_path}`;
+      p.backPhotos[parentUrl] = url;
+    }
+    if (a.created_at > p.created) p.created = a.created_at;
+  }
+
+  // Sort images newest-first per project (most-recent gens at top of strip).
+  for (const p of map.values()) {
+    const pairs = p.images.map((u, i) => ({ u, d: p.imagesData[i] }));
+    pairs.sort((a, b) => (b.d?.mtime || '').localeCompare(a.d?.mtime || ''));
+    p.images = pairs.map(x => x.u);
+    p.imagesData = pairs.map(x => x.d);
+    p.count = p.images.length;
   }
   return json({ projects: Array.from(map.values()) });
 }
@@ -5458,7 +5553,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   const { prompt, numImages, seed, asset_type, asset_style, userPrompt, steps,
-          tpose, refImageUrl, cn_scale, ip_scale } = await req.json() as {
+          tpose, refImageUrl, cn_scale, ip_scale, projectName } = await req.json() as {
     prompt?: string;
     userPrompt?: string;
     numImages?: number;
@@ -5466,6 +5561,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     asset_type?: string;
     asset_style?: string;
     steps?: number;
+    projectName?: string;   // for user_assets row insertion (Supabase-backed listing)
     // Strict T-pose front mode (verbatim port of desktop's
     // generate_front_tpose.py). When true, routes to MyFabmeshBackview's
     // /tpose endpoint instead of text2image. Required by RTS unit
@@ -5594,6 +5690,18 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     await logOperation(env, user.id, opType as keyof typeof MODAL_COST_USD,
                        COST_PER_IMAGE, opStart, Date.now(), 'succeeded',
                        { asset_type, asset_style });
+  }
+  // Persist in user_assets so /api/cloud-projects can list these
+  // without the client needing to cache R2 paths in localStorage.
+  if (projectName) {
+    const kind = useTpose ? 'image-tpose' : 'image-front';
+    for (const url of paths) {
+      const r2_path = r2PathFromPublicUrl(env, url);
+      if (r2_path) {
+        await insertUserAsset(env, user.id, projectName, kind, r2_path, null,
+          { asset_type, asset_style, prompt: rawPrompt.slice(0, 512), seed: seedBase });
+      }
+    }
   }
   return json({ ok: true, success: true, paths, creditsRemaining: remaining });
 }
@@ -6947,6 +7055,43 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
     return err(500, `R2 put failed: ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, path: key, lines: lines.length });
+}
+
+/** POST /api/user-assets/record — generic record-an-asset endpoint
+ *  the client calls after every successful image generation so the
+ *  R2 path is persisted in Supabase user_assets (replaces localStorage
+ *  cache). Body: { projectName, kind, paths: string[]|string,
+ *  parentPath?, meta? }. Idempotent: ON CONFLICT (user_id, r2_path)
+ *  do nothing. Returns { ok, inserted } */
+async function handleUserAssetsRecord(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const body = await req.json().catch(() => ({})) as {
+    projectName?: string;
+    kind?: string;
+    paths?: string[] | string;
+    parentPath?: string;
+    meta?: Record<string, unknown>;
+  };
+  const project = String(body?.projectName || '').slice(0, 128);
+  const kind    = String(body?.kind        || '').slice(0, 32);
+  const parent  = body?.parentPath ? String(body.parentPath).slice(0, 512) : null;
+  const meta    = (body?.meta && typeof body.meta === 'object') ? body.meta : {};
+  if (!project || !kind) return err(400, 'projectName and kind required');
+  const rawPaths = body?.paths;
+  const paths: string[] = Array.isArray(rawPaths) ? rawPaths
+                       : (typeof rawPaths === 'string' ? [rawPaths] : []);
+  if (!paths.length) return err(400, 'paths required');
+  let inserted = 0;
+  for (const url of paths) {
+    if (!url || typeof url !== 'string') continue;
+    // Accept either a full public URL or a raw R2 key.
+    const r2_path = r2PathFromPublicUrl(env, url) ?? url;
+    if (!r2_path || r2_path.startsWith('http')) continue;
+    await insertUserAsset(env, user.id, project, kind, r2_path, parent, meta);
+    inserted++;
+  }
+  return json({ ok: true, inserted });
 }
 
 /** GET /api/client-log/list — returns the recent log keys for the
@@ -9324,6 +9469,7 @@ export default {
         if (pathname === '/api/parental/toggle'       && method === 'POST') return await handleParentalToggle(req, env);
         if (pathname === '/api/client-log'            && method === 'POST') return await handleClientLog(req, env);
         if (pathname === '/api/client-log/list'       && method === 'GET')  return await handleClientLogList(req, env);
+        if (pathname === '/api/user-assets/record'    && method === 'POST') return await handleUserAssetsRecord(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);
         if (pathname === '/api/me/inbox/read'         && method === 'POST') return await handleMeInboxRead(req, env);

@@ -366,6 +366,7 @@
             prompt,              // already-enriched fallback
             userPrompt,          // raw user text (Worker re-enriches)
             numImages, asset_type, asset_style, steps,
+            projectName,         // for user_assets row insertion
           }),
           credentials: 'include',
         });
@@ -802,9 +803,58 @@
       if (projectName) _appendCloudImages(projectName, [newPath], kind || 'front');
     } catch (_) { /* ignore */ }
   }
-  function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */) {
+  // Map the legacy `kind` (front/back/view) into the user_assets `kind`
+  // values the worker stores (image-front/image-back/image-...).
+  function _userAssetKind(legacyKind) {
+    switch (legacyKind) {
+      case 'front':     return 'image-front';
+      case 'back':      return 'image-back';
+      case 'view':      return 'image-view';
+      case 'modified':  return 'image-modified';
+      case 'removebg':  return 'image-removebg';
+      case 'rectified': return 'image-rectified';
+      case 'upscaled':  return 'image-upscaled';
+      case 'inpainted': return 'image-inpainted';
+      case 'facefixed': return 'image-facefixed';
+      default:          return `image-${legacyKind || 'unknown'}`;
+    }
+  }
+
+  // Persist a new image to Supabase user_assets (replaces the
+  // localStorage cache so we never hit the 5 MB quota again).
+  // Fire-and-forget so it never blocks the success path; the
+  // localStorage write below still runs as a transient fallback in
+  // case the API call drops.
+  function _recordUserAsset(projectName, urls, legacyKind, parentPath) {
+    if (!projectName || !urls || !urls.length) return;
+    try {
+      fetch('/api/user-assets/record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectName,
+          kind: _userAssetKind(legacyKind),
+          paths: urls,
+          parentPath: parentPath || null,
+        }),
+        credentials: 'include',
+        keepalive: true,
+      }).then(r => r.json().catch(() => ({}))).then(j => {
+        console.log('[user-assets/record]', _userAssetKind(legacyKind),
+                    'projectName=', projectName,
+                    'inserted=', j?.inserted, 'of', urls.length);
+      }).catch(e => console.warn('[user-assets/record] failed:', e?.message || e));
+    } catch (e) { console.warn('[user-assets/record] threw:', e?.message || e); }
+  }
+
+  function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */, parentPath) {
     console.log('[_appendCloudImages] CALLED name=', projectName, 'urls=', urls, 'kind=', kind);
     if (!projectName) { console.warn('[_appendCloudImages] no projectName, skip'); return; }
+    // Primary path: tell the worker to record in Supabase user_assets.
+    _recordUserAsset(projectName, urls, kind, parentPath);
+    // Legacy localStorage path — kept for now as a transient fallback
+    // (worker-side row appears in /api/cloud-projects on next reload;
+    // the local cache fills the gap between gen and reload).
     const k = _imgKey(projectName);
     const payload = urls || [];
     function tryWrite() {
