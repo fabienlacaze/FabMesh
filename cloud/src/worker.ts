@@ -7057,6 +7057,54 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, path: key, lines: lines.length });
 }
 
+/** POST /api/thumbs/upload — stores a mesh thumbnail in R2 instead of
+ *  the client's localStorage (where a single PNG dataURL was eating
+ *  100-200 KB and saturating the 5 MB origin cap). Body: {meshKey,
+ *  dataUrl} where dataUrl is a data:image/png|webp;base64,... or raw
+ *  base64 PNG. Stores under <uid>/thumb/<base>.webp (or .png).
+ *  Returns the public URL. */
+async function handleThumbsUpload(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const body = await req.json().catch(() => ({})) as {
+    meshKey?: string;
+    dataUrl?: string;
+  };
+  const meshKey = String(body?.meshKey || '').trim();
+  if (!meshKey) return err(400, 'meshKey required');
+  // Strip everything but a safe filename: keep alnum/_/-/. and slice.
+  const safeBase = meshKey.replace(/^.*[/\\]/, '').replace(/\.[^.]+$/, '')
+                          .replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96);
+  if (!safeBase) return err(400, 'invalid meshKey');
+  let dataUrl = String(body?.dataUrl || '');
+  let mime = 'image/png';
+  const m = dataUrl.match(/^data:(image\/(png|webp|jpeg));base64,(.+)$/);
+  if (m) { mime = m[1]; dataUrl = m[3]; }
+  if (!dataUrl) return err(400, 'dataUrl required');
+  // Decode base64
+  let bytes: Uint8Array;
+  try {
+    const bin = atob(dataUrl);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch { return err(400, 'invalid base64'); }
+  if (bytes.length > 512 * 1024) return err(413, 'thumb too large (max 512 KB)');
+  const ext = mime === 'image/webp' ? 'webp' : (mime === 'image/jpeg' ? 'jpg' : 'png');
+  const key = `${user.id}/thumb/${safeBase}.${ext}`;
+  await env.MESHES.put(key, bytes, {
+    httpMetadata: { contentType: mime, cacheControl: 'public, max-age=31536000, immutable' },
+  });
+  const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+  const url = `${prefix}/${key}`;
+  // Record in user_assets so handleCloudProjects can return it.
+  // No project here — we look up the mesh's project via the meshes
+  // table. For simplicity we record under a synthetic project '_thumbs'
+  // and the client falls back to the URL convention.
+  await insertUserAsset(env, user.id, '_thumbs', 'thumb-mesh', key, meshKey, { mime });
+  return json({ ok: true, url, key });
+}
+
 /** POST /api/user-assets/record — generic record-an-asset endpoint
  *  the client calls after every successful image generation so the
  *  R2 path is persisted in Supabase user_assets (replaces localStorage
@@ -9470,6 +9518,7 @@ export default {
         if (pathname === '/api/client-log'            && method === 'POST') return await handleClientLog(req, env);
         if (pathname === '/api/client-log/list'       && method === 'GET')  return await handleClientLogList(req, env);
         if (pathname === '/api/user-assets/record'    && method === 'POST') return await handleUserAssetsRecord(req, env);
+        if (pathname === '/api/thumbs/upload'         && method === 'POST') return await handleThumbsUpload(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);
         if (pathname === '/api/me/inbox/read'         && method === 'POST') return await handleMeInboxRead(req, env);

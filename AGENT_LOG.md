@@ -1,5 +1,71 @@
 # FabMesh Agent Log
 
+## 2026-06-01 (Durable fix: Supabase user_assets + R2 thumbs migration)
+
+**Pourquoi**: la pré-version (purge agressive on-demand) marchait mais
+re-purgeait à chaque génération les caches des autres projets. Quota
+localStorage 5 Mo trop petit pour 19 projets × dataURL PNG vignettes
++ emissive layers. Solution durable: déplacer les caches lourds hors
+de localStorage.
+
+**Architecture**:
+
+1. **Nouvelle table Supabase `user_assets`** (`cloud/supabase/migrations/
+   20260601_user_assets.sql`) — une row par asset (image-front,
+   image-back, image-modified, image-removebg, image-rectified,
+   image-upscaled, image-inpainted, image-facefixed, image-tpose,
+   thumb-mesh). Colonnes: user_id, project, kind, r2_path, parent_path,
+   meta JSONB, created_at. Index sur (user_id, project, created_at) +
+   (user_id, kind, created_at). Unique (user_id, r2_path) pour
+   idempotence. RLS: own_assets policy SELECT. Writes via service_role
+   (worker). Appliquée via `npx supabase db push --linked`.
+
+2. **Worker** (`cloud/src/worker.ts`):
+   - `insertUserAsset(env, userId, project, kind, r2_path, parent_path,
+     meta)` — UPSERT idempotent best-effort, never throws.
+   - `r2PathFromPublicUrl(env, url)` — extrait la R2 key d'une public URL.
+   - `handleGenerateImage`: accepte `projectName` dans body, INSERT chaque
+     path comme image-front/image-tpose après le success path.
+   - `handleCloudProjects`: query user_assets en parallèle avec jobs,
+     merge images + back-photos + imagesData dans le map, tri newest-first.
+   - `handleUserAssetsRecord` (POST /api/user-assets/record) — endpoint
+     générique pour record any asset depuis le client (back-view,
+     image-op, upscale, rectify, etc.). Idempotent.
+   - `handleThumbsUpload` (POST /api/thumbs/upload) — accepte dataURL
+     base64, upload R2 sous `<uid>/thumb/<base>.<ext>`, INSERT user_assets
+     kind='thumb-mesh'. Cap 512 KB.
+
+3. **Client** (`cloud/public/app/meshyAPI-cloud.js`):
+   - `_userAssetKind(legacyKind)` mappe front→image-front etc.
+   - `_recordUserAsset(projectName, urls, legacyKind, parentPath)` —
+     fire-and-forget POST vers /api/user-assets/record.
+   - `_appendCloudImages` appelle _recordUserAsset en plus du localStorage
+     legacy (fallback transitoire).
+   - `generateImages` passe `projectName` dans le body.
+   - `saveThumbnail` upload via /api/thumbs/upload au lieu de localStorage
+     setItem(dataURL). Cache l'URL retournée (~150 chars) dans
+     `myfm:thumburl:<base>` (vs ~200 KB pour le dataURL).
+   - `getThumbnail` lit l'URL cache, fallback legacy dataURL si présent.
+   - **One-shot cleanup au boot**: drop `myfm:thumb:*`, `myfm:cloudimages:*`,
+     `myfm:backphotos:*` (legacy, ~3-5 MB freed sur heavy users).
+
+4. **Console-capture** (`cloud/public/app/console-capture.js` +
+   `/api/client-log`): patch `console.*` en ring buffer 2000 lignes,
+   auto-flush à chaque `completeJob()` vers
+   R2 `<uid>/logs/<ts>_<kind>_<status>.log`. Permet à Claude de lire
+   les logs browser sans copier-coller via `wrangler r2 object get`.
+
+**Bumps wrangler.toml**: `MAX_USER_DAILY_CALLS` 100 → 1000 (heavy dev/test
+sessions cassent 100 en un AM). Bornage cost reste via
+MAX_DAILY_SPEND_USD ($5) + MAX_DAILY_MODAL_SPEND_USD.
+
+**Backup branch**: `backup-before-supabase-images-20260601-155940` pour
+revert facile si la migration foire.
+
+**Phase 3 future** (non fait aujourd'hui): emissive layers (`myfm:emissive:*`)
+→ IndexedDB. Aujourd'hui dropped au boot par le cleanup; à long-terme
+mieux de les persister proprement.
+
 ## 2026-06-01 (Fix: localStorage QuotaExceeded silencing "no new image version")
 
 **Symptôme utilisateur**: après une génération d'image cloud,
