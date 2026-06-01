@@ -2156,16 +2156,16 @@
   // Step 3 — drop the heavy legacy keys (dataURL thumbs, the now-
   // migrated cloudimages cache, back-photos). Skips if Step 1 fails.
   (async function _migrateAndCleanup() {
-    // Guard bumped v2 → v3 to add Step 2b (reassign-orphans by
-    // timestamp matching). Users on v2 saw all their images dumped
-    // into a single _orphans project because jobs.options.sourceImage
-    // was empty; v3 redistributes them to the right project.
-    const guardKey = 'myfm:migration:v3';
+    // Guard v4: re-run reassign-orphans with the wider 1h window
+    // (v3 used 10 min and left dragon/lion/orc-soldier images behind
+    // because the gap between image-gen and mesh-gen was wider).
+    const guardKey = 'myfm:migration:v4';
     try {
       if (localStorage.getItem(guardKey) === 'done') return;
       try { localStorage.removeItem('myfm:migration:v1'); } catch (_) {}
       try { localStorage.removeItem('myfm:migration:v2'); } catch (_) {}
-      log('migration: starting one-shot Supabase backfill + cleanup (v3)');
+      try { localStorage.removeItem('myfm:migration:v3'); } catch (_) {}
+      log('migration: starting one-shot Supabase backfill + cleanup (v4)');
 
       // Step 1: migrate per-project image caches (if still present).
       const migrationCalls = [];
