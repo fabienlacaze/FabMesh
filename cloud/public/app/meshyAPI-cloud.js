@@ -1634,7 +1634,7 @@
     // Mirrors autoRigAI: spawn /api/animate, poll /api/animate-status
     // every 5s. Worker uploads the animated GLB to R2 on done; we push
     // it into state.currentProject.animations[].
-    autoAnimAI: async ({ rigPath, rigUrl, animType, prompt, engine, onProgress } = {}) => {
+    autoAnimAI: async ({ rigPath, rigUrl, animType, prompt, engine, onProgress, batchId, projectName } = {}) => {
       const url = rigUrl || rigPath;
       if (!url) return { success: false, ok: false, error: 'rigPath or rigUrl required' };
       let jobId;
@@ -1644,6 +1644,8 @@
           anim_type: animType || 'idle',
           prompt: prompt || '',
           engine: engine || 'anytop',
+          batch_id: batchId || null,
+          projectName: projectName || null,
         });
         if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
         if (!spawn?.success || !spawn?.job_id) {

@@ -4399,13 +4399,15 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     for (const obj of listed.objects) {
       const filename = obj.key.split('/').pop() || 'anim.glb';
       const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
-      // Anim filename pattern (worker.ts handleAutoAnimStatus l. 6890):
-      //   <baseName>_<animType>_<timestamp>.glb
-      // where baseName comes from the rig URL — typically
-      //   modal_<hex>_rigged_puppeteer_<rigTs>_<animType>_<animTs>.glb
-      // Strip _<animType>_<ts>.glb to recover the rig basename, then
-      // strip _rigged_.* to recover the source mesh slug.
-      const beforeAnim = filename.replace(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_\d{10,}\.glb$/i, '');
+      // Anim filename pattern (worker.ts handleAutoAnimStatus):
+      //   <baseName>_<animType>_<batchId>_<timestamp>.glb   (post-batch)
+      //   <baseName>_<animType>_<timestamp>.glb             (legacy)
+      // Extract batchId if present so the client can group clips of
+      // the same Generate click into one version.
+      const batchMatch = filename.match(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_([A-Za-z0-9_-]{4,32})_\d{10,}\.glb$/i);
+      const animType = batchMatch ? batchMatch[1].toLowerCase() : 'clip';
+      const batchId = batchMatch ? batchMatch[2] : '';
+      const beforeAnim = filename.replace(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_(?:[A-Za-z0-9_-]{4,32}_)?\d{10,}\.glb$/i, '');
       const beforeRigged = beforeAnim.replace(/_rigged_.*$/i, '');
       const cleanSlug = beforeRigged.replace(/^modal_/i, '').toLowerCase();
       const source = meshes.find(m => {
@@ -4424,6 +4426,8 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
         thumb: null,
         sourceImage: null,
         asset_type: 'animation',
+        anim_type: animType,
+        batch_id: batchId,
         projectName: inheritedProject,
         id: filename.replace(/\.glb$/i, ''),
       });
@@ -6414,6 +6418,8 @@ interface AnimJobRecord {
   rig_url: string;
   anim_type: string;
   created_at: number;
+  batch_id?: string;
+  project_name?: string;
 }
 
 async function putAnimJobRecord(
@@ -6758,7 +6764,7 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
   if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
   if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
 
-  let body: { rig_url?: string; anim_type?: string; prompt?: string; engine?: string };
+  let body: { rig_url?: string; anim_type?: string; prompt?: string; engine?: string; batch_id?: string; projectName?: string };
   try {
     body = await req.json() as typeof body;
   } catch {
@@ -6769,6 +6775,13 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
   if (!isTrustedAssetHost(env, rigUrl)) return err(400, 'rig_url host not allowed');
   const animType = typeof body.anim_type === 'string' ? body.anim_type.slice(0, 32) : 'idle';
   const prompt = typeof body.prompt === 'string' ? body.prompt.slice(0, 400) : '';
+  // batch_id groups all animations spawned by the same "Generate" click
+  // so the client can show them as ONE version (v0 = batch with run+idle,
+  // v1 = batch with run+attack, etc.) instead of one version per type.
+  const batchId = typeof body.batch_id === 'string'
+    ? body.batch_id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32)
+    : '';
+  const projectName = typeof body.projectName === 'string' ? body.projectName : '';
 
   const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM);
   if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
@@ -6832,6 +6845,8 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
     rig_url: rigUrl,
     anim_type: animType,
     created_at: Date.now(),
+    batch_id: batchId || undefined,
+    project_name: projectName || undefined,
   });
   return json({ success: true, job_id: jobId, status: 'queued', creditsRemaining: remaining });
 }
@@ -6929,7 +6944,12 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
       } catch {}
     }
     const animType = record?.anim_type || 'clip';
-    const key = `${user.id}/animations/${baseName}_${animType}_${Date.now()}.glb`;
+    // Embed batch_id in the filename so the listing endpoint can
+    // re-group clips generated together into a single "version" on the
+    // client. Format: <base>_<type>_<batchId>_<ts>.glb. Legacy keys
+    // without batch_id segment fall back to per-clip versioning.
+    const batchSeg = record?.batch_id ? `${record.batch_id}_` : '';
+    const key = `${user.id}/animations/${baseName}_${animType}_${batchSeg}${Date.now()}.glb`;
     try {
       await env.MESHES.put(key, fetchResp.body, {
         httpMetadata: { contentType: 'model/gltf-binary' },

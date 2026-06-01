@@ -585,13 +585,16 @@ async function refreshProjectsPage() {
                  || meshProject(m.filename);
     const p = ensure(project);
     if (m.asset_type === 'animation' || /_anim_|_animation_/i.test(m.filename)) {
-      // Extract anim type from filename: <base>_<type>_<ts>.glb where
-      // <type> is one of idle/walk/run/attack/death/fly (matches
-      // worker.ts handleAutoAnimStatus naming at line 6890).
-      const typeMatch = m.filename.match(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_\d{10,}\.glb$/i);
-      const animType = (typeMatch ? typeMatch[1] : 'clip').toLowerCase();
+      // Worker now returns anim_type + batch_id parsed from the
+      // filename. Fall back to local parsing for legacy entries.
+      let animType = (m.anim_type || '').toLowerCase();
+      let batchId = m.batch_id || '';
+      if (!animType) {
+        const m1 = m.filename.match(/_(idle|walk|run|attack|death|fly|jump|custom|clip)_(?:[A-Za-z0-9_-]{4,32}_)?\d{10,}\.glb$/i);
+        animType = (m1 ? m1[1] : 'clip').toLowerCase();
+      }
       p.animations = p.animations || [];
-      p.animations.push({ ...m, type: animType });
+      p.animations.push({ ...m, type: animType, batchId });
     } else if (/_rigged_/i.test(m.filename)) {
       p.rigs.push(m);
     } else {
@@ -13045,11 +13048,12 @@ document.getElementById('ws-anim-type')?.addEventListener('change', _wsAnimEngin
 _wsAnimEngineSync();
 
 // Render animation versions strip (placeholder).
-// Group animations by type so each type has its own version stack
-// (idle v0/v1/v2, attack v0/v1/v2, etc.) — matches how meshes/rigs
-// are versioned. Type button under the viewer selects which stack
-// the right-side strip shows.
-let _step4SelectedType = null;
+// User model: 1 VERSION = 1 batch of generation (all clips spawned by
+// the same "Generate" click share a batch_id). Right-side strip shows
+// v0/v1/v2/... per BATCH (newest first). Type buttons under the viewer
+// show which clips are in the CURRENTLY-SELECTED version.
+let _step4SelectedBatch = null;
+let _step4SelectedClipInBatch = null;
 function renderAnimVersions(p) {
   const typeBtns = document.getElementById('ws-anim-type-buttons');
   const strip = document.getElementById('ws-anim-versions');
@@ -13063,53 +13067,72 @@ function renderAnimVersions(p) {
   const iconFor = (t) => t === 'idle' ? '😴' : t === 'walk' ? '🚶'
     : t === 'run' ? '🏃' : t === 'attack' ? '⚔️'
     : t === 'death' ? '💀' : t === 'fly' ? '✈️' : '🎬';
-  // Group by type (preserving newest-first chronological order).
-  const byType = new Map();
-  const sortedAll = [...anims].sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
-  for (const a of sortedAll) {
-    const t = (a.type || 'clip').toLowerCase();
-    if (!byType.has(t)) byType.set(t, []);
-    byType.get(t).push(a);
+  // Group by batchId. Animations without one (legacy keys) each
+  // become their own batch — keyed by filename so they stay distinct.
+  const byBatch = new Map();
+  for (const a of anims) {
+    const key = a.batchId || `single_${a.filename || a.url}`;
+    if (!byBatch.has(key)) byBatch.set(key, []);
+    byBatch.get(key).push(a);
   }
-  // Default selected type = the most-recently-generated overall.
-  if (!_step4SelectedType || !byType.has(_step4SelectedType)) {
-    _step4SelectedType = sortedAll[0]?.type?.toLowerCase() || [...byType.keys()][0];
+  // Sort batches by newest member's timestamp, newest first.
+  const batches = [...byBatch.entries()].map(([id, clips]) => {
+    const latest = Math.max(...clips.map(c => new Date(c.created || 0).getTime()));
+    return { id, clips, latest };
+  }).sort((a, b) => b.latest - a.latest);
+
+  // Default selection = newest batch + its first clip.
+  if (!_step4SelectedBatch || !byBatch.has(_step4SelectedBatch)) {
+    _step4SelectedBatch = batches[0].id;
+    _step4SelectedClipInBatch = batches[0].clips[0];
   }
-  // Render TYPE buttons under viewer.
-  typeBtns.innerHTML = [...byType.keys()].map(t => `
-    <button class="anim-type-btn${t === _step4SelectedType ? ' selected' : ''}" data-anim-type="${t}"
-            style="display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 12px; min-width:64px;
-                   background:${t === _step4SelectedType ? 'var(--bg-2)' : 'transparent'};
-                   border:2px solid ${t === _step4SelectedType ? 'var(--accent)' : 'var(--border)'};
-                   border-radius:6px; cursor:pointer; color:var(--text-0); font-size:11px;">
-      <span style="font-size:18px;">${iconFor(t)}</span>
-      <span style="text-transform:uppercase; font-weight:600;">${t}</span>
-      <span style="font-size:9px; color:var(--text-2);">${byType.get(t).length} ver.</span>
-    </button>
-  `).join('');
-  typeBtns.querySelectorAll('.anim-type-btn').forEach(b => {
-    b.addEventListener('click', () => {
-      _step4SelectedType = b.dataset.animType;
+  const currentBatch = batches.find(b => b.id === _step4SelectedBatch);
+  const clipsInBatch = currentBatch ? currentBatch.clips : [];
+  if (!clipsInBatch.includes(_step4SelectedClipInBatch)) {
+    _step4SelectedClipInBatch = clipsInBatch[0] || null;
+  }
+
+  // RIGHT strip = the versions (batches). Each thumb stacks the type
+  // icons of all clips in that batch so the user can tell them apart
+  // at a glance (e.g. v0 thumb shows 🏃😴 for a Run+Idle batch).
+  strip.innerHTML = batches.map((b, i) => {
+    const icons = b.clips.map(c => iconFor(c.type)).slice(0, 4).join('');
+    return `
+      <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}">
+        <div class="version-thumb-icon" style="font-size:18px; line-height:1.1; display:flex; align-items:center; justify-content:center; height:42px; letter-spacing:-2px;">${icons}</div>
+        <div class="version-thumb-sub">v${i}</div>
+      </div>`;
+  }).join('');
+  strip.querySelectorAll('.version-thumb').forEach(t => {
+    t.addEventListener('click', () => {
+      _step4SelectedBatch = t.dataset.batchId;
+      _step4SelectedClipInBatch = null; // reset → falls back to first
       renderAnimVersions(p);
     });
   });
-  // Render VERSION strip for the selected type.
-  const versions = byType.get(_step4SelectedType) || [];
-  strip.innerHTML = versions.map((a, i) => `
-    <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}">
-      <div class="version-thumb-icon" style="font-size:22px; display:flex; align-items:center; justify-content:center; height:42px;">${iconFor(a.type)}</div>
-      <div class="version-thumb-sub">v${i}</div>
-    </div>
-  `).join('');
-  strip.querySelectorAll('.version-thumb').forEach(t => {
-    t.addEventListener('click', () => {
-      strip.querySelectorAll('.version-thumb').forEach(o => o.classList.remove('selected'));
-      t.classList.add('selected');
-      const idx = parseInt(t.dataset.animIdx, 10);
-      showStep4AnimPreview(versions[idx]);
+
+  // BOTTOM = the clips contained in the selected version (1 button
+  // per type — clicking one swaps the viewer to that clip).
+  typeBtns.innerHTML = clipsInBatch.map(c => {
+    const isSel = c === _step4SelectedClipInBatch;
+    return `
+      <button class="anim-type-btn${isSel ? ' selected' : ''}" data-clip-id="${c.id}"
+              style="display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 12px; min-width:64px;
+                     background:${isSel ? 'var(--bg-2)' : 'transparent'};
+                     border:2px solid ${isSel ? 'var(--accent)' : 'var(--border)'};
+                     border-radius:6px; cursor:pointer; color:var(--text-0); font-size:11px;">
+        <span style="font-size:18px;">${iconFor(c.type)}</span>
+        <span style="text-transform:uppercase; font-weight:600;">${c.type || 'clip'}</span>
+      </button>`;
+  }).join('');
+  typeBtns.querySelectorAll('.anim-type-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      _step4SelectedClipInBatch = clipsInBatch.find(c => c.id === b.dataset.clipId) || clipsInBatch[0];
+      renderAnimVersions(p);
     });
   });
-  if (versions[0]) showStep4AnimPreview(versions[0]);
+
+  if (_step4SelectedClipInBatch) showStep4AnimPreview(_step4SelectedClipInBatch);
 }
 
 // Renders the selected animation GLB into the Step 4 viewer using
@@ -13257,6 +13280,9 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     customError('autoAnimAI not exposed on this build', 'API missing');
     return;
   }
+  // batchId shared across all clips of this Generate click → server
+  // groups them into ONE version (v0) instead of N versions.
+  const batchId = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   // Spawn ONE job per checked type. They run sequentially so we don't
   // saturate the Modal anim app cold start (~30s per cold container)
   // and so the credit ledger sees N discrete charges/refunds.
@@ -13275,6 +13301,8 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
           animType,
           prompt,
           engine,
+          batchId,
+          projectName: p?.name || null,
           onProgress: ({ polls, elapsedMs, lastWarn }) => {
             const j = state.jobs.find(x => x.id === job.id);
             if (!j || j.status !== 'running') return;
