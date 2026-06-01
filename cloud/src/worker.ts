@@ -6753,6 +6753,42 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   });
 }
 
+/** POST /api/animations/upload — multipart: file=<glb>, animType=<idle|run|...>,
+ *  projectName=<...>. Stores the user-provided animated GLB as a new
+ *  version under <user.id>/animations/<projectSlug>/<base>_manual_<type>_<batchId>_<ts>.glb
+ *  so it shows up in the version strip alongside generated ones. The
+ *  GLB must start with 'glTF' magic; size cap 50 MB. */
+async function handleAnimUpload(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+  let form: FormData;
+  try { form = await req.formData(); } catch { return err(400, 'multipart body required'); }
+  const file = form.get('file');
+  if (!(file instanceof File)) return err(400, 'file field required');
+  if (file.size > 50 * 1024 * 1024) return err(413, 'file too large (max 50 MB)');
+  const animType = (String(form.get('animType') || 'clip').toLowerCase().replace(/[^a-z]/g, '') || 'clip').slice(0, 16);
+  const projectName = String(form.get('projectName') || '');
+  const projectSlug = (projectName || 'untitled').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled';
+  // Sniff GLB magic to reject random binaries.
+  const head = await file.slice(0, 4).arrayBuffer();
+  const magic = new TextDecoder().decode(new Uint8Array(head));
+  if (magic !== 'glTF') return err(400, 'not a GLB file (magic mismatch)');
+  const batchId = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const baseName = (file.name || 'imported').replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'imported';
+  const key = `${user.id}/animations/${projectSlug}/${baseName}_manual_${animType}_${batchId}_${Date.now()}.glb`;
+  try {
+    await env.MESHES.put(key, file.stream(), {
+      httpMetadata: { contentType: 'model/gltf-binary' },
+    });
+  } catch (e) {
+    return err(500, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+  return json({ ok: true, url: publicUrl, key, animType, batchId });
+}
+
+
 /** POST /api/animations/delete — body { url }. Removes the R2 blob
  *  if and only if the URL points under <user.id>/animations/ (so a
  *  hostile body can't nuke unrelated R2 keys). Always idempotent —
@@ -9041,6 +9077,7 @@ export default {
         if (pathname === '/api/animate'               && method === 'POST') return await handleAutoAnim(req, env);
         if (pathname === '/api/animate-status'        && (method === 'GET' || method === 'POST')) return await handleAutoAnimStatus(req, env);
         if (pathname === '/api/animations/delete'     && method === 'POST') return await handleAnimDelete(req, env);
+        if (pathname === '/api/animations/upload'     && method === 'POST') return await handleAnimUpload(req, env);
         if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
