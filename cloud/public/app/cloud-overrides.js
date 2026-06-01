@@ -432,6 +432,15 @@
         ? (io.expected_seconds_warm || 30)
         : (io.expected_seconds_cold || 150);
       window.__modalSecondsSinceLastSuccess = io.seconds_since_last_success;
+      // Per-container map so callers can pick the right pill based on
+      // the op they're about to fire (text2image vs mesh vs rig…).
+      window.__modalContainers = {
+        image_op:   d?.image_op,
+        text2image: d?.text2image,
+        back_view:  d?.back_view,
+        tpose:      d?.tpose,
+        mesh:       d?.mesh,
+      };
       try {
         console.log('[modalStatus]', {
           warm: window.__modalWarm,
@@ -442,19 +451,31 @@
       // Notify any listener (AI tool modals can update their pill).
       try { window.dispatchEvent(new CustomEvent('modal-status', { detail: io })); }
       catch (_) {}
-      // Drive the topbar warm-up pill: visible whenever Modal is cold,
-      // hidden as soon as it reports warm. Avoids stale UI by being
-      // tied to the same poll that already runs every 60s.
+      // Drive the topbar warm-up pill: only shows COLD containers and
+      // names them explicitly so the user knows which kind of op will
+      // pay the cold-start tax. Hidden when every container is warm.
       try {
         const pill = document.getElementById('gpu-warmup-pill');
         const txt  = document.getElementById('gpu-warmup-text');
         if (pill) {
-          if (window.__modalWarm === false) {
-            const eta = Math.round((window.__modalExpectedSeconds || 150) / 60 * 10) / 10;
-            if (txt) txt.textContent = `Cloud GPU warming up (~${eta} min)`;
-            pill.style.display = 'inline-flex';
-          } else {
+          const C = window.__modalContainers || {};
+          const COLD_LABELS = {
+            text2image: 'image gen',
+            image_op:   'image edit',
+            back_view:  'back-view',
+            tpose:      'T-pose',
+            mesh:       '3D mesh',
+          };
+          const coldList = [];
+          for (const [k, v] of Object.entries(C)) {
+            if (v && v.warm === false) coldList.push(COLD_LABELS[k] || k);
+          }
+          if (coldList.length === 0) {
             pill.style.display = 'none';
+          } else {
+            const eta = Math.round((C.text2image?.expected_seconds_cold || 150) / 60 * 10) / 10;
+            if (txt) txt.textContent = `${coldList.join(' + ')} cold (~${eta} min on first call)`;
+            pill.style.display = 'inline-flex';
           }
         }
       } catch (_) {}

@@ -5130,6 +5130,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] text2image dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _writeLastWarmMs(env, '_meta/last_warm_text2image.txt').catch(() => {});
   _assertImageBytes(buf, 'Modal text2image');
 
   // Mirror to R2 (same key shape as the Cog path so downstream stays uniform).
@@ -5229,6 +5230,7 @@ async function callModalBackView(env: Env, userId: string, input: {
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] back-view dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _writeLastWarmMs(env, '_meta/last_warm_back_view.txt').catch(() => {});
 
   _assertImageBytes(buf, 'Modal back-view');
 
@@ -5357,6 +5359,7 @@ async function callModalTpose(env: Env, userId: string, input: {
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] tpose dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _writeLastWarmMs(env, '_meta/last_warm_tpose.txt').catch(() => {});
   _assertImageBytes(buf, 'Modal tpose');
 
   if (env.MESHES && env.R2_PUBLIC_URL) {
@@ -5686,6 +5689,8 @@ async function persistModalGlb(env: Env, jobId: string, glbBase64: string): Prom
   await env.MESHES.put(key, buf.buffer, {
     httpMetadata: { contentType: 'model/gltf-binary' },
   });
+  // Tag the mesh container as warm.
+  _writeLastWarmMs(env, '_meta/last_warm_mesh.txt').catch(() => {});
   return `${env.R2_PUBLIC_URL}/${key}`;
 }
 
@@ -6620,17 +6625,30 @@ async function _writeLastWarmMs(env: Env, key: string): Promise<void> {
 async function handleModalStatus(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
-  const last = await _readLastWarmMs(env, '_meta/last_warm_image_op.txt');
   const now = Date.now();
-  const secondsSinceLastSuccess = last ? Math.floor((now - last) / 1000) : null;
-  const warm = last != null && (now - last) < COLD_THRESHOLD_MS;
-  return json({
-    image_op: {
+  // Each Modal container is tracked separately. The renderer uses
+  // this to show the correct warm/cold pill depending on which
+  // operation the user is about to fire.
+  async function status(file: string, warmSec: number, coldSec: number) {
+    const last = await _readLastWarmMs(env, file).catch(() => null);
+    const secondsSinceLastSuccess = last ? Math.floor((now - last) / 1000) : null;
+    const warm = last != null && (now - last) < COLD_THRESHOLD_MS;
+    return {
       warm,
       seconds_since_last_success: secondsSinceLastSuccess,
-      expected_seconds_warm: 30,
-      expected_seconds_cold: 150,
-    },
+      expected_seconds_warm: warmSec,
+      expected_seconds_cold: coldSec,
+    };
+  }
+  const [image_op, text2image, back_view, tpose, mesh] = await Promise.all([
+    status('_meta/last_warm_image_op.txt',  30, 150),
+    status('_meta/last_warm_text2image.txt', 30, 150),
+    status('_meta/last_warm_back_view.txt',  40, 180),
+    status('_meta/last_warm_tpose.txt',      30, 150),
+    status('_meta/last_warm_mesh.txt',       60, 240),
+  ]);
+  return json({
+    image_op, text2image, back_view, tpose, mesh,
     cold_threshold_seconds: Math.floor(COLD_THRESHOLD_MS / 1000),
   });
 }
