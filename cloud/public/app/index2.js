@@ -17416,6 +17416,130 @@ function getActiveLandmarkModel() {
   return null;
 }
 
+// ----------------------------------------------------------------
+// Extract landmark positions from an already-generated rig.
+//
+// Loads the user's currently-selected rig GLB, walks the bone tree,
+// fuzzy-matches each bone's name against the LM_SCHEMA ids, and
+// places a landmark marker at each matched bone's WORLD position
+// (after computing matrices). The result is the same as a manual
+// click-placement, so 'Re-generate rig with these landmarks' will
+// see them as input.
+//
+// Coordinates: the loaded rig is positioned into lmFsScene with the
+// same fit transform as the mesh in openLandmarksFullscreen (centered
+// on x/z, bottom on y=0). Bone world positions read after we apply
+// the same transform are in the same space as user-placed markers.
+async function extractLandmarksFromRig() {
+  const p = state.currentProject;
+  // Pick the selected rig if any, fall back to the first one.
+  const rigPath = p?.selectedRigPath
+              || (p?.rigs && p.rigs[0]?.url)
+              || (p?.rigs && p.rigs[0]?.path);
+  if (!rigPath) {
+    customError('Generate a rig first (Step 3 Rig → Generate Rig).', 'From rig');
+    return;
+  }
+  // Fuzzy mapping from bone-name → landmark id. Supports the major
+  // rig naming conventions:
+  //  - Mixamo: mixamorig:Head, mixamorig:LeftArm, …
+  //  - Puppeteer/AnyTop: Head, Neck, Spine2, LeftShoulder, …
+  //  - orc_m1 (Apovivor game): head, chest, belt, shoulder_l, …
+  const BONE_RULES = [
+    { id: 'head',       patterns: [/^head$/i, /skull/i, /mixamo.*head/i, /bip01.*head/i] },
+    { id: 'neck',       patterns: [/^neck/i, /mixamo.*neck/i, /bip01.*neck/i] },
+    { id: 'spine_top',  patterns: [/spine.?2$/i, /spine.?upper/i, /upper.?spine/i, /chest$/i, /sternum/i] },
+    { id: 'spine_mid',  patterns: [/spine.?1$/i, /spine.?mid/i, /mid.?spine/i, /^spine$/i, /belt/i] },
+    { id: 'hips',       patterns: [/^hips?$/i, /pelvis/i, /^root$/i, /mixamo.*hips/i] },
+    { id: 'shoulder_l', patterns: [/(^l[_.]?|left)shoulder/i, /(^l[_.]?|left)clavicle/i, /(^l[_.]?|left)arm$/i, /mixamo.*leftarm$/i] },
+    { id: 'elbow_l',    patterns: [/(^l[_.]?|left)elbow/i, /(^l[_.]?|left)forearm/i, /mixamo.*leftforearm/i] },
+    { id: 'hand_l',     patterns: [/(^l[_.]?|left)wrist/i, /(^l[_.]?|left)hand$/i, /mixamo.*lefthand$/i] },
+    { id: 'shoulder_r', patterns: [/(^r[_.]?|right)shoulder/i, /(^r[_.]?|right)clavicle/i, /(^r[_.]?|right)arm$/i, /mixamo.*rightarm$/i] },
+    { id: 'elbow_r',    patterns: [/(^r[_.]?|right)elbow/i, /(^r[_.]?|right)forearm/i, /mixamo.*rightforearm/i] },
+    { id: 'hand_r',     patterns: [/(^r[_.]?|right)wrist/i, /(^r[_.]?|right)hand$/i, /mixamo.*righthand$/i] },
+    { id: 'hip_l',      patterns: [/(^l[_.]?|left)upleg/i, /(^l[_.]?|left)thigh/i, /(^l[_.]?|left)hip/i] },
+    { id: 'knee_l',     patterns: [/(^l[_.]?|left)leg$/i, /(^l[_.]?|left)knee/i, /(^l[_.]?|left)shin/i] },
+    { id: 'ankle_l',    patterns: [/(^l[_.]?|left)ankle/i, /(^l[_.]?|left)foot$/i] },
+    { id: 'foot_l',     patterns: [/(^l[_.]?|left)toe/i, /(^l[_.]?|left)toebase/i, /(^l[_.]?|left)ball/i] },
+    { id: 'hip_r',      patterns: [/(^r[_.]?|right)upleg/i, /(^r[_.]?|right)thigh/i, /(^r[_.]?|right)hip/i] },
+    { id: 'knee_r',     patterns: [/(^r[_.]?|right)leg$/i, /(^r[_.]?|right)knee/i, /(^r[_.]?|right)shin/i] },
+    { id: 'ankle_r',    patterns: [/(^r[_.]?|right)ankle/i, /(^r[_.]?|right)foot$/i] },
+    { id: 'foot_r',     patterns: [/(^r[_.]?|right)toe/i, /(^r[_.]?|right)toebase/i, /(^r[_.]?|right)ball/i] },
+  ];
+  function classifyBone(name) {
+    // Strip the 'mixamorig:' prefix for cleaner matching against the
+    // standardized rules. Tests run against BOTH original and stripped.
+    const clean = String(name || '').replace(/^mixamo[^:]*:/i, '').trim();
+    for (const r of BONE_RULES) {
+      for (const p of r.patterns) {
+        if (p.test(name) || p.test(clean)) return r.id;
+      }
+    }
+    return null;
+  }
+
+  try {
+    lmPushHistory(); // so Ctrl+Z restores whatever the user had before.
+    const buffer = await API.readMeshFile(rigPath);
+    if (!buffer) { customError('Could not load rig file.', 'From rig'); return; }
+    // Parse OFFSCREEN — we don't add the rig to the scene; we only
+    // need world positions of the bones.
+    const rigScene = await new Promise((resolve, reject) => {
+      new GLTFLoader().parse(buffer, '', (gltf) => resolve(gltf.scene), reject);
+    });
+    // Apply the same centering as the mesh fit so bone positions land
+    // in the user's view.
+    const box = new THREE.Box3().setFromObject(rigScene);
+    const center = box.getCenter(new THREE.Vector3());
+    rigScene.position.x -= center.x;
+    rigScene.position.z -= center.z;
+    rigScene.position.y -= box.min.y;
+    rigScene.updateMatrixWorld(true);
+    // Walk bones; first SkinnedMesh's skeleton is the authoritative
+    // ordered list, but we also collect floating bones in case the
+    // GLB doesn't have a skin.
+    const bones = [];
+    rigScene.traverse((c) => {
+      if (c.isBone) bones.push(c);
+      else if (c.isSkinnedMesh && c.skeleton) {
+        for (const b of c.skeleton.bones) if (!bones.includes(b)) bones.push(b);
+      }
+    });
+    if (!bones.length) {
+      customError('No bones found in the selected rig.', 'From rig');
+      return;
+    }
+    let matched = 0;
+    const seen = new Set();
+    // Build a color lookup from LM_SCHEMA so each marker shows the
+    // right colour in the silhouette panel.
+    const colorById = {};
+    for (const cat of LM_SCHEMA) for (const it of cat.items) colorById[it.id] = it.color;
+    for (const b of bones) {
+      const id = classifyBone(b.name);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const pos = new THREE.Vector3();
+      b.getWorldPosition(pos);
+      placeLandmarkMarker(id, pos, colorById[id] || '#ffffff');
+      matched++;
+    }
+    if (matched === 0) {
+      customError(
+        `Found ${bones.length} bone(s) but none matched a known landmark name.\n\nFirst few names: ${bones.slice(0, 8).map(b => b.name).join(', ')}`,
+        'From rig',
+      );
+      return;
+    }
+    if (typeof showToast === 'function') {
+      showToast(`Imported ${matched} landmark(s) from rig — drag them to adjust, then click "Re-generate rig".`, 'success', 5000);
+    }
+  } catch (e) {
+    console.error('[extractLandmarksFromRig]', e);
+    customError('Failed to read the rig: ' + (e?.message || e), 'From rig');
+  }
+}
+
 function autoDetectLandmarks() {
   const ctx = getActiveLandmarkModel();
   if (!ctx) { customError('Load a mesh first (use the "Use this mesh for Rig" button in the 3D Mesh card).', 'Auto-detect landmarks'); return; }
@@ -17983,6 +18107,21 @@ async function openLandmarksFullscreen() {
   } catch (e) { console.error('openLandmarksFullscreen', e); }
   // Build the side list of landmark buttons
   buildLmFsList();
+  // Auto-extract landmarks from the selected rig (if any) on the
+  // first open of this session. Only runs if no markers have been
+  // placed yet — avoids stomping the user's manual edits when they
+  // re-open the modal mid-tweak.
+  const hasExistingMarkers = Object.keys(lmMarkers).length > 0;
+  const hasRig = !!(state.currentProject?.selectedRigPath
+                 || (state.currentProject?.rigs && state.currentProject.rigs[0]));
+  if (!hasExistingMarkers && hasRig) {
+    // Slight delay so the canvases are sized and the fit transform
+    // settled before we read bone world positions.
+    setTimeout(() => {
+      try { extractLandmarksFromRig(); }
+      catch (e) { console.warn('[lm] auto-extract from rig failed:', e); }
+    }, 200);
+  }
 }
 
 function buildLmFsList() {
@@ -18134,6 +18273,9 @@ function closeLandmarksFullscreen() {
 }
 document.getElementById('ws-lm-manual')?.addEventListener('click', openLandmarksFullscreen);
 document.getElementById('lm-fs-close')?.addEventListener('click', closeLandmarksFullscreen);
+document.getElementById('lm-fs-from-rig')?.addEventListener('click', () => {
+  extractLandmarksFromRig();
+});
 document.getElementById('lm-fs-auto')?.addEventListener('click', () => {
   autoDetectLandmarks();
   refreshLmFsSilhouetteDots();
