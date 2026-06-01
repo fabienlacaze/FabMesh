@@ -14297,6 +14297,7 @@ function inferKind(name) {
   if (n.includes('inpaint') || n.includes('mask')) return 'inpaint';
   if (n.includes('3d') || n.includes('mesh')) return 'mesh';
   if (n.includes('rig')) return 'rig';
+  if (n.includes('animate') || n.includes('anim ') || n.includes('animation') || /\banim$/.test(n) || /\banim:/.test(n) || /\banim\b/.test(n)) return 'anim';
   if (n.includes('background')) return 'bg';
   if (n.includes('modify') || n.includes('img2img')) return 'img2img';
   return 'image';

@@ -442,21 +442,27 @@
         mesh:       d?.mesh,
       };
       // Helper: which Modal container is associated with a job kind?
-      // Used by job popups / pre-flight toasts so they pick the correct
-      // warm/cold reading instead of the legacy global __modalWarm.
+      // Returns UNDEFINED for kinds we don't track (anim, rig) — the
+      // caller must check before using c.warm so the cold-start toast
+      // / popup hint doesn't misfire for those job types.
       window.__modalContainerForKind = function (kind) {
         const map = {
           image:    'text2image',
           view:     'back_view',
           mesh:     'mesh',
           modify:   'image_op',
+          img2img:  'image_op',
           inpaint:  'image_op',
           facefix:  'image_op',
           upscale:  'image_op',
           removebg: 'image_op',
+          bg:       'image_op',
           rectify:  'tpose',
+          // anim, rig: no tracked container — return undefined so the
+          // UI skips the cold-start hint instead of misreporting it.
         };
-        const key = map[String(kind || '').toLowerCase()] || 'image_op';
+        const key = map[String(kind || '').toLowerCase()];
+        if (!key) return undefined;
         return (window.__modalContainers || {})[key];
       };
       try {
