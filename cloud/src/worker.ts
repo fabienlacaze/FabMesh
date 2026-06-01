@@ -6774,7 +6774,11 @@ async function handleAnimUpload(req: Request, env: Env): Promise<Response> {
   const head = await file.slice(0, 4).arrayBuffer();
   const magic = new TextDecoder().decode(new Uint8Array(head));
   if (magic !== 'glTF') return err(400, 'not a GLB file (magic mismatch)');
-  const batchId = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  // Optional batchId from the form — lets the client group copies of
+  // existing clips + freshly generated ones into the same version.
+  // Falls back to a unique 'm<...>' for manual one-off uploads.
+  const incomingBatch = String(form.get('batchId') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+  const batchId = incomingBatch || `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const baseName = (file.name || 'imported').replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'imported';
   const key = `${user.id}/animations/${projectSlug}/${baseName}_manual_${animType}_${batchId}_${Date.now()}.glb`;
   try {
