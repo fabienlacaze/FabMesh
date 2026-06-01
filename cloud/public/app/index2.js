@@ -13330,7 +13330,15 @@ document.getElementById('modal-anim-go')?.addEventListener('click', () => {
     cb.checked = picked.includes(cb.value);
   });
   modal.classList.add('hidden');
-  document.getElementById('ws-generate-anim')?.click();
+  // The Create-new Generate button starts disabled (HTML default until
+  // a rig is detected). We've already gated on p.rigs at the opener,
+  // so force-enable before clicking — otherwise .click() is a no-op
+  // and nothing happens.
+  const genBtn = document.getElementById('ws-generate-anim');
+  if (genBtn) {
+    genBtn.disabled = false;
+    genBtn.click();
+  }
 });
 
 // Manual import — user picks an animated GLB → POST to
