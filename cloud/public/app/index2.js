@@ -13045,45 +13045,71 @@ document.getElementById('ws-anim-type')?.addEventListener('change', _wsAnimEngin
 _wsAnimEngineSync();
 
 // Render animation versions strip (placeholder).
+// Group animations by type so each type has its own version stack
+// (idle v0/v1/v2, attack v0/v1/v2, etc.) — matches how meshes/rigs
+// are versioned. Type button under the viewer selects which stack
+// the right-side strip shows.
+let _step4SelectedType = null;
 function renderAnimVersions(p) {
+  const typeBtns = document.getElementById('ws-anim-type-buttons');
   const strip = document.getElementById('ws-anim-versions');
-  if (!strip) return;
+  if (!strip || !typeBtns) return;
   const anims = p?.animations || [];
   if (!anims.length) {
-    strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick a type and click Generate Animation.</div>';
+    typeBtns.innerHTML = '';
+    strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick types in Create new and click Generate Animation.</div>';
     return;
   }
-  // Newest-first ordering (worker returns chronological). Numbered v0..vN
-  // top-down so v0 = the most recent generation. Each thumb shows the
-  // anim type as a small label + v-number; the icon hints at the type.
-  const sorted = [...anims].sort((a, b) => {
-    const at = new Date(a.created || 0).getTime();
-    const bt = new Date(b.created || 0).getTime();
-    return bt - at;
-  });
   const iconFor = (t) => t === 'idle' ? '😴' : t === 'walk' ? '🚶'
     : t === 'run' ? '🏃' : t === 'attack' ? '⚔️'
     : t === 'death' ? '💀' : t === 'fly' ? '✈️' : '🎬';
-  strip.innerHTML = sorted.map((a, i) => {
-    const icon = iconFor(a.type);
-    return `
-      <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}">
-        <div class="version-thumb-icon" style="font-size:22px; display:flex; align-items:center; justify-content:center; height:42px;">${icon}</div>
-        <div class="version-thumb-label" style="font-size:10px; text-transform:uppercase;">${a.type || 'clip'}</div>
-        <div class="version-thumb-sub">v${i}</div>
-      </div>`;
-  }).join('');
-  const thumbs = strip.querySelectorAll('.version-thumb');
-  thumbs.forEach(t => {
-    t.addEventListener('click', () => {
-      thumbs.forEach(o => o.classList.remove('selected'));
-      t.classList.add('selected');
-      const idx = parseInt(t.dataset.animIdx, 10);
-      showStep4AnimPreview(sorted[idx]);
+  // Group by type (preserving newest-first chronological order).
+  const byType = new Map();
+  const sortedAll = [...anims].sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
+  for (const a of sortedAll) {
+    const t = (a.type || 'clip').toLowerCase();
+    if (!byType.has(t)) byType.set(t, []);
+    byType.get(t).push(a);
+  }
+  // Default selected type = the most-recently-generated overall.
+  if (!_step4SelectedType || !byType.has(_step4SelectedType)) {
+    _step4SelectedType = sortedAll[0]?.type?.toLowerCase() || [...byType.keys()][0];
+  }
+  // Render TYPE buttons under viewer.
+  typeBtns.innerHTML = [...byType.keys()].map(t => `
+    <button class="anim-type-btn${t === _step4SelectedType ? ' selected' : ''}" data-anim-type="${t}"
+            style="display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 12px; min-width:64px;
+                   background:${t === _step4SelectedType ? 'var(--bg-2)' : 'transparent'};
+                   border:2px solid ${t === _step4SelectedType ? 'var(--accent)' : 'var(--border)'};
+                   border-radius:6px; cursor:pointer; color:var(--text-0); font-size:11px;">
+      <span style="font-size:18px;">${iconFor(t)}</span>
+      <span style="text-transform:uppercase; font-weight:600;">${t}</span>
+      <span style="font-size:9px; color:var(--text-2);">${byType.get(t).length} ver.</span>
+    </button>
+  `).join('');
+  typeBtns.querySelectorAll('.anim-type-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      _step4SelectedType = b.dataset.animType;
+      renderAnimVersions(p);
     });
   });
-  // Auto-show v0 (newest) immediately.
-  if (sorted[0]) showStep4AnimPreview(sorted[0]);
+  // Render VERSION strip for the selected type.
+  const versions = byType.get(_step4SelectedType) || [];
+  strip.innerHTML = versions.map((a, i) => `
+    <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}">
+      <div class="version-thumb-icon" style="font-size:22px; display:flex; align-items:center; justify-content:center; height:42px;">${iconFor(a.type)}</div>
+      <div class="version-thumb-sub">v${i}</div>
+    </div>
+  `).join('');
+  strip.querySelectorAll('.version-thumb').forEach(t => {
+    t.addEventListener('click', () => {
+      strip.querySelectorAll('.version-thumb').forEach(o => o.classList.remove('selected'));
+      t.classList.add('selected');
+      const idx = parseInt(t.dataset.animIdx, 10);
+      showStep4AnimPreview(versions[idx]);
+    });
+  });
+  if (versions[0]) showStep4AnimPreview(versions[0]);
 }
 
 // Renders the selected animation GLB into the Step 4 viewer using
@@ -13128,9 +13154,19 @@ function showStep4AnimPreview(anim) {
     if (tracks.length === 0) {
       showToast('⚠ This GLB has no animation tracks embedded — the mesh is at its bind pose. (server-side bvh→glTF retarget produced an empty animation)', 'warning', 8000);
       console.warn('[anim-viewer] no tracks in', anim.url, 'availableAnimations:', tracks);
-    } else {
-      console.log('[anim-viewer] tracks:', tracks, 'duration:', mv.duration, 'currentAnim:', mv.animationName);
+      return;
     }
+    // Force-engage the animation: with `autoplay` alone, model-viewer
+    // sometimes leaves currentAnim undefined when the GLB's animation
+    // has no explicit name or its index isn't 0. Set animationName to
+    // the first track explicitly and call play() so the mixer ticks.
+    try {
+      mv.animationName = tracks[0];
+      // Defer to next frame so model-viewer's animation system picks
+      // up the new name before play() runs.
+      requestAnimationFrame(() => { try { mv.play(); } catch (_) {} });
+    } catch (e) { console.warn('[anim-viewer] forcing play failed:', e); }
+    console.log('[anim-viewer] tracks:', tracks, 'duration:', mv.duration, 'currentAnim →', tracks[0]);
   }, { once: true });
 }
 
