@@ -571,7 +571,20 @@ async function refreshProjectsPage() {
     );
     // Remove a trailing _<number> if any (legacy index naming)
     base = base.replace(/_\d+$/, '');
-    return base || 'untitled';
+    // Patterns that indicate this mesh has no real project — route to
+    // _orphans instead of creating a phantom project named after the
+    // raw filename:
+    //   - raw hash/uuid (modal_<hex32>, bare hex32)
+    //   - 'untitled' (worker fallback when jobs.project_name is NULL)
+    //   - timestamp-prefixed (mesh-op outputs like 1780268987313_material_adjust)
+    //   - bare 'rigged_puppeteer' (worker fallback when no source mesh found)
+    //   - generic '_anim_<x>' or just 'anim'
+    if (/^(modal_)?[a-f0-9-]{8,}$/i.test(base)) return '_orphans';
+    if (base === 'untitled')                    return '_orphans';
+    if (/^\d{13}_/.test(base))                  return '_orphans';
+    if (/^rigged(_puppeteer)?$/i.test(base))    return '_orphans';
+    if (/^anim$/i.test(base))                   return '_orphans';
+    return base || '_orphans';
   }
   for (const m of meshes) {
     // Cloud API attaches the original `projectName` directly on each mesh
