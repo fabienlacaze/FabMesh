@@ -705,11 +705,12 @@ async function _runNsfwBackgroundScan() {
  * three views: cards (default), flat image grid, flat mesh grid.
  * --------------------------------------------------------------------- */
 function _updateHomeViewCounts() {
-  let imgN = 0, meshN = 0, rigN = 0;
+  let imgN = 0, meshN = 0, rigN = 0, animN = 0;
   for (const p of state.projects || []) {
     imgN += (p.images || []).length;
     meshN += (p.meshes || []).length;
     rigN += (p.rigs || []).length;
+    animN += (p.animations || []).length;
   }
   const projN = (state.projects || []).length;
   const set = (k, n) => {
@@ -720,6 +721,7 @@ function _updateHomeViewCounts() {
   set('images', imgN);
   set('meshes', meshN);
   set('rigs', rigN);
+  set('anims', animN);
 }
 
 let _homeView = 'projects';
@@ -929,6 +931,7 @@ async function renderProjectsGrid() {
     const hasImage = p.images.length > 0;
     const hasMesh = p.meshes.length > 0;
     const hasRig = p.rigs.length > 0;
+    const hasAnim = (p.animations || []).length > 0;
     const isSelected = state._selectedProjects.has(p.name);
     const card = document.createElement('div');
     card.className = 'project-card' + (isSelected ? ' selected' : '');
@@ -943,12 +946,13 @@ async function renderProjectsGrid() {
       <div class="project-card-body">
         <div class="project-card-name">${escapeHtml(p.name)}</div>
         <div class="project-card-meta">
-          ${p.images.length} img · ${p.meshes.length} mesh · ${p.rigs.length} rig
+          ${p.images.length} img · ${p.meshes.length} mesh · ${p.rigs.length} rig · ${(p.animations||[]).length} anim
         </div>
         <div class="project-card-progress">
           <span class="pcp-step ${hasImage ? 'done' : ''}"></span>
           <span class="pcp-step ${hasMesh ? 'done' : ''}"></span>
           <span class="pcp-step ${hasRig ? 'done' : ''}"></span>
+          <span class="pcp-step ${hasAnim ? 'done' : ''}"></span>
         </div>
       </div>
     `;
@@ -13296,38 +13300,65 @@ let _step4BonesOn = false;
 function _toggleAnimBones() {
   const mv = _getStep4MV();
   if (!mv) { showToast('Select a clip first', 'error'); return; }
-  const scene = mv[Symbol.for('three')] || mv.model || mv?.[Symbol.for('three.scene')];
+  // Try every known model-viewer internal accessor across versions:
+  //   3.x: mv.model.scene OR mv.model?._scene
+  //   1.x-2.x: mv[Symbol.for('three')]
+  //   v4: mv[Symbol.for('threeScene')] or mv.modelScene
+  const candidates = [
+    mv.model?.scene,
+    mv.model?._scene,
+    mv.modelScene,
+    mv[Symbol.for('three')],
+    mv[Symbol.for('threeScene')],
+    mv[Symbol.for('three.scene')],
+    mv[Symbol.for('three-scene')],
+  ];
+  let scene = candidates.find(c => c && typeof c.traverse === 'function');
+  // Last-resort: walk the shadowRoot to find a <model-viewer> hosting node.
+  if (!scene && mv.shadowRoot) {
+    const inner = mv.shadowRoot.querySelector('canvas, slot');
+    console.warn('[anim bones] no scene via symbols; shadowRoot inner:', inner);
+  }
   if (!scene) {
-    showToast('Bones overlay unsupported on this model-viewer build', 'warning', 4000);
+    showToast('Bones overlay needs three.js scene access — model-viewer didn\'t expose it. Open Step 3 Rig to see the skeleton.', 'warning', 5000);
+    console.warn('[anim bones] all symbol probes failed. mv keys:',
+      Object.getOwnPropertySymbols(mv).map(s => s.toString()));
     return;
   }
   _step4BonesOn = !_step4BonesOn;
   const btn = document.querySelector('#ws-anim-toolbar [data-act="bones"]');
   if (btn) btn.classList.toggle('active', _step4BonesOn);
-  const apply = (root) => {
-    root.traverse(o => {
-      if (!o.isSkinnedMesh || !o.skeleton) return;
-      const rootBone = o.skeleton.bones[0]?.parent || o;
-      let existing = null;
-      rootBone.traverse(c => { if (c.name === '__animBones') existing = c; });
-      if (_step4BonesOn && !existing) {
-        const helper = new THREE.SkeletonHelper(o);
-        helper.name = '__animBones';
-        try {
-          helper.material.color = new THREE.Color(0x00ffff);
-          helper.material.depthTest = false;
-          helper.material.transparent = true;
-        } catch (e) {}
-        helper.renderOrder = 999;
-        rootBone.add(helper);
-      } else if (!_step4BonesOn && existing) {
-        existing.parent.remove(existing);
-        try { existing.material?.dispose?.(); existing.geometry?.dispose?.(); } catch (_) {}
-      }
-    });
-  };
-  apply(scene);
-  showToast(_step4BonesOn ? 'Bones visible' : 'Bones hidden', 'info', 1500);
+  let skinCount = 0;
+  scene.traverse(o => {
+    if (!o.isSkinnedMesh || !o.skeleton) return;
+    skinCount++;
+    // Attach the helper as a sibling of the skinned mesh (under same
+    // parent) so it inherits the same world transform. Adding under
+    // the rootBone makes it inherit double rotation.
+    const parent = o.parent || scene;
+    let existing = null;
+    parent.traverse(c => { if (c.name === '__animBones_' + o.uuid) existing = c; });
+    if (_step4BonesOn && !existing) {
+      const helper = new THREE.SkeletonHelper(o);
+      helper.name = '__animBones_' + o.uuid;
+      try {
+        helper.material.color = new THREE.Color(0x00ffff);
+        helper.material.depthTest = false;
+        helper.material.transparent = true;
+        helper.material.opacity = 1.0;
+      } catch (e) {}
+      helper.renderOrder = 999;
+      parent.add(helper);
+    } else if (!_step4BonesOn && existing) {
+      existing.parent.remove(existing);
+      try { existing.material?.dispose?.(); existing.geometry?.dispose?.(); } catch (_) {}
+    }
+  });
+  console.log('[anim bones]', _step4BonesOn ? 'on' : 'off', 'skins=', skinCount);
+  showToast(`Bones ${_step4BonesOn ? 'on' : 'off'} (${skinCount} skin${skinCount !== 1 ? 's' : ''})`, 'info', 2000);
+  // model-viewer caches the render — request a redraw.
+  if (mv.requestUpdate) mv.requestUpdate();
+  else if (mv.update) mv.update();
 }
 
 // Wire the anim viewer toolbar (Reset / View / Play / Loop / Bones /
