@@ -355,33 +355,69 @@ def animate_mesh(
         if not ckpt:
             raise RuntimeError(f"checkpoint not found: {ckpt_name}")
 
+        # ── Step 3.0: route winged creatures to the FLYING ckpt ───
+        # 2026-06-01 fix #2 for Mode 3 (verified via workflow audit
+        # wtdvocwde): _pick_checkpoint('run') hits the bipeds branch
+        # before flying, so for a dragon doing 'run' we'd load the
+        # Ostrich (flightless biped) class embedding on a 47-bone
+        # winged skeleton → topologically meaningless prior → near-
+        # identity motion regardless of anim_type. Workflow evidence:
+        # frame quaternions are BIT-IDENTICAL across pre-fix and
+        # post-fix runs that used Ostrich (lines 1520 == 2402 in the
+        # Modal logs). Override: if the caller hint or the prompt
+        # mentions winged creatures, force flying+Dragon — that's the
+        # actual trained class whose topology matches our rig.
+        _winged_kw = ('dragon', 'wing', 'wyvern', 'bat', 'pterodactyl',
+                      'eagle', 'phoenix', 'griffin', 'pegasus', 'fly')
+        _prompt_low = (str(prompt) if prompt else '').lower()
+        _anim_low = (str(anim_type) if anim_type else '').lower()
+        winged = any(k in _prompt_low or k in _anim_low for k in _winged_kw)
+        if winged and ckpt_name != 'flying':
+            new_ckpt = _resolve_checkpoint_path('flying')
+            if new_ckpt:
+                _log(f"step 3.0: winged creature detected (prompt/anim_type "
+                     f"matches winged keyword) — overriding ckpt {ckpt_name} -> flying "
+                     f"so Dragon class embedding can be loaded")
+                ckpt_name = 'flying'
+                ckpt = new_ckpt
+            else:
+                _log(f"step 3.0: winged detected but flying ckpt not found — keeping {ckpt_name}")
+
         # ── Step 3.5: alias our skel_name into a TRAINED class. ───
-        # 2026-06-01 fix for Mode 3 (identity motion): sample.generate
-        # conditions on the class embedding learned during training.
-        # When we passed our synthetic skel_name as --object_type,
-        # the lookup found cond_dict[skel_name]['parents'] (the skeleton
-        # hierarchy is there) BUT the model's class embedding for that
-        # key didn't exist → zero embedding → identity motion.
-        # Fix: copy our cond entry under one of the trained class names
-        # the checkpoint was actually trained on, then pass that class
-        # as --object_type. The skeleton hierarchy is identical (same
-        # bones, same parents); only the CONDITIONING IDENTITY changes,
-        # which is what gives the sampler a real motion prior to follow.
+        # See workflow wtdvocwde verdict: alias landing alone is NOT
+        # enough if the chosen target_class is topologically wrong.
+        # With step 3.0 above, ckpt_name is now 'flying' for dragons,
+        # so _pick_object_type returns 'Dragon' (winged biped). The
+        # alias finally writes cond['Dragon'] = cond[skel_name] and
+        # --object_type=Dragon will use the actual learned embedding.
         target_class = _pick_object_type(ckpt_name)
         try:
             import numpy as _np
             _cond_path = os.path.join(ds_dir, "cond.npy")
-            _cond = _np.load(_cond_path, allow_pickle=True).item()
+            _cond_raw = _np.load(_cond_path, allow_pickle=True)
+            # Robust unwrap: cond.npy can be a 0-d object array (.item())
+            # OR a plain dict, depending on how process_new_skeleton wrote
+            # it. Defend against both.
+            if hasattr(_cond_raw, 'item') and getattr(_cond_raw, 'ndim', 1) == 0:
+                _cond = _cond_raw.item()
+            else:
+                _cond = _cond_raw
+            if not isinstance(_cond, dict):
+                raise TypeError(
+                    f"cond.npy unwrapped to {type(_cond).__name__}, expected dict"
+                )
             if skel_name in _cond and target_class not in _cond:
                 _cond[target_class] = _cond[skel_name]
                 _np.save(_cond_path, _cond, allow_pickle=True)
                 _log(f"step 3.5: aliased cond.npy {skel_name!r} -> {target_class!r} "
-                     f"(ckpt family={ckpt_name}, will use this for class embedding)")
+                     f"(ckpt family={ckpt_name}, cond.keys()={list(_cond.keys())[:8]})")
             else:
                 _log(f"step 3.5: cond.npy alias skipped "
-                     f"(skel_in_cond={skel_name in _cond}, target_in_cond={target_class in _cond})")
+                     f"(skel_in_cond={skel_name in _cond}, "
+                     f"target_in_cond={target_class in _cond}, "
+                     f"cond.keys()={list(_cond.keys())[:8]})")
         except Exception as _e:
-            _log(f"step 3.5: cond.npy alias FAILED: {_e}, falling back to skel_name")
+            _log(f"step 3.5: cond.npy alias FAILED: {_e!r}, falling back to skel_name")
             target_class = skel_name  # legacy behaviour as fallback
 
         # ── Step 4: sample.generate ───────────────────────────────
@@ -408,6 +444,47 @@ def animate_mesh(
             raise RuntimeError("sample.generate produced no BVH")
         os.replace(gen_bvh, bvh_anim)
         _log(f"step 4 done: bvh={bvh_anim} ({os.path.getsize(bvh_anim)} bytes)")
+
+        # ── Step 4.5: probe the raw .npy motion magnitude ─────────
+        # Workflow audit pinpointed: bit-identical quaternions across
+        # runs is the smoking gun that conditioning is a no-op. We need
+        # raw motion stats BEFORE BVH→GLB conversion to localise whether
+        # the model is producing real motion or near-identity output.
+        # If global_std < 1e-3 AND per_joint_std_mean < 1e-3 across all
+        # bones → model is emitting identity (conditioning ignored or
+        # class embedding still meaningless). If global_std is healthy
+        # → motion exists; loss is in the BVH/GLB writer.
+        try:
+            import glob as _glob
+            import numpy as _np
+            ckpt_dir = os.path.dirname(ckpt)
+            cand = _glob.glob(os.path.join(ckpt_dir, "samples_*", f"{target_class}_rep_*.npy"))
+            if cand:
+                cand.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+                _npy = cand[0]
+                _arr = _np.load(_npy, allow_pickle=True)
+                _shape = getattr(_arr, 'shape', None)
+                _dtype = getattr(_arr, 'dtype', None)
+                if isinstance(_arr, _np.ndarray) and _arr.dtype != object and _arr.size > 1:
+                    _gstd = float(_arr.std())
+                    # Per-joint mean std: collapse all-but-the-last axis
+                    if _arr.ndim >= 2:
+                        _per = float(_arr.std(axis=tuple(range(_arr.ndim - 1))).mean())
+                    else:
+                        _per = _gstd
+                    _l2 = float(_np.linalg.norm(_arr[0] - _arr[-1])) if _arr.shape[0] > 1 else 0.0
+                    _log(f"step 4.5 probe: file={os.path.basename(_npy)} "
+                         f"shape={_shape} dtype={_dtype} "
+                         f"global_std={_gstd:.6f} per_joint_std_mean={_per:.6f} "
+                         f"first_vs_last_l2={_l2:.6f} "
+                         f"DIAGNOSIS={'near-identity (conditioning failed)' if _gstd < 1e-3 else 'has motion'}")
+                else:
+                    _log(f"step 4.5 probe: file={os.path.basename(_npy)} "
+                         f"unexpected shape={_shape} dtype={_dtype} type={type(_arr).__name__}")
+            else:
+                _log(f"step 4.5 probe: no .npy candidates under {ckpt_dir}/samples_*/{target_class}_rep_*.npy")
+        except Exception as _e:
+            _log(f"step 4.5 probe FAILED: {_e!r}")
 
         # ── Step 5: BVH → glTF animation tracks injected in rig ───
         # FORCE fresh import: Modal warm containers cache the module in
