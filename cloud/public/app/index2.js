@@ -13232,6 +13232,37 @@ function _disposeAnimModel() {
     try { _animVw.scene.remove(_animModel); } catch (_) {}
     _animModel = null;
   }
+  // Aggressive purge: even if _animModel got dereferenced (project
+  // switch, hot reload, race), walk the scene and remove ANY non-light
+  // non-camera child that isn't part of the viewer's own setup. Without
+  // this, previous-project meshes ghost behind the new one.
+  if (_animVw?.scene) {
+    const toRemove = [];
+    _animVw.scene.children.forEach(c => {
+      // Keep lights, cameras, and Viewer3D's helper objects.
+      if (c.isLight || c.isCamera) return;
+      if (c.userData?._viewerKeep) return;
+      // Everything else (meshes, groups, skeleton helpers) goes.
+      toRemove.push(c);
+    });
+    for (const c of toRemove) {
+      try {
+        _animVw.scene.remove(c);
+        c.traverse?.(o => {
+          try {
+            o.geometry?.dispose?.();
+            const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+            mats.forEach(m => {
+              ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap'].forEach(k => {
+                try { m[k]?.dispose?.(); } catch (_) {}
+              });
+              try { m.dispose?.(); } catch (_) {}
+            });
+          } catch (_) {}
+        });
+      } catch (_) {}
+    }
+  }
 }
 
 function showStep4AnimPreview(anim) {
