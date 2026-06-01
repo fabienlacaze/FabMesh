@@ -13123,10 +13123,16 @@ function renderAnimVersions(p) {
       if (!batch) return;
       if (!confirm(`Delete version v${batches.indexOf(batch)} (${batch.clips.length} clip(s))? This is permanent.`)) return;
       try {
-        // Delete every clip in the batch from R2.
+        // Delete every clip in the batch from R2. postJSON lives in
+        // meshyAPI-cloud and isn't exposed in this scope — use fetch
+        // directly with credentials so the session cookie rides along.
         await Promise.all(batch.clips.map(c =>
-          postJSON('/api/animations/delete', { url: c.url || c.path })
-            .catch(err => console.warn('[anim del]', c.url, err))
+          fetch('/api/animations/delete', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: c.url || c.path }),
+          }).catch(err => console.warn('[anim del]', c.url, err))
         ));
         // Drop locally so the strip updates immediately.
         p.animations = (p.animations || []).filter(a => !batch.clips.includes(a));
