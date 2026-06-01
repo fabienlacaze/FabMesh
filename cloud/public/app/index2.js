@@ -14254,6 +14254,27 @@ function completeJob(id, success, errorMessage) {
     j.errorMessage = String(errorMessage);
   }
   renderJobs();
+  // Auto-flush the console buffer to R2 so server-side debug has the
+  // full log of every Generate* operation. Fire-and-forget; the lib
+  // handles auth + R2 put. We derive `kind` from the job name so the
+  // R2 key reads e.g. <uid>/logs/<ts>_image_done.log.
+  try {
+    if (window.__consoleCapture && typeof window.__consoleCapture.flush === 'function') {
+      const name = (j.name || '').toLowerCase();
+      let kind = 'job';
+      if (/image|generate/.test(name)) kind = 'image';
+      else if (/mesh/.test(name))       kind = 'mesh';
+      else if (/rig/.test(name))        kind = 'rig';
+      else if (/anim/.test(name))       kind = 'anim';
+      else if (/back|view|multi/.test(name)) kind = 'view';
+      window.__consoleCapture.flush({
+        kind,
+        status: success ? 'done' : 'error',
+        job_id: j.id,
+        project: state.currentProject?.name || null,
+      });
+    }
+  } catch (_) { /* never block job completion on log flush */ }
   // Failed jobs linger longer than successful ones so the user has time to
   // open the details modal and read the error message.
   const ttl = success ? 4000 : 30000;
