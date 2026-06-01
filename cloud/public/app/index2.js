@@ -14394,38 +14394,39 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
 function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride, opts) {
   const id = ++state.jobIdCounter;
   const kind = inferKind(name);
-  const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
-    ? expectedMsOverride
-    : (JOB_EXPECTED_MS[kind] || 60000);
-  // Cold-start surface: when the user kicks off a job, pick the
-  // SPECIFIC Modal container that op will hit (text2image vs mesh vs
-  // image_op, etc.) and warn only if THAT container is cold. The
-  // previous global pill misleadingly said 'GPU warming up' for ALL
-  // jobs even when their container was warm.
+  // Pre-compute expected: caller wins, else infer container-aware
+  // ETA from window.__modalContainers (warm vs cold). The legacy
+  // JOB_EXPECTED_MS lookup is the final fallback for jobs that don't
+  // map to a Modal container (local desktop ops).
+  let expected;
+  if (typeof expectedMsOverride === 'number' && expectedMsOverride > 0) {
+    expected = expectedMsOverride;
+  } else {
+    const c = typeof window.__modalContainerForKind === 'function'
+      ? window.__modalContainerForKind(kind) : null;
+    if (c && (c.warm === true || c.warm === false)) {
+      const sec = c.warm ? (c.expected_seconds_warm || 30) : (c.expected_seconds_cold || 150);
+      expected = sec * 1000;
+    } else {
+      expected = JOB_EXPECTED_MS[kind] || 60000;
+    }
+  }
+  // Cold-start toast: container-specific via the helper so we never
+  // misfire for jobs whose container is actually warm.
   try {
-    const C = window.__modalContainers || {};
-    // Map job kind -> Modal container key.
-    const containerForKind = {
-      image: 'text2image',
-      view:  'back_view',
-      mesh:  'mesh',
-      modify: 'image_op',
-      inpaint: 'image_op',
-      facefix: 'image_op',
-      upscale: 'image_op',
-      removebg: 'image_op',
-      rectify: 'tpose',
-    };
-    const ckey = containerForKind[kind];
-    const c = ckey ? C[ckey] : null;
+    const c = typeof window.__modalContainerForKind === 'function'
+      ? window.__modalContainerForKind(kind) : null;
     if (c && c.warm === false && typeof showToast === 'function') {
+      const ckey = kind;
       const last = window.__lastColdStartToast?.[ckey] || 0;
       if (Date.now() - last > 90_000) {
         window.__lastColdStartToast = window.__lastColdStartToast || {};
         window.__lastColdStartToast[ckey] = Date.now();
         const eta = Math.round((c.expected_seconds_cold || 150) / 60 * 10) / 10;
-        const label = { text2image: 'Image gen', mesh: '3D mesh', image_op: 'Image edit',
-                        back_view: 'Back-view', tpose: 'T-pose' }[ckey] || ckey;
+        const label = { image: 'Image gen', mesh: '3D mesh', modify: 'Image edit',
+                        inpaint: 'Image edit', facefix: 'Image edit',
+                        upscale: 'Image edit', removebg: 'Image edit',
+                        view: 'Back-view', rectify: 'T-pose' }[kind] || kind;
         showToast(
           `${label} container is cold (~${eta} min). Your job is queued and will start as soon as it warms up.`,
           'info', 7000,
@@ -14860,7 +14861,21 @@ async function refreshJobDetailsModal(id) {
     // after the first minute. If we're still flagged cold after 3 min
     // the status endpoint is probably stale — that's the only case the
     // cap saves us from.
-    const isCloudCold = isRunning && window.__modalWarm === false && elapsed < 180000;
+    // Pick the SPECIFIC container this job will hit (not the legacy
+    // global __modalWarm which only tracks image_op). Without this,
+    // the popup wrongly said 'Warming up' for mesh/rig jobs when the
+    // mesh container was actually warm — and vice versa.
+    const containerForKind = {
+      image: 'text2image', view: 'back_view',
+      mesh: 'mesh',
+      modify: 'image_op', inpaint: 'image_op',
+      facefix: 'image_op', upscale: 'image_op', removebg: 'image_op',
+      rectify: 'tpose',
+    };
+    const ckey = containerForKind[j.kind];
+    const jobContainer = (window.__modalContainers || {})[ckey];
+    const jobContainerWarm = jobContainer ? jobContainer.warm : undefined;
+    const isCloudCold = isRunning && jobContainerWarm === false && elapsed < 180000;
     // Rate-limit the diag log: only print when the decision FLIPS, not
     // on every render tick. Otherwise long-running jobs (60s+) flood
     // the console with hundreds of identical entries.
