@@ -2913,8 +2913,32 @@
           : String(val);
         return `<div style="display:grid; grid-template-columns:140px 1fr; gap:12px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:var(--text-2); font-size:11px; text-transform:uppercase;">${label}</span><span>${v}</span></div>`;
       }
-      function imgLink(url) {
-        return url ? `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:underline; word-break:break-all;">${url}</a>` : '—';
+      // Extract a friendly filename from an R2/HTTPS URL.
+      function basename(url) {
+        if (!url) return '';
+        try {
+          let s = String(url).split('?')[0];
+          const slash = s.lastIndexOf('/');
+          return slash >= 0 ? s.slice(slash + 1) : s;
+        } catch { return String(url); }
+      }
+      // Render an asset URL as a CLICKABLE FILENAME that opens the
+      // project + selects the asset. The full URL is in the title
+      // attribute for hover, and a tiny ↗ external link is rendered
+      // next to the name for direct preview.
+      function assetLink(url, projectName) {
+        if (!url) return '—';
+        const fn = basename(url);
+        const safeUrl = String(url).replace(/"/g, '&quot;');
+        const safeProj = String(projectName || '').replace(/"/g, '&quot;');
+        const openCall = `window.openProjectByName(&quot;${safeProj}&quot;,&quot;${safeUrl}&quot;); event.stopPropagation();`;
+        return `<a href="#" onclick="${openCall} return false;" title="${safeUrl}" style="color:var(--accent); text-decoration:underline; word-break:break-all;">${fn}</a>`
+             + ` <a href="${url}" target="_blank" rel="noopener" title="Open raw URL" style="color:var(--text-2); text-decoration:none; margin-left:6px;">↗</a>`;
+      }
+      function projectLink(name) {
+        if (!name) return '—';
+        const safe = String(name).replace(/"/g, '&quot;');
+        return `<a href="#" onclick="window.openProjectByName(&quot;${safe}&quot;); event.stopPropagation(); return false;" style="color:var(--accent); text-decoration:underline; word-break:break-all;">${name}</a>`;
       }
       // Click outside the detail card closes it.
       detailWrap?.addEventListener('click', (e) => {
@@ -2946,16 +2970,16 @@
           html += row('Duration', (durMs / 1000).toFixed(1) + ' s');
           html += row('Credits', job.credit_cost);
           html += row('Seed', job.seed);
-          html += row('Project', job.project_name);
+          html += row('Project', projectLink(job.project_name));
           if (job.error) {
             html += `<div style="margin-top:10px; padding:8px 10px; background:rgba(255,82,82,0.1); border:1px solid #ff5252; border-radius:6px; color:#ff5252; word-break:break-word;"><strong>Error:</strong> ${job.error}</div>`;
           }
-          if (job.mesh_url) html += row('Mesh URL', imgLink(job.mesh_url));
+          if (job.mesh_url) html += row('Mesh URL', assetLink(job.mesh_url, job.project_name));
           // Options sub-section.
           if (Object.keys(opt).length) {
             html += '<div style="margin-top:10px; padding-top:8px; border-top:1px dashed var(--border);"><strong style="font-size:11px; text-transform:uppercase; color:var(--text-2);">Options</strong></div>';
             if (opt.prompt) html += row('Prompt', opt.prompt);
-            if (opt.sourceImage) html += row('Source image', imgLink(opt.sourceImage));
+            if (opt.sourceImage) html += row('Source image', assetLink(opt.sourceImage, job.project_name));
             if (opt.asset_type) html += row('Asset type', opt.asset_type);
             if (opt.asset_style) html += row('Style', opt.asset_style);
             if (opt.preset) html += row('Preset', opt.preset);

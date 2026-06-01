@@ -118,6 +118,49 @@ const state = {
 try {
   window.state = state;
   window.openProject = openProject;
+
+// Navigate to a project by name, optionally selecting a specific
+// asset URL inside it (image/mesh/rig/anim). Used by the history
+// detail modal so the user can jump from an event back to the
+// project + asset that produced it.
+window.openProjectByName = async function (projectName, focusAssetUrl) {
+  try {
+    await refreshProjectsPage();
+    const target = state.projects.find(p => p.name === projectName)
+                || state.projects.find(p => (p.name || '').toLowerCase() === (projectName || '').toLowerCase())
+                || state.projects.find(p => p.name?.replace(/[^a-zA-Z0-9_-]/g, '_') === (projectName || ''));
+    if (!target) {
+      if (typeof showToast === 'function') showToast(`Project "${projectName}" not found`, 'warn', 4000);
+      return;
+    }
+    // Close any open dialogs first.
+    const hist = document.getElementById('history-modal');
+    const histDetail = document.getElementById('history-detail');
+    if (histDetail) histDetail.style.display = 'none';
+    if (hist) hist.style.display = 'none';
+    await openProject(target);
+    // Try to select the focused asset (best-effort).
+    if (focusAssetUrl) {
+      const isImg = /\.(png|jpg|jpeg|webp)(\?|$)/i.test(focusAssetUrl);
+      const isMesh = /\.(glb|gltf|fbx|obj)(\?|$)/i.test(focusAssetUrl);
+      if (isImg) {
+        const match = (target.images || []).find(im => (typeof im === 'string' ? im : im?.path) === focusAssetUrl);
+        if (match) {
+          target.selectedImagePath = (typeof match === 'string') ? match : match.path;
+          target.previewImagePath = target.selectedImagePath;
+          try { renderImageVersions(target); } catch (_) {}
+        }
+      } else if (isMesh) {
+        const match = (target.meshes || []).find(m => m.url === focusAssetUrl || m.path === focusAssetUrl);
+        if (match) {
+          target.previewMeshPath = match.path;
+          target.selectedMeshPath = match.path;
+          try { renderMeshVersions(target); } catch (_) {}
+        }
+      }
+    }
+  } catch (e) { console.warn('[openProjectByName] failed:', e); }
+};
 } catch (_) {}
 
 // ────────────────────────────────────────────────────────────────
