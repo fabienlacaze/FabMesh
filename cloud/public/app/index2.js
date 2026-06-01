@@ -13097,12 +13097,20 @@ function renderAnimVersions(p) {
   // at a glance (e.g. v0 thumb shows 🏃😴 for a Run+Idle batch).
   // Small × button in top-right of each thumb deletes that batch's
   // clips from R2.
+  // Same scheme as rig: newest = highest vN (display order newest-first).
+  // Thumbnail uses the project's source image (p.thumb) so all version
+  // strips look consistent. The type icons stack overlays on top so the
+  // user can still distinguish a Run+Idle batch from a Run-only one.
+  const projThumb = (typeof p?.thumb === 'string' && p.thumb)
+    ? (typeof _toFileUrl === 'function' ? _toFileUrl(p.thumb) : p.thumb) : '';
   strip.innerHTML = batches.map((b, i) => {
     const icons = b.clips.map(c => iconFor(c.type)).slice(0, 4).join('');
+    const vNum = batches.length - 1 - i;
     return `
       <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}">
-        <div class="version-thumb-icon" style="font-size:18px; line-height:1.1; display:flex; align-items:center; justify-content:center; height:42px; letter-spacing:-2px;">${icons}</div>
-        <span class="v-label">v${i}</span>
+        ${projThumb ? `<img src="${projThumb}" alt="">` : ''}
+        <div class="version-thumb-icon" style="position:absolute; bottom:14px; right:2px; font-size:14px; line-height:1; padding:1px 3px; background:rgba(0,0,0,0.65); border-radius:3px; letter-spacing:-1px;">${icons}</div>
+        <span class="v-label">v${vNum}</span>
         <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
       </div>`;
   }).join('');
@@ -13121,7 +13129,13 @@ function renderAnimVersions(p) {
       const batchId = btn.dataset.batchId;
       const batch = batches.find(b => b.id === batchId);
       if (!batch) return;
-      if (!confirm(`Delete version v${batches.indexOf(batch)} (${batch.clips.length} clip(s))? This is permanent.`)) return;
+      const vNum = batches.length - 1 - batches.indexOf(batch);
+      const ok = await customConfirm(
+        `Delete version v${vNum} (${batch.clips.length} clip${batch.clips.length > 1 ? 's' : ''})? This is permanent.`,
+        'Delete animation version',
+        'Delete',
+      );
+      if (!ok) return;
       try {
         // Delete every clip in the batch from R2. postJSON lives in
         // meshyAPI-cloud and isn't exposed in this scope — use fetch
@@ -13142,7 +13156,7 @@ function renderAnimVersions(p) {
           _step4SelectedClipInBatch = null;
         }
         renderAnimVersions(p);
-        showToast(`Deleted version v${batches.indexOf(batch)}`, 'success', 2500);
+        showToast(`Deleted version v${vNum}`, 'success', 2500);
       } catch (err) {
         showToast(`Delete failed: ${err.message}`, 'error', 5000);
       }
@@ -13275,6 +13289,52 @@ document.getElementById('ws-anim-export-btn')?.addEventListener('click', async (
     showToast(`Download failed: ${e.message}`, 'error');
   }
 });
+// Manual import — user picks an animated GLB → POST to
+// /api/animations/upload → R2 → reload project so it appears as a
+// new version v(N) in the strip.
+document.getElementById('ws-anim-import-btn')?.addEventListener('click', () => {
+  document.getElementById('ws-anim-import-file')?.click();
+});
+document.getElementById('ws-anim-import-file')?.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = ''; // reset so the same file can be picked twice
+  if (!file) return;
+  const p = state.currentProject;
+  if (!p) { showToast('Open a project first', 'error'); return; }
+  if (!/\.(glb|gltf)$/i.test(file.name)) {
+    showToast('Pick a .glb or .gltf file', 'error');
+    return;
+  }
+  // Quick animType prompt — let the user label it (defaults to 'clip').
+  const animType = (prompt('Animation type? (idle / walk / run / attack / death / fly / clip)', 'clip') || 'clip').trim().toLowerCase();
+  const job = pushJob(`Import animation: ${file.name}`, null, {
+    File: file.name,
+    'Size': `${(file.size / 1024).toFixed(0)} KB`,
+    Type: animType,
+  }, 10000);
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('animType', animType);
+    form.append('projectName', p.name || '');
+    const r = await fetch('/api/animations/upload', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: form,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data?.ok) {
+      throw new Error(data?.error || `HTTP ${r.status}`);
+    }
+    completeJob(job.id, true);
+    showToast(`Imported as new version`, 'success', 3000);
+    await reloadCurrentProject();
+  } catch (err) {
+    completeJob(job.id, false, err?.message || String(err));
+    showToast(`Import failed: ${err?.message || err}`, 'error', 5000);
+  }
+});
+
 document.getElementById('ws-anim-folder-btn')?.addEventListener('click', () => {
   const a = _step4ActiveAnim;
   if (!a?.url && !a?.path) { showToast('Select an animation first', 'error'); return; }
