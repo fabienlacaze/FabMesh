@@ -1115,22 +1115,44 @@
       }
     },
 
-    /* ── thumbnails (localStorage) ──────────────────────────────── */
+    /* ── thumbnails (R2-backed) ──────────────────────────────────
+       Thumbnails used to be base64 PNGs in localStorage (~100-200 KB
+       each), one of the heaviest offenders of the 5 MB origin quota.
+       Now they go to R2 via /api/thumbs/upload and we cache the
+       returned URL in localStorage (~150 chars instead of 200 KB). */
     saveThumbnail: async ({ meshPath, dataUrl } = {}) => {
       try {
-        // Key by mesh URL/filename so reloading a project still finds
-        // the thumb. Cap at ~256KB to avoid blowing the localStorage
-        // quota — most PNG thumbs are already under that.
-        const key = `myfm:thumb:${_basename(meshPath)}`;
-        if (dataUrl && dataUrl.length < 262144) {
-          localStorage.setItem(key, dataUrl);
+        if (!meshPath || !dataUrl) return { ok: false, error: 'missing arg' };
+        const base = _basename(meshPath);
+        const r = await fetch('/api/thumbs/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meshKey: base, dataUrl }),
+          credentials: 'include',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j?.url) {
+          // Best-effort fallback: keep the legacy localStorage write so
+          // the user still sees a thumbnail until the worker comes back.
+          try { localStorage.setItem(`myfm:thumb:${base}`, dataUrl.slice(0, 260000)); } catch (_) {}
+          return { ok: false, error: j?.error || `HTTP ${r.status}` };
         }
-        return { ok: true };
+        // Cache just the URL (small) so we don't re-upload on every load.
+        try { localStorage.setItem(`myfm:thumburl:${base}`, j.url); } catch (_) {}
+        // Drop any legacy dataURL cache for this mesh — it's now in R2.
+        try { localStorage.removeItem(`myfm:thumb:${base}`); } catch (_) {}
+        return { ok: true, url: j.url };
       } catch (e) { return { ok: false, error: String(e) }; }
     },
     getThumbnail: async (meshPath) => {
-      try { return localStorage.getItem(`myfm:thumb:${_basename(meshPath)}`) || null; }
-      catch (_) { return null; }
+      try {
+        const base = _basename(meshPath);
+        // Prefer the URL cache (small). Falls back to the legacy
+        // dataURL cache if a thumb was saved before this migration.
+        const urlCached = localStorage.getItem(`myfm:thumburl:${base}`);
+        if (urlCached) return urlCached;
+        return localStorage.getItem(`myfm:thumb:${base}`) || null;
+      } catch (_) { return null; }
     },
 
     /* ── file I/O (browser-native) ──────────────────────────────── */
@@ -2119,6 +2141,39 @@
   window.wizardAPI = wizardAPI;
   window.__isCloud = true;
   log(`mounted — ${Object.keys(meshyAPI).length} methods, ${STUBS.length} stubs`);
+
+  // ─── One-shot localStorage cleanup ──────────────────────────────
+  // Drop legacy heavy caches (dataURL PNGs) that pre-date the R2 /
+  // Supabase migration. Idempotent: leaves the new small-URL caches
+  // alone. Done at boot, not on demand, so we never hit the quota
+  // again on subsequent gens. ~3-5 MB freed on heavy users.
+  (function _cleanupLegacyHeavyCaches() {
+    try {
+      const toDrop = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const lk = localStorage.key(i) || '';
+        if (!lk) continue;
+        // Legacy dataURL thumb cache (`myfm:thumb:<base>` = full PNG)
+        // — replaced by the URL-only cache `myfm:thumburl:<base>`.
+        if (lk.startsWith('myfm:thumb:'))           toDrop.push(lk);
+        // Legacy image listing cache — now served by /api/cloud-projects
+        // out of Supabase user_assets. Drop it so we don't merge stale
+        // entries (the worker is the source of truth from this build on).
+        if (lk.startsWith('myfm:cloudimages:'))     toDrop.push(lk);
+        // Back-photo mapping is in user_assets too (kind=image-back,
+        // parent_path=front URL). Legacy cache no longer needed.
+        if (lk.startsWith('myfm:backphotos:'))      toDrop.push(lk);
+      }
+      let freed = 0;
+      for (const lk of toDrop) {
+        freed += (localStorage.getItem(lk) || '').length;
+        try { localStorage.removeItem(lk); } catch (_) {}
+      }
+      if (toDrop.length) {
+        log('cleanup: dropped', toDrop.length, 'legacy heavy cache keys,', freed, 'chars freed');
+      }
+    } catch (e) { console.warn('[cleanup] failed:', e?.message || e); }
+  })();
   // Resume any mesh job a previous tab left behind. Delayed so the
   // renderer has time to wire pushJob / reloadCurrentProject onto
   // window before we fire pollPrediction.
