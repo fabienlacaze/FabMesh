@@ -3892,6 +3892,10 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         backend: 'modal',
         operation_type: 'mesh',
         cost_usd: input.face_fix ? MODAL_COST_USD['mesh-face'] : MODAL_COST_USD['mesh'],
+        // 2026-06-01: store the source image URL so handleListMeshes
+        // can show it as the mesh thumbnail (each mesh version gets
+        // the image it was generated FROM, not the project's default).
+        sourceImage: frontUrl,
       },
       created_at: new Date().toISOString(),
     });
