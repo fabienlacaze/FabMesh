@@ -1100,30 +1100,20 @@
       if (/\.(glb|gltf|fbx|obj|stl|ply)$/i.test(filePath)) {
         return impl.deleteMesh(_basename(filePath));
       }
-      // Image versions: drop the URL from the project's localStorage
-      // cache so reloadCurrentProject() stops returning it. We don't
-      // delete the R2 blob — keeps undo cheap and the per-mesh-op
-      // storage cost is tiny. Also remove the back-photo mapping if
-      // this image had one attached.
+      // Image version: DELETE the Supabase row + the R2 blob via
+      // /api/user-assets/delete. The legacy localStorage cache was
+      // removed in the Supabase migration so we don't touch it.
       try {
-        const projectName = window.state?.currentProject?.name;
-        if (projectName) {
-          const k = _imgKey(projectName);
-          const arr = JSON.parse(localStorage.getItem(k) || '[]');
-          const filtered = arr.filter(x => (x.path || x) !== filePath);
-          localStorage.setItem(k, JSON.stringify(filtered));
-          // Also clear any back-photo mapping that pointed to or from
-          // this image so the FRONT/BACK bar doesn't show a ghost.
-          const bk = _backKey(projectName);
-          const bm = JSON.parse(localStorage.getItem(bk) || '{}');
-          let changed = false;
-          if (bm[filePath]) { delete bm[filePath]; changed = true; }
-          for (const k2 of Object.keys(bm)) {
-            if (bm[k2] === filePath) { delete bm[k2]; changed = true; }
-          }
-          if (changed) localStorage.setItem(bk, JSON.stringify(bm));
-        }
-        return { ok: true, success: true, cloud: true };
+        const r = await fetch('/api/user-assets/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ path: filePath }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) return { ok: false, success: false, error: j?.error || `HTTP ${r.status}` };
+        console.log('[deleteFile] image:', filePath, '→', j);
+        return { ok: true, success: true, cloud: true, ...j };
       } catch (e) {
         return { ok: false, error: String(e) };
       }

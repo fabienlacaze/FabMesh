@@ -4668,17 +4668,47 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
       job = data ?? null;
     }
   }
+  // No matching jobs row — the mesh may have been generated under a
+  // wiped account or come from a stand-alone R2 upload (rig/mesh-op/
+  // anim files don't have their own jobs row, they're discovered by
+  // R2 listing in handleListMeshes). Fall back to deleting the R2 key
+  // directly so the user can still get rid of the artefact.
   if (!job) {
+    if (!env.MESHES) return err(404, 'not found and no R2 binding');
+    // Candidate R2 keys to try, in priority order. We attempt each and
+    // delete whichever matches an actually-existing object.
+    const candidates: string[] = [];
+    // 1. Caller passed the R2 key literally (e.g. "<uid>/rigged/...glb")
+    if (id.includes('/')) candidates.push(id.replace(/^\/+/, ''));
+    // 2. Bare filename → try every folder we might have stored it in
+    const filename = id.endsWith('.glb') ? id : `${id}.glb`;
+    candidates.push(`${user.id}/mesh/${filename}`);
+    candidates.push(`${user.id}/rigged/${filename}`);
+    candidates.push(`${user.id}/animations/${filename}`);
+    candidates.push(`mesh/${filename}`);
+    // 3. handleListMeshes uses 'modal_<hex>.glb' under <uid>/rigged/
+    if (filename.startsWith('modal_')) {
+      candidates.push(`${user.id}/rigged/${filename}`);
+      candidates.push(`mesh/${filename}`);
+    }
+    let deleted = false;
+    for (const key of candidates) {
+      try {
+        const obj = await env.MESHES.head(key);
+        if (obj) {
+          await env.MESHES.delete(key);
+          deleted = true;
+          console.log(`[meshes/delete] fallback-R2 deleted ${key}`);
+          break;
+        }
+      } catch (_) { /* try next */ }
+    }
+    if (deleted) return json({ ok: true, fallback: 'r2-only' });
     if (reconstructedUuid) {
-      console.warn(`[meshes/delete] uuid ${reconstructedUuid} reconstructed from slug "${id}" but no row for user ${user.id}`);
-      return err(404, 'no such mesh under your account (this row may have been deleted by an admin)');
+      console.warn(`[meshes/delete] uuid ${reconstructedUuid} reconstructed from slug "${id}" but no row for user ${user.id} AND no R2 hit`);
     }
-    if (!isUuid && !id.match(/_trellis2_/i) && !_reconstructUuidFromSlug(id)) {
-      console.warn(`[meshes/delete] unrecognised slug "${id}" from user ${user.id}`);
-      return err(400, 'unrecognised mesh id format');
-    }
-    console.warn(`[meshes/delete] no row for id "${id}" / user ${user.id}`);
-    return err(404, 'not found');
+    console.warn(`[meshes/delete] no row or R2 key for "${id}" / user ${user.id}`);
+    return err(404, 'mesh not found in your account or R2');
   }
   const realId = job.id;
 
@@ -7211,6 +7241,39 @@ async function handleClientLog(req: Request, env: Env): Promise<Response> {
     return err(500, `R2 put failed: ${e instanceof Error ? e.message : String(e)}`);
   }
   return json({ ok: true, path: key, lines: lines.length });
+}
+
+/** POST /api/user-assets/delete — delete a single user_asset row
+ *  (and optionally its R2 blob). Body: { path: string } where path
+ *  is either a public R2 URL or a raw R2 key. */
+async function handleUserAssetsDelete(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const body = await req.json().catch(() => ({})) as { path?: string };
+  const path = String(body?.path || '').trim();
+  if (!path) return err(400, 'path required');
+  const r2_path = r2PathFromPublicUrl(env, path) ?? path;
+  // Safety: only allow paths under this user's own R2 prefix.
+  if (!r2_path.startsWith(`${user.id}/`)) {
+    return err(403, 'path is not under your account');
+  }
+  const sb = supabaseAdmin(env);
+  const { error: aErr, count: aDel } = await sb.from('user_assets')
+    .delete({ count: 'exact' })
+    .eq('user_id', user.id)
+    .eq('r2_path', r2_path);
+  let r2Deleted = false;
+  if (env.MESHES) {
+    try { await env.MESHES.delete(r2_path); r2Deleted = true; } catch (_) {}
+    // Also clear any back-image pointing to this front image, and
+    // vice-versa (parent_path link).
+    try {
+      await sb.from('user_assets').delete()
+        .eq('user_id', user.id)
+        .eq('parent_path', r2_path);
+    } catch (_) {}
+  }
+  return json({ ok: true, rows_deleted: aDel ?? 0, r2_deleted: r2Deleted, error: aErr?.message });
 }
 
 /** POST /api/user-assets/migrate-from-jobs — one-shot backfill that
@@ -10072,6 +10135,7 @@ export default {
         if (pathname === '/api/admin/logs/list'       && method === 'GET')  return await handleAdminLogsList(req, env);
         if (pathname === '/api/admin/logs/get'        && method === 'GET')  return await handleAdminLogsGet(req, env);
         if (pathname === '/api/user-assets/record'    && method === 'POST') return await handleUserAssetsRecord(req, env);
+        if (pathname === '/api/user-assets/delete'    && method === 'POST') return await handleUserAssetsDelete(req, env);
         if (pathname === '/api/user-assets/migrate-from-jobs' && method === 'POST') return await handleUserAssetsMigrateFromJobs(req, env);
         if (pathname === '/api/user-assets/reassign-orphans'  && method === 'POST') return await handleUserAssetsReassignOrphans(req, env);
         if (pathname === '/api/thumbs/upload'         && method === 'POST') return await handleThumbsUpload(req, env);
