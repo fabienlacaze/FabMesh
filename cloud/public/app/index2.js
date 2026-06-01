@@ -630,6 +630,21 @@ async function _getNsfwKeywords() {
 }
 // NSFW scan cache: { filename: true/false }
 const _nsfwScanCache = {};
+// Purge any localStorage-persisted NSFW cache that may have been
+// poisoned by the pre-fix bug that flagged 'ok' / 'results' as
+// project filenames. Safe to remove — the next scan re-populates.
+try {
+  if (typeof localStorage !== 'undefined') {
+    const k = localStorage.getItem('fabmesh_nsfw_cache');
+    if (k) {
+      const parsed = JSON.parse(k);
+      if (parsed && (parsed.ok || parsed.results)) {
+        localStorage.removeItem('fabmesh_nsfw_cache');
+        console.log('[NSFW] purged poisoned cache (had ok/results keys)');
+      }
+    }
+  }
+} catch (_) {}
 let _nsfwScanRunning = false;
 
 async function _isProjectNSFW(p) {
@@ -681,18 +696,35 @@ async function _runNsfwBackgroundScan() {
   console.log('[NSFW] scanning', toScan.length, 'thumbnails...');
   _nsfwScanRunning = true;
   try {
-    const results = await API.batchCheckNsfw({ images: toScan });
-    console.log('[NSFW] scan results:', results);
-    if (results && typeof results === 'object') {
+    const resp = await API.batchCheckNsfw({ images: toScan });
+    console.log('[NSFW] scan results:', resp);
+    // The cloud stub returns { ok: true, results: [] }. The old code
+    // iterated Object.entries(resp) and read 'ok' / 'results' as paths,
+    // flagging 2 random projects as NSFW because both wrapper values
+    // happened to be truthy ('true' for ok, '[]' for results — arrays
+    // are truthy in JS). Handle the SHAPE properly: results is an
+    // array of either path strings or {path/url, nsfw} objects.
+    if (resp && typeof resp === 'object') {
+      // Accept both wrapped { results: [...] } and bare arrays.
+      const items = Array.isArray(resp) ? resp
+                  : Array.isArray(resp.results) ? resp.results
+                  : [];
       let changed = false;
-      for (const [imgPath, nsfw] of Object.entries(results)) {
+      for (const item of items) {
+        let imgPath, nsfw;
+        if (typeof item === 'string') { imgPath = item; nsfw = true; }
+        else if (item && typeof item === 'object') {
+          imgPath = item.path || item.url || item.image || '';
+          nsfw = !!(item.nsfw || item.blocked || item.unsafe);
+        } else continue;
+        if (!imgPath) continue;
         const fname = imgPath.split(/[/\\]/).pop();
-        _nsfwScanCache[fname] = !!nsfw;
+        _nsfwScanCache[fname] = nsfw;
         if (nsfw) { changed = true; console.log('[NSFW] BLOCKED:', fname, imgPath); }
       }
-      console.log('[NSFW] cache keys:', Object.keys(_nsfwScanCache).filter(k => _nsfwScanCache[k]));
       if (changed) {
-        console.log('[NSFW] re-rendering grid to hide', Object.values(_nsfwScanCache).filter(v=>v).length, 'NSFW projects');
+        console.log('[NSFW] re-rendering grid to hide',
+          Object.values(_nsfwScanCache).filter(v => v).length, 'NSFW projects');
         renderProjectsGrid();
       }
     }
