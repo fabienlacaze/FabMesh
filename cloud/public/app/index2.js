@@ -13189,68 +13189,160 @@ function renderAnimVersions(p) {
   if (_step4SelectedClipInBatch) showStep4AnimPreview(_step4SelectedClipInBatch);
 }
 
-// Renders the selected animation GLB into the Step 4 viewer using
-// <model-viewer>. It auto-plays embedded animations and exposes
-// .play()/.pause()/.availableAnimations for the Play button.
+// Three.js-based animation viewer. Replaces the previous model-viewer
+// approach because model-viewer doesn't expose its internal scene, so
+// Bones overlay was impossible. With Viewer3D + AnimationMixer +
+// SkeletonHelper we own the render loop and can toggle bones natively.
 let _step4ActiveAnim = null;
-let _step4MV = null;
+let _animVw = null;      // Viewer3D
+let _animMixer = null;
+let _animAction = null;
+let _animModel = null;
+let _animHelper = null;
+let _animLastTime = 0;
+let _animLooping = true;
+let _animPlaybackRate = 1;
+
+function _initAnimViewer() {
+  if (_animVw) return;
+  const canvas = document.getElementById('ws-anim-canvas');
+  if (!canvas) return;
+  const _v = new Viewer3D({
+    canvas, fov: 45, bgColor: 0x0a0a0e, far: 5000, cameraPos: [2, 2, 3],
+    lighting: true,
+    onBeforeRender: () => {
+      const now = performance.now() / 1000;
+      const dt = Math.min(0.1, now - (_animLastTime || now));
+      _animLastTime = now;
+      if (_animMixer) _animMixer.update(dt * _animPlaybackRate);
+    },
+  });
+  _animVw = _v;
+  _v.startTickLoop();
+}
+
+function _disposeAnimModel() {
+  if (_animMixer) { try { _animMixer.stopAllAction(); } catch (_) {} _animMixer = null; }
+  _animAction = null;
+  if (_animHelper) {
+    try { _animHelper.parent?.remove(_animHelper); _animHelper.material?.dispose?.(); } catch (_) {}
+    _animHelper = null;
+  }
+  if (_animModel && _animVw?.scene) {
+    try { _animVw.scene.remove(_animModel); } catch (_) {}
+    _animModel = null;
+  }
+}
+
 function showStep4AnimPreview(anim) {
   _step4ActiveAnim = anim || null;
   const card = document.getElementById('step4-preview');
   if (!card) return;
   const placeholder = document.getElementById('step4-placeholder');
   const canvas = document.getElementById('ws-anim-canvas');
-  // Remove any previous model-viewer overlay.
+  // Clean any leftover model-viewer node from a prior build.
   const prev = card.querySelector('model-viewer.anim-mv');
   if (prev) prev.remove();
-  _step4MV = null;
   if (!anim) {
     if (placeholder) placeholder.style.display = '';
     if (canvas) canvas.style.display = '';
+    _disposeAnimModel();
     setViewerFilename('ws-anim-filename', '');
     return;
   }
   if (placeholder) placeholder.style.display = 'none';
-  if (canvas) canvas.style.display = 'none';
+  if (canvas) canvas.style.display = '';
   setViewerFilename('ws-anim-filename', anim.filename || anim.path || anim.url || '');
-  const mv = document.createElement('model-viewer');
-  mv.className = 'anim-mv';
-  mv.setAttribute('src', anim.url || anim.path || '');
-  mv.setAttribute('camera-controls', '');
-  mv.setAttribute('autoplay', '');
-  mv.setAttribute('loop', '');
-  mv.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; background:#0a0a0e; --poster-color:transparent;';
-  card.appendChild(mv);
-  _step4MV = mv;
-  // Diagnostic — if the GLB has NO animation tracks, model-viewer's
-  // availableAnimations stays empty and play() is a no-op. Surface
-  // that explicitly so the user knows the bug is server-side
-  // (bvh_to_gltf_anim.py wrote no tracks) and not "I forgot to click Play".
-  mv.addEventListener('load', () => {
-    const tracks = mv.availableAnimations || [];
-    if (tracks.length === 0) {
-      showToast('⚠ This GLB has no animation tracks embedded — the mesh is at its bind pose. (server-side bvh→glTF retarget produced an empty animation)', 'warning', 8000);
-      console.warn('[anim-viewer] no tracks in', anim.url, 'availableAnimations:', tracks);
-      return;
-    }
-    // Force-engage the animation: with `autoplay` alone, model-viewer
-    // sometimes leaves currentAnim undefined when the GLB's animation
-    // has no explicit name or its index isn't 0. Set animationName to
-    // the first track explicitly and call play() so the mixer ticks.
+  _initAnimViewer();
+  _disposeAnimModel();
+  const url = anim.url || anim.path || '';
+  const loader = new GLTFLoader();
+  loader.load(url, (gltf) => {
+    _animModel = gltf.scene;
+    _animVw.scene.add(_animModel);
+    // Disable frustum culling — skinned bounds at rest don't include the
+    // animated extent, so culling makes the mesh vanish during motion.
+    _animModel.traverse(o => { o.frustumCulled = false; });
+    // Fit camera to the model.
     try {
-      mv.animationName = tracks[0];
-      // Defer to next frame so model-viewer's animation system picks
-      // up the new name before play() runs.
-      requestAnimationFrame(() => { try { mv.play(); } catch (_) {} });
-    } catch (e) { console.warn('[anim-viewer] forcing play failed:', e); }
-    console.log('[anim-viewer] tracks:', tracks, 'duration:', mv.duration, 'currentAnim →', tracks[0]);
-  }, { once: true });
+      const box = new THREE.Box3().setFromObject(_animModel);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3()).length() || 1;
+      _animVw.camera.position.set(center.x + size * 0.9, center.y + size * 0.5, center.z + size * 0.9);
+      _animVw.camera.near = size / 100;
+      _animVw.camera.far = size * 100;
+      _animVw.camera.updateProjectionMatrix();
+      _animVw.controls?.target?.copy(center);
+      _animVw.controls?.update?.();
+    } catch (e) { console.warn('[anim-vw] fit camera failed:', e); }
+    // Mixer + play first clip.
+    if (gltf.animations?.length) {
+      _animMixer = new THREE.AnimationMixer(_animModel);
+      _animAction = _animMixer.clipAction(gltf.animations[0]);
+      _animAction.setLoop(_animLooping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+      _animAction.clampWhenFinished = !_animLooping;
+      _animAction.play();
+      console.log('[anim-vw] tracks:', gltf.animations.map(a => a.name),
+                  'duration:', gltf.animations[0].duration);
+    } else {
+      showToast('⚠ This GLB has no animation tracks embedded.', 'warning', 6000);
+    }
+    // Hidden SkeletonHelper for the Bones toggle.
+    let firstSkin = null;
+    _animModel.traverse(o => { if (!firstSkin && o.isSkinnedMesh) firstSkin = o; });
+    if (firstSkin) {
+      const helper = new THREE.SkeletonHelper(firstSkin);
+      try {
+        helper.material.color = new THREE.Color(0x00ffff);
+        helper.material.depthTest = false;
+        helper.material.transparent = true;
+        helper.material.opacity = 1.0;
+      } catch (e) {}
+      helper.renderOrder = 999;
+      helper.visible = _step4BonesOn;
+      _animVw.scene.add(helper);
+      _animHelper = helper;
+    }
+  }, undefined, (err) => {
+    console.error('[anim-vw] GLB load failed:', err);
+    showToast(`Animation load failed: ${err?.message || err}`, 'error', 5000);
+  });
 }
 
-// Play / Loop / Export FBX / Show in folder — operate on the
-// currently-loaded model-viewer in step4-preview (anim.mv).
+// Shim for the legacy _getStep4MV() callers — returns an object with
+// the play/pause/loop interface they expect, backed by the Three.js
+// mixer instead of model-viewer.
 function _getStep4MV() {
-  return _step4MV || document.querySelector('#step4-preview model-viewer.anim-mv');
+  if (!_animAction) return null;
+  return {
+    get paused() { return _animAction.paused; },
+    play()  { _animAction.paused = false; },
+    pause() { _animAction.paused = true; },
+    set animationName(_) {},
+    get availableAnimations() { return _animAction ? [_animAction.getClip().name] : []; },
+    hasAttribute(n) { return n === 'loop' && _animLooping; },
+    setAttribute(n) {
+      if (n === 'loop') { _animLooping = true; _animAction.setLoop(THREE.LoopRepeat, Infinity); }
+    },
+    removeAttribute(n) {
+      if (n === 'loop') { _animLooping = false; _animAction.setLoop(THREE.LoopOnce, 1); }
+    },
+    set playbackRate(v) { _animPlaybackRate = Number(v) || 1; },
+    set cameraOrbit(_) {},
+    set exposure(v) {
+      if (_animVw?.renderer) _animVw.renderer.toneMappingExposure = Number(v) || 1;
+    },
+    resetTurntableRotation() {
+      if (_animVw?.controls && _animModel) {
+        const box = new THREE.Box3().setFromObject(_animModel);
+        const center = box.getCenter(new THREE.Vector3());
+        _animVw.controls.target.copy(center);
+        _animVw.controls.update();
+      }
+    },
+    requestUpdate() {},
+    style: { background: '' },
+  };
 }
 document.getElementById('ws-anim-play-btn')?.addEventListener('click', (e) => {
   const mv = _getStep4MV();
@@ -13298,67 +13390,12 @@ document.getElementById('ws-anim-export-btn')?.addEventListener('click', async (
 // follows the running animation.
 let _step4BonesOn = false;
 function _toggleAnimBones() {
-  const mv = _getStep4MV();
-  if (!mv) { showToast('Select a clip first', 'error'); return; }
-  // Try every known model-viewer internal accessor across versions:
-  //   3.x: mv.model.scene OR mv.model?._scene
-  //   1.x-2.x: mv[Symbol.for('three')]
-  //   v4: mv[Symbol.for('threeScene')] or mv.modelScene
-  const candidates = [
-    mv.model?.scene,
-    mv.model?._scene,
-    mv.modelScene,
-    mv[Symbol.for('three')],
-    mv[Symbol.for('threeScene')],
-    mv[Symbol.for('three.scene')],
-    mv[Symbol.for('three-scene')],
-  ];
-  let scene = candidates.find(c => c && typeof c.traverse === 'function');
-  // Last-resort: walk the shadowRoot to find a <model-viewer> hosting node.
-  if (!scene && mv.shadowRoot) {
-    const inner = mv.shadowRoot.querySelector('canvas, slot');
-    console.warn('[anim bones] no scene via symbols; shadowRoot inner:', inner);
-  }
-  if (!scene) {
-    showToast('Bones overlay needs three.js scene access — model-viewer didn\'t expose it. Open Step 3 Rig to see the skeleton.', 'warning', 5000);
-    console.warn('[anim bones] all symbol probes failed. mv keys:',
-      Object.getOwnPropertySymbols(mv).map(s => s.toString()));
-    return;
-  }
+  if (!_animVw) { showToast('Select a clip first', 'error'); return; }
   _step4BonesOn = !_step4BonesOn;
   const btn = document.querySelector('#ws-anim-toolbar [data-act="bones"]');
   if (btn) btn.classList.toggle('active', _step4BonesOn);
-  let skinCount = 0;
-  scene.traverse(o => {
-    if (!o.isSkinnedMesh || !o.skeleton) return;
-    skinCount++;
-    // Attach the helper as a sibling of the skinned mesh (under same
-    // parent) so it inherits the same world transform. Adding under
-    // the rootBone makes it inherit double rotation.
-    const parent = o.parent || scene;
-    let existing = null;
-    parent.traverse(c => { if (c.name === '__animBones_' + o.uuid) existing = c; });
-    if (_step4BonesOn && !existing) {
-      const helper = new THREE.SkeletonHelper(o);
-      helper.name = '__animBones_' + o.uuid;
-      try {
-        helper.material.color = new THREE.Color(0x00ffff);
-        helper.material.depthTest = false;
-        helper.material.transparent = true;
-        helper.material.opacity = 1.0;
-      } catch (e) {}
-      helper.renderOrder = 999;
-      parent.add(helper);
-    } else if (!_step4BonesOn && existing) {
-      existing.parent.remove(existing);
-      try { existing.material?.dispose?.(); existing.geometry?.dispose?.(); } catch (_) {}
-    }
-  });
-  console.log('[anim bones]', _step4BonesOn ? 'on' : 'off', 'skins=', skinCount);
-  showToast(`Bones ${_step4BonesOn ? 'on' : 'off'} (${skinCount} skin${skinCount !== 1 ? 's' : ''})`, 'info', 2000);
-  // model-viewer caches the render — request a redraw.
-  if (mv.requestUpdate) mv.requestUpdate();
-  else if (mv.update) mv.update();
+  if (_animHelper) _animHelper.visible = _step4BonesOn;
+  showToast(`Bones ${_step4BonesOn ? 'on' : 'off'}`, 'info', 1500);
 }
 
 // Wire the anim viewer toolbar (Reset / View / Play / Loop / Bones /
