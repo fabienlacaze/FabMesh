@@ -15445,19 +15445,103 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
 
 // Contact modal — POSTs to /api/contact which stores the message in
 // R2 so the admin can read it under /admin > Messages.
+//
+// 2026-06-01: Send is disabled until ALL four fields are non-empty AND
+// the email looks valid. Optional screenshot attachments (up to 5 × 5 MB)
+// are previewed in-place and posted as multipart/form-data.
 (() => {
-  const modal     = document.getElementById('contact-modal');
-  const closeBtn  = document.getElementById('contact-close');
-  const cancelBtn = document.getElementById('contact-cancel');
-  const backdrop  = document.getElementById('contact-backdrop');
-  const form      = document.getElementById('contact-form');
-  const submitBtn = document.getElementById('contact-submit');
-  const feedback  = document.getElementById('contact-feedback');
+  const modal      = document.getElementById('contact-modal');
+  const closeBtn   = document.getElementById('contact-close');
+  const cancelBtn  = document.getElementById('contact-cancel');
+  const backdrop   = document.getElementById('contact-backdrop');
+  const form       = document.getElementById('contact-form');
+  const submitBtn  = document.getElementById('contact-submit');
+  const feedback   = document.getElementById('contact-feedback');
+  const fileInput  = document.getElementById('contact-screenshots');
+  const previewBox = document.getElementById('contact-screenshots-preview');
   if (!modal || !form) return;
+  const nameEl    = document.getElementById('contact-name');
+  const emailEl   = document.getElementById('contact-email');
+  const subjectEl = document.getElementById('contact-subject');
+  const bodyEl    = document.getElementById('contact-body');
+  const MAX_FILES = 5;
+  const MAX_SIZE  = 5 * 1024 * 1024;
+  // Selected files survive separate from the input.files FileList so
+  // the user can remove individual items via the preview's ✕ button.
+  let selectedFiles = [];
+
+  function isValidEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s); }
+  function refreshSubmitState() {
+    const ok = nameEl.value.trim()
+            && isValidEmail(emailEl.value.trim())
+            && subjectEl.value.trim()
+            && bodyEl.value.trim();
+    submitBtn.disabled = !ok;
+    // Soft visual cue when disabled.
+    submitBtn.style.opacity = ok ? '1' : '0.5';
+    submitBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+  }
+  ['input', 'change', 'keyup'].forEach(ev => {
+    nameEl.addEventListener(ev, refreshSubmitState);
+    emailEl.addEventListener(ev, refreshSubmitState);
+    subjectEl.addEventListener(ev, refreshSubmitState);
+    bodyEl.addEventListener(ev, refreshSubmitState);
+  });
+  refreshSubmitState();
+
+  function renderPreviews() {
+    previewBox.innerHTML = '';
+    selectedFiles.forEach((f, i) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative; width:72px; height:72px; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--bg-2);';
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.style.cssText = 'width:100%; height:100%; object-fit:cover;';
+      img.onload = () => URL.revokeObjectURL(img.src);
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.textContent = '✕';
+      rm.title = 'Remove';
+      rm.style.cssText = 'position:absolute; top:2px; right:2px; width:20px; height:20px; padding:0; border-radius:50%; border:none; background:rgba(0,0,0,0.7); color:#fff; cursor:pointer; font-size:11px; line-height:1;';
+      rm.addEventListener('click', () => {
+        selectedFiles.splice(i, 1);
+        renderPreviews();
+      });
+      wrap.appendChild(img);
+      wrap.appendChild(rm);
+      previewBox.appendChild(wrap);
+    });
+  }
+  fileInput?.addEventListener('change', () => {
+    const added = Array.from(fileInput.files || []);
+    for (const f of added) {
+      if (selectedFiles.length >= MAX_FILES) {
+        feedback.style.background = 'rgba(239, 68, 68, 0.15)';
+        feedback.style.color = '#f87171';
+        feedback.textContent = `⚠ Max ${MAX_FILES} screenshots — extras ignored.`;
+        feedback.style.display = 'block';
+        break;
+      }
+      if (f.size > MAX_SIZE) {
+        feedback.style.background = 'rgba(239, 68, 68, 0.15)';
+        feedback.style.color = '#f87171';
+        feedback.textContent = `⚠ "${f.name}" is too large (${(f.size / 1024 / 1024).toFixed(1)} MB > 5 MB).`;
+        feedback.style.display = 'block';
+        continue;
+      }
+      selectedFiles.push(f);
+    }
+    // Reset the input so re-picking the same file re-fires change.
+    fileInput.value = '';
+    renderPreviews();
+  });
+
   const hide = () => {
     modal.classList.add('hidden');
     feedback.style.display = 'none';
     feedback.textContent = '';
+    selectedFiles = [];
+    renderPreviews();
   };
   closeBtn?.addEventListener('click', hide);
   cancelBtn?.addEventListener('click', hide);
@@ -15467,41 +15551,40 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name    = document.getElementById('contact-name').value.trim();
-    const email   = document.getElementById('contact-email').value.trim();
-    const subject = document.getElementById('contact-subject').value.trim();
-    const body    = document.getElementById('contact-body').value.trim();
-    // All four fields are required — surface the first empty one
-    // rather than silently no-op'ing (preventDefault disables the
-    // browser's native required validation, so we redo it manually).
-    const missing = !name ? 'name' : !email ? 'email' : !subject ? 'subject' : !body ? 'message' : null;
-    if (missing) {
-      feedback.style.background = 'rgba(239, 68, 68, 0.15)';
-      feedback.style.color = '#f87171';
-      feedback.textContent = `⚠ The ${missing} field is required.`;
-      feedback.style.display = 'block';
-      document.getElementById('contact-' + (missing === 'message' ? 'body' : missing))?.focus();
-      return;
-    }
-    // Cheap email sanity-check (server re-validates).
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      feedback.style.background = 'rgba(239, 68, 68, 0.15)';
-      feedback.style.color = '#f87171';
-      feedback.textContent = '⚠ Email looks invalid.';
-      feedback.style.display = 'block';
-      document.getElementById('contact-email')?.focus();
+    const name    = nameEl.value.trim();
+    const email   = emailEl.value.trim();
+    const subject = subjectEl.value.trim();
+    const body    = bodyEl.value.trim();
+    // Defensive — the button is disabled while any field is empty, but
+    // re-validate in case someone bypasses the UI.
+    if (!name || !email || !subject || !body || !isValidEmail(email)) {
+      refreshSubmitState();
       return;
     }
     submitBtn.disabled = true;
     submitBtn.textContent = 'Sending…';
     feedback.style.display = 'none';
     try {
-      const r = await fetch('/api/contact', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, email, subject, message: body }),
-      });
+      let r;
+      if (selectedFiles.length > 0) {
+        // multipart/form-data so the worker can stream the image bytes
+        // straight into R2 without base64 overhead.
+        const fd = new FormData();
+        fd.append('name', name);
+        fd.append('email', email);
+        fd.append('subject', subject);
+        fd.append('message', body);
+        selectedFiles.forEach((f, i) => fd.append(`screenshot_${i}`, f, f.name));
+        r = await fetch('/api/contact', {
+          method: 'POST', credentials: 'include', body: fd,
+        });
+      } else {
+        r = await fetch('/api/contact', {
+          method: 'POST', credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, email, subject, message: body }),
+        });
+      }
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
       feedback.style.background = 'rgba(34, 197, 94, 0.15)';
@@ -15509,6 +15592,9 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
       feedback.textContent = '✓ Message sent. Thanks — we read everything that lands in the inbox.';
       feedback.style.display = 'block';
       form.reset();
+      selectedFiles = [];
+      renderPreviews();
+      refreshSubmitState();
       setTimeout(hide, 3000);
     } catch (err) {
       feedback.style.background = 'rgba(239, 68, 68, 0.15)';
@@ -15516,8 +15602,8 @@ document.getElementById('btn-settings')?.addEventListener('click', openSettings)
       feedback.textContent = '⚠ Could not send: ' + (err?.message || err);
       feedback.style.display = 'block';
     } finally {
-      submitBtn.disabled = false;
       submitBtn.textContent = 'Send';
+      refreshSubmitState();
     }
   });
 })();

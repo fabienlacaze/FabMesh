@@ -2760,9 +2760,20 @@
                  style="padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-2); color:var(--text-0); font-size:13px;" />
           <textarea id="contact-body" placeholder="Your message…" required maxlength="4000" rows="6"
                     style="padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-2); color:var(--text-0); font-size:13px; resize:vertical; font-family:inherit;"></textarea>
+          <!-- Screenshot attachments (optional). Multiple files, up
+               to 5 images × 5 MB each. Stored in R2 under
+               _meta/contact/<msgId>/screenshot_<n>.<ext>. -->
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label for="contact-screenshots" style="font-size:12px; color:var(--text-2); cursor:pointer;">
+              📎 Attach screenshots (optional, max 5 images × 5 MB)
+            </label>
+            <input type="file" id="contact-screenshots" accept="image/png,image/jpeg,image/webp" multiple
+                   style="font-size:12px; color:var(--text-1);" />
+            <div id="contact-screenshots-preview" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+          </div>
           <div style="display:flex; gap:8px; justify-content:flex-end;">
             <button type="button" id="contact-cancel" class="ghost-btn">Cancel</button>
-            <button type="submit" id="contact-submit" class="refine-btn" style="margin:0; padding:8px 18px; width:auto;">Send</button>
+            <button type="submit" id="contact-submit" class="refine-btn" style="margin:0; padding:8px 18px; width:auto;" disabled>Send</button>
           </div>
         </form>
         <div id="contact-feedback" style="display:none; margin-top:10px; padding:8px 10px; border-radius:6px; font-size:13px;"></div>

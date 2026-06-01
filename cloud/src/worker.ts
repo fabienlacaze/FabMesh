@@ -1320,8 +1320,42 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
   const globCur = parseInt((await r2GetText(env, globalKey)) || '0', 10) || 0;
   if (ipCur >= 5) return err(429, 'Too many messages from this IP today. Try again tomorrow.');
   if (globCur >= 200) return err(429, 'Contact form is rate-limited today, please try again tomorrow.');
+  // Accept both JSON (legacy / no screenshots) and multipart/form-data
+  // (when the user attached screenshots — uploaded as files alongside
+  // the text fields). The flow re-uses the same fields either way.
+  const contentType = req.headers.get('content-type') || '';
   let body: { name?: string; email?: string; subject?: string; message?: string };
-  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const screenshots: Array<{ name: string; bytes: Uint8Array; mime: string }> = [];
+  if (contentType.includes('multipart/form-data')) {
+    let form: FormData;
+    try { form = await req.formData(); } catch { return err(400, 'bad multipart'); }
+    body = {
+      name:    String(form.get('name')    || ''),
+      email:   String(form.get('email')   || ''),
+      subject: String(form.get('subject') || ''),
+      message: String(form.get('message') || ''),
+    };
+    for (let i = 0; i < 5; i++) {
+      const f = form.get(`screenshot_${i}`);
+      if (!(f instanceof File)) continue;
+      if (f.size > 5 * 1024 * 1024) return err(413, `screenshot_${i} too large (>5 MB)`);
+      const mime = f.type || 'image/png';
+      if (!/^image\/(png|jpe?g|webp)$/i.test(mime)) {
+        return err(400, `screenshot_${i} unsupported type: ${mime}`);
+      }
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      // Cheap magic-byte sanity check.
+      const isPng  = bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+      const isJpeg = bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+      const isWebp = bytes.length >= 12
+                  && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+                  && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+      if (!isPng && !isJpeg && !isWebp) return err(400, `screenshot_${i} bytes don't match its declared type`);
+      screenshots.push({ name: f.name || `screenshot_${i}.png`, bytes, mime });
+    }
+  } else {
+    try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  }
   const name    = String(body.name    ?? '').trim().slice(0, 80);
   const email   = String(body.email   ?? '').trim().slice(0, 120);
   const subject = String(body.subject ?? '').trim().slice(0, 120);
@@ -1342,6 +1376,26 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
     if (u) { user_id = u.id; user_email = u.email ?? null; }
   } catch {}
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  // Persist screenshots to R2 alongside the message JSON. Paths live
+  // under _meta/contact/<id>/screenshot_N.<ext> so the admin can list
+  // & view them next to the message body.
+  const attachments: Array<{ key: string; url: string; mime: string; size: number; name: string }> = [];
+  try {
+    for (let i = 0; i < screenshots.length; i++) {
+      const s = screenshots[i];
+      const ext = s.mime === 'image/jpeg' ? 'jpg'
+                : s.mime === 'image/webp' ? 'webp' : 'png';
+      const key = `_meta/contact/${id}/screenshot_${i}.${ext}`;
+      await env.MESHES.put(key, s.bytes, {
+        httpMetadata: { contentType: s.mime },
+        customMetadata: { original_name: s.name.slice(0, 100) },
+      });
+      const url = `${(env.R2_PUBLIC_URL || '').replace(/\/+$/, '')}/${key}`;
+      attachments.push({ key, url, mime: s.mime, size: s.bytes.length, name: s.name });
+    }
+  } catch (e) {
+    return err(502, `screenshot write failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const payload = {
     id,
     name, email, subject, message,
@@ -1350,6 +1404,7 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
     user_agent: req.headers.get('user-agent') ?? null,
     created_at: new Date().toISOString(),
     read: false,
+    attachments,
   };
   try {
     await env.MESHES.put(`_meta/contact/${id}.json`, JSON.stringify(payload),
@@ -1359,7 +1414,7 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     return err(502, `storage write failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return json({ ok: true, success: true, id });
+  return json({ ok: true, success: true, id, attachments: attachments.length });
 }
 
 function _safeId(s: string): string {
