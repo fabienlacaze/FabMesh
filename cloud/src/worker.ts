@@ -6897,6 +6897,80 @@ async function handleParentalToggle(req: Request, env: Env): Promise<Response> {
 }
 
 
+/** POST /api/client-log — stores browser console logs in R2 so they can
+ *  be retrieved server-side for debug. Body: JSON {kind, status, job_id?,
+ *  project?, ua?, url?, lines: string[]}. Stored under
+ *  <uid>/logs/<ts>_<kind>_<status>.log (path returned in the response).
+ *  Cap: 1 MB body. Anonymous calls are accepted too (logged under
+ *  _anon/logs/) so a user who isn't logged in can still get a flush. */
+async function handleClientLog(req: Request, env: Env): Promise<Response> {
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const user = await getSessionUser(req, env).catch(() => null);
+  let body: any;
+  try {
+    const text = await req.text();
+    if (text.length > 1024 * 1024) return err(413, 'log too large (max 1 MB)');
+    body = JSON.parse(text);
+  } catch {
+    return err(400, 'JSON body required');
+  }
+  const lines = Array.isArray(body?.lines) ? body.lines : [];
+  if (!lines.length) return json({ ok: true, skipped: true, reason: 'no lines' });
+  const kind   = String(body?.kind   || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'unknown';
+  const status = String(body?.status || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'unknown';
+  const project = String(body?.project || '').replace(/[^a-zA-Z0-9_\- ]/g, '').slice(0, 64);
+  const job_id = String(body?.job_id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const dir = user ? `${user.id}/logs` : '_anon/logs';
+  const key = `${dir}/${ts}_${kind}_${status}${job_id ? `_${job_id}` : ''}.log`;
+  // Build a header + body. Keep it text/plain for easy reading via curl.
+  const header = [
+    `# fabmesh client-log`,
+    `# user_id: ${user ? user.id : '(anon)'}`,
+    `# kind: ${kind}`,
+    `# status: ${status}`,
+    `# project: ${project || '(none)'}`,
+    `# job_id: ${job_id || '(none)'}`,
+    `# url: ${String(body?.url || '').slice(0, 256)}`,
+    `# ua: ${String(body?.ua || '').slice(0, 256)}`,
+    `# server_ts: ${ts}`,
+    `# lines: ${lines.length}`,
+    ``,
+  ].join('\n');
+  const payload = header + lines.join('\n') + '\n';
+  try {
+    await env.MESHES.put(key, payload, {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+      customMetadata: { kind, status, project: project || '', userId: user?.id || '' },
+    });
+  } catch (e) {
+    return err(500, `R2 put failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ ok: true, path: key, lines: lines.length });
+}
+
+/** GET /api/client-log/list — returns the recent log keys for the
+ *  current user. Useful for me (the agent) to find the latest log
+ *  without listing the entire R2 bucket. Query: ?limit=20 (max 100). */
+async function handleClientLogList(req: Request, env: Env): Promise<Response> {
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const url = new URL(req.url);
+  const limit = Math.max(1, Math.min(100, parseInt(url.searchParams.get('limit') || '20', 10)));
+  const prefix = `${user.id}/logs/`;
+  const list = await env.MESHES.list({ prefix, limit });
+  const objects = (list.objects || []).map(o => ({
+    key: o.key,
+    size: o.size,
+    uploaded: o.uploaded?.toISOString?.() || null,
+    meta: o.customMetadata || {},
+  }));
+  // Newest first
+  objects.sort((a, b) => (b.uploaded || '').localeCompare(a.uploaded || ''));
+  return json({ ok: true, prefix, count: objects.length, objects });
+}
+
 /** POST /api/animations/upload — multipart: file=<glb>, animType=<idle|run|...>,
  *  projectName=<...>. Stores the user-provided animated GLB as a new
  *  version under <user.id>/animations/<projectSlug>/<base>_manual_<type>_<batchId>_<ts>.glb
@@ -9248,6 +9322,8 @@ export default {
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
         if (pathname === '/api/parental/status'       && method === 'GET')  return await handleParentalStatus(req, env);
         if (pathname === '/api/parental/toggle'       && method === 'POST') return await handleParentalToggle(req, env);
+        if (pathname === '/api/client-log'            && method === 'POST') return await handleClientLog(req, env);
+        if (pathname === '/api/client-log/list'       && method === 'GET')  return await handleClientLogList(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);
         if (pathname === '/api/me/inbox/read'         && method === 'POST') return await handleMeInboxRead(req, env);

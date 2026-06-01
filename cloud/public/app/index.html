@@ -8,6 +8,10 @@
   <title>MyFabmesh.AI Cloud</title>
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/index2.css">
+  <!-- Console capture: patches console.* into a ring buffer that gets
+       auto-flushed to /api/client-log at every Generate event. Loaded
+       FIRST so it captures everything from boot. -->
+  <script src="console-capture.js"></script>
   <!-- Cloud shim: replaces Electron IPC with HTTP fetch. MUST load before index2.js. -->
   <script src="meshyAPI-cloud.js"></script>
   <script src="cloud-overrides.js"></script>
