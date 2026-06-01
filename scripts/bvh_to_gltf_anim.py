@@ -535,21 +535,27 @@ def bvh_to_gltf_anim(
                         if ci in parent_by_jidx and parent_by_jidx[ci] == -1:
                             parent_by_jidx[ci] = pi
                 patched = 0
+                non_zero = 0
+                sample_patches = []
                 for jidx in joint_idxs:
                     parent_jidx = parent_by_jidx.get(jidx, -1)
                     if parent_jidx in world_by_jidx:
                         offset = world_by_jidx[jidx] - world_by_jidx[parent_jidx]
                     else:
                         offset = world_by_jidx.get(jidx, np.array([0.0, 0.0, 0.0]))
-                    # Only patch if the node lacks a translation. Don't
-                    # overwrite values the rig may have set deliberately.
-                    if not _all_nodes[jidx].get("translation"):
-                        _all_nodes[jidx]["translation"] = [
-                            float(offset[0]), float(offset[1]), float(offset[2]),
-                        ]
-                        patched += 1
+                    # Always patch — even if existing translation is
+                    # [0,0,0]. The rig writes [0,0,0] explicitly which
+                    # would otherwise short-circuit our fix.
+                    new_t = [float(offset[0]), float(offset[1]), float(offset[2])]
+                    _all_nodes[jidx]["translation"] = new_t
+                    patched += 1
+                    if any(abs(c) > 1e-9 for c in new_t):
+                        non_zero += 1
+                    if len(sample_patches) < 3:
+                        sample_patches.append((jidx, new_t))
                 print(f"[bvh→glb] patched node.translation on {patched}/"
-                      f"{len(joint_idxs)} bones from IBM offsets", flush=True)
+                      f"{len(joint_idxs)} bones, non-zero={non_zero}, "
+                      f"samples={sample_patches}", flush=True)
     except Exception as e:
         print(f"[bvh→glb] bone-translation patch failed: {e}", flush=True)
     # DIAG: inventory the input rig's skin/mesh shape so we can tell
