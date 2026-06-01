@@ -12174,6 +12174,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // {jobId, projectName, meshUrl, createdAt} in localStorage so this page
   // can surface the orphan and resume polling instead of silently losing
   // the user's credit. We keep at most the 10 most recent entries.
+  //
+  // Resumed rigs re-create the original "work in progress" popup (via
+  // pushJob with startedAt=p.createdAt so the elapsed timer continues
+  // from the real launch time) and a poll loop drives the bar to done
+  // or error.
   try {
     const raw = localStorage.getItem('fabmesh_pending_rigs') || '[]';
     const pending = JSON.parse(raw);
@@ -12186,40 +12191,101 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(fresh));
     }
     if (fresh.length === 0) return;
-    // Show a non-blocking toast — the user can click Projects to refresh.
-    const projectNames = fresh.map(p => p.projectName || p.jobId).join(', ');
-    showToast(
-      `${fresh.length} rig job(s) left over from a previous session (${projectNames}). They may have completed — check Projects.`,
-      'info', 10000,
-    );
-    // Attempt one-shot status check per pending — if 'done', the rig is in R2
-    // and /api/meshes/projects already lists it; we just need to nudge the UI.
-    fresh.forEach(async (p) => {
+
+    const _dropPending = (jobId) => {
       try {
-        const resp = await fetch(`/api/auto-rig-status?job_id=${encodeURIComponent(p.jobId)}`, {
-          method: 'GET', credentials: 'same-origin',
-        });
-        if (!resp.ok) return;
-        const st = await resp.json();
-        if (st?.status === 'done') {
-          showToast(`Rig "${p.projectName || p.jobId}" completed — refreshing Projects.`, 'success', 4000);
-          // Drop from pending list now that we've confirmed completion.
-          try {
-            const after = (JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]') || [])
-              .filter(x => x.jobId !== p.jobId);
-            localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(after));
-          } catch (e) { /* ignore */ }
-          if (typeof refreshProjectsPage === 'function') refreshProjectsPage();
-        } else if (st?.status === 'failed') {
-          showToast(`Rig "${p.projectName || p.jobId}" failed: ${st.error || 'unknown'} — credits refunded.`, 'error', 8000);
-          try {
-            const after = (JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]') || [])
-              .filter(x => x.jobId !== p.jobId);
-            localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(after));
-          } catch (e) { /* ignore */ }
+        const after = (JSON.parse(localStorage.getItem('fabmesh_pending_rigs') || '[]') || [])
+          .filter(x => x.jobId !== jobId);
+        localStorage.setItem('fabmesh_pending_rigs', JSON.stringify(after));
+      } catch (e) { /* ignore */ }
+    };
+
+    fresh.forEach((p) => {
+      const projectLabel = p.projectName || p.jobId;
+      // Re-create the live progress popup. pushJob computes the initial
+      // progress from (Date.now() - startedAt) / expectedMs so the bar
+      // appears where it actually is, not at 0%.
+      const job = pushJob(
+        `Auto-rig AI (resumed): ${projectLabel}`,
+        null,                                    // no client-side cancel — server still owns the job
+        { 'Project': projectLabel, 'Resumed': 'yes' },
+        180 * 1000,                              // expected ~3 min (matches autoRigAI cadence)
+        p.createdAt || Date.now(),
+        { projectName: p.projectName || null, sourceImageUrl: p.meshUrl || null },
+      );
+
+      let cancelled = false;
+      const POLL_INTERVAL_MS = 5000;
+      const MAX_POLLS = 180;        // 15 min absolute ceiling
+      let polls = 0;
+      let consecutiveErr = 0;
+
+      const tick = async () => {
+        if (cancelled) return;
+        if (polls++ >= MAX_POLLS) {
+          if (typeof completeJob === 'function') completeJob(job.id, false, 'auto-rig timeout (>15 min) — check Projects later');
+          _dropPending(p.jobId);
+          return;
         }
-        // 'pending' → leave in the list; user can refresh later.
-      } catch (e) { /* network blip, leave entry */ }
+        try {
+          const resp = await fetch(`/api/auto-rig-status?job_id=${encodeURIComponent(p.jobId)}`, {
+            method: 'GET', credentials: 'same-origin',
+          });
+          if (!resp.ok) {
+            consecutiveErr++;
+            if (consecutiveErr >= 30) {
+              if (typeof completeJob === 'function') completeJob(job.id, false, `backend unreachable (${resp.status})`);
+              _dropPending(p.jobId);
+              return;
+            }
+            setTimeout(tick, POLL_INTERVAL_MS);
+            return;
+          }
+          consecutiveErr = 0;
+          const st = await resp.json();
+          if (st?.status === 'done') {
+            if (typeof completeJob === 'function') completeJob(job.id, true);
+            _dropPending(p.jobId);
+            // Push the new rig into state if we're on the right project,
+            // else fire the orphan event so the projects list picks it up.
+            const glbUrl = st.mesh_url || st.url || st.path || null;
+            if (glbUrl && state.currentProject && state.currentProject.name === p.projectName) {
+              state.currentProject.rigs = state.currentProject.rigs || [];
+              if (!state.currentProject.rigs.some(r => r.url === glbUrl)) {
+                state.currentProject.rigs.push({
+                  filename: glbUrl.split('/').pop() || 'rigged.glb',
+                  url: glbUrl, path: glbUrl, asset_type: 'rig',
+                  size: 0, created: new Date().toISOString(),
+                });
+              }
+              if (typeof window._updateRigToolButtons === 'function') {
+                try { window._updateRigToolButtons(); } catch (e) {}
+              }
+            }
+            if (typeof refreshProjectsPage === 'function') refreshProjectsPage();
+            return;
+          }
+          if (st?.status === 'failed') {
+            if (typeof completeJob === 'function') completeJob(job.id, false, st.error || 'auto-rig failed');
+            _dropPending(p.jobId);
+            return;
+          }
+          // 'pending' — keep polling. The job bar continues to advance on
+          // its own via the tickTimer inside pushJob.
+          setTimeout(tick, POLL_INTERVAL_MS);
+        } catch (e) {
+          consecutiveErr++;
+          if (consecutiveErr >= 30) {
+            if (typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
+            _dropPending(p.jobId);
+            return;
+          }
+          setTimeout(tick, POLL_INTERVAL_MS);
+        }
+      };
+      // Stagger the first tick by 1s so multiple resumed jobs don't all
+      // hit the worker at the exact same instant.
+      setTimeout(tick, 1000);
     });
   } catch (e) { /* localStorage parse fail, ignore */ }
 });
