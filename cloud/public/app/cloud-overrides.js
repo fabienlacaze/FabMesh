@@ -442,6 +442,22 @@
       // Notify any listener (AI tool modals can update their pill).
       try { window.dispatchEvent(new CustomEvent('modal-status', { detail: io })); }
       catch (_) {}
+      // Drive the topbar warm-up pill: visible whenever Modal is cold,
+      // hidden as soon as it reports warm. Avoids stale UI by being
+      // tied to the same poll that already runs every 60s.
+      try {
+        const pill = document.getElementById('gpu-warmup-pill');
+        const txt  = document.getElementById('gpu-warmup-text');
+        if (pill) {
+          if (window.__modalWarm === false) {
+            const eta = Math.round((window.__modalExpectedSeconds || 150) / 60 * 10) / 10;
+            if (txt) txt.textContent = `Cloud GPU warming up (~${eta} min)`;
+            pill.style.display = 'inline-flex';
+          } else {
+            pill.style.display = 'none';
+          }
+        }
+      } catch (_) {}
     } catch (_) {
       // Network/parse failure → same fail-safe as non-OK.
       window.__modalWarm = true;

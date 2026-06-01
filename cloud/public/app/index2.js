@@ -14354,6 +14354,24 @@ function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride, 
   const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
     ? expectedMsOverride
     : (JOB_EXPECTED_MS[kind] || 60000);
+  // Cold-start surface: when the user kicks off a job and Modal is
+  // cold, show a clear one-time toast with the expected wait so they
+  // don't think the app is frozen. Only the FIRST cold-start job in
+  // a 90s window triggers the toast — subsequent jobs share the same
+  // warm-up so the message would be noise.
+  try {
+    if (window.__modalWarm === false && typeof showToast === 'function') {
+      const last = window.__lastColdStartToast || 0;
+      if (Date.now() - last > 90_000) {
+        window.__lastColdStartToast = Date.now();
+        const eta = Math.round((window.__modalExpectedSeconds || 150) / 60 * 10) / 10;
+        showToast(
+          `Cloud GPU is cold-starting (~${eta} min). Your job is queued and will start as soon as the container warms up.`,
+          'info', 7000,
+        );
+      }
+    }
+  } catch (_) {}
   // startedAt can be overridden when resuming a job that began before a
   // page reload — lets the popup show ELAPSED measured from the real
   // start instead of "0s" right after refresh.
@@ -14775,12 +14793,13 @@ async function refreshJobDetailsModal(id) {
     // up for the whole run, misleading the user on warm jobs.
     // Default to NOT cold when __modalWarm has never been polled (i.e.
     // strictly === false), so warm/unknown both hide the hint.
-    // Cap the cold-start hint to a 60s window from job start. If Modal
-    // is still flagged cold after 60s it almost certainly means the
-    // status endpoint is stale/unreachable — keep the hint from
-    // sticking around forever. Reuses the `elapsed` value computed
-    // above (L13033) so we don't re-invoke Date.now() here.
-    const isCloudCold = isRunning && window.__modalWarm === false && elapsed < 60000;
+    // Cap the cold-start hint to a 180s window from job start. Modal's
+    // typical cold-start is 60-150s on the heaviest containers
+    // (RealVis, TRELLIS-2). The previous 60s cap was lying to the user
+    // after the first minute. If we're still flagged cold after 3 min
+    // the status endpoint is probably stale — that's the only case the
+    // cap saves us from.
+    const isCloudCold = isRunning && window.__modalWarm === false && elapsed < 180000;
     // Rate-limit the diag log: only print when the decision FLIPS, not
     // on every render tick. Otherwise long-running jobs (60s+) flood
     // the console with hundreds of identical entries.

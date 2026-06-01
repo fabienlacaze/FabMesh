@@ -47,6 +47,13 @@
         <span id="breadcrumb"></span>
       </div>
       <div class="topbar-right">
+        <!-- Cloud GPU warm-up status pill. Visible only while Modal is
+             cold-starting; clicking opens a tooltip with the ETA. -->
+        <span id="gpu-warmup-pill" style="display:none; align-items:center; gap:6px; padding:4px 10px; background:rgba(255,170,51,0.15); color:#ffaa33; border:1px solid rgba(255,170,51,0.35); border-radius:12px; font-size:11px; font-weight:600; cursor:default;" title="Cloud GPU is cold-starting. First generation will take ~2 min while the container warms up.">
+          <span style="display:inline-block; width:6px; height:6px; background:#ffaa33; border-radius:50%; animation:pulse 1.4s ease-in-out infinite;"></span>
+          <span id="gpu-warmup-text">Cloud GPU warming up…</span>
+        </span>
+        <style>@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}</style>
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
         <button id="btn-history" class="icon-btn" title="My usage history">&#128229;</button>
         <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
@@ -2810,15 +2817,18 @@
           </thead>
           <tbody id="history-tbody"></tbody>
         </table>
-        <!-- Detail panel — slides in when a row is clicked -->
-        <div id="history-detail" style="display:none; margin-top:16px; padding:16px; background:var(--bg-2); border:1px solid var(--border); border-radius:8px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <strong id="history-detail-title" style="font-size:14px;">Event details</strong>
-            <button id="history-detail-close" class="ghost-btn" style="padding:3px 10px; font-size:11px;">✕ Close</button>
-          </div>
-          <div id="history-detail-body" style="font-size:12px; color:var(--text-1); line-height:1.6;">Loading…</div>
-        </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Floating event-detail modal (sits ABOVE the history modal). -->
+  <div id="history-detail" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.65); align-items:center; justify-content:center; padding:24px;">
+    <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; max-width:760px; width:100%; max-height:80vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border);">
+        <strong id="history-detail-title" style="font-size:14px;">Event details</strong>
+        <button id="history-detail-close" class="ghost-btn" style="padding:3px 10px; font-size:11px;">✕ Close</button>
+      </div>
+      <div id="history-detail-body" style="font-size:12px; color:var(--text-1); line-height:1.6; padding:16px 18px; overflow-y:auto;">Loading…</div>
     </div>
   </div>
 
@@ -2906,11 +2916,19 @@
       function imgLink(url) {
         return url ? `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:underline; word-break:break-all;">${url}</a>` : '—';
       }
+      // Click outside the detail card closes it.
+      detailWrap?.addEventListener('click', (e) => {
+        if (e.target === detailWrap) detailWrap.style.display = 'none';
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && detailWrap.style.display === 'flex') {
+          detailWrap.style.display = 'none';
+        }
+      });
       async function showDetail(id) {
-        detailWrap.style.display = 'block';
+        detailWrap.style.display = 'flex';
         detailTitle.textContent = 'Event ' + id;
         detailBody.innerHTML = 'Loading…';
-        detailWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         try {
           const r = await fetch('/api/history/' + encodeURIComponent(id));
           if (!r.ok) { detailBody.textContent = 'Error ' + r.status; return; }
