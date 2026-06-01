@@ -800,19 +800,62 @@
     } catch (_) { /* ignore */ }
   }
   function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */) {
-    try {
-      const k = _imgKey(projectName);
+    if (!projectName) { console.warn('[_appendCloudImages] no projectName, skip'); return; }
+    const k = _imgKey(projectName);
+    const payload = urls || [];
+    function tryWrite() {
       const arr = JSON.parse(localStorage.getItem(k) || '[]');
       const before = arr.length;
-      for (const u of urls || []) arr.push({ path: u, kind, mtime: Date.now() });
-      // Cap at 200 entries to keep localStorage sane.
+      for (const u of payload) arr.push({ path: u, kind, mtime: Date.now() });
       const capped = arr.slice(-200);
       localStorage.setItem(k, JSON.stringify(capped));
       console.log('[_appendCloudImages]', k,
-                  'before=', before, '+', (urls || []).length, 'kind=', kind,
+                  'before=', before, '+', payload.length, 'kind=', kind,
                   '→ stored=', capped.length,
-                  'sample urls=', (urls || []).slice(0, 2));
-    } catch (e) { console.warn('[_appendCloudImages] FAILED:', e); }
+                  'sample urls=', payload.slice(0, 2));
+    }
+    function isQuotaError(e) {
+      return !!e && (e.name === 'QuotaExceededError'
+                  || e.code === 22 || e.code === 1014
+                  || /quota|exceeded/i.test(String(e.message || e)));
+    }
+    function freeNonEssentialCaches() {
+      let freed = 0;
+      const toDrop = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const lk = localStorage.key(i) || '';
+        if (lk.startsWith('myfm:emissive:')
+         || lk.startsWith('myfm:imagestyle:')
+         || lk === 'fabmesh_nsfw_cache') {
+          toDrop.push(lk);
+        }
+      }
+      for (const lk of toDrop) {
+        freed += (localStorage.getItem(lk) || '').length;
+        try { localStorage.removeItem(lk); } catch (_) {}
+      }
+      return { freed, count: toDrop.length };
+    }
+    try {
+      tryWrite();
+    } catch (e) {
+      const quota = isQuotaError(e);
+      console.warn('[_appendCloudImages] write failed:', e?.message || e, 'quota=', quota);
+      if (!quota) return;
+      try {
+        const { freed, count } = freeNonEssentialCaches();
+        console.warn('[_appendCloudImages] freed', freed, 'chars across', count, 'keys; retrying');
+        tryWrite();
+        if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+          window.showToast('Image saved (emissive/style cache cleared to free localStorage)', 'warn');
+        }
+      } catch (e2) {
+        console.error('[_appendCloudImages] retry also failed:', e2?.message || e2);
+        if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+          window.showToast('Could not save new image locally — localStorage full. Open DevTools → Application → Storage → Clear site data, then retry.', 'error', 12000);
+        }
+      }
+    }
   }
   function _readCloudImages(projectName) {
     try { return JSON.parse(localStorage.getItem(_imgKey(projectName)) || '[]'); }

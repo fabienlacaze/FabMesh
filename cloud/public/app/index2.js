@@ -4332,8 +4332,11 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         if (state.currentProject) {
           try {
             await renderImageVersions(state.currentProject);
+            const _firstImg = state.currentProject.images?.[0];
+            const _firstPath = (typeof _firstImg === 'string') ? _firstImg : _firstImg?.path;
             console.log('[image-gen] post-reload strip rendered, images=',
-                        state.currentProject.images?.length);
+                        state.currentProject.images?.length,
+                        'first=', _firstPath);
           } catch (e) { console.warn('[image-gen] strip render failed:', e); }
         }
         // After successful image generation, open the Edit stage and scroll
