@@ -635,7 +635,7 @@
           return { success: false, error: r?.error || 'upload failed' };
         }
         const newPath = r.path;
-        _attachToCurrentProject(newPath, 'front');
+        await _attachToCurrentProject(newPath, 'front');
         const base = basePath ? _stripExt(_basename(basePath)) : 'image';
         const fn   = filename || `${base}_${suf}_${Date.now()}.png`;
         return { success: true, ok: true, newPath, path: newPath, filename: fn };
@@ -822,11 +822,15 @@
   // Modify, the call succeeds, but the new version is invisible
   // because the Worker stores it under /users/<id>/modified/ not
   // /users/<id>/<project>/.
-  function _attachToCurrentProject(newPath, kind /* 'front'|'back' */) {
+  // 2026-06-01: now returns a Promise — callers should `await` it
+  // BEFORE reloadCurrentProject() so the Supabase row is visible to
+  // the next /api/cloud-projects call. Without this, the user had
+  // to manually refresh after Remove BG / Modify / Inpaint / Upscale.
+  async function _attachToCurrentProject(newPath, kind /* 'front'|'back' */) {
     if (!newPath) return;
     try {
       const projectName = window.state?.currentProject?.name;
-      if (projectName) _appendCloudImages(projectName, [newPath], kind || 'front');
+      if (projectName) await _appendCloudImages(projectName, [newPath], kind || 'front');
     } catch (_) { /* ignore */ }
   }
   // Map the legacy `kind` (front/back/view) into the user_assets `kind`
@@ -851,10 +855,10 @@
   // Fire-and-forget so it never blocks the success path; the
   // localStorage write below still runs as a transient fallback in
   // case the API call drops.
-  function _recordUserAsset(projectName, urls, legacyKind, parentPath) {
-    if (!projectName || !urls || !urls.length) return;
+  async function _recordUserAsset(projectName, urls, legacyKind, parentPath) {
+    if (!projectName || !urls || !urls.length) return { ok: false };
     try {
-      fetch('/api/user-assets/record', {
+      const r = await fetch('/api/user-assets/record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -864,23 +868,24 @@
           parentPath: parentPath || null,
         }),
         credentials: 'include',
-        keepalive: true,
-      }).then(r => r.json().catch(() => ({}))).then(j => {
-        console.log('[user-assets/record]', _userAssetKind(legacyKind),
-                    'projectName=', projectName,
-                    'inserted=', j?.inserted, 'of', urls.length);
-      }).catch(e => console.warn('[user-assets/record] failed:', e?.message || e));
-    } catch (e) { console.warn('[user-assets/record] threw:', e?.message || e); }
+      });
+      const j = await r.json().catch(() => ({}));
+      console.log('[user-assets/record]', _userAssetKind(legacyKind),
+                  'projectName=', projectName,
+                  'inserted=', j?.inserted, 'of', urls.length);
+      return j;
+    } catch (e) {
+      console.warn('[user-assets/record] failed:', e?.message || e);
+      return { ok: false, error: String(e) };
+    }
   }
 
-  function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */, parentPath) {
+  async function _appendCloudImages(projectName, urls, kind /* 'front'|'back'|'view' */, parentPath) {
     console.log('[_appendCloudImages] CALLED name=', projectName, 'urls=', urls, 'kind=', kind);
     if (!projectName) { console.warn('[_appendCloudImages] no projectName, skip'); return; }
     // Server is the source of truth: POST /api/user-assets/record.
-    // The legacy localStorage write was removed in v2026-06-01 because
-    // it created duplicate thumbnails in listImageFolders (the merge
-    // there was already removed).
-    _recordUserAsset(projectName, urls, kind, parentPath);
+    // AWAITS so reloadCurrentProject() called right after sees the row.
+    await _recordUserAsset(projectName, urls, kind, parentPath);
     return;
     // (Dead code below kept on purpose so a future build can revive
     // the local write if Supabase ever has hiccups.)
@@ -1315,7 +1320,7 @@
           const r = await postJSON('/api/upscale-image', { imageUrl: imagePath, scale: (params?.scale === 4 ? 4 : 2) });
           if (r?.success && (r.newPath || r.path)) {
             const newPath = r.newPath || r.path;
-            _attachToCurrentProject(newPath, 'front');
+            await _attachToCurrentProject(newPath, 'front');
             if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
             return { success: true, newPath };
           }
@@ -1379,7 +1384,7 @@
           return { success: false, error: 'Unknown operation: ' + operation };
         }
         const newPath = await _canvasToBlobUrl(out);
-        _attachToCurrentProject(newPath, 'front');
+        await _attachToCurrentProject(newPath, 'front');
         return { success: true, newPath };
       } catch (e) { return { success: false, error: String(e) }; }
     },
@@ -1436,7 +1441,7 @@
           r = await postForm('/api/remove-background', fd);
         }
         if (r?.success && (r.newPath || r.path)) {
-          _attachToCurrentProject(r.newPath || r.path, 'front');
+          await _attachToCurrentProject(r.newPath || r.path, 'front');
         }
         return r;
       } catch (e) { return { success: false, ok: false, error: String(e) }; }
@@ -1515,7 +1520,7 @@
         });
         if (r?.success && (r.newPath || r.path)) {
           const newPath = r.newPath || r.path;
-          _attachToCurrentProject(newPath, 'front');
+          await _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
           return { success: true, newPath };
         }
@@ -1535,7 +1540,7 @@
         });
         if (r?.success && (r.newPath || r.path)) {
           const newPath = r.newPath || r.path;
-          _attachToCurrentProject(newPath, 'front');
+          await _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
           return { success: true, newPath };
         }
@@ -1554,7 +1559,7 @@
         const r = await postJSON('/api/mask-inpaint', { imageUrl: imagePath, maskDataUrl, prompt });
         if (r?.success && (r.newPath || r.path)) {
           const newPath = r.newPath || r.path;
-          _attachToCurrentProject(newPath, 'front');
+          await _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
           return { success: true, newPath };
         }
@@ -1569,7 +1574,7 @@
         const r = await postJSON('/api/face-fix-image', { imageUrl: imagePath, strength });
         if (r?.success && (r.newPath || r.path)) {
           const newPath = r.newPath || r.path;
-          _attachToCurrentProject(newPath, 'front');
+          await _attachToCurrentProject(newPath, 'front');
           if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
           return { success: true, newPath };
         }
