@@ -12391,6 +12391,30 @@ async function showStep3Preview(rig) {
   rigVwClips = [];
   rigVwActiveAction = null;
   populateRigAnimDropdown([]);
+  // Aggressive scene purge — same fix as the anim viewer. Project
+  // switches sometimes leave a previous-project mesh hanging in the
+  // scene (the rigVwModel ref gets cleared but the Object3D is still
+  // a child). Walk and remove everything that isn't a light/camera.
+  if (rigVwScene) {
+    const toRemove = [];
+    rigVwScene.children.forEach(c => {
+      if (c.isLight || c.isCamera) return;
+      if (c.userData?._viewerKeep) return;
+      toRemove.push(c);
+    });
+    for (const c of toRemove) {
+      try {
+        rigVwScene.remove(c);
+        c.traverse?.(o => {
+          try {
+            o.geometry?.dispose?.();
+            const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+            mats.forEach(m => { try { m.dispose?.(); } catch (_) {} });
+          } catch (_) {}
+        });
+      } catch (_) {}
+    }
+  }
   const ext = (rig.filename || '').toLowerCase().split('.').pop();
   // Infer the rig template name from the filename: <base>_rigged_<template>_<ts>.fbx
   // → captures things like "orc_m1", "ue5_mannequin", "humanoid".
