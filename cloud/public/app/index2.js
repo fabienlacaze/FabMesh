@@ -13275,19 +13275,36 @@ function showStep4AnimPreview(anim) {
       _animVw.controls?.target?.copy(center);
       _animVw.controls?.update?.();
     } catch (e) { console.warn('[anim-vw] fit camera failed:', e); }
-    // Inventory diagnostics.
-    let skinCount = 0, totalBones = 0;
+    // Inventory diagnostics + HIDE duplicate non-skinned meshes.
+    // Some retarget outputs end up with a SkinnedMesh + a plain Mesh
+    // sharing the same vertex data — one animates, the other sits at
+    // bind pose and ghosts behind the moving copy. We hide the plain
+    // Mesh in that case.
+    let skinCount = 0, totalBones = 0, plainCount = 0, hiddenCount = 0;
+    const allMeshes = [];
     _animModel.traverse(o => {
       if (o.isSkinnedMesh) {
         skinCount++;
         totalBones += o.skeleton?.bones?.length || 0;
+        allMeshes.push({ kind: 'skin', name: o.name, mesh: o });
+      } else if (o.isMesh) {
+        plainCount++;
+        allMeshes.push({ kind: 'plain', name: o.name, mesh: o });
       }
     });
+    // If we have at least one SkinnedMesh, hide every plain Mesh.
+    if (skinCount > 0) {
+      _animModel.traverse(o => {
+        if (o.isMesh && !o.isSkinnedMesh) { o.visible = false; hiddenCount++; }
+      });
+    }
     console.log('[anim-vw] loaded GLB:',
       'animations=', gltf.animations?.length || 0,
       'tracks0=', gltf.animations?.[0]?.tracks?.length || 0,
       'duration=', gltf.animations?.[0]?.duration || 0,
-      'skinnedMeshes=', skinCount, 'totalBones=', totalBones);
+      'skinnedMeshes=', skinCount, 'plainMeshes=', plainCount,
+      'totalBones=', totalBones, 'hidden=', hiddenCount,
+      'meshes=', allMeshes.map(m => `${m.kind}:${m.name || '(anon)'}`));
     // Mixer + play first clip — bound to the GLB scene root so every
     // track's nodePath resolves correctly.
     if (gltf.animations?.length) {
@@ -13644,21 +13661,43 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     customError('autoAnimAI not exposed on this build', 'API missing');
     return;
   }
+  // Skip types that already exist in the CURRENT selected batch so
+  // we don't re-burn credits regenerating something the user already
+  // has in this version. (We DO allow regenerating into a NEW batch,
+  // i.e. when the modal's selection differs from the batch's clips.)
+  const currentBatchTypes = new Set(((p.animations || [])
+    .filter(a => a.batchId === _step4SelectedBatch))
+    .map(a => (a.type || '').toLowerCase()));
+  const skipped = animTypes.filter(t => currentBatchTypes.has(t));
+  const toRun = animTypes.filter(t => !currentBatchTypes.has(t));
+  if (!toRun.length) {
+    showToast('All checked types already exist in this version — nothing to generate.', 'info', 5000);
+    return;
+  }
+  if (skipped.length) {
+    showToast(`Skipping ${skipped.join(', ')} (already in this version)`, 'info', 4000);
+  }
   // batchId shared across all clips of this Generate click → server
   // groups them into ONE version (v0) instead of N versions.
   const batchId = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  // Spawn ONE job per checked type. They run sequentially so we don't
-  // saturate the Modal anim app cold start (~30s per cold container)
-  // and so the credit ledger sees N discrete charges/refunds.
-  gatedRun('anim', `Animate (${animTypes.join(',')}): ${p.name}`, async () => {
-    for (const animType of animTypes) {
-      const job = pushJob(`Animate ${animType}: ${p.name}`, null, {
-        Engine: 'AnyTop (cloud GPU)',
-        Type: animType,
-        Prompt: prompt || '—',
-        'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),
-        Batch: `${animTypes.indexOf(animType) + 1}/${animTypes.length}`,
-      }, 180000);
+  // ONE master batch job (instead of per-type popups) — the user sees
+  // a single Running task that walks through 1/N → N/N.
+  gatedRun('anim', `Animate ${toRun.join('+')}: ${p.name}`, async () => {
+    const batchJob = pushJob(`Animate ${toRun.join('+')}: ${p.name}`, null, {
+      Engine: 'AnyTop (cloud GPU)',
+      Types: toRun.join(', '),
+      Prompt: prompt || '—',
+      'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),
+      Batch: `0/${toRun.length}`,
+    }, 180000 * toRun.length);
+    let done = 0;
+    for (const animType of toRun) {
+      const bj = state.jobs.find(x => x.id === batchJob.id);
+      if (bj) {
+        bj.params.Batch = `${done + 1}/${toRun.length} (${animType})`;
+        bj.subtitle = `Spawning Modal for ${animType}...`;
+        renderJobs();
+      }
       try {
         const r = await API.autoAnimAI({
           rigUrl: rig.url,
@@ -13668,35 +13707,44 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
           batchId,
           projectName: p?.name || null,
           onProgress: ({ polls, elapsedMs, lastWarn }) => {
-            const j = state.jobs.find(x => x.id === job.id);
+            const j = state.jobs.find(x => x.id === batchJob.id);
             if (!j || j.status !== 'running') return;
             j.bridgeReporting = true;
-            const overTime = Math.max(0, elapsedMs - 180000);
-            const target = Math.min(99, 90 + Math.min(9, overTime / 20000));
+            // Per-type progress slice. Each type covers (100/N)% of the
+            // master bar; within a type we go 0 → (100/N) over time.
+            const slice = 100 / toRun.length;
+            const tFrac = Math.min(1, elapsedMs / 60000); // 60s = a slice
+            const target = Math.min(99, done * slice + tFrac * slice * 0.95);
             if (target > (j.progress || 0)) j.progress = target;
-            j.subtitle = (elapsedMs > 180000)
-              ? `Still running... ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s (Modal cold start probable)`
-              : `Polling Modal (${polls} polls)`;
-            if (lastWarn) j.subtitle += ` — last warn: ${String(lastWarn).slice(0, 80)}`;
+            j.subtitle = `${animType} (${done + 1}/${toRun.length}) — ${(elapsedMs > 180000)
+              ? `cold start ${Math.floor(elapsedMs/60000)}m ${Math.floor((elapsedMs%60000)/1000)}s`
+              : `polling ${polls}x`}`;
+            if (lastWarn) j.subtitle += ` — ${String(lastWarn).slice(0, 60)}`;
             renderJobs();
           },
         });
         if (r?.success) {
-          completeJob(job.id, true);
+          done++;
+          const j = state.jobs.find(x => x.id === batchJob.id);
+          if (j) {
+            j.progress = (done / toRun.length) * 100;
+            j.subtitle = `${done}/${toRun.length} done`;
+            renderJobs();
+          }
           renderAnimVersions(p);
         } else {
-          completeJob(job.id, false, r?.error || 'unknown');
-          if (!job.cancelled) reportPipelineError(r?.error, `Animate failed (${animType})`);
-          // Stop the batch on first failure so we don't burn credits on
-          // a Modal that's clearly down. The user can re-run just the
-          // remaining types.
+          completeJob(batchJob.id, false, r?.error || 'unknown');
+          if (!batchJob.cancelled) reportPipelineError(r?.error, `Animate failed (${animType})`);
           break;
         }
       } catch (e) {
-        completeJob(job.id, false, e?.error || e?.message || String(e));
-        if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), `Animate error (${animType})`);
+        completeJob(batchJob.id, false, e?.error || e?.message || String(e));
+        if (!batchJob.cancelled) reportPipelineError(e?.error || e?.message || String(e), `Animate error (${animType})`);
         break;
       }
+    }
+    if (done === toRun.length) {
+      completeJob(batchJob.id, true);
     }
     // After the batch: refresh from server so persistence picks up all
     // new clips, then reveal Step 4 Edit panel.
