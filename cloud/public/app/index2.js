@@ -582,8 +582,10 @@ async function refreshProjectsPage() {
     if (/^(modal_)?[a-f0-9-]{8,}$/i.test(base)) return '_orphans';
     if (base === 'untitled')                    return '_orphans';
     if (/^\d{13}_/.test(base))                  return '_orphans';
-    if (/^rigged(_puppeteer)?$/i.test(base))    return '_orphans';
-    if (/^anim$/i.test(base))                   return '_orphans';
+    // 'rigged_puppeteer' anywhere → orphan (anim filenames keep this
+    // prefix because the source mesh was already named rigged_puppeteer_*).
+    if (/^rigged(_puppeteer)?(_|$)/i.test(base)) return '_orphans';
+    if (/^anim(_|$)/i.test(base))                return '_orphans';
     return base || '_orphans';
   }
   for (const m of meshes) {
