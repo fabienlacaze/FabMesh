@@ -4831,6 +4831,30 @@ async function callModalBackView(env: Env, userId: string, input: {
   const buf = await r.arrayBuffer();
   console.log(`[modal] back-view dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
 
+  // Validate the response IS an image. Modal's back-view container has
+  // an internal content filter that returns a small text-rendered
+  // 'Blocked by content filter' PNG when triggered — we'd otherwise
+  // save it to R2 as the user's back-view image, and they'd see the
+  // filter text inside the viewer with no way to right-click out of it.
+  // Magic bytes:
+  //   PNG  → 89 50 4E 47
+  //   JPEG → FF D8 FF
+  //   WEBP → 'RIFF....WEBP'
+  // Anything else is suspect (JSON/HTML/SVG error placeholder).
+  if (buf.byteLength < 256) {
+    throw new Error(`Modal back-view returned ${buf.byteLength} bytes — too small to be an image (likely content-filtered placeholder)`);
+  }
+  const head = new Uint8Array(buf, 0, Math.min(16, buf.byteLength));
+  const isPng  = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
+  const isJpeg = head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF;
+  const isWebp = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
+              && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50;
+  if (!isPng && !isJpeg && !isWebp) {
+    const preview = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 200));
+    console.warn(`[modal] back-view returned non-image bytes (${buf.byteLength}): "${preview.slice(0, 120)}"`);
+    throw new Error(`Modal back-view returned non-image content (likely 'blocked by content filter' placeholder). Re-run; if it keeps happening the prompt is flagged.`);
+  }
+
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
     const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
