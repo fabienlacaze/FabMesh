@@ -17515,26 +17515,17 @@ async function extractLandmarksFromRig() {
 
   try {
     lmPushHistory(); // so Ctrl+Z restores whatever the user had before.
-    const buffer = await API.readMeshFile(rigPath);
-    if (!buffer) { customError('Could not load rig file.', 'From rig'); return; }
-    // Parse OFFSCREEN — we don't add the rig to the scene; we only
-    // need world positions of the bones.
-    const rigScene = await new Promise((resolve, reject) => {
-      new GLTFLoader().parse(buffer, '', (gltf) => resolve(gltf.scene), reject);
-    });
-    // Apply the same centering as the mesh fit so bone positions land
-    // in the user's view.
-    const box = new THREE.Box3().setFromObject(rigScene);
-    const center = box.getCenter(new THREE.Vector3());
-    rigScene.position.x -= center.x;
-    rigScene.position.z -= center.z;
-    rigScene.position.y -= box.min.y;
-    rigScene.updateMatrixWorld(true);
-    // Walk bones; first SkinnedMesh's skeleton is the authoritative
-    // ordered list, but we also collect floating bones in case the
-    // GLB doesn't have a skin.
+    // Read bones DIRECTLY from lmFsModel (the rig already loaded into
+    // the modal viewer and centered in fitFs). Reading from a freshly-
+    // re-parsed offscreen instance had subtle bbox/centering drift
+    // that decoupled marker positions from the visible skeleton.
+    if (!lmFsModel) {
+      customError('Wait for the rig to finish loading.', 'From rig');
+      return;
+    }
+    lmFsModel.updateMatrixWorld(true);
     const bones = [];
-    rigScene.traverse((c) => {
+    lmFsModel.traverse((c) => {
       if (c.isBone) bones.push(c);
       else if (c.isSkinnedMesh && c.skeleton) {
         for (const b of c.skeleton.bones) if (!bones.includes(b)) bones.push(b);
@@ -17559,62 +17550,125 @@ async function extractLandmarksFromRig() {
       placeLandmarkMarker(id, pos, colorById[id] || '#ffffff');
       matched++;
     }
-    // Geometric fallback for rigs with opaque names (AnyTop's joint22,
-    // joint41, …; some Puppeteer outputs). For each canonical landmark
-    // position (head = 94% height centerline, shoulders = 82% with
-    // lateral offset, etc.) find the closest bone world-position and
-    // assign it. This loses semantic precision but is dramatically
-    // better than 'no match → no markers'.
+    // Hierarchical fallback for rigs with opaque names (AnyTop's
+    // joint22 etc.). Instead of placing markers at canonical Y%
+    // positions (which is wrong for dragons because ailes inflate the
+    // bbox), we walk the bone tree:
+    //   - root = bone with no parent OR with a non-bone parent
+    //   - spine chain = longest path UP from root that stays roughly
+    //     on the centerline
+    //   - head = TOP of spine chain
+    //   - hips = root
+    //   - other limbs = chains branching off the spine
     if (matched === 0) {
-      const rbox = new THREE.Box3().setFromObject(rigScene);
-      const minU = rbox.min.y, maxU = rbox.max.y, sU = maxU - minU;
-      const cX = (rbox.min.x + rbox.max.x) / 2;
-      const cZ = (rbox.min.z + rbox.max.z) / 2;
-      const sL = rbox.max.x - rbox.min.x;
-      const Y = (f) => minU + sU * f;
-      // [id, expectedPos]. Mirror these values to autoDetectLandmarks
-      // semantics so users get a familiar layout.
-      const TARGETS = [
-        ['head',       new THREE.Vector3(cX,            Y(0.94), cZ)],
-        ['neck',       new THREE.Vector3(cX,            Y(0.86), cZ)],
-        ['spine_top',  new THREE.Vector3(cX,            Y(0.78), cZ)],
-        ['spine_mid',  new THREE.Vector3(cX,            Y(0.62), cZ)],
-        ['hips',       new THREE.Vector3(cX,            Y(0.52), cZ)],
-        ['shoulder_l', new THREE.Vector3(cX + sL*0.25,  Y(0.82), cZ)],
-        ['elbow_l',    new THREE.Vector3(cX + sL*0.32,  Y(0.62), cZ)],
-        ['hand_l',     new THREE.Vector3(cX + sL*0.37,  Y(0.46), cZ)],
-        ['shoulder_r', new THREE.Vector3(cX - sL*0.25,  Y(0.82), cZ)],
-        ['elbow_r',    new THREE.Vector3(cX - sL*0.32,  Y(0.62), cZ)],
-        ['hand_r',     new THREE.Vector3(cX - sL*0.37,  Y(0.46), cZ)],
-        ['hip_l',      new THREE.Vector3(cX + sL*0.10,  Y(0.50), cZ)],
-        ['knee_l',     new THREE.Vector3(cX + sL*0.10,  Y(0.30), cZ)],
-        ['ankle_l',    new THREE.Vector3(cX + sL*0.10,  Y(0.06), cZ)],
-        ['foot_l',     new THREE.Vector3(cX + sL*0.10,  Y(0.02), cZ + sL*0.05)],
-        ['hip_r',      new THREE.Vector3(cX - sL*0.10,  Y(0.50), cZ)],
-        ['knee_r',     new THREE.Vector3(cX - sL*0.10,  Y(0.30), cZ)],
-        ['ankle_r',    new THREE.Vector3(cX - sL*0.10,  Y(0.06), cZ)],
-        ['foot_r',     new THREE.Vector3(cX - sL*0.10,  Y(0.02), cZ + sL*0.05)],
-      ];
-      // Pre-compute every bone world position so we don't re-walk.
+      // Pre-compute every bone world position once.
       const boneWorld = bones.map(b => {
         const p = new THREE.Vector3(); b.getWorldPosition(p); return { bone: b, pos: p };
       });
-      // Greedy nearest assignment, no bone used twice.
-      const used = new Set();
-      for (const [id, expected] of TARGETS) {
-        let best = null;
+      // Identify roots (bone-parents of nothing OR root of the tree).
+      const boneSet = new Set(bones);
+      const roots = bones.filter(b => !b.parent || !boneSet.has(b.parent));
+      // Pick the root closest to the model's geometric centerline.
+      const rbox = new THREE.Box3().setFromObject(lmFsModel);
+      const center = rbox.getCenter(new THREE.Vector3());
+      center.y = rbox.min.y; // root lives near the base
+      let root = roots[0] || bones[0];
+      if (roots.length > 1) {
         let bestD = Infinity;
-        for (let i = 0; i < boneWorld.length; i++) {
-          if (used.has(i)) continue;
-          const d = boneWorld[i].pos.distanceTo(expected);
-          if (d < bestD) { bestD = d; best = i; }
-        }
-        if (best != null) {
-          used.add(best);
-          placeLandmarkMarker(id, boneWorld[best].pos, colorById[id] || '#ffffff');
-          matched++;
+        for (const r of roots) {
+          const wp = new THREE.Vector3(); r.getWorldPosition(wp);
+          const d = wp.distanceTo(center);
+          if (d < bestD) { bestD = d; root = r; }
         }
       }
+      const rootPos = new THREE.Vector3(); root.getWorldPosition(rootPos);
+      // Walk up the spine: from root, repeatedly pick the child whose
+      // direction is most vertical (largest |delta.y|/delta.length).
+      // Stops when we reach a bone with no children or non-vertical kids.
+      const spine = [root];
+      let cur = root;
+      const visited = new Set([root]);
+      while (cur.children && cur.children.length) {
+        const childBones = cur.children.filter(c => c.isBone && boneSet.has(c) && !visited.has(c));
+        if (!childBones.length) break;
+        const curPos = new THREE.Vector3(); cur.getWorldPosition(curPos);
+        let bestChild = null;
+        let bestScore = -Infinity;
+        for (const c of childBones) {
+          const cp = new THREE.Vector3(); c.getWorldPosition(cp);
+          const d = cp.clone().sub(curPos);
+          const len = d.length();
+          if (len < 1e-6) continue;
+          const verticality = d.y / len; // 1 = straight up, -1 = down
+          // Prefer up, but if root is below origin, accept slight side.
+          if (verticality > bestScore) { bestScore = verticality; bestChild = c; }
+        }
+        if (!bestChild || bestScore < 0.3) break;
+        spine.push(bestChild);
+        visited.add(bestChild);
+        cur = bestChild;
+      }
+      // Assign spine landmarks evenly along the chain.
+      function placeAt(id, vec) {
+        placeLandmarkMarker(id, vec, colorById[id] || '#ffffff');
+        matched++;
+      }
+      const spinePos = spine.map(b => { const p = new THREE.Vector3(); b.getWorldPosition(p); return p; });
+      if (spinePos.length >= 1) placeAt('hips', spinePos[0]);
+      if (spinePos.length >= 2) placeAt('head', spinePos[spinePos.length - 1]);
+      if (spinePos.length >= 3) placeAt('neck', spinePos[Math.floor(spinePos.length * 0.85)]);
+      if (spinePos.length >= 4) placeAt('spine_top', spinePos[Math.floor(spinePos.length * 0.65)]);
+      if (spinePos.length >= 5) placeAt('spine_mid', spinePos[Math.floor(spinePos.length * 0.4)]);
+
+      // Find limb chains: walk children of each spine bone that
+      // ARE NOT part of the spine itself.
+      const limbs = [];
+      for (const sb of spine) {
+        const sChildren = (sb.children || []).filter(c => c.isBone && boneSet.has(c) && !visited.has(c));
+        for (const c of sChildren) {
+          // Walk the chain to its end.
+          const chain = [c];
+          let n = c;
+          while (n.children && n.children.length) {
+            const next = n.children.find(x => x.isBone && boneSet.has(x));
+            if (!next) break;
+            chain.push(next);
+            n = next;
+          }
+          limbs.push(chain);
+        }
+      }
+      // Sort limbs by total length descending (longer chains first =
+      // probably the main limbs, not finger sub-chains).
+      limbs.sort((a, b) => b.length - a.length);
+      // Map first 4 long limbs to arms+legs, classified by Y direction
+      // of their endpoint relative to their origin: end.y > origin.y →
+      // arm (up/lateral); end.y < origin.y → leg (down).
+      const armLefts = [], armRights = [], legLefts = [], legRights = [];
+      for (const chain of limbs.slice(0, 6)) {
+        const origin = new THREE.Vector3(); chain[0].getWorldPosition(origin);
+        const end = new THREE.Vector3(); chain[chain.length - 1].getWorldPosition(end);
+        const up = end.y >= origin.y;
+        const left = end.x >= origin.x;
+        if (up && left)  armLefts.push(chain);
+        else if (up)     armRights.push(chain);
+        else if (left)   legLefts.push(chain);
+        else             legRights.push(chain);
+      }
+      function placeChain(chain, ids) {
+        if (!chain || !chain.length) return;
+        // Place markers at fixed fractions of the chain length.
+        const wps = chain.map(b => { const p = new THREE.Vector3(); b.getWorldPosition(p); return p; });
+        const fracs = ids.length === 3 ? [0, 0.5, 1] : ids.length === 4 ? [0, 0.4, 0.8, 1] : [];
+        for (let i = 0; i < ids.length; i++) {
+          const idx = Math.min(wps.length - 1, Math.round(fracs[i] * (wps.length - 1)));
+          placeAt(ids[i], wps[idx]);
+        }
+      }
+      placeChain(armLefts[0]  || limbs[2], ['shoulder_l', 'elbow_l', 'hand_l']);
+      placeChain(armRights[0] || limbs[3], ['shoulder_r', 'elbow_r', 'hand_r']);
+      placeChain(legLefts[0]  || limbs[0], ['hip_l', 'knee_l', 'ankle_l', 'foot_l']);
+      placeChain(legRights[0] || limbs[1], ['hip_r', 'knee_r', 'ankle_r', 'foot_r']);
     }
     if (matched === 0) {
       customError(
