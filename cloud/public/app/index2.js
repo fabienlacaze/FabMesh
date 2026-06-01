@@ -623,6 +623,27 @@ async function refreshProjectsPage() {
     }
   }
 
+  // Dedupe per-project lists by their URL/path/filename so the same R2
+  // file never appears twice in a strip. Worker now dedupes too but
+  // the client adds a belt-and-braces pass — defends against legacy
+  // callers and against the merge with state pushes from autoRigAI.
+  function _dedupeBy(arr, keyFn) {
+    const seen = new Set();
+    const out = [];
+    for (const x of (arr || [])) {
+      const k = keyFn(x);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(x);
+    }
+    return out;
+  }
+  for (const p of projectsMap.values()) {
+    p.meshes = _dedupeBy(p.meshes, m => (m.url || m.path || m.filename || '').toLowerCase());
+    p.rigs   = _dedupeBy(p.rigs,   r => (r.url || r.path || r.filename || '').toLowerCase());
+    p.animations = _dedupeBy(p.animations, a => (a.url || a.path || a.filename || '').toLowerCase());
+    p.images = _dedupeBy(p.images, im => (typeof im === 'string' ? im : im?.path || '').toLowerCase());
+  }
   state.projects = Array.from(projectsMap.values()).sort((a, b) => b.latestTimestamp - a.latestTimestamp);
   renderProjectsGrid();
   // Start background NSFW scan (non-blocking, re-renders when done)

@@ -4378,12 +4378,18 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
     if (a.created_at > p.created) p.created = a.created_at;
   }
 
-  // Sort images newest-first per project (most-recent gens at top of strip).
+  // Sort images newest-first per project + dedupe by URL.
   for (const p of map.values()) {
     const pairs = p.images.map((u, i) => ({ u, d: p.imagesData[i] }));
     pairs.sort((a, b) => (b.d?.mtime || '').localeCompare(a.d?.mtime || ''));
-    p.images = pairs.map(x => x.u);
-    p.imagesData = pairs.map(x => x.d);
+    const seenU = new Set<string>();
+    const dedupedPairs = pairs.filter(x => {
+      if (!x.u || seenU.has(x.u)) return false;
+      seenU.add(x.u);
+      return true;
+    });
+    p.images = dedupedPairs.map(x => x.u);
+    p.imagesData = dedupedPairs.map(x => x.d);
     p.count = p.images.length;
   }
   return json({ projects: Array.from(map.values()) });
@@ -4592,8 +4598,20 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
   // i=0 in the array = newest version → v(N-1).
   meshes.sort((a, b) => (b.created || '').localeCompare(a.created || ''));
 
+  // Dedupe by URL/path — the same R2 file can show up via multiple
+  // code paths (jobs.mesh_url + rigged prefix + mesh-op prefix) and
+  // we want it ONCE. Keep the first (= newest after sort).
+  const deduped: typeof meshes = [];
+  const seenPath = new Set<string>();
+  for (const m of meshes) {
+    const k = (m.url || m.path || m.id || '').toLowerCase();
+    if (!k || seenPath.has(k)) continue;
+    seenPath.add(k);
+    deduped.push(m);
+  }
+
   // No-store so the client always sees fresh rigged + mesh-op + anim
-  return new Response(JSON.stringify({ meshes }), {
+  return new Response(JSON.stringify({ meshes: deduped }), {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
