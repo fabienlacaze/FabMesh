@@ -55,17 +55,51 @@
             <span id="gpu-warmup-text">Server warming up</span>
             <span style="color:rgba(255,170,51,0.6);">▾</span>
           </span>
-          <!-- Hover popover with per-service status. -->
-          <div id="gpu-warmup-popover" style="display:none; position:absolute; top:100%; right:0; margin-top:6px; min-width:240px; background:var(--bg-1); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.5); padding:8px 10px; z-index:10000;">
+          <!-- Hover popover with per-service status. Anchored to the
+               RIGHT EDGE of the pill so it stays inside the viewport. -->
+          <div id="gpu-warmup-popover" style="display:none; position:fixed; top:auto; left:auto; min-width:280px; max-width:340px; background:var(--bg-1); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.5); padding:8px 10px; z-index:10000; pointer-events:auto;">
             <div style="font-size:10px; color:var(--text-2); text-transform:uppercase; letter-spacing:0.5px; padding-bottom:6px; border-bottom:1px solid var(--border); margin-bottom:6px;">Modal containers</div>
-            <div id="gpu-warmup-list" style="display:flex; flex-direction:column; gap:4px; font-size:11px;"></div>
+            <div id="gpu-warmup-list" style="display:flex; flex-direction:column; gap:6px; font-size:11px;"></div>
             <div style="margin-top:8px; padding-top:6px; border-top:1px solid var(--border); font-size:10px; color:var(--text-2);">Each container has its own warm-up. Cold = first call takes ~2 min, then warm for ~9 min idle.</div>
           </div>
         </div>
         <style>
           @keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}
-          #gpu-warmup-wrap:hover #gpu-warmup-popover{ display:block; }
         </style>
+        <script>
+          (function () {
+            const wrap    = document.getElementById('gpu-warmup-wrap');
+            const popover = document.getElementById('gpu-warmup-popover');
+            if (!wrap || !popover) return;
+            let hideT = null;
+            function showPopover() {
+              if (hideT) { clearTimeout(hideT); hideT = null; }
+              const r = wrap.getBoundingClientRect();
+              popover.style.display = 'block';
+              const pw = popover.getBoundingClientRect().width;
+              const vw = window.innerWidth;
+              // Anchor under the pill, right-aligned to the pill's right edge.
+              // Clamp inside the viewport with a 10px margin.
+              const right = Math.max(10, vw - r.right);
+              popover.style.top  = (r.bottom + 6) + 'px';
+              popover.style.right = right + 'px';
+              popover.style.left = 'auto';
+            }
+            function scheduleHide() {
+              if (hideT) clearTimeout(hideT);
+              hideT = setTimeout(() => { popover.style.display = 'none'; }, 150);
+            }
+            wrap.addEventListener('mouseenter', showPopover);
+            wrap.addEventListener('mouseleave', scheduleHide);
+            popover.addEventListener('mouseenter', () => { if (hideT) { clearTimeout(hideT); hideT = null; } });
+            popover.addEventListener('mouseleave', scheduleHide);
+            // Click also opens (mobile / sticky inspection).
+            wrap.addEventListener('click', () => {
+              if (popover.style.display === 'block') popover.style.display = 'none';
+              else showPopover();
+            });
+          })();
+        </script>
         <button id="btn-refresh" class="icon-btn" title="Refresh">&#x21bb;</button>
         <button id="btn-history" class="icon-btn" title="My usage history">&#128229;</button>
         <button id="btn-parental-lock" class="icon-btn" title="Parental control" style="font-size:14px;">&#128274;</button>
