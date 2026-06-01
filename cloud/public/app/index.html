@@ -3002,7 +3002,7 @@
         try {
           const r = await fetch('/api/history/' + encodeURIComponent(id));
           if (!r.ok) { detailBody.textContent = 'Error ' + r.status; return; }
-          const { job } = await r.json();
+          const { job, assets = [] } = await r.json();
           const opt = job.options || {};
           const durMs = opt.duration_ms != null ? Number(opt.duration_ms)
                       : (job.finished_at ? new Date(job.finished_at).getTime() - new Date(job.created_at).getTime() : 0);
@@ -3020,12 +3020,39 @@
           if (job.error) {
             html += `<div style="margin-top:10px; padding:8px 10px; background:rgba(255,82,82,0.1); border:1px solid #ff5252; border-radius:6px; color:#ff5252; word-break:break-word;"><strong>Error:</strong> ${job.error}</div>`;
           }
-          if (job.mesh_url) html += row('Mesh URL', assetLink(job.mesh_url, job.project_name));
+          // Asset chain — clickable links to walk back to the inputs
+          // (image → mesh → rig → anim depending on event type).
+          // 1) Source image (text2image input / mesh input / inherited)
+          if (opt.sourceImage)   html += row('🖼️ Image', assetLink(opt.sourceImage, job.project_name));
+          // 2) Source mesh (rig input)
+          if (opt.sourceMesh)    html += row('🗿 Source mesh', assetLink(opt.sourceMesh, job.project_name));
+          // 3) Source rig (anim input)
+          if (opt.sourceRig)     html += row('🦴 Source rig', assetLink(opt.sourceRig, job.project_name));
+          // 4) THIS event's output (mesh_url for mesh/rig jobs)
+          if (job.mesh_url) {
+            const label = job.asset_type === 'rig' ? '🦴 Rig URL'
+                        : (job.asset_type === 'animation' || job.asset_type === 'anim') ? '🎞️ Animation URL'
+                        : '🗿 Mesh URL';
+            html += row(label, assetLink(job.mesh_url, job.project_name));
+          }
+          // 5) Other outputs created during this job's lifetime (image-op
+          //    flush: modified images, removebg, upscale results, etc.).
+          if (assets && assets.length) {
+            html += '<div style="margin-top:10px; padding-top:8px; border-top:1px dashed var(--border);"><strong style="font-size:11px; text-transform:uppercase; color:var(--text-2);">Outputs (' + assets.length + ')</strong></div>';
+            for (const a of assets) {
+              const icon = a.kind.startsWith('image-') ? '🖼️'
+                         : a.kind === 'thumb-mesh' ? '🖼️'
+                         : a.kind.includes('rig') ? '🦴'
+                         : a.kind.includes('anim') ? '🎞️'
+                         : '📦';
+              html += row(`${icon} ${a.kind}`, assetLink(a.url, a.project));
+            }
+          }
           // Options sub-section.
           if (Object.keys(opt).length) {
             html += '<div style="margin-top:10px; padding-top:8px; border-top:1px dashed var(--border);"><strong style="font-size:11px; text-transform:uppercase; color:var(--text-2);">Options</strong></div>';
             if (opt.prompt) html += row('Prompt', opt.prompt);
-            if (opt.sourceImage) html += row('Source image', assetLink(opt.sourceImage, job.project_name));
+            // (sourceImage is already rendered as the 🖼️ link above)
             if (opt.asset_type) html += row('Asset type', opt.asset_type);
             if (opt.asset_style) html += row('Style', opt.asset_style);
             if (opt.preset) html += row('Preset', opt.preset);

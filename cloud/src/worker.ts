@@ -7088,6 +7088,18 @@ async function handleAutoRig(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     console.warn('[auto-rig] could not persist job record', e);
   }
+  // Also persist in the jobs table so the event appears in
+  // 'My usage history'. status=processing, options.sourceMesh=meshUrl
+  // lets the detail modal show a 'Source mesh' link back to its origin.
+  try {
+    await supabaseAdmin(env).from('jobs').insert({
+      id: jobId, user_id: user.id,
+      asset_type: 'rig', mode: 'rig', seed: 0,
+      credit_cost: RIG_COST, status: 'processing',
+      options: { operation_type: 'rig', sourceMesh: meshUrl, backend: 'modal', skeleton },
+      created_at: new Date().toISOString(),
+    });
+  } catch (e) { console.warn('[auto-rig] jobs.insert failed', e); }
 
   return json({
     success: true,
@@ -7256,6 +7268,12 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     await deleteRigJobRecord(env, jobId).catch(() => {});
     const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
     console.log(`[auto-rig-status] job_id=${jobId} DONE expected_bytes=${expectedBytes} url=${publicUrl}`);
+    // Mark the jobs row succeeded so it shows up correctly in history.
+    try {
+      await supabaseAdmin(env).from('jobs')
+        .update({ status: 'succeeded', mesh_url: publicUrl, finished_at: new Date().toISOString() })
+        .eq('id', jobId).eq('user_id', user.id);
+    } catch (e) { console.warn('[auto-rig-status] jobs.update failed', e); }
     return json({
       status: 'done',
       success: true,
@@ -9230,7 +9248,9 @@ async function handleHistoryXls(req: Request, env: Env): Promise<Response> {
 }
 
 /** GET /api/history.json — same data the popup shows the user
- *  (rendered as a table in cloud/public/app/index.html). No margin. */
+ *  (rendered as a table in cloud/public/app/index.html). Now includes
+ *  jobs that are still running (status: queued/starting/processing/
+ *  running) so the user can see in-flight work + cancel it. */
 async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -9272,8 +9292,9 @@ async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
   return json({ rows });
 }
 
-/** GET /api/history/:id — full details for a single event row,
- *  for the click-to-expand modal in My usage history. */
+/** GET /api/history/:id — full details for a single event row +
+ *  user_assets produced during the job's lifetime, so the detail
+ *  modal can link back to images/meshes/rigs in their project. */
 async function handleHistoryDetail(req: Request, env: Env, id: string): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -9285,7 +9306,34 @@ async function handleHistoryDetail(req: Request, env: Env, id: string): Promise<
     .maybeSingle();
   if (error) return err(500, error.message);
   if (!data) return err(404, 'not found');
-  return json({ job: data });
+  // Find user_assets created in this job's time window so the modal
+  // can show clickable links to the outputs (image/mesh/rig/anim).
+  // 30s slack on both sides covers timestamp drift.
+  let assets: Array<{
+    kind: string; project: string; r2_path: string; url: string; created_at: string;
+  }> = [];
+  try {
+    const start = new Date(new Date(data.created_at).getTime() - 30_000).toISOString();
+    const end = data.finished_at
+      ? new Date(new Date(data.finished_at).getTime() + 30_000).toISOString()
+      : new Date().toISOString();
+    const { data: a } = await sb.from('user_assets')
+      .select('kind, project, r2_path, created_at')
+      .eq('user_id', user.id)
+      .gte('created_at', start)
+      .lte('created_at', end)
+      .order('created_at', { ascending: true })
+      .limit(20);
+    const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+    assets = (a ?? []).map(x => ({
+      kind: x.kind as string,
+      project: x.project as string,
+      r2_path: x.r2_path as string,
+      url: `${prefix}/${x.r2_path}`,
+      created_at: x.created_at as string,
+    }));
+  } catch (_) { /* best effort */ }
+  return json({ job: data, assets });
 }
 
 /** GET /api/admin/jobs/active — ADMIN ONLY. Returns every job whose
