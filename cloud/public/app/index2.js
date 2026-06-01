@@ -14397,19 +14397,37 @@ function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride, 
   const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
     ? expectedMsOverride
     : (JOB_EXPECTED_MS[kind] || 60000);
-  // Cold-start surface: when the user kicks off a job and Modal is
-  // cold, show a clear one-time toast with the expected wait so they
-  // don't think the app is frozen. Only the FIRST cold-start job in
-  // a 90s window triggers the toast — subsequent jobs share the same
-  // warm-up so the message would be noise.
+  // Cold-start surface: when the user kicks off a job, pick the
+  // SPECIFIC Modal container that op will hit (text2image vs mesh vs
+  // image_op, etc.) and warn only if THAT container is cold. The
+  // previous global pill misleadingly said 'GPU warming up' for ALL
+  // jobs even when their container was warm.
   try {
-    if (window.__modalWarm === false && typeof showToast === 'function') {
-      const last = window.__lastColdStartToast || 0;
+    const C = window.__modalContainers || {};
+    // Map job kind -> Modal container key.
+    const containerForKind = {
+      image: 'text2image',
+      view:  'back_view',
+      mesh:  'mesh',
+      modify: 'image_op',
+      inpaint: 'image_op',
+      facefix: 'image_op',
+      upscale: 'image_op',
+      removebg: 'image_op',
+      rectify: 'tpose',
+    };
+    const ckey = containerForKind[kind];
+    const c = ckey ? C[ckey] : null;
+    if (c && c.warm === false && typeof showToast === 'function') {
+      const last = window.__lastColdStartToast?.[ckey] || 0;
       if (Date.now() - last > 90_000) {
-        window.__lastColdStartToast = Date.now();
-        const eta = Math.round((window.__modalExpectedSeconds || 150) / 60 * 10) / 10;
+        window.__lastColdStartToast = window.__lastColdStartToast || {};
+        window.__lastColdStartToast[ckey] = Date.now();
+        const eta = Math.round((c.expected_seconds_cold || 150) / 60 * 10) / 10;
+        const label = { text2image: 'Image gen', mesh: '3D mesh', image_op: 'Image edit',
+                        back_view: 'Back-view', tpose: 'T-pose' }[ckey] || ckey;
         showToast(
-          `Cloud GPU is cold-starting (~${eta} min). Your job is queued and will start as soon as the container warms up.`,
+          `${label} container is cold (~${eta} min). Your job is queued and will start as soon as it warms up.`,
           'info', 7000,
         );
       }
