@@ -8004,9 +8004,49 @@ async function _hmacSign(secret: string, message: string): Promise<string> {
   return btoa(bin).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
+/** Returns the current admin password verification source:
+ *  - If R2 has _meta/admin_password.json (set via /api/admin/reset-password),
+ *    return { mode: 'r2', salt, hash } and login compares SHA-256(salt+pw).
+ *  - Otherwise fall back to env.ADMIN_PASSWORD as a plain literal. */
+type AdminPwSource =
+  | { mode: 'r2'; salt: string; hash: string; signingKey: string }
+  | { mode: 'env'; literal: string; signingKey: string }
+  | { mode: 'none' };
+
+async function _getAdminPasswordSource(env: Env): Promise<AdminPwSource> {
+  // R2-stored hash takes precedence if present.
+  if (env.MESHES) {
+    try {
+      const obj = await env.MESHES.get('_meta/admin_password.json');
+      if (obj) {
+        const parsed = await obj.json() as { salt?: string; hash?: string };
+        if (parsed?.salt && parsed?.hash) {
+          // HMAC signing key: prefer env so the cookie survives a hash
+          // rotation. Fall back to the hash if env is missing.
+          const signingKey = env.ADMIN_PASSWORD && env.ADMIN_PASSWORD.length >= 20
+            ? env.ADMIN_PASSWORD : parsed.hash;
+          return { mode: 'r2', salt: parsed.salt, hash: parsed.hash, signingKey };
+        }
+      }
+    } catch { /* fall through */ }
+  }
+  if (env.ADMIN_PASSWORD && env.ADMIN_PASSWORD.length >= 20) {
+    return { mode: 'env', literal: env.ADMIN_PASSWORD, signingKey: env.ADMIN_PASSWORD };
+  }
+  return { mode: 'none' };
+}
+
+async function _hashAdminPassword(salt: string, password: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256',
+    new TextEncoder().encode(salt + ':' + password));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function _adminTokenCheck(req: Request, env: Env): Promise<boolean> {
-  const secret = env.ADMIN_PASSWORD;
-  if (!secret) return false;  // Server misconfigured — fail closed.
+  const src = await _getAdminPasswordSource(env);
+  if (src.mode === 'none') return false;  // Server misconfigured — fail closed.
+  const secret = src.signingKey;
   const raw = parseCookies(req)[ADMIN_COOKIE];
   if (!raw) return false;
   const dot = raw.lastIndexOf('.');
@@ -8050,13 +8090,9 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   if (!user || !user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
     return err(401, 'unauthorized');
   }
-  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
-  // Reject obviously weak passwords at runtime — a 12-char admin
-  // password is brute-forceable from the open internet given we have
-  // no captcha or aggressive WAF. Require >=20 chars to push brute force
-  // out of reach.
-  if (env.ADMIN_PASSWORD.length < 20) {
-    return err(500, 'ADMIN_PASSWORD too short: rotate to >=20 chars before allowing logins');
+  const pwSrc = await _getAdminPasswordSource(env);
+  if (pwSrc.mode === 'none') {
+    return err(500, 'admin password not configured (set via env ADMIN_PASSWORD or /api/admin/reset-password)');
   }
 
   // Rate-limit / lockout: track failed attempts per source IP. After
@@ -8089,13 +8125,22 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
     if (fails.first_ts === 0) fails.first_ts = Date.now();
     try { await env.MESHES?.put(lockoutKey, JSON.stringify(fails)); } catch {}
   };
-  if (provided.length !== env.ADMIN_PASSWORD.length) {
-    await _recordFail();
-    return err(401, 'invalid password');
+  let ok = false;
+  if (pwSrc.mode === 'env') {
+    if (provided.length === pwSrc.literal.length) {
+      let diff = 0;
+      for (let i = 0; i < provided.length; i++) diff |= provided.charCodeAt(i) ^ pwSrc.literal.charCodeAt(i);
+      ok = diff === 0;
+    }
+  } else if (pwSrc.mode === 'r2') {
+    const computed = await _hashAdminPassword(pwSrc.salt, provided);
+    if (computed.length === pwSrc.hash.length) {
+      let diff = 0;
+      for (let i = 0; i < computed.length; i++) diff |= computed.charCodeAt(i) ^ pwSrc.hash.charCodeAt(i);
+      ok = diff === 0;
+    }
   }
-  let diff = 0;
-  for (let i = 0; i < provided.length; i++) diff |= provided.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
-  if (diff !== 0) {
+  if (!ok) {
     await _recordFail();
     return err(401, 'invalid password');
   }
@@ -8115,7 +8160,7 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
 
   const exp = Math.floor(Date.now() / 1000) + ADMIN_TTL_SEC;
   const payload = `${user.email.toLowerCase()}:${exp}`;
-  const sig = await _hmacSign(env.ADMIN_PASSWORD, payload);
+  const sig = await _hmacSign(pwSrc.signingKey, payload);
   const value = `${payload}.${sig}`;
   return new Response(JSON.stringify({ ok: true, expires_at: exp, totp_enrolled: !!totpSecret }), {
     status: 200,
@@ -8124,6 +8169,62 @@ async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
       'set-cookie': `${ADMIN_COOKIE}=${value}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ADMIN_TTL_SEC}`,
     },
   });
+}
+
+/** POST /api/admin/reset-password — set/rotate the admin dashboard
+ *  password. The caller must be Supabase-logged-in as one of the
+ *  ADMIN_EMAILS — that membership is the recovery factor (no email
+ *  link, no 2FA prompt). Body: { newPassword: string } where
+ *  newPassword.length >= 20.
+ *
+ *  Stores SHA-256(salt + newPassword) at _meta/admin_password.json in
+ *  R2. Subsequent /api/admin/login checks against this hash first;
+ *  the env.ADMIN_PASSWORD literal becomes the fallback only.
+ *
+ *  Does NOT require the existing admin password cookie — that's the
+ *  whole point of forgot-password. The Supabase admin-email check is
+ *  the gate. */
+async function handleAdminResetPassword(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized — sign in with your admin Supabase account first');
+  if (!user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
+    return err(403, 'forbidden — your Supabase email is not in the admin allow-list');
+  }
+  if (!env.MESHES) return err(500, 'R2 binding required');
+  const body = await req.json().catch(() => ({})) as { newPassword?: string };
+  const newPassword = String(body?.newPassword ?? '');
+  if (newPassword.length < 20) {
+    return err(400, 'newPassword must be at least 20 characters');
+  }
+  if (newPassword.length > 256) {
+    return err(400, 'newPassword too long (max 256)');
+  }
+  // Generate a fresh random salt every reset so the same plaintext
+  // never produces the same hash twice (defense if R2 leaks).
+  const saltBuf = new Uint8Array(16);
+  crypto.getRandomValues(saltBuf);
+  const salt = Array.from(saltBuf).map(b => b.toString(16).padStart(2, '0')).join('');
+  const hash = await _hashAdminPassword(salt, newPassword);
+  await env.MESHES.put('_meta/admin_password.json', JSON.stringify({
+    salt, hash,
+    rotated_at: new Date().toISOString(),
+    rotated_by: user.email,
+  }), { httpMetadata: { contentType: 'application/json' } });
+  // Wipe any existing login lockout counters for this user.
+  // (The login flow already wipes the IP counter on success, but
+  // we may want a clean slate post-reset.)
+  try {
+    const sourceIp = req.headers.get('cf-connecting-ip') ?? 'unknown';
+    const _ipSafe = sourceIp.replace(/[^A-Fa-f0-9.:]/g, '_').slice(0, 64);
+    await env.MESHES.delete(`_meta/admin_login_fails/${_ipSafe}.json`);
+  } catch {}
+  // Audit log: who changed the admin password and when.
+  await _auditLog(env, {
+    req, actorEmail: user.email,
+    action: 'admin_password_reset',
+    details: { mode: 'r2_hash' },
+  });
+  return json({ ok: true, message: 'Password rotated. Sign in with your new password.' });
 }
 
 /** POST /api/admin/logout — clear the admin cookie. Idempotent. */
@@ -9779,6 +9880,7 @@ export default {
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
         if (pathname === '/api/admin/login'           && method === 'POST') return await handleAdminLogin(req, env);
+        if (pathname === '/api/admin/reset-password'  && method === 'POST') return await handleAdminResetPassword(req, env);
         if (pathname === '/api/admin/logout'          && method === 'POST') return await handleAdminLogout(req, env);
         if (pathname === '/api/admin/history.csv'     && method === 'GET')  return await handleAdminHistoryCsv(req, env);
         if (pathname === '/api/admin/history.xlsx'    && method === 'GET')  return await handleAdminHistoryXls(req, env);
