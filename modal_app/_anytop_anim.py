@@ -133,18 +133,20 @@ def _log(msg: str) -> None:
 # ============================================================
 # Skeleton extraction from a Puppeteer GLB
 # ============================================================
-def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30) -> None:
+def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30,
+                          perturb: bool = False) -> None:
     """Read a Puppeteer-rigged GLB and write a BVH the AnyTop pipeline
     can ingest. Per-joint Euler order defaults to ZXY.
 
     n_frames controls how many T-pose frames are emitted:
       - 1  → use as --tpos_bvh (the reference rest pose)
-      - 30 → use as the motion file inside --bvh_dir (process_object
-             lists this dir and needs at least one entry AFTER removing
-             the tpos basename, else its iteration is empty → exit 1)
+      - 30 → use as the motion file inside --bvh_dir
 
-    The bone hierarchy + offsets are taken from the first skin in the
-    GLB; rest rotations are baked from the local TRS of each joint node.
+    perturb=True adds tiny per-frame Gaussian jitter (≈0.5°) on every
+    non-root rotation channel. AnyTop's diffusion sampler trains on
+    motion variance; a strictly-zero motion BVH makes Mean/Std collapse
+    to (0, 0) and the sampler outputs identity rotations everywhere
+    (mesh stays frozen). Tpos stays unperturbed (it's the rest reference).
     """
     import numpy as np
     sys.path.insert(0, "/tmp")
@@ -198,19 +200,28 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30) -> No
         indent=0, lines=lines, is_root=True,
     )
 
-    # Emit n_frames of identical T-pose (caller picks 1 for tpos_bvh,
-    # 30 for the motion file in bvh_dir). A single frame is fine as
-    # the reference pose; the motion needs ≥ a few frames so AnyTop's
-    # motion_process.py can compute statistics over them.
+    # Emit n_frames of T-pose. perturb=False writes strict zeros (for
+    # tpos_bvh). perturb=True adds ~0.5° Gaussian jitter on non-root
+    # rotation channels so AnyTop's Mean/Std doesn't collapse to 0.
+    # Root channels (0..5 = Xpos Ypos Zpos Zrot Xrot Yrot) stay 0 so
+    # the character doesn't drift or spin from the perturbation alone.
     n_joints = sum(1 for _ in joint_idxs)
     n_chans_per_frame = 6 + 3 * (n_joints - 1)  # root has 6, others 3
-    zero_frame = " ".join(["0"] * n_chans_per_frame)
     lines += [
         "MOTION",
         f"Frames: {int(n_frames)}",
         "Frame Time: 0.033333",
-        *[zero_frame for _ in range(int(n_frames))],
     ]
+    if not perturb:
+        zero_frame = " ".join(["0"] * n_chans_per_frame)
+        lines += [zero_frame for _ in range(int(n_frames))]
+    else:
+        rng = np.random.default_rng(seed=42)  # deterministic per-job
+        for _ in range(int(n_frames)):
+            chans = [0.0] * 6  # root stays clean
+            if n_chans_per_frame > 6:
+                chans += rng.normal(0.0, 0.5, size=n_chans_per_frame - 6).tolist()
+            lines.append(" ".join(f"{c:.6f}" for c in chans))
     with open(out_bvh, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -307,16 +318,15 @@ def animate_mesh(
             f.write(rig_glb_bytes)
 
         # ── Step 1: extract BVH skeleton from the GLB ─────────────
-        # Two BVH files with DIFFERENT names (so process_object's
-        # listdir-minus-tpos still has motion to iterate) and BOTH
-        # 30-frames-long: AnyTop's stats path needs ≥ a few frames in
-        # the tpos file too (it indexes t_pos_motion[0] after
-        # statistics rejection), and the motion file needs them for
-        # Mean/Std. A 1-frame tpos crashed with IndexError on
-        # t_pos_motion[0] (motion_process.py:361). 30 frames is cheap.
-        _log("step 1: extracting BVH skeleton from rig GLB (tpos.bvh + idle.bvh)")
-        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=30)
-        _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30)
+        # Two BVH files with DIFFERENT names. Both 30 frames so
+        # AnyTop's tpos_first_frame indexing doesn't crash. CRITICAL:
+        # motion_bvh gets perturb=True so AnyTop's diffusion sampler
+        # sees non-zero Mean/Std and outputs a real animation. Without
+        # this the sampler degenerates to identity rotations and the
+        # mesh stays frozen on its rest pose.
+        _log("step 1: extracting BVH skeleton (tpos clean + idle perturbed)")
+        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=30, perturb=False)
+        _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30, perturb=True)
 
         # ── Step 2: preprocess for AnyTop (process_new_skeleton) ──
         # process_new_skeleton needs face_joints_names. We pick from

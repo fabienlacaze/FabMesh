@@ -6753,6 +6753,33 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   });
 }
 
+/** POST /api/animations/delete — body { url }. Removes the R2 blob
+ *  if and only if the URL points under <user.id>/animations/ (so a
+ *  hostile body can't nuke unrelated R2 keys). Always idempotent —
+ *  missing keys return ok. */
+async function handleAnimDelete(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+  const { url } = await req.json() as { url?: string };
+  if (!url) return err(400, 'url required');
+  let key: string | null = null;
+  try {
+    const u = new URL(url);
+    const expectedHost = new URL(env.R2_PUBLIC_URL).host;
+    if (u.host !== expectedHost) return err(400, 'url host not allowed');
+    key = u.pathname.replace(/^\/+/, '');
+  } catch { return err(400, 'invalid url'); }
+  if (!key || !key.startsWith(`${user.id}/animations/`)) {
+    return err(403, 'can only delete your own animation files');
+  }
+  try { await env.MESHES.delete(key); } catch (e) {
+    console.warn('[animations/delete]', e instanceof Error ? e.message : String(e));
+  }
+  return json({ ok: true, deleted_key: key });
+}
+
+
 /** POST /api/animate — spawn an AnyTop animation job on Modal.
  *  Body: { rig_url: string, anim_type?: string, prompt?: string, engine?: string }
  *  Returns: { success, job_id, status:'queued', creditsRemaining }
@@ -9013,6 +9040,7 @@ export default {
         if (pathname === '/api/auto-rig-status'       && (method === 'GET' || method === 'POST')) return await handleAutoRigStatus(req, env);
         if (pathname === '/api/animate'               && method === 'POST') return await handleAutoAnim(req, env);
         if (pathname === '/api/animate-status'        && (method === 'GET' || method === 'POST')) return await handleAutoAnimStatus(req, env);
+        if (pathname === '/api/animations/delete'     && method === 'POST') return await handleAnimDelete(req, env);
         if (pathname === '/api/landmarks'             && method === 'POST') return await handleLandmarks(req, env);
         if (pathname === '/api/modal-status'          && method === 'GET')  return await handleModalStatus(req, env);
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
