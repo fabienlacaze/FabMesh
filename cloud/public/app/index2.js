@@ -13100,25 +13100,22 @@ function renderAnimVersions(p) {
   strip.innerHTML = batches.map((b, i) => {
     const icons = b.clips.map(c => iconFor(c.type)).slice(0, 4).join('');
     return `
-      <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}" style="position:relative;">
-        <button class="anim-version-del" data-batch-id="${b.id}" title="Delete this version"
-                style="position:absolute; top:2px; right:2px; width:18px; height:18px;
-                       padding:0; border:none; border-radius:50%; background:rgba(0,0,0,0.6);
-                       color:#fff; font-size:11px; line-height:18px; cursor:pointer; z-index:2;">×</button>
+      <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}">
         <div class="version-thumb-icon" style="font-size:18px; line-height:1.1; display:flex; align-items:center; justify-content:center; height:42px; letter-spacing:-2px;">${icons}</div>
-        <div class="version-thumb-sub">v${i}</div>
+        <span class="v-label">v${i}</span>
+        <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
       </div>`;
   }).join('');
   strip.querySelectorAll('.version-thumb').forEach(t => {
     t.addEventListener('click', (e) => {
       // Ignore clicks on the delete button itself (it has its own handler).
-      if (e.target.classList?.contains('anim-version-del')) return;
+      if (e.target.classList?.contains('version-delete-btn')) return;
       _step4SelectedBatch = t.dataset.batchId;
       _step4SelectedClipInBatch = null;
       renderAnimVersions(p);
     });
   });
-  strip.querySelectorAll('.anim-version-del').forEach(btn => {
+  strip.querySelectorAll('.version-delete-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const batchId = btn.dataset.batchId;
