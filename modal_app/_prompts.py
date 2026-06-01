@@ -17,6 +17,12 @@ ASSET_TYPE_PROMPTS = {
     'weapon':      'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
     'prop':        'ONE prop only, single instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
     'creature':    'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
+    # 'animal' was missing from this map, so the suffix was '' and SDXL
+    # defaulted to a head/portrait crop (user reported 'I get only the
+    # lion head'). Heavy anti-crop reinforcement via repetition is the
+    # only thing that works with plain diffusers (Compel weights are
+    # ignored). Reference: memory feedback_full_body_prompt_tuning.md.
+    'animal':      'ONE animal only, single instance, isolated, FULL BODY shown, complete animal from head to tail, all four legs visible, standing on all fours, full creature visible in frame, wide shot, animal photography full body, wildlife full-body photograph, plain white background, even studio lighting, no shadows, no humans, centered, side profile, clean silhouette, no text, no UI, no duplicate, NO close-up, NO portrait, NO headshot, NOT cropped, NOT zoomed on face, body and limbs clearly visible',
     'environment': 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
     'icon':        'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
     'custom':      '',
