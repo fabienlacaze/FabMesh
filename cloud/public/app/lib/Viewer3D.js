@@ -100,14 +100,21 @@ export class Viewer3D {
   }
 
   _addDefaultLighting() {
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-    const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+    // Bumped from 1.0/1.2/0.5/0.3 — user reported all 3D viewers
+    // looked too dark with the previous values, especially for meshes
+    // baked with PBR metallic/roughness that swallow ambient.
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.6));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.8);
     dir.position.set(5, 8, 5);
     this.scene.add(dir);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.9);
     fill.position.set(-5, 3, -5);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    const back = new THREE.DirectionalLight(0xffffff, 0.6);
+    back.position.set(0, 5, -8);
+    this.scene.add(back);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    this.renderer.toneMappingExposure = 1.3;
   }
 
   _setupAutoResize() {
