@@ -803,10 +803,16 @@
     try {
       const k = _imgKey(projectName);
       const arr = JSON.parse(localStorage.getItem(k) || '[]');
+      const before = arr.length;
       for (const u of urls || []) arr.push({ path: u, kind, mtime: Date.now() });
       // Cap at 200 entries to keep localStorage sane.
-      localStorage.setItem(k, JSON.stringify(arr.slice(-200)));
-    } catch (_) {}
+      const capped = arr.slice(-200);
+      localStorage.setItem(k, JSON.stringify(capped));
+      console.log('[_appendCloudImages]', k,
+                  'before=', before, '+', (urls || []).length, 'kind=', kind,
+                  '→ stored=', capped.length,
+                  'sample urls=', (urls || []).slice(0, 2));
+    } catch (e) { console.warn('[_appendCloudImages] FAILED:', e); }
   }
   function _readCloudImages(projectName) {
     try { return JSON.parse(localStorage.getItem(_imgKey(projectName)) || '[]'); }
