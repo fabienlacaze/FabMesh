@@ -4371,6 +4371,15 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
         a.kind === 'image-inpainted' || a.kind === 'image-facefixed') {
       p.images.push(url);
       p.imagesData.push({ path: url, created: a.created_at, size: 0, mtime: a.created_at });
+      // Surface the prompt for the Copy prompt button. insertUserAsset
+      // stores it in meta.prompt during handleGenerateImage; keep the
+      // first non-empty value we see per project (assets were sorted
+      // newest-first so this is the most-recent prompt).
+      if (!p.prompt) {
+        const m = a.meta as Record<string, unknown> | null;
+        const promptFromMeta = m && typeof m['prompt'] === 'string' ? m['prompt'] as string : null;
+        if (promptFromMeta) p.prompt = promptFromMeta;
+      }
     } else if (a.kind === 'image-back' && a.parent_path) {
       const parentUrl = a.parent_path.startsWith('http') ? a.parent_path : `${prefix}/${a.parent_path}`;
       p.backPhotos[parentUrl] = url;
