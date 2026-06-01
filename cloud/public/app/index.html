@@ -2810,6 +2810,14 @@
           </thead>
           <tbody id="history-tbody"></tbody>
         </table>
+        <!-- Detail panel — slides in when a row is clicked -->
+        <div id="history-detail" style="display:none; margin-top:16px; padding:16px; background:var(--bg-2); border:1px solid var(--border); border-radius:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <strong id="history-detail-title" style="font-size:14px;">Event details</strong>
+            <button id="history-detail-close" class="ghost-btn" style="padding:3px 10px; font-size:11px;">✕ Close</button>
+          </div>
+          <div id="history-detail-body" style="font-size:12px; color:var(--text-1); line-height:1.6;">Loading…</div>
+        </div>
       </div>
     </div>
   </div>
@@ -2861,7 +2869,7 @@
           return WARN;
         }
         tbody.innerHTML = rows.map(r => `
-          <tr>
+          <tr data-job-id="${r.id}" style="cursor:pointer;" title="Click for full details">
             <td style="padding:6px 10px; border-bottom:1px solid var(--border); white-space:nowrap;">
               ${new Date(r.date).toLocaleString('fr', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
             </td>
@@ -2874,6 +2882,78 @@
             <td style="padding:6px 10px; border-bottom:1px solid var(--border); color:var(--text-2);">${r.project || '—'}</td>
           </tr>
         `).join('');
+        // Click-to-expand handlers.
+        tbody.querySelectorAll('tr[data-job-id]').forEach(tr => {
+          tr.addEventListener('mouseenter', () => { tr.style.background = 'rgba(168,85,247,0.06)'; });
+          tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
+          tr.addEventListener('click', () => showDetail(tr.dataset.jobId));
+        });
+      }
+
+      // Detail modal logic.
+      const detailWrap  = document.getElementById('history-detail');
+      const detailTitle = document.getElementById('history-detail-title');
+      const detailBody  = document.getElementById('history-detail-body');
+      const detailClose = document.getElementById('history-detail-close');
+      detailClose?.addEventListener('click', () => { detailWrap.style.display = 'none'; });
+      function row(label, val, mono) {
+        if (val == null || val === '') return '';
+        const v = mono
+          ? `<code style="background:var(--bg-1); padding:1px 6px; border-radius:4px; word-break:break-all;">${String(val)}</code>`
+          : String(val);
+        return `<div style="display:grid; grid-template-columns:140px 1fr; gap:12px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:var(--text-2); font-size:11px; text-transform:uppercase;">${label}</span><span>${v}</span></div>`;
+      }
+      function imgLink(url) {
+        return url ? `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:underline; word-break:break-all;">${url}</a>` : '—';
+      }
+      async function showDetail(id) {
+        detailWrap.style.display = 'block';
+        detailTitle.textContent = 'Event ' + id;
+        detailBody.innerHTML = 'Loading…';
+        detailWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        try {
+          const r = await fetch('/api/history/' + encodeURIComponent(id));
+          if (!r.ok) { detailBody.textContent = 'Error ' + r.status; return; }
+          const { job } = await r.json();
+          const opt = job.options || {};
+          const durMs = opt.duration_ms != null ? Number(opt.duration_ms)
+                      : (job.finished_at ? new Date(job.finished_at).getTime() - new Date(job.created_at).getTime() : 0);
+          let html = '';
+          html += row('Job ID', job.id, true);
+          html += row('Type', job.asset_type);
+          html += row('Mode', job.mode);
+          html += row('Status', `<span style="color:${job.status === 'succeeded' ? '#4cd964' : (job.status === 'failed' ? '#ff5252' : '#ffaa33')}; font-weight:600;">${job.status}</span>`);
+          html += row('Created', new Date(job.created_at).toLocaleString('fr'));
+          if (job.finished_at) html += row('Finished', new Date(job.finished_at).toLocaleString('fr'));
+          html += row('Duration', (durMs / 1000).toFixed(1) + ' s');
+          html += row('Credits', job.credit_cost);
+          html += row('Seed', job.seed);
+          html += row('Project', job.project_name);
+          if (job.error) {
+            html += `<div style="margin-top:10px; padding:8px 10px; background:rgba(255,82,82,0.1); border:1px solid #ff5252; border-radius:6px; color:#ff5252; word-break:break-word;"><strong>Error:</strong> ${job.error}</div>`;
+          }
+          if (job.mesh_url) html += row('Mesh URL', imgLink(job.mesh_url));
+          // Options sub-section.
+          if (Object.keys(opt).length) {
+            html += '<div style="margin-top:10px; padding-top:8px; border-top:1px dashed var(--border);"><strong style="font-size:11px; text-transform:uppercase; color:var(--text-2);">Options</strong></div>';
+            if (opt.prompt) html += row('Prompt', opt.prompt);
+            if (opt.sourceImage) html += row('Source image', imgLink(opt.sourceImage));
+            if (opt.asset_type) html += row('Asset type', opt.asset_type);
+            if (opt.asset_style) html += row('Style', opt.asset_style);
+            if (opt.preset) html += row('Preset', opt.preset);
+            if (opt.steps) html += row('Steps', opt.steps);
+            if (opt.backend) html += row('Backend', opt.backend);
+            // Dump remaining boolean/number options
+            const skip = new Set(['prompt','sourceImage','asset_type','asset_style','preset','steps','backend','duration_ms','operation_type','cost_usd','project_name']);
+            for (const [k, v] of Object.entries(opt)) {
+              if (skip.has(k)) continue;
+              if (v === true || v === false || typeof v === 'number') html += row(k, String(v));
+            }
+          }
+          detailBody.innerHTML = html;
+        } catch (e) {
+          detailBody.textContent = 'Fetch failed: ' + (e && e.message || e);
+        }
       }
     })();
   </script>

@@ -9185,6 +9185,22 @@ async function handleHistoryJson(req: Request, env: Env): Promise<Response> {
   return json({ rows });
 }
 
+/** GET /api/history/:id — full details for a single event row,
+ *  for the click-to-expand modal in My usage history. */
+async function handleHistoryDetail(req: Request, env: Env, id: string): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const sb = supabaseAdmin(env);
+  const { data, error } = await sb.from('jobs')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (error) return err(500, error.message);
+  if (!data) return err(404, 'not found');
+  return json({ job: data });
+}
+
 /** GET /api/admin/jobs/active — ADMIN ONLY. Returns every job whose
  *  status is still in-flight (starting / processing / queued). Joined
  *  with profiles so the UI can show the user email next to each row. */
@@ -10269,6 +10285,10 @@ export default {
         if (pathname === '/api/mesh-op'               && method === 'POST') return await handleMeshOp(req, env);
         if (pathname === '/api/mesh-op/client-result' && method === 'POST') return await handleMeshOpClientResult(req, env);
         if (pathname === '/api/history.csv'           && method === 'GET')  return await handleHistoryCsv(req, env);
+        if (pathname.startsWith('/api/history/')      && method === 'GET') {
+          const id = pathname.slice('/api/history/'.length);
+          if (id && !id.includes('/')) return await handleHistoryDetail(req, env, id);
+        }
         if (pathname === '/api/history.xlsx'          && method === 'GET')  return await handleHistoryXls(req, env);
         if (pathname === '/api/history.json'          && method === 'GET')  return await handleHistoryJson(req, env);
         if (pathname === '/api/admin/login'           && method === 'POST') return await handleAdminLogin(req, env);
