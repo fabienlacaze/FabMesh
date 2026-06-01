@@ -6852,8 +6852,21 @@ function _applyMeshTextureFilter(root) {
       if (!mat) continue;
       // Force DoubleSide rendering so reversed-winding triangles
       // (Trellis2 sometimes emits them) don't show up as black voids.
-      // Carries through to GLTFExporter as doubleSided:true on save.
       mat.side = THREE.DoubleSide;
+      // FORCE OPAQUE: GLTFLoader sometimes carries alphaMode='BLEND' or
+      // a stray alpha map from Trellis2/SF3D output that makes the
+      // mesh look semi-transparent (red car shows through itself). Real
+      // see-through materials (glass) aren't a primary use case here,
+      // so default to opaque. If user needs transparency they can flip
+      // the baseColor alpha in Material Adjust.
+      if (mat.transparent || (mat.opacity != null && mat.opacity < 1)) {
+        mat.transparent = false;
+        mat.opacity = 1.0;
+        if (mat.alphaMap) mat.alphaMap = null;
+        if ('alphaTest' in mat) mat.alphaTest = 0;
+        mat.depthWrite = true;
+        mat.needsUpdate = true;
+      }
       const slots = [mat.map, mat.normalMap, mat.roughnessMap,
                      mat.metalnessMap, mat.aoMap, mat.emissiveMap];
       for (const tex of slots) {
