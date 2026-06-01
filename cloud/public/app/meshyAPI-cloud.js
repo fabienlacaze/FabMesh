@@ -862,28 +862,13 @@
       }
       return Array.from(byName.values()).map(p => {
         const local = _readCloudImages(p.name);
-        const frontLocal = local.filter(x => x.kind === 'front' || x.kind === 'view');
+        const frontUrls = local.filter(x => x.kind === 'front' || x.kind === 'view').map(x => x.path);
         const backCache = _readBackPhotos(p.name);
-        // Build a URL→localEntry map so we can keep mtime when present.
-        const localByUrl = new Map(frontLocal.map(x => [x.path, x]));
-        // Normalize EVERY image into an object { path, mtime, jobId }.
-        // The renderer (index2.js) does img.path / img.mtime, so feeding
-        // it raw URL strings produces broken <img src=""> thumbnails.
-        // The strip count grows but every thumb is invisible.
-        const seen = new Set();
-        const merged = [];
-        const pushUrl = (u) => {
-          if (!u || seen.has(u)) return;
-          seen.add(u);
-          const local = localByUrl.get(u);
-          merged.push({
-            path: u,
-            mtime: local?.mtime ?? Date.now(),
-            jobId: null,
-          });
-        };
-        for (const u of (p.images || [])) pushUrl(typeof u === 'string' ? u : u?.path);
-        for (const x of frontLocal) pushUrl(x.path);
+        // Merge: server images first, then locally-cached ones we don't
+        // already have. Dedup on URL.
+        const seen = new Set(p.images || []);
+        const merged = [...(p.images || [])];
+        for (const u of frontUrls) if (!seen.has(u)) { seen.add(u); merged.push(u); }
         // Desktop convention: index2.js labels versions as
         // `v${images.length - 1 - i}`, expecting the most recent image at
         // i=0 (label = max version number). On desktop main.js sorts
