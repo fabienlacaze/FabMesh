@@ -536,28 +536,63 @@ def bvh_to_gltf_anim(
                     for ci in (_all_nodes[pi].get("children") or []):
                         if ci in parent_by_jidx and parent_by_jidx[ci] == -1:
                             parent_by_jidx[ci] = pi
+                # FULL TRS decomposition. The Puppeteer rig may have
+                # non-identity rotations baked into IBM. Setting only
+                # node.translation works for translation-only rigs but
+                # leaves rotational rest mismatched, causing the mesh
+                # to explode when animations apply. Compute each joint's
+                # LOCAL matrix = inv(parent_world) @ inv(IBM_joint) and
+                # decompose into TRS.
+                world_mat_by_jidx = {}
+                for k, jidx in enumerate(joint_idxs):
+                    try:
+                        world_mat_by_jidx[jidx] = np.linalg.inv(_ibm_mats[k])
+                    except Exception:
+                        world_mat_by_jidx[jidx] = np.eye(4)
+                from scipy.spatial.transform import Rotation as _R
                 patched = 0
-                non_zero = 0
+                non_zero_t = 0
+                non_id_r = 0
                 sample_patches = []
                 for jidx in joint_idxs:
                     parent_jidx = parent_by_jidx.get(jidx, -1)
-                    if parent_jidx in world_by_jidx:
-                        offset = world_by_jidx[jidx] - world_by_jidx[parent_jidx]
+                    if parent_jidx in world_mat_by_jidx:
+                        parent_world = world_mat_by_jidx[parent_jidx]
                     else:
-                        offset = world_by_jidx.get(jidx, np.array([0.0, 0.0, 0.0]))
-                    # Always patch — even if existing translation is
-                    # [0,0,0]. The rig writes [0,0,0] explicitly which
-                    # would otherwise short-circuit our fix.
-                    new_t = [float(offset[0]), float(offset[1]), float(offset[2])]
-                    _all_nodes[jidx]["translation"] = new_t
+                        parent_world = np.eye(4)
+                    joint_world = world_mat_by_jidx.get(jidx, np.eye(4))
+                    try:
+                        local_mat = np.linalg.inv(parent_world) @ joint_world
+                    except Exception:
+                        local_mat = np.eye(4)
+                    # Extract translation + rotation. We ignore scale
+                    # (assume 1) — non-uniform scales in rigs are rare.
+                    new_t = local_mat[:3, 3].tolist()
+                    rot_mat = local_mat[:3, :3]
+                    # Orthonormalise via SVD to guard against numeric drift
+                    # before the quaternion conversion.
+                    try:
+                        u, _, vt = np.linalg.svd(rot_mat)
+                        rot_mat = u @ vt
+                        if np.linalg.det(rot_mat) < 0:
+                            u[:, -1] *= -1
+                            rot_mat = u @ vt
+                        new_r = _R.from_matrix(rot_mat).as_quat().tolist()  # xyzw
+                    except Exception:
+                        new_r = [0.0, 0.0, 0.0, 1.0]
+                    _all_nodes[jidx]["translation"] = [float(v) for v in new_t]
+                    _all_nodes[jidx]["rotation"] = [float(v) for v in new_r]
                     patched += 1
-                    if any(abs(c) > 1e-9 for c in new_t):
-                        non_zero += 1
+                    if any(abs(c) > 1e-9 for c in new_t): non_zero_t += 1
+                    if abs(new_r[3] - 1.0) > 1e-6 or any(abs(c) > 1e-6 for c in new_r[:3]):
+                        non_id_r += 1
                     if len(sample_patches) < 3:
-                        sample_patches.append((jidx, new_t))
-                print(f"[bvh→glb] patched node.translation on {patched}/"
-                      f"{len(joint_idxs)} bones, non-zero={non_zero}, "
-                      f"samples={sample_patches}", flush=True)
+                        sample_patches.append((jidx,
+                            [round(v, 4) for v in new_t],
+                            [round(v, 4) for v in new_r]))
+                print(f"[bvh→glb] patched node TRS on {patched}/"
+                      f"{len(joint_idxs)} bones — non-zero_t={non_zero_t} "
+                      f"non-identity_r={non_id_r} samples={sample_patches}", flush=True)
     except Exception as e:
         print(f"[bvh→glb] bone-translation patch failed: {e}", flush=True)
     # DIAG: inventory the input rig's skin/mesh shape so we can tell
