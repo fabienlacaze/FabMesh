@@ -7155,13 +7155,12 @@ async function renderMeshVersions(p) {
     t.querySelector('.version-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!await customConfirm(`Delete mesh v${p.meshes.length - 1 - i}? This cannot be undone.`, 'Delete mesh version')) return;
-      // Cloud needs the Supabase job UUID, not the cosmetic filename
-      // (filename strips down to e.g. "orc_soldier_trellis2_xxxxx"
-      // which never matches a uuid → silent 404). Desktop accepts
-      // either — passing m.id when available keeps both paths happy.
-      // Fallback chain also covers in-session unshifted meshes (refine /
-      // decimate paths) that lack `id` but may carry `jobId`/`job_id`.
-      const deleteKey = m.id || m.jobId || m.job_id || m.predictionId || m.prediction_id || m.filename;
+      // Cloud needs either the Supabase job UUID OR the R2 path. The
+      // path is the most reliable because mesh-op outputs live under
+      // <uid>/mesh-op/<projectSlug>/ which the worker can extract
+      // directly via r2PathFromPublicUrl. Prefer it when available;
+      // fall back to id/filename for jobs-table meshes.
+      const deleteKey = (m.url || m.path) || m.id || m.jobId || m.job_id || m.predictionId || m.prediction_id || m.filename;
       console.log('[deleteMesh] sending id=', deleteKey, 'from mesh=', m);
       const r = await API.deleteMesh(deleteKey);
       console.log('[deleteMesh] response=', r);
