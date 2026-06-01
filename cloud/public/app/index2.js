@@ -1808,6 +1808,8 @@ function enableStep(stepNum) {
 async function renderImageVersions(p) {
   const strip = document.getElementById('ws-image-versions');
   strip.innerHTML = '';
+  console.log('[renderImageVersions] project=', p?.name, 'images_count=', p?.images?.length,
+              'first_path=', p?.images?.[0]?.path || p?.images?.[0]);
 
   // Check parental control status
   let restricted = true;
