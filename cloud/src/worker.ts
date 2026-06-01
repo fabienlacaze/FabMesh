@@ -5486,11 +5486,13 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // of a generation that the post-image NSFW classifier would block
   // anyway, and rejects intent-only prompts that wouldn't render any
   // visible NSFW (e.g. "child + sensual" with a safe negative prompt).
-  // Bypass via FABMESH_UNRESTRICTED env var on the Worker for testing.
+  // Bypass via FABMESH_UNRESTRICTED env var OR per-user parental state.
+  // `unrestricted` is hoisted out of the safety block so the Modal call
+  // site below can forward it in the request body.
+  const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
+  const userState = await getParentalState(env, user.id);
+  const unrestricted = envUnrestricted || !!userState.unrestricted;
   {
-    const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
-    const userState = await getParentalState(env, user.id);
-    const unrestricted = envUnrestricted || userState.unrestricted;
     const safety = checkPromptSafety(rawPrompt, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,
