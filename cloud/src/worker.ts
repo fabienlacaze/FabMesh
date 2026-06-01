@@ -4660,12 +4660,22 @@ async function handleCloudProjectsDelete(req: Request, env: Env): Promise<Respon
   if (isMock(env)) return json({ ok: true });
 
   const sb = supabaseAdmin(env);
+  // Detach mesh jobs from the project.
   const { error } = await sb.from('jobs')
     .update({ project_name: null })
     .eq('user_id', user.id)
     .eq('project_name', projectName);
   if (error) return err(500, error.message);
-  return json({ ok: true });
+  // Also DELETE the user_assets rows for this project — otherwise a
+  // future project of the SAME name would resurrect old images on
+  // handleCloudProjects merge. The R2 blobs stay (cheap to keep,
+  // user might recover via _orphans later).
+  const { error: aErr, count: aDel } = await sb.from('user_assets')
+    .delete({ count: 'exact' })
+    .eq('user_id', user.id)
+    .eq('project', projectName);
+  if (aErr) console.warn('[cloud-projects/delete] user_assets cleanup failed:', aErr.message);
+  return json({ ok: true, user_assets_deleted: aDel ?? 0 });
 }
 
 /**
