@@ -354,19 +354,45 @@ def animate_mesh(
         ckpt = _resolve_checkpoint_path(ckpt_name)
         if not ckpt:
             raise RuntimeError(f"checkpoint not found: {ckpt_name}")
+
+        # ── Step 3.5: alias our skel_name into a TRAINED class. ───
+        # 2026-06-01 fix for Mode 3 (identity motion): sample.generate
+        # conditions on the class embedding learned during training.
+        # When we passed our synthetic skel_name as --object_type,
+        # the lookup found cond_dict[skel_name]['parents'] (the skeleton
+        # hierarchy is there) BUT the model's class embedding for that
+        # key didn't exist → zero embedding → identity motion.
+        # Fix: copy our cond entry under one of the trained class names
+        # the checkpoint was actually trained on, then pass that class
+        # as --object_type. The skeleton hierarchy is identical (same
+        # bones, same parents); only the CONDITIONING IDENTITY changes,
+        # which is what gives the sampler a real motion prior to follow.
+        target_class = _pick_object_type(ckpt_name)
+        try:
+            import numpy as _np
+            _cond_path = os.path.join(ds_dir, "cond.npy")
+            _cond = _np.load(_cond_path, allow_pickle=True).item()
+            if skel_name in _cond and target_class not in _cond:
+                _cond[target_class] = _cond[skel_name]
+                _np.save(_cond_path, _cond, allow_pickle=True)
+                _log(f"step 3.5: aliased cond.npy {skel_name!r} -> {target_class!r} "
+                     f"(ckpt family={ckpt_name}, will use this for class embedding)")
+            else:
+                _log(f"step 3.5: cond.npy alias skipped "
+                     f"(skel_in_cond={skel_name in _cond}, target_in_cond={target_class in _cond})")
+        except Exception as _e:
+            _log(f"step 3.5: cond.npy alias FAILED: {_e}, falling back to skel_name")
+            target_class = skel_name  # legacy behaviour as fallback
+
         # ── Step 4: sample.generate ───────────────────────────────
-        # --object_type MUST equal --object_name from process_new_skeleton:
-        # sample.generate looks up cond_dict[object_type]['parents'] in
-        # OUR cond.npy (which has only ONE key — the skel_name we wrote
-        # in step 2). The 70-class param_utils.py registry is for
-        # AnyTop's training-time skeleton lookup, not the runtime
-        # condition dict — passing 'Ostrich' or 'Dragon' here triggers
-        # KeyError on cond_dict because that class wasn't written by
-        # OUR process_new_skeleton run.
+        # Pass the TRAINED class as --object_type so the sampler uses
+        # the matching learned embedding. cond_dict[target_class]['parents']
+        # was just copied from skel_name so the skeleton lookup still
+        # succeeds with our actual bone hierarchy.
         cmd = [
             sys.executable, "-m", "sample.generate",
             "--model_path", ckpt,
-            "--object_type", skel_name,
+            "--object_type", target_class,
             "--cond_path", os.path.join(ds_dir, "cond.npy"),
             "--num_repetitions", "1",
             "--motion_length", "5.0",
