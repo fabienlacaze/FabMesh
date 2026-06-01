@@ -1845,10 +1845,16 @@ function enableStep(stepNum) {
 // Two paths per project:
 //   previewImagePath: what is shown in the big preview (clicking a thumb updates it)
 //   selectedImagePath: the image that will be sent to the 3D step when the user clicks "Use this for 3D"
+// Bumped on every renderImageVersions call; awaits in this function
+// check against this counter to abort if a newer call has started,
+// which prevents concurrent renders from each appending their items
+// to the strip (the bug that produced 'v1 v0 v1 v0' duplicate thumbs).
+let _renderImageVersionsSeq = 0;
 async function renderImageVersions(p) {
+  const mySeq = ++_renderImageVersionsSeq;
   const strip = document.getElementById('ws-image-versions');
   strip.innerHTML = '';
-  console.log('[renderImageVersions] project=', p?.name, 'images_count=', p?.images?.length,
+  console.log('[renderImageVersions] seq=', mySeq, 'project=', p?.name, 'images_count=', p?.images?.length,
               'first_path=', p?.images?.[0]?.path || p?.images?.[0]);
 
   // Check parental control status
@@ -1859,6 +1865,10 @@ async function renderImageVersions(p) {
       restricted = !ps.unrestricted;
     }
   } catch(_) {}
+  if (mySeq !== _renderImageVersionsSeq) {
+    console.log('[renderImageVersions] aborting seq=', mySeq, '(newer seq=', _renderImageVersionsSeq, ')');
+    return;
+  }
 
   // Filter out NSFW images when restricted (check .nsfw tag files via IPC)
   let images = p.images;
@@ -1866,6 +1876,10 @@ async function renderImageVersions(p) {
     try {
       const allPaths = p.images.map(img => img.path || img);
       const tags = await API.checkImagesNsfwTags({ images: allPaths });
+      if (mySeq !== _renderImageVersionsSeq) {
+        console.log('[renderImageVersions] aborting seq=', mySeq, 'after NSFW (newer seq=', _renderImageVersionsSeq, ')');
+        return;
+      }
       if (tags && typeof tags === 'object') {
         images = p.images.filter(img => {
           const imgPath = img.path || img;
@@ -17150,6 +17164,201 @@ window.addEventListener('drop', async (e) => {
 // LANDMARKS (manual placement on the 3D mesh viewer)
 // ============================================================
 // Schema: 22 landmarks across 6 categories
+// ----------------------------------------------------------------
+// Rig topology auto-detection.
+//
+// Analyses a list of THREE.Bones and returns a structural map:
+//   { type: 'humanoid'|'winged_biped'|'quadruped'|'hexapod'|'custom',
+//     spine: [bone, …]    // longest mostly-vertical chain from root
+//     limbs: [ { name, dir, bones, endpoint } ]   // every other long chain
+//   }
+//
+// Limb classification by endpoint direction relative to spine origin:
+//   up + lateral → 'wing' (if endpoint y above spine top) or 'arm'
+//   down + lateral → 'leg'
+//   horizontal long → 'tail'
+function analyzeRigTopology(bones) {
+  if (!bones || !bones.length) return { type: 'custom', spine: [], limbs: [] };
+  const boneSet = new Set(bones);
+  const wp = new Map();
+  for (const b of bones) {
+    const p = new THREE.Vector3(); b.getWorldPosition(p); wp.set(b, p);
+  }
+  // Root = bone whose parent is not a bone (skeleton root).
+  const roots = bones.filter(b => !b.parent || !boneSet.has(b.parent));
+  let root = roots[0] || bones[0];
+  // If multiple roots, pick the one with the most descendants in our set.
+  if (roots.length > 1) {
+    let bestCount = -1;
+    for (const r of roots) {
+      let count = 0;
+      r.traverse(c => { if (boneSet.has(c)) count++; });
+      if (count > bestCount) { bestCount = count; root = r; }
+    }
+  }
+  // Walk longest chain UP from root for the spine.
+  const visited = new Set([root]);
+  function walkLongest(start, dirFn) {
+    const path = [start];
+    let cur = start;
+    while (cur.children && cur.children.length) {
+      const candidates = cur.children.filter(c => c.isBone && boneSet.has(c) && !visited.has(c));
+      if (!candidates.length) break;
+      const curPos = wp.get(cur);
+      let best = null, bestScore = -Infinity;
+      for (const c of candidates) {
+        const d = wp.get(c).clone().sub(curPos);
+        const score = dirFn(d, d.length());
+        if (score > bestScore) { bestScore = score; best = c; }
+      }
+      if (!best || bestScore < 0.2) break;
+      path.push(best);
+      visited.add(best);
+      cur = best;
+    }
+    return path;
+  }
+  // Spine = most upward chain.
+  const spine = walkLongest(root, (d, len) => len > 1e-6 ? d.y / len : -1);
+  // Other limb chains = every child of a spine bone that we haven't yet
+  // visited. Walk each to its leaf without direction restriction.
+  const limbs = [];
+  for (const sb of spine) {
+    const sChildren = (sb.children || []).filter(c => c.isBone && boneSet.has(c) && !visited.has(c));
+    for (const start of sChildren) {
+      visited.add(start);
+      const chain = [start];
+      let cur = start;
+      while (cur.children && cur.children.length) {
+        const next = cur.children.find(x => x.isBone && boneSet.has(x) && !visited.has(x));
+        if (!next) break;
+        visited.add(next);
+        chain.push(next);
+        cur = next;
+      }
+      // Classify by direction of (endpoint - chain origin) and where on
+      // the spine the chain attaches (top vs bottom).
+      const origin = wp.get(chain[0]);
+      const end = wp.get(chain[chain.length - 1]);
+      const d = end.clone().sub(origin);
+      const len = d.length();
+      // Spine fraction: how high up the spine does this chain attach?
+      const spineIdx = spine.indexOf(sb);
+      const spineFrac = spine.length > 1 ? spineIdx / (spine.length - 1) : 0.5;
+      const lateralAxis = Math.abs(d.x) > Math.abs(d.z) ? 'x' : 'z';
+      const side = lateralAxis === 'x' ? (d.x >= 0 ? 'left' : 'right') : (d.z >= 0 ? 'left' : 'right');
+      let kind;
+      if (chain.length < 2 || len < 1e-3) kind = 'stub';
+      else if (spineFrac > 0.6 && end.y >= origin.y - len * 0.2) {
+        // High attach + mostly horizontal/upward → arm or wing.
+        kind = (len > spine.length * 0.5) ? 'wing' : 'arm';
+      } else if (spineFrac < 0.4 && end.y < origin.y) kind = 'leg';
+      else if (Math.abs(d.y) < len * 0.3) kind = 'tail';      // horizontal off spine middle
+      else kind = 'limb';
+      limbs.push({ kind, side, bones: chain, length: len, attach: spineFrac, endpoint: end.clone() });
+    }
+  }
+  // Determine type from limb counts.
+  const count = (k) => limbs.filter(l => l.kind === k).length;
+  const wings = count('wing'), arms = count('arm'), legs = count('leg'), tail = count('tail');
+  let type = 'custom';
+  if (wings === 2 && legs === 2) type = 'winged_biped';
+  else if (arms === 2 && legs === 2) type = 'humanoid';
+  else if (legs === 4) type = 'quadruped';
+  else if (legs === 6) type = 'hexapod';
+  return { type, spine, limbs, root };
+}
+
+// Generates a LM_SCHEMA tailored to a topology analysis result. Returns
+// the same shape as the static LM_SCHEMA (array of { cat, items: [] }).
+function buildDynamicLmSchema(topo) {
+  if (!topo || !topo.type) return LM_SCHEMA;
+  const palette = {
+    head: '#ff4444', neck: '#ff8844', spine_top: '#ff6622', spine_mid: '#cc5511', hips: '#ffaa00',
+    armL: ['#22cc88', '#88ff88', '#44ff44'],
+    armR: ['#11aa66', '#66cc66', '#44aa44'],
+    legL: ['#ffcc00', '#88aaff', '#5577ee', '#4444ff'],
+    legR: ['#dd9900', '#6688cc', '#4466bb', '#4477ff'],
+    wingL: ['#22ccff', '#66ddff', '#88eeff'],
+    wingR: ['#11aaee', '#55aacc', '#7799cc'],
+    tail: ['#cc66ff', '#aa44cc', '#882299'],
+  };
+  const out = [
+    { cat: 'Head & Spine', items: [
+      { id: 'head', label: 'Head', color: palette.head },
+      { id: 'neck', label: 'Neck', color: palette.neck },
+      { id: 'spine_top', label: 'Upper spine', color: palette.spine_top },
+      { id: 'spine_mid', label: 'Mid spine', color: palette.spine_mid },
+      { id: 'hips', label: 'Hips/Root', color: palette.hips },
+    ]},
+  ];
+  const hasWings = topo.limbs.filter(l => l.kind === 'wing').length >= 1;
+  const armCount = topo.limbs.filter(l => l.kind === 'arm').length;
+  const legCount = topo.limbs.filter(l => l.kind === 'leg').length;
+  if (hasWings) {
+    out.push({ cat: 'Left wing', items: [
+      { id: 'wing_root_l', label: 'L Wing root', color: palette.wingL[0] },
+      { id: 'wing_mid_l',  label: 'L Wing mid',  color: palette.wingL[1] },
+      { id: 'wing_tip_l',  label: 'L Wing tip',  color: palette.wingL[2] },
+    ]});
+    out.push({ cat: 'Right wing', items: [
+      { id: 'wing_root_r', label: 'R Wing root', color: palette.wingR[0] },
+      { id: 'wing_mid_r',  label: 'R Wing mid',  color: palette.wingR[1] },
+      { id: 'wing_tip_r',  label: 'R Wing tip',  color: palette.wingR[2] },
+    ]});
+  }
+  if (armCount >= 1) {
+    out.push({ cat: 'Left arm', items: [
+      { id: 'shoulder_l', label: 'L Shoulder', color: palette.armL[0] },
+      { id: 'elbow_l',    label: 'L Elbow',    color: palette.armL[1] },
+      { id: 'hand_l',     label: 'L Wrist',    color: palette.armL[2] },
+    ]});
+    if (armCount >= 2) {
+      out.push({ cat: 'Right arm', items: [
+        { id: 'shoulder_r', label: 'R Shoulder', color: palette.armR[0] },
+        { id: 'elbow_r',    label: 'R Elbow',    color: palette.armR[1] },
+        { id: 'hand_r',     label: 'R Wrist',    color: palette.armR[2] },
+      ]});
+    }
+  }
+  if (legCount >= 1) {
+    out.push({ cat: 'Left leg', items: [
+      { id: 'hip_l',   label: 'L Hip',    color: palette.legL[0] },
+      { id: 'knee_l',  label: 'L Knee',   color: palette.legL[1] },
+      { id: 'ankle_l', label: 'L Ankle',  color: palette.legL[2] },
+      { id: 'foot_l',  label: 'L Foot',   color: palette.legL[3] },
+    ]});
+    if (legCount >= 2) {
+      out.push({ cat: 'Right leg', items: [
+        { id: 'hip_r',   label: 'R Hip',    color: palette.legR[0] },
+        { id: 'knee_r',  label: 'R Knee',   color: palette.legR[1] },
+        { id: 'ankle_r', label: 'R Ankle',  color: palette.legR[2] },
+        { id: 'foot_r',  label: 'R Foot',   color: palette.legR[3] },
+      ]});
+    }
+  }
+  // Extra legs (quadruped front + back, hexapod, etc.)
+  if (legCount >= 3) {
+    for (let i = 2; i < Math.min(legCount, 8); i++) {
+      out.push({ cat: `Leg ${i+1}`, items: [
+        { id: `leg${i}_hip`,   label: `Leg${i+1} hip`,   color: palette.legL[i % 4] },
+        { id: `leg${i}_knee`,  label: `Leg${i+1} knee`,  color: palette.legL[(i+1) % 4] },
+        { id: `leg${i}_foot`,  label: `Leg${i+1} foot`,  color: palette.legL[(i+2) % 4] },
+      ]});
+    }
+  }
+  // Tail
+  const tailCount = topo.limbs.filter(l => l.kind === 'tail').length;
+  if (tailCount >= 1) {
+    out.push({ cat: 'Tail', items: [
+      { id: 'tail_base', label: 'Tail base', color: palette.tail[0] },
+      { id: 'tail_mid',  label: 'Tail mid',  color: palette.tail[1] },
+      { id: 'tail_tip',  label: 'Tail tip',  color: palette.tail[2] },
+    ]});
+  }
+  return out;
+}
+
 const LM_SCHEMA = [
   { cat: 'Head & Spine', items: [
     { id: 'head', label: 'Head', color: '#ff4444' },
@@ -18426,11 +18635,16 @@ async function openLandmarksFullscreen() {
   }
 }
 
+// Currently-active landmark schema. Defaults to the static humanoid
+// LM_SCHEMA; replaced by buildDynamicLmSchema() in extractLandmarksFromRig
+// when a non-humanoid topology is detected.
+let _activeLmSchema = LM_SCHEMA;
+
 function buildLmFsList() {
   const list = document.getElementById('lm-fs-list');
   if (!list) return;
   list.innerHTML = '';
-  LM_SCHEMA.forEach(group => {
+  _activeLmSchema.forEach(group => {
     const cat = document.createElement('div');
     cat.className = 'lm-cat';
     cat.style.gridColumn = '1 / -1';
