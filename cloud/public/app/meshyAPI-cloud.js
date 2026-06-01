@@ -2213,9 +2213,12 @@
       // proximity to mesh jobs.created_at. Catches the case where
       // jobs.options.sourceImage was empty (so Step 2 dumped everything
       // into _orphans) but the image's R2 filename timestamp matches
-      // a mesh creation within ±5 min.
+      // a mesh creation. Window is 1h — wider than the typical
+      // user-flow (image gen → mesh gen takes a few min) but tight
+      // enough that an image from yesterday won't end up under a
+      // mesh created today by mistake.
       try {
-        const r = await fetch('/api/user-assets/reassign-orphans?windowSec=600', {
+        const r = await fetch('/api/user-assets/reassign-orphans?windowSec=3600', {
           method: 'POST', credentials: 'include',
         });
         const j = await r.json().catch(() => ({}));

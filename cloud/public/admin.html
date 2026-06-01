@@ -531,6 +531,10 @@
         <input id="services-password-input" type="password" placeholder="Admin password"
                style="width:100%; padding:10px 14px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:14px; margin-bottom:12px;" />
         <button class="btn btn-accent" id="services-unlock-btn" style="background:var(--err); border-color:var(--err);">Unlock</button>
+        <a href="#" onclick="event.preventDefault(); openForgotPassword()"
+           style="display:inline-block; margin-left:12px; color:var(--text-2); font-size:12px; text-decoration:underline; cursor:pointer;">
+          Forgot password?
+        </a>
         <div id="services-lock-err" style="color:var(--err); font-size:12px; margin-top:10px; display:none;"></div>
       </div>
 
@@ -743,6 +747,10 @@
         <input id="pricing-unlock-input" type="password" placeholder="Admin password"
                style="width:100%; padding:10px 14px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:14px; margin-bottom:12px;" />
         <button class="btn btn-accent" id="pricing-unlock-btn" style="background:var(--warn); border-color:var(--warn); color:#0a0a0e;">Unlock</button>
+        <a href="#" onclick="event.preventDefault(); openForgotPassword()"
+           style="display:inline-block; margin-left:12px; color:var(--text-2); font-size:12px; text-decoration:underline; cursor:pointer;">
+          Forgot password?
+        </a>
         <div id="pricing-lock-err" style="color:var(--err); font-size:12px; margin-top:10px; display:none;"></div>
       </div>
 
@@ -784,7 +792,11 @@
                  style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:8px; font-size:14px;" />
         </label>
         <div id="sensitive-lock-err" style="color:var(--err); font-size:12px; margin-top:8px; display:none;"></div>
-        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px; align-items:center;">
+          <a href="#" onclick="event.preventDefault(); openForgotPassword()"
+             style="color:var(--text-2); font-size:12px; text-decoration:underline; cursor:pointer; margin-right:auto;">
+            Forgot password?
+          </a>
           <button class="btn" id="sensitive-lock-cancel">Cancel</button>
           <button class="btn btn-accent" id="sensitive-lock-ok">Unlock</button>
         </div>
