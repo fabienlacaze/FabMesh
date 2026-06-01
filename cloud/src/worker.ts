@@ -4702,6 +4702,20 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
   // directly so the user can still get rid of the artefact.
   if (!job) {
     if (!env.MESHES) return err(404, 'not found and no R2 binding');
+    // Direct path: if the caller sent a full public R2 URL, extract
+    // the key and delete it. This is the most reliable path for
+    // mesh-op outputs that live under <uid>/mesh-op/<projectSlug>/.
+    const directKey = r2PathFromPublicUrl(env, id);
+    if (directKey && directKey.startsWith(`${user.id}/`)) {
+      try {
+        const obj = await env.MESHES.head(directKey);
+        if (obj) {
+          await env.MESHES.delete(directKey);
+          console.log(`[meshes/delete] fallback-R2 direct-URL deleted ${directKey}`);
+          return json({ ok: true, fallback: 'r2-direct-url' });
+        }
+      } catch (_) { /* try the candidate list */ }
+    }
     // Candidate R2 keys to try, in priority order. We attempt each and
     // delete whichever matches an actually-existing object.
     const candidates: string[] = [];
