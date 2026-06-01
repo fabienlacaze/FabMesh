@@ -4701,6 +4701,7 @@ interface CogInput {
   asset_style?: string;
   seed?: number;
   steps?: number;
+  unrestricted?: boolean;
 }
 
 // Cached version id for fabienlacaze/myfabmesh-cloud. We resolve it
@@ -4765,6 +4766,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
       asset_style: input.asset_style,
       seed: input.seed,
       steps: input.steps,
+      unrestricted: !!input.unrestricted,
     }),
     // Modal cold-start on the RealVis container can hit 90-120s when
     // the GPU snapshot is fully cold (first call of the day). Plus the
@@ -5486,7 +5488,9 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   // visible NSFW (e.g. "child + sensual" with a safe negative prompt).
   // Bypass via FABMESH_UNRESTRICTED env var on the Worker for testing.
   {
-    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const userState = await getParentalState(env, user.id);
+    const unrestricted = envUnrestricted || userState.unrestricted;
     const safety = checkPromptSafety(rawPrompt, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,
@@ -5566,6 +5570,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
           prompt: rawPrompt,
           asset_type: asset_type || 'character',
           asset_style: asset_style || 'realistic',
+          unrestricted, // per-user parental state, forwarded to Modal
           seed: seedBase + i,
           steps: steps || 30,
         }, 'front'));
@@ -5711,7 +5716,9 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
 
   // NSFW pre-filter — same policy as text2image/back-view/rectify.
   {
-    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const userState = await getParentalState(env, user.id);
+    const unrestricted = envUnrestricted || userState.unrestricted;
     const safety = checkPromptSafety(rawPrompt, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,
@@ -5793,7 +5800,9 @@ async function handleAutoInpaint(req: Request, env: Env): Promise<Response> {
 
   const rawPrompt = (prompt ?? '').toString().trim();
   if (rawPrompt) {
-    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const userState = await getParentalState(env, user.id);
+    const unrestricted = envUnrestricted || userState.unrestricted;
     const safety = checkPromptSafety(rawPrompt, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,
@@ -5871,7 +5880,9 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
 
   // NSFW pre-filter on prompt.
   {
-    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const userState = await getParentalState(env, user.id);
+    const unrestricted = envUnrestricted || userState.unrestricted;
     const safety = checkPromptSafety(rawPrompt, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,
@@ -6812,6 +6823,76 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
   });
 }
 
+/* ─────────────────────────────────────────────────────────────────
+ *  PARENTAL CONTROL — per-user PIN + unrestricted state, mirrors
+ *  desktop FABMESH_UNRESTRICTED logic. State at R2 key
+ *  _meta/parental/<userId>.json = { pin: '<sha256>', unrestricted: bool }
+ * ───────────────────────────────────────────────────────────────── */
+interface ParentalState {
+  pinHash?: string;
+  unrestricted: boolean;
+}
+
+async function _sha256(input: string): Promise<string> {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function getParentalState(env: Env, userId: string): Promise<ParentalState> {
+  if (!env.MESHES) return { unrestricted: false };
+  try {
+    const obj = await env.MESHES.get(`_meta/parental/${userId}.json`);
+    if (!obj) return { unrestricted: false };
+    return JSON.parse(await obj.text()) as ParentalState;
+  } catch { return { unrestricted: false }; }
+}
+
+async function putParentalState(env: Env, userId: string, s: ParentalState): Promise<void> {
+  if (!env.MESHES) return;
+  await env.MESHES.put(`_meta/parental/${userId}.json`,
+    JSON.stringify(s), { httpMetadata: { contentType: 'application/json' } });
+}
+
+/** GET /api/parental/status — current user state. */
+async function handleParentalStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const s = await getParentalState(env, user.id);
+  return json({ ok: true, unrestricted: !!s.unrestricted, hasPin: !!s.pinHash });
+}
+
+/** POST /api/parental/toggle — body { pin, enable }. Validates / sets PIN. */
+async function handleParentalToggle(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  const { pin, enable } = await req.json() as { pin?: string; enable?: boolean };
+  if (typeof pin !== 'string' || pin.length < 4) {
+    if (enable === false && pin === 'lock') {
+      // Re-lock — no PIN needed.
+      const cur = await getParentalState(env, user.id);
+      cur.unrestricted = false;
+      await putParentalState(env, user.id, cur);
+      return json({ ok: true, success: true, unrestricted: false });
+    }
+    return err(400, 'PIN must be ≥ 4 chars');
+  }
+  const cur = await getParentalState(env, user.id);
+  const inHash = await _sha256(pin);
+  if (cur.pinHash) {
+    // PIN already set — validate.
+    if (inHash !== cur.pinHash) return err(403, 'PIN mismatch');
+  } else {
+    // First-time set.
+    cur.pinHash = inHash;
+  }
+  cur.unrestricted = enable !== false;
+  await putParentalState(env, user.id, cur);
+  return json({ ok: true, success: true, unrestricted: cur.unrestricted });
+}
+
+
 /** POST /api/animations/upload — multipart: file=<glb>, animType=<idle|run|...>,
  *  projectName=<...>. Stores the user-provided animated GLB as a new
  *  version under <user.id>/animations/<projectSlug>/<base>_manual_<type>_<batchId>_<ts>.glb
@@ -7347,7 +7428,9 @@ async function handleRectifyImage(req: Request, env: Env): Promise<Response> {
 
   // NSFW prompt pre-filter (same policy as text2image / back-view).
   if (rawPrompt) {
-    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
+    const userState = await getParentalState(env, user.id);
+    const unrestricted = envUnrestricted || userState.unrestricted;
     const safety = checkPromptSafety(rawPrompt, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,
@@ -9159,6 +9242,8 @@ export default {
         if (pathname === '/api/auth/refresh'          && method === 'POST') return await handleAuthRefresh(req, env);
         if (pathname === '/api/auth/signout'          && method === 'POST') return await handleAuthSignout(req, env);
         if (pathname === '/api/me/export'             && method === 'GET')  return await handleMeExport(req, env);
+        if (pathname === '/api/parental/status'       && method === 'GET')  return await handleParentalStatus(req, env);
+        if (pathname === '/api/parental/toggle'       && method === 'POST') return await handleParentalToggle(req, env);
         if (pathname === '/api/me/replies'            && method === 'GET')  return await handleMeReplies(req, env);
         if (pathname === '/api/me/inbox'              && method === 'GET')  return await handleMeInbox(req, env);
         if (pathname === '/api/me/inbox/read'         && method === 'POST') return await handleMeInboxRead(req, env);
