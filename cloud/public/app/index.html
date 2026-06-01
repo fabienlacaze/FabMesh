@@ -1689,6 +1689,43 @@
     </div>
 
     <!-- ============================================================
+         GENERATE ANYTOP AI MODAL — multi-checkbox picker. Opens from
+         the Step 4 AI tools 'Generate AnyTop AI' button. Pre-checks
+         the types that already have versions, generates a new batch
+         (= new version) without leaving the Edit selected stage.
+         ============================================================ -->
+    <div id="modal-anim-gen" class="modal-overlay hidden">
+      <div class="modal-card" style="width:440px; max-width:92vw;">
+        <h2>Generate AnyTop AI</h2>
+        <p class="modal-subtitle">Each click creates ONE new version. Check the types you want in this batch.</p>
+        <div id="modal-anim-types" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:6px; padding:10px; background:var(--bg-2); border:1px solid var(--border); border-radius:6px; margin:12px 0;">
+          <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" name="modal-anim-type" value="idle"> <span>😴 Idle</span>
+          </label>
+          <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" name="modal-anim-type" value="walk"> <span>🚶 Walk</span>
+          </label>
+          <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" name="modal-anim-type" value="run"> <span>🏃 Run</span>
+          </label>
+          <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" name="modal-anim-type" value="attack"> <span>⚔️ Attack</span>
+          </label>
+          <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" name="modal-anim-type" value="death"> <span>💀 Death</span>
+          </label>
+          <label class="anim-type-opt" style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+            <input type="checkbox" name="modal-anim-type" value="fly"> <span>✈️ Fly</span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="modal-anim-cancel">Cancel</button>
+          <button class="primary-btn" id="modal-anim-go">Generate</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
          GENERIC CONFIRM MODAL (replaces window.confirm)
          ============================================================ -->
     <div id="modal-confirm" class="modal-overlay hidden" style="z-index:10000;">

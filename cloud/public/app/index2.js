@@ -13289,28 +13289,48 @@ document.getElementById('ws-anim-export-btn')?.addEventListener('click', async (
     showToast(`Download failed: ${e.message}`, 'error');
   }
 });
-// Quick re-trigger for AnyTop AI generation — flips Step 4 from
-// 'Edit selected' to 'Create new' so the user can pick types and
-// click Generate without scrolling back up. Each Generate click
-// already produces a new batch (= new version).
+// Generate AnyTop AI — opens the dedicated modal, pre-checks any
+// types the project already has, runs the same batch flow on confirm.
+// Stays inside the Edit selected stage so the user doesn't lose
+// context.
 document.getElementById('ws-anim-gen-more-btn')?.addEventListener('click', () => {
-  const animCard = document.getElementById('step-card-animation');
-  if (!animCard) return;
-  animCard.classList.remove('collapsed', 'disabled');
-  const createStage = animCard.querySelector('.stage-create');
-  const editStage = animCard.querySelector('.stage-edit');
-  // Mutual-exclusion in this card: open create-new, close edit.
-  if (editStage) editStage.open = false;
-  if (createStage) createStage.open = true;
-  animCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  animCard.classList.add('pulse-highlight');
-  setTimeout(() => animCard.classList.remove('pulse-highlight'), 1500);
-  // Focus the first unchecked anim type so keyboard-flow users land
-  // ready to toggle the next type.
-  setTimeout(() => {
-    const firstUnchecked = animCard.querySelector('#ws-anim-types input[type="checkbox"]:not(:checked)');
-    if (firstUnchecked) firstUnchecked.focus();
-  }, 400);
+  const p = state.currentProject;
+  if (!p) { showToast('Open a project first', 'error'); return; }
+  if (!p.rigs || p.rigs.length === 0) {
+    customError('You need a rigged mesh first. Generate a Rig in Step 3, then come back.', 'No rig available');
+    return;
+  }
+  // Pre-check the types that already have a version in this project.
+  const existingTypes = new Set((p.animations || []).map(a => (a.type || '').toLowerCase()));
+  const modal = document.getElementById('modal-anim-gen');
+  modal.querySelectorAll('input[name="modal-anim-type"]').forEach(cb => {
+    cb.checked = existingTypes.has(cb.value);
+  });
+  // If NOTHING is pre-checked (no anims yet → user came via the AI
+  // tools shortcut), default-check Idle as a sensible starting point.
+  if (![...modal.querySelectorAll('input[name="modal-anim-type"]:checked')].length) {
+    const idle = modal.querySelector('input[name="modal-anim-type"][value="idle"]');
+    if (idle) idle.checked = true;
+  }
+  modal.classList.remove('hidden');
+});
+
+document.getElementById('modal-anim-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-anim-gen')?.classList.add('hidden');
+});
+
+document.getElementById('modal-anim-go')?.addEventListener('click', () => {
+  // Mirror the checkbox state from the modal into the canonical
+  // Create-new checklist (#ws-anim-types), then trigger the existing
+  // Generate handler — single source of truth for the batch loop.
+  const modal = document.getElementById('modal-anim-gen');
+  const picked = [...modal.querySelectorAll('input[name="modal-anim-type"]:checked')].map(cb => cb.value);
+  if (!picked.length) { showToast('Pick at least one animation type', 'error'); return; }
+  document.querySelectorAll('#ws-anim-types input[name="anim-type"]').forEach(cb => {
+    cb.checked = picked.includes(cb.value);
+  });
+  modal.classList.add('hidden');
+  document.getElementById('ws-generate-anim')?.click();
 });
 
 // Manual import — user picks an animated GLB → POST to
