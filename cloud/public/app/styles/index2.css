@@ -1196,6 +1196,51 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   color: var(--text-3);
   font-size: 12px;
 }
+
+/* Loading spinner overlay for the 4 viewers (image, mesh, rig, anim).
+   Toggle by adding/removing the .loading class on the .preview-placeholder
+   element. The placeholder text gets replaced by a spinner + 'Loading…'.
+   The spinner uses the accent color so it matches the app theme. */
+.preview-placeholder.loading {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: rgba(10, 10, 14, 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+.preview-placeholder.loading::before {
+  content: '';
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid rgba(167, 122, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: viewer-spin 0.9s linear infinite;
+}
+.preview-placeholder.loading::after {
+  content: 'Loading…';
+  white-space: nowrap;
+}
+.preview-placeholder.loading.with-msg::after {
+  /* When the placeholder gets a data-loading-msg attribute its value
+     overrides 'Loading…'. */
+  content: attr(data-loading-msg);
+}
+@keyframes viewer-spin {
+  from { transform: rotate(0); }
+  to   { transform: rotate(360deg); }
+}
 .step-card-form {
   display: flex;
   flex-direction: column;
