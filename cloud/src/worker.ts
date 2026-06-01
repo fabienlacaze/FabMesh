@@ -3950,7 +3950,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       await supabaseAdmin(env).from('jobs').update({
         status: 'failed', error: msg, finished_at: new Date().toISOString(),
       }).eq('id', jobId);
-      return err(502, 'cloud GPU mesh-start failed (credits refunded)');
+      return err(502, `cloud GPU mesh-start failed (credits refunded): ${msg.slice(0, 200)}`);
     }
     return json({ jobId, creditsRemaining: remaining });
   }
@@ -5571,8 +5571,10 @@ async function callModalMeshStart(env: Env, input: {
     // mesh-start returns instantly (< 1 s) once the lightweight HTTP
     // container is warm, but a COLD container for the start endpoint
     // itself takes 30-60 s to come up (it loads the shared `image`
-    // even though it doesn't use the GPU). 2 min cap covers it.
-    signal: AbortSignal.timeout(120_000),
+    // even though it doesn't use the GPU). 2 min was too tight when
+    // Modal was queueing the spawn behind concurrent jobs; bumped to
+    // 4 min (2026-06-01 — user hit the cap on a real cold start).
+    signal: AbortSignal.timeout(240_000),
   });
   if (!r.ok) {
     throw new Error(`Modal mesh-start HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
