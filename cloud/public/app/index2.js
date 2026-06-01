@@ -13520,6 +13520,7 @@ let _animMixer = null;
 let _animAction = null;
 let _animModel = null;
 let _animHelper = null;
+let _animHelperRefresh = null;
 let _animLastTime = 0;
 let _animLooping = true;
 let _animPlaybackRate = 1;
@@ -13565,6 +13566,10 @@ function _initAnimViewer() {
       const dt = Math.min(0.1, now - (_animLastTime || now));
       _animLastTime = now;
       if (_animMixer) _animMixer.update(dt * _animPlaybackRate);
+      // Keep the custom bone overlay in sync with the animated skeleton.
+      if (typeof _animHelperRefresh === 'function' && _animHelper && _animHelper.visible) {
+        try { _animHelperRefresh(); } catch (_) {}
+      }
     },
   });
   _animVw = _v;
@@ -13722,34 +13727,83 @@ function showStep4AnimPreview(anim) {
     } else {
       showToast('⚠ This GLB has no animation tracks embedded.', 'warning', 6000);
     }
-    // SkeletonHelper — attached to scene root for proper world transform.
-    // Made visible by default so the user sees something on first load;
-    // can be toggled off via the Bones button.
+    // Custom sphere+cylinder skeleton overlay — replaces THREE.
+    // SkeletonHelper which renders 1px LineSegments invisible against
+    // dark meshes (WebGL2 ignores material.linewidth). Same fix we
+    // applied to the landmarks modal.
     let firstSkin = null;
-    _animModel.traverse(o => { if (!firstSkin && o.isSkinnedMesh) firstSkin = o; });
-    if (firstSkin) {
-      const helper = new THREE.SkeletonHelper(firstSkin);
-      try {
-        helper.material.color = new THREE.Color(0x00ffff);
-        helper.material.depthTest = false;
-        helper.material.transparent = true;
-        helper.material.opacity = 1.0;
-        helper.material.linewidth = 3;
-      } catch (e) {}
-      helper.renderOrder = 999;
-      helper.visible = _step4BonesOn;
-      _animVw.scene.add(helper);
-      _animHelper = helper;
-      // DIAG: log bbox of the helper so we can tell if it's hidden
-      // off-camera. SkeletonHelper renders at the bone world transforms.
-      const box = new THREE.Box3().setFromObject(helper);
-      const sz = box.getSize(new THREE.Vector3());
-      console.log('[anim-vw] SkeletonHelper added, bones=',
-        firstSkin.skeleton?.bones?.length || 0,
-        'bbox.size=', sz.toArray().map(v => v.toFixed(2)).join(','),
-        'visible=', helper.visible);
+    const allBones = [];
+    _animModel.traverse(o => {
+      if (!firstSkin && o.isSkinnedMesh) firstSkin = o;
+      if (o.isBone) allBones.push(o);
+      else if (o.isSkinnedMesh && o.skeleton) {
+        for (const b of o.skeleton.bones) if (!allBones.includes(b)) allBones.push(b);
+      }
+    });
+    if (allBones.length) {
+      const overlay = new THREE.Group();
+      overlay.name = 'AnimSkeletonOverlay';
+      overlay.visible = _step4BonesOn;
+      const tmpBox = new THREE.Box3().setFromObject(_animModel);
+      const sz = tmpBox.getSize(new THREE.Vector3()).length();
+      const dotR = sz * 0.008;
+      const linR = sz * 0.0035;
+      const dotGeo = new THREE.SphereGeometry(dotR, 8, 8);
+      const dotMat = new THREE.MeshBasicMaterial({
+        color: 0xff00ff, depthTest: false, transparent: true, opacity: 1.0,
+      });
+      const boneMat = new THREE.MeshBasicMaterial({
+        color: 0x00ffd0, depthTest: false, transparent: true, opacity: 0.9,
+      });
+      // Spheres at each bone world position (live: parented to the bone
+      // so they follow the animation).
+      const boneSet = new Set(allBones);
+      const wpRefresh = []; // [{bone, mesh}] to update per frame
+      for (const b of allBones) {
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.renderOrder = 999;
+        const wp = new THREE.Vector3(); b.getWorldPosition(wp);
+        dot.position.copy(wp);
+        overlay.add(dot);
+        wpRefresh.push({ bone: b, mesh: dot });
+      }
+      // Cylinder bones (parent → child) — also refreshed per frame.
+      const segRefresh = []; // [{a, b, mesh, geo}]
+      for (const child of allBones) {
+        if (!child.parent || !boneSet.has(child.parent)) continue;
+        const a = new THREE.Vector3(); child.parent.getWorldPosition(a);
+        const c = new THREE.Vector3(); child.getWorldPosition(c);
+        const dir = new THREE.Vector3().subVectors(c, a);
+        const len = dir.length();
+        if (len < 1e-5) continue;
+        const cylGeo = new THREE.CylinderGeometry(linR, linR, Math.max(len, 1e-4), 6);
+        const cyl = new THREE.Mesh(cylGeo, boneMat);
+        cyl.renderOrder = 998;
+        cyl.position.copy(a).add(dir.clone().multiplyScalar(0.5));
+        cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+        overlay.add(cyl);
+        segRefresh.push({ a: child.parent, b: child, mesh: cyl });
+      }
+      _animVw.scene.add(overlay);
+      _animHelper = overlay;
+      _animHelperRefresh = function () {
+        const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpD = new THREE.Vector3();
+        for (const { bone, mesh } of wpRefresh) bone.getWorldPosition(mesh.position);
+        for (const s of segRefresh) {
+          s.a.getWorldPosition(tmpA); s.b.getWorldPosition(tmpB);
+          tmpD.subVectors(tmpB, tmpA);
+          const len = tmpD.length();
+          if (len < 1e-5) continue;
+          s.mesh.position.copy(tmpA).add(tmpD.clone().multiplyScalar(0.5));
+          s.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tmpD.clone().normalize());
+          s.mesh.scale.y = len / s.mesh.geometry.parameters.height;
+        }
+      };
+      console.log('[anim-vw] custom skeleton overlay added, bones=', allBones.length,
+                  'skinned=', !!firstSkin, 'visible=', overlay.visible);
     } else {
-      console.warn('[anim-vw] no SkinnedMesh found in GLB — bones unsupported on this clip');
+      _animHelperRefresh = null;
+      console.warn('[anim-vw] no bones found in GLB');
     }
   }, undefined, (err) => {
     setViewerLoading('step4-preview', false);

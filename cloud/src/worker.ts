@@ -8081,6 +8081,22 @@ async function handleAutoAnim(req: Request, env: Env): Promise<Response> {
     batch_id: batchId || undefined,
     project_name: projectName || undefined,
   });
+  // Also persist in the jobs table so the event appears in 'My usage
+  // history' alongside everything else. options.sourceRig lets the
+  // detail modal show a 🦴 Source rig link back to its origin.
+  try {
+    await supabaseAdmin(env).from('jobs').insert({
+      id: jobId, user_id: user.id,
+      asset_type: 'animation', mode: animType, seed: 0,
+      credit_cost: ANIM_COST, status: 'processing',
+      project_name: projectName || null,
+      options: {
+        operation_type: 'animate', sourceRig: rigUrl, anim_type: animType,
+        prompt: prompt || null, batch_id: batchId || null, backend: 'modal',
+      },
+      created_at: new Date().toISOString(),
+    });
+  } catch (e) { console.warn('[animate] jobs.insert failed', e); }
   return json({ success: true, job_id: jobId, status: 'queued', creditsRemaining: remaining });
 }
 
@@ -8195,6 +8211,12 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
     await deleteAnimJobRecord(env, jobId).catch(() => {});
     const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
     console.log(`[animate-status] job_id=${jobId} DONE url=${publicUrl}`);
+    // Mark the jobs row succeeded so history shows the right state.
+    try {
+      await supabaseAdmin(env).from('jobs')
+        .update({ status: 'succeeded', mesh_url: publicUrl, finished_at: new Date().toISOString() })
+        .eq('id', jobId).eq('user_id', user.id);
+    } catch (e) { console.warn('[animate-status] jobs.update failed', e); }
     return json({
       status: 'done',
       success: true,
