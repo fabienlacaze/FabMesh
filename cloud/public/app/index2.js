@@ -13104,12 +13104,10 @@ function renderAnimVersions(p) {
   const projThumb = (typeof p?.thumb === 'string' && p.thumb)
     ? (typeof _toFileUrl === 'function' ? _toFileUrl(p.thumb) : p.thumb) : '';
   strip.innerHTML = batches.map((b, i) => {
-    const icons = b.clips.map(c => iconFor(c.type)).slice(0, 4).join('');
     const vNum = batches.length - 1 - i;
     return `
       <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}">
         ${projThumb ? `<img src="${projThumb}" alt="">` : ''}
-        <div class="version-thumb-icon" style="position:absolute; bottom:14px; right:2px; font-size:14px; line-height:1; padding:1px 3px; background:rgba(0,0,0,0.65); border-radius:3px; letter-spacing:-1px;">${icons}</div>
         <span class="v-label">v${vNum}</span>
         <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
       </div>`;
@@ -13300,18 +13298,49 @@ document.getElementById('ws-anim-gen-more-btn')?.addEventListener('click', () =>
     customError('You need a rigged mesh first. Generate a Rig in Step 3, then come back.', 'No rig available');
     return;
   }
-  // Pre-check the types that already have a version in this project.
-  const existingTypes = new Set((p.animations || []).map(a => (a.type || '').toLowerCase()));
+  // 'Existing' = types in the CURRENTLY-SELECTED version (matches the
+  // type buttons shown under the viewer). Using all-batches here was
+  // confusing — the modal would say RUN/ATTACK already existed even
+  // when the user was looking at an IDLE-only batch.
+  const currentBatchClips = ((p.animations || [])
+    .filter(a => a.batchId === _step4SelectedBatch));
+  const existingTypes = new Set(currentBatchClips.map(c => (c.type || '').toLowerCase()));
   const modal = document.getElementById('modal-anim-gen');
-  modal.querySelectorAll('input[name="modal-anim-type"]').forEach(cb => {
+  const checkboxes = modal.querySelectorAll('input[name="modal-anim-type"]');
+  checkboxes.forEach(cb => {
     cb.checked = existingTypes.has(cb.value);
+    const label = cb.closest('label');
+    if (!label) return;
+    label.querySelector('.anim-existing-tag')?.remove();
+    if (existingTypes.has(cb.value)) {
+      const tag = document.createElement('span');
+      tag.className = 'anim-existing-tag';
+      tag.style.cssText = 'margin-left:auto; font-size:10px; color:var(--accent); font-weight:600; letter-spacing:0.4px;';
+      tag.textContent = '• EXISTING';
+      label.style.justifyContent = 'flex-start';
+      label.appendChild(tag);
+    }
   });
-  // If NOTHING is pre-checked (no anims yet → user came via the AI
-  // tools shortcut), default-check Idle as a sensible starting point.
-  if (![...modal.querySelectorAll('input[name="modal-anim-type"]:checked')].length) {
-    const idle = modal.querySelector('input[name="modal-anim-type"][value="idle"]');
-    if (idle) idle.checked = true;
-  }
+  // Snapshot the initial state so Generate stays greyed unless the
+  // user actually adds or removes a type. No-op clicks don't burn
+  // credits.
+  const initialSnapshot = [...checkboxes].map(cb => `${cb.value}=${cb.checked}`).join('|');
+  const goBtn = document.getElementById('modal-anim-go');
+  const updateGoState = () => {
+    const current = [...checkboxes].map(cb => `${cb.value}=${cb.checked}`).join('|');
+    const anyChecked = [...checkboxes].some(cb => cb.checked);
+    const changed = current !== initialSnapshot;
+    if (goBtn) {
+      goBtn.disabled = !(anyChecked && changed);
+      goBtn.title = !anyChecked
+        ? 'Pick at least one animation type'
+        : !changed
+          ? 'Add or remove a type to enable Generate'
+          : '';
+    }
+  };
+  checkboxes.forEach(cb => cb.addEventListener('change', updateGoState));
+  updateGoState();
   modal.classList.remove('hidden');
 });
 
