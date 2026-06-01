@@ -279,6 +279,32 @@ def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     ], axis=-1).astype(np.float32)
 
 
+def _quat_normalize(q: np.ndarray) -> np.ndarray:
+    """Normalize a (..., 4) quaternion array so each row is unit-length.
+    float32 drift in Hamilton products produces non-unit quats — three.js
+    SLERP then yields visible per-frame jerks. Guard against div-by-zero
+    on degenerate frames by clamping the norm at 1e-8."""
+    n = np.linalg.norm(q, axis=-1, keepdims=True)
+    n = np.maximum(n, 1e-8)
+    return (q / n).astype(np.float32)
+
+
+def _quat_sign_continuous(q: np.ndarray) -> np.ndarray:
+    """Ensure consecutive quaternions are on the same hemisphere.
+    glTF SLERP linearly interpolates [x,y,z,w] components and renormalises
+    — if dot(q[i], q[i+1]) < 0 the interpolation crosses the antipodal
+    region and produces a 180° flip. Flip q[i+1] sign whenever the dot
+    product is negative; this represents the IDENTICAL rotation but
+    keeps the path short."""
+    if q.shape[0] < 2:
+        return q
+    out = q.copy()
+    for i in range(1, out.shape[0]):
+        if float(np.dot(out[i - 1], out[i])) < 0.0:
+            out[i] = -out[i]
+    return out.astype(np.float32)
+
+
 # ---------------------------------------------------------------------------
 # Bone-name mapping BVH joints -> GLB bones
 # ---------------------------------------------------------------------------
@@ -520,17 +546,22 @@ def bvh_to_gltf_anim(
                 [frames[:, col + i] for i, _ in rot_cols], axis=1,
             )  # (n_frames, 3) in rot_order
             quats = _eulers_to_quats(eulers, j["rot_order"])
-            # COMPOSE WITH BIND POSE: BVH semantically encodes "joint
-            # rest = identity local rotation". Our rigged GLB's bind
-            # pose puts non-identity rotations on the joint nodes.
-            # Applying bvh_quat directly REPLACES bind, destroying the
-            # rest pose. Compose rest * bvh so:
-            #   - frame N with bvh = identity → rest (preserves bind)
-            #   - frame N with bvh = R       → rest applied first, then R
+            # COMPOSE WITH BIND POSE: rest * bvh per frame so identity
+            # bvh frames preserve bind pose.
             rest_rot = nodes[node_idx].get("rotation") if node_idx < len(nodes) else None
             if rest_rot is not None and rest_rot != [0, 0, 0, 1]:
                 rest_q = np.asarray(rest_rot, dtype=np.float32).reshape(1, 4)
                 quats = _quat_mul(np.broadcast_to(rest_q, quats.shape), quats)
+            # POST-PROCESS each track so model-viewer / three.js SLERP
+            # doesn't produce jerks. Two fixes (per workflow audit):
+            # 1. Normalize after Hamilton multiplication — float32 drift
+            #    leaves non-unit quats that SLERP visibly stutters on.
+            # 2. Sign-continuity flip — when dot(q[i], q[i+1]) < 0 the
+            #    interpolation crosses the antipodal region and produces
+            #    a 180° per-frame jerk. Flipping q[i+1] sign represents
+            #    the same rotation with a short path.
+            quats = _quat_normalize(quats)
+            quats = _quat_sign_continuous(quats)
             rotations_per_node[node_idx] = quats
         col += len(chans)
 
@@ -546,17 +577,28 @@ def bvh_to_gltf_anim(
 
     # Build keyframe timings.
     if target_fps and target_fps > 0:
-        new_n = int(round(n_frames * (dt * target_fps)))
+        # Resample N frames at native dt to N' frames at 1/target_fps.
+        # Correct formula (workflow audit): new_n = duration_seconds * fps
+        # = n_frames * dt * fps. Old formula `n_frames * (dt * fps)` is
+        # algebraically identical and happens to work when dt = 1/fps,
+        # but the readable form is `duration * target_fps`. Kept as a
+        # single multiply to avoid divisions on degenerate dt = 0.
+        duration_s = float(n_frames) * float(dt)
+        new_n = int(round(duration_s * float(target_fps)))
         if new_n < 2:
             new_n = n_frames
         new_dt = 1.0 / target_fps
         timings = np.arange(new_n, dtype=np.float32) * new_dt
-        # Resample rotations + translations linearly.
-        for d in (rotations_per_node, translations_per_node):
-            for k, arr in list(d.items()):
-                d[k] = _resample(arr, new_n)
+        # Rotations resample via SLERP (linear interp on quat components
+        # produces non-unit + wrong-arc rotations). Translations: linear.
+        for k, arr in list(rotations_per_node.items()):
+            rotations_per_node[k] = _resample_quat(arr, new_n)
+        for k, arr in list(translations_per_node.items()):
+            translations_per_node[k] = _resample(arr, new_n)
     else:
         timings = np.arange(n_frames, dtype=np.float32) * dt
+    print(f"[bvh→glb] n_frames={n_frames} dt={dt:.6f} duration={n_frames*dt:.3f}s "
+          f"target_fps={target_fps} final_frames={len(timings)}", flush=True)
 
     gltf, bin_blob = inject_anim_into_glb(
         gltf, bin_blob, timings,
@@ -578,6 +620,29 @@ def _resample(arr: np.ndarray, new_n: int) -> np.ndarray:
     for col in range(arr.shape[1]):
         out[:, col] = np.interp(new_t, old_t, arr[:, col])
     return out
+
+
+def _resample_quat(quats: np.ndarray, new_n: int) -> np.ndarray:
+    """SLERP-resample a quaternion track (old_n, 4) to (new_n, 4).
+    scipy's Slerp handles the shortest-arc choice and renormalisation
+    so the output is unit + continuous. Falls back to scalar lerp +
+    renormalize when scipy unavailable."""
+    if quats.shape[0] == new_n:
+        return quats.astype(np.float32)
+    if quats.shape[0] < 2:
+        return np.repeat(quats, new_n, axis=0).astype(np.float32)
+    try:
+        from scipy.spatial.transform import Rotation as R, Slerp
+        old_t = np.linspace(0.0, 1.0, quats.shape[0])
+        new_t = np.linspace(0.0, 1.0, new_n)
+        rots = R.from_quat(quats.astype(np.float64))
+        slerp = Slerp(old_t, rots)
+        out = slerp(new_t).as_quat().astype(np.float32)
+        return _quat_sign_continuous(out)
+    except Exception as e:
+        print(f"[bvh→glb] SLERP resample fallback: {e}", flush=True)
+        out = _resample(quats, new_n)
+        return _quat_sign_continuous(_quat_normalize(out))
 
 
 def main() -> int:
