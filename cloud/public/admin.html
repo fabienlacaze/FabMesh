@@ -306,7 +306,39 @@
       </div>
       <div id="password-error" style="color:var(--err); font-size:12px; margin-bottom:12px; display:none"></div>
       <button type="submit" class="btn btn-accent" style="width:100%; justify-content:center;">Unlock dashboard</button>
+      <div style="text-align:center; margin-top:14px;">
+        <a href="#" onclick="event.preventDefault(); openForgotPassword()"
+           style="color:var(--text-2); font-size:12px; text-decoration:underline; cursor:pointer;">
+          Forgot password?
+        </a>
+      </div>
     </form>
+  </div>
+
+  <!-- Forgot-password modal — gated by Supabase admin email auth only
+       (no email link / 2FA). The user is already logged in as an admin
+       Supabase account by the time they reach this modal; that's the
+       recovery factor. New password must be ≥20 chars. -->
+  <div id="forgot-password-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:var(--bg-1); border:1px solid var(--border); border-radius:12px; padding:24px; width:420px; max-width:92vw;">
+      <h3 style="margin:0 0 8px 0;">🔑 Reset admin password</h3>
+      <p style="color:var(--text-2); font-size:12px; margin-bottom:16px;">
+        You're already signed in as an admin Supabase account — that's
+        enough to rotate the dashboard password. New password must be
+        at least 20 characters.
+      </p>
+      <input id="forgot-pw-input" type="password" autocomplete="new-password"
+             placeholder="New admin password (≥20 chars)"
+             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
+      <input id="forgot-pw-confirm" type="password" autocomplete="new-password"
+             placeholder="Confirm new password"
+             style="width:100%; box-sizing:border-box; padding:10px 14px; background:var(--bg-0); border:1px solid var(--border); color:var(--text-0); border-radius:6px; font-size:14px; margin-bottom:10px;" />
+      <div id="forgot-pw-msg" style="font-size:12px; margin-bottom:12px; display:none;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn" onclick="closeForgotPassword()">Cancel</button>
+        <button class="btn btn-accent" onclick="submitForgotPassword()">Reset</button>
+      </div>
+    </div>
   </div>
 
   <div id="main" style="display:none">
@@ -833,6 +865,59 @@
         main.style.display = 'none';
         errEl.textContent = 'Load failed: ' + (e && e.message || e);
         errEl.style.display = 'block';
+      }
+    }
+
+    /* ─── Forgot-password modal ─── */
+    function openForgotPassword() {
+      document.getElementById('forgot-password-modal').style.display = 'flex';
+      document.getElementById('forgot-pw-input').focus();
+    }
+    function closeForgotPassword() {
+      document.getElementById('forgot-password-modal').style.display = 'none';
+      document.getElementById('forgot-pw-input').value = '';
+      document.getElementById('forgot-pw-confirm').value = '';
+      document.getElementById('forgot-pw-msg').style.display = 'none';
+    }
+    async function submitForgotPassword() {
+      const a = document.getElementById('forgot-pw-input').value;
+      const b = document.getElementById('forgot-pw-confirm').value;
+      const msg = document.getElementById('forgot-pw-msg');
+      msg.style.display = '';
+      if (a.length < 20) {
+        msg.style.color = 'var(--err)';
+        msg.textContent = 'Password must be at least 20 characters.';
+        return;
+      }
+      if (a !== b) {
+        msg.style.color = 'var(--err)';
+        msg.textContent = 'The two passwords do not match.';
+        return;
+      }
+      msg.style.color = 'var(--text-2)';
+      msg.textContent = 'Resetting…';
+      try {
+        const r = await fetch('/api/admin/reset-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ newPassword: a }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          msg.style.color = 'var(--err)';
+          msg.textContent = j.error || `HTTP ${r.status}`;
+          return;
+        }
+        msg.style.color = 'var(--ok, #4caf50)';
+        msg.textContent = '✓ Password rotated. Sign in below with the new password.';
+        // Pre-fill the login input with the new password so they don't
+        // have to retype, then close the modal after a short delay.
+        document.getElementById('password-input').value = a;
+        setTimeout(closeForgotPassword, 1800);
+      } catch (e) {
+        msg.style.color = 'var(--err)';
+        msg.textContent = 'Network error: ' + (e?.message || e);
       }
     }
 
