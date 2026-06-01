@@ -13287,6 +13287,99 @@ document.getElementById('ws-anim-export-btn')?.addEventListener('click', async (
     showToast(`Download failed: ${e.message}`, 'error');
   }
 });
+// Bones toggle — model-viewer exposes its internal Three.js scene at
+// mv[Symbol.for('three')]. We traverse for SkinnedMeshes, attach a
+// THREE.SkeletonHelper under each, toggle visibility on click. The
+// helper auto-updates each frame from the bones it watches, so it
+// follows the running animation.
+let _step4BonesOn = false;
+function _toggleAnimBones() {
+  const mv = _getStep4MV();
+  if (!mv) { showToast('Select a clip first', 'error'); return; }
+  const scene = mv[Symbol.for('three')] || mv.model || mv?.[Symbol.for('three.scene')];
+  if (!scene) {
+    showToast('Bones overlay unsupported on this model-viewer build', 'warning', 4000);
+    return;
+  }
+  _step4BonesOn = !_step4BonesOn;
+  const btn = document.querySelector('#ws-anim-toolbar [data-act="bones"]');
+  if (btn) btn.classList.toggle('active', _step4BonesOn);
+  const apply = (root) => {
+    root.traverse(o => {
+      if (!o.isSkinnedMesh || !o.skeleton) return;
+      const rootBone = o.skeleton.bones[0]?.parent || o;
+      let existing = null;
+      rootBone.traverse(c => { if (c.name === '__animBones') existing = c; });
+      if (_step4BonesOn && !existing) {
+        const helper = new THREE.SkeletonHelper(o);
+        helper.name = '__animBones';
+        try {
+          helper.material.color = new THREE.Color(0x00ffff);
+          helper.material.depthTest = false;
+          helper.material.transparent = true;
+        } catch (e) {}
+        helper.renderOrder = 999;
+        rootBone.add(helper);
+      } else if (!_step4BonesOn && existing) {
+        existing.parent.remove(existing);
+        try { existing.material?.dispose?.(); existing.geometry?.dispose?.(); } catch (_) {}
+      }
+    });
+  };
+  apply(scene);
+  showToast(_step4BonesOn ? 'Bones visible' : 'Bones hidden', 'info', 1500);
+}
+
+// Wire the anim viewer toolbar (Reset / View / Play / Loop / Bones /
+// Speed / Bg / Light). Each control adjusts the model-viewer attached
+// to step4-preview via _getStep4MV().
+document.querySelectorAll('#ws-anim-toolbar [data-act]').forEach(el => {
+  const act = el.dataset.act;
+  const isButton = el.tagName === 'BUTTON';
+  if (isButton) {
+    el.addEventListener('click', () => {
+      if (act === 'bones') _toggleAnimBones();
+      else if (act === 'play') document.getElementById('ws-anim-play-btn')?.click();
+      else if (act === 'loop') document.getElementById('ws-anim-loop-btn')?.click();
+      else if (act === 'reset') {
+        const mv = _getStep4MV();
+        if (mv) { mv.resetTurntableRotation?.(); mv.cameraOrbit = 'auto auto auto'; }
+      }
+    });
+  }
+});
+document.querySelector('#ws-anim-toolbar [data-act="view"]')?.addEventListener('change', (e) => {
+  const mv = _getStep4MV();
+  if (!mv) return;
+  const orbits = {
+    iso:    '45deg 65deg auto',
+    front:  '0deg 90deg auto',
+    back:   '180deg 90deg auto',
+    left:   '-90deg 90deg auto',
+    right:  '90deg 90deg auto',
+    top:    '0deg 0deg auto',
+    bottom: '0deg 180deg auto',
+  };
+  if (orbits[e.target.value]) mv.cameraOrbit = orbits[e.target.value];
+});
+document.querySelector('#ws-anim-toolbar [data-act="speed"]')?.addEventListener('change', (e) => {
+  const mv = _getStep4MV();
+  if (!mv) return;
+  const s = parseFloat(e.target.value);
+  if (Number.isFinite(s) && s > 0) mv.playbackRate = s;
+});
+document.querySelector('#ws-anim-toolbar [data-act="bg"]')?.addEventListener('change', (e) => {
+  const mv = _getStep4MV();
+  if (!mv) return;
+  const bgs = { dark: '#0a0a0e', studio: '#222233', black: '#000', gray: '#444' };
+  mv.style.background = bgs[e.target.value] || '#0a0a0e';
+});
+document.querySelector('#ws-anim-toolbar [data-act="light"]')?.addEventListener('input', (e) => {
+  const mv = _getStep4MV();
+  if (!mv) return;
+  mv.exposure = (parseFloat(e.target.value) / 100) || 1;
+});
+
 // Generate AnyTop AI — opens the dedicated modal, pre-checks any
 // types the project already has, runs the same batch flow on confirm.
 // Stays inside the Edit selected stage so the user doesn't lose
