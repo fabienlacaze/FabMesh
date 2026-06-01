@@ -4652,6 +4652,7 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
         const upstream = await fetch(url);
         if (upstream.ok) {
           const buf = await upstream.arrayBuffer();
+          _assertImageBytes(buf, 'remove-bg');
           const key = `${user.id}/removebg/${Date.now()}_${Math.floor(Math.random() * 1e9)}_nobg.png`;
           await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
           url = `${env.R2_PUBLIC_URL}/${key}`;
@@ -4778,6 +4779,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] text2image dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _assertImageBytes(buf, 'Modal text2image');
 
   // Mirror to R2 (same key shape as the Cog path so downstream stays uniform).
   if (env.MESHES && env.R2_PUBLIC_URL) {
@@ -4795,6 +4797,28 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
  *  input is a front image URL + a free-form prompt hint. Output is
  *  PNG bytes (best of N candidates auto-picked by outfit color match).
  *  Same auth + R2 mirror pattern as callModalText2Image. */
+/** Throw if `buf` isn't a real image. Catches the case where a Modal
+ *  endpoint returns a content-filter placeholder (small PNG with text
+ *  rendered into it, or a JSON error) with HTTP 200 — silently saving
+ *  it to R2 yields a poisoned image the user sees but can't recover
+ *  from. Magic-byte sniffing covers PNG / JPEG / WEBP; anything else
+ *  surfaces as a clear error to the caller. */
+function _assertImageBytes(buf: ArrayBuffer, source: string): void {
+  if (buf.byteLength < 256) {
+    throw new Error(`${source} returned ${buf.byteLength} bytes — too small to be a real image (likely content-filtered placeholder).`);
+  }
+  const head = new Uint8Array(buf, 0, Math.min(16, buf.byteLength));
+  const isPng  = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
+  const isJpeg = head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF;
+  const isWebp = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
+              && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50;
+  if (!isPng && !isJpeg && !isWebp) {
+    const preview = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 200));
+    console.warn(`[${source}] non-image bytes (${buf.byteLength}): "${preview.slice(0, 120)}"`);
+    throw new Error(`${source} returned non-image content (likely 'blocked by content filter' placeholder).`);
+  }
+}
+
 async function callModalBackView(env: Env, userId: string, input: {
   frontImageUrl: string;
   promptHint?: string;
@@ -4831,29 +4855,7 @@ async function callModalBackView(env: Env, userId: string, input: {
   const buf = await r.arrayBuffer();
   console.log(`[modal] back-view dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
 
-  // Validate the response IS an image. Modal's back-view container has
-  // an internal content filter that returns a small text-rendered
-  // 'Blocked by content filter' PNG when triggered — we'd otherwise
-  // save it to R2 as the user's back-view image, and they'd see the
-  // filter text inside the viewer with no way to right-click out of it.
-  // Magic bytes:
-  //   PNG  → 89 50 4E 47
-  //   JPEG → FF D8 FF
-  //   WEBP → 'RIFF....WEBP'
-  // Anything else is suspect (JSON/HTML/SVG error placeholder).
-  if (buf.byteLength < 256) {
-    throw new Error(`Modal back-view returned ${buf.byteLength} bytes — too small to be an image (likely content-filtered placeholder)`);
-  }
-  const head = new Uint8Array(buf, 0, Math.min(16, buf.byteLength));
-  const isPng  = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
-  const isJpeg = head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF;
-  const isWebp = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
-              && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50;
-  if (!isPng && !isJpeg && !isWebp) {
-    const preview = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 200));
-    console.warn(`[modal] back-view returned non-image bytes (${buf.byteLength}): "${preview.slice(0, 120)}"`);
-    throw new Error(`Modal back-view returned non-image content (likely 'blocked by content filter' placeholder). Re-run; if it keeps happening the prompt is flagged.`);
-  }
+  _assertImageBytes(buf, 'Modal back-view');
 
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
@@ -4980,6 +4982,7 @@ async function callModalTpose(env: Env, userId: string, input: {
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] tpose dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _assertImageBytes(buf, 'Modal tpose');
 
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
@@ -5086,6 +5089,7 @@ async function callModalImageOp(env: Env, userId: string, input: {
   // the warmth hint for one cycle.
   _writeLastWarmMs(env, '_meta/last_warm_image_op.txt').catch(() => {});
 
+  _assertImageBytes(buf, `Modal image_op (${input.op})`);
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const tag = input.op === 'modify' ? 'modified' : 'inpaint';
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
@@ -5135,6 +5139,7 @@ async function callModalSheet(env: Env, userId: string, input: {
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] sheet dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _assertImageBytes(buf, 'Modal sheet');
 
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
@@ -5187,6 +5192,7 @@ async function callModalRectify(env: Env, userId: string, input: {
   }
   const buf = await r.arrayBuffer();
   console.log(`[modal] rectify dt=${Date.now() - t0}ms bytes=${buf.byteLength}`);
+  _assertImageBytes(buf, 'Modal rectify');
 
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const key = `${userId}/${folder}/${Date.now()}_rectified.png`;
@@ -5411,6 +5417,7 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
       const imgRes = await fetch(outputUrl);
       if (imgRes.ok) {
         const buf = await imgRes.arrayBuffer();
+        _assertImageBytes(buf, 'Cog text2image');
         const seed = input.seed ?? Math.floor(Math.random() * 1e9);
         const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
         await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
