@@ -6943,9 +6943,14 @@ function _applyMeshTextureFilter(root) {
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const mat of mats) {
       if (!mat) continue;
-      // Force DoubleSide rendering so reversed-winding triangles
-      // (Trellis2 sometimes emits them) don't show up as black voids.
-      mat.side = THREE.DoubleSide;
+      // Use FrontSide (default) so we cull the BACK faces — otherwise
+      // when looking at the dragon from behind, the inside-out side
+      // of the front-facing belly (painted red) shows through the
+      // back, looking like fake transparency. Trellis2 occasionally
+      // emits reversed-winding triangles which would show as black
+      // voids with FrontSide; we accept a few dark patches over the
+      // very confusing 'see-through painted texture' artefact.
+      mat.side = THREE.FrontSide;
       // FORCE OPAQUE — applied UNCONDITIONALLY because Trellis2/SF3D
       // outputs commonly land with transparent=false BUT carry one of:
       //   - alphaMap texture        → cutout / see-through holes
