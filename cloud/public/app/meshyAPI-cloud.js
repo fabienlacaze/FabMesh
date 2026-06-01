@@ -823,14 +823,25 @@
                   || e.code === 22 || e.code === 1014
                   || /quota|exceeded/i.test(String(e.message || e)));
     }
-    function freeNonEssentialCaches() {
+    function freeNonEssentialCaches(currentProject) {
+      // Aggressive purge: anything we can rebuild on demand.
+      // Preserves ONLY auth tokens (sb-*, supabase.*) and the CURRENT
+      // project's image cache (so the just-generated image stays
+      // discoverable on next refresh).
+      const keepImgKey = currentProject ? _imgKey(currentProject) : null;
       let freed = 0;
       const toDrop = [];
       for (let i = 0; i < localStorage.length; i++) {
         const lk = localStorage.key(i) || '';
-        if (lk.startsWith('myfm:emissive:')
-         || lk.startsWith('myfm:imagestyle:')
-         || lk === 'fabmesh_nsfw_cache') {
+        if (!lk) continue;
+        // Preserve auth (Supabase / Cloudflare)
+        if (lk.startsWith('sb-') || lk.startsWith('supabase.')) continue;
+        // Preserve THIS project's image cache so we can append the new URL.
+        if (lk === keepImgKey) continue;
+        // Drop everything else we own
+        if (lk.startsWith('myfm:')
+         || lk.startsWith('fabmesh_')
+         || lk.startsWith('fabmesh:')) {
           toDrop.push(lk);
         }
       }
@@ -838,7 +849,7 @@
         freed += (localStorage.getItem(lk) || '').length;
         try { localStorage.removeItem(lk); } catch (_) {}
       }
-      return { freed, count: toDrop.length };
+      return { freed, count: toDrop.length, dropped: toDrop };
     }
     try {
       tryWrite();
@@ -847,16 +858,28 @@
       console.warn('[_appendCloudImages] write failed:', e?.message || e, 'quota=', quota);
       if (!quota) return;
       try {
-        const { freed, count } = freeNonEssentialCaches();
-        console.warn('[_appendCloudImages] freed', freed, 'chars across', count, 'keys; retrying');
+        const { freed, count, dropped } = freeNonEssentialCaches(projectName);
+        console.warn('[_appendCloudImages] freed', freed, 'chars across', count, 'keys; retrying. Dropped:', dropped.slice(0, 20));
         tryWrite();
         if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
-          window.showToast('Image saved (emissive/style cache cleared to free localStorage)', 'warn');
+          window.showToast('Image saved (non-essential caches purged to free localStorage)', 'warn');
         }
       } catch (e2) {
         console.error('[_appendCloudImages] retry also failed:', e2?.message || e2);
-        if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
-          window.showToast('Could not save new image locally — localStorage full. Open DevTools → Application → Storage → Clear site data, then retry.', 'error', 12000);
+        // Last-ditch: write ONLY the new URL (no history) so the version
+        // appears at least once. The next reload from R2 will refill.
+        try {
+          const minimal = (urls || []).map(u => ({ path: u, kind, mtime: Date.now() }));
+          localStorage.setItem(k, JSON.stringify(minimal));
+          console.warn('[_appendCloudImages] minimal-only write succeeded after full purge:', minimal.length);
+          if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+            window.showToast('Image saved (local cache reset — older versions reload from cloud)', 'warn', 8000);
+          }
+        } catch (e3) {
+          console.error('[_appendCloudImages] even minimal write failed:', e3?.message || e3);
+          if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+            window.showToast('Could not save new image locally — localStorage full. Open DevTools → Application → Storage → Clear site data, then retry.', 'error', 12000);
+          }
         }
       }
     }
