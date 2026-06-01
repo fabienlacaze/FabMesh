@@ -13308,14 +13308,31 @@ function showStep4AnimPreview(anim) {
     // Mixer + play first clip — bound to the GLB scene root so every
     // track's nodePath resolves correctly.
     if (gltf.animations?.length) {
+      const clip = gltf.animations[0];
+      // DIAG: list track names + check if those nodes exist under
+      // _animModel. If a track targets a node by name that doesn't
+      // exist, the mixer silently no-ops that track.
+      const sampleTracks = clip.tracks.slice(0, 5).map(t => t.name);
+      const allModelNames = new Set();
+      _animModel.traverse(o => { if (o.name) allModelNames.add(o.name); });
+      const trackTargets = clip.tracks.map(t => t.name.split('.')[0]);
+      const resolvedHits = trackTargets.filter(n => allModelNames.has(n)).length;
+      console.log('[anim-vw] clip:', clip.name, 'tracks=', clip.tracks.length,
+                  'duration=', clip.duration,
+                  'sample track names=', sampleTracks,
+                  'tracks resolving to model nodes:', resolvedHits, '/', trackTargets.length);
+      if (resolvedHits === 0) {
+        console.warn('[anim-vw] NO tracks resolve! First target:', trackTargets[0],
+                     'First 8 model node names:', [...allModelNames].slice(0, 8));
+      }
       _animMixer = new THREE.AnimationMixer(_animModel);
-      _animAction = _animMixer.clipAction(gltf.animations[0]);
+      _animAction = _animMixer.clipAction(clip);
       _animAction.setLoop(_animLooping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
       _animAction.clampWhenFinished = !_animLooping;
       _animAction.enabled = true;
       _animAction.reset();
       _animAction.play();
-      _animLastTime = 0; // reset dt so the first frame isn't a huge jump
+      _animLastTime = 0;
       console.log('[anim-vw] mixer started, action.isRunning =', _animAction.isRunning(),
                   'paused =', _animAction.paused);
     } else {
@@ -13336,11 +13353,17 @@ function showStep4AnimPreview(anim) {
         helper.material.linewidth = 3;
       } catch (e) {}
       helper.renderOrder = 999;
-      helper.visible = _step4BonesOn; // respect existing toggle state
+      helper.visible = _step4BonesOn;
       _animVw.scene.add(helper);
       _animHelper = helper;
+      // DIAG: log bbox of the helper so we can tell if it's hidden
+      // off-camera. SkeletonHelper renders at the bone world transforms.
+      const box = new THREE.Box3().setFromObject(helper);
+      const sz = box.getSize(new THREE.Vector3());
       console.log('[anim-vw] SkeletonHelper added, bones=',
-        firstSkin.skeleton?.bones?.length || 0);
+        firstSkin.skeleton?.bones?.length || 0,
+        'bbox.size=', sz.toArray().map(v => v.toFixed(2)).join(','),
+        'visible=', helper.visible);
     } else {
       console.warn('[anim-vw] no SkinnedMesh found in GLB — bones unsupported on this clip');
     }
