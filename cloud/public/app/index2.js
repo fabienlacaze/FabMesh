@@ -13289,6 +13289,30 @@ document.getElementById('ws-anim-export-btn')?.addEventListener('click', async (
     showToast(`Download failed: ${e.message}`, 'error');
   }
 });
+// Quick re-trigger for AnyTop AI generation — flips Step 4 from
+// 'Edit selected' to 'Create new' so the user can pick types and
+// click Generate without scrolling back up. Each Generate click
+// already produces a new batch (= new version).
+document.getElementById('ws-anim-gen-more-btn')?.addEventListener('click', () => {
+  const animCard = document.getElementById('step-card-animation');
+  if (!animCard) return;
+  animCard.classList.remove('collapsed', 'disabled');
+  const createStage = animCard.querySelector('.stage-create');
+  const editStage = animCard.querySelector('.stage-edit');
+  // Mutual-exclusion in this card: open create-new, close edit.
+  if (editStage) editStage.open = false;
+  if (createStage) createStage.open = true;
+  animCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  animCard.classList.add('pulse-highlight');
+  setTimeout(() => animCard.classList.remove('pulse-highlight'), 1500);
+  // Focus the first unchecked anim type so keyboard-flow users land
+  // ready to toggle the next type.
+  setTimeout(() => {
+    const firstUnchecked = animCard.querySelector('#ws-anim-types input[type="checkbox"]:not(:checked)');
+    if (firstUnchecked) firstUnchecked.focus();
+  }, 400);
+});
+
 // Manual import — user picks an animated GLB → POST to
 // /api/animations/upload → R2 → reload project so it appears as a
 // new version v(N) in the strip.

@@ -806,6 +806,35 @@
                   <div class="step-card-preview large" id="step4-preview">
                     <canvas id="ws-anim-canvas"></canvas>
                     <div class="preview-placeholder" id="step4-placeholder">No animation selected</div>
+                    <div id="ws-anim-toolbar" class="mesh-toolbar">
+                      <button data-act="reset" title="Reset camera">&#10227;</button>
+                      <select data-act="view" title="Camera view">
+                        <option value="iso" selected>Iso</option>
+                        <option value="front">Front</option>
+                        <option value="back">Back</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                        <option value="top">Top</option>
+                        <option value="bottom">Bottom</option>
+                      </select>
+                      <button data-act="play" title="Play / Pause">&#9654;</button>
+                      <button data-act="loop" class="active" title="Loop">&#128257;</button>
+                      <select data-act="speed" title="Playback speed">
+                        <option value="0.25">0.25x</option>
+                        <option value="0.5">0.5x</option>
+                        <option value="1" selected>1x</option>
+                        <option value="1.5">1.5x</option>
+                        <option value="2">2x</option>
+                      </select>
+                      <select data-act="bg" title="Background">
+                        <option value="dark" selected>Dark</option>
+                        <option value="studio">Studio</option>
+                        <option value="black">Black</option>
+                        <option value="gray">Gray</option>
+                      </select>
+                      <span class="light-label" title="Exposure">&#9728;</span>
+                      <input type="range" data-act="light" min="0" max="300" value="100" title="Exposure" />
+                    </div>
                   </div>
                   <div id="ws-anim-filename" class="viewer-filename"></div>
                   <!-- Type selector UNDER the viewer: each animation TYPE
@@ -830,6 +859,12 @@
                       <div class="step-tools-grid">
                         <button id="ws-anim-play-btn" class="ghost-btn tool-btn rig-tool-btn">&#9654; Play</button>
                         <button id="ws-anim-loop-btn" class="ghost-btn tool-btn rig-tool-btn active">&#128257; Loop</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">AI tools</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-anim-gen-more-btn" class="ghost-btn tool-btn rig-tool-btn" title="Open Create new to spawn another AnyTop AI batch (= new version)">&#10024; Generate AnyTop AI</button>
                       </div>
                     </div>
                     <div class="step-tools-group">
