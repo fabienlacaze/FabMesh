@@ -133,6 +133,84 @@ def _log(msg: str) -> None:
 # ============================================================
 # Skeleton extraction from a Puppeteer GLB
 # ============================================================
+def _detect_topology_family(joint_idxs, parent_by_idx, world_by_idx) -> str:
+    """Return one of 'flying' / 'quadropeds' / 'bipeds' / 'all' based on
+    the skin topology alone. Used to pre-classify the AnyTop ckpt
+    family WITHOUT relying on the upstream prompt / asset_family hint
+    (which is empty in current cloud anim payloads).
+
+    Heuristic on root-children chains:
+      * count "upper" chains (tips above root → wings/arms)
+      * count "lower" chains (tips below root → legs)
+      * count chains with significant FORWARD extent + low UP   → tail/spine
+      * if upper_count >= 2 AND those upper chains are LONG    → flying
+      * if lower_count >= 4                                    → quadropeds
+      * if lower_count == 2                                    → bipeds
+      * else                                                   → 'all'
+    """
+    import numpy as np
+    if not joint_idxs:
+        return 'all'
+    pos = {ji: np.asarray(world_by_idx.get(ji, [0.0, 0.0, 0.0]), dtype=np.float32)
+           for ji in joint_idxs}
+    arr = np.array([pos[ji] for ji in joint_idxs])
+    bb_min, bb_max = arr.min(axis=0), arr.max(axis=0)
+    size = bb_max - bb_min
+    up_axis = 1
+    body_h = max(float(size[up_axis]), 1e-6)
+    UP = lambda v: float(v[up_axis])
+
+    children = {ji: [] for ji in joint_idxs}
+    for ji in joint_idxs:
+        p = parent_by_idx.get(ji, -1)
+        if p in children:
+            children[p].append(ji)
+    roots = [ji for ji in joint_idxs if parent_by_idx.get(ji, -1) not in joint_idxs]
+    root = roots[0] if roots else joint_idxs[0]
+    branchy = [r for r in roots if len(children[r]) >= 2]
+    if branchy:
+        root = min(branchy, key=lambda r: UP(pos[r]))
+
+    def descendants(ji):
+        out, stack = [], list(children[ji])
+        while stack:
+            x = stack.pop()
+            out.append(x)
+            stack.extend(children[x])
+        return out
+    def longest_chain(ji):
+        chain = [ji]
+        cur = ji
+        while children[cur]:
+            cur = max(children[cur], key=lambda c: len(descendants(c)))
+            chain.append(cur)
+        return chain
+
+    upper_long, lower, spine_like = 0, 0, 0
+    root_y = UP(pos[root])
+    for kid in children[root]:
+        ch = longest_chain(kid)
+        tip_y = UP(pos[ch[-1]])
+        rise = tip_y - root_y
+        if rise > body_h * 0.15 and len(ch) >= 3:
+            # tip is well above root → wing or arm; "long" gating tells
+            # us wings (multi-segment) vs neck-only
+            upper_long += 1
+        elif rise < -body_h * 0.05 and len(ch) >= 2:
+            lower += 1
+        elif abs(rise) <= body_h * 0.15 and len(ch) >= 3:
+            spine_like += 1
+    if upper_long >= 2 and lower >= 2:
+        return 'flying'         # wings + legs → winged biped (dragon/bat)
+    if upper_long >= 2 and lower == 0:
+        return 'flying'         # wings only (bird perch)
+    if lower >= 4:
+        return 'quadropeds'
+    if lower == 2:
+        return 'bipeds'
+    return 'all'
+
+
 def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str = 'all'):
     """Build a name_by_idx that uses anatomical strings derived from
     topology + world bind positions, so AnyTop's T5 conditioner gets
@@ -173,12 +251,16 @@ def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str 
     arr = np.array([pos[ji] for ji in joint_idxs])
     bb_min, bb_max = arr.min(axis=0), arr.max(axis=0)
     size = bb_max - bb_min
-    # Up axis = largest extent (mesh oriented Y-up typically); side axis
-    # = next-largest of the remaining two; forward = the last.
-    up_axis = int(np.argmax(size))
-    rem = [a for a in (0, 1, 2) if a != up_axis]
-    side_axis = max(rem, key=lambda a: size[a])
-    fwd_axis = [a for a in rem if a != side_axis][0]
+    # 2026-06-02 fix: glTF spec mandates Y-up, so hard-pin up_axis = 1.
+    # Previous "largest-extent picks up_axis" heuristic broke on
+    # horizontally-elongated creatures (dragon with extended tail/wings):
+    # bbox Z (length) > Y (height) → up_axis=Z → left/right scrambled
+    # → 8 leg_l + 0 leg_r + 0 wing observed in prod logs 2026-06-02.
+    up_axis = 1
+    # Side axis = the horizontal axis with larger extent (wingspan).
+    # Forward = the remaining axis.
+    side_axis = 0 if size[0] >= size[2] else 2
+    fwd_axis = 2 if side_axis == 0 else 0
     body_h = max(float(size[up_axis]), 1e-6)
     UP = lambda v: float(v[up_axis])
     SIDE = lambda v: float(v[side_axis])
@@ -571,14 +653,59 @@ def animate_mesh(
         # ── Step 0: predict ckpt_family up-front so anatomical naming
         # gets the right `wing` vs `arm` labeling (audit acc4f279 #1).
         # Re-applies the same logic Step 3 + 3.0 use later.
+        # 2026-06-02 fix: prod log showed `ckpt_family=bipeds` on a dragon
+        # because prompt='' and anim_type='run' don't match winged keywords.
+        # The client doesn't propagate asset_family. Solution: SKELETON
+        # TOPOLOGY override — inspect the rigged GLB and detect wings/legs
+        # ourselves before any text-based heuristic. Topology beats prompt.
         _pre_ckpt = _pick_checkpoint(anim_type)
-        _winged_kw = ('dragon', 'wing', 'wyvern', 'bat', 'pterodactyl',
-                      'eagle', 'phoenix', 'griffin', 'pegasus', 'fly')
-        _pl = (str(prompt) if prompt else '').lower()
-        _al = (str(anim_type) if anim_type else '').lower()
-        if any(k in _pl or k in _al for k in _winged_kw):
-            _pre_ckpt = 'flying'
-        _log(f"step 0: pre-classified ckpt_family={_pre_ckpt} (used for anatomical naming)")
+        # Quick topology probe — re-uses the parsing logic of
+        # _extract_bvh_from_glb without writing a file.
+        try:
+            sys.path.insert(0, "/tmp")
+            from puppeteer_to_skeleton import _read_glb, _read_accessor  # type: ignore
+            import numpy as _np_topo
+            _gltf_topo, _, _bin_topo, _ = _read_glb(rig_path)
+            _skin_topo = (_gltf_topo.get("skins") or [{}])[0]
+            _ji_topo = _skin_topo.get("joints") or []
+            _nodes_topo = _gltf_topo.get("nodes") or []
+            _parent_topo = {i: -1 for i in _ji_topo}
+            for _p in _ji_topo:
+                for _c in (_nodes_topo[_p].get("children") or []):
+                    if _c in _ji_topo:
+                        _parent_topo[_c] = _p
+            _world_topo = {}
+            _ibm_acc = _skin_topo.get("inverseBindMatrices")
+            if _ibm_acc is not None:
+                _ibm = _np_topo.asarray(_read_accessor(_gltf_topo, _bin_topo, _ibm_acc))
+                _ibm = _ibm.reshape(len(_ji_topo), 4, 4).transpose(0, 2, 1)
+                for _k, _ji in enumerate(_ji_topo):
+                    try:
+                        _w = _np_topo.linalg.inv(_ibm[_k])[:3, 3]
+                        _world_topo[_ji] = _w
+                    except Exception:
+                        _world_topo[_ji] = _np_topo.array([0.0, 0.0, 0.0])
+            for _ji in _ji_topo:
+                if _ji not in _world_topo:
+                    _tr = _nodes_topo[_ji].get("translation") or [0.0, 0.0, 0.0]
+                    _world_topo[_ji] = _np_topo.asarray(_tr, dtype=_np_topo.float32)
+            _topo_ckpt = _detect_topology_family(_ji_topo, _parent_topo, _world_topo)
+            if _topo_ckpt != 'all':
+                _log(f"step 0: topology detected {_topo_ckpt} (overrides text heuristic)")
+                _pre_ckpt = _topo_ckpt
+        except Exception as _e:
+            _log(f"step 0: topology detection failed ({_e!r}), falling back to text heuristic")
+        # Text-based override only fires when topology was inconclusive.
+        if _pre_ckpt == 'all':
+            _winged_kw = ('dragon', 'wing', 'wyvern', 'bat', 'pterodactyl',
+                          'eagle', 'phoenix', 'griffin', 'pegasus', 'fly')
+            _pl = (str(prompt) if prompt else '').lower()
+            _al = (str(anim_type) if anim_type else '').lower()
+            if any(k in _pl or k in _al for k in _winged_kw):
+                _pre_ckpt = 'flying'
+            else:
+                _pre_ckpt = _pick_checkpoint(anim_type)
+        _log(f"step 0: final ckpt_family={_pre_ckpt} (used for anatomical naming)")
 
         # ── Step 1: extract BVH skeleton from the GLB ─────────────
         # Two BVH files with DIFFERENT names. Both 30 frames so
@@ -613,7 +740,12 @@ def animate_mesh(
             raise RuntimeError(f"process_new_skeleton exit {rc}")
 
         # ── Step 3: pick a checkpoint based on anim_type ──────────
-        ckpt_name = _pick_checkpoint(anim_type)
+        # 2026-06-02 fix: prefer Step 0's topology-derived family over
+        # the anim_type text heuristic. The topology probe knows the
+        # rig's real morphology (dragon has wings) while anim_type='run'
+        # would route to bipeds/Ostrich on the same dragon — exactly the
+        # bug observed in prod (logs 2026-06-02).
+        ckpt_name = _pre_ckpt if _pre_ckpt and _pre_ckpt != 'all' else _pick_checkpoint(anim_type)
         ckpt = _resolve_checkpoint_path(ckpt_name)
         if not ckpt:
             raise RuntimeError(f"checkpoint not found: {ckpt_name}")
