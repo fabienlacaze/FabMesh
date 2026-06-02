@@ -14051,7 +14051,21 @@ function showStep4AnimPreview(anim) {
     // Mixer + play first clip — bound to the GLB scene root so every
     // track's nodePath resolves correctly.
     if (gltf.animations?.length) {
-      const clip = gltf.animations[0];
+      // The Puppeteer rig bakes procedural Idle/Walk/Run clips at
+      // indices [0..2]. Any AnyTop / FBX-retarget output is APPENDED
+      // after them by scripts/anytop_retarget.py:1232. Picking
+      // animations[0] showed the procedural Idle (which is broken on
+      // some rigs — orc-marron flips upside down) and made AnyTop
+      // output look broken even when it wasn't. Prefer the last clip
+      // that isn't a procedural baseline name.
+      const PROC_NAMES = new Set(['Idle', 'Walk', 'Run']);
+      let pickIdx = gltf.animations.length - 1;
+      for (let i = gltf.animations.length - 1; i >= 0; i--) {
+        if (!PROC_NAMES.has(gltf.animations[i].name || '')) { pickIdx = i; break; }
+      }
+      const clip = gltf.animations[pickIdx];
+      console.log('[anim-vw] picked clip', pickIdx, 'of', gltf.animations.length,
+                  '-> name:', clip.name, '(skipping procedural Idle/Walk/Run if present)');
       // DIAG: list track names + check if those nodes exist under
       // _animModel. If a track targets a node by name that doesn't
       // exist, the mixer silently no-ops that track.

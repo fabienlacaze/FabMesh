@@ -1,5 +1,36 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (cloud anim viewer — toujours jouait l'Idle procédural)
+
+**Pourquoi**: en testant le viewer local du FBX retarget, on a découvert que
+la pipeline Puppeteer bake 3 anims procédurales (Idle/Walk/Run) dans tout
+rig produit, et que sur certains rigs (orc_marron) ces procédurales sont
+visuellement cassées (perso à l'envers). Le viewer cloud appelait
+`gltf.animations[0]` qui est toujours `Idle` procédural — donc tout
+résultat AnyTop / FBX-retarget était jugé sur la mauvaise track.
+
+**Conséquence rétrospective**: les semaines de "AnyTop bouge dans tous les
+sens" jugeaient probablement le Idle procédural cassé, pas l'output réel
+d'AnyTop. Les fixes basis-change / clamp / swing-twist / smoothing
+appliqués sur `scripts/anytop_retarget.py` ce mois-ci ciblaient peut-être
+le mauvais problème.
+
+**Changements**:
+
+- `cloud/public/app/index2.js:14053+` — le picker préfère le LAST clip
+  dont le nom n'est pas dans `{'Idle','Walk','Run'}`. Tombe sur le dernier
+  index sinon (rig sans procédurale). Le clip AnyTop a un nom `anim_type`
+  lowercase (`run`, `idle`, `walk`), donc l'exclusion en CamelCase est
+  safe.
+
+**À faire ensuite**:
+
+- Re-tester AnyTop sur dragon avec ce viewer corrigé pour juger le vrai
+  output.
+- Le workflow `wqt873669` apporte en parallèle 3 fixes Stage-1 (root
+  translation, family classifier quadropeds, charmap encoding) — sera
+  committé séparément quand il termine.
+
 ## 2026-06-02 (FBX reference-animation pipeline — Apovivor → Puppeteer)
 
 **Pourquoi**: AnyTop génère du motion sur les classes natives mais l'utilisateur
