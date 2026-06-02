@@ -2091,16 +2091,46 @@ function setViewerFilename(elId, p) {
   el.title = p || '';
 }
 
+// Toggle a purple-spinner overlay on a viewer container. Idempotent —
+// safe to call repeatedly. Forces position:relative on static parents.
+function setViewerLoading(containerId, on, msg) {
+  const c = document.getElementById(containerId);
+  if (!c) return;
+  let overlay = c.querySelector('.preview-placeholder.loading');
+  if (on) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'preview-placeholder loading';
+      const cs = window.getComputedStyle(c);
+      if (cs.position === 'static') c.style.position = 'relative';
+      c.appendChild(overlay);
+    }
+    if (msg) {
+      overlay.classList.add('with-msg');
+      overlay.setAttribute('data-loading-msg', msg);
+    } else {
+      overlay.classList.remove('with-msg');
+      overlay.removeAttribute('data-loading-msg');
+    }
+  } else if (overlay) {
+    overlay.remove();
+  }
+}
+
 function showStep1Preview(imgPath) {
   const preview = document.getElementById('step1-preview');
   // Remove any previous img + placeholder, but KEEP the static expand button + toolbar
   const placeholder = preview.querySelector('.preview-placeholder');
-  if (placeholder) placeholder.remove();
+  if (placeholder && !placeholder.classList.contains('loading')) placeholder.remove();
   let imgEl = preview.querySelector('img');
   if (!imgEl) {
     imgEl = document.createElement('img');
     preview.insertBefore(imgEl, preview.firstChild);
   }
+  // Loading overlay until <img> fires 'load' (or 'error').
+  setViewerLoading('step1-preview', true, 'Loading image…');
+  imgEl.onload = () => setViewerLoading('step1-preview', false);
+  imgEl.onerror = () => setViewerLoading('step1-preview', false);
   // Cache-bust — see version-thumb notes above; Electron holds onto the
   // previous bytes unless we change the URL.
   imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
@@ -4093,6 +4123,17 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
         }
         completeJob(job.id, true);
         await reloadCurrentProject();
+        // Force-await the version strip render so the new thumbnail
+        // appears before the scroll/pulse animation runs. Without this
+        // populateWorkspace fires renderImageVersions in the background
+        // and the user can see the strip stuck on the previous state.
+        if (state.currentProject) {
+          try {
+            await renderImageVersions(state.currentProject);
+            console.log('[image-gen] post-reload strip rendered, images=',
+                        state.currentProject.images?.length);
+          } catch (e) { console.warn('[image-gen] strip render failed:', e); }
+        }
         // After successful image generation, open the Edit stage and scroll
         const imgCard = document.getElementById('step-card-image');
         if (imgCard) {
@@ -14194,13 +14235,22 @@ function resizeLmFullscreen() {
 }
 
 async function openLandmarksFullscreen() {
-  // Always load the SOURCE MESH (clean GLB) into the fullscreen modal — never
-  // the generated rig FBX. Landmarks are an INPUT to the rigger; they live in
-  // mesh-space coordinates, so showing them on a rig that may be in different
-  // units (cm vs m) would place them off-screen or offset.
-  const sourcePath = rigSrcMeshPath
-    || state.currentProject?.selectedMeshPath
-    || (state.currentProject?.meshes && state.currentProject.meshes[0]?.path);
+  // 2026-06-01: prefer the currently-selected RIG so the user can see
+  // the AI-generated bones and drag the landmark markers exactly onto
+  // them. Fall back to the source mesh if no rig exists yet.
+  const p = state.currentProject;
+  // Critical: only use rigSrcMeshPath if it belongs to the CURRENT
+  // project — without this guard it survives project-switches and
+  // shows the wrong model.
+  const rigSrcBelongsHere = rigSrcMeshPath
+    && (p?.meshes || []).some(m => m.path === rigSrcMeshPath || m.url === rigSrcMeshPath);
+  const rigPath = p?.selectedRigPath
+               || (p?.rigs && p.rigs[0]?.url)
+               || (p?.rigs && p.rigs[0]?.path);
+  const meshPath = (rigSrcBelongsHere ? rigSrcMeshPath : null)
+                || p?.selectedMeshPath
+                || (p?.meshes && p.meshes[0]?.path);
+  const sourcePath = rigPath || meshPath;
   if (!sourcePath) {
     customError('Load a mesh first.', 'Manual landmarks');
     return;
