@@ -1,5 +1,44 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (Anim — topology routing + up_axis Y hardpin)
+
+**Pourquoi**: re-test prod après le hotfix __jN a montré 3 problèmes
+restants dans les logs Modal:
+1. `step 0: pre-classified ckpt_family=bipeds` sur dragon → Ostrich
+   class embedding utilisée. Le winged keyword check (`'dragon',
+   'wing', 'fly', ...`) ratait parce que `prompt=''` et
+   `anim_type='run'` ne contiennent aucun de ces tokens. Le client
+   ne propage pas `asset_family`.
+2. Anatomical classifier produisait `['hip', 'leg_l_01..leg_l_08',
+   'limb_01..limb_38']` — 8 leg_l, 0 leg_r, 0 wing, 0 tail, 0 head.
+   Le up_axis était auto-détecté par "plus grand côté de la bbox" →
+   sur un dragon stretched tail-back, c'était Z (longueur) au lieu
+   de Y → gauche/droite scrambled.
+3. Quaternions au GLB level toujours quasi-identité (5° max) malgré
+   `global_std=0.45` côté sampler — confirme suspect #4/#5 audit
+   (perte dans BVH→GLB).
+
+**Fixes (modal_app/_anytop_anim.py)**:
+
+- `_anatomical_names()` : `up_axis = 1` hardpin (glTF spec Y-up).
+  Plus de détection auto par bbox extent. side_axis = max(X, Z).
+- `_detect_topology_family()` : nouvelle fonction qui inspecte la
+  topologie du squelette (chaînes hangant du root, leur direction
+  UP/DOWN, longueur) et retourne `flying / quadropeds / bipeds /
+  all`. Comptage : `upper_long >= 2 → flying`, `lower >= 4 →
+  quadropeds`, `lower == 2 → bipeds`.
+- Step 0 : appelle `_detect_topology_family()` AVANT le fallback
+  keywords prompt. Topologie prioritaire sur texte.
+- Step 3 : utilise `_pre_ckpt` (résultat Step 0) comme source de
+  vérité, plus `_pick_checkpoint(anim_type)` en première intention.
+
+**Test attendu**: dragon → topology detected `flying` → ckpt
+`flying_model_*` → target_class `Dragon` → wing/leg labels
+symétriques (wing_l_NN + wing_r_NN + leg_l_NN + leg_r_NN).
+
+Bug #3 (perte rotation BVH→GLB) traité dans un commit séparé après
+validation des fixes #1/#2.
+
 ## 2026-06-02 (Anim hotfix — round-trip suffix __j<skin_pos>)
 
 **Pourquoi**: après deploy des noms anatomiques, premier test prod a
