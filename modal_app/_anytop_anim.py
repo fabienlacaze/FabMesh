@@ -1,4 +1,4 @@
-"""Modal app: AnyTop (Apache-2.0 / MIT, SIGGRAPH 2025) animation
+"""Modal app: AnyTop (MIT, SIGGRAPH 2025) animation
 generation, exposed via the same async spawn-poll-stream pattern as
 the Puppeteer rig router.
 
@@ -21,6 +21,7 @@ Mirrors `modal_app/_puppeteer_rig.py` 1:1 in structure; only the GPU
 work inside `animate_mesh()` differs.
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -40,7 +41,7 @@ app = modal.App("myfabmesh-anim")
 # AnyTop ships requirements via environment.yaml in their repo. We
 # replicate the pinned subset that matters at the python level here.
 ANYTOP_REPO = "https://github.com/Anytop2025/Anytop"
-ANYTOP_COMMIT = "main"  # pinned to main; bump to a SHA before prod
+ANYTOP_COMMIT = "e780d15"  # pinned SHA (issue #35 fix, 2026-04) — bump to current HEAD only after verifying real-motion regression on Dragon test set; changing this invalidates the Modal image layer and forces a rebuild on next deploy
 MOTION_LIB = "git+https://github.com/inbar-2344/Motion.git"
 
 image = (
@@ -117,6 +118,10 @@ image = (
         "scripts/anytop_retarget.py",
         remote_path="/tmp/anytop_retarget.py",
     )
+    .add_local_file(
+        "scripts/bvh_patch_leaves.py",
+        remote_path="/tmp/bvh_patch_leaves.py",
+    )
 )
 
 anim_output_volume = modal.Volume.from_name(
@@ -125,7 +130,8 @@ anim_output_volume = modal.Volume.from_name(
 
 # Mount our helper scripts so /tmp imports work inside animate_mesh.
 ANYTOP_DIR = "/AnyTop"
-HELPERS = ["/tmp/bvh_to_gltf_anim.py", "/tmp/puppeteer_to_skeleton.py"]
+HELPERS = ["/tmp/bvh_to_gltf_anim.py", "/tmp/puppeteer_to_skeleton.py",
+           "/tmp/bvh_patch_leaves.py"]
 
 
 # ============================================================
@@ -838,8 +844,14 @@ def animate_mesh(
              f"ckpt={os.path.basename(ckpt)}")
 
         # ── Step 2: sample.generate on the BUNDLED class. AnyTop
-        # writes <class>_rep_*.bvh + .npy under samples_*/ alongside
-        # the checkpoint.
+        # writes <class>_rep_*.bvh + .npy under --output_dir.
+        # Determinism + race fix: pass --seed (deterministic hash of
+        # job_id) and --output_dir (per-job dir under work_dir) so two
+        # concurrent jobs on the same Modal container never share a
+        # filesystem location and re-runs are reproducible.
+        anytop_out = os.path.join(work_dir, "anytop_out")
+        os.makedirs(anytop_out, exist_ok=True)
+        job_seed = int(hashlib.md5(job_id.encode()).hexdigest()[:8], 16)
         cmd = [
             sys.executable, "-m", "sample.generate",
             "--model_path", ckpt,
@@ -848,24 +860,47 @@ def animate_mesh(
             "--num_repetitions", "1",
             "--motion_length", "5.0",
             "--device", "0",
+            "--seed", str(job_seed),
+            "--output_dir", anytop_out,
         ]
         _log(f"step 2: {' '.join(cmd)}")
         rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
         if rc != 0:
             raise RuntimeError(f"sample.generate exit {rc}")
-        gen_bvh = _find_latest_bvh(ckpt)
+        gen_bvh = _find_bvh_in_dir(anytop_out, target_class)
         if not gen_bvh or not os.path.isfile(gen_bvh):
             raise RuntimeError("sample.generate produced no BVH")
         os.replace(gen_bvh, bvh_anim)
         _log(f"step 2 done: bvh={bvh_anim} ({os.path.getsize(bvh_anim)} bytes)")
 
+        # ── Step 2.4: patch End-Site leaves in AnyTop's output BVH (Issue #32).
+        # AnyTop's BVH writer omits CHANNELS on End Sites, so wing-tips, tail-
+        # tip, finger-tips and claws have their predicted rotation silently
+        # dropped → frozen extremities. Replace each End Site with a real Joint
+        # named "<parent>_end" carrying 3 rotation channels, and pad each MOTION
+        # frame with the corresponding rotation columns from the diffusion
+        # output (J=143 in the dragon tensor — the data exists, AnyTop just
+        # doesn't write it). Workaround from sy-hwang's custom_bvh.py.
+        try:
+            if 'bvh_patch_leaves' in sys.modules:
+                del sys.modules['bvh_patch_leaves']
+            from bvh_patch_leaves import patch_bvh_leaves  # type: ignore
+            n_patched = patch_bvh_leaves(bvh_anim)
+            _log(f"step 2.4: patched {n_patched} End-Site leaves in {bvh_anim} "
+                 f"(new size {os.path.getsize(bvh_anim)} bytes)")
+        except Exception as _e:
+            # Non-fatal: retarget can still work on the unpatched BVH, leaves
+            # just stay frozen. Surface the warning so we notice in prod logs.
+            _log(f"step 2.4 patch_bvh_leaves FAILED ({_e!r}) — leaves will be frozen")
+
         # ── Step 2.5: probe the raw .npy motion magnitude — sanity
         # check that AnyTop's native run actually produced real motion.
+        # Glob is restricted to the per-job output_dir (no race with
+        # other jobs running on the same container).
         try:
             import glob as _glob
             import numpy as _np
-            ckpt_dir = os.path.dirname(ckpt)
-            cand = _glob.glob(os.path.join(ckpt_dir, "samples_*", f"{target_class}_rep_*.npy"))
+            cand = _glob.glob(os.path.join(anytop_out, f"{target_class}_rep_*.npy"))
             if cand:
                 cand.sort(key=lambda p: os.path.getmtime(p), reverse=True)
                 _npy = cand[0]
@@ -1117,7 +1152,14 @@ def _resolve_checkpoint_path(ckpt_family: str) -> str:
 
 
 def _find_latest_bvh(ckpt_path: str) -> str:
-    """AnyTop writes outputs alongside the checkpoint dir."""
+    """AnyTop writes outputs alongside the checkpoint dir.
+
+    LEGACY: this mtime-globbed lookup is race-prone when two jobs run
+    concurrently on the same Modal container. New code paths should
+    pass --output_dir to sample.generate and use _find_bvh_in_dir()
+    against that per-job directory. Kept for back-compat with callers
+    that don't have a per-job output_dir context.
+    """
     ckpt_dir = os.path.dirname(ckpt_path)
     # Walk samples_*/<...>.bvh subdirs
     best = ""
@@ -1134,6 +1176,33 @@ def _find_latest_bvh(ckpt_path: str) -> str:
                 except OSError:
                     continue
     return best
+
+
+def _find_bvh_in_dir(output_dir: str, object_type: str = "") -> str:
+    """Direct lookup of the BVH that sample.generate writes when
+    --output_dir is passed explicitly.
+
+    generate.py iterates rep_i in range(num_repetitions) and writes
+    files as `{object_type}_rep_{rep_i:02d}.bvh` into output_dir
+    (no extra samples_* subdir when output_dir is given explicitly).
+    With num_repetitions=1 the expected filename is
+    `{object_type}_rep_00.bvh`. If that exact path is missing (e.g. a
+    future AnyTop version changes the filename pattern), we fall back
+    to a glob restricted to output_dir only — no risk of picking up a
+    BVH from another concurrent job because output_dir is per-job.
+    """
+    if object_type:
+        expected = os.path.join(output_dir, f"{object_type}_rep_00.bvh")
+        if os.path.isfile(expected):
+            return expected
+    import glob as _glob
+    cand = _glob.glob(os.path.join(output_dir, "*.bvh"))
+    if not cand:
+        return ""
+    # Single dir means no cross-job race; mtime sort just orders within
+    # this job (e.g. if num_repetitions > 1 was set in a caller).
+    cand.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return cand[0]
 
 
 def _guess_face_joints(bvh_path: str) -> list:
@@ -1377,6 +1446,16 @@ def standalone_run(class_name: str = "Dragon", motion_length: float = 5.0) -> di
         result["cond_load_warn"] = repr(e)
 
     # 4. Run sample.generate exactly as AnyTop intends.
+    # Determinism + race fix: per-run --output_dir and deterministic
+    # --seed so this dev probe never collides with a concurrent
+    # animate_mesh() call on the same Modal container.
+    standalone_job_id = uuid.uuid4().hex
+    anytop_out = f"/tmp/anim_{standalone_job_id}/anytop_out"
+    os.makedirs(anytop_out, exist_ok=True)
+    standalone_seed = int(
+        hashlib.md5(f"standalone:{class_name}:{standalone_job_id}".encode()).hexdigest()[:8],
+        16,
+    )
     t0 = time.time()
     cmd = [
         sys.executable, "-m", "sample.generate",
@@ -1386,21 +1465,26 @@ def standalone_run(class_name: str = "Dragon", motion_length: float = 5.0) -> di
         "--num_repetitions", "1",
         "--motion_length", str(motion_length),
         "--device", "0",
+        "--seed", str(standalone_seed),
+        "--output_dir", anytop_out,
     ]
     print(f"[standalone_run] CMD: {' '.join(cmd)}")
     rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
     result["sample_generate_rc"] = rc
     result["sample_generate_secs"] = round(time.time() - t0, 1)
+    result["standalone_anytop_out"] = anytop_out
+    result["standalone_seed"] = standalone_seed
     if rc != 0:
         result["error"] = f"sample.generate exit {rc}"
         return result
 
-    # 5. Probe the generated .npy (same logic as step 4.5 in animate_mesh).
-    ckpt_dir = os.path.dirname(ckpt)
-    cand = _glob.glob(os.path.join(ckpt_dir, "samples_*", f"{class_name}_rep_*.npy"))
+    # 5. Probe the generated .npy (same logic as step 4.5 in
+    # animate_mesh). Glob restricted to the per-run output_dir — no
+    # cross-job race.
+    cand = _glob.glob(os.path.join(anytop_out, f"{class_name}_rep_*.npy"))
     cand.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     if not cand:
-        result["error"] = f"no .npy produced under {ckpt_dir}/samples_*"
+        result["error"] = f"no .npy produced under {anytop_out}"
         return result
     npy_path = cand[0]
     result["output_npy"] = os.path.basename(npy_path)
@@ -1419,7 +1503,8 @@ def standalone_run(class_name: str = "Dragon", motion_length: float = 5.0) -> di
         result["arr_type"] = type(arr).__name__
 
     # 6. Also expose the BVH so the user can convert & view it locally.
-    bvh_path = _find_latest_bvh(ckpt)
+    # Look only in the per-run output_dir to avoid the mtime race.
+    bvh_path = _find_bvh_in_dir(anytop_out, class_name)
     if bvh_path and os.path.isfile(bvh_path):
         result["bvh_path_in_container"] = bvh_path
         # Persist to the shared volume so the local entrypoint can fetch it.

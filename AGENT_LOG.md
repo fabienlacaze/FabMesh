@@ -1,5 +1,51 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (anytop-modal — BVH leaf channels + per-job seed/output-dir + pinned ANYTOP_COMMIT + MIT-only license header — wf_7aed43eb)
+
+**Pourquoi**: workflow `wf_7aed43eb` a fanné plusieurs worktrees pour durcir
+`modal_app/_anytop_anim.py` côté Modal (race conditions multi-job, leaves BVH
+gelées, pin de commit AnyTop, header de licence inexact). Quatre fixes adoptés
+en parallèle, aucun conflit d'application.
+
+**Changements adoptés** :
+
+1. **`bvh-leaf-joint-channels`** (`scripts/bvh_patch_leaves.py` + step 2.4
+   dans `_anytop_anim.py`) — AnyTop écrit ses End-Sites BVH sans CHANNELS,
+   donc wing-tips / tail-tip / doigts / griffes restent gelés alors que le
+   tenseur de diffusion contient bien leurs rotations (J=143 sur Dragon).
+   On remplace chaque End-Site par un vrai Joint `<parent>_end` avec 3
+   rotation channels et on pad chaque frame MOTION avec les colonnes
+   correspondantes. Source : workaround de sy-hwang's `custom_bvh.py`
+   (Issue #32). Non-fatal — si le patch échoue, le retarget continue avec
+   les leaves gelées et un warning dans les logs prod.
+
+2. **`seed-and-output-dir`** (`_anytop_anim.py`) — `sample.generate` recevait
+   ni `--seed` ni `--output_dir`, ce qui (a) rendait les runs non
+   reproductibles et (b) faisait collisionner deux jobs concurrents sur le
+   même container Modal (mtime-glob sur `samples_*` racait). On passe
+   maintenant un seed déterministe (`md5(job_id)[:8]`) et un output_dir
+   par-job (`<work_dir>/anytop_out`). Nouveau helper `_find_bvh_in_dir()`
+   remplace `_find_latest_bvh()` sur les call-paths qui ont un output_dir
+   explicite — l'ancien est gardé en legacy avec un docstring qui pointe
+   vers le nouveau. `standalone_run()` reçoit la même refonte.
+
+3. **`pin-anytop-commit`** (`_anytop_anim.py`) — commentaire du
+   `ANYTOP_COMMIT = "e780d15"` enrichi pour expliquer que changer ce SHA
+   invalide le layer Modal image et force un rebuild (info opérationnelle
+   manquante avant). Le SHA lui-même était déjà pinné.
+
+4. **`fix-license-header`** (`_anytop_anim.py`) — docstring corrigé :
+   AnyTop est sous MIT seul, pas "Apache-2.0 / MIT". Évite toute confusion
+   downstream lors d'un audit de licence.
+
+**Ce qui N'EST PAS dans ce commit** : la branche parallèle `whbjllu36`
+(retarget bind-pose anchor) ne touche pas `_anytop_anim.py` donc aucun
+risque de conflit ; les deux séries peuvent merger indépendamment. Pas de
+`modal deploy` auto — le user déclenchera le redéploiement quand il aura
+aussi les fixes bind-pose côté retarget.
+
+---
+
 ## 2026-06-02 (anytop-retarget — bind-pose anchor + rest tracks for unmatched joints — diag wmuo726kk)
 
 **Pourquoi**: après les fixes Stage-1 + role-classifier, le retarget produisait
