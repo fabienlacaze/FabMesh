@@ -759,6 +759,41 @@ def retarget_bvh_to_rig(
             return np.array([0.0, 0.0, 0.0, 1.0])
         return np.array([-x, -y, -z, w]) / n
 
+    def _swing_twist(q: np.ndarray, axis: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Decompose q into (swing, twist) around `axis` (unit vector).
+        q = swing * twist where:
+          twist = rotation about `axis`
+          swing = rotation that takes axis to its new direction (axis-changing)
+        Returns (swing_q, twist_q). axis MUST be a unit vector in the
+        SAME frame as q (typically the parent-local frame).
+
+        Used 2026-06-02 for retargeting: source bones in AnyTop's
+        artist-rigged Dragon often carry rest-pose twists that don't
+        exist on our Puppeteer rig. Transferring the full delta
+        propagates those twists onto the wrong axes (→ "moves in all
+        directions"). Transferring only the swing keeps the
+        directional intent and discards the spin-around-axis component.
+        """
+        # Project q's vector part onto axis to build the twist quaternion.
+        vx, vy, vz, vw = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+        v = np.array([vx, vy, vz], dtype=np.float64)
+        proj = float(np.dot(v, axis))
+        twist = np.array([proj * axis[0], proj * axis[1], proj * axis[2], vw], dtype=np.float64)
+        n = np.linalg.norm(twist)
+        if n < 1e-9:
+            twist = np.array([0.0, 0.0, 0.0, 1.0])
+        else:
+            twist = twist / n
+        # swing = q * inv(twist)
+        swing = _q_mul(q, _q_inv(twist))
+        # Normalize for safety.
+        sn = np.linalg.norm(swing)
+        if sn > 1e-9:
+            swing = swing / sn
+        else:
+            swing = np.array([0.0, 0.0, 0.0, 1.0])
+        return swing, twist
+
     def _quat_from_mat(Rm: np.ndarray) -> np.ndarray:
         """Convert a 3x3 rotation matrix to a glTF-style (x,y,z,w) quat.
         Shepperd's branchless-friendly method, returns a unit quaternion.
@@ -877,6 +912,33 @@ def retarget_bvh_to_rig(
     )
 
     IDENT_Q = np.array([0.0, 0.0, 0.0, 1.0])
+
+    # Pre-compute the target BONE AXIS in parent-local frame for each
+    # joint. Used by the swing-twist decomposition below. The bone axis
+    # at rest is `(world_self - world_parent)` rotated into parent's
+    # local frame by `inv(R_parent_world)`. We normalize; degenerate
+    # bones (zero-length offset) get a fallback +Y axis.
+    tgt_bone_axis: Dict[int, np.ndarray] = {}
+    for tni in joint_node_idxs:
+        ws = world_by_idx.get(tni, np.zeros(3))
+        p = parent_by_idx.get(tni, -1)
+        if p < 0:
+            wp = np.zeros(3)
+            Rp = np.eye(3)
+        else:
+            wp = world_by_idx.get(p, np.zeros(3))
+            Rp = world_rot_by_idx.get(p, np.eye(3))
+        d_world = np.asarray(ws, dtype=np.float64) - np.asarray(wp, dtype=np.float64)
+        n = np.linalg.norm(d_world)
+        if n < 1e-9:
+            tgt_bone_axis[tni] = np.array([0.0, 1.0, 0.0])
+            continue
+        d_world = d_world / n
+        # Bring into parent-local: v_local = R_parent^T @ v_world
+        v_local = Rp.T @ d_world
+        nl = np.linalg.norm(v_local)
+        tgt_bone_axis[tni] = (v_local / nl) if nl > 1e-9 else np.array([0.0, 1.0, 0.0])
+
     for tni in joint_node_idxs:
         sidx = mapping.get(tni)
         if sidx is None:
@@ -936,20 +998,32 @@ def retarget_bvh_to_rig(
         # softened. Real IK would solve this properly — see audit
         # workflow a9b4d2e3 recommendation for pan-motion-retargeting
         # / Blender headless pivot. This clamp is a pragmatic stopgap.
+        # 2026-06-02: SWING-TWIST DECOMPOSITION
+        # Per web-audit a9b4d2e3 — "moves in all directions" is the
+        # expected failure mode of basis-only retargeting between
+        # mismatched skeletons because the source bones carry
+        # rest-pose twists baked in by the original artist that don't
+        # exist on our Puppeteer rig. Discarding the twist component
+        # (rotation around the bone's own axis) and keeping only the
+        # swing (rotation perpendicular to the axis, ie. WHERE the
+        # bone points) preserves the directional intent without
+        # propagating axis-spin artifacts that look like "wrong limbs
+        # going wrong directions" on screen.
+        #
+        # We decompose AFTER basis-change so the axis can be expressed
+        # in the TARGET parent-local frame (which is where delta_tgt
+        # lives). The target bone axis was pre-computed above from
+        # IBM-derived world positions.
         MAX_ANGLE_RAD = np.deg2rad(90.0)
+        bone_axis = tgt_bone_axis.get(tni, np.array([0.0, 1.0, 0.0]))
         q = np.empty_like(src_q)
         for fi in range(src_q.shape[0]):
             delta_src = _q_mul(src_q[fi], src_rest_inv)
-            # Clamp delta_src angle BEFORE basis-change (basis is a
-            # similarity transform → preserves angle, so clamping on
-            # either side is mathematically equivalent but clamping
-            # source-side avoids per-frame trig on the basis quat).
+            # Clamp delta_src angle before basis (similarity preserves angle).
             ds = delta_src
             ds_w = max(-1.0, min(1.0, float(ds[3])))
             ang = 2.0 * np.arccos(ds_w)
             if ang > MAX_ANGLE_RAD:
-                # Slerp delta_src toward identity by factor f<1 so the
-                # remaining angle equals MAX_ANGLE_RAD.
                 f = MAX_ANGLE_RAD / max(ang, 1e-6)
                 sinh = np.sin(ang / 2.0)
                 sinhf = np.sin(ang * f / 2.0)
@@ -957,8 +1031,12 @@ def retarget_bvh_to_rig(
                     scale = sinhf / sinh
                     ds = np.array([ds[0] * scale, ds[1] * scale, ds[2] * scale,
                                    np.cos(ang * f / 2.0)])
-            delta_tgt = _q_mul(_q_mul(basis, ds), basis_inv)
-            q[fi] = _q_mul(delta_tgt, tgt_rest)
+            # Basis change source-parent → target-parent.
+            delta_tgt_full = _q_mul(_q_mul(basis, ds), basis_inv)
+            # Decompose around target bone axis (in target parent frame).
+            swing, _twist = _swing_twist(delta_tgt_full, bone_axis)
+            # Apply ONLY swing on top of rest.
+            q[fi] = _q_mul(swing, tgt_rest)
         # Sign-continuity across frames (preserved through the mul,
         # but re-assert after delta to be safe).
         for i in range(1, q.shape[0]):
