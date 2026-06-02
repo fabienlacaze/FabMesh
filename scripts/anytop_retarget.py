@@ -1101,9 +1101,58 @@ def retarget_motion_to_rig(
         nl = np.linalg.norm(v_local)
         tgt_bone_axis[tni] = (v_local / nl) if nl > 1e-9 else np.array([0.0, 1.0, 0.0])
 
+    def _emit_rest_quat_track(tni_):
+        """Emit a 2-frame CONSTANT rest-quat rotation track for an
+        unmatched target joint.
+
+        Why: Puppeteer's skin weights may still drive vertices off a
+        joint that has no source-bone match (tail tips, twist bones,
+        Puppeteer-specific bones). Without an animation channel the
+        joint keeps its bind LOCAL transform, but LBS combines that
+        with the ANIMATED parent's world transform — the vertices get
+        dragged off rest. Writing an explicit constant quaternion
+        track at this joint's LOCAL rest tells the AnimationMixer to
+        hold the bind orientation every frame, which is the correct
+        identity-blend baseline relative to the parent's animation.
+
+        We emit just 2 keyframes (t=0 and t=new_t[-1], both equal to
+        tgt_rest_quat[tni_]); the sampler's LINEAR interp is constant
+        in this case. A dedicated 2-element INPUT accessor is created
+        (the shared `input_acc` has len(new_t) entries, which would
+        require a same-length VEC4 output — wasteful).
+        """
+        q_rest = np.asarray(tgt_rest_quat[tni_], dtype=np.float64)
+        # 2-element timeline.
+        t2 = np.array([0.0, float(new_t[-1])], dtype="<f4")
+        in_bv = _add_buffer_view(gltf, bin_data, t2.tobytes())
+        in_acc = _add_accessor(
+            gltf, in_bv, count=2,
+            comp_type=5126, acc_type="SCALAR",
+            minv=[float(t2[0])], maxv=[float(t2[-1])],
+        )
+        # 2-element constant quat output.
+        q2 = np.stack([q_rest, q_rest], axis=0).astype("<f4")
+        out_bv_ = _add_buffer_view(gltf, bin_data, q2.tobytes())
+        out_acc_ = _add_accessor(
+            gltf, out_bv_, count=2,
+            comp_type=5126, acc_type="VEC4",
+        )
+        s_idx_ = len(samplers)
+        samplers.append({"input": in_acc, "output": out_acc_,
+                         "interpolation": "LINEAR"})
+        channels_anim.append({
+            "sampler": s_idx_,
+            "target": {"node": tni_, "path": "rotation"},
+        })
+
     for tni in joint_node_idxs:
         sidx = mapping.get(tni)
         if sidx is None:
+            # No source bone maps to this target. Skin weights may still drive
+            # vertices off this bone — write a constant rest-pose quaternion
+            # track so LBS sees a stable identity-equivalent rotation instead
+            # of drifting along with the parent's animated rotation.
+            _emit_rest_quat_track(tni)
             continue
         src_q = src_quats[sidx]
         # Per-frame source PARENT-LOCAL delta vs its own rest:
@@ -1285,7 +1334,7 @@ def retarget_motion_to_rig(
                         break
             src_hip_y = abs(src_hip_y)
             scale = (tgt_hip_y / src_hip_y) if (tgt_hip_y > 1e-6 and src_hip_y > 1e-6) else 1.0
-            tr = (root_pos * scale).astype(np.float64)
+            tr = (world_by_idx[hip_tni] + (root_pos - root_pos[0:1]) * scale).astype(np.float64)
             # Resample to target FPS — mirror the quat-resample logic above.
             if target_fps and target_fps > 0 and len(new_t) != n_frames:
                 idxs = np.clip((new_t / max(times[-1], 1e-6)) * (n_frames - 1), 0, n_frames - 1)

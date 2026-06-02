@@ -1,5 +1,42 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (anytop-retarget — bind-pose anchor + rest tracks for unmatched joints — diag wmuo726kk)
+
+**Pourquoi**: après les fixes Stage-1 + role-classifier, le retarget produisait
+bien 21/21 bones matchés mais (a) le perso était téléporté à l'origine du monde
+au lieu de partir de sa bind-pose, et (b) les bones target sans match source
+(doigts, twist bones, tips) dérivaient avec l'animation du parent au lieu de
+rester à leur orientation de bind. Workflow `wf_8b65a431` a fanné 3 worktrees ;
+le vote a adopté 2 fixes et rejeté un troisième (`src-rest-from-bvh-tpose`,
+avg 27/100, 3 votes reject).
+
+**Diagnostic source** : `wmuo726kk`.
+
+**Changements** (`scripts/anytop_retarget.py`) :
+
+1. **Bind-pose anchor on root translation track** — la translation root est
+   maintenant `world_by_idx[hip_tni] + (root_pos - root_pos[0:1]) * scale`
+   au lieu de `root_pos * scale`. Le perso démarre à sa hip bind world position
+   et translate RELATIVEMENT au lieu d'être téléporté à l'origine en début
+   de clip.
+
+2. **Constant rest-quat track for unmatched joints** — ajoute le helper
+   `_emit_rest_quat_track(tni_)` qui émet une rotation channel à 2 keyframes
+   (constant = `tgt_rest_quat[tni_]`) sur tout target joint sans mapping
+   source. Sans cette track, LBS combinait le local bind de l'unmatched bone
+   avec le world animé du parent, ce qui faisait dériver les vertices
+   (doigts, tips, twist bones Puppeteer-specific). Avec la track, la mixer
+   tient l'orientation bind chaque frame.
+
+**Validation** : `matched 21/21 target bones to source`, root translation
+`hip_tni=33 scale=0.0047 frames=20`, **35 channels** (au lieu de 22 — +13
+rest-quat tracks émis pour les unmatched + 1 root translation), 20 samples,
+output 67 MB OK, pas de traceback.
+
+**Vote rejeté** : `src-rest-from-bvh-tpose` (avg 27/100, 3× reject) — proposait
+de reconstruire le rest source depuis une t-pose du BVH. Trop spéculatif et
+risquait de re-introduire de la dérive sur les rigs sans t-pose explicite.
+
 ## 2026-06-02 (role classifier — false-tail misclassification fix — diag wtwf1ae2i)
 
 **Pourquoi**: sur les rigs `humanoid_puppeteer` (Puppeteer output), le
