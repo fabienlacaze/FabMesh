@@ -170,7 +170,16 @@ def _parse_bvh(bvh_path: str) -> dict:
             offsets[i] = np.asarray(j.offset, dtype=np.float64)
         except Exception:
             offsets[i] = (0.0, 0.0, 0.0)
-        channels.append(list(j.channels) if j.channels else [])
+        # bvhsdk stores j.rotation columns in fixed [X,Y,Z] order (bvh.py:261),
+        # but the BVH CHANNELS line declares an intrinsic composition order
+        # (e.g. ZYX, ZXY, XYZ). Capture the order STRING here so the quat
+        # builder can permute columns to match scipy's seq-positional API.
+        order_str = ''
+        try:
+            order_str = (j.order or '').upper() if hasattr(j, 'order') else ''
+        except Exception:
+            order_str = ''
+        channels.append(order_str if order_str else 'ZXY')
 
     n_frames = int(bvh.frames)
     frame_time = float(bvh.frametime)
@@ -201,24 +210,33 @@ def _parse_bvh(bvh_path: str) -> dict:
     }
 
 
-def _eulers_to_quats(euler_deg: np.ndarray, channel_order: List[str]) -> np.ndarray:
-    """euler_deg: (F, 3) in CHANNELS order. Return quats (F, 4) (xyzw)."""
-    order = ''
-    for ch in channel_order:
-        c = ch.lower()
-        if 'rotation' not in c and 'rot' not in c:
-            continue
-        if 'x' in c:
-            order += 'x'
-        elif 'y' in c:
-            order += 'y'
-        elif 'z' in c:
-            order += 'z'
-    if len(order) != 3:
+def _eulers_to_quats(euler_deg: np.ndarray, channel_order) -> np.ndarray:
+    """euler_deg: (F, 3) ALWAYS in [X,Y,Z] column order (bvhsdk j.rotation
+    re-permutes by name). channel_order is the BVH CHANNELS intrinsic order
+    string (e.g. 'ZYX', 'ZXY', 'XYZ'). Returns quats (F, 4) (xyzw)."""
+    if isinstance(channel_order, str):
+        order = channel_order.lower()
+    else:
+        # Legacy: list of channel-name strings -- derive order by walking them.
+        order = ''
+        for ch in channel_order:
+            c = str(ch).lower()
+            if 'rotation' not in c and 'rot' not in c:
+                continue
+            if 'x' in c:
+                order += 'x'
+            elif 'y' in c:
+                order += 'y'
+            elif 'z' in c:
+                order += 'z'
+    if len(order) != 3 or set(order) != set('xyz'):
         order = 'zxy'  # bvhsdk default
-    # scipy: lowercase = intrinsic (matches BVH convention).
+    # scipy expects angles[:, i] to correspond to a rotation about order[i].
+    # Our columns are fixed [X,Y,Z] (bvh.py:261), so permute to match `order`.
+    col_of = {'x': 0, 'y': 1, 'z': 2}
+    ang = euler_deg[:, [col_of[c] for c in order]]
     try:
-        q = R.from_euler(order, euler_deg, degrees=True).as_quat()
+        q = R.from_euler(order, ang, degrees=True).as_quat()
     except Exception:
         q = np.tile([0.0, 0.0, 0.0, 1.0], (euler_deg.shape[0], 1))
     # Sign-continuity across frames.

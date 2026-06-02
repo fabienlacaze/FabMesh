@@ -1,5 +1,31 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (anytop-retarget — ZYX channel-order fix — Stage-3 audit w8nuzxpih)
+
+**Pourquoi** : `_eulers_to_quats` dans `scripts/anytop_retarget.py` recevait
+`euler_deg` en colonnes fixes `[X,Y,Z]` (bvhsdk `j.rotation` permute toujours
+par nom — bvh.py:261), mais scipy `R.from_euler(order, angles)` interprète
+`angles[:, i]` comme la rotation autour de `order[i]`. Pour un BVH déclaré
+ZYX (cas AnyTop Dragon), on passait donc colonne X comme angle Z, colonne Z
+comme angle X — swap silencieux qui produit des quats faux sur ~87 % des
+joints du clip.
+
+**Fix** : capturer la string d'ordre intrinsèque depuis `j.order` au parse,
+puis permuter les colonnes `[X,Y,Z]` vers l'ordre déclaré avant l'appel
+scipy. Fallback `'zxy'` (default bvhsdk) si l'attribut manque.
+
+**Validation** (audit Stage-3 `w8nuzxpih`) : régénération du clip Dragon
+before/after sur 47 joints communément animés —
+- mean per-frame quat angle delta = **71.25 deg**
+- max = **175.45 deg** (quasi-antipodal)
+- 41/47 joints divergent de plus de 10 deg sur au moins une frame
+Les trois seuils de significativité (mean>1, max>20, diverging>5) sont
+explosés simultanément — le patch fait du vrai travail structurel, ce
+n'est pas une correction marginale.
+
+**Suivi** : redéploiement `modal_app/_anytop_anim.py` pour que la prod
+cloud bénéficie du fix.
+
 ## 2026-06-02 (anytop-modal — BVH leaf channels + per-job seed/output-dir + pinned ANYTOP_COMMIT + MIT-only license header — wf_7aed43eb)
 
 **Pourquoi**: workflow `wf_7aed43eb` a fanné plusieurs worktrees pour durcir
@@ -186,6 +212,34 @@ le mauvais problème.
 - Le workflow `wqt873669` apporte en parallèle 3 fixes Stage-1 (root
   translation, family classifier quadropeds, charmap encoding) — sera
   committé séparément quand il termine.
+
+## 2026-06-02 (AnyTop dragon unblock — root cause + 5 fixes + paper-anchored audit)
+
+**Trigger**: user reported "AnyTop fait n'importe quoi en boucle" on a Puppeteer-rigged dragon job. Three months of basis-change / clamp / swing-twist patches had not improved the visible output.
+
+**Root cause** (workflow wmuo726kk, empirically validated on the actual broken job c46ed091):
+1. anytop_retarget.py emitted ABSOLUTE root translation instead of bind-anchored delta → hip teleports +49 cm vertically at frame 0
+2. 6 of 47 skin-weighted target joints had NO rotation track → LBS rips mesh apart (animated parent × frozen child)
+3. cloud viewer was rendering procedural Idle clip [0] instead of the AnyTop output clip — every "AnyTop is broken" judgment for weeks was actually about a separate procedural bug
+
+**Paper / repo audit** (workflows wfa5a7aa5 + wpzod1fht + w10o5iuc0 + wii1edjsz):
+- AnyTop is graph-conditioned single model, NOT per-class checkpoints — cc4b957 'force flying' is on false premise but harmless
+- Trained on Truebones Zoo ($99 Gumroad, royalty-free for animated movie productions) — MIT code, safe-with-conditions for commercial ship
+- Issue #32 confirms BVH writer drops End Site / leaf-joint motion — wings/tail/claws frozen by design
+- utils.process_new_skeleton offers a Mode 4 pivot (28h, 50% likely comparable to fixed Mode 3) — kept in backlog
+
+**Fixes adopted** (5 commits today):
+- 7a7663c — cloud viewer picks last non-procedural clip
+- 83d9730 — Stage-1 (charmap + family classifier + initial root translation)
+- 482bf10 — FBX role-classifier (drops false-tail misclassification on humanoid rigs)
+- 4629d3b — Bind-pose retargeter fixes (root translation anchored, rest-quat tracks for unmatched joints)
+- 6bb442f — Modal hygiene (Issue #32 BVH leaf patch, --seed, --output_dir, pinned ANYTOP_COMMIT SHA, MIT header)
+
+**Validation**: workflow w1rptewtl re-ran retarget_bvh_to_rig locally on the actual broken job's BVH + rig. Channels went 42→48, frame-0 hip translation moved from (0,0.764,0) to (-0.009,0.273,0.229) = bind exact, zero traceback. Visual BEFORE/AFTER viewer staged at c:/tmp/viewer/compare.html.
+
+**Next**: deploy Modal (workflow wxrf56ogy in progress, image rebuild ~5-10 min), user re-tests AnyTop dragon job from cloud UI.
+
+**If insufficient**: Mode 4 pivot via process_new_skeleton, 28h sprint (wpu63xcbx PoC ready). Or SinMDM fallback (sigal-raab's own suggestion in Issue #24).
 
 ## 2026-06-02 (FBX reference-animation pipeline — Apovivor → Puppeteer)
 
