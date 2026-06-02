@@ -2373,12 +2373,27 @@ details.stage-generating > summary {
   background: linear-gradient(90deg, rgba(124,58,237,0.15), rgba(168,85,247,0.08));
   border-left: 3px solid rgba(168,85,247,0.7);
 }
-details.stage-generating > summary .stage-icon {
-  display: inline-block;
-  /* No animation by default — only spin when a job is actually running
-     on this step (.has-running added to the parent step-card). */
+/* Gear glyph centered inside a pink circle. Wrapper sizing kept
+   independent of the inherited summary font-size so the gear stays
+   visually balanced regardless of theme. */
+details.stage-generating > summary .stage-icon-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ec4899, #db2777);
+  color: white;
+  font-size: 16px;
+  line-height: 1;
+  box-shadow: 0 0 0 1px rgba(236, 72, 153, 0.4),
+              0 2px 6px rgba(236, 72, 153, 0.25);
+  margin-right: 4px;
+  /* No animation by default — only spin when a job is actually
+     running (.has-running on the step card). */
 }
-.step-card.has-running details.stage-generating > summary .stage-icon {
+.step-card.has-running details.stage-generating > summary .stage-icon-gear {
   animation: spin 2s linear infinite;
 }
 @keyframes spin {
