@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (Anim hotfix — round-trip suffix __j<skin_pos>)
+
+**Pourquoi**: après deploy des noms anatomiques, premier test prod a
+crashé avec "No BVH joint name resolves to a GLB bone — BVH joints:
+['hip', 'limb_01', 'leg_l_01']... GLB bones: ['joint20', 'joint36']...".
+Les noms anatomiques côté BVH ne matchaient plus les nodes GLB
+restés en `joint<N>`.
+
+**Fix**: encoder le skin-local index dans le suffixe du nom BVH.
+
+- `modal_app/_anytop_anim.py:_anatomical_names()` — append `__j<N>` à
+  chaque nom anatomique où N = position dans `skin.joints[]`. Exemple:
+  `hip__j0`, `wing_l_01__j17`, `tail_02__j33`.
+- `scripts/bvh_to_gltf_anim.py:_map_bvh_to_glb()` — nouveau pattern
+  `__j(\d+)$` prioritaire qui mappe directement par position dans
+  `glb_bone_names` (= `skin.joints[]` order). Garde les 5 stratégies
+  existantes en fallback.
+
+T5 reste alimenté par la partie sémantique (`hip`, `wing_l`,
+`tail`) ; le suffixe `__jN` se tokenise en bruit ignorable.
+
 ## 2026-06-02 (Mode 3 anim — anatomical joint names + drop alias guard)
 
 **Pourquoi**: audit complet pipeline (agent acc4f279) a révélé que AnyTop

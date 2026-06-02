@@ -139,6 +139,15 @@ def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str 
     semantic signal instead of the cloud-rigged GLB's default
     ``joint_<N>`` placeholders.
 
+    Each returned name is suffixed with ``__j<skin_pos>`` where
+    ``skin_pos`` is the joint's position in the GLB's ``skin.joints[]``
+    array. This survives the AnyTop round-trip in BVH joint names and
+    is parsed back by ``bvh_to_gltf_anim._map_bvh_to_glb`` to recover
+    the exact GLB bone — without this, renaming the BVH names to
+    anatomical strings makes the post-sampler mapper find 0 GLB
+    matches and the whole anim job fails ("No BVH joint name resolves
+    to a GLB bone" — observed in prod 2026-06-02).
+
     Audit (acc4f279) ranked this as the dominant Mode-3 failure: AnyTop
     conditions on T5-encoded joint name STRINGS, not on a class-id
     embedding. ``joint_17`` → T5 embedding ≈ zero info → near-identity
@@ -348,6 +357,15 @@ def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str 
     unnamed = [ji for ji in joint_idxs if ji not in name_by_idx]
     for i, ni in enumerate(unnamed):
         name_by_idx[ni] = f'limb_{i + 1:02d}'
+
+    # ── Suffix every name with __j<skin_pos> for round-trip mapping.
+    # See docstring: bvh_to_gltf_anim parses this suffix back to the
+    # exact GLB bone position. Without it, the post-sampler mapping
+    # gets 0 matches between anatomical BVH names and joint_<N> GLB
+    # bones, and the anim job fails before it can write the GLB.
+    for skin_pos, ji in enumerate(joint_idxs):
+        if ji in name_by_idx:
+            name_by_idx[ji] = f"{name_by_idx[ji]}__j{skin_pos}"
 
     return name_by_idx
 
