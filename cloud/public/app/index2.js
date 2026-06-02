@@ -15096,7 +15096,7 @@ function renderStepProgressWidgets() {
     });
     if (!matching.length) {
       widget.classList.remove('has-jobs');
-      widget.innerHTML = '<div class="step-progress-empty">Pas de g&eacute;n&eacute;ration en cours</div>';
+      widget.innerHTML = '<div class="step-progress-empty">No generation in progress</div>';
       try { _toggleGeneratingStage(s, false); } catch (_) {}
       continue;
     }
