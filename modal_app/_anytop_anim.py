@@ -161,9 +161,11 @@ def _detect_topology_family(joint_idxs, parent_by_idx, world_by_idx) -> str:
     arr = np.array([pos[ji] for ji in joint_idxs])
     bb_min, bb_max = arr.min(axis=0), arr.max(axis=0)
     size = bb_max - bb_min
-    up_axis = 1
+    up_axis, side_axis, fwd_axis = 1, 0, 2  # see _anatomical_names
     body_h = max(float(size[up_axis]), 1e-6)
+    body_s = max(float(size[side_axis]), 1e-6)
     UP = lambda v: float(v[up_axis])
+    SIDE = lambda v: float(v[side_axis])
 
     children = {ji: [] for ji in joint_idxs}
     for ji in joint_idxs:
@@ -191,24 +193,37 @@ def _detect_topology_family(joint_idxs, parent_by_idx, world_by_idx) -> str:
             chain.append(cur)
         return chain
 
-    upper_long, lower, spine_like = 0, 0, 0
+    # We count chains hanging off the root. Wings are detected as
+    # LATERAL chains (large |SIDE - root.SIDE| span) of length >= 3,
+    # regardless of whether the tip is above or below root — dragon
+    # rigs can ship with wings folded down. Legs are downward chains
+    # ending below the root. The previous "wings must rise above root"
+    # check missed every folded-wing rig.
     root_y = UP(pos[root])
+    root_side = SIDE(pos[root])
+    lateral_long = 0      # likely wings/arms — long chain w/ big SIDE span
+    lower = 0             # legs — chains tipping below root
+    spine_like = 0        # head/neck — small lateral span, length >= 3
     for kid in children[root]:
         ch = longest_chain(kid)
-        tip_y = UP(pos[ch[-1]])
-        rise = tip_y - root_y
-        if rise > body_h * 0.15 and len(ch) >= 3:
-            # tip is well above root → wing or arm; "long" gating tells
-            # us wings (multi-segment) vs neck-only
-            upper_long += 1
+        tip = pos[ch[-1]]
+        side_span = max(abs(SIDE(pos[c]) - root_side) for c in ch)
+        rise = UP(tip) - root_y
+        if side_span > body_s * 0.10 and len(ch) >= 3:
+            lateral_long += 1
         elif rise < -body_h * 0.05 and len(ch) >= 2:
             lower += 1
         elif abs(rise) <= body_h * 0.15 and len(ch) >= 3:
             spine_like += 1
-    if upper_long >= 2 and lower >= 2:
-        return 'flying'         # wings + legs → winged biped (dragon/bat)
-    if upper_long >= 2 and lower == 0:
-        return 'flying'         # wings only (bird perch)
+    # Heuristics:
+    #   * 2+ lateral chains + 2+ lower legs → winged-biped (dragon, bat)
+    #   * 2+ lateral chains only            → bird perch (eagle, parrot)
+    #   * 4+ lower legs                     → quadruped
+    #   * 2 lower legs                      → biped
+    if lateral_long >= 2 and lower >= 2:
+        return 'flying'
+    if lateral_long >= 2 and lower == 0:
+        return 'flying'
     if lower >= 4:
         return 'quadropeds'
     if lower == 2:
@@ -262,10 +277,15 @@ def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str 
     # bbox Z (length) > Y (height) → up_axis=Z → left/right scrambled
     # → 8 leg_l + 0 leg_r + 0 wing observed in prod logs 2026-06-02.
     up_axis = 1
-    # Side axis = the horizontal axis with larger extent (wingspan).
-    # Forward = the remaining axis.
-    side_axis = 0 if size[0] >= size[2] else 2
-    fwd_axis = 2 if side_axis == 0 else 0
+    # 2026-06-02 fix #2: side_axis = X (axis 0) hardpin. Puppeteer
+    # rigs follow the standard "character faces +Z, Y up, X is left-
+    # right" convention. The previous `max(X, Z)` heuristic picked Z
+    # on tail-elongated rigs (dragon ~3-4m head-to-tail, ~2m wingspan)
+    # → wings projected onto Z → classified as forward/backward chains
+    # instead of left/right → 7 arm + 0 leg + 0 wing observed in prod
+    # logs 2026-06-02 (Bear retarget run).
+    side_axis = 0
+    fwd_axis = 2
     body_h = max(float(size[up_axis]), 1e-6)
     UP = lambda v: float(v[up_axis])
     SIDE = lambda v: float(v[side_axis])

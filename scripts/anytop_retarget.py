@@ -342,8 +342,14 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
     arr = np.array([pos[ji] for ji in joint_node_idxs])
     bb_min, bb_max = arr.min(axis=0), arr.max(axis=0)
     size = bb_max - bb_min
+    # See modal_app/_anytop_anim.py:_anatomical_names — both hard-pinned
+    # to Y-up + X-side per glTF convention so role classification
+    # matches between source and target (and between this and
+    # _detect_topology_family). Auto-detecting either axis breaks on
+    # tail-elongated rigs (dragon: Z > X) — left/right detection
+    # scrambles and 0 wings/legs get classified.
     up_axis = 1
-    side_axis = 0 if size[0] >= size[2] else 2
+    side_axis = 0
     body_h = max(float(size[up_axis]), 1e-6)
     UP = lambda v: float(v[up_axis])
     SIDE = lambda v: float(v[side_axis])
