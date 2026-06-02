@@ -50,7 +50,7 @@ import io
 import json
 import re
 import struct
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -60,8 +60,8 @@ from scipy.spatial.transform import Rotation as R
 # 1. Source-bone classifier — AnyTop canonical names → roles
 # ============================================================
 
-_SIDE_TOKEN_L = re.compile(r"(_L_|_l_|Left|LeftLeg|LLeg|L_)", re.IGNORECASE)
-_SIDE_TOKEN_R = re.compile(r"(_R_|_r_|Right|RightLeg|RLeg|R_)", re.IGNORECASE)
+_SIDE_TOKEN_L = re.compile(r"(_L_|_l_|Left|LeftLeg|LLeg|L_|_l$)", re.IGNORECASE)
+_SIDE_TOKEN_R = re.compile(r"(_R_|_r_|Right|RightLeg|RLeg|R_|_r$)", re.IGNORECASE)
 
 # Patterns observed in the bundled cond.npy keys (75+ classes,
 # ~3ds-Max-Biped naming). Ordered so more specific first.
@@ -571,18 +571,140 @@ def retarget_bvh_to_rig(
     """Read AnyTop's BVH, read the user's Puppeteer GLB, retarget the
     BVH motion onto the GLB's skin, and write the result GLB.
 
-    The GLB's mesh, materials, skin, and bone hierarchy are kept
-    BYTE-IDENTICAL — we only append a new AnimationClip referencing
-    the existing nodes.
+    Thin wrapper over `retarget_motion_to_rig` for the BVH path —
+    kept so existing callers in `modal_app/_anytop_anim.py` continue
+    to compile. The FBX path goes through `retarget_fbx_to_rig` which
+    also funnels into `retarget_motion_to_rig` with a different
+    source_classifier."""
+    print(f"[retarget] reading bvh: {bvh_path}")
+    motion = _parse_bvh(bvh_path)
+    return retarget_motion_to_rig(
+        rig_glb_path=rig_glb_path,
+        motion=motion,
+        out_glb_path=out_glb_path,
+        clip_name=clip_name,
+        target_fps=target_fps,
+        ckpt_family=ckpt_family,
+        source_classifier=None,  # use default _classify_source_bone
+    )
+
+
+def retarget_fbx_to_rig(
+    rig_glb_path: str,
+    fbx_path: str,
+    out_glb_path: str,
+    source_skel_id: str = "ue5_mannequin",
+    target_family: str = "humanoid_puppeteer",
+    clip_name: str = "clip",
+    target_fps: float = 30.0,
+    ckpt_family: str = 'all',
+) -> dict:
+    """Retarget an FBX animation onto a Puppeteer GLB. Reuses
+    `retarget_motion_to_rig` so the BVH path and the FBX path share
+    100% of the heavy lifting (target classification, swing-twist
+    decomposition, glTF AnimationClip emission).
 
     Args:
-      rig_glb_path: input Puppeteer rig GLB (47-bone-ish).
-      bvh_path: AnyTop canonical BVH (variable bone count by class).
+      rig_glb_path: input Puppeteer rig GLB.
+      fbx_path: input reference animation (.fbx).
       out_glb_path: where to write the animated GLB.
-      clip_name: glTF AnimationClip name field.
-      target_fps: optional FPS resampling; pass 0 to skip.
-      ckpt_family: passed to the target classifier so it knows whether
-        to label upper laterals as 'wing' (flying) or 'arm'."""
+      source_skel_id: 'ue5_mannequin' | 'orc_m1' | 'auto'. 'auto' runs
+        the fingerprint inside parse_fbx.
+      target_family: 'humanoid_puppeteer' (V1) | 'winged_puppeteer'
+        (future) — passed to `load_mapping`.
+      clip_name, target_fps, ckpt_family: forwarded to
+        `retarget_motion_to_rig`.
+
+    Returns:
+      A dict with `mapped_pairs` (int), `detected_skeleton_id` (str),
+      `source_skel_id_used` (str) — surfaced to the caller / UI for
+      diagnostics.
+    """
+    # Lazy import — keeps the parent retarget module usable in Modal
+    # containers that don't ship the rig_mappings package.
+    from fbx_motion import parse_fbx  # type: ignore
+    from rig_mappings import load_mapping, make_classifier_chain  # type: ignore
+
+    print(f"[retarget_fbx] parsing FBX: {fbx_path} hint={source_skel_id}")
+    motion = parse_fbx(fbx_path, source_skel_hint=source_skel_id)
+    detected = motion.get("detected_skeleton_id")
+
+    # Resolve which mapping to use. 'auto' → fingerprint; else trust
+    # the caller. Fall back to UE5 mannequin on a miss so we never
+    # 500 — degraded retarget is better than failed retarget.
+    effective_skel = source_skel_id
+    if source_skel_id == "auto":
+        effective_skel = detected or "ue5_mannequin"
+    try:
+        mapping = load_mapping(effective_skel, target_family)
+    except KeyError:
+        print(f"[retarget_fbx] WARN no mapping for ({effective_skel},{target_family}); "
+              f"falling back to ue5_mannequin", flush=True)
+        effective_skel = "ue5_mannequin"
+        mapping = load_mapping(effective_skel, target_family)
+
+    # Apply the axis-convention rotation to OFFSETS and ROOT_POS so
+    # the retarget core's FK pass sees a pre-rotated Y-up rest pose.
+    # Per-bone PARENT-RELATIVE rotations are axis-system-invariant
+    # once the world rest is rotated consistently — leave the euler
+    # array alone.
+    if mapping.axis_source != mapping.axis_target:
+        try:
+            motion["offsets"] = mapping.axis_to_target(motion["offsets"])
+            motion["root_pos"] = mapping.axis_to_target(motion["root_pos"])
+            print(f"[retarget_fbx] axis rotation applied: "
+                  f"{mapping.axis_source} → {mapping.axis_target}", flush=True)
+        except Exception as e:
+            print(f"[retarget_fbx] WARN axis rotation failed: {e}", flush=True)
+
+    # Build the two-stage classifier: mapping first, _classify_source_bone fallback.
+    classifier = make_classifier_chain(mapping, _classify_source_bone)
+
+    retarget_motion_to_rig(
+        rig_glb_path=rig_glb_path,
+        motion=motion,
+        out_glb_path=out_glb_path,
+        clip_name=clip_name,
+        target_fps=target_fps,
+        ckpt_family=ckpt_family,
+        source_classifier=classifier,
+    )
+    return {
+        "detected_skeleton_id": detected,
+        "source_skel_id_used": effective_skel,
+        "target_family": target_family,
+        "n_frames": int(motion.get("n_frames", 0)),
+    }
+
+
+def retarget_motion_to_rig(
+    rig_glb_path: str,
+    motion: dict,
+    out_glb_path: str,
+    clip_name: str = "clip",
+    target_fps: float = 30.0,
+    ckpt_family: str = 'all',
+    source_classifier: Optional[Callable[[str], Tuple[str, Optional[str], int]]] = None,
+) -> None:
+    """Generic retarget core: take a parsed motion dict (BVH or FBX),
+    read the Puppeteer GLB, append an AnimationClip.
+
+    The motion dict must have these keys (matches `_parse_bvh`):
+      names, parents, offsets, channels, n_frames, frame_time,
+      euler, root_pos.
+
+    `source_classifier` is the function that takes a source bone name
+    and returns (role, side, chain_idx). If None, falls back to the
+    built-in `_classify_source_bone` (AnyTop canonical vocab).
+
+    The GLB's mesh, materials, skin, and bone hierarchy are kept
+    BYTE-IDENTICAL — we only append a new AnimationClip referencing
+    the existing nodes."""
+    # Two-stage classifier: caller-provided first, generic fallback
+    # second. Lets the FBX path use a JSON-driven mapping while
+    # unknown bones still benefit from the AnyTop generic regex.
+    _classify = source_classifier or _classify_source_bone
+
     print(f"[retarget] reading rig: {rig_glb_path}")
     gltf, _json_blob, bin_blob = _read_glb(rig_glb_path)
     skins = gltf.get("skins") or []
@@ -638,16 +760,20 @@ def retarget_bvh_to_rig(
         if jidx not in world_rot_by_idx:
             world_rot_by_idx[jidx] = np.eye(3)
 
-    print(f"[retarget] reading bvh: {bvh_path}")
-    bvh = _parse_bvh(bvh_path)
+    # `motion` is the parsed source (BVH or FBX). Same schema for both
+    # paths so the rest of this function is source-agnostic. `bvh` is
+    # kept as the local variable name for blame-friendly diffs.
+    bvh = motion
     n_frames = bvh["n_frames"]
     if n_frames <= 0:
-        raise RuntimeError("BVH has 0 frames")
+        raise RuntimeError("motion has 0 frames")
+    print(f"[retarget] motion: bones={len(bvh['names'])} frames={n_frames} "
+          f"frame_time={bvh.get('frame_time')}", flush=True)
 
     # Classify source + target.
     src_roles: Dict[int, Tuple[str, Optional[str], int]] = {}
     for sidx, sname in enumerate(bvh["names"]):
-        src_roles[sidx] = _classify_source_bone(sname)
+        src_roles[sidx] = _classify(sname)
 
     # ---- Renumber source bones per (role, side) by depth-from-root ----
     # The regex classifier has two known bugs that collapse multiple

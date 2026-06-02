@@ -1,0 +1,17 @@
+{
+  "_comment": "Apovivor ORC_M1 (CC4-style export with 117 bones) → Puppeteer humanoid. Inherits the explicit mapping from ue5_mannequin and adds drop_patterns for CC4 extras.",
+  "source_skeleton_id": "orc_m1",
+  "target_family": "humanoid_puppeteer",
+  "extends": "ue5_mannequin__humanoid_puppeteer",
+  "axis_convention": { "source": "z_up", "target": "y_up" },
+  "root_strategy": "pelvis_only",
+  "unit_scale": "auto_bbox",
+  "bones": [],
+  "drop_patterns": [
+    "^cc_base_pelvis$",
+    "^cc_base_ribstwist",
+    "^cc_base_l_breast",
+    "^cc_base_r_breast"
+  ],
+  "fingerprint_required_bones": ["pelvis", "spine_05", "upperarm_l", "cc_base_facialbone"]
+}
