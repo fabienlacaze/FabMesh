@@ -456,13 +456,21 @@ async function refreshProjectsPage() {
   // Dedupe per-project lists by their URL/path/filename so the same
   // file never appears twice in a strip. Belt-and-braces against the
   // multi-phase main-process enumeration.
+  // 2026-06-02: keyless items (computed key falsy because the record
+  // came back skeleton-shaped from the main-process enumerator before
+  // its url/path/filename was filled in) are PRESERVED, not dropped.
+  // The old `if (!k || seen.has(k)) continue;` silently hid mesh/rig
+  // records the user expected to see; now we only dedupe when we have
+  // a real key.
   function _dedupeBy(arr, keyFn) {
     const seen = new Set();
     const out = [];
     for (const x of (arr || [])) {
       const k = keyFn(x);
-      if (!k || seen.has(k)) continue;
-      seen.add(k);
+      if (k) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+      }
       out.push(x);
     }
     return out;
@@ -637,10 +645,15 @@ document.addEventListener('click', (e) => {
   if (btn && btn.dataset.view) _setHomeView(btn.dataset.view);
 });
 
+// 2026-06-02: delegate to _toFileUrl to fix encoding gap. Earlier the
+// home Images grid (renderAllImagesGrid -> _imgSrcHome) skipped
+// encodeURI, so projects with a space/'#'/'?' in their name rendered
+// broken <img>s on home but worked everywhere else (workspace lightbox,
+// etc. all routed through _toFileUrl). Also covers 'file:' pass-through
+// which the old regex was missing. Hoisting makes the forward reference
+// safe — both are top-level function declarations.
 function _imgSrcHome(path) {
-  if (!path) return '';
-  if (/^(?:https?|blob|data):/i.test(path)) return path;
-  return 'file:///' + String(path).replace(/\\/g, '/');
+  return _toFileUrl(path);
 }
 
 // Universal path-to-URL helper. Desktop renderer almost always receives
@@ -1601,9 +1614,11 @@ function resetWorkspaceUI() {
 
 function populateWorkspace(p) {
   // 2026-06-02 (mirror cloud c5866be): dispose any 3D viewer state held
-  // over from a PREVIOUS project before we touch state.currentProject or
-  // the DOM. Without this, slow rigSrc loads from project A can finish
-  // AFTER project B is up and pollute B's rig viewer with A's mesh —
+  // over from a PREVIOUS project before we re-render the DOM for the
+  // new project. NOTE: by the time we get here, openProject has ALREADY
+  // swapped state.currentProject = p (see openProject above). Without
+  // this dispose, slow rigSrc loads from project A can finish AFTER
+  // project B's DOM is up and pollute B's rig viewer with A's mesh —
   // user reports "I still see the dragon while I'm in the orc project".
   // resetWorkspaceUI below also clears these, but we run the dispose
   // FIRST so the rigSrcLoadId bump invalidates A's in-flight callbacks
@@ -10764,7 +10779,21 @@ if (!window.__fabmesh_ai3d_listener_installed && window.meshyAPI && window.meshy
 // can push/complete jobs in the same queue the rest of the app uses.
 // Because index2.js is an ES module, plain `function foo()` declarations
 // don't land on `window`; we wire them up explicitly below after definition.
-function pushJob(name, onCancel, params, expectedMsOverride, opts) {
+function pushJob(name, onCancel, params, expectedMsOverride, opts, _cloudOpts) {
+  // Cross-signature guard. Cloud's pushJob is
+  //   (name, onCancel, params, expectedMsOverride, startedAtOverride, opts)
+  // — a future cloud->desktop sync paste of a 6-arg call would land opts in
+  // _cloudOpts (slot 6) and a number (or undefined) in slot 5. Detect that
+  // shape and shift opts back into place so the projectName/sourceImageUrl
+  // snapshot still survives. Also handles the legacy case where opts was
+  // accidentally passed in the expectedMsOverride slot.
+  if (_cloudOpts && typeof _cloudOpts === 'object') {
+    opts = _cloudOpts;
+  } else if (opts === undefined && expectedMsOverride
+             && typeof expectedMsOverride === 'object') {
+    opts = expectedMsOverride;
+    expectedMsOverride = undefined;
+  }
   const id = ++state.jobIdCounter;
   const kind = inferKind(name);
   const expected = (typeof expectedMsOverride === 'number' && expectedMsOverride > 0)
@@ -10962,18 +10991,6 @@ function _toggleGeneratingStage(stepIdx, hasRunning) {
   // Liveliness: badge pulse + icon spin animate via CSS picking up
   // .has-running on the step card.
   card.classList.toggle('has-running', !!hasRunning);
-}
-
-// Pull the project name a job was launched on. We prefer the SNAPSHOT
-// stored on the job (params.Project or sourceProject), then fall back to
-// extracting "...: <name>" from the title, then to current project.
-function _jobProjectName(j) {
-  if (!j) return null;
-  if (j.params && j.params.Project) return j.params.Project;
-  if (j.sourceProject) return j.sourceProject;
-  const m = (j.name || '').match(/[:—–-]\s*([^:—–-]+)\s*$/);
-  if (m) return m[1].trim();
-  return null;
 }
 
 // Open the project (if different from current) and scroll/expand the

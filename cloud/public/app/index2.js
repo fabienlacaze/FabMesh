@@ -642,7 +642,7 @@ async function refreshProjectsPage() {
     const project = (m.projectName && String(m.projectName).trim())
                  || meshProject(m.filename);
     const p = ensure(project);
-    if (m.asset_type === 'animation' || /_anim_|_animation_|_fbxref_/i.test(m.filename)) {
+    if (m.asset_type === 'animation' || /_anim_|_animation_/i.test(m.filename)) {
       // Worker now returns anim_type + batch_id parsed from the
       // filename. Fall back to local parsing for legacy entries.
       let animType = (m.anim_type || '').toLowerCase();
@@ -14576,184 +14576,6 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
 });
 
 // ============================================================
-// FBX reference-animation pipeline (2026-06-02)
-// Upload an .fbx → /api/animations/upload (kind=reference_anim) →
-// /api/animate-from-reference → poll /api/animate-from-reference-status.
-// Result lands in the same animations strip as AnyTop output thanks
-// to the `_fbxref_` discriminator in the R2 key (see index2.js line
-// 645 isAnimation filter — patched in this commit).
-// ============================================================
-(function _wireFbxReferenceAnim() {
-  const pickBtn = document.getElementById('ws-anim-fbx-pick');
-  const fileInput = document.getElementById('ws-anim-fbx-file');
-  const nameEl = document.getElementById('ws-anim-fbx-name');
-  const goBtn = document.getElementById('ws-anim-fbx-go');
-  const hintSel = document.getElementById('ws-anim-fbx-hint');
-  if (!pickBtn || !fileInput || !goBtn) return;
-
-  let chosenFile = null;
-
-  pickBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (!/\.fbx$/i.test(f.name)) {
-      try { showToast('Pick a .fbx file', 'error'); } catch {}
-      fileInput.value = '';
-      return;
-    }
-    chosenFile = f;
-    if (nameEl) nameEl.textContent = `${f.name} (${(f.size / 1024).toFixed(0)} KB)`;
-    goBtn.disabled = false;
-  });
-
-  goBtn.addEventListener('click', async () => {
-    if (!chosenFile) { try { showToast('Pick an .fbx first', 'error'); } catch {} return; }
-    const p = (window.state && window.state.currentProject) || null;
-    if (!p) { try { showToast('Open a project first', 'error'); } catch {} return; }
-    if (!p.rigs || p.rigs.length === 0) {
-      try {
-        if (typeof customError === 'function') {
-          customError('You need a rigged mesh first. Generate a Rig in Step 3.', 'No rig available');
-        } else {
-          showToast('No rig available — generate a rig first', 'error');
-        }
-      } catch {}
-      return;
-    }
-    const sel = p.selectedRigUrl || p.selectedRigPath || '';
-    const rig = p.rigs.find(r => r.url === sel || r.path === sel) || p.rigs[0];
-    if (!rig?.url) {
-      try {
-        if (typeof customError === 'function') {
-          customError('No rig selected. Click "Use this rig for Animation" in Step 3 first.', 'No rig selected');
-        } else {
-          showToast('Select a rig first', 'error');
-        }
-      } catch {}
-      return;
-    }
-    const hint = (hintSel?.value || 'auto').trim();
-    const batchId = `fbx${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-
-    const job = (typeof pushJob === 'function')
-      ? pushJob(`Retarget FBX → ${p.name}`, null, {
-          File: chosenFile.name,
-          Size: `${(chosenFile.size / 1024).toFixed(0)} KB`,
-          Hint: hint,
-          'Source rig': (rig.filename || rig.url).split(/[/\\]/).pop(),
-        }, 180000)
-      : null;
-
-    try {
-      // ----- Step 1: upload the FBX to R2 -----
-      const form = new FormData();
-      form.append('file', chosenFile);
-      form.append('kind', 'reference_anim');
-      form.append('source_skeleton_id_hint', hint);
-      const upResp = await fetch('/api/animations/upload', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: form,
-      });
-      const upData = await upResp.json().catch(() => ({}));
-      if (!upResp.ok || !upData?.ok || !upData?.url) {
-        throw new Error(upData?.error || `upload HTTP ${upResp.status}`);
-      }
-      const refAnimUrl = upData.url;
-
-      // ----- Step 2: spawn the retarget job -----
-      const spawnResp = await fetch('/api/animate-from-reference', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          rig_url: rig.url,
-          ref_anim_url: refAnimUrl,
-          source_skeleton_id_hint: hint,
-          target_family: 'humanoid_puppeteer',
-          clip_name: 'fbxref',
-          projectName: p.name || null,
-          batch_id: batchId,
-        }),
-      });
-      const spawnData = await spawnResp.json().catch(() => ({}));
-      if (!spawnResp.ok || !spawnData?.success || !spawnData?.job_id) {
-        throw new Error(spawnData?.error || `animate-from-reference HTTP ${spawnResp.status}`);
-      }
-      if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
-      const jobId = String(spawnData.job_id);
-
-      // ----- Step 3: poll status -----
-      const POLL_INTERVAL_MS = 5000;
-      const MAX_POLLS = 180;
-      const t0 = Date.now();
-      let detected = null;
-      let resultUrl = null;
-      for (let i = 0; i < MAX_POLLS; i++) {
-        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-        let st;
-        try {
-          const r = await fetch(
-            `/api/animate-from-reference-status?job_id=${encodeURIComponent(jobId)}`,
-            { method: 'GET', credentials: 'same-origin' },
-          );
-          if (!r.ok) {
-            if (job && typeof renderJobs === 'function') {
-              const jj = state.jobs.find(x => x.id === job.id);
-              if (jj) { jj.subtitle = `polling ${i + 1}x — HTTP ${r.status}`; renderJobs(); }
-            }
-            continue;
-          }
-          st = await r.json();
-        } catch (e) { continue; }
-        if (st?.status === 'pending') {
-          if (job && typeof renderJobs === 'function') {
-            const jj = state.jobs.find(x => x.id === job.id);
-            if (jj) {
-              jj.subtitle = `${(Date.now() - t0) / 1000 | 0}s — ${st.stage || 'running'}`;
-              renderJobs();
-            }
-          }
-          continue;
-        }
-        if (st?.status === 'failed') {
-          throw new Error(st.error || 'retarget failed');
-        }
-        if (st?.status === 'done') {
-          resultUrl = st.anim_url || st.url || null;
-          detected = st.detected_skeleton_id || st.source_skel_id_used || null;
-          break;
-        }
-      }
-      if (!resultUrl) throw new Error('timed out waiting for retarget — refresh project to check');
-
-      if (job && typeof completeJob === 'function') completeJob(job.id, true);
-      try {
-        if (detected) showToast(`Detected: ${detected}`, 'success', 4000);
-        showToast('FBX retarget complete', 'success', 3000);
-      } catch {}
-
-      if (typeof reloadCurrentProject === 'function') {
-        await reloadCurrentProject();
-      }
-      // Reveal step 4 edit pane.
-      const animCard = document.getElementById('step-card-animation');
-      if (animCard) {
-        animCard.classList.remove('collapsed', 'disabled');
-        const editStage = animCard.querySelector('.stage-edit');
-        if (editStage) editStage.open = true;
-      }
-    } catch (err) {
-      const msg = err?.message || String(err);
-      if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
-      try { showToast(`FBX retarget failed: ${msg}`, 'error', 5000); } catch {}
-      console.error('[fbx-retarget]', err);
-    }
-  });
-})();
-
-// ============================================================
 // HELPER: reload current project from disk
 // ============================================================
 async function reloadCurrentProject() {
@@ -15149,12 +14971,16 @@ function _jobStepIndex(j) {
 }
 
 // Pull the project name a job was launched on. We prefer the SNAPSHOT
-// stored on the job (params.Project or sourceProject), then fall back to
-// extracting "...: <name>" from the title, then to current project.
+// stored on the job (params.Project, sourceProject, or projectName),
+// then fall back to extracting "...: <name>" from the title, then to
+// current project. The j.projectName fallback was added 2026-06-02 to
+// match desktop renderer, where pushJob writes that field directly;
+// harmless on cloud where sourceProject is the canonical field.
 function _jobProjectName(j) {
   if (!j) return null;
   if (j.params && j.params.Project) return j.params.Project;
   if (j.sourceProject) return j.sourceProject;
+  if (j.projectName) return j.projectName;
   const m = (j.name || '').match(/[:—–-]\s*([^:—–-]+)\s*$/);
   if (m) return m[1].trim();
   return null;
