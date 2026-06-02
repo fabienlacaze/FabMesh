@@ -1512,6 +1512,14 @@ document.getElementById('btn-import-image')?.addEventListener('click', async () 
 // PAGE 2: PROJECT WORKSPACE
 // ============================================================
 async function openProject(p) {
+  // 2026-06-02: dispose any 3D viewer state held over from the
+  // previous project BEFORE swapping state.currentProject. User
+  // reported "je vois toujours l'animation dragon alors que je
+  // suis dans le projet orc rose" — the anim mixer / model + rig
+  // source mesh from the previous project stayed in their THREE.js
+  // scenes because nothing cleared them on project switch.
+  try { if (typeof _disposeAnimModel === 'function') _disposeAnimModel(); } catch (_) {}
+  try { if (typeof showRigSourceMesh === 'function') await showRigSourceMesh(null); } catch (_) {}
   state.currentProject = p;
   showPage('workspace');
   populateWorkspace(p);
@@ -14767,9 +14775,14 @@ function completeJob(id, success, errorMessage) {
       });
     }
   } catch (_) { /* never block job completion on log flush */ }
-  // Failed jobs linger longer than successful ones so the user has time to
-  // open the details modal and read the error message.
-  const ttl = success ? 4000 : 30000;
+  // Done jobs linger so the user can SEE that they finished — both
+  // in the sidebar and in the per-step Create New widget. Failed
+  // jobs linger even longer so the user has time to open the
+  // details modal and read the error message.
+  // 2026-06-02: bumped success TTL from 4s → 8s after user reported
+  // the per-step "Animate run: dragon" bandeau disappearing too
+  // quickly. Matches the sidebar's perceived dwell time.
+  const ttl = success ? 8000 : 30000;
   setTimeout(() => {
     state.jobs = state.jobs.filter(x => x.id !== id);
     renderJobs();
