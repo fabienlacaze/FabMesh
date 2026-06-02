@@ -1323,8 +1323,13 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.3);
 }
-.versions-strip .version-thumb.used-for-3d::before {
-  content: "\2713";
+/* Green "used for next step" badge. Real DOM element rather than a
+   ::before pseudo so we can attach a `title` attribute and surface a
+   tooltip on hover (pseudo-elements can't carry HTML attributes).
+   Hidden by default; flips to flex when the parent .version-thumb
+   carries used-for-3d / used-for-rig / used-for-anim. */
+.versions-strip .version-thumb .v-used-badge {
+  display: none;
   position: absolute;
   top: 4px;
   left: 4px;
@@ -1335,12 +1340,20 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   font-size: 12px;
   font-weight: 700;
   border-radius: 50%;
-  display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2;
   box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  cursor: help;
 }
+.versions-strip .version-thumb.used-for-3d .v-used-badge,
+.versions-strip .version-thumb.used-for-rig .v-used-badge,
+.versions-strip .version-thumb.used-for-anim .v-used-badge {
+  display: flex;
+}
+/* Legacy ::before kept hidden as a no-op so older cached CSS doesn't
+   double the badge while the new selector ships. */
+.versions-strip .version-thumb.used-for-3d::before { content: none; }
 
 /* Step 2: source-image overlay shown after "Use for 3D" (before a mesh exists) */
 .step2-source-overlay {
