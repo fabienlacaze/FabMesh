@@ -2398,7 +2398,33 @@ details.stage-generating > summary .stage-icon {
       briefly and a confetti-ish radial glow plays underneath.
    All CSS-only, no JS frame loop. */
 
-/* 1. badge pulse while a step has a running job */
+/* Always-on subtle breathe so the badge feels alive even when idle.
+   Slow + low-amplitude — doesn't distract but signals interactivity. */
+.step-badge {
+  animation: badgeBreathe 3.2s ease-in-out infinite;
+  position: relative;
+}
+.step-badge::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.55) 0%, transparent 45%);
+  opacity: 0;
+  animation: badgeShine 4s ease-in-out infinite;
+}
+@keyframes badgeBreathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50%      { transform: scale(1.04); filter: brightness(1.18); }
+}
+@keyframes badgeShine {
+  0%, 60%, 100% { opacity: 0; transform: rotate(0deg); }
+  20%, 40%      { opacity: 0.45; transform: rotate(20deg); }
+}
+
+/* 1. badge pulse while a step has a running job — overrides the
+      breathe with a stronger glow loop. */
 .step-card.has-running .step-badge {
   animation: badgePulse 1.6s ease-in-out infinite;
 }

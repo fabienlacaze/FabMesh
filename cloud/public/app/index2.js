@@ -14783,29 +14783,12 @@ function pushJob(name, onCancel, params, expectedMsOverride, startedAtOverride, 
       expected = JOB_EXPECTED_MS[kind] || 60000;
     }
   }
-  // Cold-start toast: container-specific via the helper so we never
-  // misfire for jobs whose container is actually warm.
-  try {
-    const c = typeof window.__modalContainerForKind === 'function'
-      ? window.__modalContainerForKind(kind) : null;
-    if (c && c.warm === false && typeof showToast === 'function') {
-      const ckey = kind;
-      const last = window.__lastColdStartToast?.[ckey] || 0;
-      if (Date.now() - last > 90_000) {
-        window.__lastColdStartToast = window.__lastColdStartToast || {};
-        window.__lastColdStartToast[ckey] = Date.now();
-        const eta = Math.round((c.expected_seconds_cold || 150) / 60 * 10) / 10;
-        const label = { image: 'Image gen', mesh: '3D mesh', modify: 'Image edit',
-                        inpaint: 'Image edit', facefix: 'Image edit',
-                        upscale: 'Image edit', removebg: 'Image edit',
-                        view: 'Back-view', rectify: 'T-pose' }[kind] || kind;
-        showToast(
-          `${label} container is cold (~${eta} min). Your job is queued and will start as soon as it warms up.`,
-          'info', 7000,
-        );
-      }
-    }
-  } catch (_) {}
+  // 2026-06-02: cold-start toast suppressed per user request — the
+  // floating "Image gen container is cold..." popup was redundant
+  // with the "Warming up cloud AI" hint inside the Running task
+  // modal. The popup now lives ONLY inside the modal (jd-hint-coldstart)
+  // for users who explicitly open the task to check progress.
+  // Original toast kept for reference: see git blame.
   // startedAt can be overridden when resuming a job that began before a
   // page reload — lets the popup show ELAPSED measured from the real
   // start instead of "0s" right after refresh.
