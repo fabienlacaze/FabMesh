@@ -2336,6 +2336,13 @@ button.tool-active {
   line-height: 1;
 }
 .step-progress-cancel-btn:hover { color: var(--error); }
+/* Status-driven colours — mirrors .job-item-2.done/.error in the
+   sidebar so the per-step tile carries the same success/fail signal
+   (user request 2026-06-02: "vert si succeed, rouge if failed"). */
+.step-progress-item.done .step-progress-item-bar-fill { background: var(--success); }
+.step-progress-item.done .step-progress-item-pct { color: var(--success); }
+.step-progress-item.error .step-progress-item-bar-fill { background: var(--error); }
+.step-progress-item.error .step-progress-item-pct { color: var(--error); }
 .job-goto-btn {
   background: transparent;
   border: 1px solid var(--border);
