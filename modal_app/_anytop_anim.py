@@ -1356,7 +1356,12 @@ def main(action: str = "inspect", class_name: str = "Dragon",
 @app.function(
     image=image,
     cpu=1,
-    timeout=120,
+    # Was 120s — bumped to 300s after 2026-06-02 prod incident where
+    # anim-start failed with "Modal animation backend unreachable:
+    # The operation was aborted due to timeout" when the rig fetch
+    # from R2 + animate_mesh.spawn() chain hit the 120s ceiling on
+    # a cold container restart after a fresh deploy.
+    timeout=300,
     volumes={"/anim_data": anim_output_volume},
     secrets=[modal.Secret.from_name("myfabmesh-shared", required_keys=["SHARED_SECRET"])],
 )
@@ -1421,7 +1426,11 @@ def anim_router():
         if not in_bytes or in_bytes[:4] != b"glTF":
             raise HTTPException(status_code=400, detail="rig_url did not return a GLB")
         job_id = (payload.get("job_id") or "").strip() or uuid.uuid4().hex
-        call = animate_mesh.spawn(in_bytes, anim_type, prompt, job_id=job_id)
+        # 2026-06-02: use the .spawn.aio() async variant so the FastAPI
+        # event loop isn't blocked while Modal enqueues the call. The
+        # sync version was emitting "blocking Modal interface used in
+        # async context" warnings and contributed to the 120s timeout.
+        call = await animate_mesh.spawn.aio(in_bytes, anim_type, prompt, job_id=job_id)
         try:
             with open(f"/anim_data/{job_id}.call_id", "w") as f:
                 f.write(call.object_id)
