@@ -181,6 +181,11 @@ def _parse_bvh(bvh_path: str) -> dict:
             order_str = ''
         channels.append(order_str if order_str else 'ZXY')
 
+    # tally channel orders across all joints
+    from collections import Counter
+    orders_seen = Counter(channels)
+    print(f"[_parse_bvh] orders_seen={dict(orders_seen)} total_joints={len(all_joints)}", flush=True)
+
     n_frames = int(bvh.frames)
     frame_time = float(bvh.frametime)
     eul = np.zeros((n_frames, n, 3), dtype=np.float64)
@@ -231,6 +236,8 @@ def _eulers_to_quats(euler_deg: np.ndarray, channel_order) -> np.ndarray:
                 order += 'z'
     if len(order) != 3 or set(order) != set('xyz'):
         order = 'zxy'  # bvhsdk default
+    n = euler_deg.shape[0]
+    print(f"[_eulers_to_quats] channel_order={channel_order} n_joints={n} (ZYX fix v2)", flush=True)
     # scipy expects angles[:, i] to correspond to a rotation about order[i].
     # Our columns are fixed [X,Y,Z] (bvh.py:261), so permute to match `order`.
     col_of = {'x': 0, 'y': 1, 'z': 2}

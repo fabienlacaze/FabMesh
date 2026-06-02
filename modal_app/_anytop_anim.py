@@ -742,6 +742,8 @@ def animate_mesh(
     Writes /anim_data/<job_id>.glb on success, /anim_data/<job_id>.err
     on failure. Returns the number of bytes written.
     """
+    import os
+    print(f"[anytop_entry] ANYTOP_COMMIT={os.environ.get('ANYTOP_COMMIT','UNSET')} retarget_version=v2-zyx+bindpose", flush=True)
     if not job_id:
         job_id = uuid.uuid4().hex
     out_path = f"/anim_data/{job_id}.glb"

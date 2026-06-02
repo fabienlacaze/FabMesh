@@ -1,5 +1,11 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (instrument — runtime markers for ZYX + ANYTOP_COMMIT + channel_order)
+
+instrument(anytop): runtime markers (ANYTOP_COMMIT echo, ZYX branch log,
+channel_order tally) to verify the v38 fixes actually exercise on cloud
+dragon jobs
+
 ## 2026-06-02 (anytop-retarget — ZYX channel-order fix — Stage-3 audit w8nuzxpih)
 
 **Pourquoi** : `_eulers_to_quats` dans `scripts/anytop_retarget.py` recevait
@@ -213,33 +219,46 @@ le mauvais problème.
   translation, family classifier quadropeds, charmap encoding) — sera
   committé séparément quand il termine.
 
-## 2026-06-02 (AnyTop dragon unblock — root cause + 5 fixes + paper-anchored audit)
+## 2026-06-02 (AnyTop dragon unblock — 6 commits, root cause = ZYX channel swap)
 
-**Trigger**: user reported "AnyTop fait n'importe quoi en boucle" on a Puppeteer-rigged dragon job. Three months of basis-change / clamp / swing-twist patches had not improved the visible output.
+**Trigger**: user reported "AnyTop fait n'importe quoi en boucle" on Puppeteer-rigged dragon. Months of basis-change / clamp / swing-twist patches had not improved output.
 
-**Root cause** (workflow wmuo726kk, empirically validated on the actual broken job c46ed091):
-1. anytop_retarget.py emitted ABSOLUTE root translation instead of bind-anchored delta → hip teleports +49 cm vertically at frame 0
-2. 6 of 47 skin-weighted target joints had NO rotation track → LBS rips mesh apart (animated parent × frozen child)
-3. cloud viewer was rendering procedural Idle clip [0] instead of the AnyTop output clip — every "AnyTop is broken" judgment for weeks was actually about a separate procedural bug
+**Three root causes** (all in our retargeter, none in AnyTop generation):
+1. **Cloud viewer played procedural Idle clip instead of AnyTop output** — judgments for weeks were misleading (workflow w7c0wn4tm + commit 7a7663c)
+2. **scripts/anytop_retarget.py emitted absolute root translation + 6 of 47 skin joints had no rotation track** — hip teleported +49 cm at frame 0, LBS ripped mesh apart (workflow wmuo726kk diagnostic + commit 4629d3b)
+3. **_eulers_to_quats silently swapped X and Z axes on ZYX-declared BVH joints** — bvhsdk returns [X,Y,Z] columns but scipy was being told ZYX. THIS WAS THE MAJOR BUG: 71° mean per-frame delta, 175° max, 87% of joints affected (workflow w8nuzxpih audit + w74g6bqmg empirical + commit 94c66b2)
 
-**Paper / repo audit** (workflows wfa5a7aa5 + wpzod1fht + w10o5iuc0 + wii1edjsz):
-- AnyTop is graph-conditioned single model, NOT per-class checkpoints — cc4b957 'force flying' is on false premise but harmless
-- Trained on Truebones Zoo ($99 Gumroad, royalty-free for animated movie productions) — MIT code, safe-with-conditions for commercial ship
-- Issue #32 confirms BVH writer drops End Site / leaf-joint motion — wings/tail/claws frozen by design
-- utils.process_new_skeleton offers a Mode 4 pivot (28h, 50% likely comparable to fixed Mode 3) — kept in backlog
+**Empirical validation chain**:
+- wmuo726kk dissected the broken job c46ed091 GLB — found bind-pose offset + 6 muted joints
+- wr0qblb4y rendered the raw BVH on its native 142-bone skeleton — confirmed AnyTop generation is clean (74° mean std, 0 frozen, 0 tumbling, plausible landing-dragon trajectory)
+- w1rptewtl re-ran the dragon retarget locally with the bind-pose fixes — channels 42→48, frame-0 anchored correctly
+- w8nuzxpih audited the ZYX channel handling — found _eulers_to_quats was structurally wrong
+- w74g6bqmg applied the ZYX patch and measured the quaternion delta vs bind-only fix: mean 71°, max 175°, 41/47 joints diverging — proved the ZYX issue was the structural bug
+- Visual validation at http://localhost:8765/compare.html — user judges visually
 
-**Fixes adopted** (5 commits today):
-- 7a7663c — cloud viewer picks last non-procedural clip
-- 83d9730 — Stage-1 (charmap + family classifier + initial root translation)
-- 482bf10 — FBX role-classifier (drops false-tail misclassification on humanoid rigs)
-- 4629d3b — Bind-pose retargeter fixes (root translation anchored, rest-quat tracks for unmatched joints)
-- 6bb442f — Modal hygiene (Issue #32 BVH leaf patch, --seed, --output_dir, pinned ANYTOP_COMMIT SHA, MIT header)
+**Paper + repo audit** (workflows wfa5a7aa5 + wpzod1fht + w10o5iuc0 + wii1edjsz):
+- AnyTop is graph-conditioned single model on 4-tuple skeleton input — NOT per-class checkpoints
+- Trained on Truebones Zoo ($99 Gumroad royalty-free, MIT code) — safe-with-conditions for commercial ship
+- Issue #32 BVH writer drops End Site motion (fixed via Stage-2 patch_bvh_leaves)
+- utils.process_new_skeleton offers a Mode 4 pivot path (28h sprint, kept in backlog as v2 option)
 
-**Validation**: workflow w1rptewtl re-ran retarget_bvh_to_rig locally on the actual broken job's BVH + rig. Channels went 42→48, frame-0 hip translation moved from (0,0.764,0) to (-0.009,0.273,0.229) = bind exact, zero traceback. Visual BEFORE/AFTER viewer staged at c:/tmp/viewer/compare.html.
+**Six commits delivered**:
+- 7a7663c cloud-anim-viewer: pick AnyTop output clip, not procedural Idle
+- 83d9730 anytop Stage-1: charmap + family classifier + initial root translation track
+- 482bf10 retarget-fbx: role-classifier drops false-tail misclassification
+- 4629d3b anytop-retarget: bind-pose anchor + rest-quat tracks for unmatched joints
+- 6bb442f anytop-modal: Issue #32 BVH leaf patch + --seed + --output_dir + pinned SHA + MIT header
+- 94c66b2 anytop-retarget: ZYX channel order — _eulers_to_quats permutes XYZ columns per scipy intrinsic sequence (THE big one)
 
-**Next**: deploy Modal (workflow wxrf56ogy in progress, image rebuild ~5-10 min), user re-tests AnyTop dragon job from cloud UI.
+**Modal**: deployed twice (after 6bb442f, after 94c66b2). Final endpoint https://fabienlacaze--myfabmesh-anim-anim-router.modal.run alive, ANYTOP_COMMIT=e780d15 pinned, 0 traceback.
 
-**If insufficient**: Mode 4 pivot via process_new_skeleton, 28h sprint (wpu63xcbx PoC ready). Or SinMDM fallback (sigal-raab's own suggestion in Issue #24).
+**Validation harness**: c:/tmp/viewer/compare.html (BEFORE original broken vs AFTER fully fixed), c:/tmp/anytop_validate.ps1 (one-command cloud retest).
+
+**Next session priorities**:
+- User visual confirmation in compare.html and cloud UI
+- Push commits (`git push` — not done yet, awaiting user)
+- If commercial dragon quality not good enough: Mode 4 pivot (28h, wpu63xcbx PoC ready)
+- Purchase $99 Truebones Zoo license + read EULA for the ML-derivative clause before any commercial cut
 
 ## 2026-06-02 (FBX reference-animation pipeline — Apovivor → Puppeteer)
 
