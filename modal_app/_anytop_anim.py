@@ -23,6 +23,7 @@ work inside `animate_mesh()` differs.
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -111,6 +112,10 @@ image = (
     .add_local_file(
         "scripts/puppeteer_to_skeleton.py",
         remote_path="/tmp/puppeteer_to_skeleton.py",
+    )
+    .add_local_file(
+        "scripts/anytop_retarget.py",
+        remote_path="/tmp/anytop_retarget.py",
     )
 )
 
@@ -650,17 +655,13 @@ def animate_mesh(
         with open(rig_path, "wb") as f:
             f.write(rig_glb_bytes)
 
-        # ── Step 0: predict ckpt_family up-front so anatomical naming
-        # gets the right `wing` vs `arm` labeling (audit acc4f279 #1).
-        # Re-applies the same logic Step 3 + 3.0 use later.
-        # 2026-06-02 fix: prod log showed `ckpt_family=bipeds` on a dragon
-        # because prompt='' and anim_type='run' don't match winged keywords.
-        # The client doesn't propagate asset_family. Solution: SKELETON
-        # TOPOLOGY override — inspect the rigged GLB and detect wings/legs
-        # ourselves before any text-based heuristic. Topology beats prompt.
-        _pre_ckpt = _pick_checkpoint(anim_type)
-        # Quick topology probe — re-uses the parsing logic of
-        # _extract_bvh_from_glb without writing a file.
+        # ── Step 0: topology probe — used as ckpt_family fallback ──
+        # We still classify the rig (winged / quadruped / biped) but
+        # ONLY as a fallback for class selection when the prompt
+        # doesn't mention an explicit species. Class selection runs
+        # against the BUNDLED cond.npy keyword table — see
+        # _pick_trained_class().
+        _topo_family = 'all'
         try:
             sys.path.insert(0, "/tmp")
             from puppeteer_to_skeleton import _read_glb, _read_accessor  # type: ignore
@@ -689,170 +690,62 @@ def animate_mesh(
                 if _ji not in _world_topo:
                     _tr = _nodes_topo[_ji].get("translation") or [0.0, 0.0, 0.0]
                     _world_topo[_ji] = _np_topo.asarray(_tr, dtype=_np_topo.float32)
-            _topo_ckpt = _detect_topology_family(_ji_topo, _parent_topo, _world_topo)
-            if _topo_ckpt != 'all':
-                _log(f"step 0: topology detected {_topo_ckpt} (overrides text heuristic)")
-                _pre_ckpt = _topo_ckpt
+            _topo_family = _detect_topology_family(_ji_topo, _parent_topo, _world_topo)
         except Exception as _e:
-            _log(f"step 0: topology detection failed ({_e!r}), falling back to text heuristic")
-        # Text-based override only fires when topology was inconclusive.
-        if _pre_ckpt == 'all':
-            _winged_kw = ('dragon', 'wing', 'wyvern', 'bat', 'pterodactyl',
-                          'eagle', 'phoenix', 'griffin', 'pegasus', 'fly')
-            _pl = (str(prompt) if prompt else '').lower()
-            _al = (str(anim_type) if anim_type else '').lower()
-            if any(k in _pl or k in _al for k in _winged_kw):
-                _pre_ckpt = 'flying'
-            else:
-                _pre_ckpt = _pick_checkpoint(anim_type)
-        _log(f"step 0: final ckpt_family={_pre_ckpt} (used for anatomical naming)")
+            _log(f"step 0: topology probe failed ({_e!r})")
+        _log(f"step 0: topology_family={_topo_family} (used as class-selection fallback)")
 
-        # ── Step 1: extract BVH skeleton from the GLB ─────────────
-        # Two BVH files with DIFFERENT names. Both 30 frames so
-        # AnyTop's tpos_first_frame indexing doesn't crash. CRITICAL:
-        # motion_bvh gets perturb=True so AnyTop's diffusion sampler
-        # sees non-zero Mean/Std and outputs a real animation. Without
-        # this the sampler degenerates to identity rotations and the
-        # mesh stays frozen on its rest pose.
-        _log("step 1: extracting BVH skeleton (tpos clean + idle perturbed)")
-        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=30, perturb=False, ckpt_family=_pre_ckpt)
-        _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30, perturb=True, ckpt_family=_pre_ckpt)
-
-        # ── Step 2: preprocess for AnyTop (process_new_skeleton) ──
-        # process_new_skeleton needs face_joints_names. We pick from
-        # the actual BVH joint names so the heuristic never returns a
-        # label that doesn't exist.
-        face_joints = _guess_face_joints(motion_bvh)
-        skel_name = f"job_{job_id[:8]}"
-        ds_dir = os.path.join(ANYTOP_DIR, "dataset", "truebones", "zoo", skel_name)
-        os.makedirs(ds_dir, exist_ok=True)
-        cmd = [
-            sys.executable, "-m", "utils.process_new_skeleton",
-            "--object_name", skel_name,
-            "--bvh_dir", work_dir,
-            "--save_dir", ds_dir,
-            "--face_joints_names", *face_joints,
-            "--tpos_bvh", tpos_bvh,
-        ]
-        _log(f"step 2: {' '.join(cmd)}")
-        rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
-        if rc != 0:
-            raise RuntimeError(f"process_new_skeleton exit {rc}")
-
-        # ── Step 3: pick a checkpoint based on anim_type ──────────
-        # 2026-06-02 fix: prefer Step 0's topology-derived family over
-        # the anim_type text heuristic. The topology probe knows the
-        # rig's real morphology (dragon has wings) while anim_type='run'
-        # would route to bipeds/Ostrich on the same dragon — exactly the
-        # bug observed in prod (logs 2026-06-02).
-        ckpt_name = _pre_ckpt if _pre_ckpt and _pre_ckpt != 'all' else _pick_checkpoint(anim_type)
-        ckpt = _resolve_checkpoint_path(ckpt_name)
+        # ── Step 1 (Strategy 1, 2026-06-02): pick the BUNDLED trained
+        # class whose topology+motion best matches the user's intent,
+        # then run sample.generate on AnyTop's NATIVE cond.npy. No
+        # more rig-to-AnyTop translation — Puppeteer's 47-bone output
+        # never reaches the sampler. The bundled cond.npy at
+        #   /AnyTop/dataset/truebones/zoo/truebones_processed/cond.npy
+        # contains ALL 75+ trained classes as dict keys, each with
+        # the structural data (parents, offsets, mean, std, ...) the
+        # learned class embedding was conditioned on.
+        target_class, ckpt_family = _pick_trained_class(
+            prompt=prompt, anim_type=anim_type, asset_family='',
+            topology_family=_topo_family,
+        )
+        ckpt = _resolve_checkpoint_path(ckpt_family)
         if not ckpt:
-            raise RuntimeError(f"checkpoint not found: {ckpt_name}")
+            raise RuntimeError(f"checkpoint not found for family {ckpt_family}")
+        bundled_cond = os.path.join(
+            ANYTOP_DIR, "dataset", "truebones", "zoo",
+            "truebones_processed", "cond.npy",
+        )
+        if not os.path.isfile(bundled_cond):
+            raise RuntimeError(
+                f"bundled cond.npy not found at {bundled_cond} — "
+                "container build didn't ship AnyTop's processed dataset")
+        _log(f"step 1: target_class={target_class!r} ckpt_family={ckpt_family} "
+             f"ckpt={os.path.basename(ckpt)}")
 
-        # ── Step 3.0: route winged creatures to the FLYING ckpt ───
-        # 2026-06-01 fix #2 for Mode 3 (verified via workflow audit
-        # wtdvocwde): _pick_checkpoint('run') hits the bipeds branch
-        # before flying, so for a dragon doing 'run' we'd load the
-        # Ostrich (flightless biped) class embedding on a 47-bone
-        # winged skeleton → topologically meaningless prior → near-
-        # identity motion regardless of anim_type. Workflow evidence:
-        # frame quaternions are BIT-IDENTICAL across pre-fix and
-        # post-fix runs that used Ostrich (lines 1520 == 2402 in the
-        # Modal logs). Override: if the caller hint or the prompt
-        # mentions winged creatures, force flying+Dragon — that's the
-        # actual trained class whose topology matches our rig.
-        _winged_kw = ('dragon', 'wing', 'wyvern', 'bat', 'pterodactyl',
-                      'eagle', 'phoenix', 'griffin', 'pegasus', 'fly')
-        _prompt_low = (str(prompt) if prompt else '').lower()
-        _anim_low = (str(anim_type) if anim_type else '').lower()
-        winged = any(k in _prompt_low or k in _anim_low for k in _winged_kw)
-        if winged and ckpt_name != 'flying':
-            new_ckpt = _resolve_checkpoint_path('flying')
-            if new_ckpt:
-                _log(f"step 3.0: winged creature detected (prompt/anim_type "
-                     f"matches winged keyword) — overriding ckpt {ckpt_name} -> flying "
-                     f"so Dragon class embedding can be loaded")
-                ckpt_name = 'flying'
-                ckpt = new_ckpt
-            else:
-                _log(f"step 3.0: winged detected but flying ckpt not found — keeping {ckpt_name}")
-
-        # ── Step 3.5: alias our skel_name into a TRAINED class. ───
-        # See workflow wtdvocwde verdict: alias landing alone is NOT
-        # enough if the chosen target_class is topologically wrong.
-        # With step 3.0 above, ckpt_name is now 'flying' for dragons,
-        # so _pick_object_type returns 'Dragon' (winged biped). The
-        # alias finally writes cond['Dragon'] = cond[skel_name] and
-        # --object_type=Dragon will use the actual learned embedding.
-        target_class = _pick_object_type(ckpt_name)
-        try:
-            import numpy as _np
-            _cond_path = os.path.join(ds_dir, "cond.npy")
-            _cond_raw = _np.load(_cond_path, allow_pickle=True)
-            # Robust unwrap: cond.npy can be a 0-d object array (.item())
-            # OR a plain dict, depending on how process_new_skeleton wrote
-            # it. Defend against both.
-            if hasattr(_cond_raw, 'item') and getattr(_cond_raw, 'ndim', 1) == 0:
-                _cond = _cond_raw.item()
-            else:
-                _cond = _cond_raw
-            if not isinstance(_cond, dict):
-                raise TypeError(
-                    f"cond.npy unwrapped to {type(_cond).__name__}, expected dict"
-                )
-            # Fix #3 (audit): ALWAYS overwrite. The previous guard
-            # `target_class not in _cond` left stale Dragon entries
-            # from prior runs in warm containers, masking the alias.
-            if skel_name in _cond:
-                _cond[target_class] = _cond[skel_name]
-                _np.save(_cond_path, _cond, allow_pickle=True)
-                _jn = _cond[target_class].get('joints_names', None) if hasattr(_cond[target_class], 'get') else None
-                _jn_preview = list(_jn[:8]) if _jn is not None else 'missing'
-                _log(f"step 3.5: aliased cond.npy {skel_name!r} -> {target_class!r} "
-                     f"(ckpt={ckpt_name}, cond.keys()={list(_cond.keys())[:8]}, "
-                     f"joints_names[:8]={_jn_preview})")
-            else:
-                _log(f"step 3.5: cond.npy alias skipped "
-                     f"(skel_in_cond=False, cond.keys()={list(_cond.keys())[:8]})")
-        except Exception as _e:
-            _log(f"step 3.5: cond.npy alias FAILED: {_e!r}, falling back to skel_name")
-            target_class = skel_name  # legacy behaviour as fallback
-
-        # ── Step 4: sample.generate ───────────────────────────────
-        # Pass the TRAINED class as --object_type so the sampler uses
-        # the matching learned embedding. cond_dict[target_class]['parents']
-        # was just copied from skel_name so the skeleton lookup still
-        # succeeds with our actual bone hierarchy.
+        # ── Step 2: sample.generate on the BUNDLED class. AnyTop
+        # writes <class>_rep_*.bvh + .npy under samples_*/ alongside
+        # the checkpoint.
         cmd = [
             sys.executable, "-m", "sample.generate",
             "--model_path", ckpt,
             "--object_type", target_class,
-            "--cond_path", os.path.join(ds_dir, "cond.npy"),
+            "--cond_path", bundled_cond,
             "--num_repetitions", "1",
             "--motion_length", "5.0",
             "--device", "0",
         ]
-        _log(f"step 4: {' '.join(cmd)}")
+        _log(f"step 2: {' '.join(cmd)}")
         rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
         if rc != 0:
             raise RuntimeError(f"sample.generate exit {rc}")
-        # AnyTop writes outputs under save/<ckpt_dir>/samples_*/<...>.bvh
         gen_bvh = _find_latest_bvh(ckpt)
         if not gen_bvh or not os.path.isfile(gen_bvh):
             raise RuntimeError("sample.generate produced no BVH")
         os.replace(gen_bvh, bvh_anim)
-        _log(f"step 4 done: bvh={bvh_anim} ({os.path.getsize(bvh_anim)} bytes)")
+        _log(f"step 2 done: bvh={bvh_anim} ({os.path.getsize(bvh_anim)} bytes)")
 
-        # ── Step 4.5: probe the raw .npy motion magnitude ─────────
-        # Workflow audit pinpointed: bit-identical quaternions across
-        # runs is the smoking gun that conditioning is a no-op. We need
-        # raw motion stats BEFORE BVH→GLB conversion to localise whether
-        # the model is producing real motion or near-identity output.
-        # If global_std < 1e-3 AND per_joint_std_mean < 1e-3 across all
-        # bones → model is emitting identity (conditioning ignored or
-        # class embedding still meaningless). If global_std is healthy
-        # → motion exists; loss is in the BVH/GLB writer.
+        # ── Step 2.5: probe the raw .npy motion magnitude — sanity
+        # check that AnyTop's native run actually produced real motion.
         try:
             import glob as _glob
             import numpy as _np
@@ -862,42 +755,37 @@ def animate_mesh(
                 cand.sort(key=lambda p: os.path.getmtime(p), reverse=True)
                 _npy = cand[0]
                 _arr = _np.load(_npy, allow_pickle=True)
-                _shape = getattr(_arr, 'shape', None)
-                _dtype = getattr(_arr, 'dtype', None)
                 if isinstance(_arr, _np.ndarray) and _arr.dtype != object and _arr.size > 1:
                     _gstd = float(_arr.std())
-                    # Per-joint mean std: collapse all-but-the-last axis
-                    if _arr.ndim >= 2:
-                        _per = float(_arr.std(axis=tuple(range(_arr.ndim - 1))).mean())
-                    else:
-                        _per = _gstd
-                    _l2 = float(_np.linalg.norm(_arr[0] - _arr[-1])) if _arr.shape[0] > 1 else 0.0
-                    _log(f"step 4.5 probe: file={os.path.basename(_npy)} "
-                         f"shape={_shape} dtype={_dtype} "
-                         f"global_std={_gstd:.6f} per_joint_std_mean={_per:.6f} "
-                         f"first_vs_last_l2={_l2:.6f} "
-                         f"DIAGNOSIS={'near-identity (conditioning failed)' if _gstd < 1e-3 else 'has motion'}")
-                else:
-                    _log(f"step 4.5 probe: file={os.path.basename(_npy)} "
-                         f"unexpected shape={_shape} dtype={_dtype} type={type(_arr).__name__}")
-            else:
-                _log(f"step 4.5 probe: no .npy candidates under {ckpt_dir}/samples_*/{target_class}_rep_*.npy")
+                    _per = (float(_arr.std(axis=tuple(range(_arr.ndim - 1))).mean())
+                            if _arr.ndim >= 2 else _gstd)
+                    _l2 = (float(_np.linalg.norm(_arr[0] - _arr[-1]))
+                           if _arr.shape[0] > 1 else 0.0)
+                    _log(f"step 2.5 probe: shape={_arr.shape} "
+                         f"global_std={_gstd:.4f} per_joint_std_mean={_per:.4f} "
+                         f"first_vs_last_l2={_l2:.4f} "
+                         f"DIAGNOSIS={'near-identity' if _gstd < 1e-3 else 'has motion'}")
         except Exception as _e:
-            _log(f"step 4.5 probe FAILED: {_e!r}")
+            _log(f"step 2.5 probe FAILED: {_e!r}")
 
-        # ── Step 5: BVH → glTF animation tracks injected in rig ───
-        # FORCE fresh import: Modal warm containers cache the module in
-        # sys.modules; new file content from add_local_file is on disk
-        # but the cached module isn't reloaded. Drop it from sys.modules
-        # before the import so the latest bvh_to_gltf_anim.py is read.
-        if 'bvh_to_gltf_anim' in sys.modules:
-            del sys.modules['bvh_to_gltf_anim']
-        from bvh_to_gltf_anim import bvh_to_gltf_anim  # type: ignore
-        _log("step 5: embedding BVH as glTF tracks on the rig GLB")
-        bvh_to_gltf_anim(
-            rig_path, bvh_anim, out_path,
+        # ── Step 3: retarget BVH → user's Puppeteer rig. Source has
+        # ~30-142 bones (depends on class); target has whatever
+        # Puppeteer produced. The retargeter classifies bones on both
+        # sides by anatomical role, matches by (role, side, chain
+        # index), and copies parent-relative quaternions frame-by-
+        # frame. Puppeteer rig stays byte-identical except for the
+        # added AnimationClip.
+        if 'anytop_retarget' in sys.modules:
+            del sys.modules['anytop_retarget']
+        from anytop_retarget import retarget_bvh_to_rig  # type: ignore
+        _log("step 3: retargeting BVH → Puppeteer rig")
+        retarget_bvh_to_rig(
+            rig_glb_path=rig_path,
+            bvh_path=bvh_anim,
+            out_glb_path=out_path,
             clip_name=anim_type or "clip",
             target_fps=30.0,
+            ckpt_family=ckpt_family,
         )
         sz = os.path.getsize(out_path)
         _log(f"DONE dt={time.time()-t0:.1f}s out_bytes={sz}")
@@ -973,6 +861,101 @@ def _pick_object_type(ckpt_family: str) -> str:
     """Pick the --object_type class string the AnyTop checkpoint was
     actually trained on. Falls back to Flamingo (AnyTop default)."""
     return _OBJECT_TYPE_BY_FAMILY.get(ckpt_family, "Flamingo")
+
+
+# Strategy 1 (Mixamo-style retargeting) — pick the BUNDLED trained
+# class whose topology best matches the user's mesh. Keyword-driven
+# but easy to extend; the topology detection from the Puppeteer rig
+# is used as a fallback when nothing in the prompt / anim_type / job
+# context is decisive. See [[project_anytop_strategy]].
+_TRAINED_CLASS_BY_KEYWORD = [
+    # (keyword regex, trained class, ckpt family for sample.generate)
+    (r'\bdragon\b|\bwyvern\b|\bicy\s*dragon\b',           'Dragon',      'flying'),
+    (r'\bbat\b',                                           'Bat',         'flying'),
+    (r'\beagle\b|\bhawk\b|\bfalcon\b',                    'Eagle',       'flying'),
+    (r'\bparrot\b',                                        'Parrot',      'flying'),
+    (r'\bbird\b|\bsparrow\b|\bswallow\b|\bcrow\b|\bowl\b','Bird',        'flying'),
+    (r'\bchicken\b|\brooster\b|\bhen\b',                  'Chicken',     'flying'),
+    (r'\bflamingo\b',                                      'Flamingo',    'flying'),
+    (r'\bbuzzard\b|\bvulture\b',                          'Buzzard',     'flying'),
+    (r'\bostrich\b',                                       'Ostrich',     'bipeds'),
+    (r'\bpteranodon\b|\bpterodactyl\b',                   'Pteranodon',  'flying'),
+    (r'\bgiantbee\b|\bbee\b|\bwasp\b|\bhornet\b',         'Giantbee',    'flying'),
+    (r'\bt[- ]?rex\b|\btyranno(saurus)?\b',               'Trex',        'bipeds'),
+    (r'\braptor\b|\bvelociraptor\b',                      'Raptor',      'bipeds'),
+    (r'\btricera(tops)?\b',                                'Tricera',     'quadropeds'),
+    (r'\bstegosaurus\b|\bstego\b',                        'Stego',       'quadropeds'),
+    (r'\bcrocodile\b|\balligator\b|\bgator\b',            'Crocodile',   'quadropeds'),
+    (r'\bcomodo\b|\bkomodo\b|\blizard\b',                 'Comodoa',     'quadropeds'),
+    (r'\blion\b',                                          'Lion',        'quadropeds'),
+    (r'\btiger\b|\bsabre[- ]?tooth\b',                    'SabreToothTiger', 'quadropeds'),
+    (r'\bjaguar\b',                                        'Jaguar',      'quadropeds'),
+    (r'\bleopard\b|\bcheetah\b',                          'Leapord',     'quadropeds'),
+    (r'\blynx\b',                                          'Lynx',        'quadropeds'),
+    (r'\bcat\b|\bkitten\b',                               'Cat',         'quadropeds'),
+    (r'\bfox\b',                                           'Fox',         'quadropeds'),
+    (r'\bwolf\b|\bcoyote\b|\bjackal\b',                   'Coyote',      'quadropeds'),
+    (r'\bdog\b|\bhound\b|\bpuppy\b',                      'Hound',       'quadropeds'),
+    (r'\bhorse\b|\bstallion\b|\bmare\b',                  'Horse',       'quadropeds'),
+    (r'\bdeer\b|\belk\b|\bmoose\b',                       'Deer',        'quadropeds'),
+    (r'\braindeer\b|\breindeer\b',                        'Raindeer',    'quadropeds'),
+    (r'\bgazelle\b|\bantelope\b|\bimpala\b',              'Gazelle',     'quadropeds'),
+    (r'\bgoat\b|\bsheep\b|\bram\b',                       'Goat',        'quadropeds'),
+    (r'\bbuffalo\b|\bbison\b|\bcow\b|\bbull\b|\bcattle\b','Buffalo',     'quadropeds'),
+    (r'\brhino\b|\brhinoceros\b',                         'Rhino',       'quadropeds'),
+    (r'\bhippo(potamus)?\b',                              'Hippopotamus','quadropeds'),
+    (r'\belephant\b',                                      'Elephant',    'quadropeds'),
+    (r'\bmammoth\b',                                       'Mammoth',     'quadropeds'),
+    (r'\bbear\b|\bgrizzly\b',                             'Bear',        'quadropeds'),
+    (r'\bpolar[- ]?bear\b',                               'PolarBear',   'quadropeds'),
+    (r'\bbrown[- ]?bear\b',                               'BrownBear',   'quadropeds'),
+    (r'\bmonkey\b|\bape\b|\bgorilla\b|\bchimp\b',         'Monkey',      'quadropeds'),
+    (r'\bhamster\b|\brat\b|\bmouse\b|\bsandmouse\b',      'Hamster',     'quadropeds'),
+    (r'\bcamel\b',                                         'Camel',       'quadropeds'),
+    (r'\bskunk\b',                                         'Skunk',       'quadropeds'),
+    (r'\bspider\b|\btarantula\b',                         'Spider',      'millipeds_snakes'),
+    (r'\bcentipede\b|\bmillipede\b',                      'Centipede',   'millipeds_snakes'),
+    (r'\bcricket\b|\bgrasshopper\b|\blocust\b',           'Cricket',     'millipeds_snakes'),
+    (r'\bant\b|\bfireant\b',                              'FireAnt',     'millipeds_snakes'),
+    (r'\bcrab\b|\bhermit[- ]?crab\b',                     'Crab',        'millipeds_snakes'),
+    (r'\bscorpion\b',                                      'Scorpion',    'millipeds_snakes'),
+    (r'\broach\b|\bcockroach\b|\bbeetle\b',               'Roach',       'millipeds_snakes'),
+    (r'\bisopetra\b|\bisopod\b',                          'Isopetra',    'millipeds_snakes'),
+    (r'\bturtle\b|\btortoise\b',                          'Turtle',      'quadropeds'),
+    (r'\bcobra\b|\bsnake\b|\bserpent\b|\bnaga\b',         'KingCobra',   'millipeds_snakes'),
+    (r'\bfish\b|\bpiranha\b|\bpirrana\b|\bshark\b',       'Pirrana',     'millipeds_snakes'),
+    (r'\bpigeon\b|\bdove\b',                              'Pigeon',      'flying'),
+]
+
+
+def _pick_trained_class(prompt: str, anim_type: str, asset_family: str = '',
+                        topology_family: str = '') -> tuple:
+    """Return (trained_class, ckpt_family) by inspecting (in order):
+       * prompt text (any keyword from _TRAINED_CLASS_BY_KEYWORD)
+       * asset_family the upstream client passed
+       * anim_type (rare — usually 'run'/'idle' but maybe 'fly')
+       * topology_family (from _detect_topology_family on the rig)
+
+    Falls back to (Bear, quadropeds) — the highest-bone-count
+    quadruped which we found to retarget reasonably to almost any
+    creature. Never returns Flamingo as a default (its trained
+    motion is bird-perch-specific and looks weird on quadrupeds)."""
+    haystack = ' '.join([
+        (prompt or ''), (asset_family or ''), (anim_type or ''),
+    ]).lower()
+    for pat, cls, fam in _TRAINED_CLASS_BY_KEYWORD:
+        if re.search(pat, haystack):
+            return (cls, fam)
+    # Topology fallback.
+    if topology_family == 'flying':
+        return ('Dragon', 'flying')
+    if topology_family == 'millipeds_snakes':
+        return ('Spider', 'millipeds_snakes')
+    if topology_family == 'quadropeds':
+        return ('Bear', 'quadropeds')
+    if topology_family == 'bipeds':
+        return ('Trex', 'bipeds')  # better than Ostrich for most user-gen biped meshes
+    return ('Bear', 'quadropeds')
 
 
 def _resolve_checkpoint_path(ckpt_family: str) -> str:
@@ -1088,6 +1071,263 @@ def _run_subprocess(cmd, cwd=None) -> int:
         sys.stdout.write(line)
         sys.stdout.flush()
     return p.wait()
+
+
+# ============================================================
+# Debug helpers — Plan A: prove AnyTop works on its OWN data
+# before we polish the rig-bridge layer. Run via:
+#   modal run modal_app/_anytop_anim.py::inspect_anytop
+#   modal run modal_app/_anytop_anim.py::standalone_run --class-name Dragon
+# ============================================================
+@app.function(image=image, cpu=1, timeout=120)
+def inspect_bundled_classes() -> dict:
+    """Dump the FULL list of trained classes inside AnyTop's bundled
+    cond.npy with each class's joint count + sample joint names.
+    Used to design the asset_family → trained_class mapping for the
+    retargeting bridge (Strategy 1)."""
+    import os, json
+    import numpy as _np
+    bundled = os.path.join(ANYTOP_DIR, "dataset", "truebones", "zoo",
+                           "truebones_processed", "cond.npy")
+    out = {"path": bundled, "exists": os.path.isfile(bundled)}
+    if not out["exists"]:
+        return out
+    raw = _np.load(bundled, allow_pickle=True)
+    cond = raw.item() if hasattr(raw, "item") and getattr(raw, "ndim", 1) == 0 else raw
+    if not isinstance(cond, dict):
+        out["error"] = f"cond is {type(cond).__name__}, expected dict"
+        return out
+    classes = []
+    for name, entry in cond.items():
+        jn = entry.get("joints_names") if hasattr(entry, "get") else None
+        parents = entry.get("parents") if hasattr(entry, "get") else None
+        classes.append({
+            "name": name,
+            "joint_count": len(jn) if jn is not None else (len(parents) if parents is not None else 0),
+            "joints_names_sample": list(jn[:6]) if jn is not None else [],
+            "joints_names_tail": list(jn[-3:]) if jn is not None and len(jn) > 6 else [],
+        })
+    classes.sort(key=lambda c: c["name"])
+    out["total"] = len(classes)
+    out["classes"] = classes
+    print("[inspect_bundled_classes]", json.dumps({"total": out["total"]}, indent=2))
+    for c in classes:
+        print(f"  {c['name']:18s}  {c['joint_count']:>4d}  {c['joints_names_sample']}")
+    return out
+
+
+@app.function(image=image, cpu=1, timeout=60)
+def inspect_anytop() -> dict:
+    """List what AnyTop has bundled in the container so we know if
+    sample.generate can run on its own trained data without our
+    rig-extraction bridge. Reports:
+      * /AnyTop/dataset/truebones/zoo/ subdirectories (per-class data)
+      * which subdirs have a cond.npy (the actual conditioning file)
+      * /AnyTop/save/ checkpoint folders
+    Returns a structured dict so the local entrypoint can pretty-print
+    it without scrolling through ANSI logs."""
+    import os, json
+    result = {"ANYTOP_DIR": ANYTOP_DIR}
+    ds_root = os.path.join(ANYTOP_DIR, "dataset", "truebones", "zoo")
+    result["dataset_root"] = ds_root
+    result["dataset_root_exists"] = os.path.isdir(ds_root)
+    classes = []
+    if result["dataset_root_exists"]:
+        for name in sorted(os.listdir(ds_root)):
+            sub = os.path.join(ds_root, name)
+            if not os.path.isdir(sub):
+                continue
+            cond_npy = os.path.join(sub, "cond.npy")
+            bvh_files = [f for f in os.listdir(sub) if f.lower().endswith(".bvh")]
+            classes.append({
+                "name": name,
+                "has_cond_npy": os.path.isfile(cond_npy),
+                "cond_npy_size": os.path.getsize(cond_npy) if os.path.isfile(cond_npy) else 0,
+                "bvh_count": len(bvh_files),
+                "bvh_sample": bvh_files[:3],
+            })
+    result["classes"] = classes
+    result["total_classes"] = len(classes)
+    result["classes_with_cond_npy"] = sum(1 for c in classes if c["has_cond_npy"])
+
+    save_root = os.path.join(ANYTOP_DIR, "save")
+    result["save_root_exists"] = os.path.isdir(save_root)
+    ckpts = []
+    if result["save_root_exists"]:
+        for name in sorted(os.listdir(save_root)):
+            sub = os.path.join(save_root, name)
+            if not os.path.isdir(sub):
+                continue
+            pts = [f for f in os.listdir(sub) if f.endswith(".pt")]
+            ckpts.append({"folder": name, "pt_count": len(pts), "pt_sample": pts[:2]})
+    result["checkpoints"] = ckpts
+
+    print("[inspect_anytop]", json.dumps(result, indent=2))
+    return result
+
+
+@app.function(image=image, gpu="A10G", timeout=600,
+              volumes={"/anim_data": anim_output_volume})
+def standalone_run(class_name: str = "Dragon", motion_length: float = 5.0) -> dict:
+    """Run sample.generate using AnyTop's OWN bundled cond.npy for the
+    given class, with NO rig translation, NO BVH extraction, NO bridge
+    code from our side. Whatever AnyTop produces here is what AnyTop
+    is capable of by itself.
+
+    Returns the .npy stats (shape, global_std, per_joint_std_mean,
+    first_vs_last_l2) so we can tell whether AnyTop generates real
+    motion. If global_std is healthy here → our bridge is the problem.
+    If it's near zero here too → AnyTop is broken in our container."""
+    import os, glob as _glob, json, time
+    import numpy as _np
+
+    sys.path.insert(0, "/tmp")
+    sys.path.insert(0, ANYTOP_DIR)
+
+    # 1. Pick the right ckpt family for the requested class.
+    family_by_class = {v: k for k, v in _OBJECT_TYPE_BY_FAMILY.items()}
+    family = family_by_class.get(class_name, "all")
+    ckpt = _resolve_checkpoint_path(family)
+    print(f"[standalone_run] class={class_name} family={family} ckpt={ckpt}")
+
+    # 2. AnyTop ships ONE big cond.npy at
+    #    /AnyTop/dataset/truebones/zoo/truebones_processed/cond.npy
+    # containing all 70 trained classes as dict keys. There is NO
+    # per-class folder layout — that's why our earlier attempts to
+    # alias `cond[Dragon] = cond[skel_name]` produced wrong results:
+    # the model expects the FULL dict with the canonical class keys.
+    bundled = os.path.join(ANYTOP_DIR, "dataset", "truebones", "zoo",
+                           "truebones_processed", "cond.npy")
+    result = {
+        "class_name": class_name, "family": family, "ckpt": ckpt,
+        "bundled_cond_path": bundled,
+        "bundled_cond_exists": os.path.isfile(bundled),
+    }
+    if not os.path.isfile(ckpt):
+        result["error"] = f"checkpoint not found at {ckpt}"
+        print(f"[standalone_run] ERROR: {result['error']}")
+        return result
+    if not os.path.isfile(bundled):
+        result["error"] = (f"bundled cond.npy not found at {bundled} — "
+                          "AnyTop processed dataset is not in this container.")
+        print(f"[standalone_run] ERROR: {result['error']}")
+        return result
+
+    # 3. Peek inside the bundled cond.npy: keys, target class structure.
+    cond_path = bundled
+    try:
+        _raw = _np.load(cond_path, allow_pickle=True)
+        _cond = _raw.item() if hasattr(_raw, "item") and getattr(_raw, "ndim", 1) == 0 else _raw
+        if isinstance(_cond, dict):
+            keys = list(_cond.keys())
+            result["cond_total_keys"] = len(keys)
+            result["cond_keys_sample"] = keys[:30]
+            result["class_in_cond"] = class_name in _cond
+            if class_name in _cond:
+                entry = _cond[class_name]
+                if hasattr(entry, "get"):
+                    jn = entry.get("joints_names", None)
+                    parents = entry.get("parents", None)
+                    offsets = entry.get("offsets", None)
+                    result["cond_joints_names_count"] = len(jn) if jn is not None else 0
+                    result["cond_joints_names_sample"] = list(jn[:16]) if jn is not None else None
+                    result["cond_parents_shape"] = (
+                        list(_np.asarray(parents).shape) if parents is not None else None)
+                    result["cond_offsets_shape"] = (
+                        list(_np.asarray(offsets).shape) if offsets is not None else None)
+                    result["cond_entry_keys"] = list(entry.keys()) if hasattr(entry, "keys") else None
+    except Exception as e:
+        result["cond_load_warn"] = repr(e)
+
+    # 4. Run sample.generate exactly as AnyTop intends.
+    t0 = time.time()
+    cmd = [
+        sys.executable, "-m", "sample.generate",
+        "--model_path", ckpt,
+        "--object_type", class_name,
+        "--cond_path", cond_path,
+        "--num_repetitions", "1",
+        "--motion_length", str(motion_length),
+        "--device", "0",
+    ]
+    print(f"[standalone_run] CMD: {' '.join(cmd)}")
+    rc = _run_subprocess(cmd, cwd=ANYTOP_DIR)
+    result["sample_generate_rc"] = rc
+    result["sample_generate_secs"] = round(time.time() - t0, 1)
+    if rc != 0:
+        result["error"] = f"sample.generate exit {rc}"
+        return result
+
+    # 5. Probe the generated .npy (same logic as step 4.5 in animate_mesh).
+    ckpt_dir = os.path.dirname(ckpt)
+    cand = _glob.glob(os.path.join(ckpt_dir, "samples_*", f"{class_name}_rep_*.npy"))
+    cand.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    if not cand:
+        result["error"] = f"no .npy produced under {ckpt_dir}/samples_*"
+        return result
+    npy_path = cand[0]
+    result["output_npy"] = os.path.basename(npy_path)
+    arr = _np.load(npy_path, allow_pickle=True)
+    if isinstance(arr, _np.ndarray) and arr.dtype != object:
+        result["shape"] = list(arr.shape)
+        result["dtype"] = str(arr.dtype)
+        result["global_std"] = float(arr.std())
+        if arr.ndim >= 2:
+            result["per_joint_std_mean"] = float(arr.std(axis=tuple(range(arr.ndim - 1))).mean())
+        result["first_vs_last_l2"] = float(_np.linalg.norm(arr[0] - arr[-1])) if arr.shape[0] > 1 else 0.0
+        result["DIAGNOSIS"] = ("near-identity (engine broken)"
+                              if result["global_std"] < 1e-3
+                              else "real motion")
+    else:
+        result["arr_type"] = type(arr).__name__
+
+    # 6. Also expose the BVH so the user can convert & view it locally.
+    bvh_path = _find_latest_bvh(ckpt)
+    if bvh_path and os.path.isfile(bvh_path):
+        result["bvh_path_in_container"] = bvh_path
+        # Persist to the shared volume so the local entrypoint can fetch it.
+        out_bvh = f"/anim_data/STANDALONE_{class_name}_{int(time.time())}.bvh"
+        try:
+            with open(bvh_path, "rb") as fin, open(out_bvh, "wb") as fout:
+                fout.write(fin.read())
+            anim_output_volume.commit()
+            result["bvh_persisted_to_volume"] = out_bvh
+        except Exception as e:
+            result["bvh_persist_warn"] = repr(e)
+
+    print(f"[standalone_run] RESULT: {json.dumps(result, indent=2)}")
+    return result
+
+
+@app.local_entrypoint()
+def main(action: str = "inspect", class_name: str = "Dragon",
+         motion_length: float = 5.0) -> None:
+    """`modal run modal_app/_anytop_anim.py::main --action inspect`
+    `modal run modal_app/_anytop_anim.py::main --action standalone --class-name Dragon`"""
+    import json
+    if action == "classes":
+        r = inspect_bundled_classes.remote()
+        print(f"\n=== {r.get('total', 0)} trained classes in bundled cond.npy ===\n")
+        for c in r.get("classes", []):
+            print(f"  {c['name']:18s}  {c['joint_count']:>4d}  {c['joints_names_sample']}")
+        return
+    if action == "inspect":
+        r = inspect_anytop.remote()
+        print("\n=== inspect_anytop summary ===")
+        print(f"dataset_root_exists: {r['dataset_root_exists']}")
+        print(f"total_classes: {r['total_classes']}")
+        print(f"classes_with_cond_npy: {r['classes_with_cond_npy']}")
+        print(f"save_root_exists: {r['save_root_exists']}")
+        print(f"checkpoints: {[c['folder'] for c in r['checkpoints']]}")
+        print(f"\nfirst 10 classes:")
+        for c in r["classes"][:10]:
+            print(f"  {c['name']:20s} cond={c['has_cond_npy']} bvh={c['bvh_count']}")
+    elif action == "standalone":
+        r = standalone_run.remote(class_name=class_name, motion_length=motion_length)
+        print("\n=== standalone_run summary ===")
+        print(json.dumps(r, indent=2))
+    else:
+        print(f"unknown action {action!r}; choose 'inspect' or 'standalone'")
 
 
 # ============================================================
