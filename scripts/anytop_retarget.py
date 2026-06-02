@@ -611,6 +611,48 @@ def retarget_bvh_to_rig(
     for sidx in set(mapping.values()):
         src_quats[sidx] = _eulers_to_quats(eul[:, sidx, :], channels[sidx])
 
+    # Delta-based retargeting (2026-06-02): the source skeleton's
+    # REST orientation (frame 0 of the BVH, which AnyTop emits at
+    # T-pose) is rarely identity — wings fold down, tails curl, etc.
+    # If we apply source's CURRENT-frame quaternion directly as the
+    # target's local rotation, the target's wing/limb snaps to the
+    # source's absolute orientation and the mesh visually breaks
+    # (one wing shoots far off, one leg goes through the body).
+    #
+    # Fix: compute the per-frame DELTA from the source's frame-0 rest
+    # pose, then apply that delta on top of the target's rest pose.
+    #   Q_delta(frame)  = Q_src(frame) * inv(Q_src(0))
+    #   Q_tgt(frame)    = Q_tgt_rest * Q_delta(frame)
+    # The target's rest rotation comes from the node's 'rotation'
+    # field if present (set by Puppeteer or the GLTFLoader); else
+    # we default to identity (a reasonable assumption for skinned
+    # rigs where the rest pose lives in IBM, not node TRS).
+    tgt_rest_quat: Dict[int, np.ndarray] = {}
+    for tni in joint_node_idxs:
+        q_rest = nodes[tni].get("rotation")
+        if q_rest is not None and len(q_rest) == 4:
+            tgt_rest_quat[tni] = np.asarray(q_rest, dtype=np.float64)
+        else:
+            tgt_rest_quat[tni] = np.array([0.0, 0.0, 0.0, 1.0])  # identity
+
+    def _q_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Hamilton product, (x,y,z,w) convention to match glTF."""
+        ax, ay, az, aw = a
+        bx, by, bz, bw = b
+        return np.array([
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz,
+        ])
+
+    def _q_inv(q: np.ndarray) -> np.ndarray:
+        x, y, z, w = q
+        n = x * x + y * y + z * z + w * w
+        if n < 1e-12:
+            return np.array([0.0, 0.0, 0.0, 1.0])
+        return np.array([-x, -y, -z, w]) / n
+
     # Build per-target track. Unmapped targets get rest-pose (no
     # rotation track → renderer keeps the static node rotation).
     times = np.arange(n_frames, dtype=np.float32) * float(bvh["frame_time"])
@@ -636,14 +678,28 @@ def retarget_bvh_to_rig(
         sidx = mapping.get(tni)
         if sidx is None:
             continue
-        q = src_quats[sidx]
-        # Resample to target FPS if needed (nearest-neighbour quat — good
-        # enough for ~30 Hz when source is also ~30 Hz).
+        src_q = src_quats[sidx]
+        # Delta-based retargeting: subtract source's rest pose
+        # (frame 0) and apply the residual to target's rest pose.
+        src_rest = src_q[0].copy()
+        src_rest_inv = _q_inv(src_rest)
+        tgt_rest = tgt_rest_quat[tni]
+        # Per-frame: Q_tgt = Q_tgt_rest * (Q_src * inv(Q_src_rest))
+        q = np.empty_like(src_q)
+        for fi in range(src_q.shape[0]):
+            delta = _q_mul(src_q[fi], src_rest_inv)
+            q[fi] = _q_mul(tgt_rest, delta)
+        # Sign-continuity across frames (preserved through the mul,
+        # but re-assert after delta to be safe).
+        for i in range(1, q.shape[0]):
+            if np.dot(q[i], q[i - 1]) < 0.0:
+                q[i] = -q[i]
+        # Resample to target FPS if needed (nearest-neighbour quat —
+        # good enough for ~30 Hz when source is also ~30 Hz).
         if target_fps and target_fps > 0 and len(new_t) != n_frames:
             idxs = np.clip((new_t / max(times[-1], 1e-6)) * (n_frames - 1), 0, n_frames - 1)
             idxs = idxs.round().astype(np.int64)
             q = q[idxs]
-            # Re-enforce sign-continuity after resample.
             for i in range(1, q.shape[0]):
                 if np.dot(q[i], q[i - 1]) < 0.0:
                     q[i] = -q[i]
