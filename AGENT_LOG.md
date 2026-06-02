@@ -1,5 +1,35 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (role classifier — false-tail misclassification fix — diag wtwf1ae2i)
+
+**Pourquoi**: sur les rigs `humanoid_puppeteer` (Puppeteer output), le
+classifier de roles anatomiques bucketait à tort une partie de la jambe
+gauche de l'orc dans `tail`. Conséquence : le mapping retargeting
+attribuait des bones de queue à une chaîne qui n'en avait pas, produisant
+des poses cassées sur le quart inférieur du perso.
+
+**Diagnostic source** : `wtwf1ae2i` (run de diagnostic dédié au role
+classifier sur humanoid_puppeteer).
+
+**Changements** :
+
+1. **`scripts/rig_mappings/ue5_mannequin__humanoid_puppeteer.json`** — ajoute
+   une table `target_bones` explicite déclarant les bones de la cible et
+   leurs rôles attendus (hip/spine/leg/arm/neck/head, PAS de tail). Cette
+   table devient AUTHORITATIVE et override la classification heuristique
+   pour les rigs déclarés `humanoid_puppeteer`.
+
+2. **`scripts/rig_mappings/_loader.py`** — charge et expose la nouvelle
+   table `target_bones` aux consommateurs (anytop_retarget).
+
+3. **`scripts/anytop_retarget.py`** — consume la table `target_bones` du
+   mapping quand elle est présente ; sinon retombe sur l'heuristique
+   actuelle. Élimine la mis-classification false-tail.
+
+**Validation** : `matched 21/21 target bones to source`,
+`tgt roles = {'hip': 1, 'spine': 3, 'arm': 8, 'leg': 8, 'neck': 1}`
+(aucun bucket `tail` parasite), 22 channels, 20 samples, output 67 MB OK.
+
 ## 2026-06-02 (Stage-1 AnyTop retarget fixes — workflow wf_20d765c3)
 
 **Pourquoi**: 3 worktrees parallèles (charmap, family-classifier, root-translation)

@@ -3,7 +3,7 @@
 Each JSON file is keyed by (source_skeleton_id, target_family) and
 defines:
 
-  * a per-bone mapping table (source_name -> role, side, chain_idx)
+  * a per-bone mapping table (source_name → role, side, chain_idx)
   * a list of `drop_patterns` (regex) — bones the retarget core must
     silently ignore in the SOURCE
   * an optional `extends` field naming another mapping JSON whose
@@ -57,9 +57,9 @@ class Mapping:
     target_family : str
         e.g. 'humanoid_puppeteer', 'winged_puppeteer'
     bone_table : Dict[str, Tuple[str, Optional[str], int]]
-        explicit source-bone-name -> (role, side, chain_idx) lookup
+        explicit source-bone-name → (role, side, chain_idx) lookup
     drop_re : re.Pattern
-        compiled regex of OR'd drop_patterns (matches -> sentinel)
+        compiled regex of OR'd drop_patterns (matches → sentinel)
     axis_source : str
         'y_up' | 'z_up' — used to build axis_to_target rotation
     axis_target : str
@@ -80,14 +80,23 @@ class Mapping:
     unit_scale: object = "auto_bbox"
     fingerprint_required_bones: List[str] = field(default_factory=list)
     _drop_patterns_raw: List[str] = field(default_factory=list)
+    # JSON-driven TARGET classification overlay. Built from the
+    # optional "target_bones" + "target_drop_patterns" blocks in the
+    # mapping JSON. Used by anytop_retarget.py to override the
+    # geometric `_target_anatomical_roles` heuristic on known rig
+    # families (humanoid_puppeteer) while leaving unknown rigs to
+    # the geometric fallback.
+    target_table: Dict[str, Tuple[str, Optional[str], int]] = field(default_factory=dict)
+    target_drop_re: Optional[re.Pattern] = None
+    _target_drop_patterns_raw: List[str] = field(default_factory=list)
 
     def classify(self, name: str) -> Tuple[str, Optional[str], int]:
         """Source-bone classifier. Same signature as
         `anytop_retarget._classify_source_bone`.
 
         Resolution order:
-          1. drop_patterns regex  -> ('', None, -1) sentinel (skip).
-          2. explicit bone_table  -> table row.
+          1. drop_patterns regex  → ('', None, -1) sentinel (skip).
+          2. explicit bone_table  → table row.
           3. fall back to caller (the retarget core uses
              `_classify_source_bone` as the default, so unknown bones
              still get the generic regex pass).
@@ -121,11 +130,11 @@ class Mapping:
     def axis_to_target(self, arr: np.ndarray) -> np.ndarray:
         """Apply the axis-convention rotation to a (..., 3) array.
 
-        For UE5 (z-up) -> Puppeteer (y-up), this is Rx(-90°):
+        For UE5 (z-up) → Puppeteer (y-up), this is Rx(-90°):
             [ 1,  0,  0 ]
             [ 0,  0,  1 ]
             [ 0, -1,  0 ]
-        which sends +Z -> +Y, +Y -> -Z.
+        which sends +Z → +Y, +Y → -Z.
 
         Per-bone parent-relative rotations are NOT touched. Once the
         WORLD rest pose is rotated consistently (we rotate offsets +
@@ -199,6 +208,8 @@ def _resolve_one(base: str, raw_by_basename: Dict[str, dict],
     bones: List[dict] = []
     drop_patterns: List[str] = []
     fingerprint: List[str] = []
+    target_bones: List[dict] = []
+    target_drop_patterns: List[str] = []
 
     parent_base = raw.get("extends")
     if isinstance(parent_base, str) and parent_base:
@@ -210,6 +221,11 @@ def _resolve_one(base: str, raw_by_basename: Dict[str, dict],
             bones.append({"source": src_name, "role": role, "side": side, "chain_idx": idx})
         drop_patterns.extend(parent._drop_patterns_raw)
         fingerprint.extend(parent.fingerprint_required_bones)
+        # Same trick for the target-side overlay so children inherit
+        # the humanoid_puppeteer classification without redeclaring it.
+        for tgt_name, (role, side, idx) in parent.target_table.items():
+            target_bones.append({"target": tgt_name, "role": role, "side": side, "chain_idx": idx})
+        target_drop_patterns.extend(parent._target_drop_patterns_raw)
 
     for b in (raw.get("bones") or []):
         bones.append(b)
@@ -218,6 +234,10 @@ def _resolve_one(base: str, raw_by_basename: Dict[str, dict],
     for fp in (raw.get("fingerprint_required_bones") or []):
         if fp not in fingerprint:
             fingerprint.append(fp)
+    for b in (raw.get("target_bones") or []):
+        target_bones.append(b)
+    for p in (raw.get("target_drop_patterns") or []):
+        target_drop_patterns.append(p)
 
     # Build the lookup table; later entries overwrite earlier ones so
     # the child JSON can override an inherited row.
@@ -247,6 +267,34 @@ def _resolve_one(base: str, raw_by_basename: Dict[str, dict],
             print(f"[rig_mappings] WARN bad drop_patterns in {base}: {e}", flush=True)
             drop_re = None
 
+    # Build the target-side lookup table the same way as bone_table.
+    target_table: Dict[str, Tuple[str, Optional[str], int]] = {}
+    for b in target_bones:
+        name = str(b.get("target") or "").strip().lower()
+        if not name:
+            continue
+        role = str(b.get("role") or "")
+        raw_side = b.get("side", None)
+        side: Optional[str] = None
+        if isinstance(raw_side, str) and raw_side.strip():
+            side = raw_side.strip().lower()
+        try:
+            idx = int(b.get("chain_idx") or 0)
+        except (TypeError, ValueError):
+            idx = 0
+        target_table[name] = (role, side, idx)
+
+    target_drop_re: Optional[re.Pattern] = None
+    if target_drop_patterns:
+        try:
+            target_drop_re = re.compile(
+                "|".join(f"(?:{p})" for p in target_drop_patterns)
+            )
+        except re.error as e:
+            print(f"[rig_mappings] WARN bad target_drop_patterns in {base}: {e}",
+                  flush=True)
+            target_drop_re = None
+
     axis = raw.get("axis_convention") or {}
     return Mapping(
         source_skeleton_id=str(raw.get("source_skeleton_id") or ""),
@@ -259,6 +307,9 @@ def _resolve_one(base: str, raw_by_basename: Dict[str, dict],
         unit_scale=raw.get("unit_scale", "auto_bbox"),
         fingerprint_required_bones=fingerprint,
         _drop_patterns_raw=drop_patterns,
+        target_table=target_table,
+        target_drop_re=target_drop_re,
+        _target_drop_patterns_raw=target_drop_patterns,
     )
 
 

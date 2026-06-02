@@ -676,6 +676,8 @@ def retarget_fbx_to_rig(
         target_fps=target_fps,
         ckpt_family=ckpt_family,
         source_classifier=classifier,
+        target_table=mapping.target_table,
+        target_drop_re=mapping.target_drop_re,
     )
     return {
         "detected_skeleton_id": detected,
@@ -693,6 +695,8 @@ def retarget_motion_to_rig(
     target_fps: float = 30.0,
     ckpt_family: str = 'all',
     source_classifier: Optional[Callable[[str], Tuple[str, Optional[str], int]]] = None,
+    target_table: Optional[Dict[str, Tuple[str, Optional[str], int]]] = None,
+    target_drop_re: "Optional[re.Pattern]" = None,
 ) -> None:
     """Generic retarget core: take a parsed motion dict (BVH or FBX),
     read the Puppeteer GLB, append an AnimationClip.
@@ -850,6 +854,30 @@ def retarget_motion_to_rig(
     tgt_roles = _target_anatomical_roles(
         joint_node_idxs, parent_by_idx, world_by_idx, ckpt_family=ckpt_family
     )
+
+    # JSON-driven overlay: explicit per-bone classification from the
+    # mapping JSON wins over the geometric heuristic. The geometric
+    # `_target_anatomical_roles` mis-tags the humanoid left leg as
+    # 'tail' (its centerline + below-root chain heuristic at
+    # anytop_retarget.py:402-415 picks `thigh_l` as a tail root and
+    # breaks, so calf_l/foot_l/ball_l also fall under 'tail'/None) and
+    # silently drops ball_l from the role table; clavicle_l gets
+    # mistaken for 'neck'. Overlay only fires when a target_table is
+    # supplied — unknown rigs keep the geometric fallback.
+    if target_table:
+        # Iterate over the union of currently-classified joints and the
+        # full joint list so bones missing from the geometric pass
+        # (e.g. ball_l) can be added back via the JSON table.
+        all_joints = list(tgt_roles.keys()) + [
+            j for j in joint_node_idxs if j not in tgt_roles
+        ]
+        for tni in all_joints:
+            lower = (name_by_idx.get(tni) or "").strip().lower()
+            if target_drop_re is not None and lower and target_drop_re.search(lower):
+                tgt_roles.pop(tni, None)
+                continue
+            if lower in target_table:
+                tgt_roles[tni] = target_table[lower]
 
     # Log a summary so the user can diagnose missing matches.
     src_role_count: Dict[str, int] = {}
