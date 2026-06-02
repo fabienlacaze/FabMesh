@@ -2130,7 +2130,26 @@ function showStep1Preview(imgPath) {
   // Loading overlay until <img> fires 'load' (or 'error').
   setViewerLoading('step1-preview', true, 'Loading image…');
   imgEl.onload = () => setViewerLoading('step1-preview', false);
-  imgEl.onerror = () => setViewerLoading('step1-preview', false);
+  imgEl.onerror = () => {
+    setViewerLoading('step1-preview', false);
+    // Replace the broken <img> with our own DOM placeholder so the
+    // browser / family-safety extension can't inject 'Blocked by content
+    // filter' text on the empty image slot.
+    try {
+      imgEl.style.display = 'none';
+      let fallback = preview.querySelector('.viewer-img-error');
+      if (!fallback) {
+        fallback = document.createElement('div');
+        fallback.className = 'viewer-img-error';
+        fallback.style.cssText = 'position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:var(--text-3); font-size:13px; text-align:center; padding:20px; pointer-events:none;';
+        fallback.innerHTML = '<span style="font-size:36px;">&#9888;</span><span>Image unavailable</span><span style="font-size:11px; color:var(--text-3); max-width:80%;">The file is missing or could not be read from disk.</span>';
+        preview.appendChild(fallback);
+      }
+    } catch (_) {}
+  };
+  // Clear any prior fallback so a successful reload re-shows the img.
+  preview.querySelectorAll('.viewer-img-error').forEach(el => el.remove());
+  imgEl.style.display = '';
   // Cache-bust — see version-thumb notes above; Electron holds onto the
   // previous bytes unless we change the URL.
   imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
