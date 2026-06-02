@@ -414,20 +414,37 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
             break
     tail = on_axis_chain(tail_root, up=False) if tail_root is not None else []
 
+    # 2026-06-02 (re-applied after basis-fix workflow stomped this):
+    # Collect ANY non-spine/non-tail kid whose CHAIN has lateral span
+    # OR tips below root. The strict `side_gate` check on the FIRST
+    # bone dropped legs because the hip joint sits ~centerline; only
+    # knee/foot bones extend sideways. Decide L/R from the chain's
+    # most-lateral bone instead of the first one.
     used = set(spine) | set(tail)
     laterals = []
     for sp_ni in spine:
         for k in children[sp_ni]:
-            if k in used or abs(SIDE(pos[k]) - root_side) <= side_gate:
+            if k in used:
                 continue
             ch = longest_chain(k)
+            span = max(abs(SIDE(pos[c]) - root_side) for c in ch)
+            tip_below = UP(pos[ch[-1]]) < UP(pos[root]) - body_h * 0.02
+            if span <= side_gate and not tip_below:
+                continue
+            far_bone = max(ch, key=lambda c: abs(SIDE(pos[c]) - root_side))
+            side_val = SIDE(pos[far_bone]) - root_side
+            if abs(side_val) < 1e-4:
+                side_val = SIDE(pos[k]) - root_side
             laterals.append({
                 'chain': ch,
                 'attach': UP(pos[sp_ni]),
                 'tip': UP(pos[ch[-1]]),
                 'len': len(ch),
-                'sign': SIDE(pos[k]) - root_side,
+                'sign': side_val,
             })
+    print(f"[retarget] anatomical: spine={len(spine)} tail={len(tail)} "
+          f"laterals_collected={len(laterals)} from {sum(len(children[sp]) for sp in spine)} candidates",
+          flush=True)
 
     left = [c for c in laterals if c['sign'] > 0]
     right = [c for c in laterals if c['sign'] <= 0]
@@ -435,12 +452,11 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
     spine_btm = UP(pos[spine[0]])
     midline = spine_btm + 0.5 * (spine_top - spine_btm)
 
-    def split(chs):
+    def split_all(chs):
         # Direction-based split: legs go DOWN from their attach
         # (rise = tip - attach < 0), wings/arms stay at or above the
-        # attach. Previously this used attach-vs-midline which
-        # mis-labeled dragon front legs as wings because the front
-        # shoulder attach happens to sit just above midline.
+        # attach. Returns ALL chains per category so quadrupeds with
+        # front + back legs both get labeled.
         upper, lower = [], []
         root_up = UP(pos[root])
         for c in chs:
@@ -457,10 +473,10 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
                 (upper if c['len'] >= 4 else lower).append(c)
         upper.sort(key=lambda c: (-c['len'], -c['attach']))
         lower.sort(key=lambda c: (-c['len'], -c['attach']))
-        return (upper[0] if upper else None, lower[0] if lower else None)
+        return upper, lower
 
-    upper_l, lower_l = split(left)
-    upper_r, lower_r = split(right)
+    upper_l_list, lower_l_list = split_all(left)
+    upper_r_list, lower_r_list = split_all(right)
     upper_role = 'wing' if ckpt_family == 'flying' else 'arm'
 
     roles: Dict[int, Tuple[str, Optional[str], int]] = {}
@@ -480,18 +496,21 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
             roles[head] = ('head', None, 0)
     for i, ni in enumerate(tail):
         roles[ni] = ('tail', None, i + 1)
-    if upper_l:
-        for i, ni in enumerate(upper_l['chain']):
-            roles[ni] = (upper_role, 'l', i + 1)
-    if upper_r:
-        for i, ni in enumerate(upper_r['chain']):
-            roles[ni] = (upper_role, 'r', i + 1)
-    if lower_l:
-        for i, ni in enumerate(lower_l['chain']):
-            roles[ni] = ('leg', 'l', i + 1)
-    if lower_r:
-        for i, ni in enumerate(lower_r['chain']):
-            roles[ni] = ('leg', 'r', i + 1)
+    # Enumerate ALL upper/lower chains per side with continuous
+    # chain_idx so each target bone gets a UNIQUE (role, side, idx) —
+    # a dragon's 2 legs per side both become leg_l_01..N then
+    # leg_l_(N+1)..M, etc. Without this enumeration, the second leg
+    # falls through to the unmapped 'limb' bucket.
+    def _label(chains_list, role, side):
+        off = 0
+        for rec in chains_list:
+            for i, ni in enumerate(rec['chain']):
+                roles[ni] = (role, side, off + i + 1)
+            off += len(rec['chain'])
+    _label(upper_l_list, upper_role, 'l')
+    _label(upper_r_list, upper_role, 'r')
+    _label(lower_l_list, 'leg', 'l')
+    _label(lower_r_list, 'leg', 'r')
     return roles
 
 
