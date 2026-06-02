@@ -14236,62 +14236,25 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     customError('autoAnimAI not exposed on this build', 'API missing');
     return;
   }
-  // Skip types that already exist in the CURRENT selected batch so
-  // The modal lets the user COMPOSE the next version:
-  //   - checked existing types → copy from the current batch into the
-  //     new batch (no credit cost, just a server-side blob copy)
-  //   - checked new types → generate via AnyTop AI (1 credit each)
-  //   - unchecked existing types → don't appear in the new version
-  //     (current version stays intact)
-  const currentBatchClips = ((p.animations || [])
-    .filter(a => a.batchId === _step4SelectedBatch));
-  const currentByType = new Map(currentBatchClips.map(c => [(c.type || '').toLowerCase(), c]));
-  const toCopy = animTypes.filter(t => currentByType.has(t));
-  const toRun = animTypes.filter(t => !currentByType.has(t));
-  if (!toCopy.length && !toRun.length) {
+  // 2026-06-02: user explicitly requested "Si je create une animation, il
+  // ne faut pas copier une version précédente qui existe deja, il faut
+  // systematiquement regénérer". The previous toCopy/toRun split silently
+  // copied any anim_type that already existed in the currently-selected
+  // batch — which surprised the user (2s "New version with 1 clip" toast
+  // and no Modal call). Now every checked type is regenerated.
+  if (!animTypes.length) {
     showToast('Check at least one type to generate.', 'info', 4000);
     return;
   }
-  // batchId shared across copies + freshly-generated clips → server
-  // groups them into ONE new version (v(N+1)) so the user gets a
-  // cohesive new batch with whatever they checked.
+  const toCopy = [];          // intentionally empty — no copy path anymore
+  const toRun = animTypes.slice();
+  // batchId shared across all freshly-generated clips so the server
+  // groups them into ONE new version (v(N+1)).
   const batchId = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  // STEP A — copy existing clips into the new batch via the
-  // server-side /copy endpoint. The GLB never touches the client →
-  // sidesteps Cloudflare's 100 MB body cap and uses R2-to-R2 streaming.
-  if (toCopy.length) {
-    showToast(`Copying ${toCopy.length} existing clip${toCopy.length > 1 ? 's' : ''}...`, 'info', 2000);
-    for (const t of toCopy) {
-      const src = currentByType.get(t);
-      if (!src?.url) continue;
-      try {
-        const r = await fetch('/api/animations/copy', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            sourceUrl: src.url,
-            animType: t,
-            projectName: p.name || '',
-            batchId,
-          }),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      } catch (err) {
-        console.warn('[anim copy]', t, err);
-        showToast(`Copy of ${t} failed: ${err.message}`, 'warning', 4000);
-      }
-    }
-  }
-  // If only copies were requested (no AI generation), reload + done.
-  if (!toRun.length) {
-    await reloadCurrentProject();
-    showToast(`New version with ${toCopy.length} clip${toCopy.length > 1 ? 's' : ''}.`, 'success', 4000);
-    return;
-  }
-  // STEP B — generate the new types. ONE master batch job (instead
-  // of per-type popups) — the user sees a single Running task that
-  // walks through 1/N → N/N.
+  // STEP B — generate every checked type via Modal. ONE master batch
+  // job (instead of per-type popups) — the user sees a single Running
+  // task that walks through 1/N → N/N. No copy path: every checked
+  // type is always regenerated.
   gatedRun('anim', `Animate ${toRun.join('+')}: ${p.name}`, async () => {
     const batchJob = pushJob(`Animate ${toRun.join('+')}: ${p.name}`, null, {
       Engine: 'AnyTop (cloud GPU)',
