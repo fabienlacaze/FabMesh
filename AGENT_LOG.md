@@ -1,5 +1,36 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (Mode 3 anim — anatomical joint names + drop alias guard)
+
+**Pourquoi**: audit complet pipeline (agent acc4f279) a révélé que AnyTop
+conditionne via T5 sur les **chaînes de caractères des noms d'articulations**,
+PAS sur un class-id lookup. Notre alias `cond[Dragon] = cond[skel_name]`
+était sémantiquement un no-op : mêmes noms `joint_0..joint_46` → T5
+embedding ~zéro info → identity motion garantie.
+
+**Changements `modal_app/_anytop_anim.py`**:
+
+1. **Fix #3 (Step 3.5)** : drop le guard `target_class not in _cond`.
+   Bug warm container : un run précédent laissait `cond["Dragon"]`
+   d'un autre mesh → alias silencieusement skip → vieux Dragon réutilisé.
+   Maintenant overwrite systématique.
+
+2. **Fix #1 (Step 0 + 1) — DOMINANT** : nouvelle fonction
+   `_anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family)`
+   qui classifie chaque bone via topo + IBM world positions et assigne
+   des labels sémantiques : `hip, spine_01..NN, neck_01..NN, head,
+   tail_01..NN, wing_l_01..NN, wing_r_01..NN, leg_l_01..NN, leg_r_01..NN,
+   arm_l/r_NN (humanoïdes), limb_NN (unmapped)`.
+   Family-aware : `flying` → upper laterals = `wing`, sinon `arm`.
+   Step 0 pré-classifie le ckpt_family AVANT le BVH extract pour que
+   les noms soient injectés dans cond.npy via process_new_skeleton.
+   Log preview des 12 premiers noms anatomiques.
+
+**Diagnostic à observer**: logs Modal `anatomical names (flying): ['hip',
+'spine_01', 'wing_l_01', ...]` + `step 3.5 ... joints_names[:8]=[...]`.
+Si T5 reçoit enfin des strings sémantiques → step 4.5 probe doit
+montrer `global_std > 0.01` (motion réelle, plus identity).
+
 ## 2026-06-01 (Mode 3 anim — routing override winged + probe step 4.5)
 
 **Pourquoi**: workflow `wtdvocwde` (3 reviewers indépendants) verdict

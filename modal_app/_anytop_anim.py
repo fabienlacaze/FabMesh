@@ -133,8 +133,227 @@ def _log(msg: str) -> None:
 # ============================================================
 # Skeleton extraction from a Puppeteer GLB
 # ============================================================
+def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str = 'all'):
+    """Build a name_by_idx that uses anatomical strings derived from
+    topology + world bind positions, so AnyTop's T5 conditioner gets
+    semantic signal instead of the cloud-rigged GLB's default
+    ``joint_<N>`` placeholders.
+
+    Audit (acc4f279) ranked this as the dominant Mode-3 failure: AnyTop
+    conditions on T5-encoded joint name STRINGS, not on a class-id
+    embedding. ``joint_17`` → T5 embedding ≈ zero info → near-identity
+    motion. Anatomical strings like ``"wing_l_03"`` carry meaning T5
+    actually trained on.
+
+    Heuristic — no external deps, runs in <10 ms:
+      * root          → "hip"  (lowest-up joint that has children)
+      * spine chain   → "spine_01" … "spine_NN" (longest upward-on-axis chain)
+      * neck/head     → last 1-2 spine bones get neck_01 / head if topmost
+      * tail chain    → "tail_01" … (longest chain going DOWN+BACK from root)
+      * wings         → "wing_l_NN" / "wing_r_NN" (upper laterals, long chain)
+      * legs          → "leg_l_NN" / "leg_r_NN" (lower laterals, going down)
+      * arms          → "arm_l_NN" / "arm_r_NN" (mid laterals, only if no wings)
+      * unmapped      → "limb_NN" (still > "joint_N" semantically)
+    """
+    import numpy as np
+    if not joint_idxs:
+        return {}
+
+    pos = {ji: np.asarray(world_by_idx.get(ji, [0.0, 0.0, 0.0]), dtype=np.float32)
+           for ji in joint_idxs}
+    arr = np.array([pos[ji] for ji in joint_idxs])
+    bb_min, bb_max = arr.min(axis=0), arr.max(axis=0)
+    size = bb_max - bb_min
+    # Up axis = largest extent (mesh oriented Y-up typically); side axis
+    # = next-largest of the remaining two; forward = the last.
+    up_axis = int(np.argmax(size))
+    rem = [a for a in (0, 1, 2) if a != up_axis]
+    side_axis = max(rem, key=lambda a: size[a])
+    fwd_axis = [a for a in rem if a != side_axis][0]
+    body_h = max(float(size[up_axis]), 1e-6)
+    UP = lambda v: float(v[up_axis])
+    SIDE = lambda v: float(v[side_axis])
+    FWD = lambda v: float(v[fwd_axis])
+
+    children = {ji: [] for ji in joint_idxs}
+    for ji in joint_idxs:
+        p = parent_by_idx.get(ji, -1)
+        if p in children:
+            children[p].append(ji)
+
+    roots = [ji for ji in joint_idxs if parent_by_idx.get(ji, -1) not in joint_idxs]
+    root = roots[0] if roots else joint_idxs[0]
+    # Prefer a root that actually branches (avoids picking a stray bone).
+    branchy = [r for r in roots if len(children[r]) >= 2]
+    if branchy:
+        root = min(branchy, key=lambda r: UP(pos[r]))
+
+    def descendants(ji):
+        out, stack = [], list(children[ji])
+        while stack:
+            x = stack.pop()
+            out.append(x)
+            stack.extend(children[x])
+        return out
+
+    def longest_chain(ji):
+        chain = [ji]
+        cur = ji
+        while children[cur]:
+            cur = max(children[cur], key=lambda c: len(descendants(c)))
+            chain.append(cur)
+        return chain
+
+    root_side = SIDE(pos[root])
+    side_gate = body_h * 0.10
+
+    def on_axis_chain(ji, direction_up=True):
+        chain = [ji]
+        cur = ji
+        while children[cur]:
+            kids = [c for c in children[cur]
+                    if abs(SIDE(pos[c]) - root_side) <= side_gate
+                    and ((UP(pos[c]) >= UP(pos[cur]) - body_h * 0.02) if direction_up
+                         else (UP(pos[c]) <= UP(pos[cur]) + body_h * 0.02))]
+            if not kids:
+                break
+            best = max(kids, key=lambda c: len(descendants(c)))
+            chain.append(best)
+            cur = best
+        return chain
+
+    # Spine = upward chain from root, on the body axis. Always include root.
+    spine = on_axis_chain(root, direction_up=True)
+
+    # Tail = downward+backward chain that ISN'T the spine. Look for
+    # root's children NOT in spine with negative or stable UP.
+    spine_set = set(spine)
+    tail_root = None
+    for kid in children[root]:
+        if kid in spine_set:
+            continue
+        if abs(SIDE(pos[kid]) - root_side) > side_gate:
+            continue
+        # Tail-like: tip below or at root height, length >= 2.
+        chain_test = longest_chain(kid)
+        end_p = pos[chain_test[-1]]
+        if UP(end_p) <= UP(pos[root]) + body_h * 0.05 and len(chain_test) >= 2:
+            tail_root = kid
+            break
+    tail = []
+    if tail_root is not None:
+        tail = on_axis_chain(tail_root, direction_up=False)
+
+    # Limbs = remaining lateral chains rooted on the spine.
+    # Classify each into wings/arms/legs by:
+    #   * UP(start) vs spine span → upper (wings) or lower (legs)
+    #   * winged ckpt_family bumps "upper" → wings; else "upper" → arms
+    #   * sign of SIDE → _l / _r
+    used = set(spine) | set(tail)
+    spine_lateral_kids = []
+    for sp_ni in spine:
+        for k in children[sp_ni]:
+            if k in used:
+                continue
+            if abs(SIDE(pos[k]) - root_side) <= side_gate:
+                continue  # still on-axis, not a real lateral
+            spine_lateral_kids.append((sp_ni, k))
+
+    # Group by sign of SIDE relative to root_side.
+    left_chains, right_chains = [], []
+    for sp_ni, k in spine_lateral_kids:
+        ch = longest_chain(k)
+        signed = SIDE(pos[k]) - root_side
+        rec = {
+            'chain': ch,
+            'attach_height': UP(pos[sp_ni]),
+            'tip_height': UP(pos[ch[-1]]),
+            'span': max(abs(SIDE(pos[c]) - root_side) for c in ch),
+            'length': len(ch),
+            'side_sign': signed,
+        }
+        (left_chains if signed > 0 else right_chains).append(rec)
+
+    # For each side, classify upper-most longest as wing/arm,
+    # next as leg if its tip is BELOW root.
+    spine_top = UP(pos[spine[-1]]) if spine else UP(pos[root])
+    spine_btm = UP(pos[spine[0]])
+
+    def split_upper_lower(chains):
+        if not chains:
+            return None, None
+        # Upper = attaches in top half of spine OR tip above root
+        upper = sorted(
+            [c for c in chains if c['attach_height'] > (spine_btm + 0.5 * (spine_top - spine_btm))
+             or c['tip_height'] > UP(pos[root]) + body_h * 0.1],
+            key=lambda c: (-c['length'], -c['span']),
+        )
+        lower = sorted(
+            [c for c in chains
+             if c['tip_height'] < UP(pos[root]) - body_h * 0.05
+             and c not in upper],
+            key=lambda c: (-c['length'], -c['span']),
+        )
+        return (upper[0] if upper else None,
+                lower[0] if lower else None)
+
+    upper_l, lower_l = split_upper_lower(left_chains)
+    upper_r, lower_r = split_upper_lower(right_chains)
+
+    is_winged_family = ckpt_family in ('flying',)
+    upper_role = 'wing' if is_winged_family else 'arm'
+
+    name_by_idx = {}
+
+    # ── ROOT
+    name_by_idx[root] = 'hip'
+
+    # ── SPINE / NECK / HEAD
+    # Last spine joint = head if it's near the top AND has no kids.
+    spine_assign = list(spine[1:])  # skip root
+    if spine_assign:
+        head_ni = None
+        if (UP(pos[spine_assign[-1]]) >= spine_top - body_h * 0.02
+                and not children[spine_assign[-1]]):
+            head_ni = spine_assign.pop()
+        # Last 1-2 remaining = neck
+        neck_count = min(2, max(1, len(spine_assign) // 6))
+        spine_count = max(0, len(spine_assign) - neck_count)
+        for i in range(spine_count):
+            name_by_idx[spine_assign[i]] = f'spine_{i + 1:02d}'
+        for j in range(neck_count):
+            ni = spine_assign[spine_count + j]
+            name_by_idx[ni] = f'neck_{j + 1:02d}'
+        if head_ni is not None:
+            name_by_idx[head_ni] = 'head'
+
+    # ── TAIL
+    if tail:
+        for i, ni in enumerate(tail):
+            name_by_idx[ni] = f'tail_{i + 1:02d}'
+
+    # ── LIMBS
+    def name_chain(chain, role, side_suffix):
+        for i, ni in enumerate(chain):
+            name_by_idx[ni] = f'{role}_{side_suffix}_{i + 1:02d}'
+
+    if upper_l: name_chain(upper_l['chain'], upper_role, 'l')
+    if upper_r: name_chain(upper_r['chain'], upper_role, 'r')
+    if lower_l: name_chain(lower_l['chain'], 'leg', 'l')
+    if lower_r: name_chain(lower_r['chain'], 'leg', 'r')
+
+    # ── FALLBACK for anything still unnamed (extra fingers, tail
+    #   branches, accessories). Use "limb_NN" indexed by insertion
+    #   order — still T5-meaningful as "limb" vs "joint".
+    unnamed = [ji for ji in joint_idxs if ji not in name_by_idx]
+    for i, ni in enumerate(unnamed):
+        name_by_idx[ni] = f'limb_{i + 1:02d}'
+
+    return name_by_idx
+
+
 def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30,
-                          perturb: bool = False) -> None:
+                          perturb: bool = False, ckpt_family: str = 'all') -> None:
     """Read a Puppeteer-rigged GLB and write a BVH the AnyTop pipeline
     can ingest. Per-joint Euler order defaults to ZXY.
 
@@ -158,13 +377,14 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30,
     skin = skins[0]
     joint_idxs = skin["joints"]
     nodes = gltf["nodes"]
-    name_by_idx = {i: (nodes[i].get("name") or f"joint_{i}") for i in joint_idxs}
     parent_by_idx = {i: -1 for i in joint_idxs}
     for parent_idx in joint_idxs:
         for child in (nodes[parent_idx].get("children") or []):
             if child in joint_idxs:
                 parent_by_idx[child] = parent_idx
     root = next((i for i in joint_idxs if parent_by_idx[i] == -1), joint_idxs[0])
+    # name_by_idx is filled below from anatomical heuristics so AnyTop's
+    # T5 conditioner gets semantic signal (audit acc4f279 finding #1).
 
     # Compute WORLD bind positions from inverseBindMatrices.
     # ibm = inverse(joint_to_world_bind) -> joint_to_world_bind = inverse(ibm).
@@ -193,6 +413,19 @@ def _extract_bvh_from_glb(glb_path: str, out_bvh: str, n_frames: int = 30,
         if jidx not in world_by_idx:
             tr = nodes[jidx].get("translation") or [0.0, 0.0, 0.0]
             world_by_idx[jidx] = np.asarray(tr, dtype=np.float32)
+
+    # ── Anatomical rename (Fix #1 from audit acc4f279). ──────────
+    # T5 conditioner reads joint name strings. Cloud rig emits
+    # joint_<N> placeholders → near-zero embedding → identity motion.
+    # Replace with topology+IBM-derived semantic names ("hip",
+    # "wing_l_03", "tail_02", ...) before BVH emission so downstream
+    # cond.npy["joints_names"] carries meaning.
+    name_by_idx = _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family=ckpt_family)
+    # Defensive fallback in case the heuristic returns empty.
+    for ji in joint_idxs:
+        if ji not in name_by_idx:
+            name_by_idx[ji] = (nodes[ji].get("name") or f"joint_{ji}")
+    _log(f"anatomical names ({ckpt_family}): {list(name_by_idx.values())[:12]}...")
 
     lines = ["HIERARCHY"]
     _emit_bvh_node(
@@ -317,6 +550,18 @@ def animate_mesh(
         with open(rig_path, "wb") as f:
             f.write(rig_glb_bytes)
 
+        # ── Step 0: predict ckpt_family up-front so anatomical naming
+        # gets the right `wing` vs `arm` labeling (audit acc4f279 #1).
+        # Re-applies the same logic Step 3 + 3.0 use later.
+        _pre_ckpt = _pick_checkpoint(anim_type)
+        _winged_kw = ('dragon', 'wing', 'wyvern', 'bat', 'pterodactyl',
+                      'eagle', 'phoenix', 'griffin', 'pegasus', 'fly')
+        _pl = (str(prompt) if prompt else '').lower()
+        _al = (str(anim_type) if anim_type else '').lower()
+        if any(k in _pl or k in _al for k in _winged_kw):
+            _pre_ckpt = 'flying'
+        _log(f"step 0: pre-classified ckpt_family={_pre_ckpt} (used for anatomical naming)")
+
         # ── Step 1: extract BVH skeleton from the GLB ─────────────
         # Two BVH files with DIFFERENT names. Both 30 frames so
         # AnyTop's tpos_first_frame indexing doesn't crash. CRITICAL:
@@ -325,8 +570,8 @@ def animate_mesh(
         # this the sampler degenerates to identity rotations and the
         # mesh stays frozen on its rest pose.
         _log("step 1: extracting BVH skeleton (tpos clean + idle perturbed)")
-        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=30, perturb=False)
-        _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30, perturb=True)
+        _extract_bvh_from_glb(rig_path, tpos_bvh, n_frames=30, perturb=False, ckpt_family=_pre_ckpt)
+        _extract_bvh_from_glb(rig_path, motion_bvh, n_frames=30, perturb=True, ckpt_family=_pre_ckpt)
 
         # ── Step 2: preprocess for AnyTop (process_new_skeleton) ──
         # process_new_skeleton needs face_joints_names. We pick from
@@ -406,16 +651,20 @@ def animate_mesh(
                 raise TypeError(
                     f"cond.npy unwrapped to {type(_cond).__name__}, expected dict"
                 )
-            if skel_name in _cond and target_class not in _cond:
+            # Fix #3 (audit): ALWAYS overwrite. The previous guard
+            # `target_class not in _cond` left stale Dragon entries
+            # from prior runs in warm containers, masking the alias.
+            if skel_name in _cond:
                 _cond[target_class] = _cond[skel_name]
                 _np.save(_cond_path, _cond, allow_pickle=True)
+                _jn = _cond[target_class].get('joints_names', None) if hasattr(_cond[target_class], 'get') else None
+                _jn_preview = list(_jn[:8]) if _jn is not None else 'missing'
                 _log(f"step 3.5: aliased cond.npy {skel_name!r} -> {target_class!r} "
-                     f"(ckpt family={ckpt_name}, cond.keys()={list(_cond.keys())[:8]})")
+                     f"(ckpt={ckpt_name}, cond.keys()={list(_cond.keys())[:8]}, "
+                     f"joints_names[:8]={_jn_preview})")
             else:
                 _log(f"step 3.5: cond.npy alias skipped "
-                     f"(skel_in_cond={skel_name in _cond}, "
-                     f"target_in_cond={target_class in _cond}, "
-                     f"cond.keys()={list(_cond.keys())[:8]})")
+                     f"(skel_in_cond=False, cond.keys()={list(_cond.keys())[:8]})")
         except Exception as _e:
             _log(f"step 3.5: cond.npy alias FAILED: {_e!r}, falling back to skel_name")
             target_class = skel_name  # legacy behaviour as fallback
