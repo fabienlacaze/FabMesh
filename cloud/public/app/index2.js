@@ -1605,6 +1605,19 @@ function refreshButtonStates(p) {
   setStageOpenState('step-card-image', p.images.length > 0);
   setStageOpenState('step-card-mesh',  p.meshes.length > 0);
   setStageOpenState('step-card-rig',   p.rigs.length   > 0);
+  // 2026-06-02: also fire the auto-pick-source path for any Create New
+  // that ended up open above. The <details> `toggle` event only fires
+  // on user-driven clicks, not when setStageOpenState mutates `.open`
+  // programmatically, so the auto-pick wired into bindStageMutualExclusion
+  // never ran at load time → user saw a stale "No image/mesh selected"
+  // placeholder on Steps 2/3/4.
+  ['step-card-mesh', 'step-card-rig', 'step-card-animation'].forEach((cid) => {
+    const card = document.getElementById(cid);
+    const stage = card && card.querySelector('.stage-create');
+    if (stage && stage.open) {
+      try { _autoPickSourceForCreateNew(card); } catch (_) {}
+    }
+  });
 }
 
 function toggleEditStage(cardId, show) {
