@@ -266,6 +266,43 @@ def _detect_topology_family(joint_idxs, parent_by_idx, world_by_idx) -> str:
     return 'all'
 
 
+def _count_target_roles(joint_idxs, parent_by_idx, world_by_idx) -> dict:
+    """Return a Counter-like dict {'hip':N,'spine':N,'leg':N,'wing':N,...}
+    for the target rig. Reuses scripts/anytop_retarget.py's
+    `_target_anatomical_roles` (the same heuristic that drives source→
+    target role-matching during retarget) so the family classifier and
+    the retargeter agree on what each bone IS.
+
+    Called with ckpt_family='flying' so any upward laterals are labeled
+    'wing' (not 'arm') — otherwise a real dragon target would show
+    wing=0 and get downgraded to biped/quadruped before the gate can
+    see its wings.
+    """
+    if not joint_idxs:
+        return {}
+    try:
+        # /tmp is where modal_app ships anytop_retarget.py (line 117).
+        sys.path.insert(0, "/tmp")
+        if 'anytop_retarget' in sys.modules:
+            del sys.modules['anytop_retarget']
+        from anytop_retarget import _target_anatomical_roles  # type: ignore
+        roles = _target_anatomical_roles(
+            joint_idxs, parent_by_idx, world_by_idx, ckpt_family='flying',
+        )
+    except Exception as _e:
+        print(f"[topology] _count_target_roles failed: {_e!r}", flush=True)
+        return {}
+    counts: dict = {}
+    for _ji, _tup in roles.items():
+        if not _tup:
+            continue
+        _role = _tup[0] if isinstance(_tup, (tuple, list)) else None
+        if not _role:
+            continue
+        counts[_role] = counts.get(_role, 0) + 1
+    return counts
+
+
 def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str = 'all'):
     """Build a name_by_idx that uses anatomical strings derived from
     topology + world bind positions, so AnyTop's T5 conditioner gets
@@ -737,6 +774,7 @@ def animate_mesh(
         # against the BUNDLED cond.npy keyword table — see
         # _pick_trained_class().
         _topo_family = 'all'
+        _tgt_role_counts: dict = {}
         try:
             sys.path.insert(0, "/tmp")
             from puppeteer_to_skeleton import _read_glb, _read_accessor  # type: ignore
@@ -766,9 +804,11 @@ def animate_mesh(
                     _tr = _nodes_topo[_ji].get("translation") or [0.0, 0.0, 0.0]
                     _world_topo[_ji] = _np_topo.asarray(_tr, dtype=_np_topo.float32)
             _topo_family = _detect_topology_family(_ji_topo, _parent_topo, _world_topo)
+            _tgt_role_counts = _count_target_roles(_ji_topo, _parent_topo, _world_topo)
         except Exception as _e:
             _log(f"step 0: topology probe failed ({_e!r})")
-        _log(f"step 0: topology_family={_topo_family} (used as class-selection fallback)")
+        _log(f"step 0: topology_family={_topo_family} tgt_roles={_tgt_role_counts} "
+             f"(role-counts authoritative; topology_family is fallback)")
 
         # ── Step 1 (Strategy 1, 2026-06-02): pick the BUNDLED trained
         # class whose topology+motion best matches the user's intent,
@@ -781,7 +821,7 @@ def animate_mesh(
         # learned class embedding was conditioned on.
         target_class, ckpt_family = _pick_trained_class(
             prompt=prompt, anim_type=anim_type, asset_family='',
-            topology_family=_topo_family,
+            topology_family=_topo_family, tgt_role_counts=_tgt_role_counts,
         )
         ckpt = _resolve_checkpoint_path(ckpt_family)
         if not ckpt:
@@ -1004,12 +1044,19 @@ _TRAINED_CLASS_BY_KEYWORD = [
 
 
 def _pick_trained_class(prompt: str, anim_type: str, asset_family: str = '',
-                        topology_family: str = '') -> tuple:
+                        topology_family: str = '',
+                        tgt_role_counts: dict = None) -> tuple:
     """Return (trained_class, ckpt_family) by inspecting (in order):
        * prompt text (any keyword from _TRAINED_CLASS_BY_KEYWORD)
        * asset_family the upstream client passed
        * anim_type (rare — usually 'run'/'idle' but maybe 'fly')
-       * topology_family (from _detect_topology_family on the rig)
+       * tgt_role_counts (authoritative role-based gate from the target
+         rig: {'wing': N, 'leg': N, 'spine': N, ...}). This OVERRIDES
+         the geometric topology_family heuristic, which is brittle on
+         non-canonical poses (cf. fix #2 — a quadruped with splayed
+         knees was misclassified as 'flying' because lateral_long >= 4).
+       * topology_family (from _detect_topology_family on the rig) —
+         only consulted when the role gate is ambiguous.
 
     Falls back to (Bear, quadropeds) — the highest-bone-count
     quadruped which we found to retarget reasonably to almost any
@@ -1021,6 +1068,21 @@ def _pick_trained_class(prompt: str, anim_type: str, asset_family: str = '',
     for pat, cls, fam in _TRAINED_CLASS_BY_KEYWORD:
         if re.search(pat, haystack):
             return (cls, fam)
+    # Role-count gate (authoritative; the geometric topology_family
+    # heuristic is brittle on non-canonical bind poses — e.g. a bear
+    # with splayed knees gets lateral_long >= 4 and routes to 'flying'
+    # even with zero wing-role bones in the target).
+    if tgt_role_counts:
+        wings = int(tgt_role_counts.get('wing', 0))
+        legs = int(tgt_role_counts.get('leg', 0))
+        spine = int(tgt_role_counts.get('spine', 0))
+        if wings == 0 and legs >= 4:
+            return ('Bear', 'quadropeds')
+        if wings >= 2:
+            return ('Dragon', 'flying')
+        if wings == 0 and 1 <= legs <= 3 and spine >= 1:
+            return ('Trex', 'bipeds')
+        # else: fall through to topology_family heuristic.
     # Topology fallback.
     if topology_family == 'flying':
         return ('Dragon', 'flying')

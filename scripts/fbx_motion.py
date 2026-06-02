@@ -1,4 +1,4 @@
-"""FBX → motion dict parser. Output shape IDENTICAL to
+"""FBX -> motion dict parser. Output shape IDENTICAL to
 scripts/anytop_retarget.py:_parse_bvh() so the retarget core
 (`retarget_motion_to_rig`) is reusable verbatim.
 
@@ -159,7 +159,7 @@ def parse_fbx(fbx_path: str, source_skel_hint: Optional[str] = None) -> dict:
 
 
 if __name__ == "__main__":
-    # Standalone CLI: `python scripts/fbx_motion.py <fbx_path>` →
+    # Standalone CLI: `python scripts/fbx_motion.py <fbx_path>` ->
     # prints a one-line summary. Used for local sanity testing.
     if len(sys.argv) < 2:
         print("usage: python fbx_motion.py <fbx_path>")

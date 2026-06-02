@@ -1,4 +1,4 @@
-"""AnyTop-canonical-BVH → Puppeteer-rig glTF retargeter.
+"""AnyTop-canonical-BVH -> Puppeteer-rig glTF retargeter.
 
 The default AnyTop pipeline trains class embeddings on ~75 SPECIFIC
 artist-rigged skeletons (Dragon 142 joints, Lion 31, Horse 79, …).
@@ -18,11 +18,11 @@ container side picks the trained class, runs sample.generate, hands
 the produced BVH here.
 
 Algorithm:
-  1. Parse the BVH (bvhsdk) → source hierarchy + per-frame Euler
+  1. Parse the BVH (bvhsdk) -> source hierarchy + per-frame Euler
      rotations + rest-pose offsets.
   2. Classify EVERY source bone with ``_anatomical_role_from_bip01``
      which knows the AnyTop canonical naming conventions.
-  3. Read the target GLB (skin 0) → skin.joints[] + IBM positions.
+  3. Read the target GLB (skin 0) -> skin.joints[] + IBM positions.
   4. Classify every target bone with the SAME anatomical vocabulary
      using the topology heuristic shipped in
      ``modal_app/_anytop_anim.py:_anatomical_names`` (re-imported
@@ -57,7 +57,7 @@ from scipy.spatial.transform import Rotation as R
 
 
 # ============================================================
-# 1. Source-bone classifier — AnyTop canonical names → roles
+# 1. Source-bone classifier — AnyTop canonical names -> roles
 # ============================================================
 
 _SIDE_TOKEN_L = re.compile(r"(_L_|_l_|Left|LeftLeg|LLeg|L_|_l$)", re.IGNORECASE)
@@ -519,14 +519,14 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
 # ============================================================
 
 def _match_targets_to_sources(
-    src_roles: Dict[int, Tuple[str, Optional[str], int]],   # src_bvh_idx → (role, side, idx)
-    tgt_roles: Dict[int, Tuple[str, Optional[str], int]],   # tgt_node_idx → (role, side, idx)
+    src_roles: Dict[int, Tuple[str, Optional[str], int]],   # src_bvh_idx -> (role, side, idx)
+    tgt_roles: Dict[int, Tuple[str, Optional[str], int]],   # tgt_node_idx -> (role, side, idx)
 ) -> Dict[int, int]:
     """For every target bone with a role, pick the BEST source bone:
       * same role + same side, closest chain index
       * fallback: same role, ignore side
-      * fallback: hip → hip, head → head (sideless)
-    Returns dict target_node_idx → source_bvh_idx. Unmapped targets stay
+      * fallback: hip -> hip, head -> head (sideless)
+    Returns dict target_node_idx -> source_bvh_idx. Unmapped targets stay
     pinned to their rest pose."""
     # Group sources by (role, side).
     by_role: Dict[Tuple[str, Optional[str]], List[Tuple[int, int]]] = {}
@@ -622,14 +622,22 @@ def retarget_fbx_to_rig(
     """
     # Lazy import — keeps the parent retarget module usable in Modal
     # containers that don't ship the rig_mappings package.
-    from fbx_motion import parse_fbx  # type: ignore
-    from rig_mappings import load_mapping, make_classifier_chain  # type: ignore
+    # Modal mounts `scripts/` via add_local_python_source("scripts"),
+    # so the package-qualified form (`scripts.fbx_motion`) is the only
+    # one that resolves there. We try both to stay compatible with
+    # local CLI runs where `scripts/` itself is on sys.path.
+    try:
+        from scripts.fbx_motion import parse_fbx  # type: ignore
+        from scripts.rig_mappings import load_mapping, make_classifier_chain  # type: ignore
+    except ImportError:
+        from fbx_motion import parse_fbx  # type: ignore
+        from rig_mappings import load_mapping, make_classifier_chain  # type: ignore
 
     print(f"[retarget_fbx] parsing FBX: {fbx_path} hint={source_skel_id}")
     motion = parse_fbx(fbx_path, source_skel_hint=source_skel_id)
     detected = motion.get("detected_skeleton_id")
 
-    # Resolve which mapping to use. 'auto' → fingerprint; else trust
+    # Resolve which mapping to use. 'auto' -> fingerprint; else trust
     # the caller. Fall back to UE5 mannequin on a miss so we never
     # 500 — degraded retarget is better than failed retarget.
     effective_skel = source_skel_id
@@ -653,7 +661,7 @@ def retarget_fbx_to_rig(
             motion["offsets"] = mapping.axis_to_target(motion["offsets"])
             motion["root_pos"] = mapping.axis_to_target(motion["root_pos"])
             print(f"[retarget_fbx] axis rotation applied: "
-                  f"{mapping.axis_source} → {mapping.axis_target}", flush=True)
+                  f"{mapping.axis_source} -> {mapping.axis_target}", flush=True)
         except Exception as e:
             print(f"[retarget_fbx] WARN axis rotation failed: {e}", flush=True)
 
@@ -780,9 +788,9 @@ def retarget_motion_to_rig(
     # bones onto the same chain_idx:
     #   (a) `Wing` (no captured digit) falls through to idx=0 so every
     #       single wing bone (clavicle..forearm..hand..fingertip) ends
-    #       up at chain_idx=0 → every target wing bone maps to the SAME
-    #       source bone → wings concertina-explode.
-    #   (b) `Calf` and `HorseLink` are both pinned to base_idx=2 → dragon
+    #       up at chain_idx=0 -> every target wing bone maps to the SAME
+    #       source bone -> wings concertina-explode.
+    #   (b) `Calf` and `HorseLink` are both pinned to base_idx=2 -> dragon
     #       legs get duplicated mapping.
     # Fix: for every (role, side) chain with non-unique indices, walk
     # back to the chain root in the BVH hierarchy and renumber by depth.
@@ -896,7 +904,7 @@ def retarget_motion_to_rig(
         Used 2026-06-02 for retargeting: source bones in AnyTop's
         artist-rigged Dragon often carry rest-pose twists that don't
         exist on our Puppeteer rig. Transferring the full delta
-        propagates those twists onto the wrong axes (→ "moves in all
+        propagates those twists onto the wrong axes (-> "moves in all
         directions"). Transferring only the swing keeps the
         directional intent and discards the spin-around-axis component.
         """
@@ -1017,7 +1025,7 @@ def retarget_motion_to_rig(
             src_world_rest[sidx] = _q_mul(src_world_rest[p], q_local0)
 
     # Build per-target track. Unmapped targets get rest-pose (no
-    # rotation track → renderer keeps the static node rotation).
+    # rotation track -> renderer keeps the static node rotation).
     times = np.arange(n_frames, dtype=np.float32) * float(bvh["frame_time"])
     if target_fps and target_fps > 0:
         new_t = np.arange(0.0, float(times[-1]) + 1.0 / target_fps,
@@ -1157,7 +1165,7 @@ def retarget_motion_to_rig(
                     scale = sinhf / sinh
                     ds = np.array([ds[0] * scale, ds[1] * scale, ds[2] * scale,
                                    np.cos(ang * f / 2.0)])
-            # Basis change source-parent → target-parent.
+            # Basis change source-parent -> target-parent.
             delta_tgt_full = _q_mul(_q_mul(basis, ds), basis_inv)
             # Decompose around target bone axis (in target parent frame).
             swing, _twist = _swing_twist(delta_tgt_full, bone_axis)
@@ -1215,6 +1223,69 @@ def retarget_motion_to_rig(
             "sampler": s_idx,
             "target": {"node": tni, "path": "rotation"},
         })
+
+    # ---- ROOT TRANSLATION TRACK (Fix #1) ----
+    # Without this, the character animates limbs in place and never
+    # translates through the world. Emit a TRS-translation channel on
+    # the hip target node, sourced from motion['root_pos']. Apply a
+    # hip-rest-height scale so the character doesn't sink/float on
+    # skeletons of different stature. FBX path already pre-rotated
+    # root_pos to target axes (line 654) — just scale here.
+    hip_tni = next(
+        (tni for tni, (r, _, _) in tgt_roles.items() if r == 'hip'),
+        None,
+    )
+    if hip_tni is not None and 'root_pos' in bvh:
+        root_pos = np.asarray(bvh['root_pos'], dtype=np.float64)  # (F, 3)
+        if root_pos.ndim == 2 and root_pos.shape[0] == n_frames and root_pos.shape[1] == 3:
+            # Target hip world rest Y (up_axis=1, confirmed by GLB convention).
+            tgt_hip_y = abs(float(world_by_idx.get(hip_tni, np.zeros(3))[1]))
+            # Source hip world rest Y: walk offsets from hip up to root.
+            src_hip_idx = mapping.get(hip_tni, -1)
+            src_offsets = bvh.get('offsets')
+            src_parents = bvh.get('parents')
+            src_hip_y = 0.0
+            if src_hip_idx >= 0 and src_offsets is not None and src_parents is not None:
+                cur = src_hip_idx
+                for _ in range(1024):
+                    if cur < 0:
+                        break
+                    try:
+                        src_hip_y += float(np.asarray(src_offsets[cur])[1])
+                        cur = int(src_parents[cur])
+                    except (IndexError, TypeError, ValueError):
+                        break
+            src_hip_y = abs(src_hip_y)
+            scale = (tgt_hip_y / src_hip_y) if (tgt_hip_y > 1e-6 and src_hip_y > 1e-6) else 1.0
+            tr = (root_pos * scale).astype(np.float64)
+            # Resample to target FPS — mirror the quat-resample logic above.
+            if target_fps and target_fps > 0 and len(new_t) != n_frames:
+                idxs = np.clip((new_t / max(times[-1], 1e-6)) * (n_frames - 1), 0, n_frames - 1)
+                idxs = idxs.round().astype(np.int64)
+                tr = tr[idxs]
+            tr = tr.astype("<f4")
+            tr_bv = _add_buffer_view(gltf, bin_data, tr.tobytes())
+            tr_acc = _add_accessor(
+                gltf, tr_bv, count=tr.shape[0],
+                comp_type=5126, acc_type="VEC3",
+            )
+            s_idx_tr = len(samplers)
+            samplers.append({"input": input_acc, "output": tr_acc, "interpolation": "LINEAR"})
+            channels_anim.append({
+                "sampler": s_idx_tr,
+                "target": {"node": hip_tni, "path": "translation"},
+            })
+            print(
+                f"[retarget] root translation track: hip_tni={hip_tni} "
+                f"scale={scale:.4f} frames={tr.shape[0]}"
+            )
+        else:
+            print(
+                f"[retarget][warn] root_pos shape {root_pos.shape} mismatch "
+                f"(expected ({n_frames}, 3)); skipping translation track"
+            )
+    else:
+        print(f"[retarget][warn] no hip target node OR no root_pos; skipping translation track")
 
     anim_obj = {
         "name": clip_name,

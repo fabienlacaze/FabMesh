@@ -1,5 +1,48 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (Stage-1 AnyTop retarget fixes — workflow wf_20d765c3)
+
+**Pourquoi**: 3 worktrees parallèles (charmap, family-classifier, root-translation)
+ont chacun proposé un fix pour des symptômes différents observés sur AnyTop +
+FBX-retarget. Vote ADOPT sur les 3. Appliqués séquentiellement sur master dans
+l'ordre : charmap (cosmetic only) -> family classifier -> root translation.
+
+**Changements**:
+
+1. **`scripts/anytop_retarget.py` + `scripts/fbx_motion.py` + `scripts/rig_mappings/_loader.py`**
+   (charmap) — remplace les flèches Unicode `→` par `->` dans docstrings,
+   commentaires et logs. Évite les `UnicodeEncodeError: 'charmap' codec` sur
+   Windows quand stdout n'est pas en UTF-8 (cas par défaut de Modal worker logs
+   redirigés vers fichier). Aucun changement comportemental.
+
+2. **`modal_app/_anytop_anim.py`** (family classifier) — ajoute
+   `_count_target_roles()` qui compte les rôles anatomiques (wing/leg/spine) du
+   rig cible via `_target_anatomical_roles` de anytop_retarget. Cette grille
+   role-based devient AUTHORITATIVE dans `_pick_trained_class()` et OVERRIDE
+   l'heuristique géométrique `_detect_topology_family` (qui classait un
+   quadrupède aux genoux écartés comme 'flying' parce que lateral_long >= 4).
+   Gates : `wings==0 and legs>=4` -> Bear/quadropeds ; `wings>=2` -> Dragon/flying ;
+   `wings==0 and 1<=legs<=3 and spine>=1` -> Trex/bipeds.
+
+3. **`scripts/anytop_retarget.py`** (root translation) — ajoute un canal
+   `translation` sur le hip target node, sourcé depuis `motion['root_pos']`
+   avec scale `tgt_hip_y / src_hip_y` (calculé en marchant la chaîne d'offsets
+   jusqu'à la racine BVH). Sans ce track, le perso animait ses membres sur
+   place sans jamais se déplacer dans le monde. FBX path déjà pre-rotated
+   root_pos sur l'axe target (line 654 du retarget), donc on ne fait que
+   scaler ici. Resample FPS aligné sur la logique quat-resample existante.
+
+**Validation** : `python c:/tmp/run_fbx_retarget_local.py` produit 23 channels
+au lieu de 22 (la translation track est bien émise), `scale=0.0047 frames=20`
+pour orc_marron + AS_Orc_M1_Run.fbx.
+
+**À faire ensuite** :
+
+- Re-tester sur dragon AnyTop pour confirmer que le family classifier route
+  bien sur `flying/Dragon` quand wing_count>=2.
+- Re-tester sur quadrupède (Bear/Lion) pour confirmer que le faux-positif
+  'flying' a disparu.
+
 ## 2026-06-02 (cloud anim viewer — toujours jouait l'Idle procédural)
 
 **Pourquoi**: en testant le viewer local du FBX retarget, on a découvert que

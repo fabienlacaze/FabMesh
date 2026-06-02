@@ -3,7 +3,7 @@
 Each JSON file is keyed by (source_skeleton_id, target_family) and
 defines:
 
-  * a per-bone mapping table (source_name → role, side, chain_idx)
+  * a per-bone mapping table (source_name -> role, side, chain_idx)
   * a list of `drop_patterns` (regex) — bones the retarget core must
     silently ignore in the SOURCE
   * an optional `extends` field naming another mapping JSON whose
@@ -57,9 +57,9 @@ class Mapping:
     target_family : str
         e.g. 'humanoid_puppeteer', 'winged_puppeteer'
     bone_table : Dict[str, Tuple[str, Optional[str], int]]
-        explicit source-bone-name → (role, side, chain_idx) lookup
+        explicit source-bone-name -> (role, side, chain_idx) lookup
     drop_re : re.Pattern
-        compiled regex of OR'd drop_patterns (matches → sentinel)
+        compiled regex of OR'd drop_patterns (matches -> sentinel)
     axis_source : str
         'y_up' | 'z_up' — used to build axis_to_target rotation
     axis_target : str
@@ -86,8 +86,8 @@ class Mapping:
         `anytop_retarget._classify_source_bone`.
 
         Resolution order:
-          1. drop_patterns regex  → ('', None, -1) sentinel (skip).
-          2. explicit bone_table  → table row.
+          1. drop_patterns regex  -> ('', None, -1) sentinel (skip).
+          2. explicit bone_table  -> table row.
           3. fall back to caller (the retarget core uses
              `_classify_source_bone` as the default, so unknown bones
              still get the generic regex pass).
@@ -121,11 +121,11 @@ class Mapping:
     def axis_to_target(self, arr: np.ndarray) -> np.ndarray:
         """Apply the axis-convention rotation to a (..., 3) array.
 
-        For UE5 (z-up) → Puppeteer (y-up), this is Rx(-90°):
+        For UE5 (z-up) -> Puppeteer (y-up), this is Rx(-90°):
             [ 1,  0,  0 ]
             [ 0,  0,  1 ]
             [ 0, -1,  0 ]
-        which sends +Z → +Y, +Y → -Z.
+        which sends +Z -> +Y, +Y -> -Z.
 
         Per-bone parent-relative rotations are NOT touched. Once the
         WORLD rest pose is rotated consistently (we rotate offsets +
