@@ -440,11 +440,11 @@
         back_view:  d?.back_view,
         tpose:      d?.tpose,
         mesh:       d?.mesh,
+        rig:        d?.rig,
+        anim:       d?.anim,
+        mvadapter:  d?.mvadapter,
       };
       // Helper: which Modal container is associated with a job kind?
-      // Returns UNDEFINED for kinds we don't track (anim, rig) — the
-      // caller must check before using c.warm so the cold-start toast
-      // / popup hint doesn't misfire for those job types.
       window.__modalContainerForKind = function (kind) {
         const map = {
           image:    'text2image',
@@ -458,8 +458,11 @@
           removebg: 'image_op',
           bg:       'image_op',
           rectify:  'tpose',
-          // anim, rig: no tracked container — return undefined so the
-          // UI skips the cold-start hint instead of misreporting it.
+          rig:      'rig',
+          anim:     'anim',
+          animation:'anim',
+          mvadapter:'mvadapter',
+          multiview:'mvadapter',
         };
         const key = map[String(kind || '').toLowerCase()];
         if (!key) return undefined;
@@ -487,9 +490,12 @@
           const SERVICES = [
             { key: 'text2image', label: 'Image generation',  desc: 'Generate image from prompt' },
             { key: 'image_op',   label: 'Image edit',        desc: 'Modify, Inpaint, Upscale, Face Fix, Remove BG' },
-            { key: 'mesh',       label: '3D mesh',           desc: 'Generate 3D from image (TRELLIS-2)' },
+            { key: 'mvadapter',  label: 'Multi-view',        desc: 'MV-Adapter 6 orthographic views (creature, animal)' },
             { key: 'back_view',  label: 'Back view',         desc: '2-view back photo generation' },
             { key: 'tpose',      label: 'T-pose rectify',    desc: 'Strict T-pose front rectifier' },
+            { key: 'mesh',       label: '3D mesh',           desc: 'Generate 3D from image (TRELLIS-2)' },
+            { key: 'rig',        label: 'Rig',               desc: 'Auto-rig via Puppeteer skeleton' },
+            { key: 'anim',       label: 'Animation',         desc: 'AnyTop motion + retargeting' },
           ];
           let coldCount = 0;
           let allUnknown = true;
