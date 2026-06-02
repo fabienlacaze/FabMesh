@@ -7960,9 +7960,15 @@ async function handleAnimCopy(req: Request, env: Env): Promise<Response> {
 
 
 /** POST /api/animations/delete — body { url }. Removes the R2 blob
- *  if and only if the URL points under <user.id>/animations/ (so a
- *  hostile body can't nuke unrelated R2 keys). Always idempotent —
- *  missing keys return ok. */
+ *  AND the corresponding jobs row (asset_type='animation' with
+ *  mesh_url matching the deleted URL). Without the jobs delete the
+ *  vignette reappears on the next refresh because handleListMeshes
+ *  queries `jobs WHERE succeeded AND mesh_url IS NOT NULL` and
+ *  rebuilds the strip from there (observed in prod 2026-06-02 —
+ *  user deletes vignettes, refreshes page, they all come back).
+ *  Mirrors handleMeshesDelete which already does R2+jobs cleanup.
+ *  Restricted to URLs under <user.id>/animations/ so a hostile
+ *  body can't nuke unrelated R2 keys. Idempotent. */
 async function handleAnimDelete(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -7980,7 +7986,22 @@ async function handleAnimDelete(req: Request, env: Env): Promise<Response> {
     return err(403, 'can only delete your own animation files');
   }
   try { await env.MESHES.delete(key); } catch (e) {
-    console.warn('[animations/delete]', e instanceof Error ? e.message : String(e));
+    console.warn('[animations/delete] R2 delete failed', e instanceof Error ? e.message : String(e));
+  }
+  // Drop the jobs row whose mesh_url matches this URL so that
+  // handleListMeshes' Supabase query doesn't keep resurrecting the
+  // vignette on every page refresh.
+  try {
+    const { error, count } = await supabaseAdmin(env)
+      .from('jobs')
+      .delete({ count: 'exact' })
+      .eq('user_id', user.id)
+      .eq('asset_type', 'animation')
+      .eq('mesh_url', url);
+    if (error) console.warn('[animations/delete] jobs delete failed:', error.message);
+    else console.log(`[animations/delete] jobs row(s) deleted: ${count ?? 'n/a'} for key=${key}`);
+  } catch (e) {
+    console.warn('[animations/delete] jobs delete threw:', e instanceof Error ? e.message : String(e));
   }
   return json({ ok: true, deleted_key: key });
 }
