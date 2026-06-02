@@ -4493,7 +4493,14 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
         const id = (m.id || '').toLowerCase().replace(/-/g, '');
         return cleanSlug && (u.includes(cleanSlug) || id === cleanSlug || id.includes(cleanSlug));
       });
-      const inheritedProject = source?.projectName || meshes[0]?.projectName || null;
+      // 2026-06-02 fix: if no source mesh matches the rig's hex slug,
+      // the previous code fell back to `meshes[0]?.projectName` —
+      // i.e. the MOST RECENTLY CREATED mesh across ALL projects.
+      // That made unrelated rigs (lion rig, pig rig) silently appear
+      // in whatever project the user last touched (the dragon).
+      // Send orphans to the `_orphans` bucket instead so they're
+      // visible but don't pollute the project they were created on.
+      const inheritedProject = source?.projectName || '_orphans';
       meshes.push({
         filename,
         path: url,
@@ -4588,7 +4595,12 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
         const id = (m.id || '').toLowerCase().replace(/-/g, '');
         return cleanSlug && (u.includes(cleanSlug) || id === cleanSlug || id.includes(cleanSlug));
       });
-      const inheritedProject = source?.projectName || meshes[0]?.projectName || null;
+      // 2026-06-02 fix: same orphan-attribution bug as the rigged
+      // branch above — anims with an unmatched hex slug used to
+      // inherit the most recent project, so a stray anim from
+      // another project showed up in the current one. Route to
+      // _orphans now.
+      const inheritedProject = source?.projectName || '_orphans';
       meshes.push({
         filename,
         path: url,
