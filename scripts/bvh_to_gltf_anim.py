@@ -361,9 +361,26 @@ def _map_bvh_to_glb(
         m = INDEX_RE.match((name or '').strip())
         return int(m.group(1)) if m else None
 
+    # 2026-06-02 — when AnyTop is fed anatomical BVH joint names
+    # (`hip__j0`, `wing_l_01__j17`) the suffix encodes the exact
+    # position in the GLB skin.joints[] array. Highest-priority match
+    # because it's the ground truth our own emitter wrote.
+    SUFFIX_RE = re.compile(r'__j(\d+)\s*$')
+    def _skin_pos_of(name: str):
+        m = SUFFIX_RE.search(name or '')
+        return int(m.group(1)) if m else None
+
     for bvh_name in bvh_joint_names:
         if not bvh_name:
             continue
+        # 0. Round-trip suffix `__j<N>` — direct position in skin.joints[].
+        sp = _skin_pos_of(bvh_name)
+        if sp is not None and 0 <= sp < len(glb_bone_names):
+            cand = glb_bone_names[sp]
+            if cand not in used_glb_by_index:
+                out[bvh_name] = cand
+                used_glb_by_index.add(cand)
+                continue
         # 1. Exact
         if bvh_name in glb_bone_names:
             out[bvh_name] = bvh_name
