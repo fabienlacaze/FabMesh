@@ -14683,7 +14683,24 @@ window._navigateToJobStep = async function(jobId) {
   // Expand its Create New stage if collapsed.
   const stage = card.querySelector('.stage-create');
   if (stage && !stage.open) stage.open = true;
-  try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+  // 2026-06-02 fix: scrollIntoView right after toggling <details> open
+  // landed the user at the BOTTOM of the page because layout hadn't
+  // reflowed yet — the card's bounding box was still its pre-expand
+  // (collapsed) value. Wait two rAFs so the browser has time to
+  // compute the new heights, then resolve the absolute Y from a
+  // fresh getBoundingClientRect and use window.scrollTo so we never
+  // depend on the surrounding scroll container.
+  const _scrollToCard = () => {
+    const rect = card.getBoundingClientRect();
+    const top = (window.scrollY || 0) + rect.top - 16;
+    try {
+      window.scrollTo({ top, behavior: 'smooth' });
+    } catch (_) {
+      // Older browsers / Electron without smooth — fall back to instant.
+      try { card.scrollIntoView({ block: 'start' }); } catch (__) {}
+    }
+  };
+  requestAnimationFrame(() => requestAnimationFrame(_scrollToCard));
 };
 
 // Populate every per-step progress widget from state.jobs. Only jobs
