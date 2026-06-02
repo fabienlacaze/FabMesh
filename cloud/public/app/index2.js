@@ -14871,6 +14871,23 @@ function completeJob(id, success, errorMessage) {
   if (!success && errorMessage) {
     j.errorMessage = String(errorMessage);
   }
+  // 2026-06-02 liveliness: trigger the one-shot bounce-and-flash on
+  // the matching step card so the user gets a satisfying visual cue
+  // that something just succeeded. CSS animation is 1.5s; we remove
+  // the class after 1600ms so it can re-fire on the next completion.
+  try {
+    if (success) {
+      const stepIdx = _jobStepIndex(j);
+      if (stepIdx > 0) {
+        const cardId = ['step-card-image','step-card-mesh','step-card-rig','step-card-animation'][stepIdx - 1];
+        const card = document.getElementById(cardId);
+        if (card) {
+          card.classList.add('just-done');
+          setTimeout(() => card.classList.remove('just-done'), 1600);
+        }
+      }
+    }
+  } catch (_) {}
   renderJobs();
   // Auto-flush the console buffer to R2 so server-side debug has the
   // full log of every Generate* operation. Fire-and-forget; the lib
@@ -15052,6 +15069,23 @@ window._navigateToJobStep = async function(jobId) {
   requestAnimationFrame(() => requestAnimationFrame(_scrollToCard));
 };
 
+// Auto-open / collapse the GENERATING stage of a step card based on
+// whether its widget has any tiles. 2026-06-02 update: stay VISIBLE
+// at all times (per user request) — only the open/closed state changes.
+function _toggleGeneratingStage(stepIdx, hasRunning) {
+  const cardId = ['step-card-image','step-card-mesh','step-card-rig','step-card-animation'][stepIdx - 1];
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const stage = card.querySelector('.stage-generating');
+  if (!stage) return;
+  stage.style.display = '';  // always visible, just open/close
+  stage.open = !!hasRunning;
+  // Liveliness layer: badge pulse animates while a job runs on this
+  // step (CSS picks up .has-running). Drop the class when idle so the
+  // animation doesn't keep ticking forever.
+  card.classList.toggle('has-running', !!hasRunning);
+}
+
 // Populate every per-step progress widget from state.jobs. Only jobs
 // belonging to the currently-open project show up — the widget lives
 // inside that project's workspace, so cross-project bleed would be
@@ -15071,9 +15105,15 @@ function renderStepProgressWidgets() {
     if (!matching.length) {
       widget.classList.remove('has-jobs');
       widget.innerHTML = '';
+      try { _toggleGeneratingStage(s, false); } catch (_) {}
       continue;
     }
     widget.classList.add('has-jobs');
+    // Step badge only pulses while at least one job is STILL running.
+    // Done/error tiles keep showing for ~8s but the step itself stops
+    // being "active" so we let the badge calm down.
+    const hasRunning = matching.some(j => j.status === 'running');
+    try { _toggleGeneratingStage(s, hasRunning); } catch (_) {}
     widget.innerHTML = matching.map(j => {
       const pct = Math.round(j.progress || 0);
       const canCancel = j.status === 'running';
@@ -15085,9 +15125,22 @@ function renderStepProgressWidgets() {
                         : j.status === 'error' ? ' error'
                         : '';
       const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
+      // 2026-06-02: small source-asset thumbnail on every tile so the
+      // user instantly recognises which generation is theirs. Uses
+      // sourceImageUrl snapshot stamped at pushJob time → never the
+      // currently-selected version (race-safe).
+      const thumbUrl = j.sourceImageUrl ? (
+        /^(https?:|data:|blob:)/i.test(j.sourceImageUrl)
+          ? j.sourceImageUrl
+          : (typeof _toFileUrl === 'function' ? _toFileUrl(j.sourceImageUrl) : j.sourceImageUrl)
+      ) : '';
+      const thumbHtml = thumbUrl
+        ? `<img src="${escapeHtml(thumbUrl)}" alt="" class="step-progress-item-thumb"/>`
+        : '';
       return `
         <div class="step-progress-item${statusClass}" data-job-id="${j.id}">
           <div class="step-progress-item-header">
+            ${thumbHtml}
             <div class="step-progress-item-name">${escapeHtml(j.name)}</div>
             ${canCancel ? `<button class="step-progress-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}
           </div>
@@ -15137,9 +15190,18 @@ function renderJobs() {
     // for it across projects.
     const hasStep = _jobStepIndex(j) > 0;
     const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
+    const sbThumbUrl = j.sourceImageUrl ? (
+      /^(https?:|data:|blob:)/i.test(j.sourceImageUrl)
+        ? j.sourceImageUrl
+        : (typeof _toFileUrl === 'function' ? _toFileUrl(j.sourceImageUrl) : j.sourceImageUrl)
+    ) : '';
+    const sbThumbHtml = sbThumbUrl
+      ? `<img src="${escapeHtml(sbThumbUrl)}" alt="" class="step-progress-item-thumb"/>`
+      : '';
     return `
       <div class="job-item-2 ${j.status}" data-job-id="${j.id}">
         <div class="job-item-2-header">
+          ${sbThumbHtml}
           <div class="job-item-2-name">${escapeHtml(j.name)}</div>
           ${hasStep ? `<button class="job-goto-btn" onclick="event.stopPropagation(); window._navigateToJobStep(${j.id})" title="Jump to this step">Go to</button>` : ''}
           ${canCancel ? `<button class="job-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}

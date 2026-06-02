@@ -169,7 +169,6 @@
                 <span class="stage-hint">Generate a new image from a text prompt</span>
               </summary>
               <div class="stage-body">
-                <div class="step-progress-widget" id="step-progress-1" data-step="1"></div>
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
@@ -276,6 +275,18 @@
                 </div>
                 <input type="checkbox" id="ws-auto-multiview" style="display:none;" />
                 <button id="ws-generate-image" class="primary-btn">Generate <span class="generate-cost-pill"><span class="generate-cost-bolt">⚡</span><span id="ws-image-cost-value">2</span></span></button>
+              </div>
+            </details>
+
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="1">
+              <summary>
+                <span class="stage-icon">&#9678;</span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-1" data-step="1"></div>
               </div>
             </details>
 
@@ -420,7 +431,6 @@
                 <span class="stage-hint">Convert the selected image into a 3D mesh</span>
               </summary>
               <div class="stage-body stage-create-with-source">
-                <div class="step-progress-widget" id="step-progress-2" data-step="2" style="grid-column:1 / -1;"></div>
                 <div class="stage-create-form">
                   <div class="form-row">
                     <label>Engine</label>
@@ -561,6 +571,18 @@
               </div>
             </details>
 
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="2">
+              <summary>
+                <span class="stage-icon">&#9678;</span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-2" data-step="2"></div>
+              </div>
+            </details>
+
             <!-- ===== STAGE: EDIT SELECTED ===== -->
             <details class="stage stage-edit" open>
               <summary>
@@ -676,7 +698,6 @@
                 <span class="stage-hint">Bind a skeleton to your mesh for animation</span>
               </summary>
               <div class="stage-body stage-create-with-source">
-                <div class="step-progress-widget" id="step-progress-3" data-step="3" style="grid-column:1 / -1;"></div>
                 <div class="stage-create-form">
                   <div class="form-row">
                     <label>Engine</label>
@@ -694,6 +715,18 @@
                   </div>
                   <div id="ws-rig-source-filename" class="viewer-filename"></div>
                 </div>
+              </div>
+            </details>
+
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="3">
+              <summary>
+                <span class="stage-icon">&#9678;</span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-3" data-step="3"></div>
               </div>
             </details>
 
@@ -804,7 +837,6 @@
                 <span class="stage-hint">Generate animation clips for your rig via AI</span>
               </summary>
               <div class="stage-body stage-create-with-source">
-                <div class="step-progress-widget" id="step-progress-4" data-step="4" style="grid-column:1 / -1;"></div>
                 <div class="stage-create-form">
                   <!-- Engine dropdown hidden: AnyTop is the only wired
                        engine. Re-show when Procedural / Seed3D land. -->
@@ -868,6 +900,17 @@
                     <div class="preview-placeholder" id="ws-anim-source-placeholder">No rig selected</div>
                   </div>
                 </div>
+              </div>
+            </details>
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="4">
+              <summary>
+                <span class="stage-icon">&#9678;</span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-4" data-step="4"></div>
               </div>
             </details>
             <details class="stage stage-edit" open>
