@@ -15069,20 +15069,29 @@ window._navigateToJobStep = async function(jobId) {
   requestAnimationFrame(() => requestAnimationFrame(_scrollToCard));
 };
 
-// Auto-open / collapse the GENERATING stage of a step card based on
-// whether its widget has any tiles. 2026-06-02 update: stay VISIBLE
-// at all times (per user request) — only the open/closed state changes.
+// Track per-step "last seen hasRunning" so we only auto-toggle the
+// stage when the state CHANGES. Without this, the every-second render
+// tick would clobber the user's manual expand (they open it, next
+// render closes it). With this, the user's toggle wins until the
+// running state flips.
+const _stageGenLastRunning = { 1: null, 2: null, 3: null, 4: null };
+
 function _toggleGeneratingStage(stepIdx, hasRunning) {
   const cardId = ['step-card-image','step-card-mesh','step-card-rig','step-card-animation'][stepIdx - 1];
   const card = document.getElementById(cardId);
   if (!card) return;
   const stage = card.querySelector('.stage-generating');
   if (!stage) return;
-  stage.style.display = '';  // always visible, just open/close
-  stage.open = !!hasRunning;
-  // Liveliness layer: badge pulse animates while a job runs on this
-  // step (CSS picks up .has-running). Drop the class when idle so the
-  // animation doesn't keep ticking forever.
+  stage.style.display = '';  // always visible
+  // Only force the open state on TRANSITION (running ↔ idle). User's
+  // manual click between transitions is respected.
+  const last = _stageGenLastRunning[stepIdx];
+  if (last !== hasRunning) {
+    stage.open = !!hasRunning;
+    _stageGenLastRunning[stepIdx] = hasRunning;
+  }
+  // Liveliness: badge pulse + icon spin animate via CSS picking up
+  // .has-running on the step card.
   card.classList.toggle('has-running', !!hasRunning);
 }
 
@@ -15104,7 +15113,7 @@ function renderStepProgressWidgets() {
     });
     if (!matching.length) {
       widget.classList.remove('has-jobs');
-      widget.innerHTML = '';
+      widget.innerHTML = '<div class="step-progress-empty">Pas de g&eacute;n&eacute;ration en cours</div>';
       try { _toggleGeneratingStage(s, false); } catch (_) {}
       continue;
     }
