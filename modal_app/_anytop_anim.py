@@ -400,30 +400,50 @@ def _anatomical_names(joint_idxs, parent_by_idx, world_by_idx, ckpt_family: str 
     #   * UP(start) vs spine span → upper (wings) or lower (legs)
     #   * winged ckpt_family bumps "upper" → wings; else "upper" → arms
     #   * sign of SIDE → _l / _r
+    # 2026-06-02 fix: collect ALL non-spine non-tail kids and judge by
+    # the CHAIN'S TIP/MAX SIDE-SPAN, not the FIRST bone's position.
+    # The previous "first kid must be off-axis" gate dropped dragon
+    # legs because the hip joint sits ~centerline; only the knee/foot
+    # bones extend sideways. After fix, leg chains are kept and
+    # classified by where their END lands (below root → leg).
     used = set(spine) | set(tail)
     spine_lateral_kids = []
     for sp_ni in spine:
         for k in children[sp_ni]:
             if k in used:
                 continue
-            if abs(SIDE(pos[k]) - root_side) <= side_gate:
-                continue  # still on-axis, not a real lateral
-            spine_lateral_kids.append((sp_ni, k))
+            ch_test = longest_chain(k)
+            span = max(abs(SIDE(pos[c]) - root_side) for c in ch_test)
+            tip_below = UP(pos[ch_test[-1]]) < UP(pos[root]) - body_h * 0.02
+            # Keep if EITHER the chain has lateral span (arm/wing/leg
+            # that splays out) OR the chain ends below root (down-
+            # hanging leg even if kept near centerline).
+            if span > side_gate or tip_below:
+                spine_lateral_kids.append((sp_ni, k))
 
-    # Group by sign of SIDE relative to root_side.
+    # Group by sign of SIDE — use the SIDE-most bone of each chain
+    # (the tip extension) for the L/R decision, not the first bone.
+    # Dragon hip joints sit at centerline; only knee/foot determine
+    # which side the leg actually belongs to.
     left_chains, right_chains = [], []
     for sp_ni, k in spine_lateral_kids:
         ch = longest_chain(k)
-        signed = SIDE(pos[k]) - root_side
+        # Pick the bone with the LARGEST |SIDE-root_side| to decide
+        # the side; falls back to k for degenerate (all-centerline)
+        # chains so we still classify them rather than dropping them.
+        far_bone = max(ch, key=lambda c: abs(SIDE(pos[c]) - root_side))
+        side_val = SIDE(pos[far_bone]) - root_side
+        if abs(side_val) < 1e-4:
+            side_val = SIDE(pos[k]) - root_side  # last-resort
         rec = {
             'chain': ch,
             'attach_height': UP(pos[sp_ni]),
             'tip_height': UP(pos[ch[-1]]),
             'span': max(abs(SIDE(pos[c]) - root_side) for c in ch),
             'length': len(ch),
-            'side_sign': signed,
+            'side_sign': side_val,
         }
-        (left_chains if signed > 0 else right_chains).append(rec)
+        (left_chains if side_val > 0 else right_chains).append(rec)
 
     # For each side, classify upper-most longest as wing/arm,
     # next as leg if its tip is BELOW root.
