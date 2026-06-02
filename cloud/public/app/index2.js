@@ -12653,6 +12653,111 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(tick, 1000);
     });
   } catch (e) { /* localStorage parse fail, ignore */ }
+
+  // 2026-06-02: SERVER-SIDE resume of in-flight jobs. The localStorage
+  // path above only knows about rigs that THIS browser launched —
+  // anim/mesh jobs from other tabs or post-refresh lose their progress
+  // widget. Hit /api/me/active-jobs on boot, re-push everything that
+  // Supabase still considers in-flight, then poll the same endpoint
+  // every 8s. When a job disappears from the active list it must have
+  // succeeded/failed; mark it locally + refresh the current project so
+  // the new asset shows up immediately.
+  try {
+    if (typeof fetch !== 'function') return;
+    const _kindFromAssetType = (at, name) => {
+      const a = String(at || '').toLowerCase();
+      if (a === 'animation' || a === 'anim') return 'anim';
+      if (a === 'rig' || a === 'rigging') return 'rig';
+      if (a === 'mesh' || a === '3d' || a === 'image-to-3d') return 'mesh';
+      if (a === 'image' || a === 'text-to-image') return 'image';
+      return inferKind(name || '') || 'image';
+    };
+    const _displayName = (row) => {
+      const kind = _kindFromAssetType(row.asset_type, '');
+      const project = row.project_name || (row.options && row.options.project_name) || row.id.slice(0, 8);
+      const verb = ({
+        anim: `Animate ${row.mode || 'run'}`,
+        rig: 'Auto-rig AI (unirig)',
+        mesh: 'Generate 3D',
+        image: 'Generate images',
+      })[kind] || 'Job';
+      return `${verb}: ${project}`;
+    };
+    const _expectedFor = (kind) => ({ anim: 180000, rig: 180000, mesh: 110000, image: 30000 })[kind] || 60000;
+    const _serverPolledIds = new Set();  // local job.id we created → server job.id
+    const _jobByServerId = new Map();     // server job.id → local job
+
+    const _fetchActive = async () => {
+      try {
+        const r = await fetch('/api/me/active-jobs', { credentials: 'same-origin' });
+        if (!r.ok) return null;
+        const j = await r.json();
+        return Array.isArray(j?.jobs) ? j.jobs : [];
+      } catch (_) { return null; }
+    };
+    const _resumeOne = (row) => {
+      const kind = _kindFromAssetType(row.asset_type, '');
+      const project = row.project_name || (row.options && row.options.project_name) || null;
+      const startedAt = row.created_at ? Date.parse(row.created_at) : Date.now();
+      const params = {
+        Project: project || '—',
+        Type: row.asset_type || '—',
+        Resumed: 'yes',
+      };
+      const local = pushJob(
+        _displayName(row),
+        null,
+        params,
+        _expectedFor(kind),
+        startedAt,
+        { projectName: project || null },
+      );
+      _jobByServerId.set(row.id, local);
+      _serverPolledIds.add(local.id);
+    };
+
+    const _bootAndPoll = async () => {
+      const rows = await _fetchActive();
+      if (!Array.isArray(rows)) return;
+      rows.forEach(_resumeOne);
+      // Subsequent ticks: if any tracked server id disappears, mark the
+      // local job done (success — without a status endpoint per-kind we
+      // can't tell error vs done here, so we assume success and let the
+      // project reload bring up the actual asset). Errors will surface
+      // via the next handleListMeshes/projects refresh.
+      const _tick = async () => {
+        const cur = await _fetchActive();
+        if (!Array.isArray(cur)) {
+          setTimeout(_tick, 12000);
+          return;
+        }
+        const stillActive = new Set(cur.map(r => r.id));
+        for (const [sid, local] of Array.from(_jobByServerId.entries())) {
+          if (!stillActive.has(sid)) {
+            try { completeJob(local.id, true); } catch (_) {}
+            _jobByServerId.delete(sid);
+            // Refresh the current project view so the new mesh/rig/anim
+            // shows in the strip without a full reload.
+            try {
+              if (state.currentProject && typeof reloadCurrentProject === 'function') {
+                reloadCurrentProject();
+              }
+            } catch (_) {}
+          }
+        }
+        // Also pick up jobs we didn't know about yet (e.g. spawned in
+        // another tab).
+        for (const row of cur) {
+          if (!_jobByServerId.has(row.id)) _resumeOne(row);
+        }
+        setTimeout(_tick, 8000);
+      };
+      setTimeout(_tick, 8000);
+    };
+    // Defer slightly so initial pushJob calls don't clash with the
+    // localStorage rig-resume path above.
+    setTimeout(_bootAndPoll, 1200);
+  } catch (_) { /* never block app boot on resume */ }
 });
 
 document.getElementById('ws-mesh-export-btn')?.addEventListener('click', () => {

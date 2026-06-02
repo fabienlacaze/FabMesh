@@ -4829,6 +4829,30 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
  *  Sets project_name=NULL on every jobs row + DELETEs every user_assets
  *  row. With ?wipeR2=true ALSO deletes every R2 object under the user's
  *  prefix (binaries — destructive, no recovery). */
+/** GET /api/me/active-jobs — return the user's in-flight jobs so the
+ *  client can re-attach them on hard refresh / first boot. Without
+ *  this, a refresh during a long Modal job (~3 min anim, ~100s mesh)
+ *  silently loses the progress widget client-side even though the
+ *  job is still running on the server. */
+async function handleMeActiveJobs(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (isMock(env)) return json({ jobs: [] });
+  const { data, error } = await supabaseAdmin(env)
+    .from('jobs')
+    .select('id, asset_type, mode, status, credit_cost, created_at, options, project_name')
+    .eq('user_id', user.id)
+    .in('status', ['starting', 'processing', 'queued', 'running'])
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) return err(500, error.message);
+  return new Response(JSON.stringify({ jobs: data || [] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
+
 async function handleMeWipeAllProjects(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
@@ -10450,6 +10474,7 @@ export default {
         if (pathname === '/api/meshes'                && method === 'GET')  return await handleListMeshes(req, env);
         if (pathname === '/api/meshes/delete'         && method === 'POST') return await handleMeshesDelete(req, env);
         if (pathname === '/api/jobs/cancel'           && method === 'POST') return await handleJobCancel(req, env);
+        if (pathname === '/api/me/active-jobs'        && method === 'GET')  return await handleMeActiveJobs(req, env);
         if (pathname === '/api/remove-background'     && method === 'POST') return await handleRemoveBackground(req, env);
         if (pathname === '/api/generate-image'        && method === 'POST') return await handleGenerateImage(req, env);
         if (pathname === '/api/generate-back-view'    && method === 'POST') return await handleGenerateBackView(req, env);
