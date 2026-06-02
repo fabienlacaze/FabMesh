@@ -97,6 +97,12 @@ export interface Env {
   // pattern identical to rig. Set via `wrangler secret put
   // MODAL_ANYTOP_ANIM_URL`; unset to disable /api/animate (503).
   MODAL_ANYTOP_ANIM_URL?: string;
+  // FBX reference-animation retarget on a rigged GLB. Async spawn+poll+
+  // stream pattern identical to MODAL_ANYTOP_ANIM_URL but pointed at the
+  // `myfabmesh-fbx-retarget` Modal app (CPU-only, bpy-based). Set via
+  // `wrangler secret put MODAL_FBX_RETARGET_URL`; unset to disable
+  // /api/animate-from-reference (503).
+  MODAL_FBX_RETARGET_URL?: string;
   MODAL_SHARED_SECRET?: string;
 
   // Budget safeguards (override the defaults if set).
@@ -7936,6 +7942,49 @@ async function handleAnimUpload(req: Request, env: Env): Promise<Response> {
   const file = form.get('file');
   if (!(file instanceof File)) return err(400, 'file field required');
   if (file.size > 50 * 1024 * 1024) return err(413, 'file too large (max 50 MB)');
+  // NEW (2026-06-02): support kind='reference_anim' for the FBX
+  // reference-animation pipeline. Stored under <uid>/anim_refs/ and
+  // validated for FBX magic instead of GLB magic. Default kind
+  // ('animation') preserves the legacy GLB upload behaviour.
+  const kind = String(form.get('kind') || 'animation').toLowerCase();
+  if (kind === 'reference_anim') {
+    // Validate FBX magic. Binary FBX: "Kaydara FBX Binary" (first 18
+    // bytes), ASCII FBX: starts with "; FBX". Reject anything else.
+    const head24 = new Uint8Array(await file.slice(0, 24).arrayBuffer());
+    const headStr = new TextDecoder().decode(head24);
+    const isBinaryFbx = headStr.startsWith('Kaydara FBX Binary');
+    const isAsciiFbx = headStr.startsWith('; FBX');
+    if (!isBinaryFbx && !isAsciiFbx) {
+      return err(415, 'not an FBX file (magic mismatch)');
+    }
+    const incomingHint = String(form.get('source_skeleton_id_hint') || 'auto').replace(/[^a-z0-9_-]/gi, '').slice(0, 32) || 'auto';
+    // Hash the contents so identical FBXes share a key (saves R2).
+    const buf = await file.arrayBuffer();
+    let hashHex = '';
+    try {
+      const h = await crypto.subtle.digest('SHA-256', buf);
+      hashHex = Array.from(new Uint8Array(h)).slice(0, 4)
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch { hashHex = Date.now().toString(36); }
+    const safeName = (file.name || 'ref.fbx').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'ref.fbx';
+    const key = `${user.id}/anim_refs/${hashHex}_${safeName}`;
+    try {
+      await env.MESHES.put(key, buf, {
+        httpMetadata: { contentType: 'application/octet-stream' },
+      });
+    } catch (e) {
+      return err(500, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    return json({
+      ok: true, url: publicUrl, key,
+      kind: 'reference_anim',
+      size: buf.byteLength,
+      contentType: 'application/octet-stream',
+      source_skeleton_id_hint: incomingHint,
+    });
+  }
+
   const animType = (String(form.get('animType') || 'clip').toLowerCase().replace(/[^a-z]/g, '') || 'clip').slice(0, 16);
   const projectName = String(form.get('projectName') || '');
   const projectSlug = (projectName || 'untitled').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'untitled';
@@ -8301,6 +8350,269 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
       path: key,
       anim_type: animType,
       bytes: modalResp?.bytes ?? null,
+    });
+  }
+  return json({ status: 'pending', stage: 'unknown-response' });
+}
+
+/** POST /api/animate-from-reference — spawn an FBX reference-animation
+ *  retarget job on Modal. Body:
+ *    { rig_url: string, ref_anim_url: string,
+ *      source_skeleton_id_hint?: 'auto'|'ue5_mannequin'|'orc_m1',
+ *      target_family?: 'humanoid_puppeteer',
+ *      clip_name?: string, project_name?: string, batch_id?: string }
+ *  Returns: { success, job_id, status:'queued', creditsRemaining }
+ *  Mirrors handleAutoAnim but routes to MODAL_FBX_RETARGET_URL with the
+ *  /fbx-retarget-start endpoint. Charges ANIM_COST (same as AnyTop). */
+async function handleAnimateFromReference(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_FBX_RETARGET_URL) return err(503, 'fbx retarget backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let body: {
+    rig_url?: string;
+    ref_anim_url?: string;
+    source_skeleton_id_hint?: string;
+    target_family?: string;
+    clip_name?: string;
+    projectName?: string;
+    batch_id?: string;
+  };
+  try {
+    body = await req.json() as typeof body;
+  } catch {
+    return err(400, 'invalid JSON body');
+  }
+  const rigUrl = body.rig_url;
+  const refAnimUrl = body.ref_anim_url;
+  if (!rigUrl || typeof rigUrl !== 'string') return err(400, 'rig_url required');
+  if (!refAnimUrl || typeof refAnimUrl !== 'string') return err(400, 'ref_anim_url required');
+  if (!isTrustedAssetHost(env, rigUrl)) return err(400, 'rig_url host not allowed');
+  if (!isTrustedAssetHost(env, refAnimUrl)) return err(400, 'ref_anim_url host not allowed');
+
+  const hint = (body.source_skeleton_id_hint || 'auto')
+    .replace(/[^a-z0-9_-]/gi, '').slice(0, 32) || 'auto';
+  const targetFamily = (body.target_family || 'humanoid_puppeteer')
+    .replace(/[^a-z0-9_]/gi, '').slice(0, 48) || 'humanoid_puppeteer';
+  const clipName = (typeof body.clip_name === 'string' ? body.clip_name : 'clip')
+    .slice(0, 32);
+  const batchId = typeof body.batch_id === 'string'
+    ? body.batch_id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32)
+    : '';
+  const projectName = typeof body.projectName === 'string' ? body.projectName : '';
+
+  const remainingBudget = await checkAndIncrementModalSpend(env, ESTIMATED_USD_ANIM);
+  if (remainingBudget == null) return err(429, 'daily Cloud GPU budget reached. Try again after midnight UTC.');
+  const refundSpend = async () => { await refundModalSpend(env, ESTIMATED_USD_ANIM); };
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundSpend();
+    return err(429, 'you have reached the per-user daily generation limit.');
+  }
+  const remaining = await spendCredits(env, user.id, ANIM_COST);
+  if (remaining == null) {
+    await refundSpend();
+    return err(402, 'insufficient credits');
+  }
+
+  const baseUrl = env.MODAL_FBX_RETARGET_URL.replace(/\/$/, '');
+  const startUrl = `${baseUrl}/fbx-retarget-start`;
+  let jobId: string;
+  try {
+    const r = await fetch(startUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _auth: env.MODAL_SHARED_SECRET,
+        rig_url: rigUrl,
+        ref_anim_url: refAnimUrl,
+        source_skeleton_id_hint: hint,
+        target_family: targetFamily,
+        clip_name: clipName,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!r.ok) {
+      await addCredits(env, user.id, ANIM_COST);
+      await refundSpend();
+      const txt = await r.text().catch(() => '');
+      console.error('[animate-from-reference] Modal start', r.status, txt.slice(0, 200));
+      return err(502, `Modal FBX retarget backend HTTP ${r.status}`);
+    }
+    const j = await r.json() as { job_id?: string };
+    if (!j?.job_id) {
+      await addCredits(env, user.id, ANIM_COST);
+      await refundSpend();
+      return err(502, 'Modal fbx-retarget-start: no job_id');
+    }
+    jobId = j.job_id;
+  } catch (e: unknown) {
+    await addCredits(env, user.id, ANIM_COST);
+    await refundSpend();
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[animate-from-reference] spawn threw', msg);
+    return err(502, `Modal FBX retarget backend unreachable: ${msg.slice(0, 200)}`);
+  }
+
+  await putAnimJobRecord(env, jobId, {
+    user_id: user.id,
+    modal_spend: ESTIMATED_USD_ANIM,
+    credits: ANIM_COST,
+    rig_url: rigUrl,
+    anim_type: 'fbxref',
+    created_at: Date.now(),
+    batch_id: batchId || undefined,
+    project_name: projectName || undefined,
+  });
+  try {
+    await supabaseAdmin(env).from('jobs').insert({
+      id: jobId, user_id: user.id,
+      asset_type: 'animation', mode: 'fbx_ref', seed: 0,
+      credit_cost: ANIM_COST, status: 'processing',
+      project_name: projectName || null,
+      options: {
+        operation_type: 'animate_fbx', sourceRig: rigUrl,
+        ref_anim: refAnimUrl,
+        source_skeleton_id_hint: hint, target_family: targetFamily,
+        batch_id: batchId || null, backend: 'modal',
+      },
+      created_at: new Date().toISOString(),
+    });
+  } catch (e) { console.warn('[animate-from-reference] jobs.insert failed', e); }
+  return json({ success: true, job_id: jobId, status: 'queued', creditsRemaining: remaining });
+}
+
+/** POST or GET /api/animate-from-reference-status?job_id=<id>
+ *  Mirror of handleAutoAnimStatus targeting the FBX-retarget Modal app.
+ *  Streams the result GLB into R2 with a `_fbxref_` discriminator in the
+ *  filename so the project loader (index2.js:645 isAnimation filter)
+ *  classifies it as an animation. */
+async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_FBX_RETARGET_URL) return err(503, 'fbx retarget backend unavailable');
+  if (!env.MODAL_SHARED_SECRET) return err(500, 'MODAL_SHARED_SECRET not set');
+  if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
+
+  let jobId = '';
+  try {
+    const u = new URL(req.url);
+    jobId = (u.searchParams.get('job_id') || '').trim();
+  } catch {}
+  if (!jobId && req.method === 'POST') {
+    try {
+      const b = await req.json() as { job_id?: string };
+      jobId = String(b?.job_id || '').trim();
+    } catch {}
+  }
+  if (!jobId) return err(400, 'job_id required');
+
+  const record = await getAnimJobRecord(env, jobId);
+  if (record && record.user_id !== user.id) return err(403, 'forbidden');
+
+  const refundOnFailure = async () => {
+    if (!record) return;
+    await addCredits(env, user.id, record.credits).catch(() => {});
+    await refundModalSpend(env, record.modal_spend).catch(() => {});
+    await deleteAnimJobRecord(env, jobId).catch(() => {});
+  };
+
+  const baseUrl = env.MODAL_FBX_RETARGET_URL.replace(/\/$/, '');
+  const statusUrl = `${baseUrl}/fbx-retarget-status`;
+  const fetchUrl = `${baseUrl}/fbx-retarget-fetch`;
+  let modalResp: {
+    ready?: boolean; error?: string; bytes?: number; fetch_endpoint?: string;
+    meta?: { detected_skeleton_id?: string; source_skel_id_used?: string; n_frames?: number } | null;
+  };
+  try {
+    const r = await fetch(statusUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) {
+      throw new Error(`Modal fbx-retarget-status HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    }
+    modalResp = await r.json() as typeof modalResp;
+  } catch (e: unknown) {
+    console.warn('[animate-from-reference-status] transient', e instanceof Error ? e.message : String(e));
+    return json({ status: 'pending', warn: e instanceof Error ? e.message : String(e) });
+  }
+
+  if (modalResp?.ready === false && !modalResp?.error) {
+    return json({ status: 'pending', stage: 'running' });
+  }
+  if (modalResp?.ready === false && modalResp?.error) {
+    await refundOnFailure();
+    console.log(`[animate-from-reference-status] job_id=${jobId} FAILED: ${String(modalResp.error).slice(0, 200)}`);
+    return json({ status: 'failed', error: String(modalResp.error).slice(0, 500) });
+  }
+  if (modalResp?.ready === true) {
+    let fetchResp: Response;
+    try {
+      fetchResp = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ _auth: env.MODAL_SHARED_SECRET, job_id: jobId }),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e: unknown) {
+      return json({ status: 'pending', warn: 'fbx-retarget-fetch transient: ' + (e instanceof Error ? e.message : String(e)) });
+    }
+    if (fetchResp.status === 404) return json({ status: 'pending', stage: 'race-volume-not-ready' });
+    if (fetchResp.status === 410) {
+      await refundOnFailure();
+      const txt = await fetchResp.text().catch(() => '');
+      return json({ status: 'failed', error: txt.slice(0, 500) || 'fbx retarget failed' });
+    }
+    if (!fetchResp.ok || !fetchResp.body) {
+      await refundOnFailure();
+      return json({ status: 'failed', error: `fbx-retarget-fetch HTTP ${fetchResp.status}` });
+    }
+
+    let baseName = 'anim';
+    const sourceUrl = record?.rig_url || '';
+    if (sourceUrl) {
+      try {
+        const last = new URL(sourceUrl).pathname.split('/').pop() || '';
+        baseName = last.replace(/\.(glb|gltf)$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'anim';
+      } catch {}
+    }
+    // The discriminator `_fbxref_` is recognised by index2.js' anim
+    // classifier so the new GLB lands in the same animations strip as
+    // AnyTop outputs. Format: <base>_fbxref_<batchId>_<ts>.glb
+    const batchSeg = record?.batch_id ? `${record.batch_id}_` : '';
+    const key = `${user.id}/animations/${baseName}_fbxref_${batchSeg}${Date.now()}.glb`;
+    try {
+      await env.MESHES.put(key, fetchResp.body, {
+        httpMetadata: { contentType: 'model/gltf-binary' },
+      });
+    } catch (e) {
+      await refundOnFailure();
+      console.error('[animate-from-reference-status.r2]', e instanceof Error ? e.message : String(e));
+      return json({ status: 'failed', error: 'animation storage failed (credits refunded)' });
+    }
+    await deleteAnimJobRecord(env, jobId).catch(() => {});
+    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    console.log(`[animate-from-reference-status] job_id=${jobId} DONE url=${publicUrl}`);
+    try {
+      await supabaseAdmin(env).from('jobs')
+        .update({ status: 'succeeded', mesh_url: publicUrl, finished_at: new Date().toISOString() })
+        .eq('id', jobId).eq('user_id', user.id);
+    } catch (e) { console.warn('[animate-from-reference-status] jobs.update failed', e); }
+    return json({
+      status: 'done',
+      success: true,
+      anim_url: publicUrl,
+      url: publicUrl,
+      path: key,
+      anim_type: 'fbxref',
+      bytes: modalResp?.bytes ?? null,
+      detected_skeleton_id: modalResp?.meta?.detected_skeleton_id ?? null,
+      source_skel_id_used: modalResp?.meta?.source_skel_id_used ?? null,
     });
   }
   return json({ status: 'pending', stage: 'unknown-response' });
@@ -10511,6 +10823,8 @@ export default {
         if (pathname === '/api/auto-rig-status'       && (method === 'GET' || method === 'POST')) return await handleAutoRigStatus(req, env);
         if (pathname === '/api/animate'               && method === 'POST') return await handleAutoAnim(req, env);
         if (pathname === '/api/animate-status'        && (method === 'GET' || method === 'POST')) return await handleAutoAnimStatus(req, env);
+        if (pathname === '/api/animate-from-reference' && method === 'POST') return await handleAnimateFromReference(req, env);
+        if (pathname === '/api/animate-from-reference-status' && (method === 'GET' || method === 'POST')) return await handleAnimateFromReferenceStatus(req, env);
         if (pathname === '/api/animations/delete'     && method === 'POST') return await handleAnimDelete(req, env);
         if (pathname === '/api/animations/upload'     && method === 'POST') return await handleAnimUpload(req, env);
         if (pathname === '/api/animations/copy'       && method === 'POST') return await handleAnimCopy(req, env);
