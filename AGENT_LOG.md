@@ -1,5 +1,47 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (cloud→desktop port wave — reviewer-flagged bugfixes, attempt B winner)
+
+Bug fixes landed on top of the earlier desktop-sync ports (commits
+f210fc6 / ef475f2 / c0f6685 / 25d5f0b / a8492db) after code review
+flagged six issues. Patch came from worktree `wf_ded2f8fc-43b-3` and
+was merged into master with three conflict resolutions (kept the
+viewer error placeholder added by a8492db).
+
+- `src/renderer/index2.js`:
+  - Added missing `_toFileUrl` helper used by `showAnimSourceRig`,
+    lightbox, and cross-feature inpaint paths — without it those
+    callers threw `ReferenceError`. Mirrors cloud d5798ea. Exposed on
+    `window` so classic-script helpers (index2-edit-tools.js) share it.
+  - Promoted the earlier `setViewerLoading` (with the
+    `.viewer-loading-overlay` marker class) and deleted the duplicate
+    near `showStep1Preview`. Without the marker the
+    `:not(.viewer-loading-overlay)` cleanup in `resetWorkspaceUI` wiped
+    the spinner mid-load.
+  - `populateWorkspace`: clear stale loading overlays in the 4 viewers
+    (`step1-preview`, `ws-3d-source-preview`, `ws-rig-source-preview`,
+    `ws-anim-source-preview`) BEFORE touching `state.currentProject`.
+    Without this, slow loads from project A finished after project B
+    was up and contaminated B's viewers ("I still see the dragon while
+    I'm in the orc project"). Mirrors cloud c5866be.
+  - Bumped `rigSrcLoadId` per `showRigSourceMesh` entry so an in-flight
+    slow load from project A cannot commit its scene into project B
+    (same class of bug fixed in cloud ec1cab1).
+  - `pushJob` now records a `sourceProject` field so `_jobProjectName`
+    can label the job tile correctly when the user navigates between
+    projects.
+  - Wrapped `setViewerLoading` callsites in `showStep1Preview` in
+    try/catch (defensive — the helper is loaded from `<script>`, not
+    a module, and a load-order race could leave it undefined for the
+    first render).
+
+- `src/renderer/styles/index2.css`:
+  - `pointer-events: none` on `.preview-placeholder.loading` so the
+    overlay can't swallow clicks on the expand/use-for-3D buttons
+    underneath.
+  - `--accent` fallback color (`#a77aff`) on the spinner so it still
+    renders if the theme variable hasn't loaded yet.
+
 ## 2026-06-02 (cloud→desktop port wave, attempt A)
 
 Foundational port of cloud commits 04e3c9c / 86cda31 / 8e51faa /

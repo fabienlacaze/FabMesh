@@ -643,6 +643,68 @@ function _imgSrcHome(path) {
   return 'file:///' + String(path).replace(/\\/g, '/');
 }
 
+// Universal path-to-URL helper. Desktop renderer almost always receives
+// bare filesystem paths ('C:\\Users\\...\\img.png') and needs the
+// file:/// prefix + back-slash normalization + URL-encoding of
+// reserved characters (spaces, #, ?). The cloud bundle defines the
+// same helper at the same name. Any caller that may already hold an
+// https/file/blob/data URL is passed through untouched.
+//
+// 2026-06-02 — added to fix two references in this file (showAnimSourceRig +
+// _toFileUrl callsites in cross-feature inpaint + lightbox paths) that
+// otherwise threw a ReferenceError. Exposed on window for classic-script
+// helpers (index2-edit-tools.js) to share.
+function _toFileUrl(path) {
+  if (!path) return '';
+  const s = String(path);
+  // Already a real URL (http(s), file, data, blob) -> return as-is.
+  // Without this guard the file:/// prefix concatenates to
+  // 'file:///https://...' which the browser rejects with
+  // "Not allowed to load local resource".
+  if (/^(?:https?|blob|data|file):/i.test(s)) return s;
+  // Normalize back-slashes (Windows) to forward slashes for the URL.
+  const fwd = s.replace(/\\/g, '/');
+  // URL-encode each path segment so spaces, '#', '?', etc. don't
+  // break the <img>/three.js loader. Don't touch the ':' after the
+  // drive letter ("C:") — encodeURI leaves it alone.
+  return 'file:///' + encodeURI(fwd);
+}
+window._toFileUrl = _toFileUrl;
+
+// Unified viewer-loading spinner overlay. Works on a CONTAINER id —
+// creates/removes a position:absolute overlay with the spinner CSS
+// classes. Idempotent; safe to call repeatedly. msg defaults to "Loading…".
+// Mirrors the cloud helper (cloud/public/app/index2.js — d5798ea wired
+// it to step1, ws-3d-source-preview, ws-rig-source-preview, and
+// ws-anim-source-preview); ported here so desktop has the same UX
+// feedback during slow mesh / image loads.
+function setViewerLoading(containerId, on, msg) {
+  const card = document.getElementById(containerId);
+  if (!card) return;
+  // Ensure the card is a positioning context so absolute children center.
+  if (getComputedStyle(card).position === 'static') {
+    card.style.position = 'relative';
+  }
+  let overlay = card.querySelector(':scope > .viewer-loading-overlay');
+  if (on) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'preview-placeholder loading viewer-loading-overlay';
+      card.appendChild(overlay);
+    }
+    if (msg) {
+      overlay.classList.add('with-msg');
+      overlay.setAttribute('data-loading-msg', msg);
+    } else {
+      overlay.classList.remove('with-msg');
+      overlay.removeAttribute('data-loading-msg');
+    }
+  } else if (overlay) {
+    overlay.remove();
+  }
+}
+window.setViewerLoading = setViewerLoading;
+
 function renderAllImagesGrid() {
   const grid = document.getElementById('all-images-grid');
   if (!grid) return;
@@ -1466,10 +1528,13 @@ function resetWorkspaceUI() {
   // Image step
   const step1Prev = document.getElementById('step1-preview');
   if (step1Prev) {
+    // Always remove any stale loading-overlay from the previous project
+    // FIRST so it can't masquerade as an idle placeholder below.
+    try { setViewerLoading('step1-preview', false); } catch (_) {}
     // Remove img + restore placeholder, KEEP the static expand button
     const oldImg = step1Prev.querySelector('img');
     if (oldImg) oldImg.remove();
-    if (!step1Prev.querySelector('.preview-placeholder')) {
+    if (!step1Prev.querySelector('.preview-placeholder:not(.viewer-loading-overlay)')) {
       const ph = document.createElement('div');
       ph.className = 'preview-placeholder';
       ph.textContent = 'No image yet';
@@ -1478,6 +1543,11 @@ function resetWorkspaceUI() {
     step1Prev.classList.remove('clickable');
     step1Prev.onclick = null;
   }
+  // Same cleanup for the other three viewers — covers slow loads from
+  // the previous project that didn't finish before the user switched.
+  try { setViewerLoading('ws-3d-source-preview', false); } catch (_) {}
+  try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {}
+  try { setViewerLoading('ws-anim-source-preview', false); } catch (_) {}
   const imgExpandBtn = document.getElementById('ws-image-expand-btn');
   if (imgExpandBtn) imgExpandBtn.classList.add('hidden');
   setViewerFilename('ws-image-filename', '');
@@ -1530,6 +1600,16 @@ function resetWorkspaceUI() {
 }
 
 function populateWorkspace(p) {
+  // 2026-06-02 (mirror cloud c5866be): dispose any 3D viewer state held
+  // over from a PREVIOUS project before we touch state.currentProject or
+  // the DOM. Without this, slow rigSrc loads from project A can finish
+  // AFTER project B is up and pollute B's rig viewer with A's mesh —
+  // user reports "I still see the dragon while I'm in the orc project".
+  // resetWorkspaceUI below also clears these, but we run the dispose
+  // FIRST so the rigSrcLoadId bump invalidates A's in-flight callbacks
+  // before any subsequent showRigSourceMesh kicks off a fresh load.
+  try { if (typeof _disposeAnimModel === 'function') _disposeAnimModel(); } catch (_) {}
+  try { if (typeof showRigSourceMesh === 'function') showRigSourceMesh(null); } catch (_) {}
   // Reset UI first so stale previews/versions from a previous project are wiped
   resetWorkspaceUI();
 
@@ -1845,9 +1925,25 @@ async function showStep2SourceImage(imgPath) {
   const target = document.getElementById('ws-3d-source-preview');
   if (!target) return;
   if (imgPath) {
-    target.innerHTML = `<img src="file:///${imgPath.replace(/\\/g, '/')}">`;
+    target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
+    // Spinner while the <img> decodes — only relevant for big PNGs.
+    // Cleared on load/error or after a 10s safety timeout. Mirrors
+    // the cloud d5798ea wiring.
+    try { setViewerLoading('ws-3d-source-preview', true, 'Loading image…'); } catch (_) {}
+    const imgEl = target.querySelector('img');
+    if (imgEl) {
+      const clear = () => { try { setViewerLoading('ws-3d-source-preview', false); } catch (_) {} };
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
+        clear();
+      } else {
+        imgEl.addEventListener('load', clear, { once: true });
+        imgEl.addEventListener('error', clear, { once: true });
+        setTimeout(clear, 10000);
+      }
+    }
   } else {
     target.innerHTML = '<div class="preview-placeholder">No image selected</div>';
+    try { setViewerLoading('ws-3d-source-preview', false); } catch (_) {}
   }
   setViewerFilename('ws-3d-source-filename', imgPath);
   // Auto-detect multi-view dir for the selected image:
@@ -1996,6 +2092,13 @@ document.getElementById('ws-3d-source-back-clear')?.addEventListener('click', ()
 // ----- Source mesh preview for the Rig "Create new" stage -----
 let rigSrcRenderer, rigSrcScene, rigSrcCamera, rigSrcControls, rigSrcModel, rigSrcRafId;
 let rigSrcMeshPath = null; // path of the mesh currently loaded in the rig source viewer
+// 2026-06-02: bump on every showRigSourceMesh entry. Async loader
+// callbacks check that their captured ID still matches before adding
+// to the scene — otherwise a stale callback (slow load from project A)
+// silently appends its mesh on top of the fresh project B load, and
+// the user sees two meshes at once (the "lion ghost next to dragon"
+// class of bug seen in cloud commit ec1cab1).
+let rigSrcLoadId = 0;
 function initRigSrcViewer() {
   if (rigSrcRenderer) return;
   const canvas = document.getElementById('ws-rig-source-canvas');
@@ -2020,16 +2123,34 @@ function initRigSrcViewer() {
 
 async function showRigSourceMesh(meshPath) {
   const placeholder = document.getElementById('ws-rig-source-placeholder');
+  // Bump the load token: any callback from a PREVIOUS call that
+  // hasn't fired yet will now find loadId !== myId and skip its
+  // scene.add. Prevents the "lion ghost beside the dragon" bug
+  // when a slow load from project A finishes after project B is open.
+  const myId = ++rigSrcLoadId;
   if (!meshPath) {
     if (placeholder) placeholder.style.display = '';
     if (rigSrcModel && rigSrcScene) { rigSrcScene.remove(rigSrcModel); rigSrcModel = null; }
     rigSrcMeshPath = null;
+    try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {}
+    return;
+  }
+  // Idempotency: if we're already showing the requested mesh, do
+  // nothing. Avoids tearing down a working scene during re-entrant
+  // refreshButtonStates calls (auto-pick path can re-call this with
+  // the same mesh several times during a single open).
+  if (rigSrcMeshPath === meshPath && rigSrcModel) {
+    try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {}
     return;
   }
   rigSrcMeshPath = meshPath;
   initRigSrcViewer();
   setViewerFilename('ws-rig-source-filename', meshPath);
   if (placeholder) placeholder.style.display = 'none';
+  // Show the spinner immediately so the user has visual feedback while
+  // the mesh fetch + GLB/FBX parse happen (can take 500ms-2s on big
+  // meshes). Cleared in applyLoadedModel / on load error.
+  try { setViewerLoading('ws-rig-source-preview', true, 'Loading mesh…'); } catch (_) {}
   // Make sure no leftover landmark markers pollute this clean preview
   if (rigSrcScene) {
     for (const id in lmMarkers) {
@@ -2039,6 +2160,18 @@ async function showRigSourceMesh(meshPath) {
   if (rigSrcModel) { rigSrcScene.remove(rigSrcModel); rigSrcModel = null; }
   const ext = (meshPath.split('.').pop() || '').toLowerCase();
   const applyLoadedModel = (obj) => {
+    // Stale-callback guard: a slow load that started for a previous
+    // path/project just finished, but we've moved on. Drop it on the
+    // floor instead of polluting the current scene.
+    if (myId !== rigSrcLoadId) {
+      try { obj?.traverse?.((c) => { c.geometry?.dispose?.(); c.material?.dispose?.(); }); } catch (_) {}
+      return;
+    }
+    // If a previous load already populated the scene since we cleared
+    // it (race when 2 same-id loads overlap), remove its model first.
+    if (rigSrcModel && rigSrcScene) {
+      try { rigSrcScene.remove(rigSrcModel); } catch (_) {}
+    }
     rigSrcModel = obj;
     rigSrcScene.add(rigSrcModel);
     const box = new THREE.Box3().setFromObject(rigSrcModel);
@@ -2066,18 +2199,20 @@ async function showRigSourceMesh(meshPath) {
     // asynchronously re-open Edit selected here.
     try { refreshButtonLabelsAndHiding(state.currentProject); } catch (_e) {}
   };
+  const clearSpinner = () => { try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {} };
   if (ext === 'fbx') {
     // FBXLoader needs a URL so it can resolve textures relative to the file
-    const url = 'file:///' + meshPath.replace(/\\/g, '/');
-    new FBXLoader().load(url, applyLoadedModel, undefined, (err) => {
+    const url = _toFileUrl(meshPath);
+    new FBXLoader().load(url, (obj) => { applyLoadedModel(obj); clearSpinner(); }, undefined, (err) => {
       console.error('FBX load error in rig source viewer', err);
+      clearSpinner();
     });
   } else {
     const buffer = await API.readMeshFile(meshPath);
-    if (!buffer) return;
+    if (!buffer) { clearSpinner(); return; }
     const loader = new GLTFLoader();
-    loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); applyLoadedModel(gltf.scene); },
-      (err) => console.error('GLTF parse error in rig source viewer', err));
+    loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); applyLoadedModel(gltf.scene); clearSpinner(); },
+      (err) => { console.error('GLTF parse error in rig source viewer', err); clearSpinner(); });
   }
 }
 
@@ -2091,47 +2226,31 @@ function setViewerFilename(elId, p) {
   el.title = p || '';
 }
 
-// Toggle a purple-spinner overlay on a viewer container. Idempotent —
-// safe to call repeatedly. Forces position:relative on static parents.
-function setViewerLoading(containerId, on, msg) {
-  const c = document.getElementById(containerId);
-  if (!c) return;
-  let overlay = c.querySelector('.preview-placeholder.loading');
-  if (on) {
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.className = 'preview-placeholder loading';
-      const cs = window.getComputedStyle(c);
-      if (cs.position === 'static') c.style.position = 'relative';
-      c.appendChild(overlay);
-    }
-    if (msg) {
-      overlay.classList.add('with-msg');
-      overlay.setAttribute('data-loading-msg', msg);
-    } else {
-      overlay.classList.remove('with-msg');
-      overlay.removeAttribute('data-loading-msg');
-    }
-  } else if (overlay) {
-    overlay.remove();
-  }
-}
+// setViewerLoading is defined earlier (line ~681) with the
+// .viewer-loading-overlay marker class. The previous duplicate
+// definition here used .preview-placeholder.loading only — without the
+// marker class, resetWorkspaceUI's :not(.viewer-loading-overlay) cleanup
+// would wipe the spinner mid-load. Removed to let the canonical
+// version above own the behaviour.
 
 function showStep1Preview(imgPath) {
   const preview = document.getElementById('step1-preview');
   // Remove any previous img + placeholder, but KEEP the static expand button + toolbar
-  const placeholder = preview.querySelector('.preview-placeholder');
-  if (placeholder && !placeholder.classList.contains('loading')) placeholder.remove();
+  // and KEEP the loading overlay — it's recreated below.
+  const placeholder = preview.querySelector('.preview-placeholder:not(.viewer-loading-overlay)');
+  if (placeholder) placeholder.remove();
   let imgEl = preview.querySelector('img');
   if (!imgEl) {
     imgEl = document.createElement('img');
     preview.insertBefore(imgEl, preview.firstChild);
   }
-  // Loading overlay until <img> fires 'load' (or 'error').
-  setViewerLoading('step1-preview', true, 'Loading image…');
-  imgEl.onload = () => setViewerLoading('step1-preview', false);
+  // Loading overlay until <img> fires 'load' (or 'error'). Mirrors cloud
+  // d5798ea — big PNGs / freshly-generated multi-view assemblies can take
+  // 100-300ms to decode and the previous version flashed empty.
+  try { setViewerLoading('step1-preview', true, 'Loading image…'); } catch (_) {}
+  imgEl.onload = () => { try { setViewerLoading('step1-preview', false); } catch (_) {} };
   imgEl.onerror = () => {
-    setViewerLoading('step1-preview', false);
+    try { setViewerLoading('step1-preview', false); } catch (_) {}
     // Replace the broken <img> with our own DOM placeholder so the
     // browser / family-safety extension can't inject 'Blocked by content
     // filter' text on the empty image slot.
@@ -2152,7 +2271,7 @@ function showStep1Preview(imgPath) {
   imgEl.style.display = '';
   // Cache-bust — see version-thumb notes above; Electron holds onto the
   // previous bytes unless we change the URL.
-  imgEl.src = 'file:///' + imgPath.replace(/\\/g, '/') + '?t=' + Date.now();
+  imgEl.src = _toFileUrl(imgPath) + '?t=' + Date.now();
   setViewerFilename('ws-image-filename', imgPath);
   preview.classList.add('clickable');
   preview.onclick = (e) => {
@@ -6650,6 +6769,17 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
         </model-viewer>
         <div style="position:absolute; bottom:6px; left:0; right:0; text-align:center; font-size:10px; color:var(--text-2); pointer-events:none; padding:0 8px; word-break:break-all;">${filename}</div>
       `;
+      // Spinner while <model-viewer> parses + uploads the rig to GPU.
+      // Mirrors cloud d5798ea — rig GLBs can be 10+ MB and the user
+      // otherwise sees a black square for 1-2s.
+      try { setViewerLoading('ws-anim-source-preview', true, 'Loading rig…'); } catch (_) {}
+      const mv = preview.querySelector('model-viewer');
+      if (mv) {
+        const clear = () => { try { setViewerLoading('ws-anim-source-preview', false); } catch (_) {} };
+        mv.addEventListener('load', clear, { once: true });
+        mv.addEventListener('error', clear, { once: true });
+        setTimeout(clear, 10000);
+      }
     }
     const genBtn = document.getElementById('ws-generate-anim');
     if (genBtn) {
@@ -6932,7 +7062,7 @@ document.getElementById('rfn-go')?.addEventListener('click', async () => {
       Format: format,
       'AI model': model,
       'Source mesh': m.filename,
-    }, undefined, { projectName: p.name });
+    }, undefined, { sourceImageUrl: m.path, projectName: p.name });
     try {
       const r = await API.refineMesh({ projectName: p.name, modification, format, model, jobId: job.id });
       if (r?.success || r?.meshPath) {
@@ -6978,7 +7108,7 @@ async function runMeshTool(operation, params = []) {
         Tool: operation,
         Mesh: meshName,
         Params: params.length ? params.join(', ') : '(none)',
-      }, expectedMs)
+      }, expectedMs, { sourceImageUrl: meshPath, projectName: p.name })
     : null;
   try {
     const result = await API.meshTool({ operation, meshPath, params });
@@ -9534,7 +9664,7 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
   const projName = state.currentProject?.name || '';
-  const job = pushJob(`Save mesh edit: ${projName}`, null, null, 8000);
+  const job = pushJob(`Save mesh edit: ${projName}`, null, null, 8000, { sourceImageUrl: meState.meshPath, projectName: projName });
   try {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const exporter = new GLTFExporter();
@@ -9637,7 +9767,7 @@ document.getElementById('exp-go')?.addEventListener('click', async () => {
       sourcePath = glbSibling.path;
     }
   }
-  const job = pushJob(`Export ${format}: ${m.filename}`);
+  const job = pushJob(`Export ${format}: ${m.filename}`, null, null, undefined, { sourceImageUrl: sourcePath, projectName: state.currentProject?.name });
   try {
     const r = await API.exportMesh({ sourcePath, targetFormat: format, outputPath });
     const outPath = r?.outputPath || r?.path;
@@ -10184,7 +10314,7 @@ document.getElementById('ws-rig-blender-btn')?.addEventListener('click', async (
 document.getElementById('ws-rig-unreal-btn')?.addEventListener('click', async () => {
   const r = getCurrentRigObj();
   if (!r) { showToast('No rig yet.', 'error'); return; }
-  const job = pushJob(`Export to Unreal: ${r.filename}`);
+  const job = pushJob(`Export to Unreal: ${r.filename}`, null, null, undefined, { sourceImageUrl: r.path, projectName: state.currentProject?.name });
   try {
     if (!API.exportToUnreal) {
       completeJob(job.id, false);
@@ -10296,7 +10426,7 @@ document.getElementById('ws-generate-rig')?.addEventListener('click', async () =
       'Mirror X': mirrorX ? 'yes' : 'no',
       Landmarks: Object.keys(lmData).length > 0 ? `${Object.keys(lmData).length} placed` : 'auto',
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
-    }, rigExpected, { projectName: p.name });
+    }, rigExpected, { sourceImageUrl: meshPathToUse, projectName: p.name });
     try {
       const r = await API.autoRig({
         meshPath: meshPathToUse,
@@ -10353,7 +10483,7 @@ document.getElementById('ws-generate-rig-ai')?.addEventListener('click', async (
     const job = pushJob(`Auto-rig AI (local): ${p.name}`, null, {
       Engine: engineLabel,
       'Source mesh': meshPathToUse.split(/[/\\]/).pop(),
-    }, expectedMs, { projectName: p.name });
+    }, expectedMs, { sourceImageUrl: meshPathToUse, projectName: p.name });
     try {
       const skeleton = state.currentProject?.rigTarget
         || document.getElementById('ws-rig-skeleton')?.value
@@ -10646,6 +10776,11 @@ function pushJob(name, onCancel, params, expectedMsOverride, opts) {
   // between launch and the modal refresh (bug: modal shows wrong
   // thumb because the user switched selected image mid-job).
   const o = opts || {};
+  // Resolve a stable project label ONCE: callers may pass it through opts,
+  // else snapshot whatever the current project is at launch (the user can
+  // switch projects mid-job, and the popup must keep pointing at the project
+  // that started the job — not whichever is open now).
+  const projectName = o.projectName || (state.currentProject ? state.currentProject.name : null);
   const job = {
     id,
     name,
@@ -10658,7 +10793,13 @@ function pushJob(name, onCancel, params, expectedMsOverride, opts) {
     tickTimer: null,
     params: params || null,
     sourceImageUrl: o.sourceImageUrl || null,
-    projectName: o.projectName || (state.currentProject ? state.currentProject.name : null),
+    projectName,
+    // 2026-06-02 — mirror cloud's `sourceProject` field so _jobProjectName
+    // (the cross-project navigation helper used by the running-job tile click)
+    // has a reliable source independent of the legacy title-regex parse,
+    // which breaks on project names containing colons / em-dashes
+    // (e.g. "Orc rose: chapter 2" was matched as project="chapter 2").
+    sourceProject: o.sourceProject || projectName,
     assetKind: o.assetKind || null,
   };
   // Smoothly climb from 5 to 90% over expected duration UNTIL the bridge
@@ -10685,6 +10826,26 @@ function pushJob(name, onCancel, params, expectedMsOverride, opts) {
   try { openJobDetails(id); } catch (e) {}
   return job;
 }
+
+// Resolve a job's owning project name. Mirrors cloud's _jobProjectName
+// (cloud/public/app/index2.js). Priority:
+//   1. j.params.Project  — set by some legacy MCP paths
+//   2. j.sourceProject   — set by pushJob (preferred, snapshot at launch)
+//   3. j.projectName     — current pushJob field, equivalent to sourceProject
+//   4. title-regex tail  — last-ditch fallback for jobs that pre-date the
+//                          opts param (kept for backwards-compat). Fragile
+//                          on names with ':' or '—' so the above sources
+//                          should hit first.
+function _jobProjectName(j) {
+  if (!j) return null;
+  if (j.params && j.params.Project) return j.params.Project;
+  if (j.sourceProject) return j.sourceProject;
+  if (j.projectName) return j.projectName;
+  const m = (j.name || '').match(/[:—–-]\s*([^:—–-]+)\s*$/);
+  if (m) return m[1].trim();
+  return null;
+}
+window._jobProjectName = _jobProjectName;
 
 function completeJob(id, success, errorMessage) {
   const j = state.jobs.find(j => j.id === id);
@@ -11112,7 +11273,10 @@ async function refreshJobDetailsModal(id) {
   document.getElementById('jd-started').textContent = new Date(j.startedAt).toLocaleTimeString();
   document.getElementById('jd-elapsed').textContent = fmtDuration(Date.now() - j.startedAt);
   document.getElementById('jd-estimated').textContent = '~' + fmtDuration(j.expectedMs);
-  document.getElementById('jd-project').textContent = state.currentProject ? state.currentProject.name : '--';
+  // Show the job's OWN project (snapshot at pushJob time) instead of whatever
+  // is currently open. If the user switches projects mid-job the popup must
+  // keep pointing at the project that started the job.
+  document.getElementById('jd-project').textContent = _jobProjectName(j) || (state.currentProject ? state.currentProject.name : '--');
   // Parameters block
   const paramsBox = document.getElementById('jd-params');
   if (paramsBox) {
@@ -13111,7 +13275,10 @@ if (API.onMcpJobStart) {
   API.onMcpJobStart((data) => {
     const name = data.name || `MCP: ${data.type || 'task'}`;
     const expectedMs = { image: 120000, mesh: 45000, rig: 120000 }[data.type] || 90000;
-    const job = pushJob(name, null, data.params || {}, expectedMs);
+    const job = pushJob(name, null, data.params || {}, expectedMs, {
+      sourceImageUrl: data.sourceImageUrl || data.imagePath || data.meshPath || null,
+      projectName: data.projectName || (state.currentProject ? state.currentProject.name : null),
+    });
     _mcpJobs.set(data.type, job.id);
     console.log(`[MCP] job started: ${name} (id=${job.id})`);
     // Force the jobs panel open so the user sees what Claude is doing
@@ -13241,7 +13408,7 @@ document.getElementById('ws-rig-reskin-btn')?.addEventListener('click', async ()
     'Skinning': skinMethod,
     'Smoothing': skinSmoothing,
     'Mirror X': mirrorX ? 'yes' : 'no',
-  });
+  }, undefined, { sourceImageUrl: r.path, projectName: state.currentProject?.name });
   try {
     if (!API.autoRig) {
       completeJob(job.id, false);
