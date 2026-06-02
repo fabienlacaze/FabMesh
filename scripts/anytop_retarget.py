@@ -926,16 +926,70 @@ def retarget_bvh_to_rig(
         #                                               matching the source convention)
         # At frame 0 delta_src = identity, so delta_tgt = identity, so
         # Q_tgt_local(0) = Q_tgt_rest exactly (round-trip preserved).
+        #
+        # 2026-06-02: ANGLE CLAMP added on top of basis math. AnyTop's
+        # 142-bone Dragon and our 47-bone Puppeteer rig have different
+        # bone LENGTHS and ATTACH ANGLES; correct quaternion transfer
+        # still produces "exploded limbs" when the source bone rotates
+        # 150-180° (folded wing unfolding, tail curling). Cap each
+        # per-frame delta to MAX_ANGLE so the worst-case extreme is
+        # softened. Real IK would solve this properly — see audit
+        # workflow a9b4d2e3 recommendation for pan-motion-retargeting
+        # / Blender headless pivot. This clamp is a pragmatic stopgap.
+        MAX_ANGLE_RAD = np.deg2rad(90.0)
         q = np.empty_like(src_q)
         for fi in range(src_q.shape[0]):
             delta_src = _q_mul(src_q[fi], src_rest_inv)
-            delta_tgt = _q_mul(_q_mul(basis, delta_src), basis_inv)
+            # Clamp delta_src angle BEFORE basis-change (basis is a
+            # similarity transform → preserves angle, so clamping on
+            # either side is mathematically equivalent but clamping
+            # source-side avoids per-frame trig on the basis quat).
+            ds = delta_src
+            ds_w = max(-1.0, min(1.0, float(ds[3])))
+            ang = 2.0 * np.arccos(ds_w)
+            if ang > MAX_ANGLE_RAD:
+                # Slerp delta_src toward identity by factor f<1 so the
+                # remaining angle equals MAX_ANGLE_RAD.
+                f = MAX_ANGLE_RAD / max(ang, 1e-6)
+                sinh = np.sin(ang / 2.0)
+                sinhf = np.sin(ang * f / 2.0)
+                if abs(sinh) > 1e-6:
+                    scale = sinhf / sinh
+                    ds = np.array([ds[0] * scale, ds[1] * scale, ds[2] * scale,
+                                   np.cos(ang * f / 2.0)])
+            delta_tgt = _q_mul(_q_mul(basis, ds), basis_inv)
             q[fi] = _q_mul(delta_tgt, tgt_rest)
         # Sign-continuity across frames (preserved through the mul,
         # but re-assert after delta to be safe).
         for i in range(1, q.shape[0]):
             if np.dot(q[i], q[i - 1]) < 0.0:
                 q[i] = -q[i]
+        # 2026-06-02: TEMPORAL SMOOTHING — short boxcar over 5 frames
+        # (centered, edge-clamped) to remove single-frame spikes that
+        # would otherwise look like jitter to the user. Quaternion
+        # averages are normalized after the sum so the result stays
+        # on the unit hypersphere.
+        if q.shape[0] >= 5:
+            sm = np.empty_like(q)
+            W = 2  # half-window: covers 5 frames total (i-2..i+2)
+            for i in range(q.shape[0]):
+                lo = max(0, i - W)
+                hi = min(q.shape[0], i + W + 1)
+                # Sign-align neighbours to q[i] before averaging.
+                base = q[i]
+                acc = np.zeros(4)
+                for j in range(lo, hi):
+                    qq = q[j]
+                    if np.dot(qq, base) < 0.0:
+                        qq = -qq
+                    acc += qq
+                n = np.linalg.norm(acc)
+                sm[i] = (acc / n) if n > 1e-9 else q[i]
+            q = sm
+            # Re-assert sign continuity after smoothing.
+            for i in range(1, q.shape[0]):
+                if np.dot(q[i], q[i - 1]) < 0.0:
+                    q[i] = -q[i]
         # Resample to target FPS if needed (nearest-neighbour quat —
         # good enough for ~30 Hz when source is also ~30 Hz).
         if target_fps and target_fps > 0 and len(new_t) != n_frames:
