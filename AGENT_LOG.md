@@ -1,5 +1,47 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (fix — AnyTop retarget : desactivation par defaut du clamp 90deg + twist-drop)
+
+**Pourquoi** : audit `wgjsu8jbu` sur Dragon 41-bone vs source BVH 102-bone
+(125 frames @30fps) a quantifie une perte cumulee de **~1957 degres** de
+mouvement angulaire entre la motion source AnyTop et l'animation finale
+ecrite dans la GLB. Le coupable est double :
+
+1. **Clamp dur a 90deg** sur `delta_src` avant le basis-change : tout
+   frame avec >90deg de rotation parent-local etait re-slerp vers
+   90deg, lissant les flap d'ailes et les coups de queue.
+2. **Twist-drop total** apres `_swing_twist` : on ne gardait que le
+   swing, jetant a la poubelle TOUTE la rotation axiale autour de
+   l'os. Audit chiffre : ~3.2x plus de perte de motion via twist-drop
+   que via le clamp. Sur un dragon, c'est le mouvement de roulis du
+   torse + la torsion de la queue qui disparaissaient.
+
+**Changement** (`scripts/anytop_retarget.py`) :
+- Defaults env-driven, no-op par defaut :
+  - `ANYTOP_MAX_ANGLE_DEG=180.0` -> clamp desactive.
+  - `ANYTOP_TWIST_KEEP=1.0` -> on garde TOUT le delta full-quat
+    (court-circuite meme la decomposition swing/twist).
+- Override possible via env si on veut revenir au comportement legacy
+  pour un asset specifique (`ANYTOP_MAX_ANGLE_DEG=90 ANYTOP_TWIST_KEEP=0.0`).
+- Log de header : `[retarget] mitigations: max_angle_deg=180.0 twist_keep=1.0`
+  imprime au demarrage pour audit.
+
+**Validation locale** (Dragon master) :
+- Input rig : `c:/tmp/dragon_rig.glb` (41 bones cible).
+- Input motion : `c:/tmp/dragon_raw.bvh` (102 bones source, 100 frames @24fps).
+- Output : `c:/tmp/dragon_master_no_mit.glb` = 67,138,340 bytes, 48 canaux
+  d'animation, 125 samples re-echantillonnes a 30fps, clip 'run',
+  ckpt_family=flying. 41/41 target bones matches.
+- Bone roles src : hip=1 tail=5 spine=3 leg=20 neck=6 arm=26 wing=30 head=1.
+- Bone roles tgt : hip=1 spine=2 neck=1 tail=4 wing=11 leg=22.
+- Hip translation scale=0.4599 sur 125 frames.
+- Stage compare : `c:/tmp/viewer/compare/after.glb` (octet-identique).
+
+**Suivi** : si Modal retarget remote produit toujours un mesh fige post-deploy,
+verifier que l'image Modal embarque bien `os.environ.get` defaults a 180/1.0
+(pas de variable d'env explicite cote container qui forcerait 90/0.0). Rollback :
+`git revert <sha>` + `modal deploy modal_app/_anytop_anim.py`.
+
 ## 2026-06-02 (verify — Hi3DGen removal post-flight, TRELLIS-2 single mesh path)
 
 **Pourquoi** : audit post-suppression de `c2808a9` pour confirmer qu'aucun

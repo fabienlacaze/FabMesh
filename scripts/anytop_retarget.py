@@ -48,12 +48,25 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import struct
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+
+
+# ============================================================
+# Mitigation defaults — disabled per audit w0u3cnspi (2026-06-02).
+# The 90deg clamp + twist-drop ate ~1957deg of cumulative motion
+# across 125 frames on Dragon (~3.2x more loss from twist-drop
+# than from clamp). Defaults below are NO-OPs; override via env:
+#   ANYTOP_MAX_ANGLE_DEG=90   to re-enable the clamp
+#   ANYTOP_TWIST_KEEP=0.0     to fully drop twist (legacy behaviour)
+# ============================================================
+_MAX_ANGLE_DEG_DEFAULT = 180.0  # clamp disabled
+_TWIST_KEEP_DEFAULT = 1.0       # keep all twist
 
 
 # ============================================================
@@ -742,6 +755,15 @@ def retarget_motion_to_rig(
     # unknown bones still benefit from the AnyTop generic regex.
     _classify = source_classifier or _classify_source_bone
 
+    # Mitigation toggles (env-driven). Defaults disable both layers
+    # per audit w0u3cnspi: the 90deg clamp + twist-drop together
+    # consumed ~1957deg of cumulative angular motion across 125
+    # frames. Twist-drop alone was responsible for ~3.2x of the
+    # motion loss vs the clamp.
+    max_angle_deg = float(os.environ.get('ANYTOP_MAX_ANGLE_DEG', _MAX_ANGLE_DEG_DEFAULT))
+    twist_keep = float(os.environ.get('ANYTOP_TWIST_KEEP', _TWIST_KEEP_DEFAULT))
+    print(f"[retarget] mitigations: max_angle_deg={max_angle_deg} twist_keep={twist_keep}", flush=True)
+
     print(f"[retarget] reading rig: {rig_glb_path}")
     gltf, _json_blob, bin_blob = _read_glb(rig_glb_path)
     skins = gltf.get("skins") or []
@@ -1250,29 +1272,67 @@ def retarget_motion_to_rig(
         # in the TARGET parent-local frame (which is where delta_tgt
         # lives). The target bone axis was pre-computed above from
         # IBM-derived world positions.
-        MAX_ANGLE_RAD = np.deg2rad(90.0)
+        MAX_ANGLE_RAD = np.deg2rad(max_angle_deg)
+        clamp_enabled = max_angle_deg < 179.99
+        twist_full = twist_keep >= 0.9999
         bone_axis = tgt_bone_axis.get(tni, np.array([0.0, 1.0, 0.0]))
         q = np.empty_like(src_q)
         for fi in range(src_q.shape[0]):
             delta_src = _q_mul(src_q[fi], src_rest_inv)
             # Clamp delta_src angle before basis (similarity preserves angle).
             ds = delta_src
-            ds_w = max(-1.0, min(1.0, float(ds[3])))
-            ang = 2.0 * np.arccos(ds_w)
-            if ang > MAX_ANGLE_RAD:
-                f = MAX_ANGLE_RAD / max(ang, 1e-6)
-                sinh = np.sin(ang / 2.0)
-                sinhf = np.sin(ang * f / 2.0)
-                if abs(sinh) > 1e-6:
-                    scale = sinhf / sinh
-                    ds = np.array([ds[0] * scale, ds[1] * scale, ds[2] * scale,
-                                   np.cos(ang * f / 2.0)])
+            if clamp_enabled:
+                ds_w = max(-1.0, min(1.0, float(ds[3])))
+                ang = 2.0 * np.arccos(ds_w)
+                if ang > MAX_ANGLE_RAD:
+                    f = MAX_ANGLE_RAD / max(ang, 1e-6)
+                    sinh = np.sin(ang / 2.0)
+                    sinhf = np.sin(ang * f / 2.0)
+                    if abs(sinh) > 1e-6:
+                        scale = sinhf / sinh
+                        ds = np.array([ds[0] * scale, ds[1] * scale, ds[2] * scale,
+                                       np.cos(ang * f / 2.0)])
             # Basis change source-parent -> target-parent.
             delta_tgt_full = _q_mul(_q_mul(basis, ds), basis_inv)
-            # Decompose around target bone axis (in target parent frame).
-            swing, _twist = _swing_twist(delta_tgt_full, bone_axis)
-            # Apply ONLY swing on top of rest.
-            q[fi] = _q_mul(swing, tgt_rest)
+            if twist_full:
+                # Keep the full per-frame delta — no swing-twist decomposition.
+                delta_tgt = delta_tgt_full
+            else:
+                # Decompose around target bone axis (in target parent frame),
+                # then SLERP the twist toward identity by (1 - twist_keep)
+                # so we keep a configurable fraction of the axial spin.
+                swing, twist_q = _swing_twist(delta_tgt_full, bone_axis)
+                if twist_keep <= 1e-4:
+                    # Drop twist entirely (legacy behaviour).
+                    delta_tgt = swing
+                else:
+                    # slerp(identity, twist_q, twist_keep)
+                    tw = twist_q.copy()
+                    tw_w = max(-1.0, min(1.0, float(tw[3])))
+                    if tw_w < 0.0:
+                        tw = -tw
+                        tw_w = -tw_w
+                    if tw_w > 0.9999:
+                        twist_scaled = np.array([0.0, 0.0, 0.0, 1.0])
+                    else:
+                        ang_t = np.arccos(tw_w)
+                        sin_t = np.sin(ang_t)
+                        a = np.sin((1.0 - twist_keep) * ang_t) / sin_t
+                        b = np.sin(twist_keep * ang_t) / sin_t
+                        twist_scaled = np.array([
+                            b * tw[0],
+                            b * tw[1],
+                            b * tw[2],
+                            a * 1.0 + b * tw[3],
+                        ])
+                        n_ts = np.linalg.norm(twist_scaled)
+                        if n_ts > 1e-9:
+                            twist_scaled = twist_scaled / n_ts
+                        else:
+                            twist_scaled = np.array([0.0, 0.0, 0.0, 1.0])
+                    delta_tgt = _q_mul(swing, twist_scaled)
+            # Apply delta on top of rest.
+            q[fi] = _q_mul(delta_tgt, tgt_rest)
         # Sign-continuity across frames (preserved through the mul,
         # but re-assert after delta to be safe).
         for i in range(1, q.shape[0]):
