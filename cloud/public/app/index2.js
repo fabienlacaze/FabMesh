@@ -14780,13 +14780,24 @@ window._navigateToJobStep = async function(jobId) {
   // fresh getBoundingClientRect and use window.scrollTo so we never
   // depend on the surrounding scroll container.
   const _scrollToCard = () => {
-    const rect = card.getBoundingClientRect();
-    const top = (window.scrollY || 0) + rect.top - 16;
+    // 2026-06-02: scrollIntoView is more reliable across nested
+    // overflow containers (the workspace area in cloud/app uses a
+    // scrollable wrapper). window.scrollTo only moves the document
+    // root viewport — when the workspace has its own scroll context,
+    // it has no effect and the user reports "click does nothing".
+    let scrolled = false;
     try {
-      window.scrollTo({ top, behavior: 'smooth' });
-    } catch (_) {
-      // Older browsers / Electron without smooth — fall back to instant.
-      try { card.scrollIntoView({ block: 'start' }); } catch (__) {}
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrolled = true;
+    } catch (_) {}
+    if (!scrolled) {
+      try {
+        const rect = card.getBoundingClientRect();
+        const top = (window.scrollY || 0) + rect.top - 16;
+        window.scrollTo({ top, behavior: 'smooth' });
+      } catch (__) {
+        try { card.scrollIntoView({ block: 'start' }); } catch (___) {}
+      }
     }
     // 2026-06-02 UX: pulse-highlight the SPECIFIC running-job tile
     // inside the step's Create New widget so the user immediately
