@@ -1,5 +1,39 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (Anim PIVOT — Strategy 1: bundled cond + retargeting)
+
+**Pourquoi**: Plan A `modal run ::main --action standalone --class-name Dragon`
+a prouvé qu'AnyTop fait du VRAI motion (global_std=0.59, l2=30.37) sur sa
+classe Dragon NATIVE (142 bones, noms `Bip01_Pelvis, BN_Tail01, Bip01_R_Thigh,
+Bip01_R_HorseLink, ...`). Notre rig Puppeteer 47-bones est structurellement
+étranger à ce que la class embedding Dragon a appris → output dégradé même
+avec alias.
+
+**Décision**: Strategy 1 Mixamo-style — AnyTop génère sur SA topologie native,
+on retargete vers Puppeteer downstream. Puppeteer reste INTACT.
+
+**Changements**:
+
+1. `scripts/anytop_retarget.py` (nouveau, ~400 lignes) :
+   - Parse BVH AnyTop (bvhsdk) → noms + parents + offsets + eulers/frame
+   - Classifie chaque bone SOURCE par regex sur noms canoniques
+     (`Bip01_R_Thigh` → leg_r_01, `BN_Tail_03` → tail_03, etc.)
+   - Lit GLB rig user, IBM-based world positions
+   - Re-classifie le target via la même heuristique que `_anatomical_names`
+   - Matche (role, side, chain index) source ↔ target
+   - Convertit Eulers BVH → quaternions, sign-continuity
+   - Émet glTF AnimationClip — rig/mesh/skin INTACTS
+
+2. `modal_app/_anytop_anim.py:_pick_trained_class()` (nouveau) :
+   - 50+ patterns regex (Dragon, Lion, Horse, Eagle, Spider, Trex, ...)
+   - Fallback topology si rien dans le prompt ne matche
+
+3. `animate_mesh()` simplifié à 3 steps (au lieu de 5+) :
+   - Step 1 : pick trained_class + ckpt_family
+   - Step 2 : sample.generate sur BUNDLED cond.npy
+   - Step 3 : retarget_bvh_to_rig
+   - Plus de fabrication de cond.npy synthétique, plus de process_new_skeleton
+
 ## 2026-06-02 (Anim — topology routing + up_axis Y hardpin)
 
 **Pourquoi**: re-test prod après le hotfix __jN a montré 3 problèmes
