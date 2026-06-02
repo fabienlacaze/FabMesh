@@ -414,31 +414,19 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
             break
     tail = on_axis_chain(tail_root, up=False) if tail_root is not None else []
 
-    # 2026-06-02 fix (mirrors modal_app/_anytop_anim.py:_anatomical_names):
-    # collect ANY non-spine/tail kid whose chain has lateral span OR
-    # tips below root. The previous gate `abs(SIDE(first)) > side_gate`
-    # dropped legs because the hip joint sits ~centerline.
     used = set(spine) | set(tail)
     laterals = []
     for sp_ni in spine:
         for k in children[sp_ni]:
-            if k in used:
+            if k in used or abs(SIDE(pos[k]) - root_side) <= side_gate:
                 continue
             ch = longest_chain(k)
-            span = max(abs(SIDE(pos[c]) - root_side) for c in ch)
-            tip_below = UP(pos[ch[-1]]) < UP(pos[root]) - body_h * 0.02
-            if span <= side_gate and not tip_below:
-                continue
-            far_bone = max(ch, key=lambda c: abs(SIDE(pos[c]) - root_side))
-            side_val = SIDE(pos[far_bone]) - root_side
-            if abs(side_val) < 1e-4:
-                side_val = SIDE(pos[k]) - root_side
             laterals.append({
                 'chain': ch,
                 'attach': UP(pos[sp_ni]),
                 'tip': UP(pos[ch[-1]]),
                 'len': len(ch),
-                'sign': side_val,
+                'sign': SIDE(pos[k]) - root_side,
             })
 
     left = [c for c in laterals if c['sign'] > 0]
@@ -447,24 +435,32 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
     spine_btm = UP(pos[spine[0]])
     midline = spine_btm + 0.5 * (spine_top - spine_btm)
 
-    # 2026-06-02: keep ALL upper and ALL lower per side (not just one).
-    # A dragon has 2 legs per side (front + back); the previous "ONE
-    # upper + ONE lower" output dropped the second leg into the
-    # 'limb_NN' fallback bucket. We now numerically index them, so
-    # caller gets leg_l_01..N for every leg chain on the left.
-    def split_all(chs):
-        upper = sorted([c for c in chs if c['attach'] > midline or c['tip'] > UP(pos[root]) + body_h * 0.1],
-                       key=lambda c: (-c['len'], -c['attach']))
-        lower = sorted([c for c in chs if c['tip'] < UP(pos[root]) - body_h * 0.05 and c not in upper],
-                       key=lambda c: (-c['len'], -c['attach']))
-        return upper, lower
+    def split(chs):
+        # Direction-based split: legs go DOWN from their attach
+        # (rise = tip - attach < 0), wings/arms stay at or above the
+        # attach. Previously this used attach-vs-midline which
+        # mis-labeled dragon front legs as wings because the front
+        # shoulder attach happens to sit just above midline.
+        upper, lower = [], []
+        root_up = UP(pos[root])
+        for c in chs:
+            rise = c['tip'] - c['attach']
+            tip_below_root = c['tip'] < root_up - body_h * 0.05
+            tip_above_root = c['tip'] > root_up + body_h * 0.1
+            if rise < -body_h * 0.05 or tip_below_root:
+                lower.append(c)
+            elif rise > body_h * 0.05 or tip_above_root:
+                upper.append(c)
+            else:
+                # Ambiguous (near-horizontal): longer chains tend to
+                # be wings/arms; short stubs are usually feet.
+                (upper if c['len'] >= 4 else lower).append(c)
+        upper.sort(key=lambda c: (-c['len'], -c['attach']))
+        lower.sort(key=lambda c: (-c['len'], -c['attach']))
+        return (upper[0] if upper else None, lower[0] if lower else None)
 
-    upper_l_list, lower_l_list = split_all(left)
-    upper_r_list, lower_r_list = split_all(right)
-    upper_l = upper_l_list[0] if upper_l_list else None
-    upper_r = upper_r_list[0] if upper_r_list else None
-    lower_l = lower_l_list[0] if lower_l_list else None
-    lower_r = lower_r_list[0] if lower_r_list else None
+    upper_l, lower_l = split(left)
+    upper_r, lower_r = split(right)
     upper_role = 'wing' if ckpt_family == 'flying' else 'arm'
 
     roles: Dict[int, Tuple[str, Optional[str], int]] = {}
@@ -484,20 +480,18 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
             roles[head] = ('head', None, 0)
     for i, ni in enumerate(tail):
         roles[ni] = ('tail', None, i + 1)
-    # 2026-06-02: enumerate ALL upper/lower chains per side so a
-    # quadruped dragon's 2 legs per side both get labeled. Bone idx
-    # continues across chains so each target bone has a UNIQUE
-    # (role, side, idx) triple.
-    def _label(chains_list, role, side):
-        off = 0
-        for rec in chains_list:
-            for i, ni in enumerate(rec['chain']):
-                roles[ni] = (role, side, off + i + 1)
-            off += len(rec['chain'])
-    _label(upper_l_list, upper_role, 'l')
-    _label(upper_r_list, upper_role, 'r')
-    _label(lower_l_list, 'leg', 'l')
-    _label(lower_r_list, 'leg', 'r')
+    if upper_l:
+        for i, ni in enumerate(upper_l['chain']):
+            roles[ni] = (upper_role, 'l', i + 1)
+    if upper_r:
+        for i, ni in enumerate(upper_r['chain']):
+            roles[ni] = (upper_role, 'r', i + 1)
+    if lower_l:
+        for i, ni in enumerate(lower_l['chain']):
+            roles[ni] = ('leg', 'l', i + 1)
+    if lower_r:
+        for i, ni in enumerate(lower_r['chain']):
+            roles[ni] = ('leg', 'r', i + 1)
     return roles
 
 
@@ -585,8 +579,13 @@ def retarget_bvh_to_rig(
             if child in joint_node_idxs:
                 parent_by_idx[child] = parent_idx
 
-    # World bind positions for the target's anatomical classifier.
+    # World bind positions AND world rest rotations for the target.
+    # Puppeteer-rigged GLBs never write node.rotation — the rest
+    # orientation of every bone lives ENTIRELY inside the
+    # inverseBindMatrices. Recovering it here is the only way the
+    # per-frame retarget can produce a correct bind-pose at frame 0.
     world_by_idx: Dict[int, np.ndarray] = {}
+    world_rot_by_idx: Dict[int, np.ndarray] = {}
     ibm_acc = skin.get("inverseBindMatrices")
     if ibm_acc is not None:
         ibm_flat = _read_accessor_floats(gltf, bin_blob, ibm_acc)
@@ -596,12 +595,29 @@ def retarget_bvh_to_rig(
             try:
                 world_mat = np.linalg.inv(ibm_mats[k])
                 world_by_idx[jidx] = world_mat[:3, 3].astype(np.float64)
+                # Polar-decompose the rotation block to strip any
+                # scale or shear that sloppy rig authoring might have
+                # baked into the bind matrix. SVD gives the closest
+                # orthonormal rotation in Frobenius norm.
+                M = world_mat[:3, :3].astype(np.float64)
+                U, _, Vt = np.linalg.svd(M)
+                Rmat = U @ Vt
+                # Force a right-handed rotation (det = +1). SVD on a
+                # reflection produces a mirror; flipping the smallest
+                # singular column fixes it.
+                if np.linalg.det(Rmat) < 0:
+                    U[:, -1] *= -1
+                    Rmat = U @ Vt
+                world_rot_by_idx[jidx] = Rmat
             except Exception:
                 world_by_idx[jidx] = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+                world_rot_by_idx[jidx] = np.eye(3)
     for jidx in joint_node_idxs:
         if jidx not in world_by_idx:
             tr = nodes[jidx].get("translation") or [0.0, 0.0, 0.0]
             world_by_idx[jidx] = np.asarray(tr, dtype=np.float64)
+        if jidx not in world_rot_by_idx:
+            world_rot_by_idx[jidx] = np.eye(3)
 
     print(f"[retarget] reading bvh: {bvh_path}")
     bvh = _parse_bvh(bvh_path)
@@ -613,6 +629,71 @@ def retarget_bvh_to_rig(
     src_roles: Dict[int, Tuple[str, Optional[str], int]] = {}
     for sidx, sname in enumerate(bvh["names"]):
         src_roles[sidx] = _classify_source_bone(sname)
+
+    # ---- Renumber source bones per (role, side) by depth-from-root ----
+    # The regex classifier has two known bugs that collapse multiple
+    # bones onto the same chain_idx:
+    #   (a) `Wing` (no captured digit) falls through to idx=0 so every
+    #       single wing bone (clavicle..forearm..hand..fingertip) ends
+    #       up at chain_idx=0 → every target wing bone maps to the SAME
+    #       source bone → wings concertina-explode.
+    #   (b) `Calf` and `HorseLink` are both pinned to base_idx=2 → dragon
+    #       legs get duplicated mapping.
+    # Fix: for every (role, side) chain with non-unique indices, walk
+    # back to the chain root in the BVH hierarchy and renumber by depth.
+    bvh_parents_list = bvh["parents"]
+    _ROLES_TO_RENUMBER = {"wing", "arm", "leg", "tail", "spine", "neck"}
+
+    def _chain_root(s: int) -> int:
+        role_s, side_s, _ = src_roles[s]
+        cur = s
+        while True:
+            p = bvh_parents_list[cur]
+            if p < 0:
+                return cur
+            pr, psd, _ = src_roles.get(p, ('', None, 0))
+            if pr != role_s or psd != side_s:
+                return cur
+            cur = p
+
+    def _depth_from(s: int, root: int) -> int:
+        d, cur = 0, s
+        # Hard cap so a malformed BVH cannot infinite-loop.
+        for _ in range(1024):
+            if cur == root or bvh_parents_list[cur] < 0:
+                return d
+            cur = bvh_parents_list[cur]
+            d += 1
+        return d
+
+    # Bucket by (role, side, chain_root) so distinct symmetric chains
+    # (e.g. left vs right wings) don't get merged.
+    chains: Dict[Tuple[str, Optional[str], int], List[int]] = {}
+    for s, (role, side, _) in src_roles.items():
+        if role not in _ROLES_TO_RENUMBER:
+            continue
+        key = (role, side, _chain_root(s))
+        chains.setdefault(key, []).append(s)
+
+    # Merge across chain-roots within the same (role, side) so we get
+    # one ordered list per (role, side). Within each bucket, sort by
+    # depth-from-its-own-root. Sort chains by their root's BVH index
+    # so the renumbering is deterministic across runs.
+    by_rs: Dict[Tuple[str, Optional[str]], List[int]] = {}
+    for (role, side, root), bones in sorted(chains.items(), key=lambda kv: kv[0][2]):
+        bones.sort(key=lambda b: _depth_from(b, root))
+        by_rs.setdefault((role, side), []).extend(bones)
+
+    for (role, side), bones in by_rs.items():
+        cur_idxs = [src_roles[b][2] for b in bones]
+        # If indices are already all distinct AND none is 0 (the
+        # Wing fallback sentinel), trust the regex.
+        if len(set(cur_idxs)) == len(cur_idxs) and 0 not in cur_idxs:
+            continue
+        for n, b in enumerate(bones, start=1):
+            r_b, sd_b, _ = src_roles[b]
+            src_roles[b] = (r_b, sd_b, n)
+
     tgt_roles = _target_anatomical_roles(
         joint_node_idxs, parent_by_idx, world_by_idx, ckpt_family=ckpt_family
     )
@@ -640,30 +721,7 @@ def retarget_bvh_to_rig(
     for sidx in set(mapping.values()):
         src_quats[sidx] = _eulers_to_quats(eul[:, sidx, :], channels[sidx])
 
-    # Delta-based retargeting (2026-06-02): the source skeleton's
-    # REST orientation (frame 0 of the BVH, which AnyTop emits at
-    # T-pose) is rarely identity — wings fold down, tails curl, etc.
-    # If we apply source's CURRENT-frame quaternion directly as the
-    # target's local rotation, the target's wing/limb snaps to the
-    # source's absolute orientation and the mesh visually breaks
-    # (one wing shoots far off, one leg goes through the body).
-    #
-    # Fix: compute the per-frame DELTA from the source's frame-0 rest
-    # pose, then apply that delta on top of the target's rest pose.
-    #   Q_delta(frame)  = Q_src(frame) * inv(Q_src(0))
-    #   Q_tgt(frame)    = Q_tgt_rest * Q_delta(frame)
-    # The target's rest rotation comes from the node's 'rotation'
-    # field if present (set by Puppeteer or the GLTFLoader); else
-    # we default to identity (a reasonable assumption for skinned
-    # rigs where the rest pose lives in IBM, not node TRS).
-    tgt_rest_quat: Dict[int, np.ndarray] = {}
-    for tni in joint_node_idxs:
-        q_rest = nodes[tni].get("rotation")
-        if q_rest is not None and len(q_rest) == 4:
-            tgt_rest_quat[tni] = np.asarray(q_rest, dtype=np.float64)
-        else:
-            tgt_rest_quat[tni] = np.array([0.0, 0.0, 0.0, 1.0])  # identity
-
+    # ---------------- Quaternion helpers ----------------
     def _q_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """Hamilton product, (x,y,z,w) convention to match glTF."""
         ax, ay, az, aw = a
@@ -681,6 +739,102 @@ def retarget_bvh_to_rig(
         if n < 1e-12:
             return np.array([0.0, 0.0, 0.0, 1.0])
         return np.array([-x, -y, -z, w]) / n
+
+    def _quat_from_mat(Rm: np.ndarray) -> np.ndarray:
+        """Convert a 3x3 rotation matrix to a glTF-style (x,y,z,w) quat.
+        Shepperd's branchless-friendly method, returns a unit quaternion.
+        """
+        # Defensive: if the matrix is garbage (NaN, zero), return identity.
+        if not np.all(np.isfinite(Rm)):
+            return np.array([0.0, 0.0, 0.0, 1.0])
+        tr = Rm[0, 0] + Rm[1, 1] + Rm[2, 2]
+        if tr > 0.0:
+            s = np.sqrt(tr + 1.0) * 2.0
+            w = 0.25 * s
+            x = (Rm[2, 1] - Rm[1, 2]) / s
+            y = (Rm[0, 2] - Rm[2, 0]) / s
+            z = (Rm[1, 0] - Rm[0, 1]) / s
+        elif Rm[0, 0] > Rm[1, 1] and Rm[0, 0] > Rm[2, 2]:
+            s = np.sqrt(1.0 + Rm[0, 0] - Rm[1, 1] - Rm[2, 2]) * 2.0
+            w = (Rm[2, 1] - Rm[1, 2]) / s
+            x = 0.25 * s
+            y = (Rm[0, 1] + Rm[1, 0]) / s
+            z = (Rm[0, 2] + Rm[2, 0]) / s
+        elif Rm[1, 1] > Rm[2, 2]:
+            s = np.sqrt(1.0 + Rm[1, 1] - Rm[0, 0] - Rm[2, 2]) * 2.0
+            w = (Rm[0, 2] - Rm[2, 0]) / s
+            x = (Rm[0, 1] + Rm[1, 0]) / s
+            y = 0.25 * s
+            z = (Rm[1, 2] + Rm[2, 1]) / s
+        else:
+            s = np.sqrt(1.0 + Rm[2, 2] - Rm[0, 0] - Rm[1, 1]) * 2.0
+            w = (Rm[1, 0] - Rm[0, 1]) / s
+            x = (Rm[0, 2] + Rm[2, 0]) / s
+            y = (Rm[1, 2] + Rm[2, 1]) / s
+            z = 0.25 * s
+        q = np.array([x, y, z, w], dtype=np.float64)
+        n = np.linalg.norm(q)
+        if n < 1e-12:
+            return np.array([0.0, 0.0, 0.0, 1.0])
+        return q / n
+
+    # ---------- TARGET rest rotations from IBM ----------
+    # Puppeteer's skin never writes node.rotation: the rig's rest
+    # orientation lives entirely in inverseBindMatrices. Build:
+    #   tgt_rest_quat[tni]  = parent-relative LOCAL rest (what we
+    #                          multiply animation deltas onto)
+    #   tgt_world_rest[tni] = bone's world-space rest rotation
+    #                          (basis-change reference vs source)
+    tgt_rest_quat: Dict[int, np.ndarray] = {}
+    tgt_world_rest: Dict[int, np.ndarray] = {}
+    for tni in joint_node_idxs:
+        Rw = world_rot_by_idx.get(tni, np.eye(3))
+        tgt_world_rest[tni] = _quat_from_mat(Rw)
+        p = parent_by_idx.get(tni, -1)
+        if p < 0 or p not in world_rot_by_idx:
+            Rp = np.eye(3)
+        else:
+            Rp = world_rot_by_idx[p]
+        # Local rest = R_parent^T * R_world  (parent-to-self rotation)
+        R_local = Rp.T @ Rw
+        tgt_rest_quat[tni] = _quat_from_mat(R_local)
+
+    # ---------- SOURCE world rest rotation via FK on BVH frame 0 ----------
+    # The BVH's frame-0 local quaternion IS the AnyTop class T-pose
+    # (wings folded, tails curled, …). Composing them along the BVH
+    # parent chain yields each bone's world-space rest orientation,
+    # which the basis change needs as a reference.
+    #
+    # Critical: we need frame-0 quats for EVERY ancestor of every
+    # mapped bone, not just the mapped ones — otherwise FK would
+    # silently treat unmapped intermediate bones as identity rotation
+    # and the world rest of mapped descendants would be wrong.
+    src_world_rest: Dict[int, np.ndarray] = {}
+    bvh_parents_for_fk = bvh["parents"]
+    n_src = len(bvh["names"])
+    bvh_channels = bvh["channels"]
+    bvh_eul0 = bvh["euler"][0]   # (N_src, 3) — frame 0 Eulers in CHANNELS order
+    # Process in topological order. _parse_bvh emits joints in DFS
+    # order so parents always come before children. Compose each
+    # bone's local frame-0 quat onto its parent's world rest.
+    for sidx in range(n_src):
+        if sidx in src_quats:
+            q_local0 = src_quats[sidx][0]
+        else:
+            # Compute the local frame-0 quat on demand from this
+            # bone's Euler row + channel order so FK is correct
+            # through unmapped intermediate joints.
+            try:
+                q_local0 = _eulers_to_quats(
+                    bvh_eul0[sidx:sidx + 1, :], bvh_channels[sidx]
+                )[0]
+            except Exception:
+                q_local0 = np.array([0.0, 0.0, 0.0, 1.0])
+        p = bvh_parents_for_fk[sidx]
+        if p < 0 or p not in src_world_rest:
+            src_world_rest[sidx] = q_local0
+        else:
+            src_world_rest[sidx] = _q_mul(src_world_rest[p], q_local0)
 
     # Build per-target track. Unmapped targets get rest-pose (no
     # rotation track → renderer keeps the static node rotation).
@@ -703,21 +857,61 @@ def retarget_bvh_to_rig(
         minv=[float(new_t[0])], maxv=[float(new_t[-1])],
     )
 
+    IDENT_Q = np.array([0.0, 0.0, 0.0, 1.0])
     for tni in joint_node_idxs:
         sidx = mapping.get(tni)
         if sidx is None:
             continue
         src_q = src_quats[sidx]
-        # Delta-based retargeting: subtract source's rest pose
-        # (frame 0) and apply the residual to target's rest pose.
+        # Per-frame source PARENT-LOCAL delta vs its own rest:
+        #   Q_src(f) = delta_src * Q_src_rest   (pre-multiply)
+        #   delta_src = Q_src(f) * inv(Q_src_rest)
+        # delta_src is therefore expressed in SOURCE-PARENT frame.
         src_rest = src_q[0].copy()
         src_rest_inv = _q_inv(src_rest)
         tgt_rest = tgt_rest_quat[tni]
-        # Per-frame: Q_tgt = Q_tgt_rest * (Q_src * inv(Q_src_rest))
+
+        # --- BUG-A fix: use PARENT world rest, not the bone's own ---
+        # delta_src lives in the source PARENT frame, so the basis-
+        # change must rotate it from source-parent to target-parent.
+        # Pull each bone's PARENT (not self) world-space rest quat.
+        p_src = bvh_parents_for_fk[sidx] if sidx < len(bvh_parents_for_fk) else -1
+        p_tgt = parent_by_idx.get(tni, -1)
+        Ps = src_world_rest.get(p_src, IDENT_Q) if p_src >= 0 else IDENT_Q
+        Pt = tgt_world_rest.get(p_tgt, IDENT_Q) if p_tgt >= 0 else IDENT_Q
+
+        # Surface silent fallbacks: when a mapped bone's parent world
+        # rest is missing (root or untracked node) we degrade to
+        # identity and the user should know.
+        if p_src >= 0 and p_src not in src_world_rest:
+            print(f"[retarget][warn] src parent world rest missing for sidx={sidx} "
+                  f"(parent={p_src}, name={bvh['names'][sidx]!r}); falling back to identity")
+        if p_tgt >= 0 and p_tgt not in tgt_world_rest:
+            print(f"[retarget][warn] tgt parent world rest missing for tni={tni} "
+                  f"(parent={p_tgt}, name={name_by_idx.get(tni, '?')!r}); falling back to identity")
+
+        # --- BUG-B fix: correct conjugation form ---
+        # Derivation: a vector v_s in source-parent frame relates to its
+        # target-parent expression via v_t = Pt^-1 * Ps * v_s * Ps^-1 * Pt
+        # (rotate v_s to world via Ps, then into target-parent via Pt^-1).
+        # So basis = Pt^-1 * Ps takes source-parent vectors to
+        # target-parent vectors, and a rotation R in source-parent
+        # becomes basis * R * inv(basis) in target-parent.
+        basis = _q_mul(_q_inv(Pt), Ps)
+        basis_inv = _q_inv(basis)
+
+        # Per-frame:
+        #   delta_tgt = basis * delta_src * basis^-1   (re-express in target-parent)
+        #   Q_tgt_local(f) = delta_tgt * Q_tgt_rest    (pre-multiply on rest, so
+        #                                               delta lives in PARENT frame
+        #                                               matching the source convention)
+        # At frame 0 delta_src = identity, so delta_tgt = identity, so
+        # Q_tgt_local(0) = Q_tgt_rest exactly (round-trip preserved).
         q = np.empty_like(src_q)
         for fi in range(src_q.shape[0]):
-            delta = _q_mul(src_q[fi], src_rest_inv)
-            q[fi] = _q_mul(tgt_rest, delta)
+            delta_src = _q_mul(src_q[fi], src_rest_inv)
+            delta_tgt = _q_mul(_q_mul(basis, delta_src), basis_inv)
+            q[fi] = _q_mul(delta_tgt, tgt_rest)
         # Sign-continuity across frames (preserved through the mul,
         # but re-assert after delta to be safe).
         for i in range(1, q.shape[0]):
@@ -754,3 +948,158 @@ def retarget_bvh_to_rig(
     _write_glb(gltf, bytes(bin_data), out_glb_path)
     print(f"[retarget] wrote {out_glb_path}: "
           f"{len(channels_anim)} channels, {len(new_t)} samples")
+
+
+# ============================================================
+# 7. Inline self-test for the basis-change math (BUG-A/BUG-B fix)
+# ============================================================
+
+def _self_test_basis_change() -> None:
+    """Verify the parent-frame basis-change is correct.
+
+    Synthetic setup (independent of any BVH/glTF):
+      * Source parent is rotated +30 deg about world +Z at rest.
+      * Target parent is rotated -45 deg about world +X at rest.
+      * Source bone's own rest is identity in its parent frame.
+      * Target bone's own rest is identity in its parent frame.
+      * At frame F, source bone gets a parent-local rotation of
+        +90 deg about its parent-local +Y axis. In WORLD frame that
+        rotation's axis is Ps * y_hat * Ps^-1 (axis rotated by Ps).
+      * In target-parent frame that SAME world rotation must have
+        axis Pt^-1 * world_axis * Pt and the same 90 deg angle.
+
+    Assertions:
+      (a) Frame 0 (delta_src = identity) -> Q_tgt_local = Q_tgt_rest.
+      (b) Frame F: applying Q_tgt_local then walking the target chain
+          to world produces a world-space rotation whose axis matches
+          the source's world-space rotation axis, and whose angle is
+          90 deg.
+    """
+
+    def _q_mul(a, b):
+        ax, ay, az, aw = a
+        bx, by, bz, bw = b
+        return np.array([
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz,
+        ])
+
+    def _q_inv(q):
+        x, y, z, w = q
+        n = x * x + y * y + z * z + w * w
+        return np.array([-x, -y, -z, w]) / n
+
+    def _q_axis_angle(axis, deg):
+        a = np.asarray(axis, dtype=np.float64)
+        a = a / np.linalg.norm(a)
+        th = np.deg2rad(deg) * 0.5
+        s = np.sin(th)
+        return np.array([a[0] * s, a[1] * s, a[2] * s, np.cos(th)])
+
+    def _q_rotate_vec(q, v):
+        # v as pure quat (vx, vy, vz, 0)
+        v4 = np.array([v[0], v[1], v[2], 0.0])
+        out = _q_mul(_q_mul(q, v4), _q_inv(q))
+        return out[:3]
+
+    def _quat_to_axis_angle(q):
+        q = q / np.linalg.norm(q)
+        w = max(-1.0, min(1.0, q[3]))
+        ang = 2.0 * np.arccos(w)
+        s = np.sqrt(max(0.0, 1.0 - w * w))
+        if s < 1e-8:
+            return np.array([1.0, 0.0, 0.0]), 0.0
+        return np.array([q[0] / s, q[1] / s, q[2] / s]), np.rad2deg(ang)
+
+    IDENT = np.array([0.0, 0.0, 0.0, 1.0])
+
+    # Synthetic parent world rests.
+    Ps = _q_axis_angle([0, 0, 1], 30.0)   # source parent: +30° about Z
+    Pt = _q_axis_angle([1, 0, 0], -45.0)  # target parent: -45° about X
+
+    # Source bone rest = identity in parent frame; ditto target.
+    Q_src_rest = IDENT.copy()
+    Q_tgt_rest = IDENT.copy()
+
+    # Basis change per the fixed formula.
+    basis = _q_mul(_q_inv(Pt), Ps)
+    basis_inv = _q_inv(basis)
+
+    # ---- Assertion (a): frame 0 round-trip ----
+    delta_src_0 = _q_mul(Q_src_rest, _q_inv(Q_src_rest))  # identity
+    delta_tgt_0 = _q_mul(_q_mul(basis, delta_src_0), basis_inv)
+    Q_tgt_local_0 = _q_mul(delta_tgt_0, Q_tgt_rest)
+    err0 = np.linalg.norm(Q_tgt_local_0 - Q_tgt_rest)
+    assert err0 < 1e-9, f"frame 0 round-trip failed: err={err0}"
+    print(f"[self-test] frame 0 round-trip OK (err={err0:.2e})")
+
+    # ---- Assertion (b): frame F = 5, +90 deg about parent-local +Y ----
+    spin = _q_axis_angle([0, 1, 0], 90.0)
+    Q_src_F = _q_mul(spin, Q_src_rest)   # source local at frame F
+    delta_src_F = _q_mul(Q_src_F, _q_inv(Q_src_rest))   # parent-local delta
+    delta_tgt_F = _q_mul(_q_mul(basis, delta_src_F), basis_inv)
+    Q_tgt_local_F = _q_mul(delta_tgt_F, Q_tgt_rest)
+
+    # World-space rotations on each side:
+    #   src world rotation = Ps * Q_src_local * inv(Ps * Q_src_rest)
+    # which simplifies (since rest=identity) to:
+    #   Q_src_world_rot = Ps * delta_src * Ps^-1 (parent-frame delta to world)
+    # Equivalent direct form: world rotation axis = Ps applied to +Y.
+    src_world_rot = _q_mul(_q_mul(Ps, delta_src_F), _q_inv(Ps))
+    tgt_world_rot = _q_mul(_q_mul(Pt, delta_tgt_F), _q_inv(Pt))
+
+    axis_s, ang_s = _quat_to_axis_angle(src_world_rot)
+    axis_t, ang_t = _quat_to_axis_angle(tgt_world_rot)
+    # Axes can flip sign if angles are interpreted as -ang; normalize.
+    if np.dot(axis_s, axis_t) < 0:
+        axis_t = -axis_t
+        ang_t = -ang_t
+    axis_err = np.linalg.norm(axis_s - axis_t)
+    ang_err = abs(abs(ang_s) - abs(ang_t))
+    assert axis_err < 1e-6, f"world axis mismatch: src={axis_s} tgt={axis_t} err={axis_err}"
+    assert ang_err < 1e-6, f"world angle mismatch: src={ang_s} tgt={ang_t} err={ang_err}"
+    assert abs(abs(ang_s) - 90.0) < 1e-6, f"expected 90 deg, got {ang_s}"
+    print(f"[self-test] frame F world rotation OK "
+          f"(axis={axis_s}, angle={ang_s:.4f} deg; "
+          f"axis_err={axis_err:.2e}, ang_err={ang_err:.2e})")
+
+    # ---- Extra: pure +Y WORLD rotation on source must map to pure +Y
+    # WORLD rotation on target (with the same angle). Express +Y world
+    # as a source-parent-frame delta: delta_src_parent = Ps^-1 * spin * Ps.
+    spin_world_Y = _q_axis_angle([0, 1, 0], 90.0)
+    delta_src_p_world = _q_mul(_q_mul(_q_inv(Ps), spin_world_Y), Ps)
+    delta_tgt_p = _q_mul(_q_mul(basis, delta_src_p_world), basis_inv)
+    tgt_world_rot_Y = _q_mul(_q_mul(Pt, delta_tgt_p), _q_inv(Pt))
+    axis_y, ang_y = _quat_to_axis_angle(tgt_world_rot_Y)
+    if axis_y[1] < 0:
+        axis_y = -axis_y
+        ang_y = -ang_y
+    assert np.linalg.norm(axis_y - np.array([0, 1, 0])) < 1e-6, \
+        f"+Y world on src did not map to +Y world on tgt: got axis={axis_y}"
+    assert abs(abs(ang_y) - 90.0) < 1e-6, f"angle mismatch: {ang_y}"
+    print(f"[self-test] +Y world preserved across basis change "
+          f"(axis={axis_y}, angle={ang_y:.4f} deg)")
+
+    # ---- Negative control: confirm the OLD (buggy) formula breaks ----
+    # Old: basis_old = Q_tgt_world_rest * inv(Q_src_world_rest), using
+    # the BONE's own world rest (not the parent's). Since bone rest = I
+    # here, Q_self_world = Ps and Pt respectively, so:
+    basis_old = _q_mul(Pt, _q_inv(Ps))
+    delta_tgt_F_old = _q_mul(_q_mul(basis_old, delta_src_F), _q_inv(basis_old))
+    Q_tgt_local_F_old = _q_mul(delta_tgt_F_old, Q_tgt_rest)
+    tgt_world_rot_old = _q_mul(_q_mul(Pt, delta_tgt_F_old), _q_inv(Pt))
+    axis_o, ang_o = _quat_to_axis_angle(tgt_world_rot_old)
+    if np.dot(axis_o, axis_s) < 0:
+        axis_o = -axis_o
+        ang_o = -ang_o
+    diff_old = np.linalg.norm(axis_o - axis_s)
+    print(f"[self-test] OLD formula produces axis={axis_o} (vs correct {axis_s}); "
+          f"diff={diff_old:.4f} — confirms old code was wrong when "
+          f"parents differ from self-rests.")
+
+
+if __name__ == "__main__":
+    _self_test_basis_change()
+    print("[self-test] ALL PASS")

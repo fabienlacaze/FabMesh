@@ -568,13 +568,38 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   overflow: hidden;
   transition: opacity 0.2s;
 }
-/* 2026-06-02 — per-step colour for visual differentiation. Subtle
-   left-border accent + matching badge colour so the user can spot
-   "which step is which" without reading the title. */
-#step-card-image      { border-left: 4px solid #4a90e2; }   /* blue */
-#step-card-mesh       { border-left: 4px solid #b94aa3; }   /* magenta */
-#step-card-rig        { border-left: 4px solid #d97706; }   /* orange */
-#step-card-animation  { border-left: 4px solid #16a34a; }   /* green */
+/* 2026-06-02 — per-step colour for visual differentiation.
+   - Card body stays on the dark theme for max text contrast.
+   - Accent moved from heavy left border to a thin TOP stripe so
+     the colour bands don't bleed pastel into the card interior.
+   - Badge gradient keeps the strong colour identity. */
+.step-card { position: relative; }
+.step-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  pointer-events: none;
+  background: currentColor;
+  opacity: 0.95;
+}
+#step-card-image      { color: #4a90e2; }   /* blue   */
+#step-card-mesh       { color: #b94aa3; }   /* magenta */
+#step-card-rig        { color: #d97706; }   /* orange */
+#step-card-animation  { color: #16a34a; }   /* green  */
+/* Reset text colour inside the card so the accent colour set on the
+   card itself only drives ::before — text/icon colours stay theme. */
+.step-card .step-card-header,
+.step-card .stage-title,
+.step-card .stage-hint,
+.step-card .step-status,
+.step-card .form-row,
+.step-card .stage-body { color: var(--text-0); }
+.step-card .stage-hint,
+.step-card .step-status { color: var(--text-2); }
+.step-card .step-status[data-status="done"],
+.step-card .step-status.done { color: var(--success); }
 #step-card-image      .step-badge { background: linear-gradient(135deg, #4a90e2, #2563eb); }
 #step-card-mesh       .step-badge { background: linear-gradient(135deg, #b94aa3, #9333ea); }
 #step-card-rig        .step-badge { background: linear-gradient(135deg, #d97706, #ea580c); }
