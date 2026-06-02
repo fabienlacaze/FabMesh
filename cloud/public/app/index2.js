@@ -2355,6 +2355,12 @@ document.getElementById('ws-3d-source-back-clear')?.addEventListener('click', ()
 // ----- Source mesh preview for the Rig "Create new" stage -----
 let rigSrcRenderer, rigSrcScene, rigSrcCamera, rigSrcControls, rigSrcModel, rigSrcRafId;
 let rigSrcMeshPath = null; // path of the mesh currently loaded in the rig source viewer
+// 2026-06-02: bump on every showRigSourceMesh entry. Async loader
+// callbacks check that their captured ID still matches before adding
+// to the scene — otherwise a stale callback (slow load from project A)
+// silently appends its mesh on top of the fresh project B load, and
+// the user sees two meshes at once (a lion next to the dragon).
+let rigSrcLoadId = 0;
 function initRigSrcViewer() {
   if (rigSrcRenderer) return;
   const canvas = document.getElementById('ws-rig-source-canvas');
@@ -2379,10 +2385,22 @@ function initRigSrcViewer() {
 
 async function showRigSourceMesh(meshPath) {
   const placeholder = document.getElementById('ws-rig-source-placeholder');
+  // Bump the load token: any callback from a PREVIOUS call that
+  // hasn't fired yet will now find loadId !== myId and skip its
+  // scene.add. Prevents the "lion ghost beside the dragon" bug.
+  const myId = ++rigSrcLoadId;
   if (!meshPath) {
     if (placeholder) placeholder.style.display = '';
     if (rigSrcModel && rigSrcScene) { rigSrcScene.remove(rigSrcModel); rigSrcModel = null; }
     rigSrcMeshPath = null;
+    try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {}
+    return;
+  }
+  // Idempotency: if we're already showing the requested mesh, do
+  // nothing. Avoids tearing down a working scene during the
+  // refreshButtonStates re-entrancy from the new unconditional
+  // auto-pick path.
+  if (rigSrcMeshPath === meshPath && rigSrcModel) {
     try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {}
     return;
   }
@@ -2402,6 +2420,18 @@ async function showRigSourceMesh(meshPath) {
   if (rigSrcModel) { rigSrcScene.remove(rigSrcModel); rigSrcModel = null; }
   const ext = (meshPath.split('.').pop() || '').toLowerCase();
   const applyLoadedModel = (obj) => {
+    // Stale-callback guard: a slow load that started for a previous
+    // path/project just finished, but we've moved on. Drop it on the
+    // floor instead of polluting the current scene.
+    if (myId !== rigSrcLoadId) {
+      try { obj?.traverse?.((c) => { c.geometry?.dispose?.(); c.material?.dispose?.(); }); } catch (_) {}
+      return;
+    }
+    // If a previous load already populated the scene since we cleared
+    // it (race when 2 same-id loads overlap), remove its model first.
+    if (rigSrcModel && rigSrcScene) {
+      try { rigSrcScene.remove(rigSrcModel); } catch (_) {}
+    }
     rigSrcModel = obj;
     rigSrcScene.add(rigSrcModel);
     const box = new THREE.Box3().setFromObject(rigSrcModel);
@@ -13664,6 +13694,12 @@ let _animVw = null;      // Viewer3D
 let _animMixer = null;
 let _animAction = null;
 let _animModel = null;
+// Loader race token — same purpose as rigSrcLoadId. If a previous
+// loader callback fires after a fresh _disposeAnimModel + new load,
+// we drop the stale model instead of letting it ghost into the
+// scene next to the new one ("static skeleton next to the animated
+// one" reported in prod 2026-06-02).
+let _animLoadId = 0;
 let _animHelper = null;
 let _animHelperRefresh = null;
 let _animLastTime = 0;
@@ -13785,12 +13821,18 @@ function showStep4AnimPreview(anim) {
   setViewerFilename('ws-anim-filename', anim.filename || anim.path || anim.url || '');
   _initAnimViewer();
   _disposeAnimModel();
+  const myId = ++_animLoadId;
   // Loading overlay (purple spinner + 'Loading…') until the GLB
   // resolves and the model lands in the scene.
   setViewerLoading('step4-preview', true, 'Loading animation…');
   const url = anim.url || anim.path || '';
   const loader = new GLTFLoader();
   loader.load(url, (gltf) => {
+    // Stale-callback guard.
+    if (myId !== _animLoadId) {
+      try { gltf.scene?.traverse?.((c) => { c.geometry?.dispose?.(); c.material?.dispose?.(); }); } catch (_) {}
+      return;
+    }
     setViewerLoading('step4-preview', false);
     _animModel = gltf.scene;
     _animVw.scene.add(_animModel);

@@ -237,15 +237,24 @@ def _detect_topology_family(joint_idxs, parent_by_idx, world_by_idx) -> str:
                 lower += 1
             elif abs(rise) <= body_h * 0.15 and len(ch) >= 3:
                 spine_like += 1
-    # Heuristics:
-    #   * 2+ lateral chains + 2+ lower legs → winged-biped (dragon, bat)
-    #   * 2+ lateral chains only            → bird perch (eagle, parrot)
-    #   * 4+ lower legs                     → quadruped
-    #   * 2 lower legs                      → biped
+    # Heuristics — relaxed 2026-06-02 after prod dragon log showed
+    # `lateral_long=6 lower=1` which fell through to 'all'. Cause: in
+    # rest pose, dragon's 4 LEGS all have non-trivial lateral span
+    # (knees splay outward from spine) so they got counted as
+    # `lateral_long` instead of `lower`. The tail's lateral span is
+    # almost zero so it stayed in `lower`. → for a 6-leg/wing
+    # creature with a tail, lateral_long=6 lower=1 is the signature.
+    #   * 4+ lateral chains            → winged quadruped (dragon)
+    #   * 2+ lateral + 2+ lower        → winged biped (bat, dragon flat-tail)
+    #   * 2+ lateral + 0 lower         → bird perch (eagle, parrot)
+    #   * 4+ lower (no laterals)       → plain quadruped
+    #   * 2 lower (no laterals)        → biped
     print(f"[topology] root_y={root_y:.3f} root_side={root_side:.3f} "
           f"spine_len={len(spine_chain)} lateral_long={lateral_long} "
           f"lower={lower} spine_like={spine_like} body_h={body_h:.3f} "
           f"body_s={body_s:.3f}", flush=True)
+    if lateral_long >= 4:
+        return 'flying'
     if lateral_long >= 2 and lower >= 2:
         return 'flying'
     if lateral_long >= 2 and lower == 0:
