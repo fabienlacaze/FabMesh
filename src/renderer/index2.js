@@ -453,6 +453,27 @@ async function refreshProjectsPage() {
     }
   }
 
+  // Dedupe per-project lists by their URL/path/filename so the same
+  // file never appears twice in a strip. Belt-and-braces against the
+  // multi-phase main-process enumeration.
+  function _dedupeBy(arr, keyFn) {
+    const seen = new Set();
+    const out = [];
+    for (const x of (arr || [])) {
+      const k = keyFn(x);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(x);
+    }
+    return out;
+  }
+  for (const p of projectsMap.values()) {
+    p.meshes = _dedupeBy(p.meshes, m => (m.url || m.path || m.filename || '').toLowerCase());
+    p.rigs   = _dedupeBy(p.rigs,   r => (r.url || r.path || r.filename || '').toLowerCase());
+    p.animations = _dedupeBy(p.animations, a => (a.url || a.path || a.filename || '').toLowerCase());
+    p.images = _dedupeBy(p.images, im => (typeof im === 'string' ? im : im?.path || '').toLowerCase());
+  }
+
   state.projects = Array.from(projectsMap.values()).sort((a, b) => b.latestTimestamp - a.latestTimestamp);
   renderProjectsGrid();
   // Start background NSFW scan (non-blocking, re-renders when done)
@@ -526,18 +547,40 @@ async function _runNsfwBackgroundScan() {
   console.log('[NSFW] scanning', toScan.length, 'thumbnails...');
   _nsfwScanRunning = true;
   try {
-    const results = await API.batchCheckNsfw({ images: toScan });
-    console.log('[NSFW] scan results:', results);
-    if (results && typeof results === 'object') {
+    const resp = await API.batchCheckNsfw({ images: toScan });
+    console.log('[NSFW] scan results:', resp);
+    if (resp && typeof resp === 'object') {
+      // Accept BOTH wrapped { results: [...] } and bare object/array.
+      // The pre-fix bug iterated Object.entries(resp) and read 'ok' /
+      // 'results' as paths, flagging random projects as NSFW.
       let changed = false;
-      for (const [imgPath, nsfw] of Object.entries(results)) {
-        const fname = imgPath.split(/[/\\]/).pop();
-        _nsfwScanCache[fname] = !!nsfw;
-        if (nsfw) { changed = true; console.log('[NSFW] BLOCKED:', fname, imgPath); }
+      if (Array.isArray(resp) || Array.isArray(resp.results)) {
+        const items = Array.isArray(resp) ? resp : resp.results;
+        for (const item of items) {
+          let imgPath, nsfw;
+          if (typeof item === 'string') { imgPath = item; nsfw = true; }
+          else if (item && typeof item === 'object') {
+            imgPath = item.path || item.url || item.image || '';
+            nsfw = !!(item.nsfw || item.blocked || item.unsafe);
+          } else continue;
+          if (!imgPath) continue;
+          const fname = imgPath.split(/[/\\]/).pop();
+          _nsfwScanCache[fname] = nsfw;
+          if (nsfw) { changed = true; console.log('[NSFW] BLOCKED:', fname, imgPath); }
+        }
+      } else {
+        // Legacy { path: bool } map — keep working for desktop's IPC.
+        for (const [imgPath, nsfw] of Object.entries(resp)) {
+          // Defensive: skip wrapper-style keys.
+          if (imgPath === 'ok' || imgPath === 'results') continue;
+          const fname = imgPath.split(/[/\\]/).pop();
+          _nsfwScanCache[fname] = !!nsfw;
+          if (nsfw) { changed = true; console.log('[NSFW] BLOCKED:', fname, imgPath); }
+        }
       }
-      console.log('[NSFW] cache keys:', Object.keys(_nsfwScanCache).filter(k => _nsfwScanCache[k]));
       if (changed) {
-        console.log('[NSFW] re-rendering grid to hide', Object.values(_nsfwScanCache).filter(v=>v).length, 'NSFW projects');
+        console.log('[NSFW] re-rendering grid to hide',
+          Object.values(_nsfwScanCache).filter(v => v).length, 'NSFW projects');
         renderProjectsGrid();
       }
     }
@@ -549,11 +592,12 @@ async function _runNsfwBackgroundScan() {
  * Home view toggle — Projects / Images / Meshes
  * --------------------------------------------------------------------- */
 function _updateHomeViewCounts() {
-  let imgN = 0, meshN = 0, rigN = 0;
+  let imgN = 0, meshN = 0, rigN = 0, animN = 0;
   for (const p of state.projects || []) {
     imgN += (p.images || []).length;
     meshN += (p.meshes || []).length;
     rigN += (p.rigs || []).length;
+    animN += (p.animations || []).length;
   }
   const projN = (state.projects || []).length;
   const set = (k, n) => {
@@ -564,6 +608,7 @@ function _updateHomeViewCounts() {
   set('images', imgN);
   set('meshes', meshN);
   set('rigs', rigN);
+  set('anims', animN);
 }
 
 let _homeView = 'projects';
@@ -847,6 +892,7 @@ async function renderProjectsGrid() {
     const hasImage = p.images.length > 0;
     const hasMesh = p.meshes.length > 0;
     const hasRig = p.rigs.length > 0;
+    const hasAnim = (p.animations || []).length > 0;
     const isSelected = state._selectedProjects.has(p.name);
     const card = document.createElement('div');
     card.className = 'project-card' + (isSelected ? ' selected' : '');
@@ -861,12 +907,13 @@ async function renderProjectsGrid() {
       <div class="project-card-body">
         <div class="project-card-name">${escapeHtml(p.name)}</div>
         <div class="project-card-meta">
-          ${p.images.length} img · ${p.meshes.length} mesh · ${p.rigs.length} rig
+          ${p.images.length} img · ${p.meshes.length} mesh · ${p.rigs.length} rig · ${(p.animations||[]).length} anim
         </div>
         <div class="project-card-progress">
           <span class="pcp-step ${hasImage ? 'done' : ''}"></span>
           <span class="pcp-step ${hasMesh ? 'done' : ''}"></span>
           <span class="pcp-step ${hasRig ? 'done' : ''}"></span>
+          <span class="pcp-step ${hasAnim ? 'done' : ''}"></span>
         </div>
       </div>
     `;
@@ -13514,6 +13561,108 @@ function getActiveLandmarkModel() {
   return null;
 }
 
+// ----------------------------------------------------------------
+// Extract landmark positions from an already-generated rig.
+// Loads the selected rig GLB, walks the bone tree, fuzzy-matches each
+// bone name against the LM_SCHEMA ids, and places a landmark marker
+// at each matched bone's WORLD position. Equivalent to manual
+// click-placement so "Re-generate rig with these landmarks" sees them.
+async function extractLandmarksFromRig() {
+  const p = state.currentProject;
+  const rigPath = p?.selectedRigPath
+              || (p?.rigs && p.rigs[0]?.url)
+              || (p?.rigs && p.rigs[0]?.path);
+  if (!rigPath) {
+    if (typeof customError === 'function')
+      customError('Generate a rig first (Step 3 Rig → Generate Rig).', 'From rig');
+    return;
+  }
+  const BONE_RULES = [
+    { id: 'head',       patterns: [/^head$/i, /skull/i, /mixamo.*head/i, /bip01.*head/i] },
+    { id: 'neck',       patterns: [/^neck/i, /mixamo.*neck/i, /bip01.*neck/i] },
+    { id: 'spine_top',  patterns: [/spine.?2$/i, /spine.?upper/i, /upper.?spine/i, /chest$/i, /sternum/i] },
+    { id: 'spine_mid',  patterns: [/spine.?1$/i, /spine.?mid/i, /mid.?spine/i, /^spine$/i, /belt/i] },
+    { id: 'hips',       patterns: [/^hips?$/i, /pelvis/i, /^root$/i, /mixamo.*hips/i] },
+    { id: 'shoulder_l', patterns: [/(^l[_.]?|left)shoulder/i, /(^l[_.]?|left)clavicle/i, /(^l[_.]?|left)arm$/i, /mixamo.*leftarm$/i] },
+    { id: 'elbow_l',    patterns: [/(^l[_.]?|left)elbow/i, /(^l[_.]?|left)forearm/i, /mixamo.*leftforearm/i] },
+    { id: 'hand_l',     patterns: [/(^l[_.]?|left)wrist/i, /(^l[_.]?|left)hand$/i, /mixamo.*lefthand$/i] },
+    { id: 'shoulder_r', patterns: [/(^r[_.]?|right)shoulder/i, /(^r[_.]?|right)clavicle/i, /(^r[_.]?|right)arm$/i, /mixamo.*rightarm$/i] },
+    { id: 'elbow_r',    patterns: [/(^r[_.]?|right)elbow/i, /(^r[_.]?|right)forearm/i, /mixamo.*rightforearm/i] },
+    { id: 'hand_r',     patterns: [/(^r[_.]?|right)wrist/i, /(^r[_.]?|right)hand$/i, /mixamo.*righthand$/i] },
+    { id: 'hip_l',      patterns: [/(^l[_.]?|left)upleg/i, /(^l[_.]?|left)thigh/i, /(^l[_.]?|left)hip/i] },
+    { id: 'knee_l',     patterns: [/(^l[_.]?|left)leg$/i, /(^l[_.]?|left)knee/i, /(^l[_.]?|left)shin/i] },
+    { id: 'ankle_l',    patterns: [/(^l[_.]?|left)ankle/i, /(^l[_.]?|left)foot$/i] },
+    { id: 'foot_l',     patterns: [/(^l[_.]?|left)toe/i, /(^l[_.]?|left)toebase/i, /(^l[_.]?|left)ball/i] },
+    { id: 'hip_r',      patterns: [/(^r[_.]?|right)upleg/i, /(^r[_.]?|right)thigh/i, /(^r[_.]?|right)hip/i] },
+    { id: 'knee_r',     patterns: [/(^r[_.]?|right)leg$/i, /(^r[_.]?|right)knee/i, /(^r[_.]?|right)shin/i] },
+    { id: 'ankle_r',    patterns: [/(^r[_.]?|right)ankle/i, /(^r[_.]?|right)foot$/i] },
+    { id: 'foot_r',     patterns: [/(^r[_.]?|right)toe/i, /(^r[_.]?|right)toebase/i, /(^r[_.]?|right)ball/i] },
+  ];
+  function classifyBone(name) {
+    const clean = String(name || '').replace(/^mixamo[^:]*:/i, '').trim();
+    for (const r of BONE_RULES) {
+      for (const p of r.patterns) {
+        if (p.test(name) || p.test(clean)) return r.id;
+      }
+    }
+    return null;
+  }
+  try {
+    lmPushHistory();
+    const buffer = await API.readMeshFile(rigPath);
+    if (!buffer) {
+      if (typeof customError === 'function') customError('Could not load rig file.', 'From rig');
+      return;
+    }
+    const rigScene = await new Promise((resolve, reject) => {
+      new GLTFLoader().parse(buffer, '', (gltf) => resolve(gltf.scene), reject);
+    });
+    const box = new THREE.Box3().setFromObject(rigScene);
+    const center = box.getCenter(new THREE.Vector3());
+    rigScene.position.x -= center.x;
+    rigScene.position.z -= center.z;
+    rigScene.position.y -= box.min.y;
+    rigScene.updateMatrixWorld(true);
+    const bones = [];
+    rigScene.traverse((c) => {
+      if (c.isBone) bones.push(c);
+      else if (c.isSkinnedMesh && c.skeleton) {
+        for (const b of c.skeleton.bones) if (!bones.includes(b)) bones.push(b);
+      }
+    });
+    if (!bones.length) {
+      if (typeof customError === 'function') customError('No bones found in the selected rig.', 'From rig');
+      return;
+    }
+    let matched = 0;
+    const seen = new Set();
+    const colorById = {};
+    for (const cat of LM_SCHEMA) for (const it of cat.items) colorById[it.id] = it.color;
+    for (const b of bones) {
+      const id = classifyBone(b.name);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const pos = new THREE.Vector3();
+      b.getWorldPosition(pos);
+      placeLandmarkMarker(id, pos, colorById[id] || '#ffffff');
+      // Link the marker to the bone so drag can move the bone too.
+      if (lmMarkers[id]) lmMarkers[id].userData._linkedBone = b;
+      matched++;
+    }
+    if (matched === 0) {
+      if (typeof customError === 'function')
+        customError(`Found ${bones.length} bone(s) but none matched a known landmark name.\n\nFirst few names: ${bones.slice(0, 8).map(b => b.name).join(', ')}`, 'From rig');
+      return;
+    }
+    if (typeof showToast === 'function') {
+      showToast(`Imported ${matched} landmark(s) from rig — drag them to adjust, then click "Re-generate rig".`, 'success', 5000);
+    }
+  } catch (e) {
+    console.error('[extractLandmarksFromRig]', e);
+    if (typeof customError === 'function') customError('Failed to read the rig: ' + (e?.message || e), 'From rig');
+  }
+}
+
 function autoDetectLandmarks() {
   const ctx = getActiveLandmarkModel();
   if (!ctx) { customError('Load a mesh first (use the "Use this mesh for Rig" button in the 3D Mesh card).', 'Auto-detect landmarks'); return; }
@@ -13755,7 +13904,41 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
         const btn = document.querySelector(`.lm-btn[data-lm="${lmActive}"]`);
         const colorHex = btn?.dataset.color || '#ffffff';
         const color = parseInt(colorHex.replace('#', ''), 16);
-        placeLandmarkMarker(lmActive, pt, color);
+        // Snap to the CLOSEST bone if a rig is loaded — the user is
+        // usually trying to target a specific bone visible via the
+        // skeleton overlay. Also remember which bone we snapped to so
+        // a future drag can update that bone's position.
+        let placePt = pt;
+        let snappedBone = null;
+        try {
+          const bones = [];
+          model.traverse(c => {
+            if (c.isBone) bones.push(c);
+            else if (c.isSkinnedMesh && c.skeleton) {
+              for (const b of c.skeleton.bones) if (!bones.includes(b)) bones.push(b);
+            }
+          });
+          if (bones.length) {
+            let bestBone = null;
+            let best = null;
+            let bestD = Infinity;
+            const bp = new THREE.Vector3();
+            for (const b of bones) {
+              b.getWorldPosition(bp);
+              const d = bp.distanceTo(pt);
+              if (d < bestD) { bestD = d; best = bp.clone(); bestBone = b; }
+            }
+            if (best) {
+              const bbox = new THREE.Box3().setFromObject(model);
+              const sz = bbox.getSize(new THREE.Vector3()).length();
+              if (bestD < sz * 0.125) { placePt = best; snappedBone = bestBone; }
+            }
+          }
+        } catch (_) { /* fall through to raw pt */ }
+        placeLandmarkMarker(lmActive, placePt, color);
+        if (snappedBone && lmMarkers[lmActive]) {
+          lmMarkers[lmActive].userData._linkedBone = snappedBone;
+        }
         saveLandmarksForCurrentMesh();
         btn?.classList.remove('armed');
         lmActive = null;
@@ -13812,6 +13995,33 @@ function bindLandmarkRaycaster(canvas, getModel, getCamera, getControls) {
       // the marker's — i.e. keep the marker on its original slice plane.
       const corrected = pt.clone().addScaledVector(camDir, markerDepth - hitDepth);
       marker.position.copy(corrected);
+      // If this marker is linked to an AI bone, move the bone too.
+      // Two modes (controlled by the "Freeze mesh" checkbox):
+      //   - DEFORM (unchecked): skinning follows bone → mesh warps.
+      //   - FREEZE (checked, default): recompute boneInverse so the
+      //     skinning identity preserves vertex world positions →
+      //     mesh stays put, bone gizmo moves alone.
+      const linkedBone = marker.userData?._linkedBone;
+      if (linkedBone && linkedBone.parent) {
+        try {
+          linkedBone.parent.updateMatrixWorld(true);
+          const localPos = linkedBone.parent.worldToLocal(corrected.clone());
+          linkedBone.position.copy(localPos);
+          linkedBone.updateMatrixWorld(true);
+          const freezeMesh = document.getElementById('lm-fs-freeze-mesh')?.checked;
+          if (freezeMesh && typeof lmFsModel !== 'undefined' && lmFsModel) {
+            lmFsModel.traverse((c) => {
+              if (!c.isSkinnedMesh || !c.skeleton) return;
+              const boneIdx = c.skeleton.bones.indexOf(linkedBone);
+              if (boneIdx < 0) return;
+              if (!c.skeleton.boneInverses[boneIdx]) return;
+              const newInv = new THREE.Matrix4();
+              newInv.copy(linkedBone.matrixWorld).invert();
+              c.skeleton.boneInverses[boneIdx].copy(newInv);
+            });
+          }
+        } catch (_e) { /* ignore */ }
+      }
       try { refreshLmFsSilhouetteDots && refreshLmFsSilhouetteDots(); } catch (_e) {}
     }
     e.stopPropagation();
@@ -13903,17 +14113,24 @@ function initLmFullscreen() {
   // Shared scene + lights
   lmFsScene = new THREE.Scene();
   lmFsScene.background = new THREE.Color(0x0b0b14);
-  lmFsScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  // Bright lighting — match the main 3D Mesh viewer rig (dark meshes
+  // were nearly invisible in the landmark modal with the previous defaults).
+  lmFsScene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.8));
+  const dir = new THREE.DirectionalLight(0xffffff, 2.0);
   dir.position.set(5, 8, 5);
   lmFsScene.add(dir);
-  lmFsScene.add(new THREE.DirectionalLight(0xffffff, 0.5).translateX(-5).translateY(3).translateZ(-5));
-  lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  fill.position.set(-5, 3, -5);
+  lmFsScene.add(fill);
+  const back = new THREE.DirectionalLight(0xffffff, 0.7);
+  back.position.set(0, 5, -8);
+  lmFsScene.add(back);
+  lmFsScene.add(new THREE.AmbientLight(0xffffff, 0.6));
   // Pane A (Front by default)
   lmFsRenderer = new THREE.WebGLRenderer({ canvas: canvasA, antialias: true, alpha: true });
   lmFsRenderer.setPixelRatio(window.devicePixelRatio);
   lmFsRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  lmFsRenderer.toneMappingExposure = 1.0;
+  lmFsRenderer.toneMappingExposure = 1.4;
   lmFsCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
   lmFsControls = new OrbitControls(lmFsCamera, canvasA);
   lmFsControls.enableDamping = true;
@@ -14081,6 +14298,22 @@ async function openLandmarksFullscreen() {
   } catch (e) { console.error('openLandmarksFullscreen', e); }
   // Build the side list of landmark buttons
   buildLmFsList();
+  // Auto-extract landmarks from the selected rig (if any) on the first
+  // open of this session. Only runs when no markers have been placed
+  // yet — avoids stomping the user's manual edits when they re-open
+  // the modal mid-tweak.
+  try {
+    const hasExistingMarkers = (typeof lmMarkers === 'object')
+      && lmMarkers && Object.keys(lmMarkers).length > 0;
+    const cp = state.currentProject;
+    const hasRig = !!(cp?.selectedRigPath || (cp?.rigs && cp.rigs[0]));
+    if (!hasExistingMarkers && hasRig) {
+      setTimeout(() => {
+        try { extractLandmarksFromRig(); }
+        catch (e) { console.warn('[lm] auto-extract from rig failed:', e); }
+      }, 200);
+    }
+  } catch (_) {}
 }
 
 function buildLmFsList() {
@@ -14232,6 +14465,11 @@ function closeLandmarksFullscreen() {
 }
 document.getElementById('ws-lm-manual')?.addEventListener('click', openLandmarksFullscreen);
 document.getElementById('lm-fs-close')?.addEventListener('click', closeLandmarksFullscreen);
+document.getElementById('lm-fs-from-rig')?.addEventListener('click', () => {
+  extractLandmarksFromRig().then(() => {
+    try { if (typeof refreshLmFsSilhouetteDots === 'function') refreshLmFsSilhouetteDots(); } catch (_) {}
+  });
+});
 document.getElementById('lm-fs-auto')?.addEventListener('click', () => {
   autoDetectLandmarks();
   refreshLmFsSilhouetteDots();

@@ -993,9 +993,17 @@
           <div class="lm-fs-title">Landmarks</div>
           <div class="lm-fs-actions">
             <button id="lm-fs-auto" class="ghost-btn">Auto-detect</button>
+            <button id="lm-fs-from-rig" class="ghost-btn" title="Read bone positions from the currently selected rig">&#128205; From rig</button>
             <button id="lm-fs-guided" class="ghost-btn">&#9758; Guided</button>
             <button id="lm-fs-clear" class="ghost-btn">Clear all</button>
           </div>
+          <!-- Drag mode toggle. Default ON (freeze) so dragging a marker
+               REALIGNS the bone to the mesh without warping the mesh.
+               Turn OFF to pose the mesh (skinning follows bone). -->
+          <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:var(--text-2); cursor:pointer;">
+            <input type="checkbox" id="lm-fs-freeze-mesh" checked />
+            <span>&#128274; Freeze mesh while dragging (align bone, don't deform)</span>
+          </label>
           <button id="lm-fs-regen-rig" class="primary-btn lm-fs-regen-btn">&#10227; Re-generate rig with these landmarks</button>
         </div>
         <div class="lm-fs-silhouettes">
