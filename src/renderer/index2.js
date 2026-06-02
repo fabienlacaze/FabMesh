@@ -1635,7 +1635,13 @@ function enableStep(stepNum) {
 // Two paths per project:
 //   previewImagePath: what is shown in the big preview (clicking a thumb updates it)
 //   selectedImagePath: the image that will be sent to the 3D step when the user clicks "Use this for 3D"
+// Bumped on every renderImageVersions call; awaits inside check
+// against this counter to abort if a newer call has started. Prevents
+// concurrent renders from each appending their items to the strip
+// (the bug that produced 'v1 v0 v1 v0' duplicate thumbs on cloud).
+let _renderImageVersionsSeq = 0;
 async function renderImageVersions(p) {
+  const mySeq = ++_renderImageVersionsSeq;
   const strip = document.getElementById('ws-image-versions');
   strip.innerHTML = '';
 
@@ -1647,6 +1653,10 @@ async function renderImageVersions(p) {
       restricted = !ps.unrestricted;
     }
   } catch(_) {}
+  if (mySeq !== _renderImageVersionsSeq) {
+    console.log('[renderImageVersions] aborting seq=', mySeq, '(newer seq=', _renderImageVersionsSeq, ')');
+    return;
+  }
 
   // Filter out NSFW images when restricted (check .nsfw tag files via IPC)
   let images = p.images;
@@ -1654,6 +1664,10 @@ async function renderImageVersions(p) {
     try {
       const allPaths = p.images.map(img => img.path || img);
       const tags = await API.checkImagesNsfwTags({ images: allPaths });
+      if (mySeq !== _renderImageVersionsSeq) {
+        console.log('[renderImageVersions] aborting seq=', mySeq, 'after NSFW (newer seq=', _renderImageVersionsSeq, ')');
+        return;
+      }
       if (tags && typeof tags === 'object') {
         images = p.images.filter(img => {
           const imgPath = img.path || img;
@@ -3561,16 +3575,29 @@ const ASSET_TYPE_PROMPTS = {
 };
 
 const ASSET_STYLE_PROMPTS = {
-  realistic:  'realistic style, photorealistic, sharp details, detailed materials',
-  stylized:   'stylized art, mid-poly game asset, hand-painted textures, fantasy game style',
-  lowpoly:    'low-poly 3D art, flat-shaded, faceted geometry, minimalist, geometric shapes, vibrant colors',
-  cartoon:    'cartoon style, bold outlines, cel-shading, vibrant flat colors, expressive shapes',
-  anime:      'anime style, soft cel-shading, expressive features, japanese animation aesthetic',
-  pixelart:   'pixel art style, 16-bit retro game aesthetic, limited palette, sharp pixel edges',
-  painterly:  'painterly style, brushstroke textures, hand-painted concept art look',
-  pbr:        'PBR materials, ultra detailed, 8k textures, high-poly cinematic quality, film-grade lighting',
-  voxel:      'voxel art, minecraft-inspired blocky 3D style, cubic geometry, clean voxels',
-  custom:     '',
+  realistic:    'realistic style, photorealistic, sharp details, detailed materials',
+  stylized:     'stylized art, mid-poly game asset, hand-painted textures, fantasy game style',
+  lowpoly:      'low-poly 3D art, flat-shaded, faceted geometry, minimalist, geometric shapes, vibrant colors',
+  cartoon:      'cartoon style, bold outlines, cel-shading, vibrant flat colors, expressive shapes',
+  anime:        'anime style, soft cel-shading, expressive features, japanese animation aesthetic',
+  pixelart:     'pixel art style, 16-bit retro game aesthetic, limited palette, sharp pixel edges',
+  painterly:    'painterly style, brushstroke textures, hand-painted concept art look',
+  pbr:          'PBR materials, ultra detailed, 8k textures, high-poly cinematic quality, film-grade lighting',
+  voxel:        'voxel art, minecraft-inspired blocky 3D style, cubic geometry, clean voxels',
+  'stylized-pbr':'stylized PBR, Overwatch and Fortnite style, hand-painted shading on PBR maps, clean game asset',
+  'hand-painted':'hand-painted texture, WoW-style stylized, painterly diffuse, no realistic PBR maps, vibrant',
+  ghibli:       'Studio Ghibli style, soft anime, gentle warm palette, hand-drawn animation, expressive nature',
+  pixar:        'Pixar 3D animated movie, clean stylized 3D, family-friendly polish, expressive characters',
+  comic:        'comic book style, ink outlines, halftone shading, bold saturated colors, dynamic poses',
+  'dark-fantasy':'dark fantasy, gothic grimdark, dramatic chiaroscuro lighting, weathered ornate detail, brooding',
+  cyberpunk:    'cyberpunk sci-fi, neon accents, futuristic mechanical detail, gritty urban',
+  steampunk:    'steampunk, brass copper rivets, victorian mechanical, leather and gears, ornate clockwork',
+  minecraft:    'Minecraft blocky low-fi, cubic geometry, pixelated 16x16 texture, voxel inspired',
+  watercolor:   'watercolor painting, soft pigment washes, paper texture, gentle bleeding edges',
+  concept:      'concept art, rough painterly, dramatic lighting, production design, key art quality',
+  sketch:       'pencil sketch, line art, graphite shading, minimal color, hand-drawn',
+  claymation:   'claymation, plasticine model, soft stop-motion surface, Aardman style, handmade charm',
+  custom:       '',
 };
 
 // Rig-target skeletons exposed in the Generate Rig dropdown. The Python
@@ -6275,6 +6302,23 @@ function _applyMeshTextureFilter(root) {
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const mat of mats) {
       if (!mat) continue;
+      // FrontSide (cull back faces) — Trellis2 reversed-winding triangles
+      // can produce a few dark patches but that's preferable to the
+      // 'see-through painted texture' artefact users reported when
+      // DoubleSide reveals the inside-out of the front face.
+      mat.side = THREE.FrontSide;
+      // FORCE OPAQUE: GLTFLoader sometimes carries alphaMode='BLEND' or
+      // a stray alpha map from Trellis2/SF3D output that makes the
+      // mesh look semi-transparent. Default to opaque; users who need
+      // glass can re-enable via Material Adjust.
+      if (mat.transparent || (mat.opacity != null && mat.opacity < 1)) {
+        mat.transparent = false;
+        mat.opacity = 1.0;
+        if (mat.alphaMap) mat.alphaMap = null;
+        if ('alphaTest' in mat) mat.alphaTest = 0;
+        mat.depthWrite = true;
+        mat.needsUpdate = true;
+      }
       const slots = [mat.map, mat.normalMap, mat.roughnessMap,
                      mat.metalnessMap, mat.aoMap, mat.emissiveMap];
       for (const tex of slots) {
@@ -6317,6 +6361,18 @@ async function renderMeshVersions(p) {
 
   // Filter NSFW meshes: check if the source image has a .nsfw tag
   let meshes = p.meshes;
+  // Newest-first guarantee. The main-process handler appends meshes in
+  // four phases (jobs → rigged → mesh-op → animations) without a final
+  // sort, so a freshly-generated mesh-op output could land BEHIND
+  // older jobs. The renderer labels by index (v(N-1-i)) and assumes
+  // i=0 is newest, so re-sort defensively here.
+  if (Array.isArray(meshes)) {
+    meshes = meshes.slice().sort((a, b) => {
+      const ka = (a && (a.created || a.mtime)) || '';
+      const kb = (b && (b.created || b.mtime)) || '';
+      return String(kb).localeCompare(String(ka));
+    });
+  }
   let restricted = true;
   try {
     if (API.getParentalStatus) {
@@ -6636,8 +6692,17 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     fast:     { steps: 12, texSize: 2048, imgRes: 1024 },
     balanced: { steps: 24, texSize: 2048, imgRes: 1024 },
     quality:  { steps: 32, texSize: 4096, imgRes: 2048 },
+    // Ultra 8K = Quality (TRELLIS atlas 4096) + forced Real-ESRGAN x2
+    // post-process → 8192px final. Cheaper than re-running TRELLIS at
+    // 8K (would OOM on RTX 5080) and quality-comparable.
+    ultra_8k: { steps: 32, texSize: 4096, imgRes: 2048, forceUltraHd: true },
   };
   const t2cfg = TRELLIS2_PRESETS[trellis2Preset] || TRELLIS2_PRESETS.fast;
+  // Ultra 8K forces ultra_hd ON regardless of the checkbox.
+  const effectiveUltraHD = trellis2UltraHD || !!t2cfg.forceUltraHd;
+  if (t2cfg.forceUltraHd && !trellis2UltraHD) {
+    expectedMs += 280000; // add Real-ESRGAN x2 time not yet accounted for
+  }
 
   const params = {
     imagePath: p.selectedImagePath,
@@ -6662,7 +6727,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     trellis2QualityPlus,
     trellis2UltraQ,
     trellis2FaceFix,
-    trellis2UltraHD,
+    trellis2UltraHD: effectiveUltraHD,
+    // Also send via the snake_case key expected by the python runner.
+    ultra_hd: effectiveUltraHD,
     trellis2Preset,
     assetType: document.getElementById('ws-asset-type')?.value || 'character',
   };
@@ -12712,7 +12779,14 @@ async function refreshParentalStatus() {
       lockIcon.style.display = '';
       lockIcon.innerHTML = r.unrestricted ? '&#128275;' : '&#128274;';
       lockIcon.title = r.unrestricted ? 'Unrestricted mode — click to lock' : 'Parental control active — click to unlock';
-      lockIcon.style.opacity = r.unrestricted ? '0.4' : '0.8';
+      // Always fully opaque + clickable. Use an amber tint when
+      // unrestricted to signal 'danger zone' instead of dimming the
+      // icon (which read as disabled / unclickable to the user).
+      lockIcon.style.opacity = '1';
+      lockIcon.style.cursor = 'pointer';
+      lockIcon.style.pointerEvents = 'auto';
+      lockIcon.style.background = r.unrestricted ? 'rgba(245, 158, 11, 0.18)' : '';
+      lockIcon.style.borderColor = r.unrestricted ? 'var(--warning, #f59e0b)' : '';
     }
     if (r.unrestricted) {
       statusEl.textContent = '🔓 Unrestricted';
