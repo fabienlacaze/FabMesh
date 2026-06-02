@@ -1693,11 +1693,35 @@ function _autoPickSourceForCreateNew(card) {
   const p = state.currentProject;
   if (!p || !card) return;
   const cardId = card.id;
+  // Guard against cross-project bleed (mesh-op / rigged / animation
+  // attribution upstream sometimes pulls items from other projects
+  // into p.meshes/rigs — observed in prod 2026-06-02 when a "lion"
+  // mesh appeared as the Source Mesh in the "dragon" project).
+  // STRICT: require explicit projectName match. Items with no
+  // projectName, "_orphans", or a different project name are
+  // rejected — surfacing the upstream attribution bug rather than
+  // silently displaying the wrong asset.
+  const belongs = (it) => {
+    if (!it) return false;
+    if (!p || !p.name) return false;
+    if (!it.projectName) return false;
+    if (it.projectName === '_orphans') return false;
+    return it.projectName === p.name;
+  };
   // Step 2 (3D Mesh) — source IMAGE.
   if (cardId === 'step-card-mesh') {
+    // STALE GUARD: if selectedImagePath doesn't exist in p.images
+    // (e.g. user clicked "Use this for X" on an image in another
+    // project at some point), reset and re-pick from current project.
+    if (p.selectedImagePath && p.images && !p.images.some(it =>
+        (typeof it === 'string' ? it : it.path) === p.selectedImagePath)) {
+      console.warn('[autoPick] stale selectedImagePath, resetting', p.selectedImagePath);
+      p.selectedImagePath = null;
+      p.previewImagePath = null;
+    }
     if (!p.selectedImagePath && p.images && p.images.length > 0) {
-      const newest = p.images[0];
-      const path = (typeof newest === 'string') ? newest : (newest && newest.path);
+      const newest = (p.images || []).find(it => belongs(it));
+      const path = newest && (typeof newest === 'string' ? newest : newest.path);
       if (path) {
         p.selectedImagePath = path;
         p.previewImagePath = path;
@@ -1711,8 +1735,18 @@ function _autoPickSourceForCreateNew(card) {
   }
   // Step 3 (Rig) — source MESH.
   if (cardId === 'step-card-rig') {
+    // STALE GUARD: if selectedMeshPath doesn't point to any of the
+    // current project's meshes, drop it so the auto-pick falls back
+    // to a valid one (this is what was happening with the "lion in
+    // dragon viewer" bug — selectedMeshPath was leaking across
+    // projects via the "Use this for X" handoff).
+    if (p.selectedMeshPath && p.meshes && !p.meshes.some(m =>
+        m && (m.path === p.selectedMeshPath || m.url === p.selectedMeshPath))) {
+      console.warn('[autoPick] stale selectedMeshPath, resetting', p.selectedMeshPath);
+      p.selectedMeshPath = null;
+    }
     if (!p.selectedMeshPath && p.meshes && p.meshes.length > 0) {
-      const newest = p.meshes[0];
+      const newest = (p.meshes || []).find(it => belongs(it));
       const path = newest && (newest.path || newest.url);
       if (path) p.selectedMeshPath = path;
     }
@@ -1724,8 +1758,15 @@ function _autoPickSourceForCreateNew(card) {
   }
   // Step 4 (Animation) — source RIG.
   if (cardId === 'step-card-animation') {
+    const selRig = p.selectedRigUrl || p.selectedRigPath;
+    if (selRig && p.rigs && !p.rigs.some(r =>
+        r && (r.url === selRig || r.path === selRig))) {
+      console.warn('[autoPick] stale selectedRigUrl, resetting', selRig);
+      p.selectedRigUrl = null;
+      p.selectedRigPath = null;
+    }
     if (!p.selectedRigUrl && !p.selectedRigPath && p.rigs && p.rigs.length > 0) {
-      const newest = p.rigs[0];
+      const newest = (p.rigs || []).find(it => belongs(it));
       const url = newest && (newest.url || newest.path);
       if (url) {
         p.selectedRigUrl = url;
