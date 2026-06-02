@@ -10521,10 +10521,29 @@ function completeJob(id, success, errorMessage) {
   if (!success && errorMessage) {
     j.errorMessage = String(errorMessage);
   }
+  // 2026-06-02 liveliness: trigger the one-shot bounce-and-flash on
+  // the matching step card so the user gets a satisfying visual cue
+  // that something just succeeded. CSS animation is 1.5s; we remove
+  // the class after 1600ms so it can re-fire on the next completion.
+  try {
+    if (success) {
+      const stepIdx = _jobStepIndex(j);
+      if (stepIdx > 0) {
+        const cardId = ['step-card-image','step-card-mesh','step-card-rig','step-card-animation'][stepIdx - 1];
+        const card = document.getElementById(cardId);
+        if (card) {
+          card.classList.add('just-done');
+          setTimeout(() => card.classList.remove('just-done'), 1600);
+        }
+      }
+    }
+  } catch (_) {}
   renderJobs();
   // Failed jobs linger longer than successful ones so the user has time to
   // open the details modal and click the recovery button (e.g. "Open Settings").
-  const ttl = success ? 4000 : 30000;
+  // 2026-06-02: extend the done dwell to 8s so the user can read the
+  // result tile inside the per-step widget instead of having it vanish.
+  const ttl = success ? 8000 : 30000;
   setTimeout(() => {
     state.jobs = state.jobs.filter(x => x.id !== id);
     renderJobs();
@@ -10571,6 +10590,172 @@ async function cancelJob(id) {
 }
 window._cancelJob = cancelJob;
 
+// Classify a job into one of the 4 Create New steps so the per-step
+// progress widget can show only the jobs relevant to its own panel.
+// Returns 1..4 or 0 for "no step" (don't render in any step widget).
+function _jobStepIndex(j) {
+  const n = (j && j.name) || '';
+  // Step 1 (image) — generation, edits, variants, view rectifiers.
+  if (/^(generate images?|generating (back|6) views|generate back views|multi[- ]?views|modify|inpaint|face[- ]?fix|remove[- ]?bg|rectif|upscal|back[- ]?view|t[- ]?pose|re[- ]?roll|variant|img2img|sdxl|flux|image[- ]?to[- ]?image)/i.test(n)) return 1;
+  if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr)/i.test(n)) return 2;
+  if (/(rig|skeleton)/i.test(n)) return 3;
+  if (/^(animate|animation)/i.test(n)) return 4;
+  return 0;
+}
+
+// Track per-step "last seen hasRunning" so we only auto-toggle the
+// GENERATING stage when the state CHANGES. Without this, the every-
+// second render tick would clobber the user's manual expand (they
+// open it, next render closes it). With this, the user's toggle wins
+// until the running state flips.
+const _stageGenLastRunning = { 1: null, 2: null, 3: null, 4: null };
+
+function _toggleGeneratingStage(stepIdx, hasRunning) {
+  const cardId = ['step-card-image','step-card-mesh','step-card-rig','step-card-animation'][stepIdx - 1];
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const stage = card.querySelector('.stage-generating');
+  if (!stage) return;
+  stage.style.display = '';  // always visible
+  // Only force the open state on TRANSITION (running ↔ idle). User's
+  // manual click between transitions is respected.
+  const last = _stageGenLastRunning[stepIdx];
+  if (last !== hasRunning) {
+    stage.open = !!hasRunning;
+    _stageGenLastRunning[stepIdx] = hasRunning;
+  }
+  // Liveliness: badge pulse + icon spin animate via CSS picking up
+  // .has-running on the step card.
+  card.classList.toggle('has-running', !!hasRunning);
+}
+
+// Pull the project name a job was launched on. We prefer the SNAPSHOT
+// stored on the job (params.Project or sourceProject), then fall back to
+// extracting "...: <name>" from the title, then to current project.
+function _jobProjectName(j) {
+  if (!j) return null;
+  if (j.params && j.params.Project) return j.params.Project;
+  if (j.sourceProject) return j.sourceProject;
+  const m = (j.name || '').match(/[:—–-]\s*([^:—–-]+)\s*$/);
+  if (m) return m[1].trim();
+  return null;
+}
+
+// Open the project (if different from current) and scroll/expand the
+// step card matching this job. Exposed on window so HTML onclick can
+// reach it from anywhere.
+window._navigateToJobStep = async function(jobId) {
+  const j = state.jobs.find(x => x.id === jobId);
+  if (!j) return;
+  const stepIdx = _jobStepIndex(j);
+  if (!stepIdx) return;
+  const targetName = _jobProjectName(j);
+  const cur = state.currentProject && state.currentProject.name;
+  if (targetName && targetName !== cur) {
+    try {
+      const p = (state.projects || []).find(x => x && x.name === targetName);
+      if (p && typeof openProject === 'function') {
+        await openProject(p);
+      } else if (typeof window.openProjectByName === 'function') {
+        await window.openProjectByName(targetName);
+      }
+    } catch (_) {}
+  }
+  const cardId = ['step-card-image','step-card-mesh','step-card-rig','step-card-animation'][stepIdx - 1];
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  card.classList.remove('collapsed');
+  // Expand its Create New stage if collapsed.
+  const stage = card.querySelector('.stage-create');
+  if (stage && !stage.open) stage.open = true;
+  // Wait a beat for the details to fully reflow before scrolling so the
+  // browser has settled on its final layout box.
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+  // Pulse-highlight the destination card so the user gets a visual cue
+  // that the navigation actually happened.
+  try {
+    card.classList.add('pulse-highlight');
+    setTimeout(() => card.classList.remove('pulse-highlight'), 1600);
+  } catch (_) {}
+  // Pulse the specific job tile inside the step widget if present.
+  try {
+    const tile = document.querySelector(`.step-progress-item[data-job-id="${jobId}"]`);
+    if (tile) {
+      tile.classList.add('pulse-highlight');
+      setTimeout(() => tile.classList.remove('pulse-highlight'), 1600);
+    }
+  } catch (_) {}
+};
+
+// Populate every per-step progress widget from state.jobs. Only jobs
+// belonging to the currently-open project show up — the widget lives
+// inside that project's workspace, so cross-project bleed would be
+// confusing. Empty widgets get the hidden state (no .has-jobs class).
+function renderStepProgressWidgets() {
+  const curName = state.currentProject && state.currentProject.name;
+  for (let s = 1; s <= 4; s++) {
+    const widget = document.getElementById(`step-progress-${s}`);
+    if (!widget) continue;
+    const matching = state.jobs.filter(j => {
+      if (_jobStepIndex(j) !== s) return false;
+      const pn = _jobProjectName(j);
+      // No project label on the job → show in the current project's
+      // widget only (best-effort). With a label, show only if matching.
+      return !pn || pn === curName;
+    });
+    if (!matching.length) {
+      widget.classList.remove('has-jobs');
+      widget.innerHTML = '<div class="step-progress-empty">No generation in progress</div>';
+      try { _toggleGeneratingStage(s, false); } catch (_) {}
+      continue;
+    }
+    widget.classList.add('has-jobs');
+    // Step badge only pulses while at least one job is STILL running.
+    // Done/error tiles keep showing for ~3-8s but the step itself
+    // stops being "active" so we let the badge calm down.
+    const hasRunning = matching.some(j => j.status === 'running');
+    try { _toggleGeneratingStage(s, hasRunning); } catch (_) {}
+    widget.innerHTML = matching.map(j => {
+      const pct = Math.round(j.progress || 0);
+      const canCancel = j.status === 'running';
+      const statusClass = j.status === 'done' ? ' done'
+                        : j.status === 'error' ? ' error'
+                        : '';
+      const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
+      // Small source-asset thumbnail so the user recognises which
+      // generation is theirs. Snapshot stamped at pushJob time —
+      // never the currently-selected version (race-safe).
+      const thumbUrl = j.sourceImageUrl ? (
+        /^(https?:|data:|blob:|file:|app:)/i.test(j.sourceImageUrl)
+          ? j.sourceImageUrl
+          : (typeof _toFileUrl === 'function' ? _toFileUrl(j.sourceImageUrl) : j.sourceImageUrl)
+      ) : '';
+      const thumbHtml = thumbUrl
+        ? `<img src="${escapeHtml(thumbUrl)}" alt="" class="step-progress-item-thumb"/>`
+        : '';
+      return `
+        <div class="step-progress-item${statusClass}" data-job-id="${j.id}">
+          <div class="step-progress-item-header">
+            ${thumbHtml}
+            <div class="step-progress-item-name">${escapeHtml(j.name)}</div>
+            ${canCancel ? `<button class="step-progress-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}
+          </div>
+          <div class="step-progress-item-bar">
+            <div class="step-progress-item-bar-fill" style="width:${pct}%"></div>
+          </div>
+          <div class="step-progress-item-pct">${elapsed ? `<span style="color:var(--text-2); margin-right:8px; font-weight:normal;">${elapsed}</span>` : ''}${pct}%</div>
+        </div>`;
+    }).join('');
+    widget.querySelectorAll('.step-progress-item[data-job-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.jobId);
+        openJobDetails(id);
+      });
+    });
+  }
+}
+
 function renderJobs() {
   const bubble = document.getElementById('jobs-bubble-2');
   const panel = document.getElementById('jobs-panel-2');
@@ -10579,6 +10764,8 @@ function renderJobs() {
   const totalCount = state.jobs.length + queuedCount;
   const badgeText = queuedCount > 0 ? `${runningCount}+${queuedCount}` : String(runningCount);
   document.getElementById('jobs-bubble-count-2').textContent = badgeText;
+  // Per-step widgets piggy-back on the same refresh tick.
+  try { renderStepProgressWidgets(); } catch (_) {}
   if (totalCount === 0) {
     bubble.classList.add('hidden');
     panel.classList.add('hidden');
@@ -10595,16 +10782,31 @@ function renderJobs() {
   let html = state.jobs.map(j => {
     const pct = Math.round(j.progress);
     const canCancel = j.status === 'running';
+    // Show a "Go to step" pill when the job maps to a known step so the
+    // user can jump straight to its Create New widget instead of hunting
+    // for it across projects.
+    const hasStep = _jobStepIndex(j) > 0;
+    const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
+    const sbThumbUrl = j.sourceImageUrl ? (
+      /^(https?:|data:|blob:|file:|app:)/i.test(j.sourceImageUrl)
+        ? j.sourceImageUrl
+        : (typeof _toFileUrl === 'function' ? _toFileUrl(j.sourceImageUrl) : j.sourceImageUrl)
+    ) : '';
+    const sbThumbHtml = sbThumbUrl
+      ? `<img src="${escapeHtml(sbThumbUrl)}" alt="" class="step-progress-item-thumb"/>`
+      : '';
     return `
       <div class="job-item-2 ${j.status}" data-job-id="${j.id}">
         <div class="job-item-2-header">
+          ${sbThumbHtml}
           <div class="job-item-2-name">${escapeHtml(j.name)}</div>
+          ${hasStep ? `<button class="job-goto-btn" onclick="event.stopPropagation(); window._navigateToJobStep(${j.id})" title="Jump to this step">Go to</button>` : ''}
           ${canCancel ? `<button class="job-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}
         </div>
         <div class="job-item-2-bar">
           <div class="job-item-2-bar-fill" style="width:${pct}%"></div>
         </div>
-        <div class="job-item-2-pct">${pct}%</div>
+        <div class="job-item-2-pct">${elapsed ? `<span style="color:var(--text-2); margin-right:8px; font-weight:normal;">${elapsed}</span>` : ''}${pct}%</div>
       </div>
     `;
   }).join('');
@@ -10842,8 +11044,26 @@ async function refreshJobDetailsModal(id) {
       openSettingsBtn.style.display = 'none';
     }
   }
+  // Go-to-step button: visible whenever this job maps to a Create New
+  // step (image / mesh / rig / anim). Clicking it opens the matching
+  // project and scroll-expands its step card.
+  const gotoBtn = document.getElementById('job-details-goto-step');
+  if (gotoBtn) {
+    const stepIdx = _jobStepIndex(j);
+    gotoBtn.style.display = stepIdx > 0 ? '' : 'none';
+    if (stepIdx > 0) {
+      const labels = ['Image','3D Mesh','Rig','Animation'];
+      gotoBtn.textContent = `→ Go to ${labels[stepIdx - 1]}`;
+    }
+  }
 }
 document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
+document.getElementById('job-details-goto-step')?.addEventListener('click', () => {
+  const id = state._jobDetailsOpenId;
+  if (!id) return;
+  closeJobDetails();
+  window._navigateToJobStep(id);
+});
 document.getElementById('job-details-open-settings')?.addEventListener('click', () => {
   closeJobDetails();
   openSettings();
@@ -10861,6 +11081,14 @@ document.getElementById('modal-job-details').addEventListener('click', (e) => {
 // Tick the modal every second so elapsed time updates
 setInterval(() => {
   if (state._jobDetailsOpenId) refreshJobDetailsModal(state._jobDetailsOpenId);
+}, 1000);
+// Also tick the sidebar + per-step tiles every second so the elapsed-
+// time chip next to the % updates live. Only re-renders when there
+// are running jobs to avoid useless DOM work when idle.
+setInterval(() => {
+  if (state.jobs && state.jobs.some(j => j.status === 'running')) {
+    try { renderJobs(); } catch (_) {}
+  }
 }, 1000);
 document.getElementById('jobs-bubble-2').addEventListener('click', () => {
   document.getElementById('jobs-panel-2').classList.remove('hidden');

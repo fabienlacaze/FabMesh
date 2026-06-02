@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (cloud→desktop port wave, attempt A)
+
+Foundational port of cloud commits 04e3c9c / 86cda31 / 8e51faa /
+6878f7f / 485e47b / 955a49a / 0e5b011 / e64ea20 / c5866be into the
+desktop renderer:
+- `src/renderer/index2.html` — added 4 GENERATING `<details>` sections
+  (one per step card) with the gear-in-pink-circle icon; Go-to-step
+  button in job details modal.
+- `src/renderer/index2.js` — new helpers `_jobStepIndex`,
+  `_jobProjectName`, `_navigateToJobStep`, `_toggleGeneratingStage`,
+  `renderStepProgressWidgets`. Updated `renderJobs` to add Go-to pill
+  + source thumbnail + elapsed time; `completeJob` flashes a 1.5s ring
+  and extends done dwell to 8s; new 1-second tick re-renders the
+  sidebar while a job is running.
+- `src/renderer/styles/index2.css` — step-progress-widget + GENERATING
+  stage CSS, gear-in-pink-circle, always-on badge breathe, per-step
+  card colours, liveliness layer (bounce, shake, shimmer, just-done
+  flash) and pulse-highlight used by `_navigateToJobStep`.
+
+Cold-start toast suppression (cloud-only) skipped per plan — desktop
+GPU is local.
+
 ## 2026-06-02 (Anim PIVOT — Strategy 1: bundled cond + retargeting)
 
 **Pourquoi**: Plan A `modal run ::main --action standalone --class-name Dragon`

@@ -2198,6 +2198,282 @@ button.tool-active {
 .job-item-2 { cursor: pointer; transition: background 0.15s; }
 .job-item-2:hover { background: var(--bg-3); }
 
+/* Per-step progress widget inside the GENERATING section. Always
+   visible (the empty state shows "No generation in progress"); the
+   GENERATING <details> handles the open/closed UX. */
+.step-progress-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 0;
+  padding: 8px;
+  background: rgba(124, 58, 237, 0.06);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: var(--radius-sm);
+}
+.step-progress-empty {
+  text-align: center;
+  color: var(--text-2);
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 8px;
+  opacity: 0.75;
+}
+/* Small source-asset thumbnail rendered on the left of each tile.
+   28x28 keeps the row compact. */
+.step-progress-item-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+}
+.step-progress-item {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.step-progress-item:hover { background: var(--bg-3); }
+.step-progress-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.step-progress-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-0);
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.step-progress-item-bar {
+  height: 5px;
+  background: var(--bg-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.step-progress-item-bar-fill {
+  height: 100%;
+  background: var(--accent-grad);
+  transition: width 0.3s;
+}
+.step-progress-item-pct {
+  text-align: right;
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.step-progress-cancel-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.step-progress-cancel-btn:hover { color: var(--error); }
+.job-goto-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.job-goto-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* Pulse-highlight used by _navigateToJobStep to draw the user's eye to
+   the destination card after a "Go to step" click. */
+@keyframes pulseHighlight {
+  0%   { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.7); }
+  50%  { box-shadow: 0 0 0 12px rgba(124, 58, 237, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+}
+.pulse-highlight {
+  animation: pulseHighlight 1.4s ease-out;
+}
+
+/* Status-driven colours — mirrors .job-item-2.done/.error in the
+   sidebar so the per-step tile carries the same success/fail signal. */
+.step-progress-item.done .step-progress-item-bar-fill { background: var(--success); }
+.step-progress-item.done .step-progress-item-pct { color: var(--success); }
+.step-progress-item.error .step-progress-item-bar-fill { background: var(--error); }
+.step-progress-item.error .step-progress-item-pct { color: var(--error); }
+
+/* Per-step colour for visual differentiation. */
+#step-card-image      { border-left: 4px solid #4a90e2; }   /* blue */
+#step-card-mesh       { border-left: 4px solid #b94aa3; }   /* magenta */
+#step-card-rig        { border-left: 4px solid #d97706; }   /* orange */
+#step-card-animation  { border-left: 4px solid #16a34a; }   /* green */
+#step-card-image      .step-badge { background: linear-gradient(135deg, #4a90e2, #2563eb); }
+#step-card-mesh       .step-badge { background: linear-gradient(135deg, #b94aa3, #9333ea); }
+#step-card-rig        .step-badge { background: linear-gradient(135deg, #d97706, #ea580c); }
+#step-card-animation  .step-badge { background: linear-gradient(135deg, #16a34a, #15803d); }
+
+/* GENERATING stage — purple gradient summary + spinning gear icon. */
+details.stage-generating > summary {
+  background: linear-gradient(90deg, rgba(124,58,237,0.15), rgba(168,85,247,0.08));
+  border-left: 3px solid rgba(168,85,247,0.7);
+}
+/* Gear glyph centered inside a pink circle. */
+details.stage-generating > summary .stage-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ec4899, #db2777);
+  color: white;
+  font-size: 16px;
+  line-height: 1;
+  box-shadow: 0 0 0 1px rgba(236, 72, 153, 0.4),
+              0 2px 6px rgba(236, 72, 153, 0.25);
+  margin-right: 4px;
+}
+details.stage-generating > summary .stage-gear .gear-glyph {
+  display: inline-block;
+  line-height: 1;
+}
+/* Spin only when a job is actually running on this step. */
+.step-card.has-running details.stage-generating > summary .stage-gear .gear-glyph {
+  animation: spin 2s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Always-on subtle breathe on every step badge — signals interactivity. */
+.step-badge {
+  animation: badgeBreathe 3.2s ease-in-out infinite;
+  position: relative;
+}
+.step-badge::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.55) 0%, transparent 45%);
+  opacity: 0;
+  animation: badgeShine 4s ease-in-out infinite;
+}
+@keyframes badgeBreathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50%      { transform: scale(1.04); filter: brightness(1.18); }
+}
+@keyframes badgeShine {
+  0%, 60%, 100% { opacity: 0; transform: rotate(0deg); }
+  20%, 40%      { opacity: 0.45; transform: rotate(20deg); }
+}
+
+/* Strong badge pulse while a job runs on the step. */
+.step-card.has-running .step-badge {
+  animation: badgePulse 1.6s ease-in-out infinite;
+}
+@keyframes badgePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.6); transform: scale(1); }
+  50%  { box-shadow: 0 0 0 8px rgba(168, 85, 247, 0); transform: scale(1.06); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); transform: scale(1); }
+}
+#step-card-image.has-running .step-badge { animation-name: badgePulseBlue; }
+#step-card-mesh.has-running .step-badge { animation-name: badgePulsePink; }
+#step-card-rig.has-running .step-badge { animation-name: badgePulseOrange; }
+#step-card-animation.has-running .step-badge { animation-name: badgePulseGreen; }
+@keyframes badgePulseBlue {
+  0%,100% { box-shadow: 0 0 0 0 rgba(74,144,226,0); transform: scale(1); }
+  50%     { box-shadow: 0 0 16px 4px rgba(74,144,226,0.6); transform: scale(1.08); }
+}
+@keyframes badgePulsePink {
+  0%,100% { box-shadow: 0 0 0 0 rgba(185,74,163,0); transform: scale(1); }
+  50%     { box-shadow: 0 0 16px 4px rgba(185,74,163,0.6); transform: scale(1.08); }
+}
+@keyframes badgePulseOrange {
+  0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); transform: scale(1); }
+  50%     { box-shadow: 0 0 16px 4px rgba(217,119,6,0.6); transform: scale(1.08); }
+}
+@keyframes badgePulseGreen {
+  0%,100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); transform: scale(1); }
+  50%     { box-shadow: 0 0 16px 4px rgba(22,163,74,0.6); transform: scale(1.08); }
+}
+
+/* Progress bar shimmer while running. */
+.step-progress-item-bar-fill,
+.job-item-2-bar-fill {
+  position: relative;
+  overflow: hidden;
+}
+.step-progress-item:not(.done):not(.error) .step-progress-item-bar-fill::after,
+.job-item-2.running .job-item-2-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -40%;
+  width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  from { transform: translateX(0%); }
+  to   { transform: translateX(350%); }
+}
+
+/* Completion celebration — one-shot 1.5s when tile flips to .done. */
+.step-progress-item.done {
+  animation: tileDoneBounce 1.2s cubic-bezier(.4,1.4,.6,1) 1;
+}
+.step-card.just-done {
+  animation: cardDoneFlash 1.5s ease-out 1;
+}
+.step-card.just-done .step-badge {
+  animation: badgeDoneBounce 1.2s cubic-bezier(.4,1.4,.6,1) 1;
+}
+@keyframes tileDoneBounce {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.04); box-shadow: 0 0 24px 6px rgba(22,163,74,0.5); }
+  60%  { transform: scale(0.99); }
+  100% { transform: scale(1); box-shadow: none; }
+}
+@keyframes badgeDoneBounce {
+  0%   { transform: scale(1) rotate(0deg); }
+  30%  { transform: scale(1.4) rotate(-8deg); box-shadow: 0 0 20px 4px rgba(22,163,74,0.8); }
+  55%  { transform: scale(0.9) rotate(6deg); }
+  75%  { transform: scale(1.1) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0deg); box-shadow: none; }
+}
+@keyframes cardDoneFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(22,163,74,0.7); }
+  30%  { box-shadow: 0 0 0 16px rgba(22,163,74,0.15); }
+  100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
+}
+
+/* Error shake. */
+.step-progress-item.error {
+  animation: tileErrorShake 0.6s ease-in-out 1;
+}
+@keyframes tileErrorShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
 /* GPU mini monitor inside the job details modal */
 .job-gpu-monitor {
   position: absolute;

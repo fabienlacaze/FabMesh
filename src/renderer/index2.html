@@ -212,6 +212,18 @@
               </div>
             </details>
 
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="1">
+              <summary>
+                <span class="stage-icon stage-gear"><span class="gear-glyph">&#9881;</span></span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-1" data-step="1"><div class="step-progress-empty">No generation in progress</div></div>
+              </div>
+            </details>
+
             <!-- ===== STAGE: EDIT SELECTED ===== -->
             <details class="stage stage-edit" open>
               <summary>
@@ -478,6 +490,18 @@
               </div>
             </details>
 
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="2">
+              <summary>
+                <span class="stage-icon stage-gear"><span class="gear-glyph">&#9881;</span></span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-2" data-step="2"><div class="step-progress-empty">No generation in progress</div></div>
+              </div>
+            </details>
+
             <!-- ===== STAGE: EDIT SELECTED ===== -->
             <details class="stage stage-edit" open>
               <summary>
@@ -618,6 +642,18 @@
                   </div>
                   <div id="ws-rig-source-filename" class="viewer-filename"></div>
                 </div>
+              </div>
+            </details>
+
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="3">
+              <summary>
+                <span class="stage-icon stage-gear"><span class="gear-glyph">&#9881;</span></span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-3" data-step="3"><div class="step-progress-empty">No generation in progress</div></div>
               </div>
             </details>
 
@@ -769,6 +805,17 @@
                     <div class="preview-placeholder" id="ws-anim-source-placeholder">No rig selected</div>
                   </div>
                 </div>
+              </div>
+            </details>
+            <!-- ===== STAGE: GENERATING ===== -->
+            <details class="stage stage-generating" data-step="4">
+              <summary>
+                <span class="stage-icon stage-gear"><span class="gear-glyph">&#9881;</span></span>
+                <span class="stage-title">Generating</span>
+                <span class="stage-hint">Live progress of jobs running for this step</span>
+              </summary>
+              <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-4" data-step="4"><div class="step-progress-empty">No generation in progress</div></div>
               </div>
             </details>
             <!-- ===== STAGE: EDIT SELECTED ===== -->
@@ -1771,6 +1818,7 @@
         <div id="jd-error-box" class="jd-error-box hidden"></div>
         <div class="modal-actions">
           <button class="ghost-btn" id="job-details-close">Close</button>
+          <button class="primary-btn" id="job-details-goto-step" style="display:none; background:linear-gradient(135deg,#7c3aed,#a855f7);">&#8594; Go to step</button>
           <button class="primary-btn" id="job-details-open-settings" style="display:none; background:linear-gradient(135deg,#6a5acd,#9370db);">&#9881; Open Settings</button>
           <button class="primary-btn danger" id="job-details-cancel">Cancel task</button>
         </div>
