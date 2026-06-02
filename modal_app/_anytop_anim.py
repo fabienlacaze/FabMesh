@@ -193,33 +193,59 @@ def _detect_topology_family(joint_idxs, parent_by_idx, world_by_idx) -> str:
             chain.append(cur)
         return chain
 
-    # We count chains hanging off the root. Wings are detected as
-    # LATERAL chains (large |SIDE - root.SIDE| span) of length >= 3,
-    # regardless of whether the tip is above or below root — dragon
-    # rigs can ship with wings folded down. Legs are downward chains
-    # ending below the root. The previous "wings must rise above root"
-    # check missed every folded-wing rig.
+    # 2026-06-02 fix #3: walk the WHOLE spine chain, not just children
+    # of root. Dragon wings attach to mid/upper spine (shoulder area),
+    # not directly to the pelvis — the previous root-only iteration
+    # never saw them and topology_family kept returning 'all'.
     root_y = UP(pos[root])
     root_side = SIDE(pos[root])
-    lateral_long = 0      # likely wings/arms — long chain w/ big SIDE span
-    lower = 0             # legs — chains tipping below root
-    spine_like = 0        # head/neck — small lateral span, length >= 3
-    for kid in children[root]:
-        ch = longest_chain(kid)
-        tip = pos[ch[-1]]
-        side_span = max(abs(SIDE(pos[c]) - root_side) for c in ch)
-        rise = UP(tip) - root_y
-        if side_span > body_s * 0.10 and len(ch) >= 3:
-            lateral_long += 1
-        elif rise < -body_h * 0.05 and len(ch) >= 2:
-            lower += 1
-        elif abs(rise) <= body_h * 0.15 and len(ch) >= 3:
-            spine_like += 1
+    # Find the main spine = longest on-axis upward chain from root.
+    spine_chain = []
+    cur = root
+    seen = {root}
+    while children[cur]:
+        # next bone on axis (small lateral span, going up or flat)
+        on_axis = [c for c in children[cur]
+                   if abs(SIDE(pos[c]) - root_side) <= max(body_s * 0.10, 1e-3)
+                   and (UP(pos[c]) >= UP(pos[cur]) - body_h * 0.05)]
+        if not on_axis:
+            break
+        nxt = max(on_axis, key=lambda c: len(descendants(c)))
+        if nxt in seen:
+            break
+        spine_chain.append(nxt)
+        seen.add(nxt)
+        cur = nxt
+
+    # Now collect lateral kids hanging off EITHER the root OR any
+    # spine bone — that's where wings, arms, and legs all attach.
+    lateral_long = 0
+    lower = 0
+    spine_like = 0
+    branch_sources = [root] + spine_chain
+    for src in branch_sources:
+        for kid in children[src]:
+            if kid in seen:
+                continue
+            ch = longest_chain(kid)
+            tip = pos[ch[-1]]
+            side_span = max(abs(SIDE(pos[c]) - root_side) for c in ch)
+            rise = UP(tip) - root_y
+            if side_span > body_s * 0.10 and len(ch) >= 3:
+                lateral_long += 1
+            elif rise < -body_h * 0.05 and len(ch) >= 2:
+                lower += 1
+            elif abs(rise) <= body_h * 0.15 and len(ch) >= 3:
+                spine_like += 1
     # Heuristics:
     #   * 2+ lateral chains + 2+ lower legs → winged-biped (dragon, bat)
     #   * 2+ lateral chains only            → bird perch (eagle, parrot)
     #   * 4+ lower legs                     → quadruped
     #   * 2 lower legs                      → biped
+    print(f"[topology] root_y={root_y:.3f} root_side={root_side:.3f} "
+          f"spine_len={len(spine_chain)} lateral_long={lateral_long} "
+          f"lower={lower} spine_like={spine_like} body_h={body_h:.3f} "
+          f"body_s={body_s:.3f}", flush=True)
     if lateral_long >= 2 and lower >= 2:
         return 'flying'
     if lateral_long >= 2 and lower == 0:
