@@ -1,7 +1,6 @@
 """TRELLIS-2 native image-to-3D pipeline (single-shot mesh + PBR).
 
-Default engine of FabMesh since 2026-05-19. Replaces the previous
-Hi3DGen + TRELLIS-2 texturing two-stage pipeline.
+Default engine of FabMesh since 2026-05-19.
 
 Uses microsoft/TRELLIS.2-4B's Trellis2ImageTo3DPipeline which generates
 geometry and texture jointly from a single input image. Validated at
@@ -148,7 +147,7 @@ def main():
     decim = int(os.environ.get('FABMESH_TRELLIS2_NATIVE_DECIM', '500000'))
 
     t0 = time.time()
-    print('LOCAL_HI3DGEN_PROGRESS: 3 patch_cache', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 3 patch_cache', flush=True)
     _patch_rmbg_in_hf_cache()
 
     import torch
@@ -156,7 +155,7 @@ def main():
         f'cc={torch.cuda.get_device_capability(0)}')
     log(f'mode={mode} seed={seed} decim={decim} tex_res={tex_res}')
 
-    print('LOCAL_HI3DGEN_PROGRESS: 8 image_prep', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 8 image_prep', flush=True)
     img = _prep_image(image_path)
     log(f'image prepared: {img.size}')
 
@@ -208,7 +207,7 @@ def main():
         log(f'multi-view conditioning: {len(mv_images)} images '
             f'(front + {len(mv_images)-1} extras)')
 
-    print('LOCAL_HI3DGEN_PROGRESS: 12 loading_pipeline', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 12 loading_pipeline', flush=True)
     log('loading Trellis2ImageTo3DPipeline from microsoft/TRELLIS.2-4B...')
     t_load = time.time()
     from trellis2.pipelines import Trellis2ImageTo3DPipeline
@@ -218,11 +217,11 @@ def main():
     pipeline.cuda()
     log(f'pipeline loaded in {time.time()-t_load:.1f}s, '
         f'VRAM peak {torch.cuda.max_memory_allocated()/1e9:.1f} GB')
-    print('LOCAL_HI3DGEN_PROGRESS: 35 pipeline_ready', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 35 pipeline_ready', flush=True)
 
     log(f'inference (pipeline_type={mode}, n_views={len(mv_images)})...')
     t_inf = time.time()
-    print('LOCAL_HI3DGEN_PROGRESS: 40 sparse_struct', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 40 sparse_struct', flush=True)
     # Multi-view path is gated upstream (FABMESH_USE_EXTRA_VIEWS=1) but
     # may still raise at runtime if the loaded checkpoint doesn't
     # support multi-image cross-attention. Catch RuntimeError shape
@@ -303,13 +302,13 @@ def main():
         sys.exit(2)
     log(f'inference done in {time.time()-t_inf:.1f}s, '
         f'VRAM peak {torch.cuda.max_memory_allocated()/1e9:.1f} GB')
-    print('LOCAL_HI3DGEN_PROGRESS: 80 inference_done', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 80 inference_done', flush=True)
 
     mesh = outputs[0]
     log(f'mesh: {mesh.vertices.shape[0]}v / {mesh.faces.shape[0]}f')
 
     log('exporting GLB via o_voxel.postprocess.to_glb (Kaolin)...')
-    print('LOCAL_HI3DGEN_PROGRESS: 85 export_start', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 85 export_start', flush=True)
     t_exp = time.time()
     from o_voxel.postprocess import to_glb
     glb = to_glb(
@@ -328,7 +327,7 @@ def main():
         verbose=False,
     )
     log(f'GLB built in {time.time()-t_exp:.1f}s')
-    print('LOCAL_HI3DGEN_PROGRESS: 92 brightening', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 92 brightening', flush=True)
 
     # Auto-brighten the baseColor texture (TRELLIS-2 output under-lit in PBR viewers).
     if os.environ.get('FABMESH_TRELLIS2_SKIP_BRIGHTEN') != '1':
@@ -348,7 +347,7 @@ def main():
     except Exception as _ai_e:
         log(f'AI Act metadata skipped: {_ai_e}')
 
-    print('LOCAL_HI3DGEN_PROGRESS: 100 done', flush=True)
+    print('LOCAL_TRELLIS2_PROGRESS: 100 done', flush=True)
     log(f'TOTAL: {time.time()-t0:.1f}s')
 
 

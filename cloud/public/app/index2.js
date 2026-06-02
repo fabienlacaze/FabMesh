@@ -301,7 +301,6 @@ const ENGINE_LABELS = {
   'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
   'local':          'MyFabmesh.AI 3D Native (rerouted)',
   'trellis2_native':'MyFabmesh.AI 3D Native',
-  'hi3dgen':        'MyFabmesh.AI Legacy (2-stage)',
   'trellis':        'MyFabmesh.AI 3D Engine',
 };
 function engineLabel(v) {
@@ -2687,9 +2686,9 @@ _wsMvSync();
 
 // ----------------------------------------------------------------
 // 3D engine selector — toggles visibility of legacy-only fields.
-// Hi3DGen+TRELLIS-2 ignores texture-res and target-triangles (TRELLIS-2
-// generates its own native PBR resolution). Only show those fields when
-// the legacy SF3D engine is selected.
+// TRELLIS-2 ignores texture-res and target-triangles (it generates its
+// own native PBR resolution). Only show those fields when the legacy
+// SF3D engine is selected.
 // ----------------------------------------------------------------
 function _ws3dEngineSync() {
   const eng = document.getElementById('ws-3d-engine')?.value || 'trellis2_native';
@@ -2697,19 +2696,17 @@ function _ws3dEngineSync() {
   const tRow = document.getElementById('ws-3d-triangles-row');
   const qHint = document.getElementById('ws-3d-quality-hint');
   const sf3dHint = document.getElementById('ws-3d-sf3d-hint');
-  const hi3dgenHint = document.getElementById('ws-3d-hi3dgen-hint');
   const trellis2Opts = document.getElementById('ws-3d-trellis2-opts');
   const legacy = ['sf3d'].includes(eng);
-  // Hide texture-res / triangles when using TRELLIS-2 native or Hi3DGen
-  // (both have their own internal quality settings).
+  // Hide texture-res / triangles when using TRELLIS-2 native
+  // (it has its own internal quality settings).
   if (qRow) qRow.style.display = legacy ? '' : 'none';
   if (tRow) tRow.style.display = legacy ? '' : 'none';
   if (qHint) qHint.style.display = legacy ? '' : 'none';
   if (sf3dHint) sf3dHint.style.display = legacy ? '' : 'none';
-  if (hi3dgenHint) hi3dgenHint.style.display = (eng === 'hi3dgen') ? '' : 'none';
-  // Advanced TRELLIS-2 options apply to both hi3dgen (legacy) and trellis2_native.
+  // Advanced TRELLIS-2 options apply to trellis2_native.
   if (trellis2Opts) trellis2Opts.style.display =
-    (eng === 'hi3dgen' || eng === 'trellis2_native') ? '' : 'none';
+    (eng === 'trellis2_native') ? '' : 'none';
 }
 document.getElementById('ws-3d-engine')?.addEventListener('change', _ws3dEngineSync);
 _ws3dEngineSync();
@@ -7681,19 +7678,11 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     //   - export GLB (bake Kaolin): ~25s
     // Total ~100s (~10-20s with warm cache).
     expectedMs = 110000;
-  } else if (engine === 'hi3dgen') {
-    // Hi3DGen full pipeline (with MV-Adapter 6 views):
-    //   - Hi3DGen inference: ~30s
-    //   - xatlas unwrap on 200K verts: ~45s
-    //   - MV-Adapter 6 views (RealVisXL + adapter): ~60s
-    //   - texture_project bake at 1024 (6 views): ~60s
-    // Total ~3-4 min for complex meshes, ~2 min for simple.
-    expectedMs = 240000;
   } else {
     expectedMs = 60000;
   }
   if (buildStages) expectedMs *= 2.5;
-  // TRELLIS-2 texture options (Hi3DGen only).
+  // TRELLIS-2 texture options.
   const trellis2Preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
   const trellis2MultiRef = document.getElementById('ws-trellis2-multiref')?.checked || false;
   const trellis2Refine = document.getElementById('ws-trellis2-refine')?.checked || false;
@@ -11557,9 +11546,8 @@ async function openMaterialAdjust() {
     _matViewer.scene.add(_matModel);
     // Patch every material with brightness/sat/contrast shader uniforms.
     // Also DETACH any pre-existing emissive map — otherwise the GLB's
-    // baked-in emissive setup (e.g. emissiveMap=baseColor from our
-    // hi3dgen pipeline) would double-apply on top of the slider, giving
-    // a clipped-white preview.
+    // baked-in emissive setup (e.g. emissiveMap=baseColor) would
+    // double-apply on top of the slider, giving a clipped-white preview.
     _matModel.traverse(obj => {
       if (!obj.isMesh || !obj.material) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];

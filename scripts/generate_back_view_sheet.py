@@ -44,7 +44,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     # Persist the 4 views in <front_dir>/<stem>_multiview/ (FabMesh
-    # convention, picked up by hi3dgen_full_pipeline / trellis2_native).
+    # convention, picked up by trellis2_native).
     front_dir = os.path.dirname(front_image)
     mv_persist_dir = os.path.join(front_dir, f'{name_suffix}_multiview')
     log(f'front={front_image}')

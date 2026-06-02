@@ -8852,9 +8852,8 @@ async function openMaterialAdjust() {
     _matViewer.scene.add(_matModel);
     // Patch every material with brightness/sat/contrast shader uniforms.
     // Also DETACH any pre-existing emissive map — otherwise the GLB's
-    // baked-in emissive setup (e.g. emissiveMap=baseColor from our
-    // hi3dgen pipeline) would double-apply on top of the slider, giving
-    // a clipped-white preview.
+    // baked-in emissive setup (e.g. emissiveMap=baseColor) would
+    // double-apply on top of the slider, giving a clipped-white preview.
     _matModel.traverse(obj => {
       if (!obj.isMesh || !obj.material) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];

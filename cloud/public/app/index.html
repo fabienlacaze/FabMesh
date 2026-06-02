@@ -438,8 +438,8 @@
                       <option value="trellis2_native" selected>MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
                     </select>
                   </div>
-                  <!-- Texture resolution (UNUSED by Hi3DGen+TRELLIS-2, only relevant for legacy engines)
-                       Kept hidden by default; will be re-shown by JS when engine != hi3dgen. -->
+                  <!-- Texture resolution (UNUSED by TRELLIS-2, only relevant for legacy engines)
+                       Kept hidden by default; will be re-shown by JS for legacy engines. -->
                   <div class="form-row" id="ws-3d-quality-row" style="display:none;">
                     <label>Texture</label>
                     <select id="ws-3d-quality">
@@ -474,14 +474,13 @@
                   <div id="ws-3d-quality-hint" class="form-hint" style="display:none;">~200K triangles · 1024 px texture</div>
                   <div id="ws-3d-sf3d-hint" class="form-hint" style="margin-top:2px; display:none;">Texture is baked on the GPU. Triangles are added via subdivision (CPU, no extra VRAM).</div>
                   <div id="ws-3d-highcount-warn" class="form-hint hidden" style="color: #f4a632; margin-top:4px;">&#9888;&#65039; Above ~50K triangles the UV atlas gets over-crowded (micro-island packing) and the texture ends up as voronoi noise. For best texture quality keep triangles ≤ 50K. High-poly only makes sense when you only need the geometry.</div>
-                  <div id="ws-3d-hi3dgen-hint" class="form-hint" style="margin-top:2px;">Legacy mode génère la géom détaillée (92K faces) + texture PBR native. Durée ~3 min.</div>
                   <div class="form-row check-row">
                     <label class="inline-check">
                       <input type="checkbox" id="ws-3d-buildstages" />
                       Construction stages (3 versions)
                     </label>
                   </div>
-                  <!-- TRELLIS-2 Texturing options (only relevant for Hi3DGen engine) -->
+                  <!-- TRELLIS-2 Texturing options -->
                   <details id="ws-3d-trellis2-opts" style="margin-top:8px; font-size:12px;">
                     <summary style="cursor:pointer; color:var(--text-muted);">&#9881;&#65039; Advanced texture options</summary>
                     <div class="form-row" style="margin-top:6px;">

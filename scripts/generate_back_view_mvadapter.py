@@ -70,7 +70,7 @@ def main():
 
     t0 = time.time()
     # Persist all 6 views in <front_dir>/<stem>_multiview/ (FabMesh
-    # convention — texture_project / hi3dgen_full_pipeline / texture_augment
+    # convention — texture_project / trellis2_native / texture_augment
     # all look here). This gives downstream pipelines free multi-view
     # data without re-running MV-Adapter.
     front_dir = os.path.dirname(front_image)

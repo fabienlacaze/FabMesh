@@ -1062,8 +1062,7 @@
    * ────────────────────────────────────────────────────────────────── */
   function pruneEngineSelectors() {
     // 3D engine — cloud only supports trellis2_native (via fishwowater/
-    // trellis2). The "MyFabmesh.AI Legacy" (hi3dgen) option isn't wired
-    // server-side and would 404.
+    // trellis2).
     const eng3d = document.getElementById('ws-3d-engine');
     if (eng3d) {
       [...eng3d.options].forEach((opt) => {

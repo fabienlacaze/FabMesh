@@ -32,8 +32,7 @@ import trimesh
 from PIL import Image
 
 
-# Slot convention matches multiview_sheet_gen.py / hi3dgen_full_pipeline /
-# trellis2_native_full_pipeline.
+# Slot convention matches multiview_sheet_gen.py / trellis2_native_full_pipeline.
 SLOTS = [
     ('front',  0.0,    0.0),
     ('back',   180.0,  0.0),

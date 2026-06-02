@@ -1,5 +1,59 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (cleanup — remove Hi3DGen from desktop pipeline)
+
+**Pourquoi** : Hi3DGen n'est plus l'engine par défaut depuis 2026-05-19
+(remplacé par TRELLIS-2 native single-shot). Le code Hi3DGen restait
+listé dans les engine maps de main.js, les options UI cloud et les
+scripts dédiés, alors qu'aucune route ne l'expose plus côté desktop ni
+cloud (cloud-overrides.js prune déjà toute option != trellis2_native).
+Nettoyage pour réduire la surface de maintenance.
+
+**Supprimé** :
+- `scripts/hi3dgen_full_pipeline.py`, `scripts/local_hi3dgen_bridge.py`
+- `scripts/__pycache__/hi3dgen_full_pipeline.cpython-311.pyc`,
+  `scripts/__pycache__/hi3dgen_invuv_bake_v3.cpython-311.pyc`
+- `dist/installer/win-unpacked/resources/scripts/local_hi3dgen_bridge.py`
+  (artefact build, sera re-généré au prochain `electron-builder`)
+
+**Édité** :
+- `src/main/main.js` : retrait des entrées `bridgeScripts['hi3dgen']`,
+  `argsMap['hi3dgen']`, `fixedArgsMap['hi3dgen']`, des 5 spreads env
+  `FABMESH_TRELLIS2_*` gated sur `engine === 'hi3dgen'`, du log preset,
+  et simplification des conditions `(trellis2_native || hi3dgen)` à
+  `trellis2_native` seul. Filtre sanitizer Hi3DGen retiré.
+- `src/renderer/index2.js` : comment hi3dgen retiré du patch emissive.
+  Regex `meshProject` ligne 436 PRÉSERVÉE (mesh files `_hi3dgen_*.glb`
+  toujours dans `meshes/` côté utilisateur).
+- `cloud/public/app/index.html` : retrait `<div id="ws-3d-hi3dgen-hint">`
+  et nettoyage des commentaires.
+- `cloud/public/app/index2.js` : retrait de `ENGINE_LABELS['hi3dgen']`,
+  de la branche `expectedMs` hi3dgen, de la logique `hi3dgenHint` dans
+  `_ws3dEngineSync`, et simplification du toggle `trellis2-opts`.
+- `cloud/public/app/cloud-overrides.js` : nettoyage commentaire.
+- `scripts/trellis2_native_full_pipeline.py` : docstring corrigée
+  (n'est pas une "two-stage Hi3DGen + TRELLIS-2", c'est un single-shot
+  TRELLIS-2 native). Renommage `LOCAL_HI3DGEN_PROGRESS` →
+  `LOCAL_TRELLIS2_PROGRESS` (9 occurrences ; le regex main.js ligne 4417
+  matche `LOCAL_[A-Z0-9_]+_PROGRESS` génériquement → safe).
+- `scripts/trellis2_texturing_bridge.py` : même renommage marker
+  (10 occurrences) + commentaires nettoyés.
+- `scripts/multiview_from_mesh.py`, `scripts/generate_back_view_sheet.py`,
+  `scripts/generate_back_view_mvadapter.py` : commentaires de convention
+  mis à jour (drop `hi3dgen_full_pipeline`).
+
+**Préservé volontairement** :
+- `scripts/mesh_tools.py` + `scripts/texture_project.py` :
+  auto-détection `_hi3dgen_` dans le nom de fichier + env var
+  `FABMESH_TEXPROJ_HI3DGEN_UNDO` nécessaires pour re-projection des
+  100+ meshes `_hi3dgen_*.glb` existants côté user (convention d'axe
+  différente de trellis2).
+- Regex `meshProject` dans les deux index2.js : retirer `hi3dgen` du
+  pattern recréerait des projets fantômes à partir des artefacts user.
+- `THIRD_PARTY_LICENSES.txt` §12 : KEEP tant que `external/Hi3DGen/`
+  reste dans .gitignore (légalement requis si binaires l'ont référencé).
+- `AGENT_LOG.md` mentions historiques : log immuable.
+
 ## 2026-06-02 (instrument — runtime markers for ZYX + ANYTOP_COMMIT + channel_order)
 
 instrument(anytop): runtime markers (ANYTOP_COMMIT echo, ZYX branch log,

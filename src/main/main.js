@@ -390,7 +390,6 @@ const _BRAND_FILTERS = [
   [/\bFlorence-?2?\b/gi,                            'vision analyzer'],
   [/\bBLIP-?\d?\b/gi,                               'vision analyzer'],
   [/\bReal-?ESRGAN\b/gi,                            'upscale engine'],
-  [/\bHi3DGen\b/gi,                                 'legacy mesh engine'],
   [/\bMV-?Adapter\b/gi,                             'multi-view module'],
   [/\bStable\s*Fast\s*3D\b/gi,                      'mesh engine'],
   [/\bTripoSR\b/gi,                                 'mesh engine'],
@@ -4115,9 +4114,9 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
   }
 });
 
-// --- Image-to-3D: TRELLIS-2 native (default), Hi3DGen. SF3D and
-// TripoSR have been retired for non-commercial license; legacy requests
-// for those engines are silently rerouted to trellis2_native. ---
+// --- Image-to-3D: TRELLIS-2 native (default). SF3D and TripoSR have
+// been retired for non-commercial license; legacy requests for those
+// engines are silently rerouted to trellis2_native. ---
 ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBack, outputName, textureSize, engine: _engine, targetFaces, effort, jobId, vramFraction, subdivide, trellis2Steps, trellis2TexSize, trellis2ImgRes, trellis2MultiRef, trellis2Refine, trellis2RectifySource, trellis2Smooth, trellis2QualityPlus, trellis2UltraQ, trellis2FaceFix, trellis2UltraHD, trellis2Preset, assetType }) => {
   let imagePath = _imagePath;
   let engine = _engine;
@@ -4140,10 +4139,10 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   //   and ControlNet OpenPose paths, T-pose symmetric).
   // - everything else        -> 3/4 ISO (depth axis visible, better mesh
   //   proportions for vehicles / objects / non-bipedal creatures).
-  // Pre-process gates: only run for TRELLIS-2-based engines (trellis2_native,
-  // hi3dgen) — other engines have their own opinions about the source view.
+  // Pre-process gates: only run for TRELLIS-2-based engines — other
+  // engines have their own opinions about the source view.
   if (trellis2RectifySource && imagePath && fs.existsSync(imagePath)
-      && (engine === 'trellis2_native' || engine === 'hi3dgen')) {
+      && engine === 'trellis2_native') {
     const rectifyScript = path.join(__dirname, '..', '..', 'scripts', 'generate_front_strict.py');
     const rectifiedPath = imagePath.replace(/\.(png|jpg|jpeg|webp)$/i, '_rectified.png');
     // assetType drives the canonical source view we want for mesh
@@ -4155,7 +4154,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     log.info('main', `auto-rectify source: ${path.basename(imagePath)} `
       + `-> ${path.basename(rectifiedPath)} (mode=${rectifyMode}, assetType=${assetType})`);
     safeSend('ai3d-progress', `[main] auto-rectify source view (mode=${rectifyMode})...\n`);
-    const pythonExeForRectify = (engine === 'hi3dgen' || engine === 'trellis2_native')
+    const pythonExeForRectify = (engine === 'trellis2_native')
       ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
       : 'python';
     try {
@@ -4190,13 +4189,8 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'sf3d':    path.join(__dirname, '..', '..', 'scripts', 'local_sf3d_bridge.py'),
       // TRELLIS-2 native: single-shot mesh + PBR texture via
       // microsoft/TRELLIS.2-4B's Trellis2ImageTo3DPipeline. Default engine
-      // since 2026-05-19 (replaces Hi3DGen + TRELLIS-2 separated).
+      // since 2026-05-19.
       'trellis2_native': path.join(__dirname, '..', '..', 'scripts', 'trellis2_native_full_pipeline.py'),
-      // Hi3DGen: direct image-to-3D via normal bridging (MIT, ByteDance+CUHK).
-      // Routed through the full pipeline wrapper that adds xatlas UV unwrap
-      // + texture_project.py so the output is a textured GLB (the bare
-      // bridge alone produces geometry-only mesh).
-      'hi3dgen': path.join(__dirname, '..', '..', 'scripts', 'hi3dgen_full_pipeline.py'),
       'trellis': path.join(__dirname, '..', '..', 'scripts', 'trellis_bridge.py')
     };
     const bridgeScript = bridgeScripts[engine] || bridgeScripts['trellis2_native'];
@@ -4212,7 +4206,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
-      'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
     };
     const args = argsMap[engine] || argsMap['trellis2_native'];
@@ -4235,7 +4228,6 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       'local':   [bridgeScript, imagePath, meshPath, '512'],
       'sf3d':    [bridgeScript, imagePath, meshPath, sf3dTexRes, sf3dVerts, sf3dRemesh, sf3dSubdivide],
       'trellis2_native': [bridgeScript, imagePath, meshPath, String(textureSize || 2048)],
-      'hi3dgen': [bridgeScript, imagePath, meshPath, String(textureSize || 1024)],
       'trellis': [bridgeScript, imagePath, meshPath, '0.95', String(textureSize || 1024)],
     };
     const fixedArgs = fixedArgsMap[engine] || fixedArgsMap['trellis2_native'];
@@ -4291,8 +4283,8 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       // Forces sdpa (Blackwell-correct, fp32-math in dense + sparse paths)
       // and disables torchdynamo/triton/flash_attn so SAC never blocks on
       // flash_attn_2_cuda.dll. These must NOT rely on Python setdefault
-      // because a polluted parent env (e.g. local_hi3dgen_bridge.py) used
-      // to force flash_attn. Set authoritatively here to override.
+      // because a polluted parent env used to force flash_attn. Set
+      // authoritatively here to override.
       ATTN_BACKEND: 'sdpa',
       SPARSE_ATTN_BACKEND: 'sdpa',
       TORCHDYNAMO_DISABLE: '1',
@@ -4316,32 +4308,19 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
         FABMESH_AUTOFIT: '1',
         FABMESH_AUTOFIT_RATIO: '1.20',
       } : {}),
-      // TRELLIS-2 texturing options (Hi3DGen only) -- forwarded to
-      // hi3dgen_full_pipeline.py -> trellis2_texturing_bridge.py.
-      ...(engine === 'hi3dgen' && trellis2Steps ?
-        { FABMESH_TRELLIS2_STEPS: String(trellis2Steps) } : {}),
-      ...(engine === 'hi3dgen' && trellis2TexSize ?
-        { FABMESH_TRELLIS2_TEX_SIZE: String(trellis2TexSize) } : {}),
-      ...(engine === 'hi3dgen' && trellis2ImgRes ?
-        { FABMESH_TRELLIS2_IMG_RES: String(trellis2ImgRes) } : {}),
-      ...(engine === 'hi3dgen' && trellis2MultiRef && imagePathBack
-            && fs.existsSync(imagePathBack)
-        ? { FABMESH_TRELLIS2_BACK_IMAGE: imagePathBack } : {}),
-      ...(engine === 'hi3dgen' && trellis2Refine
-        ? { FABMESH_TRELLIS2_REFINE: '1' } : {}),
       // Quality presets: Ultra Quality (1536_cascade) > Quality+ (1024_cascade)
       // > default (1024). Ultra wins if both checked.
-      ...((engine === 'trellis2_native' || engine === 'hi3dgen') && trellis2UltraQ
+      ...(engine === 'trellis2_native' && trellis2UltraQ
         ? {
             FABMESH_TRELLIS2_NATIVE_MODE: '1536_cascade',
             FABMESH_TRELLIS2_NATIVE_DECIM: '1500000',
           }
-        : ((engine === 'trellis2_native' || engine === 'hi3dgen') && trellis2QualityPlus
+        : (engine === 'trellis2_native' && trellis2QualityPlus
             ? {
                 FABMESH_TRELLIS2_NATIVE_MODE: '1024_cascade',
                 FABMESH_TRELLIS2_NATIVE_DECIM: '1000000',
               } : {})),
-      // TRELLIS-2 native + Hi3DGen : auto-feed extra views to the mesh
+      // TRELLIS-2 native: auto-feed extra views to the mesh
       // pipeline when the user generated them. DISABLED BY DEFAULT since
       // 2026-05-20 — confirmed via the singe / red car tests that
       // TRELLIS-2 4B was not trained on multi-image cond and produces
@@ -4350,7 +4329,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       // multi-view dir is still useful for UI preview, just not as
       // mesh conditioning. Set FABMESH_USE_EXTRA_VIEWS=1 to re-enable
       // for experimentation.
-      ...(((engine === 'trellis2_native' || engine === 'hi3dgen')
+      ...((engine === 'trellis2_native'
             && process.env.FABMESH_USE_EXTRA_VIEWS === '1'
             && imagePath
             && fs.existsSync(path.join(
@@ -4368,14 +4347,11 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
     if (mv2Dir) {
       log.info('main', '2-view env applied: AUGMENT mode (front=SF3D bake, back=additive blend)');
     }
-    if (engine === 'hi3dgen') {
-      log.info('main', `TRELLIS-2 preset: ${trellis2Preset || 'fast'} (steps=${trellis2Steps}, tex=${trellis2TexSize}, multiref=${trellis2MultiRef ? 'yes' : 'no'}, refine=${trellis2Refine ? 'yes' : 'no'})`);
-    }
     log.info('main', `image-to-3d: launching with PYTORCH_CUDA_ALLOC_CONF=${allocConf}`);
-    // Hi3DGen and TRELLIS-2 native need torch 2.8 + flash_attn + kaolin,
-    // which only live in external/TRELLIS2_win/.venv. Other engines use
-    // the system Python (torch 2.7.1). Pick the right interpreter per engine.
-    const _pythonExe = (engine === 'hi3dgen' || engine === 'trellis2_native')
+    // TRELLIS-2 native needs torch 2.8 + flash_attn + kaolin, which only
+    // live in external/TRELLIS2_win/.venv. Other engines use the system
+    // Python (torch 2.7.1). Pick the right interpreter per engine.
+    const _pythonExe = (engine === 'trellis2_native')
       ? path.join(__dirname, '..', '..', 'external', 'TRELLIS2_win', '.venv', 'Scripts', 'python.exe')
       : 'python';
     const result = await new Promise((resolve, reject) => {
@@ -4407,7 +4383,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       });
       // Early-resolve: once a bridge emits LOCAL_*_PROGRESS: 100 done AND the
       // GLB exists on disk, resolve immediately without waiting for the
-      // subprocess to exit. Hi3DGen accumulates 10+ MB of tqdm/diffusers
+      // subprocess to exit. Some bridges accumulate 10+ MB of tqdm/diffusers
       // stdout that Node has to fully drain before firing execFile's
       // callback — causing a 1-2 min "stuck at 70%" delay even though the
       // mesh has been written. The process is left to exit on its own
