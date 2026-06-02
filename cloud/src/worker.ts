@@ -5368,6 +5368,7 @@ async function callModalMVAdapter(env: Env, userId: string, input: {
     throw new Error('Modal mvadapter: back view (index 2) missing/invalid');
   }
   console.log(`[modal] mvadapter dt=${Date.now() - t0}ms views=${views.length} back=${back.slice(-40)}`);
+  _writeLastWarmMs(env, '_meta/last_warm_mvadapter.txt').catch(() => {});
   return { back, views };
 }
 
@@ -6738,6 +6739,12 @@ async function handleModalStatus(req: Request, env: Env): Promise<Response> {
       bump('back_view', j.finished_at);
     } else if (['modify','auto_inpaint','mask_inpaint','face_fix_image','remove_background','upscale'].includes(opType)) {
       bump('image_op', j.finished_at);
+    } else if (opType === 'auto_rig' || opType === 'rig' || at === 'rig') {
+      bump('rig', j.finished_at);
+    } else if (opType === 'animate' || opType === 'animation' || at === 'animation') {
+      bump('anim', j.finished_at);
+    } else if (opType === 'multiview' || opType === 'mvadapter') {
+      bump('mvadapter', j.finished_at);
     } else if (at === 'text2image') {
       bump('text2image', j.finished_at);
     } else {
@@ -6745,15 +6752,22 @@ async function handleModalStatus(req: Request, env: Env): Promise<Response> {
       bump('mesh', j.finished_at);
     }
   }
-  const [image_op, text2image, back_view, tpose, mesh] = await Promise.all([
+  // 2026-06-02: added rig (Puppeteer), anim (AnyTop), mvadapter
+  // (multi-view generator) so the "Server warming up (N services)"
+  // popover lists every Modal container the user can actually trigger
+  // — previous list missed rig and anim which were silent surprises.
+  const [image_op, text2image, back_view, tpose, mesh, rig, anim, mvadapter] = await Promise.all([
     status('_meta/last_warm_image_op.txt',  30, 150, lastByContainer.image_op   ?? null),
     status('_meta/last_warm_text2image.txt', 30, 150, lastByContainer.text2image ?? null),
     status('_meta/last_warm_back_view.txt',  40, 180, lastByContainer.back_view  ?? null),
     status('_meta/last_warm_tpose.txt',      30, 150, lastByContainer.tpose      ?? null),
     status('_meta/last_warm_mesh.txt',       60, 240, lastByContainer.mesh       ?? null),
+    status('_meta/last_warm_rig.txt',        45, 180, lastByContainer.rig        ?? null),
+    status('_meta/last_warm_anim.txt',       60, 240, lastByContainer.anim       ?? null),
+    status('_meta/last_warm_mvadapter.txt',  40, 180, lastByContainer.mvadapter  ?? null),
   ]);
   return json({
-    image_op, text2image, back_view, tpose, mesh,
+    image_op, text2image, back_view, tpose, mesh, rig, anim, mvadapter,
     cold_threshold_seconds: Math.floor(COLD_THRESHOLD_MS / 1000),
   });
 }
@@ -7304,6 +7318,9 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     await deleteRigJobRecord(env, jobId).catch(() => {});
     const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
     console.log(`[auto-rig-status] job_id=${jobId} DONE expected_bytes=${expectedBytes} url=${publicUrl}`);
+    // Tag the rig container as warm so /api/modal-status shows the
+    // right pill (added 2026-06-02 alongside anim + mvadapter tracking).
+    _writeLastWarmMs(env, '_meta/last_warm_rig.txt').catch(() => {});
     // Mark the jobs row succeeded so it shows up correctly in history.
     try {
       await supabaseAdmin(env).from('jobs')
@@ -8268,6 +8285,8 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
     await deleteAnimJobRecord(env, jobId).catch(() => {});
     const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
     console.log(`[animate-status] job_id=${jobId} DONE url=${publicUrl}`);
+    // Tag the anim container as warm — added 2026-06-02.
+    _writeLastWarmMs(env, '_meta/last_warm_anim.txt').catch(() => {});
     // Mark the jobs row succeeded so history shows the right state.
     try {
       await supabaseAdmin(env).from('jobs')
