@@ -169,6 +169,7 @@
                 <span class="stage-hint">Generate a new image from a text prompt</span>
               </summary>
               <div class="stage-body">
+                <div class="step-progress-widget" id="step-progress-1" data-step="1"></div>
                 <div class="form-row">
                   <label>Engine</label>
                   <select id="ws-engine">
@@ -406,6 +407,7 @@
                 <span class="stage-hint">Convert the selected image into a 3D mesh</span>
               </summary>
               <div class="stage-body stage-create-with-source">
+                <div class="step-progress-widget" id="step-progress-2" data-step="2" style="grid-column:1 / -1;"></div>
                 <div class="stage-create-form">
                   <div class="form-row">
                     <label>Engine</label>
@@ -661,6 +663,7 @@
                 <span class="stage-hint">Bind a skeleton to your mesh for animation</span>
               </summary>
               <div class="stage-body stage-create-with-source">
+                <div class="step-progress-widget" id="step-progress-3" data-step="3" style="grid-column:1 / -1;"></div>
                 <div class="stage-create-form">
                   <div class="form-row">
                     <label>Engine</label>
@@ -788,6 +791,7 @@
                 <span class="stage-hint">Generate animation clips for your rig via AI</span>
               </summary>
               <div class="stage-body stage-create-with-source">
+                <div class="step-progress-widget" id="step-progress-4" data-step="4" style="grid-column:1 / -1;"></div>
                 <div class="stage-create-form">
                   <!-- Engine dropdown hidden: AnyTop is the only wired
                        engine. Re-show when Procedural / Seed3D land. -->
@@ -2138,6 +2142,7 @@
         <div id="jd-error-box" class="jd-error-box hidden"></div>
         <div class="modal-actions">
           <button class="ghost-btn" id="job-details-close">Close</button>
+          <button class="primary-btn" id="job-details-goto-step" style="display:none; background:linear-gradient(135deg,#7c3aed,#a855f7);">&#8594; Go to step</button>
           <button class="primary-btn" id="job-details-open-settings" style="display:none; background:linear-gradient(135deg,#6a5acd,#9370db);">&#9881; Open Settings</button>
           <button class="primary-btn danger" id="job-details-cancel">Cancel task</button>
         </div>
