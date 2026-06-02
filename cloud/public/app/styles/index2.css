@@ -2280,20 +2280,27 @@ button.tool-active {
 .job-item-2 { cursor: pointer; transition: background 0.15s; }
 .job-item-2:hover { background: var(--bg-3); }
 
-/* Per-step progress widget inside Create New panels (mirrors the
-   sidebar job tiles, slightly tighter). Hidden until renderJobs
-   adds .has-jobs at render time. */
+/* Per-step progress widget inside the GENERATING section. Always
+   visible (the empty state shows "Pas de génération en cours"); the
+   GENERATING <details> handles the open/closed UX. */
 .step-progress-widget {
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   padding: 8px;
   background: rgba(124, 58, 237, 0.06);
   border: 1px solid rgba(124, 58, 237, 0.3);
   border-radius: var(--radius-sm);
 }
-.step-progress-widget.has-jobs { display: flex; }
+.step-progress-empty {
+  text-align: center;
+  color: var(--text-2);
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 8px;
+  opacity: 0.75;
+}
 .step-progress-item {
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -2368,6 +2375,10 @@ details.stage-generating > summary {
 }
 details.stage-generating > summary .stage-icon {
   display: inline-block;
+  /* No animation by default — only spin when a job is actually running
+     on this step (.has-running added to the parent step-card). */
+}
+.step-card.has-running details.stage-generating > summary .stage-icon {
   animation: spin 2s linear infinite;
 }
 @keyframes spin {
