@@ -14788,12 +14788,18 @@ window._navigateToJobStep = async function(jobId) {
       // Older browsers / Electron without smooth — fall back to instant.
       try { card.scrollIntoView({ block: 'start' }); } catch (__) {}
     }
-    // 2026-06-02 UX: pulse-highlight the destination card for ~1s
-    // so the user immediately sees WHERE they landed. Re-uses the
-    // existing .pulse-highlight CSS already applied during the
-    // "Use this for X" handoff flow.
-    card.classList.add('pulse-highlight');
-    setTimeout(() => card.classList.remove('pulse-highlight'), 1500);
+    // 2026-06-02 UX: pulse-highlight the SPECIFIC running-job tile
+    // inside the step's Create New widget so the user immediately
+    // sees the tile that matches the job they came from. Falls back
+    // to the whole card if the widget hasn't rendered the tile yet
+    // (e.g. the job just transitioned, no Create New tile present).
+    const stepIdx2 = _jobStepIndex(j);
+    const targetTile = stepIdx2
+      ? document.querySelector(`#step-progress-${stepIdx2} .step-progress-item[data-job-id="${jobId}"]`)
+      : null;
+    const flashEl = targetTile || card;
+    flashEl.classList.add('pulse-highlight');
+    setTimeout(() => flashEl.classList.remove('pulse-highlight'), 1500);
   };
   requestAnimationFrame(() => requestAnimationFrame(_scrollToCard));
 };
