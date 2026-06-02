@@ -15064,8 +15064,16 @@ function renderStepProgressWidgets() {
     widget.innerHTML = matching.map(j => {
       const pct = Math.round(j.progress || 0);
       const canCancel = j.status === 'running';
+      // 2026-06-02: status class drives bar/pct colour (green on
+      // done, red on error). Mirrors the sidebar's .job-item-2
+      // status-coloring CSS so the per-step tile gives the same
+      // success/fail signal.
+      const statusClass = j.status === 'done' ? ' done'
+                        : j.status === 'error' ? ' error'
+                        : '';
+      const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
       return `
-        <div class="step-progress-item" data-job-id="${j.id}">
+        <div class="step-progress-item${statusClass}" data-job-id="${j.id}">
           <div class="step-progress-item-header">
             <div class="step-progress-item-name">${escapeHtml(j.name)}</div>
             ${canCancel ? `<button class="step-progress-cancel-btn" onclick="event.stopPropagation(); window._cancelJob(${j.id})" title="Cancel job">&#10005;</button>` : ''}
@@ -15073,7 +15081,7 @@ function renderStepProgressWidgets() {
           <div class="step-progress-item-bar">
             <div class="step-progress-item-bar-fill" style="width:${pct}%"></div>
           </div>
-          <div class="step-progress-item-pct">${pct}%</div>
+          <div class="step-progress-item-pct">${elapsed ? `<span style="color:var(--text-2); margin-right:8px; font-weight:normal;">${elapsed}</span>` : ''}${pct}%</div>
         </div>`;
     }).join('');
     widget.querySelectorAll('.step-progress-item[data-job-id]').forEach(el => {
@@ -15115,6 +15123,7 @@ function renderJobs() {
     // user can jump straight to its Create New widget instead of hunting
     // for it across projects.
     const hasStep = _jobStepIndex(j) > 0;
+    const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
     return `
       <div class="job-item-2 ${j.status}" data-job-id="${j.id}">
         <div class="job-item-2-header">
@@ -15125,7 +15134,7 @@ function renderJobs() {
         <div class="job-item-2-bar">
           <div class="job-item-2-bar-fill" style="width:${pct}%"></div>
         </div>
-        <div class="job-item-2-pct">${pct}%</div>
+        <div class="job-item-2-pct">${elapsed ? `<span style="color:var(--text-2); margin-right:8px; font-weight:normal;">${elapsed}</span>` : ''}${pct}%</div>
       </div>
     `;
   }).join('');
@@ -15482,6 +15491,14 @@ document.getElementById('modal-job-details').addEventListener('click', (e) => {
 // Tick the modal every second so elapsed time updates
 setInterval(() => {
   if (state._jobDetailsOpenId) refreshJobDetailsModal(state._jobDetailsOpenId);
+}, 1000);
+// 2026-06-02: also tick the sidebar + per-step tiles every second so
+// the elapsed-time chip next to the % updates live. Only re-renders
+// when there are running jobs to avoid useless DOM work when idle.
+setInterval(() => {
+  if (state.jobs && state.jobs.some(j => j.status === 'running')) {
+    try { renderJobs(); } catch (_) {}
+  }
 }, 1000);
 document.getElementById('jobs-bubble-2').addEventListener('click', () => {
   document.getElementById('jobs-panel-2').classList.remove('hidden');
