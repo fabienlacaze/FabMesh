@@ -1,68 +1,66 @@
 # FabMesh Agent Log
 
-## 2026-06-02 (cloud→desktop port wave — reviewer-flagged bugfixes, attempt B winner)
+## 2026-06-02 (FBX reference-animation pipeline — Apovivor → Puppeteer)
 
-Bug fixes landed on top of the earlier desktop-sync ports (commits
-f210fc6 / ef475f2 / c0f6685 / 25d5f0b / a8492db) after code review
-flagged six issues. Patch came from worktree `wf_ded2f8fc-43b-3` and
-was merged into master with three conflict resolutions (kept the
-viewer error placeholder added by a8492db).
+**Pourquoi**: AnyTop génère du motion sur les classes natives mais l'utilisateur
+veut aussi pouvoir importer un .fbx de référence (Apovivor ORC_M1, UE5 Mannequin)
+et le retarget direct sur son rig Puppeteer — bypass total du sampler.
 
-- `src/renderer/index2.js`:
-  - Added missing `_toFileUrl` helper used by `showAnimSourceRig`,
-    lightbox, and cross-feature inpaint paths — without it those
-    callers threw `ReferenceError`. Mirrors cloud d5798ea. Exposed on
-    `window` so classic-script helpers (index2-edit-tools.js) share it.
-  - Promoted the earlier `setViewerLoading` (with the
-    `.viewer-loading-overlay` marker class) and deleted the duplicate
-    near `showStep1Preview`. Without the marker the
-    `:not(.viewer-loading-overlay)` cleanup in `resetWorkspaceUI` wiped
-    the spinner mid-load.
-  - `populateWorkspace`: clear stale loading overlays in the 4 viewers
-    (`step1-preview`, `ws-3d-source-preview`, `ws-rig-source-preview`,
-    `ws-anim-source-preview`) BEFORE touching `state.currentProject`.
-    Without this, slow loads from project A finished after project B
-    was up and contaminated B's viewers ("I still see the dragon while
-    I'm in the orc project"). Mirrors cloud c5866be.
-  - Bumped `rigSrcLoadId` per `showRigSourceMesh` entry so an in-flight
-    slow load from project A cannot commit its scene into project B
-    (same class of bug fixed in cloud ec1cab1).
-  - `pushJob` now records a `sourceProject` field so `_jobProjectName`
-    can label the job tile correctly when the user navigates between
-    projects.
-  - Wrapped `setViewerLoading` callsites in `showStep1Preview` in
-    try/catch (defensive — the helper is loaded from `<script>`, not
-    a module, and a load-order race could leave it undefined for the
-    first render).
+**Décision**: pipeline JSON-driven extensible — ajouter un nouveau skeleton =
+ajouter un JSON, jamais de code dans le core retargeter.
 
-- `src/renderer/styles/index2.css`:
-  - `pointer-events: none` on `.preview-placeholder.loading` so the
-    overlay can't swallow clicks on the expand/use-for-3D buttons
-    underneath.
-  - `--accent` fallback color (`#a77aff`) on the spinner so it still
-    renders if the theme variable hasn't loaded yet.
+**Changements**:
 
-## 2026-06-02 (cloud→desktop port wave, attempt A)
+1. `scripts/rig_mappings/ue5_mannequin__humanoid_puppeteer.json` (nouveau) —
+   mapping UE5 27 bones → rôles Puppeteer (hip/spine/neck/head/arm/leg) +
+   drop_patterns (twist/share/facial/finger/toe/IK) qui absorbent les bones
+   superflus côté source.
+2. `scripts/rig_mappings/orc_m1__humanoid_puppeteer.json` (nouveau) — hérite
+   du UE5 mapping via `"extends"` et ajoute uniquement les drop_patterns CC4
+   (cc_base_pelvis duplicate, ribstwist, breast). Preuve que la design scale.
+3. `scripts/rig_mappings/_loader.py` (nouveau) — résout les JSON, applique
+   `extends`, expose `load_mapping()`, `fingerprint_skeleton()`, et
+   `make_classifier_chain()` qui chaine (drop → table → fallback).
+4. `scripts/fbx_motion.py` (nouveau) — parse FBX via subprocess `bpy_worker.py`
+   (GPL isolation : bpy n'est jamais importé dans le parent retarget). Output
+   shape IDENTIQUE à `_parse_bvh()` pour réutilisation à 100% du retarget core.
+5. `scripts/bpy_worker.py` (nouveau) — worker bpy headless, import FBX avec
+   `automatic_bone_orientation=False`, bake action `visual_keying=True`,
+   dump JSON+NPZ.
+6. `scripts/anytop_retarget.py` (refactor ~15 min) — split en
+   `retarget_motion_to_rig(rig, motion, source_classifier=...)` (core) +
+   `retarget_bvh_to_rig` (wrapper BVH) + `retarget_fbx_to_rig` (wrapper FBX).
+   Bug fix bonus : `_SIDE_TOKEN_L` / `_R` matchent maintenant le suffixe
+   trailing `_l$`/`_r$` (UE5 convention).
+7. `modal_app/_ref_anim.py` (nouveau) — app Modal séparée
+   `myfabmesh-fbx-retarget` CPU-only, image bpy 5.1 + numpy + scipy, expose
+   `/fbx-retarget-{start,status,fetch}` qui miment `/anim-*`. Volume séparé
+   pour ne pas polluer le AnyTop output.
+8. `cloud/src/worker.ts` — nouveau env var `MODAL_FBX_RETARGET_URL`,
+   2 nouveaux handlers `handleAnimateFromReference` +
+   `handleAnimateFromReferenceStatus`, route le résultat dans R2 sous
+   `<uid>/animations/<base>_fbxref_<batch>_<ts>.glb` (discriminator reconnu
+   par le filtre `isAnimation` côté UI). Extend `handleAnimUpload` avec
+   `kind='reference_anim'` qui valide le magic Kaydara FBX et stocke sous
+   `<uid>/anim_refs/<sha>_<name>.fbx`.
+9. `cloud/public/app/index.html` — nouveau bloc UI "Import reference animation
+   (.fbx)" dans Step 4 avec dropdown auto-détect, picker fichier, bouton go.
+10. `cloud/public/app/index2.js` — wires `_wireFbxReferenceAnim()` qui upload
+    → spawn → poll → reload project. Étend la regex `isAnimation` pour matcher
+    `_fbxref_`.
 
-Foundational port of cloud commits 04e3c9c / 86cda31 / 8e51faa /
-6878f7f / 485e47b / 955a49a / 0e5b011 / e64ea20 / c5866be into the
-desktop renderer:
-- `src/renderer/index2.html` — added 4 GENERATING `<details>` sections
-  (one per step card) with the gear-in-pink-circle icon; Go-to-step
-  button in job details modal.
-- `src/renderer/index2.js` — new helpers `_jobStepIndex`,
-  `_jobProjectName`, `_navigateToJobStep`, `_toggleGeneratingStage`,
-  `renderStepProgressWidgets`. Updated `renderJobs` to add Go-to pill
-  + source thumbnail + elapsed time; `completeJob` flashes a 1.5s ring
-  and extends done dwell to 8s; new 1-second tick re-renders the
-  sidebar while a job is running.
-- `src/renderer/styles/index2.css` — step-progress-widget + GENERATING
-  stage CSS, gear-in-pink-circle, always-on badge breathe, per-step
-  card colours, liveliness layer (bounce, shake, shimmer, just-done
-  flash) and pulse-highlight used by `_navigateToJobStep`.
+**Bone count mismatch absorption** : drop_patterns côté source (silent skip
+via sentinel '/', None, -1)), unmatched targets restent en rest pose (déjà
+géré par le retarget core). Chain-length mismatch absorbé par le matcher
+nearest-chain_idx existant.
 
-Cold-start toast suppression (cloud-only) skipped per plan — desktop
-GPU is local.
+**Pas de changement à `_puppeteer_rig.py` / `puppeteer_to_skeleton.py`**
+(contrainte [[dont-touch-puppeteer]]).
+
+**Tests** : loader résout les 2 JSONs, classifier chain renvoie les bons
+tuples (drop sentinel pour ik_/twist_/finger_, table hit pour pelvis/spine,
+fallback _classify_source_bone pour Bip01_Pelvis legacy). Image bpy ~390 MB
+ajoute ~30 s cold start mais reste isolée du AnyTop image (~120 MB).
 
 ## 2026-06-02 (Anim PIVOT — Strategy 1: bundled cond + retargeting)
 
