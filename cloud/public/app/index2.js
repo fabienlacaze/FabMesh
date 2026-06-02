@@ -14788,6 +14788,12 @@ window._navigateToJobStep = async function(jobId) {
       // Older browsers / Electron without smooth — fall back to instant.
       try { card.scrollIntoView({ block: 'start' }); } catch (__) {}
     }
+    // 2026-06-02 UX: pulse-highlight the destination card for ~1s
+    // so the user immediately sees WHERE they landed. Re-uses the
+    // existing .pulse-highlight CSS already applied during the
+    // "Use this for X" handoff flow.
+    card.classList.add('pulse-highlight');
+    setTimeout(() => card.classList.remove('pulse-highlight'), 1500);
   };
   requestAnimationFrame(() => requestAnimationFrame(_scrollToCard));
 };
