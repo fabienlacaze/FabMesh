@@ -2243,6 +2243,89 @@ button.tool-active {
 .job-item-2 { cursor: pointer; transition: background 0.15s; }
 .job-item-2:hover { background: var(--bg-3); }
 
+/* Per-step progress widget inside Create New panels (mirrors the
+   sidebar job tiles, slightly tighter). Hidden until renderJobs
+   adds .has-jobs at render time. */
+.step-progress-widget {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(124, 58, 237, 0.06);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: var(--radius-sm);
+}
+.step-progress-widget.has-jobs { display: flex; }
+.step-progress-item {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.step-progress-item:hover { background: var(--bg-3); }
+.step-progress-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.step-progress-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-0);
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.step-progress-item-bar {
+  height: 5px;
+  background: var(--bg-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.step-progress-item-bar-fill {
+  height: 100%;
+  background: var(--accent-grad);
+  transition: width 0.3s;
+}
+.step-progress-item-pct {
+  text-align: right;
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.step-progress-cancel-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.step-progress-cancel-btn:hover { color: var(--error); }
+.job-goto-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.job-goto-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 /* GPU mini monitor inside the job details modal */
 .job-gpu-monitor {
   position: absolute;
