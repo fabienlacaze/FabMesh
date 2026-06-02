@@ -1650,7 +1650,16 @@ function bindStageMutualExclusion() {
     const editStage = card.querySelector('.stage-edit');
     if (!createStage || !editStage) return;
     createStage.addEventListener('toggle', () => {
-      if (createStage.open) editStage.open = false;
+      if (createStage.open) {
+        editStage.open = false;
+        // 2026-06-02 UX: auto-pick the latest version from the
+        // previous step when the user opens Create New without an
+        // explicit source selection. Previously the user saw an empty
+        // "No image/mesh/rig selected" placeholder and had to go back
+        // a step → click "Use this for X" → return. Now Step 2/3/4
+        // each fall back to their previous step's newest version.
+        try { _autoPickSourceForCreateNew(card); } catch (_) {}
+      }
     });
     editStage.addEventListener('toggle', () => {
       if (editStage.open) createStage.open = false;
@@ -1658,6 +1667,79 @@ function bindStageMutualExclusion() {
   });
 }
 bindStageMutualExclusion();
+
+function _autoPickSourceForCreateNew(card) {
+  const p = state.currentProject;
+  if (!p) return;
+  const cardId = card.id;
+  // Step 2 (3D Mesh) — needs a source IMAGE
+  if (cardId === 'step-card-mesh') {
+    if (!p.selectedImagePath && p.images && p.images.length > 0) {
+      const newest = p.images[0];
+      const path = (typeof newest === 'string') ? newest : (newest && newest.path);
+      if (path) {
+        p.selectedImagePath = path;
+        p.previewImagePath = path;
+        try { showStep2SourceImage(path); } catch (_) {}
+        try { refreshButtonLabelsAndHiding(p); } catch (_) {}
+      }
+    }
+    return;
+  }
+  // Step 3 (Rig) — needs a source MESH
+  if (cardId === 'step-card-rig') {
+    if (!p.selectedMeshPath && p.meshes && p.meshes.length > 0) {
+      const newest = p.meshes[0];
+      const path = newest && (newest.path || newest.url);
+      if (path) {
+        p.selectedMeshPath = path;
+        try { showRigSourceMesh(path); } catch (_) {}
+        try { refreshButtonLabelsAndHiding(p); } catch (_) {}
+      }
+    }
+    return;
+  }
+  // Step 4 (Animation) — needs a source RIG
+  if (cardId === 'step-card-animation') {
+    if (!p.selectedRigUrl && !p.selectedRigPath && p.rigs && p.rigs.length > 0) {
+      const newest = p.rigs[0];
+      const url = newest && (newest.url || newest.path);
+      if (url) {
+        p.selectedRigUrl = url;
+        p.selectedRigPath = newest.path || url;
+        try {
+          const preview = document.getElementById('ws-anim-source-preview');
+          const placeholder = document.getElementById('ws-anim-source-placeholder');
+          if (placeholder) placeholder.style.display = 'none';
+          if (preview) {
+            const filename = (newest.filename || url).split(/[/\\]/).pop() || 'rig.glb';
+            preview.style.position = 'relative';
+            preview.style.minHeight = '200px';
+            preview.innerHTML = `
+              <model-viewer src="${url}"
+                            camera-controls touch-action="pan-y"
+                            shadow-intensity="1" exposure="1"
+                            auto-rotate auto-rotate-delay="3000"
+                            style="position:absolute; inset:0; width:100%; height:100%; background:#0a0a0e; border-radius:6px;">
+              </model-viewer>
+              <div style="position:absolute; bottom:6px; left:0; right:0; text-align:center; font-size:10px; color:var(--text-2); pointer-events:none; padding:0 8px; word-break:break-all;">${filename}</div>
+            `;
+            try { setViewerLoading('ws-anim-source-preview', true, 'Loading rig…'); } catch (_) {}
+            const mv = preview.querySelector('model-viewer');
+            if (mv) {
+              const clear = () => { try { setViewerLoading('ws-anim-source-preview', false); } catch (_) {} };
+              mv.addEventListener('load', clear, { once: true });
+              mv.addEventListener('error', clear, { once: true });
+              setTimeout(clear, 10000);
+            }
+          }
+          const genBtn = document.getElementById('ws-generate-anim');
+          if (genBtn) { genBtn.disabled = false; genBtn.title = ''; }
+        } catch (_) {}
+      }
+    }
+  }
+}
 
 function resetWorkspaceUI() {
   // Image step
@@ -2066,8 +2148,23 @@ async function showStep2SourceImage(imgPath) {
   if (!target) return;
   if (imgPath) {
     target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
+    // Spinner while the <img> decodes — only relevant for big PNGs
+    // or remote R2 URLs. Cleared on load/error or after 10s safety.
+    try { setViewerLoading('ws-3d-source-preview', true, 'Loading image…'); } catch (_) {}
+    const imgEl = target.querySelector('img');
+    if (imgEl) {
+      const clear = () => { try { setViewerLoading('ws-3d-source-preview', false); } catch (_) {} };
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
+        clear();
+      } else {
+        imgEl.addEventListener('load', clear, { once: true });
+        imgEl.addEventListener('error', clear, { once: true });
+        setTimeout(clear, 10000);
+      }
+    }
   } else {
     target.innerHTML = '<div class="preview-placeholder">No image selected</div>';
+    try { setViewerLoading('ws-3d-source-preview', false); } catch (_) {}
   }
   setViewerFilename('ws-3d-source-filename', imgPath);
   // Auto-detect multi-view dir for the selected image:
@@ -2257,12 +2354,16 @@ async function showRigSourceMesh(meshPath) {
     if (placeholder) placeholder.style.display = '';
     if (rigSrcModel && rigSrcScene) { rigSrcScene.remove(rigSrcModel); rigSrcModel = null; }
     rigSrcMeshPath = null;
+    try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {}
     return;
   }
   rigSrcMeshPath = meshPath;
   initRigSrcViewer();
   setViewerFilename('ws-rig-source-filename', meshPath);
   if (placeholder) placeholder.style.display = 'none';
+  // Show the spinner immediately so the user has visual feedback
+  // while the mesh fetch + GLB/FBX parse happen (can take 500ms-2s).
+  try { setViewerLoading('ws-rig-source-preview', true, 'Loading mesh…'); } catch (_) {}
   // Make sure no leftover landmark markers pollute this clean preview
   if (rigSrcScene) {
     for (const id in lmMarkers) {
@@ -2299,18 +2400,20 @@ async function showRigSourceMesh(meshPath) {
     // asynchronously re-open Edit selected here.
     try { refreshButtonLabelsAndHiding(state.currentProject); } catch (_e) {}
   };
+  const clearSpinner = () => { try { setViewerLoading('ws-rig-source-preview', false); } catch (_) {} };
   if (ext === 'fbx') {
     // FBXLoader needs a URL so it can resolve textures relative to the file
     const url = _toFileUrl(meshPath);
-    new FBXLoader().load(url, applyLoadedModel, undefined, (err) => {
+    new FBXLoader().load(url, (obj) => { applyLoadedModel(obj); clearSpinner(); }, undefined, (err) => {
       console.error('FBX load error in rig source viewer', err);
+      clearSpinner();
     });
   } else {
     const buffer = await API.readMeshFile(meshPath);
-    if (!buffer) return;
+    if (!buffer) { clearSpinner(); return; }
     const loader = new GLTFLoader();
-    loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); applyLoadedModel(gltf.scene); },
-      (err) => console.error('GLTF parse error in rig source viewer', err));
+    loader.parse(buffer, '', (gltf) => { _applyMeshTextureFilter(gltf.scene); applyLoadedModel(gltf.scene); clearSpinner(); },
+      (err) => { console.error('GLTF parse error in rig source viewer', err); clearSpinner(); });
   }
 }
 
@@ -7321,6 +7424,16 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
         </model-viewer>
         <div style="position:absolute; bottom:6px; left:0; right:0; text-align:center; font-size:10px; color:var(--text-2); pointer-events:none; padding:0 8px; word-break:break-all;">${filename}</div>
       `;
+      // Spinner while <model-viewer> fetches + parses the GLB.
+      try { setViewerLoading('ws-anim-source-preview', true, 'Loading rig…'); } catch (_) {}
+      const mv = preview.querySelector('model-viewer');
+      if (mv) {
+        const clear = () => { try { setViewerLoading('ws-anim-source-preview', false); } catch (_) {} };
+        mv.addEventListener('load', clear, { once: true });
+        mv.addEventListener('error', clear, { once: true });
+        // Safety net: clear after 10s no matter what so the spinner never gets stuck.
+        setTimeout(clear, 10000);
+      }
     }
     const genBtn = document.getElementById('ws-generate-anim');
     if (genBtn) {
