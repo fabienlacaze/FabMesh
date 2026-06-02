@@ -1,5 +1,37 @@
 # FabMesh Agent Log
 
+## 2026-06-02 (verify — Hi3DGen removal post-flight, TRELLIS-2 single mesh path)
+
+**Pourquoi** : audit post-suppression de `c2808a9` pour confirmer qu'aucun
+import vivant ne réfère encore au moteur Hi3DGen. Vérification effectuée
+avant push vers `origin/master`.
+
+**Backup branch** : `backup-pre-hi3dgen-removal-undefined` (créée par le
+workflow d'orchestration avant le run de cleanup, tag de safety net).
+
+**Résultat audit** :
+- `node --check src/main/main.js` → EXIT=0
+- `node --check src/renderer/index2.js` → EXIT=0
+- Grep `import.*hi3dgen|from.*hi3dgen|require.*hi3dgen` → 0 hit
+- 12 occurrences textuelles restantes, toutes inertes :
+  - `scripts/mesh_tools.py` lignes 248-265 (5) : shim filename-detection
+    qui set `FABMESH_TEXPROJ_HI3DGEN_UNDO` pour les vieux meshes
+    `_hi3dgen_*.glb` sur disque. Aucun import du moteur supprimé.
+  - `scripts/texture_project.py` lignes 187-200 (3) + 642 (commentaire) :
+    receveur de cet env var, branche math pure (axis-undo).
+  - `scripts/_test_trellis2_native.py:3` : commentaire dans test inactif.
+  - `cloud/public/app/index2.js:611` + `src/renderer/index2.js:436` :
+    regex de groupage projet par nom de fichier (préserve la compat
+    avec les `_hi3dgen_*.glb` user existants).
+
+**Décision** : conserver ces 12 hits tels quels — ce sont des hooks de
+backward-compat sur les artefacts disque user, pas du code Hi3DGen actif.
+TRELLIS-2 native est désormais le seul chemin mesh côté desktop ET cloud.
+
+**Suivi optionnel** : pruner le shim + la regex dans un commit ultérieur
+quand l'utilisateur aura confirmé qu'il ne reste plus de `_hi3dgen_*.glb`
+dans `meshes/`.
+
 ## 2026-06-02 (cleanup — remove Hi3DGen from desktop pipeline)
 
 **Pourquoi** : Hi3DGen n'est plus l'engine par défaut depuis 2026-05-19
