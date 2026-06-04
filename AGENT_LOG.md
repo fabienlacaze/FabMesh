@@ -1,5 +1,34 @@
 # FabMesh Agent Log
 
+## 2026-06-04 (feat — morphology classifier prototype : GLB -> archetype + Truebones donor)
+
+**Pourquoi** : pour passer de "AnyTop = Dragon-only" a "AnyTop multi-espece"
+on doit deviner l'archetype morphologique du rig en sortie de Puppeteer
+AVANT de choisir un BVH donor. Six classes : `biped` / `quadruped` /
+`hexapod` / `serpent` / `winged` / `blob`, alignees sur les sous-ensembles
+AnyTop (`BIPEDS`, `QUADROPEDS`, `MILLIPEDS`, `SNAKES`, `FLYING`).
+
+**Changement** (`scripts/morphology_classifier.py`, ~250 LOC, pure
+pygltflib + numpy, zero Blender) :
+- `extract_skeleton(glb)` : lit `skin.joints` + `inverseBindMatrices`,
+  inverse les IBMs pour reconstruire les positions monde de chaque os
+  et reconstitue les parent indices via `node.children`.
+- `_topology_features()` : 9 signaux topo/geo (n_term, branch_nodes,
+  max_depth, aspect H/W, aspect long, symetrie X, high/low/wide
+  terminals).
+- `classify()` : heuristiques sommees + tie-break -> archetype +
+  confidence. Wings dominent sur biped/quadruped pour les dragons
+  ailes-haut + pattes-bas.
+- `_best_truebones()` : pick l'espece AnyTop dont le joint count est
+  le plus proche du rig (table `SPECIES_JOINT_HINT`).
+- Smoke-test embarque : `c:/tmp/dragon_rig.glb` (47 os) -> attendu
+  `winged`, obtenu `winged` (confidence 0.71, donor = `Buzzard`).
+
+**Resultat** : permet a `anytop_retarget.py` de selectionner
+automatiquement le BVH donor pertinent au lieu de hard-coder MountainDragon.
+
+---
+
 ## 2026-06-02 (fix — AnyTop retarget : desactivation par defaut du clamp 90deg + twist-drop)
 
 **Pourquoi** : audit `wgjsu8jbu` sur Dragon 41-bone vs source BVH 102-bone
