@@ -1,5 +1,59 @@
 # FabMesh Agent Log
 
+## 2026-06-04 (research — AnyTop unconditional confirmé + plan text-conditioning + Mode 4 V2 winner + 41 FBX MountainDragon)
+
+**TL;DR** : Session intensive de debug du pipeline AnyTop. Conclusion :
+AnyTop ne supporte PAS le choix d'animation (walk/run/death) — 4 sources
+indépendantes le confirment. User a décidé d'implémenter le text-conditioning
+nous-mêmes (~10-12 jours). En attendant, le Mode 4 V2 (seed=777 low DAMP=0.6)
+produit un dragon stable et shippable comme idle générique. Et 41 FBX
+MountainDragon ont été exportés depuis Apovivor UE5 pour utiliser le pipeline
+`retarget_fbx_to_rig` existant pour les anims précises.
+
+**Document complet** : `docs/anytop_research_2026-06-04.md` (résumé exhaustif
+des 4 sources confirmant la limite AnyTop, plan d'implémentation détaillé
+text-conditioning ~50 LOC + fine-tuning, library FBX disponible, bugs actuels
+du retarget).
+
+**Changements code** :
+- `scripts/rig_mappings/_loader.py` : tentative Ry(+90°) pour fix forward axis
+  UE5 → glTF reverted (user dit "pire"). Code commenté pour référence future.
+
+**Tests menés** (workflow IDs) :
+- `wxsmsl985` : audit pipeline (a halluciné — 4 hypothèses invalidées par mesure)
+- `wuw2yxv1d` : spec AnyTop custom skeleton (validée)
+- `wq1bagc4v` : design Bridge IK Strategy B1 (rejeté, on a trouvé Mode 4 V2)
+- `wrfwwkjti` : post-mortem (recommandait procedural, on a continué)
+- `w63pf1o4q` : exploration systematic V2 — 24 variants × 3 frames screenshots
+  + reviews adversariales. Winner = seed=123 low DAMP=0.6 score 72/100 mais
+  s'écroule à 3-4s.
+
+**Test #5 V2 final winner** : seed=777 low DAMP=0.6, dragon mesh debout natural,
+4 pattes au sol, ailes spread. User validé visuellement "B parait vraiment bien".
+Pipeline complet :
+1. `c:/tmp/export_puppeteer_v2.py` (rig → 3 BVHs perturbés + canonical names)
+2. `python -m utils.process_new_skeleton --object_name PuppDragonV2 ...`
+3. `python -m sample.generate --seed 777 ...`
+4. `retarget_bvh_to_rig` avec `ANYTOP_OUTPUT_DAMP=0.6`
+
+**FBX library exportée** : `c:/tmp/dragon_anim_fbx/*.fbx` (41 anims MountainDragon
+depuis `d:/apovivor512.15` via UE5 Python commandlet
+`c:/tmp/export_dragon_anims_v2.py`). Walk, run, death, idle, fly, glide, bite,
+attack, etc.
+
+**Décisions** :
+- Mode 4 V2 winner → à intégrer dans modal_app comme "generic dragon idle"
+- Voie A : implémenter text-conditioning AnyTop nous-mêmes (~10-12 jours).
+  User a choisi cette voie.
+- Voie B parallèle : FBX library (41 anims prêtes) via `retarget_fbx_to_rig`,
+  besoin de fix le bug arms-stuck-T-pose et créer mapping `flying_quadruped`.
+
+**Pas encore committé en prod** : modal_app/_anytop_anim.py wire des params V2
+winner, modal_app/_ref_anim.py debug arms-T-pose, mapping flying_quadruped.
+Ce commit est un backup-of-research-state, pas un milestone fonctionnel.
+
+---
+
 ## 2026-06-02 (fix — AnyTop retarget : desactivation par defaut du clamp 90deg + twist-drop)
 
 **Pourquoi** : audit `wgjsu8jbu` sur Dragon 41-bone vs source BVH 102-bone

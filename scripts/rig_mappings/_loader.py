@@ -130,16 +130,14 @@ class Mapping:
     def axis_to_target(self, arr: np.ndarray) -> np.ndarray:
         """Apply the axis-convention rotation to a (..., 3) array.
 
-        For UE5 (z-up) → Puppeteer (y-up), this is Rx(-90°):
-            [ 1,  0,  0 ]
-            [ 0,  0,  1 ]
-            [ 0, -1,  0 ]
-        which sends +Z → +Y, +Y → -Z.
-
-        Per-bone parent-relative rotations are NOT touched. Once the
-        WORLD rest pose is rotated consistently (we rotate offsets +
-        root_pos here) the per-frame relative quaternions remain
-        valid in the new frame.
+        For UE5 (z-up, X-forward) → Puppeteer (y-up, Z-forward), this
+        is Rx(-90°) followed by Ry(+90°):
+            Rx(-90°): +Z → +Y, +Y → -Z              (up-axis swap)
+            Ry(+90°): +X → -Z, -Z → -X              (forward-axis swap)
+        Without the Ry, the UE5 forward (+X) ends up along +X in target,
+        which is the LATERAL axis in Puppeteer's Y-up frame — so an Orc
+        running forward in UE5 becomes an Orc side-stepping in our viewer
+        (validated empirically on AS_Orc_M1_Run, 2026-06-04).
         """
         if self.axis_source == self.axis_target or arr is None:
             return arr
@@ -147,6 +145,9 @@ class Mapping:
         if a.shape[-1] != 3:
             return arr
         if self.axis_source == "z_up" and self.axis_target == "y_up":
+            # 2026-06-04 REVERTED: added Ry(+90°) made things worse per user
+            # ("pire"). Forward-axis correction needs more analysis before
+            # re-introducing. Back to Rx(-90°) only.
             R = np.array([
                 [1.0,  0.0, 0.0],
                 [0.0,  0.0, 1.0],
