@@ -854,19 +854,40 @@ def _adapt_chain_lengths(
                         out[tni] = ("interpolated", src_chain[lo], src_chain[hi], t)
                 handled_tgt.add(tni)
         else:
-            # M < N: each target bone bins multiple source bones to
-            # average. Distribute N source bones across M target bins
-            # roughly equally.
+            # M < N: source has MORE bones than target. Two strategies:
+            #
+            # (1) DECIMATION (default, 2026-06-09): pick ONE source bone
+            #     per target position via the same formula as the M > N
+            #     interpolation branch. Avoids the arithmetic quat-mean
+            #     that collapses opposite-phase rotations to identity
+            #     (workflow wmf4t8smh root cause: 24/34 dragon bones
+            #     were "averaged" = wing/arm/neck rotations cancelled
+            #     to near-zero, which was why ANYTOP_OUTPUT_DAMP=0.25
+            #     was hiding the symptom).
+            #
+            # (2) AVERAGING (legacy): emit ('averaged', [src bones]).
+            #     The per-frame loop arithmetically means the quats.
+            #     Kept behind env gate `ANYTOP_DECIMATE_LONGER_SRC=0`
+            #     for A/B comparison.
+            decimate = os.environ.get('ANYTOP_DECIMATE_LONGER_SRC', '1') in (
+                '1', 'true', 'True', 'yes', 'YES', 'on', 'ON')
+            denom = max(M - 1, 1)
             for ti, tni in enumerate(tgt_chain):
-                lo = int(np.floor(ti * N / M))
-                hi = int(np.floor((ti + 1) * N / M))
-                hi = max(hi, lo + 1)
-                hi = min(hi, N)
-                bucket = src_chain[lo:hi]
-                if len(bucket) == 1:
-                    out[tni] = ("direct", bucket[0])
+                if decimate:
+                    # Symmetric with M > N branch: ti*(N-1)/max(M-1,1)
+                    pos = ti * (N - 1) / denom if M > 1 else 0.0
+                    src_idx = src_chain[int(round(pos))]
+                    out[tni] = ("direct", src_idx)
                 else:
-                    out[tni] = ("averaged", list(bucket))
+                    lo = int(np.floor(ti * N / M))
+                    hi = int(np.floor((ti + 1) * N / M))
+                    hi = max(hi, lo + 1)
+                    hi = min(hi, N)
+                    bucket = src_chain[lo:hi]
+                    if len(bucket) == 1:
+                        out[tni] = ("direct", bucket[0])
+                    else:
+                        out[tni] = ("averaged", list(bucket))
                 handled_tgt.add(tni)
 
     # Preserve any 1:1 entries from the original mapping for targets
