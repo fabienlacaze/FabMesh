@@ -73,8 +73,13 @@ _TWIST_KEEP_DEFAULT = 1.0       # keep all twist
 # 1. Source-bone classifier — AnyTop canonical names -> roles
 # ============================================================
 
-_SIDE_TOKEN_L = re.compile(r"(_L_|_l_|Left|LeftLeg|LLeg|L_|_l$)", re.IGNORECASE)
-_SIDE_TOKEN_R = re.compile(r"(_R_|_r_|Right|RightLeg|RLeg|R_|_r$)", re.IGNORECASE)
+# 2026-06-09: added LWing/RWing and LBeard/RBeard tokens so dragon
+# source bones like BN_LWing01 / BN_RWing01 get side='l'/'r' instead of
+# None. Without this, all 30 wing bones collapse into a single
+# (wing, None) bucket -> L+R target wings receive identical mirror
+# averaged motion -> near-identity quats on opposite frames.
+_SIDE_TOKEN_L = re.compile(r"(_L_|_l_|Left|LeftLeg|LLeg|L_|_l$|LWing|Lwing|LBeard|LFinger)", re.IGNORECASE)
+_SIDE_TOKEN_R = re.compile(r"(_R_|_r_|Right|RightLeg|RLeg|R_|_r$|RWing|Rwing|RBeard|RFinger)", re.IGNORECASE)
 
 # Patterns observed in the bundled cond.npy keys (75+ classes,
 # ~3ds-Max-Biped naming). Ordered so more specific first.
@@ -233,27 +238,29 @@ def _eulers_to_quats(euler_deg: np.ndarray, channel_order) -> np.ndarray:
     re-permutes by name). channel_order is the BVH CHANNELS intrinsic order
     string (e.g. 'ZYX', 'ZXY', 'XYZ'). Returns quats (F, 4) (xyzw)."""
     if isinstance(channel_order, str):
-        order = channel_order.lower()
+        # BVH spec: 'CHANNELS Zrotation Yrotation Xrotation' = EXTRINSIC ZYX
+        # = matrix Rz @ Ry @ Rx applied to a world-anchored vector. scipy's
+        # UPPERCASE 'ZYX' is extrinsic; LOWERCASE 'zyx' is intrinsic. Using
+        # the lowercase path here was producing a 25 deg off-axis error on
+        # every wing flap (workflow wb2el707u root cause #1).
+        order = channel_order.upper()
     else:
-        # Legacy: list of channel-name strings -- derive order by walking them.
         order = ''
         for ch in channel_order:
             c = str(ch).lower()
             if 'rotation' not in c and 'rot' not in c:
                 continue
             if 'x' in c:
-                order += 'x'
+                order += 'X'
             elif 'y' in c:
-                order += 'y'
+                order += 'Y'
             elif 'z' in c:
-                order += 'z'
-    if len(order) != 3 or set(order) != set('xyz'):
-        order = 'zxy'  # bvhsdk default
+                order += 'Z'
+    if len(order) != 3 or set(order) != set('XYZ'):
+        order = 'ZXY'
     n = euler_deg.shape[0]
-    print(f"[_eulers_to_quats] channel_order={channel_order} n_joints={n} (ZYX fix v2)", flush=True)
-    # scipy expects angles[:, i] to correspond to a rotation about order[i].
-    # Our columns are fixed [X,Y,Z] (bvh.py:261), so permute to match `order`.
-    col_of = {'x': 0, 'y': 1, 'z': 2}
+    print(f"[_eulers_to_quats] channel_order={channel_order} n_joints={n} (ZYX fix v3 - extrinsic)", flush=True)
+    col_of = {'X': 0, 'Y': 1, 'Z': 2}
     ang = euler_deg[:, [col_of[c] for c in order]]
     try:
         q = R.from_euler(order, ang, degrees=True).as_quat()
@@ -517,6 +524,51 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
     upper_r_list, lower_r_list = split_all(right)
     upper_role = 'wing' if ckpt_family == 'flying' else 'arm'
 
+    # 2026-06-08 audit fix #2 (ANYTOP_FIX_FLYING_ARM=1): in flying mode
+    # the previous code labeled EVERY lateral upper chain as 'wing',
+    # leaving source 'arm' bones (e.g. MountainDragon's front-leg
+    # arm chain: clavicle/upperarm/forearm/hand) with no target home
+    # because the target rig only emits 'wing' bones. Result: 8 source
+    # arm bones silently dropped per side.
+    #
+    # Fix: in flying mode, emit BOTH 'wing' and 'arm' roles. Per side,
+    # sort lateral upper chains by length DESC, then:
+    #   - longest chain  -> 'wing'           (chain_n=1)
+    #   - 2nd chain      -> 'arm'            (chain_n=1)
+    #   - 3rd chain      -> 'arm'            (chain_n=2, rare)
+    # Non-flying mode is unchanged: all upper chains -> 'arm'.
+    # Default ON since 2026-06-09. Without this, Bip01_*_Clavicle/UpperArm/
+    # Forearm (carrying 70-180 deg of flap motion each) get silently dropped
+    # because target has no 'arm' role in flying mode. Wing pivots from a
+    # fixed pseudo-shoulder and the mesh clips through the body.
+    _fix_flying_arm = os.environ.get('ANYTOP_FIX_FLYING_ARM', '1') in (
+        '1', 'true', 'True', 'yes', 'YES', 'on', 'ON')
+
+    def _split_flying(upper_list):
+        """Return (wing_chains, arm_chains) by chain length DESC.
+        First -> wing, rest -> arm."""
+        ordered = sorted(upper_list, key=lambda c: -c['len'])
+        wings, arms = [], []
+        for i, rec in enumerate(ordered):
+            if i == 0:
+                wings.append(rec)
+            else:
+                arms.append(rec)
+        return wings, arms
+
+    if _fix_flying_arm and ckpt_family == 'flying':
+        wing_l_list, arm_l_list = _split_flying(upper_l_list)
+        wing_r_list, arm_r_list = _split_flying(upper_r_list)
+        print(f"[retarget] FIX_FLYING_ARM: split upper into "
+              f"L(wing={len(wing_l_list)}, arm={len(arm_l_list)}) "
+              f"R(wing={len(wing_r_list)}, arm={len(arm_r_list)})",
+              flush=True)
+    else:
+        wing_l_list = upper_l_list if upper_role == 'wing' else []
+        wing_r_list = upper_r_list if upper_role == 'wing' else []
+        arm_l_list = upper_l_list if upper_role == 'arm' else []
+        arm_r_list = upper_r_list if upper_role == 'arm' else []
+
     roles: Dict[int, Tuple[str, Optional[str], int]] = {}
     roles[root] = ('hip', None, 0)
     sp = list(spine[1:])
@@ -539,16 +591,84 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
     # a dragon's 2 legs per side both become leg_l_01..N then
     # leg_l_(N+1)..M, etc. Without this enumeration, the second leg
     # falls through to the unmapped 'limb' bucket.
+    #
+    # 2026-06-08 audit fix #1 (ANYTOP_FIX_CHAINS=1): when there are
+    # multiple chains per (role, side) — e.g. a quadruped dragon has
+    # 2 leg chains per side (front + back) — the continuous offset
+    # collapses them in the source/target matcher. Instead, give each
+    # chain a distinct hundreds-prefix so chain 1 gets idx 100..,
+    # chain 2 gets idx 200.. etc. The source mapping JSON keeps the
+    # small original chain_idx values (1..N) because it describes the
+    # *source* skeleton — only the target bucketing changes here.
+    _fix_chains = os.environ.get('ANYTOP_FIX_CHAINS', '0') in (
+        '1', 'true', 'True', 'yes', 'YES', 'on', 'ON')
     def _label(chains_list, role, side):
-        off = 0
-        for rec in chains_list:
-            for i, ni in enumerate(rec['chain']):
-                roles[ni] = (role, side, off + i + 1)
-            off += len(rec['chain'])
-    _label(upper_l_list, upper_role, 'l')
-    _label(upper_r_list, upper_role, 'r')
+        if _fix_chains:
+            for chain_n, rec in enumerate(chains_list, start=1):
+                base = chain_n * 100
+                for i, ni in enumerate(rec['chain']):
+                    roles[ni] = (role, side, base + i)
+        else:
+            off = 0
+            for rec in chains_list:
+                for i, ni in enumerate(rec['chain']):
+                    roles[ni] = (role, side, off + i + 1)
+                off += len(rec['chain'])
+    # 2026-06-08 audit fix #2: feed the wing/arm splits into _label so
+    # that in flying mode the longest lateral becomes the wing chain and
+    # any remaining laterals become arm chains (recovering the source
+    # arm bones that were previously dropped).
+    _label(wing_l_list, 'wing', 'l')
+    _label(wing_r_list, 'wing', 'r')
+    _label(arm_l_list, 'arm', 'l')
+    _label(arm_r_list, 'arm', 'r')
     _label(lower_l_list, 'leg', 'l')
     _label(lower_r_list, 'leg', 'r')
+
+    # 2026-06-08 audit fix #5 (ANYTOP_FIX_HEAD_NECK=1): rescue centerline
+    # bones above the chest hub that fell through every classification
+    # bucket. Observed on rigs whose neck/head chain is too short for the
+    # `neck_n = min(2, max(1, len(sp)//6))` split — intermediate spine
+    # nodes (joint27, joint26, joint25, joint24, joint23, joint2) end up
+    # roleless and the matcher silently drops their motion.
+    #
+    # Heuristic: a target joint that is currently roleless, sits within
+    # the spine lateral gate (|side - root_side| <= side_gate), and is
+    # ABOVE the chest hub (root + 5% body_h) belongs to the spine ->
+    # neck -> head chain. Assign 'neck' with a high chain_idx so it sorts
+    # AFTER the already-classified neck bones in the matcher's argmin —
+    # keeps existing matches stable.
+    _fix_head_neck = os.environ.get('ANYTOP_FIX_HEAD_NECK', '0') in (
+        '1', 'true', 'True', 'yes', 'YES', 'on', 'ON')
+    if _fix_head_neck:
+        root_up = UP(pos[root])
+        chest_threshold = root_up + body_h * 0.05
+        # Highest neck chain_idx already used (None side, neck role).
+        existing_neck_idx = [v[2] for v in roles.values()
+                             if v[0] == 'neck' and v[1] is None]
+        next_neck_idx = (max(existing_neck_idx) + 1) if existing_neck_idx else 1
+        rescued = []
+        # Sort candidates by altitude so the lowest unclassified bone
+        # gets the smallest chain_idx — preserves chain ordering.
+        candidates = [ji for ji in joint_node_idxs if ji not in roles]
+        candidates.sort(key=lambda ji: UP(pos[ji]))
+        for ji in candidates:
+            p = pos[ji]
+            on_centerline = abs(SIDE(p) - root_side) <= side_gate
+            above_chest = UP(p) >= chest_threshold
+            if on_centerline and above_chest:
+                roles[ji] = ('neck', None, next_neck_idx)
+                rescued.append(ji)
+                next_neck_idx += 1
+        if rescued:
+            print(f"[retarget] FIX_HEAD_NECK: rescued {len(rescued)} "
+                  f"centerline-above-hub bones as neck "
+                  f"(idx {next_neck_idx - len(rescued)}..{next_neck_idx - 1})",
+                  flush=True)
+        else:
+            print(f"[retarget] FIX_HEAD_NECK: no candidates "
+                  f"(unclassified={len(candidates)})", flush=True)
+
     return roles
 
 
@@ -579,6 +699,24 @@ def _match_targets_to_sources(
             continue
         by_role_any.setdefault(role, []).append((idx, sidx))
 
+    # 2026-06-08 audit fix #3 (ANYTOP_FIX_PROPORTIONAL=1): when src and
+    # tgt chains have very different lengths (e.g. src leg 4 bones vs
+    # tgt leg 13 bones), the raw |src.idx - tgt.idx| argmin collapses
+    # all intermediate target bones onto the source tip. Normalizing
+    # both indices by their bucket length distributes the picks
+    # proportionally across the source chain.
+    _fix_proportional = os.environ.get('ANYTOP_FIX_PROPORTIONAL', '0') in (
+        '1', 'true', 'True', 'yes', 'YES', 'on', 'ON')
+
+    # Precompute target bucket lengths once for normalization.
+    tgt_bucket_len: Dict[Tuple[str, Optional[str]], int] = {}
+    if _fix_proportional:
+        for _tni, (_role, _side, _idx) in tgt_roles.items():
+            if not _role:
+                continue
+            tgt_bucket_len[(_role, _side)] = tgt_bucket_len.get(
+                (_role, _side), 0) + 1
+
     out: Dict[int, int] = {}
     for tni, (role, side, idx) in tgt_roles.items():
         if not role:
@@ -588,9 +726,146 @@ def _match_targets_to_sources(
             cand = by_role_any.get(role, [])
         if not cand:
             continue
-        # Pick closest chain index.
-        best = min(cand, key=lambda kv: abs(kv[0] - idx))
+        if _fix_proportional:
+            src_bucket_n = max(len(cand), 1)
+            tgt_bucket_n = max(tgt_bucket_len.get((role, side), 1), 1)
+            tgt_norm = idx / tgt_bucket_n
+            best = min(
+                cand,
+                key=lambda kv: abs((kv[0] / src_bucket_n) - tgt_norm),
+            )
+        else:
+            # Pick closest chain index.
+            best = min(cand, key=lambda kv: abs(kv[0] - idx))
         out[tni] = best[1]
+    return out
+
+
+# ============================================================
+# 5b. Chain length adaptation (N:M chain bridging) — 2026-06-08
+# ============================================================
+#
+# Problem: _match_targets_to_sources picks the closest chain_idx but
+# silently collapses (or leaves unmapped) bones when source vs target
+# chain lengths mismatch. Example from audit on MountainDragon walk ->
+# flying_quadruped Puppeteer rig:
+#   src leg:8  tgt leg:22   -> with 1:1 nearest-idx, the first 8 target
+#                              bones each get one source while the
+#                              remaining 14 target bones all share the
+#                              tip-most source -> visible jitter.
+#   src wing:6 tgt wing:11  -> same problem.
+#
+# Fix: identify each chain in source and target (ordered list of bones
+# sharing role+side, sorted by chain_idx), then redistribute the source
+# rotations across the target chain proportionally.
+#
+# We return an EXTENDED mapping where each target node is associated
+# with either:
+#   ("direct",       sidx)                — 1:1 transfer, same as before.
+#   ("interpolated", sidx_a, sidx_b, t)   — slerp source[a] -> source[b]
+#                                          with parameter t in [0,1].
+#   ("averaged",     [sidx_0, ..., sidx_k]) — quat-average those sources.
+# The frame-loop checks the tag and produces the appropriate source
+# rotation.
+
+
+def _build_chains(
+    roles: Dict[int, Tuple[str, Optional[str], int]],
+) -> Dict[Tuple[str, Optional[str]], List[int]]:
+    """Group bones by (role, side) and order by chain_idx ascending.
+    Returns {(role, side): [bone_idx_root_first, ..., bone_idx_tip]}.
+    Roles like 'hip'/'head' (single bone) are still emitted as 1-element
+    chains so the caller can treat them uniformly.
+    """
+    buckets: Dict[Tuple[str, Optional[str]], List[Tuple[int, int]]] = {}
+    for bidx, (role, side, idx) in roles.items():
+        if not role:
+            continue
+        buckets.setdefault((role, side), []).append((idx, bidx))
+    out: Dict[Tuple[str, Optional[str]], List[int]] = {}
+    for key, pairs in buckets.items():
+        pairs.sort(key=lambda p: p[0])
+        out[key] = [bidx for _, bidx in pairs]
+    return out
+
+
+def _adapt_chain_lengths(
+    mapping: Dict[int, int],
+    src_roles: Dict[int, Tuple[str, Optional[str], int]],
+    tgt_roles: Dict[int, Tuple[str, Optional[str], int]],
+) -> Dict[int, tuple]:
+    """Take the 1:1 mapping from _match_targets_to_sources and return
+    a chain-aware mapping. Each target node's value is now a tuple
+    starting with a tag ('direct' / 'interpolated' / 'averaged') and
+    followed by the source bone index(es) needed to compute its
+    rotation. See module-level comment for the algorithm.
+    """
+    src_chains = _build_chains(src_roles)
+    tgt_chains = _build_chains(tgt_roles)
+
+    out: Dict[int, tuple] = {}
+    handled_tgt: set = set()
+
+    # First: for every (role, side) chain on the target that has a
+    # matching source chain, redistribute. Fall back to (role, *) if
+    # exact side-match has no source.
+    for (role, side), tgt_chain in tgt_chains.items():
+        src_chain = src_chains.get((role, side))
+        if src_chain is None:
+            # Same-role any-side fallback (e.g. centerline source feeds
+            # both sides of target).
+            for cand_key, cand_chain in src_chains.items():
+                if cand_key[0] == role:
+                    src_chain = cand_chain
+                    break
+        if src_chain is None or len(src_chain) == 0:
+            continue
+        N = len(src_chain)
+        M = len(tgt_chain)
+        if N == M:
+            for ti, tni in enumerate(tgt_chain):
+                if tni in mapping:
+                    out[tni] = ("direct", src_chain[ti])
+                    handled_tgt.add(tni)
+        elif M > N:
+            # Interpolate: target bone i samples source position
+            # i*(N-1)/(M-1). Use slerp between neighbouring sources.
+            denom = max(M - 1, 1)
+            for ti, tni in enumerate(tgt_chain):
+                if N == 1:
+                    out[tni] = ("direct", src_chain[0])
+                else:
+                    pos = ti * (N - 1) / denom
+                    lo = int(np.floor(pos))
+                    hi = min(lo + 1, N - 1)
+                    t = float(pos - lo)
+                    if hi == lo or t < 1e-6:
+                        out[tni] = ("direct", src_chain[lo])
+                    else:
+                        out[tni] = ("interpolated", src_chain[lo], src_chain[hi], t)
+                handled_tgt.add(tni)
+        else:
+            # M < N: each target bone bins multiple source bones to
+            # average. Distribute N source bones across M target bins
+            # roughly equally.
+            for ti, tni in enumerate(tgt_chain):
+                lo = int(np.floor(ti * N / M))
+                hi = int(np.floor((ti + 1) * N / M))
+                hi = max(hi, lo + 1)
+                hi = min(hi, N)
+                bucket = src_chain[lo:hi]
+                if len(bucket) == 1:
+                    out[tni] = ("direct", bucket[0])
+                else:
+                    out[tni] = ("averaged", list(bucket))
+                handled_tgt.add(tni)
+
+    # Preserve any 1:1 entries from the original mapping for targets
+    # the chain-adapt code didn't touch (e.g. role with no source chain
+    # at all but a sideless fallback already chose something).
+    for tni, sidx in mapping.items():
+        if tni not in handled_tgt:
+            out[tni] = ("direct", sidx)
     return out
 
 
@@ -616,6 +891,21 @@ def retarget_bvh_to_rig(
     source_classifier."""
     print(f"[retarget] reading bvh: {bvh_path}")
     motion = _parse_bvh(bvh_path)
+
+    # 2026-06-09: pass the rig_mapping target_table when one matches the
+    # ckpt_family. Without this the geometric _target_anatomical_roles
+    # classifier only finds 18/45 bones on the dragon-flying rig (the
+    # other 27 fall back to rest pose, dead in the output). The mapping
+    # JSON's effectors enumerate explicit chains for every limb.
+    target_table = None
+    target_drop_re = None
+    try:
+        target_table, target_drop_re = _build_target_table_from_mapping(ckpt_family)
+        if target_table:
+            print(f"[retarget] target_table loaded: {len(target_table)} bones", flush=True)
+    except Exception as e:
+        print(f"[retarget] target_table load failed: {e}", flush=True)
+
     return retarget_motion_to_rig(
         rig_glb_path=rig_glb_path,
         motion=motion,
@@ -623,8 +913,74 @@ def retarget_bvh_to_rig(
         clip_name=clip_name,
         target_fps=target_fps,
         ckpt_family=ckpt_family,
-        source_classifier=None,  # use default _classify_source_bone
+        source_classifier=None,
+        target_table=target_table,
+        target_drop_re=target_drop_re,
     )
+
+
+_CKPT_TO_MAPPING_FILE = {
+    'flying':      'mountain_dragon__flying_quadruped.json',
+    'quadropeds':  'mountain_dragon__flying_quadruped.json',
+    'bipeds':      'ue5_mannequin__humanoid_puppeteer.json',
+}
+
+def _build_target_table_from_mapping(ckpt_family: str):
+    """Construct (target_table, target_drop_re) from a rig_mappings JSON.
+
+    Returns a dict mapping joint NAME (e.g. 'joint27', 'pelvis') to
+    (role, side, chain_idx) — same shape `retarget_motion_to_rig`
+    expects via its `target_table` arg. Walks the effector
+    chain_bones_target arrays and assigns roles by effector name.
+
+    Without this, the geometric classifier in _target_anatomical_roles
+    misses 60% of dragon joints (only 18/45 classified, the other 27
+    end up with no role -> no source match -> rest-pose track in the
+    output GLB, which is why so many bones in the v1 telemetry showed
+    only 2 keyframes).
+    """
+    fn = _CKPT_TO_MAPPING_FILE.get(ckpt_family)
+    if not fn:
+        return None, None
+    import json as _json
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rig_mappings', fn)
+    if not os.path.isfile(p):
+        return None, None
+    data = _json.loads(open(p, 'r', encoding='utf-8').read())
+
+    # Effector name -> (role, side)
+    EFF_ROLE = {
+        'hip':        ('hip',  None),
+        'head_tip':   ('head', None),
+        'tail_tip':   ('tail', None),
+        'hand_l_tip': ('arm',  'l'),
+        'hand_r_tip': ('arm',  'r'),
+        'foot_l_tip': ('leg',  'l'),
+        'foot_r_tip': ('leg',  'r'),
+        'wing_l_tip': ('wing', 'l'),
+        'wing_r_tip': ('wing', 'r'),
+    }
+    table: dict = {}
+    for eff in data.get('effectors') or []:
+        name = eff.get('name') or ''
+        chain = list(eff.get('chain_bones_target') or [])
+        rs = EFF_ROLE.get(name)
+        if not rs or not chain:
+            continue
+        role, side = rs
+        # chain ordered chain_root -> tip; chain_idx increases tipward
+        for k, tn in enumerate(chain):
+            this_role = role
+            # head chain: last = head, rest = neck (mirror what
+            # puppeteer_joint_renamer does)
+            if name == 'head_tip':
+                this_role = 'head' if k == len(chain) - 1 else 'neck'
+            joint_key = 'pelvis' if (role == 'hip' and tn == chain[0]) else f'joint{tn}'
+            table[joint_key.lower()] = (this_role, side, k + 1)
+    # Also pelvis explicitly
+    table.setdefault('pelvis', ('hip', None, 0))
+    drop_re = None  # JSON has no target_drop_patterns for flying_quadruped
+    return table, drop_re
 
 
 def retarget_fbx_to_rig(
@@ -762,7 +1118,59 @@ def retarget_motion_to_rig(
     # motion loss vs the clamp.
     max_angle_deg = float(os.environ.get('ANYTOP_MAX_ANGLE_DEG', _MAX_ANGLE_DEG_DEFAULT))
     twist_keep = float(os.environ.get('ANYTOP_TWIST_KEEP', _TWIST_KEEP_DEFAULT))
-    print(f"[retarget] mitigations: max_angle_deg={max_angle_deg} twist_keep={twist_keep}", flush=True)
+    # 2026-06-03: ANYTOP_OUTPUT_DAMP (0..1, default 0.25) — per-frame slerp
+    # toward tgt_rest. Tames the magnitude inflation that turns Truebones
+    # canonical Dragon motion (142 bones, large per-joint deltas reaching
+    # 178-180deg) into mesh-fragmenting whole-body rotations on our
+    # 47-bone Puppeteer rig. 1.0 = full motion, 0.0 = locked at rest.
+    # Empirical: 0.25 keeps mesh intact with visible articulation; 0.15
+    # is the "safe MVP" with subtle motion; 1.0 = legacy behaviour
+    # (proven to fragment the mesh on dragon).
+    output_damp = float(os.environ.get('ANYTOP_OUTPUT_DAMP', '0.25'))
+    output_damp = max(0.0, min(1.0, output_damp))
+    # 2026-06-08: ANYTOP_CHAIN_ADAPT (default ON) distributes the source
+    # chain rotation across the target chain when source/target chains
+    # differ in length. ANYTOP_AMPLITUDE_BOOST (default 1.0 = no boost)
+    # multiplies the delta_src ANGLE around its own axis to compensate
+    # for the output damping or for under-articulated outputs. >1.0
+    # = boost, <1.0 = attenuate.
+    chain_adapt = os.environ.get('ANYTOP_CHAIN_ADAPT', '1') not in ('0', 'false', 'False', '')
+    amplitude_boost = float(os.environ.get('ANYTOP_AMPLITUDE_BOOST', '1.0'))
+    amplitude_boost = max(0.0, amplitude_boost)
+    # 2026-06-08 audit fixes (4-flag A/B testing harness). Each flag
+    # defaults to 0 so existing callers see byte-identical behaviour.
+    # Set all 4 to 1 simultaneously to enable the full post-audit
+    # retarget. Individual flags exist so we can bisect regressions.
+    #   ANYTOP_FIX_CHAINS=1       fix #1 — chain identification / matching
+    #   ANYTOP_FIX_FLYING_ARM=1   fix #2 — flying-quadruped arm handling
+    #   ANYTOP_FIX_PROPORTIONAL=1 fix #3 — proportional chain distribution
+    #   ANYTOP_FIX_FANOUT=1       fix #4 — N-target-bones-pick-same-source
+    #                                       fan-out: divide source rotation
+    #                                       across the duplicates so the
+    #                                       cumulative chain rotation
+    #                                       matches the single source.
+    #   ANYTOP_FIX_HEAD_NECK=1    fix #5 — rescue centerline-above-hub bones
+    #                                       that the spine/neck/head walker
+    #                                       missed (short chain, role-split
+    #                                       heuristics dropped intermediates).
+    #                                       Reads in _target_anatomical_roles
+    #                                       directly; surfaced here only for
+    #                                       the [retarget] startup banner.
+    _truthy = ('1', 'true', 'True', 'yes', 'YES', 'on', 'ON')
+    # 2026-06-09: audit fixes default ON. They address chain-length
+    # mismatches (src 15 wing bones vs tgt 6) and fan-out where N
+    # target bones share one source. Workflow wb2el707u confirmed
+    # each is correct on the dragon-fly clip. Set to '0' to revert.
+    fix_chains = os.environ.get('ANYTOP_FIX_CHAINS', '1') in _truthy
+    fix_flying_arm = os.environ.get('ANYTOP_FIX_FLYING_ARM', '1') in _truthy
+    fix_proportional = os.environ.get('ANYTOP_FIX_PROPORTIONAL', '1') in _truthy
+    fix_fanout = os.environ.get('ANYTOP_FIX_FANOUT', '1') in _truthy
+    fix_head_neck = os.environ.get('ANYTOP_FIX_HEAD_NECK', '1') in _truthy
+    print(f"[retarget] mitigations: max_angle_deg={max_angle_deg} twist_keep={twist_keep} output_damp={output_damp}", flush=True)
+    print(f"[retarget] chain_adapt={chain_adapt} amplitude_boost={amplitude_boost}", flush=True)
+    print(f"[retarget] audit fixes: chains={fix_chains} flying_arm={fix_flying_arm} "
+          f"proportional={fix_proportional} fanout={fix_fanout} "
+          f"head_neck={fix_head_neck}", flush=True)
 
     print(f"[retarget] reading rig: {rig_glb_path}")
     gltf, _json_blob, bin_blob = _read_glb(rig_glb_path)
@@ -942,11 +1350,116 @@ def retarget_motion_to_rig(
     mapping = _match_targets_to_sources(src_roles, tgt_roles)
     print(f"[retarget] matched {len(mapping)}/{len(tgt_roles)} target bones to source")
 
+    # 2026-06-08 debug dump (gated on env var ANYTOP_DUMP_MAPPING=1).
+    # Emits an explicit per-bone audit of the 1:1 mapping produced by
+    # _match_targets_to_sources, listing target idx / target name /
+    # target (role,side,chain_idx) -> source idx / source name /
+    # source (role,side,chain_idx). Unmapped targets are listed too so
+    # we can spot bones the classifier missed.
+    if os.environ.get("ANYTOP_DUMP_MAPPING", "") == "1":
+        src_names_list = bvh["names"]
+        print("[MAPPING-DUMP] === target -> source (1:1 pre-chain-adapt) ===", flush=True)
+        for tni in sorted(joint_node_idxs):
+            tname = name_by_idx.get(tni, f"node_{tni}")
+            t_role = tgt_roles.get(tni)
+            sidx = mapping.get(tni)
+            if sidx is None:
+                print(f"[MAPPING-DUMP] tgt[{tni:>3}] {tname!r:30s} role={t_role} -> UNMAPPED (rest pose)", flush=True)
+            else:
+                sname = src_names_list[sidx] if 0 <= sidx < len(src_names_list) else f"src_{sidx}"
+                s_role = src_roles.get(sidx)
+                print(f"[MAPPING-DUMP] tgt[{tni:>3}] {tname!r:30s} role={t_role} -> src[{sidx:>3}] {sname!r:30s} role={s_role}", flush=True)
+        # Also dump reverse: source -> [targets].
+        rev: Dict[int, List[int]] = {}
+        for tni, sidx in mapping.items():
+            rev.setdefault(sidx, []).append(tni)
+        print("[MAPPING-DUMP] === source -> [targets] (reverse) ===", flush=True)
+        for sidx in sorted(rev.keys()):
+            sname = src_names_list[sidx] if 0 <= sidx < len(src_names_list) else f"src_{sidx}"
+            s_role = src_roles.get(sidx)
+            tgts_str = ", ".join(f"{t}({name_by_idx.get(t,'?')!r})" for t in sorted(rev[sidx]))
+            print(f"[MAPPING-DUMP] src[{sidx:>3}] {sname!r:30s} role={s_role} -> tgts: {tgts_str}", flush=True)
+        print(f"[MAPPING-DUMP] === END (targets_total={len(joint_node_idxs)} mapped={len(mapping)} unmapped={len(joint_node_idxs)-len(mapping)}) ===", flush=True)
+
+    # Chain-length adaptation (N:M bridging). Replaces the flat
+    # int-valued mapping with a tag-valued one: ('direct', sidx) |
+    # ('interpolated', a, b, t) | ('averaged', [s0, s1, ...]).
+    if chain_adapt:
+        mapping_tagged = _adapt_chain_lengths(mapping, src_roles, tgt_roles)
+        n_direct = sum(1 for v in mapping_tagged.values() if v[0] == 'direct')
+        n_interp = sum(1 for v in mapping_tagged.values() if v[0] == 'interpolated')
+        n_avg = sum(1 for v in mapping_tagged.values() if v[0] == 'averaged')
+        print(f"[retarget] chain-adapt: direct={n_direct} interpolated={n_interp} averaged={n_avg}")
+    else:
+        mapping_tagged = {tni: ("direct", sidx) for tni, sidx in mapping.items()}
+
+    # 2026-06-08 audit fix #4 (ANYTOP_FIX_FANOUT). Detect runs of
+    # consecutive target bones on the SAME (role, side) chain that
+    # all resolved to the SAME source bone via a 'direct' tag, and
+    # rewrite each member of the run as ('fanout', sidx, run_len).
+    # The per-frame loop then slerps the source delta toward identity
+    # by 1/run_len so the cumulative chain rotation matches the
+    # source's single rotation instead of being replayed `run_len`
+    # times along the chain. Conservative: only consecutive 'direct'
+    # entries are merged; 'interpolated'/'averaged' tags break the run.
+    if fix_fanout:
+        n_fanout = 0
+        # Group target nodes by (role, side); order each group by tgt
+        # chain_idx so consecutive bones along the chain line up.
+        chain_groups: Dict[Tuple[str, Optional[str]], List[Tuple[int, int]]] = {}
+        for tni_, (role_, side_, idx_) in tgt_roles.items():
+            if not role_:
+                continue
+            chain_groups.setdefault((role_, side_), []).append((idx_, tni_))
+        for _key, pairs in chain_groups.items():
+            pairs.sort(key=lambda p: p[0])
+            ordered = [p[1] for p in pairs]
+            i = 0
+            while i < len(ordered):
+                tag_i = mapping_tagged.get(ordered[i])
+                if tag_i is None or tag_i[0] != 'direct':
+                    i += 1
+                    continue
+                sidx_i = tag_i[1]
+                j = i + 1
+                while j < len(ordered):
+                    tag_j = mapping_tagged.get(ordered[j])
+                    if tag_j is None or tag_j[0] != 'direct' or tag_j[1] != sidx_i:
+                        break
+                    j += 1
+                run_len = j - i
+                if run_len >= 2:
+                    for k in range(i, j):
+                        mapping_tagged[ordered[k]] = ('fanout', sidx_i, run_len)
+                    n_fanout += run_len
+                i = j
+        print(f"[retarget] fanout: rewrote {n_fanout} target bones into "
+              f"('fanout', sidx, run_len) tags", flush=True)
+
+    # Collect every source bone index referenced by ANY tag so we can
+    # pre-compute its per-frame quat once.
+    referenced_sources: set = set()
+    for tag in mapping_tagged.values():
+        if tag[0] == 'direct':
+            referenced_sources.add(tag[1])
+        elif tag[0] == 'interpolated':
+            referenced_sources.add(tag[1])
+            referenced_sources.add(tag[2])
+        elif tag[0] == 'averaged':
+            referenced_sources.update(tag[1])
+        elif tag[0] == 'fanout':
+            # ('fanout', sidx, divisor) — 2026-06-08 audit fix #4.
+            # The fan-out tag never appears unless ANYTOP_FIX_FANOUT=1
+            # has caused _adapt_chain_lengths to emit it, but the
+            # decoder is unconditional so a tag in the wild is always
+            # routed correctly.
+            referenced_sources.add(tag[1])
+
     # Pre-compute source quats (F, N_src, 4).
     src_quats: Dict[int, np.ndarray] = {}
     eul = bvh["euler"]            # (F, N, 3)
     channels = bvh["channels"]    # list[N]
-    for sidx in set(mapping.values()):
+    for sidx in referenced_sources:
         src_quats[sidx] = _eulers_to_quats(eul[:, sidx, :], channels[sidx])
 
     # ---------------- Quaternion helpers ----------------
@@ -1192,16 +1705,86 @@ def retarget_motion_to_rig(
             "target": {"node": tni_, "path": "rotation"},
         })
 
+    def _slerp_series(qa: np.ndarray, qb: np.ndarray, t: float) -> np.ndarray:
+        """Per-frame slerp between two (F,4) quaternion series.
+        Used by chain-length interpolation ('interpolated' tag)."""
+        out = np.empty_like(qa)
+        for fi in range(qa.shape[0]):
+            a = qa[fi]
+            b = qb[fi].copy()
+            dot = float(np.dot(a, b))
+            if dot < 0.0:
+                b = -b
+                dot = -dot
+            dot = max(-1.0, min(1.0, dot))
+            if dot > 0.9999:
+                m = (1.0 - t) * a + t * b
+            else:
+                omega = np.arccos(dot)
+                so = np.sin(omega)
+                ca = np.sin((1.0 - t) * omega) / so
+                cb = np.sin(t * omega) / so
+                m = ca * a + cb * b
+            n = np.linalg.norm(m)
+            out[fi] = m / n if n > 1e-12 else np.array([0.0, 0.0, 0.0, 1.0])
+        return out
+
+    def _avg_series(qs: List[np.ndarray]) -> np.ndarray:
+        """Per-frame quaternion average of several (F,4) series.
+        Sign-aligns to the first series, sums, normalizes. Used by
+        chain-length 'averaged' tag (M < N case)."""
+        base = qs[0]
+        acc = np.zeros_like(base)
+        for q in qs:
+            for fi in range(base.shape[0]):
+                qf = q[fi]
+                if np.dot(qf, base[fi]) < 0.0:
+                    qf = -qf
+                acc[fi] += qf
+        for fi in range(acc.shape[0]):
+            n = np.linalg.norm(acc[fi])
+            if n < 1e-12:
+                acc[fi] = np.array([0.0, 0.0, 0.0, 1.0])
+            else:
+                acc[fi] = acc[fi] / n
+        return acc
+
     for tni in joint_node_idxs:
-        sidx = mapping.get(tni)
-        if sidx is None:
+        tag = mapping_tagged.get(tni)
+        if tag is None:
             # No source bone maps to this target. Skin weights may still drive
             # vertices off this bone — write a constant rest-pose quaternion
             # track so LBS sees a stable identity-equivalent rotation instead
             # of drifting along with the parent's animated rotation.
             _emit_rest_quat_track(tni)
             continue
-        src_q = src_quats[sidx]
+        # Resolve the per-frame source rotation series + the "effective"
+        # source bone index used for the basis change (parent lookup).
+        fanout_div = 1  # 2026-06-08 audit fix #4: default = no fan-out scaling
+        if tag[0] == 'direct':
+            sidx = tag[1]
+            src_q = src_quats[sidx]
+        elif tag[0] == 'interpolated':
+            sidx = tag[1]  # use the LOWER chain index as the anchor for basis
+            src_q = _slerp_series(src_quats[tag[1]], src_quats[tag[2]], tag[3])
+        elif tag[0] == 'averaged':
+            sidx = tag[1][0]  # use the first bone in the bucket as anchor
+            src_q = _avg_series([src_quats[s] for s in tag[1]])
+        elif tag[0] == 'fanout':
+            # 2026-06-08 audit fix #4: N consecutive target bones picked
+            # the same source — divide the source rotation across them
+            # so the cumulative effect along the target chain matches
+            # the single source rotation. Same src_q as 'direct'; the
+            # divisor is consumed downstream where delta_src is built.
+            sidx = tag[1]
+            src_q = src_quats[sidx]
+            try:
+                fanout_div = max(1, int(tag[2]))
+            except (TypeError, ValueError):
+                fanout_div = 1
+        else:
+            _emit_rest_quat_track(tni)
+            continue
         # Per-frame source PARENT-LOCAL delta vs its own rest:
         #   Q_src(f) = delta_src * Q_src_rest   (pre-multiply)
         #   delta_src = Q_src(f) * inv(Q_src_rest)
@@ -1277,8 +1860,35 @@ def retarget_motion_to_rig(
         twist_full = twist_keep >= 0.9999
         bone_axis = tgt_bone_axis.get(tni, np.array([0.0, 1.0, 0.0]))
         q = np.empty_like(src_q)
+        # 2026-06-08 audit fix #4: when fanout_div > 1, slerp(identity,
+        # delta_src, 1/divisor) per frame so the divisor target bones
+        # that share the same source jointly produce the source's full
+        # rotation instead of each replaying it (which would multiply
+        # the effect by `divisor`).
+        _fanout_t = 1.0 / float(fanout_div) if fanout_div > 1 else 1.0
         for fi in range(src_q.shape[0]):
             delta_src = _q_mul(src_q[fi], src_rest_inv)
+            if fanout_div > 1:
+                # slerp(identity, delta_src, 1/divisor) — inline, with
+                # the short-angle linear fallback to dodge sin(omega)~0.
+                dq = delta_src
+                dw = max(-1.0, min(1.0, float(dq[3])))
+                if dw < 0.0:
+                    dq = -dq
+                    dw = -dw
+                if dw > 0.9999:
+                    # Near-identity: linear blend then normalize.
+                    qm = (1.0 - _fanout_t) * np.array([0.0, 0.0, 0.0, 1.0]) + _fanout_t * dq
+                    n_qm = np.linalg.norm(qm)
+                    delta_src = (qm / n_qm) if n_qm > 1e-12 else np.array([0.0, 0.0, 0.0, 1.0])
+                else:
+                    omega = np.arccos(dw)
+                    so = np.sin(omega)
+                    a = np.sin((1.0 - _fanout_t) * omega) / so
+                    b = np.sin(_fanout_t * omega) / so
+                    qm = a * np.array([0.0, 0.0, 0.0, 1.0]) + b * dq
+                    n_qm = np.linalg.norm(qm)
+                    delta_src = (qm / n_qm) if n_qm > 1e-12 else np.array([0.0, 0.0, 0.0, 1.0])
             # Clamp delta_src angle before basis (similarity preserves angle).
             ds = delta_src
             if clamp_enabled:
@@ -1294,6 +1904,27 @@ def retarget_motion_to_rig(
                                        np.cos(ang * f / 2.0)])
             # Basis change source-parent -> target-parent.
             delta_tgt_full = _q_mul(_q_mul(basis, ds), basis_inv)
+            # Amplitude boost (2026-06-08). Multiply the rotation ANGLE
+            # by `amplitude_boost` around the same axis. Safer than
+            # quat extrapolation because slerp(I, q, k>1) goes around
+            # the long way past 180deg. Default 1.0 = no-op. Set
+            # ANYTOP_AMPLITUDE_BOOST=1.5 to over-articulate by +50%.
+            if amplitude_boost != 1.0:
+                dw = max(-1.0, min(1.0, float(delta_tgt_full[3])))
+                ang = 2.0 * np.arccos(dw)
+                if ang > 1e-6:
+                    new_ang = ang * amplitude_boost
+                    # Cap at just under pi to avoid wrap-around artifacts.
+                    new_ang = max(-np.pi + 1e-4, min(np.pi - 1e-4, new_ang))
+                    sin_old = np.sin(ang / 2.0)
+                    if abs(sin_old) > 1e-6:
+                        s = np.sin(new_ang / 2.0) / sin_old
+                        delta_tgt_full = np.array([
+                            delta_tgt_full[0] * s,
+                            delta_tgt_full[1] * s,
+                            delta_tgt_full[2] * s,
+                            np.cos(new_ang / 2.0),
+                        ])
             if twist_full:
                 # Keep the full per-frame delta — no swing-twist decomposition.
                 delta_tgt = delta_tgt_full
@@ -1333,6 +1964,34 @@ def retarget_motion_to_rig(
                     delta_tgt = _q_mul(swing, twist_scaled)
             # Apply delta on top of rest.
             q[fi] = _q_mul(delta_tgt, tgt_rest)
+        # 2026-06-03: OUTPUT DAMPING. Per-frame slerp from tgt_rest toward
+        # the computed motion by `output_damp`. Empirical finding (grid
+        # bisect dragon test): without damping, AnyTop's Truebones-canonical
+        # motion magnitudes (max 178-180deg deviation from rest on 37/47
+        # joints) overshoot the 47-bone Puppeteer rig's anatomical
+        # tolerance and fragment the LBS skinning regardless of basis
+        # math. Damping to 25% preserves motion shape while keeping mesh
+        # intact. Set ANYTOP_OUTPUT_DAMP=1.0 to disable.
+        if output_damp < 0.9999:
+            tgt_rest_arr = np.asarray(tgt_rest, dtype=np.float64)
+            for fi in range(q.shape[0]):
+                qa = tgt_rest_arr
+                qb = np.asarray(q[fi], dtype=np.float64)
+                qb = qb / max(np.linalg.norm(qb), 1e-12)
+                dot = float(np.dot(qa, qb))
+                if dot < 0.0:
+                    qb = -qb; dot = -dot
+                dot = max(-1.0, min(1.0, dot))
+                if dot > 0.9999:
+                    q[fi] = qb.astype(q.dtype)
+                else:
+                    omega = np.arccos(dot)
+                    so = np.sin(omega)
+                    a = np.sin((1.0 - output_damp) * omega) / so
+                    b = np.sin(output_damp * omega) / so
+                    qm = a * qa + b * qb
+                    qm = qm / max(np.linalg.norm(qm), 1e-12)
+                    q[fi] = qm.astype(q.dtype)
         # Sign-continuity across frames (preserved through the mul,
         # but re-assert after delta to be safe).
         for i in range(1, q.shape[0]):

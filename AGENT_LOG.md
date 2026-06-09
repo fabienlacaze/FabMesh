@@ -1,5 +1,64 @@
 # FabMesh Agent Log
 
+## 2026-06-09 (fix — AnyTop retarget Plan A : 5 bugs, 27 bones morts → 2)
+
+**Pourquoi** : Plan A validé end-to-end (sample.generate Dragon →
+global_std 0.5958 → retarget) mais le GLB animé montrait des artefacts
+visibles (ailes interpénètrent corps, body twist anormal).
+Diagnostic via telemetry custom `scripts/anytop_bone_telemetry.py`
+(extrait per-frame world positions + local quaternions des BVH source
+et GLB target → JSON comparable) + workflow `wb2el707u` (18 agents,
+1.1M tokens).
+
+**Bugs identifiés (5)** :
+
+1. **Euler convention inverse** (`scripts/anytop_retarget.py:236`) :
+   `scipy 'zyx'` (intrinsèque) au lieu de `'ZYX'` (extrinsèque, BVH spec).
+   Erreur 25° off-axis sur chaque wing flap → ailes vrillent corps.
+2. **`ANYTOP_FIX_FLYING_ARM=0` défaut** (`:535`) : Bip01_*_Clavicle/
+   UpperArm/Forearm (70-180° flap) silencieusement droppés en flying.
+3. **Side regex** (`:76-77`) : `LWing/RWing` matchent pas → toutes les
+   30 wings tombent dans `(wing, None)` → L+R reçoivent mirror moyenne
+   = quasi-identité.
+4. **Audit fixes désactivées** (`:1078-1083`) : FIX_CHAINS / PROPORTIONAL
+   / FANOUT / HEAD_NECK toutes à 0 par défaut.
+5. **target_table jamais passé en BVH path** (`:893`) : seul
+   `retarget_fbx_to_rig` lisait `rig_mappings/*.json` ; le BVH path
+   tombait sur le classifier géométrique qui ne trouvait que 18/45
+   bones (27 droppés à rest pose).
+
+**Changement** :
+
+- `_eulers_to_quats` : `channel_order.upper()` (extrinsèque scipy)
+- `ANYTOP_FIX_FLYING_ARM` défaut `'1'`
+- `_SIDE_TOKEN_L/R` : ajout `LWing|Lwing|LBeard|LFinger` et symétrique R
+- `ANYTOP_FIX_CHAINS/PROPORTIONAL/FANOUT/HEAD_NECK` défauts à `'1'`
+- Nouveau `_build_target_table_from_mapping(ckpt_family)` qui lit
+  `scripts/rig_mappings/mountain_dragon__flying_quadruped.json` et
+  construit `(joint_name → role, side, chain_idx)` à partir des
+  effectors. Appelé dans `retarget_bvh_to_rig` → passé à
+  `retarget_motion_to_rig` comme `target_table`.
+
+**Test (Dragon BVH AnyTop → Puppeteer 47-bone GLB)** :
+
+| Métrique | v1 (avant) | v3 (après) |
+|----------|-----------|-----------|
+| Target bones matched | 18/45 | 43/43 |
+| Bones morts (≤2 keyframes = rest pose) | 27/45 | 2/45 |
+| Total quaternion std (motion totale) | 2.609 | 7.871 |
+| `tgt roles` distribution | hip=1 neck=1 tail=1 wing=11 leg=4 | hip=1 arm=9 tail=5 wing=12 leg=11 neck=4 head=1 |
+
+**Outil debug** : `scripts/anytop_bone_telemetry.py` (~280 LOC, MIT) +
+`c:/tmp/viewer/bone_telemetry.html` (side-by-side SRC|TGT avec trails
++ catégorisation par rôle + sidebar amplitude per-bone). Réutilisable
+pour tout retarget BVH→GLB futur.
+
+**Next** : visuel humain pour valider que les ailes flap maintenant
+proprement sans clipper le corps. Si OK : commit et port Plan A dans
+`anytop_bridge.py` (replace mon ancien S1 fix moot).
+
+---
+
 ## 2026-06-09 (fix — AnyTop S1 : anatomical joint renamer + idle wiggle BVH pour briser la collapse)
 
 **Pourquoi** : workflows de diagnostic `wnum1x0bz` (AnyTop, 18 agents,
