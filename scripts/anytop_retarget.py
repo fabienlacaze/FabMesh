@@ -576,12 +576,21 @@ def _target_anatomical_roles(joint_node_idxs: List[int], parent_by_idx: Dict[int
         head = None
         if UP(pos[sp[-1]]) >= spine_top - body_h * 0.02 and not children[sp[-1]]:
             head = sp.pop()
-        neck_n = min(2, max(1, len(sp) // 6))
-        spine_n = max(0, len(sp) - neck_n)
+        # 2026-06-09: defensive bounds — if sp is now empty (1-bone chain
+        # split into all-head), neck_n must be 0 too. Was crashing on the
+        # 118-bone ORC_M1 humanoid: short sp of 2 with head pop -> sp=1,
+        # neck_n=1 from old min/max math, then sp[spine_n + j] = sp[1]
+        # out of range.
+        n_remaining = len(sp)
+        neck_n = min(2, max(0, n_remaining // 6)) if n_remaining else 0
+        spine_n = max(0, n_remaining - neck_n)
         for i in range(spine_n):
-            roles[sp[i]] = ('spine', None, i + 1)
+            if i < len(sp):
+                roles[sp[i]] = ('spine', None, i + 1)
         for j in range(neck_n):
-            roles[sp[spine_n + j]] = ('neck', None, j + 1)
+            idx = spine_n + j
+            if idx < len(sp):
+                roles[sp[idx]] = ('neck', None, j + 1)
         if head is not None:
             roles[head] = ('head', None, 0)
     for i, ni in enumerate(tail):
@@ -923,6 +932,7 @@ _CKPT_TO_MAPPING_FILE = {
     'flying':      'mountain_dragon__flying_quadruped.json',
     'quadropeds':  'mountain_dragon__flying_quadruped.json',
     'bipeds':      'ue5_mannequin__humanoid_puppeteer.json',
+    'all':         'ue5_mannequin__humanoid_puppeteer.json',
 }
 
 def _build_target_table_from_mapping(ckpt_family: str):
@@ -961,6 +971,9 @@ def _build_target_table_from_mapping(ckpt_family: str):
         'wing_r_tip': ('wing', 'r'),
     }
     table: dict = {}
+    # Path A: 'effectors' block (used by mountain_dragon flying_quadruped).
+    # Each effector lists chain_bones_target indices into the Puppeteer
+    # numeric joint namespace.
     for eff in data.get('effectors') or []:
         name = eff.get('name') or ''
         chain = list(eff.get('chain_bones_target') or [])
@@ -968,18 +981,35 @@ def _build_target_table_from_mapping(ckpt_family: str):
         if not rs or not chain:
             continue
         role, side = rs
-        # chain ordered chain_root -> tip; chain_idx increases tipward
         for k, tn in enumerate(chain):
             this_role = role
-            # head chain: last = head, rest = neck (mirror what
-            # puppeteer_joint_renamer does)
             if name == 'head_tip':
                 this_role = 'head' if k == len(chain) - 1 else 'neck'
             joint_key = 'pelvis' if (role == 'hip' and tn == chain[0]) else f'joint{tn}'
             table[joint_key.lower()] = (this_role, side, k + 1)
-    # Also pelvis explicitly
+
+    # Path B: 'target_bones' block (used by ue5_mannequin / humanoid_puppeteer
+    # — anatomical names instead of numeric joint indices). Each entry has
+    # explicit target name + role + side + chain_idx so we can just copy.
+    for tb in data.get('target_bones') or []:
+        name = (tb.get('target') or '').strip().lower()
+        role = tb.get('role') or ''
+        side = tb.get('side')
+        chain_idx = int(tb.get('chain_idx') or 0)
+        if name and role:
+            table[name] = (role, side, chain_idx)
+
+    # Also pelvis explicitly (works for both flying and humanoid mappings)
     table.setdefault('pelvis', ('hip', None, 0))
-    drop_re = None  # JSON has no target_drop_patterns for flying_quadruped
+
+    # Build drop_re from target_drop_patterns if present.
+    drop_re = None
+    drop_pats = data.get('target_drop_patterns') or []
+    if drop_pats:
+        try:
+            drop_re = re.compile('|'.join(f'({p})' for p in drop_pats), re.IGNORECASE)
+        except re.error:
+            drop_re = None
     return table, drop_re
 
 
@@ -2059,25 +2089,50 @@ def retarget_motion_to_rig(
     if hip_tni is not None and 'root_pos' in bvh:
         root_pos = np.asarray(bvh['root_pos'], dtype=np.float64)  # (F, 3)
         if root_pos.ndim == 2 and root_pos.shape[0] == n_frames and root_pos.shape[1] == 3:
-            # Target hip world rest Y (up_axis=1, confirmed by GLB convention).
-            tgt_hip_y = abs(float(world_by_idx.get(hip_tni, np.zeros(3))[1]))
-            # Source hip world rest Y: walk offsets from hip up to root.
-            src_hip_idx = mapping.get(hip_tni, -1)
-            src_offsets = bvh.get('offsets')
-            src_parents = bvh.get('parents')
-            src_hip_y = 0.0
-            if src_hip_idx >= 0 and src_offsets is not None and src_parents is not None:
-                cur = src_hip_idx
-                for _ in range(1024):
-                    if cur < 0:
-                        break
+            # 2026-06-09: scale root translation by MEAN BONE LENGTH ratio
+            # instead of hip_y/hip_y. The hip_y ratio explodes catastrophically
+            # when source and target use different units (Monkey BVH in m vs
+            # ORC_M1 GLB in cm produced a 20610x scale -> 33805-unit bones).
+            # mean bone length is the correct geometric invariant: it captures
+            # overall skeleton size regardless of where the hip happens to sit.
+            # MEDIAN bone length is robust to corrupted IBM outliers
+            # (Hunyuan/Puppeteer rigs frequently have a few bones claiming
+            # impossible world positions like Y=9644 when the mesh extent
+            # is only 191). Mean would explode on those; median ignores.
+            def _median_bone_length_from_offsets(offsets, parents):
+                if offsets is None or parents is None:
+                    return 0.0
+                arr = np.asarray(offsets)
+                lens = []
+                for j in range(len(arr)):
+                    p = int(parents[j])
+                    if p < 0:
+                        continue
                     try:
-                        src_hip_y += float(np.asarray(src_offsets[cur])[1])
-                        cur = int(src_parents[cur])
-                    except (IndexError, TypeError, ValueError):
-                        break
-            src_hip_y = abs(src_hip_y)
-            scale = (tgt_hip_y / src_hip_y) if (tgt_hip_y > 1e-6 and src_hip_y > 1e-6) else 1.0
+                        l = float(np.linalg.norm(arr[j]))
+                        if l > 1e-6:
+                            lens.append(l)
+                    except Exception:
+                        continue
+                return float(np.median(lens)) if lens else 0.0
+
+            def _median_bone_length_from_world(world_by_idx, parent_by_idx, joint_node_idxs):
+                lens = []
+                for ji in joint_node_idxs:
+                    p = parent_by_idx.get(ji, -1)
+                    if p < 0:
+                        continue
+                    a = np.asarray(world_by_idx.get(ji, np.zeros(3)))
+                    b = np.asarray(world_by_idx.get(p, np.zeros(3)))
+                    l = float(np.linalg.norm(a - b))
+                    if l > 1e-6:
+                        lens.append(l)
+                return float(np.median(lens)) if lens else 0.0
+
+            tgt_mbl = _median_bone_length_from_world(world_by_idx, parent_by_idx, joint_node_idxs)
+            src_mbl = _median_bone_length_from_offsets(bvh.get('offsets'), bvh.get('parents'))
+            scale = (tgt_mbl / src_mbl) if (tgt_mbl > 1e-6 and src_mbl > 1e-6) else 1.0
+            print(f"[retarget] root translation scale: tgt_mbl={tgt_mbl:.4f} src_mbl={src_mbl:.4f} scale={scale:.4f}", flush=True)
             tr = (world_by_idx[hip_tni] + (root_pos - root_pos[0:1]) * scale).astype(np.float64)
             # Resample to target FPS — mirror the quat-resample logic above.
             if target_fps and target_fps > 0 and len(new_t) != n_frames:

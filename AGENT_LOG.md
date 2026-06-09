@@ -1,5 +1,74 @@
 # FabMesh Agent Log
 
+## 2026-06-09 (fix — rig post-process + 2 retarget fixes : mesh ne casse plus)
+
+**Pourquoi** : workflow `wxl8vwfy7` (12 agents, 894k tokens) + telemetry
+sur ORC_M1 ont prouvé que la cause RACINE du mesh distorsion n'est ni
+AnyTop ni le retarget — c'est les **auto-riggers Puppeteer et Hunyuan
+qui produisent des GLBs avec IBMs corrompus** :
+
+- **Puppeteer Dragon (45 bones)** : **19 paires de joints coïncidents**
+  (joints 32 == 21 == 19 == 15 tous au même point world, etc). Quand
+  AnyTop anime un wing, ça déplace aussi le neck/tail/spine au même
+  endroit géométrique → spaghetti.
+- **Hunyuan ORC_M1 (118 bones)** : IBMs scale corrompu sur certaines
+  chaînes (joint `pelvis` à Y=9644 alors que mesh max-Y=191cm). Bones
+  outliers à ×100 du mesh extent. Telemetry mesurée : TGT bone
+  amplitude **18938** vs SRC 0.92 = ratio **20610x**.
+
+**Changement** :
+
+- **Nouveau** : `scripts/rig_postprocess.py` (~430 LOC, MIT).
+  - `detect_defects()` : inspect IBMs, retourne `coincident_pairs`
+    + `ibm_scale_corrupted` flags.
+  - `repair_ibm_scale()` : deux modes — uniform scale si TOUS les
+    joints sont off, OR per-joint snap des outliers à leur parent
+    (snap puis merge ensuite).
+  - `merge_coincident_joints()` : union-find sur les paires < tol,
+    choisit le canonical (le bone avec le plus d'enfants = pivot
+    anatomique), redirige skin weights JOINTS_0, drop les
+    duplicates de skin.joints.
+  - `postprocess()` : pipeline scale-then-merge.
+  - CLI `--in path.glb --out fixed.glb` + `--detect-only`.
+
+- **Patch** : `scripts/anytop_retarget.py` :
+  - L2093-2110 : remplacé scale `hip_y/hip_y` par
+    `median_bone_length / median_bone_length`. Robuste aux IBMs
+    outliers. Mean would explode ; median stays sane.
+  - L575-590 : defensive bounds dans `_target_anatomical_roles`
+    pour skeleton courts (1-bone spine après head pop). Avant ça
+    crashait sur le 118-bone ORC_M1 humanoid avec IndexError sur
+    `sp[spine_n + j]`.
+  - L_build_target_table_from_mapping : ajout du path B qui lit le
+    block `target_bones` (humanoid mapping ue5_mannequin) en plus
+    du path A `effectors` (flying_quadruped). Ajout `'all'` dans
+    `_CKPT_TO_MAPPING_FILE`. Read aussi `target_drop_patterns`.
+
+**Test (Dragon Puppeteer 45-bone)** :
+
+| Métrique | dirty | post-clean |
+|----------|-------|-----------|
+| Joints | 45 | 35 |
+| Coincident pairs | 19 | 0 |
+| TGT/SRC bone amplitude ratio | 1.43 | **0.37** |
+| Matched bones | 18→43 (post Plan A fixes) | 34/34 |
+| Visuel | mesh shredded en fragments | dragon intact, pose tordue (orientation à fix) |
+
+**Test (Hunyuan ORC_M1 118-bone)** :
+
+| Métrique | dirty | post-clean |
+|----------|-------|-----------|
+| Joints | 118 | 90 |
+| Coincident pairs | 12 | 0 |
+| Max joint dist from mesh center | 17896 | **95.9** |
+| `ibm_scale_corrupted` | true | **false** |
+
+**Reste à faire** : orientation/rotation residuelle (le dragon est dans
+une pose tordue, pas en vol droit) — probablement axis up Y↔Z ou
+rest-pose offset. Bug de qualité, pas d'intégrité mesh.
+
+---
+
 ## 2026-06-09 (fix — AnyTop retarget Plan A : 5 bugs, 27 bones morts → 2)
 
 **Pourquoi** : Plan A validé end-to-end (sample.generate Dragon →
