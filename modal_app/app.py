@@ -471,7 +471,8 @@ class MyFabmeshPredictor:
             f"seed={seed} steps={steps}",
             flush=True,
         )
-        img = generate(self.pipe, enriched, seed=seed, steps=steps)
+        img = generate(self.pipe, enriched, seed=seed, steps=steps,
+                       asset_type=asset_type)
 
         # Parental control. Two bypass paths:
         #  - server-wide FABMESH_UNRESTRICTED env var (test environments)

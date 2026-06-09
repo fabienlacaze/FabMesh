@@ -114,13 +114,25 @@ def generate(
     except Exception:
         pass
 
+    # Compel long-prompt encoding — bypasses the 77-token CLIP cap. ISO_TAIL
+    # is ~58 tok, STRICT_FRONT_TAIL is ~47 tok, and BLIP-captioned source
+    # prompts routinely overflow the budget, silently dropping the view-anchor
+    # tokens (workflow wb66mnlri). Encoded ONCE before the loop since
+    # (full_prompt, neg) are seed-independent. Falls back to vanilla pipe()
+    # with truncated prompts if Compel fails.
+    embeds = None
+    try:
+        from modal_app._sdxl_prompt_utils import encode_sdxl_long_prompt
+        embeds = encode_sdxl_long_prompt(pipe, full_prompt, neg)
+    except Exception as _ce:
+        print(f'[rectify] Compel fallback ({_ce}); using truncated prompts',
+              flush=True)
+
     candidates = []
     for i in range(seeds):
         seed = 1000 + i * 137  # same reproducible spread as desktop
         gen = torch.Generator('cuda').manual_seed(seed)
-        call_kwargs = dict(
-            prompt=full_prompt,
-            negative_prompt=neg,
+        base_kwargs = dict(
             image=blank_skel,
             controlnet_conditioning_scale=0.0,
             num_inference_steps=steps,
@@ -130,8 +142,21 @@ def generate(
             generator=gen,
         )
         if ref_img is not None:
-            call_kwargs['ip_adapter_image'] = ref_img
-        img = pipe(**call_kwargs).images[0]
+            base_kwargs['ip_adapter_image'] = ref_img
+        if embeds is not None:
+            try:
+                img = pipe(**embeds, **base_kwargs).images[0]
+            except Exception as _pe:
+                print(f'[rectify] embeds call failed ({_pe}); '
+                      f'falling back to prompt= path', flush=True)
+                embeds = None
+                img = pipe(
+                    prompt=full_prompt, negative_prompt=neg, **base_kwargs,
+                ).images[0]
+        else:
+            img = pipe(
+                prompt=full_prompt, negative_prompt=neg, **base_kwargs,
+            ).images[0]
         sym = symmetry_score(img)
         # Front: maximize symmetry. ISO: maximize asymmetry but cap at
         # sym>=0.85 (would already be ~front), so reward

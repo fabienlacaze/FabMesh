@@ -21,6 +21,12 @@ import time
 import torch
 from PIL import Image
 
+# Compel helper (bypass SDXL 77-token cap on positive + negative prompts).
+# Workflow woydvj5w6 audit: this file's negative is 179 tokens, the
+# anti-close-up / anti-cropping tokens were INVISIBLE before Compel.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _sdxl_prompt_utils import encode_sdxl_long_prompt
+
 
 def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
                   ip_scale=0.65, steps=30, seed=424242, name_suffix='',
@@ -339,15 +345,31 @@ def generate_back(front_image, out_dir, prompt_hint='', num_images=1,
             cand_seed = seed + i * 1000 + k * 137
             gen = torch.Generator('cuda').manual_seed(cand_seed)
             t0 = time.time()
-            img = pipe(
-                prompt=prompt, negative_prompt=neg,
+            base_kwargs = dict(
                 image=skel_img,                # ControlNet conditioning
                 controlnet_conditioning_scale=cn_scale,
                 ip_adapter_image=ref_img_no_face,  # face-masked ref
-                num_inference_steps=int(steps), guidance_scale=7.0,
-                height=1024, width=1024,
+                num_inference_steps=int(steps),
+                guidance_scale=7.0,
+                height=1024,
+                width=1024,
                 generator=gen,
-            ).images[0]
+            )
+            # Compel bypasses SDXL's 77-token CLIP-L cap (workflow
+            # wb66mnlri / woydvj5w6). This file's negative is ~179 tokens —
+            # the anti-front-details + anti-outfit-drift + anti-close-up
+            # tail was being silently truncated past position 77 and
+            # never reached CFG. Falls back to legacy on any failure.
+            try:
+                embeds = encode_sdxl_long_prompt(pipe, prompt, neg)
+                img = pipe(**embeds, **base_kwargs).images[0]
+            except Exception as _ce:
+                print(f'[back-view] Compel fallback ({_ce}); '
+                      'using truncated prompts', flush=True)
+                img = pipe(
+                    prompt=prompt, negative_prompt=neg,
+                    **base_kwargs,
+                ).images[0]
             score = _outfit_color_score(img, front_mirror)
             print(f'[back-view] candidate {k+1}/{n_candidates} seed={cand_seed} '
                   f'color_match={score:.3f} ({time.time()-t0:.1f}s)', flush=True)

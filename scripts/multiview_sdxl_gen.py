@@ -29,6 +29,13 @@ import argparse
 import torch
 from PIL import Image
 
+# Compel helper (bypass SDXL 77-token cap on positive + negative prompts).
+# Workflow woydvj5w6 audit: the quality scaffold here is ~65 tokens, so
+# any user prompt > ~12 tokens silently drops the "8k / sharp focus /
+# masterpiece" tail past position 77 in vanilla diffusers.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _sdxl_prompt_utils import encode_sdxl_long_prompt
+
 
 def log(msg):
     print(f'[multiview_sdxl] {msg}', flush=True)
@@ -139,9 +146,7 @@ def generate_multiview(input_image_path, prompt, output_dir, steps=30,
             "multiple people, duplicate, nude, shirtless, underwear"
         )
 
-        result = pipe(
-            prompt=styled_prompt,
-            negative_prompt=negative_prompt,
+        base_kwargs = dict(
             ip_adapter_image=ref_img,
             num_inference_steps=int(steps),
             guidance_scale=7.0,
@@ -149,6 +154,22 @@ def generate_multiview(input_image_path, prompt, output_dir, steps=30,
             width=1024,
             generator=torch.Generator("cuda").manual_seed(seed),
         )
+        # Compel bypasses SDXL's 77-token CLIP-L cap (workflow wb66mnlri
+        # / woydvj5w6). The styled scaffold + user prompt + per-view
+        # orientation easily blow past 77 tokens here, dropping the
+        # quality tail and the orientation cue depending on order.
+        # Falls back to legacy truncated prompts on any failure.
+        try:
+            embeds = encode_sdxl_long_prompt(pipe, styled_prompt,
+                                             negative_prompt)
+            result = pipe(**embeds, **base_kwargs)
+        except Exception as _ce:
+            log(f'Compel fallback ({_ce}); using truncated prompts')
+            result = pipe(
+                prompt=styled_prompt,
+                negative_prompt=negative_prompt,
+                **base_kwargs,
+            )
         generated[orientation] = result.images[0]
         progress += step_per_view
         log(f'MULTIVIEW_PROGRESS: {progress}')

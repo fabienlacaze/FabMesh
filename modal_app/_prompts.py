@@ -10,21 +10,23 @@ so Modal's @modal.enter(snap=True) can import it without paying any
 CUDA cost.
 """
 
+# 2026-06-09 (workflow wb66mnlri): trimmed to fit SDXL CLIP-L 77-token
+# cap. Removed "ONE X only / single instance / isolated / no duplicate"
+# anti-patterns — empirically these POSITIVE tokens make SDXL fill
+# empty space with a second subject (canonical doubling bug, seed
+# 1004/1009 bear+cub). Anti-headshot/anti-portrait moved to NEGATIVE
+# in modal_app/_realvis.py:build_prompts() where they belong. What
+# remains here: pure semantic guidance (pose, framing, background).
 ASSET_TYPE_PROMPTS = {
-    'character':   'single isolated 3D character, one character only, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
-    'building':    'ONE building only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric angle, clean silhouette, no text, no UI, no duplicate, no second building',
-    'vehicle':     'ONE car only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second car, no twin, no rear view inset',
-    'weapon':      'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
-    'prop':        'ONE prop only, single instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
-    'creature':    'ONE creature only, single instance, isolated, full body, neutral stance, front view, facing camera, symmetric, plain white background, even studio lighting, no shadows, no other creatures, centered, clean silhouette, no text, no UI, no duplicate',
-    # 'animal' was missing from this map, so the suffix was '' and SDXL
-    # defaulted to a head/portrait crop (user reported 'I get only the
-    # lion head'). Heavy anti-crop reinforcement via repetition is the
-    # only thing that works with plain diffusers (Compel weights are
-    # ignored). Reference: memory feedback_full_body_prompt_tuning.md.
-    'animal':      'ONE animal only, single instance, isolated, FULL BODY shown, complete animal from head to tail, all four legs visible, standing on all fours, full creature visible in frame, wide shot, animal photography full body, wildlife full-body photograph, plain white background, even studio lighting, no shadows, no humans, centered, side profile, clean silhouette, no text, no UI, no duplicate, NO close-up, NO portrait, NO headshot, NOT cropped, NOT zoomed on face, body and limbs clearly visible',
-    'environment': 'ONE environment piece only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',
-    'icon':        'single flat icon, app icon, UI icon, ONE element only, isolated subject centered in square frame, transparent or pure white background, soft rim light, vibrant colors, clean silhouette, slight isometric 3/4 angle, glossy material, mobile / desktop application icon style, no text, no logo, no duplicate, no extra elements',
+    'character':   'full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, plain white background, even studio lighting',
+    'building':    'full structure, plain white background, even studio lighting, centered, isometric angle',
+    'vehicle':     'complete vehicle, plain white background, even studio lighting, centered, strict front view, facing camera',
+    'weapon':      'full weapon, plain white background, even studio lighting, centered, side profile',
+    'prop':        'full item, plain white background, even studio lighting, centered, strict front view',
+    'creature':    'full body, neutral stance, side profile, plain white background, even studio lighting, centered',
+    'animal':      'full body, four legs visible, standing on all fours, side profile, plain white background, even studio lighting, centered',
+    'environment': 'full structure, plain white background, even studio lighting, centered, strict front view',
+    'icon':        'app icon, isolated subject, centered, transparent background, slight isometric angle, glossy material',
     'custom':      '',
 }
 

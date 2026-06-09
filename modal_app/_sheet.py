@@ -128,9 +128,7 @@ def generate(
 
     prompt = _build_prompt(prompt_hint, layout)
     gen = torch.Generator('cuda').manual_seed(int(seed))
-    sheet = pipe(
-        prompt=prompt,
-        negative_prompt=NEG_PROMPT,
+    base_kwargs = dict(
         image=blank_skel,
         controlnet_conditioning_scale=0.0,
         ip_adapter_image=front_img,
@@ -139,5 +137,21 @@ def generate(
         num_inference_steps=int(steps),
         guidance_scale=guidance,
         generator=gen,
-    ).images[0]
+    )
+    # Compel bypasses SDXL's 77-token CLIP-L cap (workflow woydvj5w6).
+    # _sheet.py is WORST CASE: POS=149-158 tokens — cell mapping hints
+    # (top-left=front, top-right=right, bottom-left=back, bottom-right
+    # =left) all live past pos 77 and are INVISIBLE to vanilla SDXL,
+    # which collapses the 2x2 sheet to 4 near-front views. Falls back
+    # to vanilla pipe() if Compel is unavailable — never blocks gen.
+    try:
+        from modal_app._sdxl_prompt_utils import encode_sdxl_long_prompt
+        embeds = encode_sdxl_long_prompt(pipe, prompt, NEG_PROMPT)
+        sheet = pipe(**embeds, **base_kwargs).images[0]
+    except Exception as _ce:
+        print(f"[_sheet] Compel fallback ({_ce}); cell hints will be "
+              f"truncated past pos 77", flush=True)
+        sheet = pipe(
+            prompt=prompt, negative_prompt=NEG_PROMPT, **base_kwargs
+        ).images[0]
     return _split_sheet(sheet, layout)

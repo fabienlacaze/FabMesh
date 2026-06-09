@@ -98,9 +98,8 @@ def generate(
     see app.py MyFabmeshBackview.move_to_gpu). When ref_img is provided,
     pipe.set_ip_adapter_scale(ip_scale) is called and the IP-Adapter
     image is passed; otherwise the IPAdapter branch is skipped (set to 0)."""
-    kwargs = {
-        'prompt': prompt.strip().rstrip('.,') + FRONT_PROMPT_TAIL,
-        'negative_prompt': NEG,
+    full_prompt = prompt.strip().rstrip('.,') + FRONT_PROMPT_TAIL
+    base_kwargs = {
         'image': skel_img,
         'controlnet_conditioning_scale': cn_scale,
         'num_inference_steps': int(steps),
@@ -111,7 +110,7 @@ def generate(
     }
     if ref_img is not None:
         pipe.set_ip_adapter_scale(ip_scale)
-        kwargs['ip_adapter_image'] = ref_img
+        base_kwargs['ip_adapter_image'] = ref_img
     else:
         # Neutralize IPAdapter so a previous request's identity doesn't bleed.
         try:
@@ -119,5 +118,19 @@ def generate(
         except Exception:
             pass
 
-    img = pipe(**kwargs).images[0]
+    # Compel long-prompt encoding — bypasses the 77-token CLIP cap. The
+    # FRONT_PROMPT_TAIL alone is ~75 tokens, so any user prompt overflows
+    # and the T-pose anchors ("arms extended horizontally", "feet visible")
+    # get silently dropped by vanilla diffusers (workflow wb66mnlri). Falls
+    # back to truncated prompts if Compel is unavailable.
+    try:
+        from modal_app._sdxl_prompt_utils import encode_sdxl_long_prompt
+        embeds = encode_sdxl_long_prompt(pipe, full_prompt, NEG)
+        img = pipe(**embeds, **base_kwargs).images[0]
+    except Exception as _ce:
+        print(f'[_tpose] Compel fallback ({_ce}); using truncated prompts',
+              flush=True)
+        img = pipe(
+            prompt=full_prompt, negative_prompt=NEG, **base_kwargs,
+        ).images[0]
     return remove_bg_and_center(img, size=size)

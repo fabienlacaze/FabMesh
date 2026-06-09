@@ -28,6 +28,17 @@ except Exception as _gt_err:
 
 def generate_images(prompt, output_dir, num_images=4, steps=30):
     from diffusers import StableDiffusionXLPipeline
+    # Compel helper bypasses SDXL's 77-token CLIP-L cap (workflow wb66mnlri).
+    # If Compel is not installed we fall back to legacy pipe(prompt=...).
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from _sdxl_prompt_utils import encode_sdxl_long_prompt
+        _HAS_COMPEL = True
+    except Exception as _ce:
+        encode_sdxl_long_prompt = None
+        _HAS_COMPEL = False
+        print(f"LOCAL_REALVIS: Compel helper unavailable ({_ce}), "
+              f"falling back to truncated 77-token prompts", flush=True)
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from fabmesh_log import Logger
@@ -238,9 +249,15 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             'frontal view', 'front-facing',
         ))
         _angle_token = '' if _has_angle else 'slight angle, one side visible, '
+        # 2026-06-09 (workflow wb66mnlri): dropped 'single instance only,
+        # one subject, no duplicate' — canonical SDXL anti-pattern that
+        # fills empty space with the subject (the bear-cub doubling at
+        # seed 1004/1009). Replaced with concrete background. Mirror of
+        # modal_app/_realvis.py L40-46.
         optimized_prompt = (
             f"{prompt}, {_angle_token}"
-            f"single instance only, one subject, no duplicate, no composition grid, "
+            f"centered subject, neutral grey studio backdrop, soft seamless background, "
+            f"plain backdrop, no composition grid, "
             f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
             f"masterpiece, no text, no watermark"
         )
@@ -255,27 +272,23 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         # Other asset_types keep the existing hard-surface anti-doubling
         # block unchanged for parity with prior commits.
         if _asset_type in ('animal', 'creature'):
+            # 2026-06-09 (workflow wb66mnlri): rewritten for SDXL CLIP-L
+            # 77-token cap. Previous neg = 410 tokens, 333 silently
+            # truncated. Anti-anatomy + anti-doubling were past pos 77
+            # = INVISIBLE to U-Net. Mirror of modal_app/_realvis.py
+            # build_prompts() rewrite.
+            _anatomy = (
+                "five legs, six legs, three legs, polydactyly, two heads, "
+                if _asset_type == 'animal'
+                else "extra wings, missing wing, five legs, three legs, two heads, "
+            )
             negative_prompt = (
-                "blurry, low quality, text, watermark, signature, deformed, "
-                "extra limbs, bad anatomy, distorted, cropped, worst quality, "
-                "flat profile, "
-                "close-up, close-up, close-up, portrait, portrait, portrait, "
-                "headshot, headshot, headshot, head only, head only, "
-                "head close-up, face only, face only, bust shot, bust shot, "
-                "head and shoulders, head and shoulders, face close-up, "
-                "head crop, cropped to head, zoomed in on face, extreme close-up, "
-                "macro shot, dragon head, animal head close-up, "
-                "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
-                "(set of two:1.5), (multiple instances:1.5), "
-                "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
-                "(two cars:1.5), (two vehicles:1.5), (two knives:1.5), "
-                "(two characters:1.5), (two props:1.5), (two weapons:1.5), "
-                "(second instance:1.5), (second copy:1.4), (companion item:1.4), "
-                "(side by side:1.5), (paired:1.4), (matched set:1.4), "
-                "(rear view inset:1.4), (front and back:1.4), "
-                "split image, stacked vertically, stacked horizontally, "
-                "collage, grid layout, comparison view, "
-                "product comparison, kitchenware set, catalog grid"
+                _anatomy +
+                "two animals, animal pair, duplicate, twin, "
+                "split image, collage, side by side, "
+                "headshot, portrait, close-up, head only, partial body, "
+                "body cut off, cropped, out of frame, "
+                "blurry, deformed, bad anatomy"
             )
         else:
             negative_prompt = (
@@ -313,15 +326,33 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         # actually bites in classifier-free guidance. Mirrors cloud
         # modal_app/_realvis.py. T-pose override (=2.0) still wins below.
         _cfg = 9.5 if _asset_type in ('animal', 'creature') else 7.0
+        # Build base kwargs (everything EXCEPT the prompt pair). We then
+        # attach either (prompt, negative_prompt) [legacy / Compel KO] or
+        # (*_embeds) [Compel OK] just below. Same dict feeds both the
+        # regular pipe and the ControlNet T-pose pipe — when _is_tpose is
+        # True, `pipe` IS `_ctrl_pipe` (see line ~175), and ControlNet
+        # SDXL accepts the *_embeds kwargs since diffusers 0.24+.
         _pipe_kwargs = dict(
-            prompt=optimized_prompt,
-            negative_prompt=negative_prompt,
             num_inference_steps=int(steps),
             guidance_scale=_cfg,
             height=1024,
             width=1024,
             generator=torch.Generator("cuda").manual_seed(int(time.time()) + i),
         )
+        _used_embeds = False
+        if _HAS_COMPEL:
+            try:
+                _embeds = encode_sdxl_long_prompt(
+                    pipe, optimized_prompt, negative_prompt
+                )
+                _pipe_kwargs.update(_embeds)
+                _used_embeds = True
+            except Exception as _ee:
+                print(f"LOCAL_REALVIS: Compel encode failed ({_ee}), "
+                      f"falling back to truncated prompts", flush=True)
+        if not _used_embeds:
+            _pipe_kwargs['prompt'] = optimized_prompt
+            _pipe_kwargs['negative_prompt'] = negative_prompt
         if _is_tpose and _ctrl_pipe is not None and _tpose_skeleton is not None:
             # ControlNet OpenPose path: feed the T-pose skeleton as control image.
             # Lower CFG because Lightning prefers 1.5-3.0. ControlNet scale 0.85

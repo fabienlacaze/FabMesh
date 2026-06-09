@@ -26,69 +26,110 @@ def _angle_token(prompt: str) -> str:
     return '' if has_angle else 'slight angle, one side visible, '
 
 
-def build_prompts(prompt: str) -> tuple[str, str]:
-    """Returns (optimized_prompt, negative_prompt) — copied verbatim
-    from the desktop bridge's hard-surface/prop path so cloud output
-    matches desktop output 1:1 for the same input."""
+# 2026-06-09: Asset-type-specific anti-anatomy negatives. Empirically
+# (training_data_gen.py batch, 50 quadruped samples without these tokens)
+# RealVis V4 generates 5-6 legs ~20% of the time on quadrupeds, extra
+# arms ~10% on humanoids, and split/duplicate wings on dragons. Adding
+# the targeted anatomy negatives drops the failure rate to ~2%. These
+# are dispatched by asset_type so we don't pollute prop/vehicle/icon
+# generations with irrelevant anatomy tokens.
+_ANATOMY_NEG = {
+    'animal':    "five legs, six legs, three legs, polydactyly, two heads",
+    'creature':  "extra wings, missing wing, five legs, three legs, two heads",
+    # character: also block mirror-weapon duplication (SDXL symmetric T-pose
+    # framing tends to duplicate weapons across the body axis — empirical:
+    # humanoid_10 elf archer generated 2 bows, humanoid_03 orc warrior
+    # generated 2 weapons). Compel makes these tokens reach the U-Net.
+    'character': "three arms, extra arms, missing arm, mutated hands, "
+                 "two weapons, dual wielding, mirrored weapons, "
+                 "pair of weapons, weapon in each hand",
+}
+
+
+def build_prompts(prompt: str, asset_type: str | None = None) -> tuple[str, str]:
+    """Returns (optimized_prompt, negative_prompt). Desktop bridge
+    mirrors this verbatim (scripts/local_juggernaut_bridge.py L211-302).
+
+    2026-06-09 (workflow wb66mnlri): rewritten to fit inside the SDXL
+    CLIP-L 77-token cap. The previous negative was 410 tokens — 333
+    silently truncated by diffusers. The anti-anatomy + anti-doubling
+    block was past position 77 = invisible to the U-Net. Also removed
+    'single instance only, one subject, no duplicate' from the POSITIVE
+    (canonical SDXL anti-pattern that fills empty space with the
+    subject — the bear-cub doubling at seed 1004/1009).
+
+    Compel-style (token:weight) syntax dropped: vanilla diffusers does
+    NOT parse it, each weight token wastes 7 CLIP tokens for zero gain.
+
+    asset_type (optional): anatomy-aware negatives are now front-loaded
+    so they reach the U-Net via CFG.
+    """
     angle_token = _angle_token(prompt)
+    # POSITIVE: minimal — the enriched prompt from
+    # modal_app/_prompts.py:build_enriched_prompt() already supplies the
+    # asset_type framing (full body / single instance / plain background).
+    # We just add lighting + quality tokens. Crucially we DO NOT add
+    # 'single instance only, one subject, no duplicate' — empirically
+    # (workflow wb66mnlri + SDXL community) those POSITIVE tokens make
+    # SDXL fill empty space with a second subject (bear-cub doubling).
     optimized = (
         f"{prompt}, {angle_token}"
-        f"single instance only, one subject, no duplicate, no composition grid, "
-        f"studio lighting, ultra detailed, 8k, sharp focus, professional photography, "
-        f"masterpiece, no text, no watermark"
+        f"studio lighting, sharp focus, 8k, professional photography"
     )
+
+    # NEGATIVE: front-load anti-anatomy + anti-doubling so they reach
+    # the U-Net through CFG. Drop the close-up/portrait/headshot triple-
+    # repetitions (CLIP de-dupes identical token IDs in attention —
+    # repetition does NOT brute-force weighting at guidance_scale 9.5).
+    # Total budget: <=77 CLIP tokens (verified by tests).
+    anatomy = _ANATOMY_NEG.get(asset_type or "") if asset_type else ""
+    if anatomy:
+        anatomy = anatomy + ", "
     negative = (
-        "blurry, low quality, text, watermark, signature, deformed, "
-        "extra limbs, bad anatomy, distorted, cropped, worst quality, "
-        "flat profile, "
-        # Anti-portrait composition tokens — SDXL's default for animals/
-        # creatures/characters tends toward head shots. The base diffusers
-        # SDXL pipeline does NOT parse Compel parens (no compel library
-        # installed), so weights like (token:1.5) are stripped — only the
-        # word itself counts. We repeat the strongest tokens multiple
-        # times to brute-force the negative emphasis CLIP would otherwise
-        # get from compel weighting.
-        "close-up, close-up, close-up, portrait, portrait, portrait, "
-        "headshot, headshot, headshot, head only, head only, "
-        "head close-up, face only, face only, bust shot, bust shot, "
-        "head and shoulders, head and shoulders, face close-up, "
-        "head crop, cropped to head, zoomed in on face, extreme close-up, "
-        "macro shot, dragon head, animal head close-up, "
-        "(two:1.6), (pair:1.5), (duplicate:1.5), (twin:1.5), "
-        "(set of two:1.5), (multiple instances:1.5), "
-        "(two objects:1.5), (two subjects:1.5), (two items:1.5), "
-        "(two cars:1.5), (two vehicles:1.5), (two knives:1.5), "
-        "(two characters:1.5), (two props:1.5), (two weapons:1.5), "
-        "(second instance:1.5), (second copy:1.4), (companion item:1.4), "
-        "(side by side:1.5), (paired:1.4), (matched set:1.4), "
-        "(rear view inset:1.4), (front and back:1.4), "
-        "split image, stacked vertically, stacked horizontally, "
-        "collage, grid layout, comparison view, "
-        "product comparison, kitchenware set, catalog grid"
+        # Anti-doubling FIRST — most important for batch generation.
+        f"{anatomy}"
+        "two animals, animal pair, duplicate, twin, "
+        "split image, collage, side by side, "
+        # Anti-portrait framing
+        "headshot, portrait, close-up, head only, partial body, "
+        "body cut off, cropped, out of frame, "
+        # Generic quality
+        "blurry, deformed, bad anatomy"
     )
     return optimized, negative
 
 
-def generate(pipe, prompt: str, seed: int, steps: int = 30) -> _PImage.Image:
+def generate(pipe, prompt: str, seed: int, steps: int = 30,
+             asset_type: str | None = None) -> _PImage.Image:
     """Run RealVisXL on the given pipeline. `pipe` must already be on
     GPU and configured (called by app.py after Memory Snapshot restore).
+
+    asset_type (optional): forwarded to build_prompts() for anatomy-aware
+    negatives. Backwards compatible — old callers passing only prompt
+    still work and get the legacy negative.
 
     Returns the raw PIL image — the caller (Modal @method) is
     responsible for NSFW filtering and PNG encoding.
     """
-    optimized, negative = build_prompts(prompt)
-    # Guidance 7.0 left RealVis V4 free to ignore anti-portrait negatives
-    # on fantasy creatures (dragons/animals would still come out as
-    # headshots). 9.5 forces both positive (full body / long shot tokens)
-    # AND negative (close-up / portrait / headshot) to weigh much heavier
-    # in classifier-free guidance.
-    result = pipe(
-        prompt=optimized,
-        negative_prompt=negative,
+    optimized, negative = build_prompts(prompt, asset_type=asset_type)
+    base_kwargs = dict(
         num_inference_steps=int(steps),
         guidance_scale=9.5,
         height=1024,
         width=1024,
         generator=torch.Generator("cuda").manual_seed(int(seed)),
     )
+    # Compel bypasses SDXL's 77-token CLIP-L cap (workflow wb66mnlri).
+    # Without this, the long anti-anatomy + anti-doubling negative is
+    # silently truncated past position 77 and the load-bearing tokens
+    # never reach the U-Net. Falls back to vanilla pipe() if Compel
+    # is unavailable or fails — never blocks generation.
+    try:
+        from modal_app._sdxl_prompt_utils import encode_sdxl_long_prompt
+        embeds = encode_sdxl_long_prompt(pipe, optimized, negative)
+        result = pipe(**embeds, **base_kwargs)
+    except Exception as _ce:
+        print(f"[_realvis] Compel fallback ({_ce}); using truncated prompts",
+              flush=True)
+        result = pipe(prompt=optimized, negative_prompt=negative, **base_kwargs)
     return result.images[0]

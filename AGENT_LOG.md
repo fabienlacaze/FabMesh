@@ -1,5 +1,81 @@
 # FabMesh Agent Log
 
+## 2026-06-09 (feat — SDXL chunked encode helper + 8 fichiers patchés)
+
+**Pourquoi** : workflow `wb66mnlri` a découvert que SDXL CLIP-L cap à
+77 tokens silently truncate les negative > 77. Notre negative de prod
+faisait **410 tokens** → 333 droppés. Anti-anatomy + anti-doubling +
+anti-cropping étaient INVISIBLES au modèle. Worse : `(token:1.5)`
+Compel syntax tokenise comme 7 junk tokens chez vanilla diffusers,
+gaspille ~138 tokens pour 0 effet.
+
+Workflow `woydvj5w6` a audité TOUS les pipelines SDXL FabMesh et
+confirmé que **8 fichiers** ont le même bug : modal_app/{_tpose,
+_rectify, _sheet, _realvis, _backview, app}.py + scripts/
+{local_juggernaut_bridge, generate_back_view, multiview_sheet_gen,
+multiview_sdxl_gen, training_data_gen}.py.
+
+Workflow `wf9tiyzt1` a résolu CUDA OOM de CompelForSDXL sur RTX 5080
+16GB via une implémentation **pure-diffusers chunked encode**.
+
+**Changement** :
+
+- **Nouveau** : `scripts/_sdxl_prompt_utils.py` + miroir
+  `modal_app/_sdxl_prompt_utils.py` (~280 LOC, MIT). Pure-diffusers
+  chunked dual-CLIP encode, zero dep externe, zero VRAM overhead :
+  - `encode_sdxl_long_prompt(pipe, positive, negative)` → dict avec
+    `prompt_embeds`, `pooled_prompt_embeds`, `negative_prompt_embeds`,
+    `negative_pooled_prompt_embeds`.
+  - Splits en chunks de 75 tokens, wrap BOS/EOS, pad à 77.
+  - Re-use `pipe.text_encoder` + `pipe.text_encoder_2` in-place
+    sous `torch.no_grad` (pas de duplication d'encoders en VRAM).
+  - Supporte syntaxe A1111-style `(token:1.4)` (emphasis weights).
+  - Mirror du community pipeline `lpw_stable_diffusion_xl.py`.
+  - `count_clip_tokens(text)` pour sanity checks.
+
+- **Patch** : `modal_app/_prompts.py` : trim `ASSET_TYPE_PROMPTS`
+  pour rentrer dans budget 77 + drop anti-pattern POSITIVE
+  ("ONE X only / single instance / no duplicate") qui causait
+  doubling (bear+cub seed 1004/1009).
+
+- **Patch** : `modal_app/_realvis.py` : `build_prompts()` réécrit
+  pour fitter NEG à 70 tokens, drop Compel syntax, anti-anatomy
+  `_ANATOMY_NEG[asset_type]` front-loaded. `generate()` utilise
+  `encode_sdxl_long_prompt` + fallback try/except.
+
+- **Patch** : 8 sites SDXL refactorisés `pipe(prompt=, negative_prompt=)`
+  → `pipe(**embeds, **base_kwargs)` :
+  - `modal_app/_tpose.py:101-138` (T-pose ControlNet OpenPose)
+  - `modal_app/_rectify.py:117-159` (rectifier MV-Adapter + ControlNet)
+  - `modal_app/_sheet.py:131-157` (2x2 sheet generation)
+  - `modal_app/_realvis.py:127-134` (text2image cloud)
+  - `modal_app/_backview.py:198-244` (back-view ControlNet + IPAdapter)
+  - `scripts/local_juggernaut_bridge.py:335-355` (desktop bridge,
+    ControlNet T-pose + regular paths)
+  - `scripts/generate_back_view.py:348-374`
+  - `scripts/multiview_sheet_gen.py:222-248`
+  - `scripts/multiview_sdxl_gen.py:148-171`
+  - `scripts/training_data_gen.py` (batch training data gen)
+
+**Impact mesuré** (workflow wb66mnlri sanity) :
+- Bear+cub doubling (humanoid seed 1004/1009) : fixed
+- Anti-mirror-weapon (humanoid_03 orc 2 weapons, humanoid_10 elf 2
+  bows) : fixed via NEG `two weapons, dual wielding, mirrored
+  weapons, pair of weapons, weapon in each hand` qui passe le 77-cap
+- Sheet 2x2 cell mapping : maintenant visible (était truncated past
+  pos 77 → 4× near-front collapse)
+
+**Outil** : `scripts/training_data_gen.py` (~370 LOC, MIT) — génère
+150 reference images (50 quadruped + 50 humanoid + 50 winged_biped)
+en utilisant le même prompt pipeline que MyFabmesh DESKTOP
+production, pour le dataset training AnyTop Plan B1 (skeleton
+transplant). Compatible Compel chunked encode.
+
+**License** : helper MIT, copies des prompt builders inchangées
+license-wise (CreativeML OpenRAIL++-M pour RealVis V4.0).
+
+---
+
 ## 2026-06-09 (fix — _backview.py: Compel long-prompt helper)
 
 **Pourquoi** : workflow `woydvj5w6` a mesure NEG=179 tokens dans

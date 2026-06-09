@@ -219,16 +219,31 @@ def main():
     log(f'prompt: {prompt[:300]}...')
 
     t0 = time.time()
-    image = pipe(
-        prompt=prompt,
-        negative_prompt=NEG_PROMPT,
+    base_kwargs = dict(
         ip_adapter_image=front_img_pil,
         width=sheet_w,
         height=sheet_h,
         num_inference_steps=30,
         guidance_scale=7.0,
         num_images_per_prompt=1,
-    ).images[0]
+    )
+    # Compel bypasses SDXL's 77-token CLIP-L cap (workflow woydvj5w6).
+    # multiview_sheet_gen.py has POS=149 tokens — cell orientation hints
+    # ("top-left cell: strict front view ..." etc.) sit past pos 77 and
+    # are INVISIBLE to vanilla SDXL, which collapses the 2x2 sheet to 4
+    # near-front views. Falls back to vanilla pipe() on any failure so
+    # gen never blocks.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from _sdxl_prompt_utils import encode_sdxl_long_prompt
+        embeds = encode_sdxl_long_prompt(pipe, prompt, NEG_PROMPT)
+        image = pipe(**embeds, **base_kwargs).images[0]
+    except Exception as _ce:
+        log(f'Compel fallback ({_ce}); cell hints will be truncated '
+            f'past pos 77')
+        image = pipe(
+            prompt=prompt, negative_prompt=NEG_PROMPT, **base_kwargs
+        ).images[0]
     log(f'SDXL done in {time.time()-t0:.1f}s')
 
     sheet_path = os.path.join(output_dir, 'sheet.png')
