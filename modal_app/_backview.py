@@ -196,20 +196,46 @@ def generate(
     ref_no_face = mask_face_region(front_img)
     front_mirror = front_img.transpose(Image.FLIP_LEFT_RIGHT)
 
+    # Compel long-prompt encoding — bypasses the 77-token CLIP cap so the
+    # full anti-doubling + anti-cropping negatives (179 tokens, was 57%
+    # truncated per workflow woydvj5w6) reach the U-Net. Encoded ONCE
+    # before the loop since (prompt, neg) are seed-independent. Falls
+    # back to vanilla pipe() with truncated prompts if Compel fails.
+    embeds = None
+    try:
+        from modal_app._sdxl_prompt_utils import encode_sdxl_long_prompt
+        embeds = encode_sdxl_long_prompt(pipe, prompt, neg)
+    except Exception as _ce:
+        print(f'[backview] Compel fallback ({_ce}); using truncated prompts',
+              flush=True)
+
     candidates = []
     for k in range(n_candidates):
         cand_seed = seed + k * 137
         gen = torch.Generator('cuda').manual_seed(cand_seed)
         t0 = time.time()
-        img = pipe(
-            prompt=prompt, negative_prompt=neg,
+        base_kwargs = dict(
             image=skel_img,
             controlnet_conditioning_scale=cn_scale,
             ip_adapter_image=ref_no_face,
             num_inference_steps=int(steps), guidance_scale=7.0,
             height=1024, width=1024,
             generator=gen,
-        ).images[0]
+        )
+        if embeds is not None:
+            try:
+                img = pipe(**embeds, **base_kwargs).images[0]
+            except Exception as _pe:
+                print(f'[backview] embeds call failed ({_pe}); '
+                      f'falling back to prompt= path', flush=True)
+                embeds = None
+                img = pipe(
+                    prompt=prompt, negative_prompt=neg, **base_kwargs,
+                ).images[0]
+        else:
+            img = pipe(
+                prompt=prompt, negative_prompt=neg, **base_kwargs,
+            ).images[0]
         score = outfit_color_score(img, front_mirror)
         print(f'[backview] cand {k+1}/{n_candidates} seed={cand_seed} '
               f'score={score:.3f} ({time.time()-t0:.1f}s)', flush=True)

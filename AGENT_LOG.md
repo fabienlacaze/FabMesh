@@ -1,5 +1,32 @@
 # FabMesh Agent Log
 
+## 2026-06-09 (fix — _backview.py: Compel long-prompt helper)
+
+**Pourquoi** : workflow `woydvj5w6` a mesure NEG=179 tokens dans
+`modal_app/_backview.py` (102 tokens truncated, 57% drop). Tout le bloc
+anti-doubling + anti-cropping du negative prompt etait silencieusement
+coupe past position 77 par le tokenizer CLIP-L, donc invisible a CFG —
+le SDXL pouvait re-introduire face visible, breast pocket on the back,
+button placket on back, etc.
+
+**Changement** :
+
+- `modal_app/_backview.py:192-223` — appel `pipe(prompt=..., negative_prompt=...)`
+  remplace par `pipe(prompt_embeds=..., pooled_prompt_embeds=...,
+  negative_prompt_embeds=..., negative_pooled_prompt_embeds=..., **base_kwargs)`
+  via `encode_sdxl_long_prompt(pipe, prompt, neg)`.
+- Encoding hoisted hors de la boucle multi-seed (4 candidats) — les
+  embeds ne dependent pas du seed, on les calcule UNE fois (~5 ms).
+- Try/except enveloppe l'import + l'encoding; en cas d'echec on
+  retombe sur l'ancien chemin `prompt=/negative_prompt=` (degradation
+  gracieuse — jamais bloquant).
+- Tous les params existants preserves: `image=skel_img`,
+  `controlnet_conditioning_scale=cn_scale`,
+  `ip_adapter_image=ref_no_face`, `num_inference_steps`,
+  `guidance_scale=7.0`, `height/width=1024`, `generator`.
+
+Suit le meme pattern que `_realvis.py:127-134` deja patche.
+
 ## 2026-06-09 (fix — rig post-process + 2 retarget fixes : mesh ne casse plus)
 
 **Pourquoi** : workflow `wxl8vwfy7` (12 agents, 894k tokens) + telemetry
