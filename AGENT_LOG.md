@@ -1,5 +1,60 @@
 # FabMesh Agent Log
 
+## 2026-06-09 (fix — AnyTop S1 : anatomical joint renamer + idle wiggle BVH pour briser la collapse)
+
+**Pourquoi** : workflows de diagnostic `wnum1x0bz` (AnyTop, 18 agents,
+26 hypothèses, 6 survivantes après adversarial verify) ont identifié
+DEUX root causes du "near-identity motion" sur skeletons Puppeteer
+custom :
+
+- **RC1** : `_extract_bvh_from_glb()` écrivait 30 frames de zéros pour
+  le motion_bvh. `motion_process.get_mean_std()` produisait std ~1e-6.
+  En denorm (predict_xstart=True) : `out = pred * std + mean` →
+  effondrement en T-pose + micro-tremor.
+- **RC2** : le tokenizer T5 d'AnyTop (`model/conditioners.py:334`
+  `_split_and_replace`) strip digits/underscores via
+  `re.sub(r'[\d_]+', '', part)`. Tous les `joint_0..joint_46` de
+  Puppeteer deviennent le seul token `'joint'` → embedding T5 identique
+  pour wing / leg / arm / tail → le modèle ne peut PAS différencier les
+  appendices. Seul signal per-joint discriminant collapsé.
+
+**Changement** :
+
+- **Nouveau** : `scripts/puppeteer_joint_renamer.py` (~370 LOC, MIT).
+  Renomme les joints synthétiques `joint_NN` / `bone_NN` en noms
+  anatomiques (`Hips`, `Spine`, `Neck`, `Head`, `LeftArm`, `RightArm`,
+  `LeftLeg`, `RightLeg`, `LeftWing`, `RightWing`, `Tail`). Deux tiers :
+  (1) `rig_mapping` effectors si dispo (high-fidelity), (2) topology
+  heuristic en fallback (axes Y-up + sign X pour la side).
+  Inclut `t5_tokenize_like()` qui simule le tokenizer pour asserter
+  qu'il reste ≥ 4 tokens distincts post-rename. Test sur
+  `c:/tmp/dragon_rig.glb` : 47 joints → 12 tokens T5 distincts
+  (vs 1 avant). CLI `--glb path --rig-mapping family` pour inspection.
+
+- **Patch** : `scripts/anytop_bridge.py:76-160` `_extract_bvh_from_glb()`
+  - Ajoute `is_motion` (kw-only) et `rig_mapping` (kw-only).
+  - Détecte naming synthétique via `is_synthetic_naming()` → applique
+    `rename_for_anytop()` avant l'émission BVH.
+  - Si `is_motion=True` : remplace `zero_frame` par un sinus
+    `amp_joint_rot_deg=2.5°`, `period=1s @ 30fps`, phase per-joint
+    `n * π/7` → std garanti non dégénéré sur tous les channel-blocks.
+  - `run()` appelle tpos avec `is_motion=False`, motion avec
+    `is_motion=True`.
+
+**Test** : `python scripts/puppeteer_joint_renamer.py --glb c:/tmp/dragon_rig.glb`
+→ 12 tokens T5 distincts. BVH extract end-to-end : 47 noms distincts,
+motion frame 0 vs 15 → inversion de signe (full sin cycle), root XYZpos
+restent à 0 (no float root translation).
+
+**Contrainte respectée** : aucune modif Puppeteer
+(`feedback_dont_touch_puppeteer`). Le rewriter tourne en aval.
+
+**Next** : valider end-to-end via `python scripts/anytop_bridge.py
+--rig c:/tmp/dragon_rig.glb --out c:/tmp/anytop_walk.glb --anim-type walk`
+puis mesurer `global_std > 0.1` sur 60 frames du BVH résultant.
+
+---
+
 ## 2026-06-04 (feat — morphology classifier prototype : GLB -> archetype + Truebones donor)
 
 **Pourquoi** : pour passer de "AnyTop = Dragon-only" a "AnyTop multi-espece"

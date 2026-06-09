@@ -73,13 +73,31 @@ def _venv_python() -> str:
     return str(py)
 
 
-def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str, n_frames: int = 30) -> None:
+def _extract_bvh_from_glb(
+    rig_glb_path: str,
+    bvh_out: str,
+    n_frames: int = 30,
+    *,
+    is_motion: bool = False,
+    rig_mapping: str | None = None,
+) -> None:
     """Use the same GLB->BVH extraction as the Modal side, but importable
     from this script. We re-import from bvh_to_gltf_anim (which loads
-    puppeteer_to_skeleton helpers via sys.path)."""
+    puppeteer_to_skeleton helpers via sys.path).
+
+    is_motion=True writes a small sinusoidal idle wiggle instead of
+    zero rotations -- AnyTop's get_mean_std produces near-degenerate std
+    on all-zero BVH, which collapses denorm at sample time (see RC1 in
+    docs/ for full analysis).
+
+    rig_mapping is forwarded to puppeteer_joint_renamer.rename_for_anytop.
+    """
     import numpy as np
     sys.path.insert(0, str(HERE))
     from puppeteer_to_skeleton import _read_glb, _read_accessor  # type: ignore
+    from puppeteer_joint_renamer import (  # type: ignore
+        rename_for_anytop, is_synthetic_naming,
+    )
 
     gltf, _json_blob, bin_blob, _tail = _read_glb(rig_glb_path)
     skins = gltf.get("skins") or []
@@ -88,7 +106,7 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str, n_frames: int = 30) -
     skin = skins[0]
     joint_idxs = skin["joints"]
     nodes = gltf["nodes"]
-    name_by_idx = {i: (nodes[i].get("name") or f"joint_{i}") for i in joint_idxs}
+    raw_name_by_idx = {i: (nodes[i].get("name") or f"joint_{i}") for i in joint_idxs}
     parent_by_idx = {i: -1 for i in joint_idxs}
     for parent_idx in joint_idxs:
         for child in (nodes[parent_idx].get("children") or []):
@@ -114,6 +132,21 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str, n_frames: int = 30) -
         if jidx not in world_by_idx:
             tr = nodes[jidx].get("translation") or [0.0, 0.0, 0.0]
             world_by_idx[jidx] = np.asarray(tr, dtype=np.float32)
+
+    # Rename synthetic joint_NN / bone_NN -> anatomical names so AnyTop's
+    # T5 joint-name conditioner can differentiate appendages (otherwise
+    # every joint name collapses to the token "joint" -> identical
+    # per-joint embedding -> model can't tell leg from wing from tail).
+    # See scripts/puppeteer_joint_renamer.py docstring for the full
+    # rationale (workflow wh35yzi34 / wnum1x0bz root cause RC2).
+    if is_synthetic_naming(raw_name_by_idx):
+        name_by_idx = rename_for_anytop(
+            joint_idxs, parent_by_idx, world_by_idx, raw_name_by_idx,
+            rig_mapping_path=rig_mapping,
+        )
+        _log("info", f"renamed {len(joint_idxs)} synthetic joints -> anatomical names")
+    else:
+        name_by_idx = dict(raw_name_by_idx)
 
     lines = ["HIERARCHY"]
 
@@ -145,16 +178,49 @@ def _extract_bvh_from_glb(rig_glb_path: str, bvh_out: str, n_frames: int = 30) -
         lines.append(f"{pad}}}")
 
     emit(root, 0, True)
-    # n_frames T-pose frames: 1 for the tpos reference, 30 for the
-    # motion file (AnyTop's stats need ≥ a few frames).
+    # n_frames frames. tpos_bvh uses zeros (rest pose reference); the
+    # motion BVH uses a small sinusoidal idle wiggle so AnyTop's
+    # get_mean_std produces non-degenerate per-channel std. All-zero
+    # motion -> std ~1e-6 -> denorm collapses output to T-pose +
+    # micro-tremor (workflow wnum1x0bz root cause RC1).
     n_joints = sum(1 for _ in joint_idxs)
     n_chans_per_frame = 6 + 3 * (n_joints - 1)
-    zero_frame = " ".join(["0"] * n_chans_per_frame)
+    fps = 30.0
+    if not is_motion:
+        zero_frame = " ".join(["0"] * n_chans_per_frame)
+        motion_frames = [zero_frame for _ in range(int(n_frames))]
+    else:
+        # Per-channel: small sinus with a per-joint phase shift so std
+        # is non-zero on every channel-block. Period ~1s @ 30fps.
+        # Root channels (0-5): keep XYZpos at 0, mild rotation only.
+        # Joint channels: 3 per joint (Z, X, Y rotation in degrees).
+        rng_phase = np.arange(n_joints) * (np.pi / 7.0)
+        amp_root_rot_deg = 1.5
+        amp_joint_rot_deg = 2.5
+        period_s = 1.0
+        motion_frames = []
+        for f in range(int(n_frames)):
+            t = f / fps
+            omega = 2.0 * np.pi / period_s
+            chans: list[float] = []
+            # Root: 6 channels (Xpos, Ypos, Zpos, Zrot, Xrot, Yrot)
+            chans.extend([0.0, 0.0, 0.0])
+            root_phase = rng_phase[0]
+            chans.append(amp_root_rot_deg * float(np.sin(omega * t + root_phase + 0.0)))
+            chans.append(amp_root_rot_deg * float(np.sin(omega * t + root_phase + 1.0)))
+            chans.append(amp_root_rot_deg * float(np.sin(omega * t + root_phase + 2.0)))
+            # Each non-root joint: 3 channels (Zrot, Xrot, Yrot)
+            for ji in range(1, n_joints):
+                ph = rng_phase[ji]
+                chans.append(amp_joint_rot_deg * float(np.sin(omega * t + ph + 0.0)))
+                chans.append(amp_joint_rot_deg * float(np.sin(omega * t + ph + 1.0)))
+                chans.append(amp_joint_rot_deg * float(np.sin(omega * t + ph + 2.0)))
+            motion_frames.append(" ".join(f"{v:.4f}" for v in chans))
     lines += [
         "MOTION",
         f"Frames: {int(n_frames)}",
-        "Frame Time: 0.033333",
-        *[zero_frame for _ in range(int(n_frames))],
+        f"Frame Time: {1.0 / fps:.6f}",
+        *motion_frames,
     ]
     with open(bvh_out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -310,9 +376,9 @@ def run(rig_glb: str, out_glb: str, anim_type: str, prompt: str) -> int:
         # frames so AnyTop's tpos_first_frame indexing doesn't crash
         # (motion_process.py:361 does t_pos_motion[0] after statistics
         # rejection — a 1-frame tpos becomes 0-frames after the drop).
-        _log("info", f"extracting BVH skeleton from {rig_glb} (tpos + idle, 30 frames each)")
-        _extract_bvh_from_glb(rig_glb, str(tpos_bvh), n_frames=30)
-        _extract_bvh_from_glb(rig_glb, str(motion_bvh), n_frames=30)
+        _log("info", f"extracting BVH skeleton from {rig_glb} (tpos zeros + idle wiggle, 30 frames each)")
+        _extract_bvh_from_glb(rig_glb, str(tpos_bvh), n_frames=30, is_motion=False)
+        _extract_bvh_from_glb(rig_glb, str(motion_bvh), n_frames=30, is_motion=True)
         _progress(12, "skeleton_bvh_extracted")
 
         # Step 2 — process_new_skeleton
