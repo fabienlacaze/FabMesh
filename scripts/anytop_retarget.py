@@ -915,6 +915,27 @@ def retarget_bvh_to_rig(
     except Exception as e:
         print(f"[retarget] target_table load failed: {e}", flush=True)
 
+    # 2026-06-09: apply axis_convention from rig_mapping JSON to BVH
+    # offsets + root_pos. Mountain Dragon JSON declares
+    # axis_convention.source = z_up, target = y_up; the FBX path was
+    # already doing this rotation (retarget_fbx_to_rig L1083-1088) but
+    # the BVH path was skipping it. Empirically: SRC head-tail vector
+    # was dominantly Z (Bip01 quadruped in 3DS Max Z-up authored
+    # frame), while TGT head-tail is along Y after Puppeteer's
+    # auto-rig — so without this rotation the retargeted dragon ends
+    # up "lying on its side" twisted 90deg around X.
+    try:
+        _axis_source, _axis_target = _load_axis_convention(ckpt_family)
+        if _axis_source != _axis_target:
+            R = _axis_rotation_matrix(_axis_source, _axis_target)
+            if R is not None and motion.get("offsets") is not None:
+                motion["offsets"] = (np.asarray(motion["offsets"]) @ R.T).astype(np.float64)
+            if R is not None and motion.get("root_pos") is not None:
+                motion["root_pos"] = (np.asarray(motion["root_pos"]) @ R.T).astype(np.float64)
+            print(f"[retarget] axis rotation applied: {_axis_source} -> {_axis_target}", flush=True)
+    except Exception as e:
+        print(f"[retarget] axis rotation skipped: {e}", flush=True)
+
     return retarget_motion_to_rig(
         rig_glb_path=rig_glb_path,
         motion=motion,
@@ -934,6 +955,43 @@ _CKPT_TO_MAPPING_FILE = {
     'bipeds':      'ue5_mannequin__humanoid_puppeteer.json',
     'all':         'ue5_mannequin__humanoid_puppeteer.json',
 }
+
+
+def _load_axis_convention(ckpt_family: str):
+    """Read the rig_mapping JSON's axis_convention block. Returns
+    (axis_source, axis_target) defaulting to y_up/y_up."""
+    fn = _CKPT_TO_MAPPING_FILE.get(ckpt_family)
+    if not fn:
+        return "y_up", "y_up"
+    import json as _json
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rig_mappings', fn)
+    if not os.path.isfile(p):
+        return "y_up", "y_up"
+    data = _json.loads(open(p, 'r', encoding='utf-8').read())
+    axis = data.get('axis_convention') or {}
+    return str(axis.get('source') or 'y_up'), str(axis.get('target') or 'y_up')
+
+
+def _axis_rotation_matrix(axis_source: str, axis_target: str):
+    """Return the 3x3 rotation matrix that sends a vector expressed in
+    axis_source coords into axis_target coords. Mirrors
+    rig_mappings/_loader.py:axis_to_target so the BVH path produces
+    identical results to the FBX path."""
+    if axis_source == axis_target:
+        return None
+    if axis_source == "z_up" and axis_target == "y_up":
+        return np.array([
+            [1.0,  0.0, 0.0],
+            [0.0,  0.0, 1.0],
+            [0.0, -1.0, 0.0],
+        ], dtype=np.float64)
+    if axis_source == "y_up" and axis_target == "z_up":
+        return np.array([
+            [1.0,  0.0, 0.0],
+            [0.0,  0.0, -1.0],
+            [0.0,  1.0,  0.0],
+        ], dtype=np.float64)
+    return None
 
 def _build_target_table_from_mapping(ckpt_family: str):
     """Construct (target_table, target_drop_re) from a rig_mappings JSON.
