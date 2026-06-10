@@ -1,5 +1,50 @@
 # FabMesh Agent Log
 
+## 2026-06-11 (feat — Plan B1 end-to-end: rotation-transfer + dynamic labels)
+
+**Visuellement validé** : un mesh Trellis humanoid_05 riggé Puppeteer
++ une animation Apovivor (AS_Robot1_Walk) → mesh dwarf parfaitement
+préservé tenant sa hache dans une pose naturelle de combat. Premier
+end-to-end propre du pipeline Plan B1.
+
+**Changements** :
+
+- `scripts/puppeteer_rotation_retarget.py` (NEW, ~150 LOC) : entry
+  point qui combine
+  * `anytop_retarget.retarget_motion_to_rig` (rotation-transfer core,
+    bone-by-bone local rotation copy)
+  * `puppeteer_semantic_extractor`'s labels.json (per-rig roles)
+  * `build_target_table_from_labels()` parse les labels et émet
+    `{joint_name → (role, side, chain_idx)}` que le core comprend
+  
+  vs `ik_retarget.py` qui utilisait end-effector IK :
+  - IK end-effector solveur tire tous les bones d'une chaîne pour
+    atteindre la cible → arms écartelés, mesh distordu
+  - Rotation-transfer applique UNE rotation par bone (copie directe)
+    → mesh préservé, motion fidèle au source
+
+- `scripts/ik_retarget.py` (3 ajouts) :
+  * `_effectors_from_labels()` (~90 LOC) — construit dynamiquement
+    les effectors depuis labels.json. Mapping par NOM de node
+    (`jointN`), pas par index d'énumération GLB. Conservé pour les
+    cas où le rotation transfer ne marche pas (topo très différente).
+  * Chargement automatique du sidecar `<rig>.labels.json` si présent
+  * Chain head_tip limitée à Neck+Head (excluait spine entier qui
+    causait whole-body rotation)
+
+- `scripts/rig_mappings/_puppeteer_anchors/humanoid/labels.json` :
+  L/R swap après test empirique. Puppeteer/renamer convention X+=Left
+  inversait la chiralité par rapport à Apovivor (Mixamo X-=Left).
+
+**Test E2E** : humanoid_05_seed47 (Trellis+Puppeteer) + Robot1_Walk
+(Apovivor). Mesh dwarf intact, hache tenue correctement, anim 42
+samples 23 channels, 19 driven_bones (vs 22 effectors mais 3 outside
+mapped roles).
+
+**Reste** : batch script (50 rigs × N motions), Hungarian matching
+pour labels uniques, anchors par sous-type (humanoid lean/stocky/
+robot pour précision >90%).
+
 ## 2026-06-11 (feat — Plan B1 unblocked: Puppeteer semantic labels via anchors)
 
 **Pourquoi** : Plan B1 (train AnyTop sur skeletons FabMesh natifs) bloqué
