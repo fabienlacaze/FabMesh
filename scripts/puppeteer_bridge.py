@@ -501,6 +501,19 @@ def main():
         sz = os.path.getsize(output_glb)
         log(f"step 5 glb in {time.time()-t0:.1f}s ({sz} bytes)")
 
+        # 2026-06-10 (Plan B1): preserve the RigNet-format _pred.txt next
+        # to the GLB so downstream tools can recover the source-of-truth
+        # topology + DFS joint order (workflow w5nplqm0h finding). Without
+        # this file, GLB-only rigs lose the joint ordering and the
+        # bone semantic extractor has to fall back to geometric heuristics.
+        try:
+            sidecar = output_glb + ".pred.txt"
+            shutil.copyfile(pred_txt, sidecar)
+            log(f"step 6 sidecar {os.path.basename(sidecar)} "
+                f"({os.path.getsize(sidecar)} bytes)")
+        except Exception as _e:
+            log(f"step 6 sidecar SKIP ({_e}) — non-fatal")
+
         print(f"AUTORIG_SUCCESS: {output_glb} ({sz} bytes)")
         sys.exit(0)
     finally:

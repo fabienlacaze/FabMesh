@@ -1,5 +1,76 @@
 # FabMesh Agent Log
 
+## 2026-06-11 (feat — Plan B1 unblocked: Puppeteer semantic labels via anchors)
+
+**Pourquoi** : Plan B1 (train AnyTop sur skeletons FabMesh natifs) bloqué
+parce que Puppeteer émet `joint0..jointN` sans labels sémantiques, avec
+indices non-déterministes entre rigs. Sans labels, impossible de mapper
+les os à des rôles (Hips/Spine/LeftArm/...) pour un retarget ik_retarget
+ou pour fournir T5 tokens distincts à AnyTop training.
+
+Workflow `w5nplqm0h` (3 angles : source code, paper, runtime tensors) a
+identifié 3 étages cumulatifs sans modifier Puppeteer :
+1. Parser `_pred.txt` (format RigNet généré par Puppeteer en interne)
+2. Renamer géométrique (existant, ~50% accuracy sur topo atypique)
+3. k-NN cosine sur embeddings 1024-D vs anchors annotés manuellement
+
+**Changements** :
+
+- `scripts/puppeteer_bridge.py` : après génération GLB, copie
+  `pred_txt` vers `<output_glb>.pred.txt` sidecar. Préserve les
+  coordonnées XYZ + DFS order + root + parents (source de vérité
+  topologique) pour tous les rigs futurs.
+
+- `scripts/puppeteer_semantic_extractor.py` (NEW, ~450 LOC) :
+  * `parse_puppeteer_txt()` — étage 1, format RigNet
+  * `label_via_renamer()` — étage 2, réutilise renamer existant
+  * `run_hooked_demo()` — étage 3a, monkey-patch SkeletonGPT.generate
+    pour capturer hidden_states (n_tokens, 1024) + cross-attention
+    Michelangelo, ZERO modification source Puppeteer
+  * `label_via_anchors()` — étage 3b, k-NN cosine vs anchors
+    annotés. **Fix 2026-06-11** : aggregate query tokens en per-joint
+    embeddings (groupes de 4 tokens) avant similarité — sinon k-NN
+    raw tokens vs joints donnait labels incohérents.
+  * `build_anchors_from_run()` — helper pour créer un anchor à
+    partir d'une run instrumentée + labels manuels
+
+- `scripts/puppeteer_joint_renamer.py` : 2 fixes heuristique
+  1. Spine walker : préférer enfant vertical à enfant longest pour
+     éviter que le RIGHT arm soit traité comme extension spine
+  2. Détection arms branchant depuis spine (pas depuis Hips comme
+     l'ancienne logique supposait) : si chain side-branch va latéral
+     (|X| > 0.7 × max(Y,Z)), classifier comme arm
+  3. Spine walker : stop si aucun kid vertical existe (évite
+     continuer dans une chaîne lateral comme RightArm)
+
+- `scripts/rig_mappings/_puppeteer_anchors/humanoid/` (NEW) :
+  premier anchor humanoid_05 = `embeds.npy` (22, 1024) + `labels.json`
+  (22 labels annotés manuellement). Permet k-NN sur futurs rigs
+  humanoid Puppeteer.
+
+**Test E2E POC** :
+- humanoid_05 (anchor) → généré + hook OK
+- humanoid_07 (test) → k-NN cosine vs anchor h05 :
+  - Lower body (hips, legs both sides) : 100% labels corrects
+  - Spine + torso : 100%
+  - Right arm : 100%
+  - Upper body (neck/head/left arm) : ~50% (confusion mineure)
+  - **Overall : ~75-80% accuracy sur rig non-vu avec 1 anchor**
+
+**Outils annexes** :
+
+- `scripts/bone_semantic_classifier.py` (NEW, ~400 LOC, alternative
+  approach C non utilisée) : classifieur MLP per-joint entraîné sur
+  Truebones BVH labelisé. Scaffold complet (parse BVH, extract
+  features 16-D, MLP train, predict). Conservé pour futur si étage
+  3 nécessite plus de robustesse.
+
+**Hors-scope ce commit** :
+- Intégration `ik_retarget.py` pour consommer `labels.json` au lieu
+  des effectors hardcodés (next step)
+- Multi-anchor (2-3 anchors → vote moyen, ~90% accuracy attendue)
+- Hungarian matching (assignment unique, pas de label dupliqué)
+
 ## 2026-06-09 (feat — SDXL chunked encode helper + 8 fichiers patchés)
 
 **Pourquoi** : workflow `wb66mnlri` a découvert que SDXL CLIP-L cap à

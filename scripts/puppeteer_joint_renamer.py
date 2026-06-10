@@ -310,15 +310,49 @@ def _classify_via_topology(
             chain_idx += 1
 
     def walk_spine_chain(root_of_chain: int) -> None:
-        """Walk spine: bottom -> Spine, near-top -> Neck, top -> Head."""
+        """Walk spine: bottom -> Spine, near-top -> Neck, top -> Head.
+
+        2026-06-10 (FabMesh Plan B1 fix): Puppeteer arms branch off the
+        spine, not Hips, so the root-children classifier never sees them.
+        While walking the spine, for each joint check side branches; if a
+        branch's avg_direction goes mostly along X, classify it as an arm.
+        """
+        # 2026-06-10 (FabMesh): when spine forks at the top (shoulder
+        # girdle), "longest descendant" arbitrarily picks the right arm
+        # chain as the spine continuation. Prefer the child that
+        # continues most vertically (avg_dir Y dominant) — falls back
+        # to longest if no child is clearly vertical.
         path = []
         cur = root_of_chain
+        def _verticalness(k):
+            d = avg_dir(k)
+            ay = float(d[1])
+            ax = abs(float(d[0]))
+            az = abs(float(d[2]))
+            return ay - max(ax, az)
         while True:
             path.append(cur)
             kids = children_by_idx.get(cur, [])
             if not kids:
                 break
-            cur = max(kids, key=lambda k: len(descendants(k)))
+            if len(kids) == 1:
+                # 2026-06-10 (FabMesh): even with a single child, stop the
+                # spine walk if that child is NOT vertical (means the
+                # chain has shifted to an arm/limb branch). Otherwise
+                # the right arm gets labeled as Neck/Head on rigs where
+                # the spine terminates at Spine03 with only an arm
+                # shoulder above.
+                if _verticalness(kids[0]) <= 0:
+                    break
+                cur = kids[0]
+                continue
+            vertical_kids = [k for k in kids if _verticalness(k) > 0]
+            if vertical_kids:
+                cur = max(vertical_kids, key=lambda k: len(descendants(k)))
+            else:
+                # No vertical kid -> spine has ended. Stop here, don't
+                # promote a lateral kid to spine continuation.
+                break
         L = len(path)
         # rough partition: top 1 = Head, next 1-2 = Neck, rest = Spine
         for i, j in enumerate(path):
@@ -328,6 +362,27 @@ def _classify_via_topology(
                 out[j] = _anatomical_name("neck", None, L - 1 - i)
             else:
                 out[j] = _anatomical_name("spine", None, i)
+        # Walk side-branches off the spine: arm detection.
+        # For each spine joint, look at every child that is NOT the longest
+        # descendant (i.e. not the spine continuation) and check whether
+        # its subtree goes laterally (|X| dominant). If yes -> arm.
+        for j in path:
+            kids = children_by_idx.get(j, [])
+            if len(kids) < 2:
+                continue
+            longest = max(kids, key=lambda k: len(descendants(k)))
+            for ch in kids:
+                if ch == longest:
+                    continue
+                d = avg_dir(ch)
+                ax, ay, az = float(d[0]), float(d[1]), float(d[2])
+                abs_x, abs_y, abs_z = abs(ax), abs(ay), abs(az)
+                # Lateral chain -> arm (or wing if long)
+                if abs_x >= max(abs_y, abs_z) * 0.7:
+                    side = "l" if ax < 0 else "r"
+                    sub_size = len(descendants(ch))
+                    role = "wing" if sub_size >= 5 else "arm"
+                    walk_chain(ch, role, side)
 
     for ch, kind in subtree_kinds.items():
         if kind == "spine_up":
