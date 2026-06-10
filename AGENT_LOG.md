@@ -1,5 +1,49 @@
 # FabMesh Agent Log
 
+## 2026-06-11 (wip — Plan B1: delta-from-rest retarget + diag tooling)
+
+**Pourquoi** : la rotation-transfer du commit précédent (51d83e8)
+produisait un mesh visuellement parfait mais avec une motion sous-
+amortie ("pas chassé" au lieu de marche). Diagnostic concret après
+ajout d'un script `c:/tmp/diag_compare.py` qui dump les ranges
+Euler par bone source vs target :
+  - Source thigh_l Z range : 11°→74° (63° swing = la marche)
+  - Target joint4 Z range : -7°→+10° (17° = 27% de l'amplitude)
+
+**Tentatives** :
+1. ANYTOP_OUTPUT_DAMP=1.0 + AMPLITUDE_BOOST=4.0 → mesh écartelé, le
+   boost multiplie AUSSI le rest-pose offset baked dans les eulers
+2. --rest-yaw-deg 90 → squelette tourné mais marche restait sideways
+3. `scripts/puppeteer_delta_retarget.py` (NEW, ~250 LOC) :
+   contournement complet du core anytop. Math direct :
+     delta_q = q_source_frame * conj(q_source_rest)
+     target_q = q_target_rest * delta_q
+   Bug initial : classifier de source matchait `cc_base_l_thightwist02`
+   (twist bone, ne porte que le roll) au lieu de `thigh_l`. Fix :
+   `_SKIP_PATTERNS` qui ignore twist / sharebone / ik_ / finger / etc.
+   Après fix : 18 bones classifiés correctement (thigh_l, calf_l,
+   foot_l, ball_l, etc.).
+
+**État actuel** : delta-retarget transfère bien les rotations sources
+sur le target, mais reste un MIS-ALIGNEMENT T-POSE entre source et
+target bone-local frames. Source Z=63° swing devient une rotation
+autour de l'axe Z LOCAL du target — qui pointe différemment dans le
+monde — donc l'arme et les jambes partent dans des directions
+inattendues.
+
+**Vrai fix nécessaire** : world-frame transfer
+  - FK sur source pour q_world_source_frame
+  - FK sur target pour parent_world_of_target
+  - target_local_q_frame = q_world_source_frame * conj(parent_world_of_target)
+Demande ~3-4h dev + test harness (compare RMS sur plusieurs motions),
+pas faisable en fin de nuit.
+
+**Outils annexes** :
+- `c:/tmp/diag_compare.py` : compare ranges Euler source vs target par
+  bone. Format diag concret au lieu de juger visuellement le rendu.
+- `scripts/puppeteer_rotation_retarget.py` du commit précédent reste
+  utilisable pour fallback (rotation-transfer via anytop_retarget core).
+
 ## 2026-06-11 (feat — Plan B1 end-to-end: rotation-transfer + dynamic labels)
 
 **Visuellement validé** : un mesh Trellis humanoid_05 riggé Puppeteer

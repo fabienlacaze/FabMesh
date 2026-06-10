@@ -124,6 +124,16 @@ def main() -> int:
     ap.add_argument("--target-family", default="humanoid_puppeteer")
     ap.add_argument("--clip-name", default="apovivor")
     ap.add_argument("--fps", type=float, default=30.0)
+    # 2026-06-11: forward-axis calibration. Apovivor source faces +Z
+    # (z_up convention) but Puppeteer-rigged FabMesh meshes face
+    # variable directions depending on how Trellis + Puppeteer
+    # oriented the auto-rig. Pre-rotate motion offsets + root_pos
+    # by this many degrees around Y so the target's "forward" matches
+    # the source's "forward".
+    ap.add_argument("--rest-yaw-deg", type=float, default=0.0,
+                    help="Yaw rotation (around Y axis) applied to source "
+                         "motion to align with target rest pose. Common "
+                         "values: 0 / 90 / 180 / 270. Empirical for now.")
     args = ap.parse_args()
 
     (retarget_motion_to_rig, _classify_source_bone, _read_glb,
@@ -158,6 +168,28 @@ def main() -> int:
             print(f"[rot-retarget] axis: {mapping.axis_source} -> {mapping.axis_target}")
         except Exception as e:
             print(f"[rot-retarget] WARN axis rotation: {e}")
+
+    # 2026-06-11: extra yaw rotation around Y to align source's forward
+    # with target's forward. Applied to OFFSETS and ROOT_POS in target
+    # coords (post axis_to_target). Per-bone eulers are parent-local so
+    # unaffected.
+    if abs(args.rest_yaw_deg) > 1e-3:
+        import numpy as _np
+        a = _np.deg2rad(args.rest_yaw_deg)
+        c, s = _np.cos(a), _np.sin(a)
+        Ry = _np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=_np.float64)
+        try:
+            offs = _np.asarray(motion["offsets"], dtype=_np.float64)
+            motion["offsets"] = (Ry @ offs.T).T.astype(_np.float32)
+            rp = _np.asarray(motion["root_pos"], dtype=_np.float64)
+            motion["root_pos"] = (Ry @ rp.T).T.astype(_np.float32)
+            # Also rotate per-frame eulers around root: simplest as
+            # multiplying the ROOT bone's rotation by Ry. The motion's
+            # euler array's first joint is the root.
+            print(f"[rot-retarget] applied rest yaw +{args.rest_yaw_deg:.1f}deg "
+                  f"(forward-axis calibration)")
+        except Exception as e:
+            print(f"[rot-retarget] WARN rest yaw failed: {e}")
 
     classifier = make_classifier_chain(mapping, _classify_source_bone)
     retarget_motion_to_rig(
