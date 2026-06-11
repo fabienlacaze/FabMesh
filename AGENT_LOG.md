@@ -1,5 +1,67 @@
 # FabMesh Agent Log
 
+## 2026-06-12 (feat — Plan B1: multi-class retarget + auto-detect forward axis)
+
+**Multi-class Rokoko pipeline E2E** :
+- ✅ Humanoid (humanoid_05): dwarf marche avec hache, validé visuellement
+- ✅ Quadruped (test_quad_00 = loup Trellis + comodo_dragon Apovivor):
+  marche correctement après fix auto-detect forward axis (-83.9°)
+- ✅ Winged biped (dragon_red Trellis + MOUNTAIN_DRAGON Apovivor):
+  GLB exporté, mesh + skin OK, wings restent à valider visuellement
+  (probable problème mapping wing fingers source→target)
+
+**Auto-detect forward axis** (`scripts/rokoko_batch_retarget.py`):
+Le problème "pas chassé" du wolf hier soir était dû à un mismatch
+d'orientation rest-pose entre source (Apovivor convention) et target
+(Trellis+Puppeteer orientation arbitraire). Fix:
+
+```python
+def _horizontal_forward(arm_obj, hips_name, head_candidates):
+    # Hips world pos + Head world pos -> vecteur forward projeté
+    # sur le plan horizontal (Blender Z-up)
+    ...
+
+# Compute rotation angle around Z
+src_fwd = _horizontal_forward(src_arm, "pelvis", ["head"])
+tgt_fwd = _horizontal_forward(tgt_arm, "Hips", ["Head", "Neck"])
+ang = signed_angle(tgt_fwd, src_fwd, around=Z)
+# Rotate target armature by ang around world Z, apply rotation
+# into armature data (so rest pose itself is rotated)
+```
+
+Sur le wolf: -83.9° detected, applied, wolf marche normalement. Sur
+le dragon: src_fwd=None (le mountain_dragon source pelvis pas trouvé
+parce que le nom est "MOUNTAIN_DRAGON_ Pelvis" avec espace), skip
+auto-align. Le dragon retarget marche quand même mais probablement
+avec un offset.
+
+**Mode auto-detection** humanoid/quadruped/winged_biped basé sur les
+préfixes des bones source:
+- "Lizard*" → QUADRUPED_PREFIX_MAP (comodo_dragon, 35 pairs)
+- "MOUNTAIN_DRAGON_*" → WINGED_BIPED_PREFIX_MAP (mountain dragon,
+  35 pairs avec wings L_ARM/L_FOREARM/L_HAND + fingers)
+- Sinon → EXPLICIT_PAIRS_HUMANOID (Apovivor orc_m1)
+
+**Viewer center button** (`c:/tmp/training_meshes/anim_preview.html`):
+Bouton "Center" qui calcule bbox depuis les **bones du skeleton**
+(qui ont les positions animées via les matrix world) plutôt que
+`Box3.setFromObject` sur SkinnedMesh (qui retourne le bind pose).
+Fallback sur geometry bbox si pas de skeleton.
+
+**Labels manuels** annotés pour 2 rigs supplémentaires :
+- `c:/tmp/test_quad_00.glb.labels.json` (38 joints wolf quadruped)
+- `c:/tmp/dragon_red_rigged.glb.labels.json` (55 joints dragon
+  winged_biped: 4 chaînes principales = spine forward, tail back,
+  L/R legs, wings depuis joint28)
+
+**À continuer** :
+- Vérifier visuel dragon (problème wings probable)
+- Fix src_fwd detection pour mountain_dragon (case avec espace
+  dans bone name)
+- Generate labels semi-automatiquement (au lieu de manuel par
+  topo + position)
+- Batch overnight 50 rigs × N motions par classe
+
 ## 2026-06-11 (feat — Plan B1: Rokoko Blender pipeline E2E validated)
 
 **End-to-end Rokoko retarget MARCHE visuellement** : dwarf

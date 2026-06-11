@@ -105,6 +105,7 @@ def run_single_retarget():
     # rather than "LeftArm00..LeftArm03") and mapped to the Mixamo-style
     # vocabulary that the auto-detect tables ship with.
     labels_path = tgt_glb + ".labels.json"
+    labels = None
     if os.path.isfile(labels_path):
         import json
         raw = json.loads(open(labels_path, "r", encoding="utf-8").read())
@@ -118,10 +119,59 @@ def run_single_retarget():
                 labels = {i: ll[i] for i in range(len(ll))}
         else:
             labels = {int(k): v for k, v in raw.items()}
+    else:
+        # 2026-06-11: fallback for rigs without labels.json sidecar.
+        # The 50 humanoid rigs in c:/tmp/training_rigs/ were rigged
+        # before the puppeteer_bridge sidecar patch. Use the renamer's
+        # geometric heuristic to recover per-joint role names without
+        # needing the pred.txt sidecar.
+        sys.path.insert(0, r"c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/scripts")
+        try:
+            from puppeteer_joint_renamer import rename_for_anytop
+        except Exception as e:
+            print(f"[rokoko-single] WARN renamer import failed: {e}")
+            rename_for_anytop = None
+        if rename_for_anytop is not None:
+            joint_idxs = []
+            parent_by_idx = {}
+            world_by_idx = {}
+            name_by_idx = {}
+            # Walk the GLB's armature in Blender to get rest world pose
+            for i, bone in enumerate(tgt_arm.data.bones):
+                joint_idxs.append(i)
+                name_by_idx[i] = bone.name
+                parent_by_idx[i] = (
+                    list(tgt_arm.data.bones).index(bone.parent)
+                    if bone.parent is not None else -1
+                )
+                # Rest world position: armature_matrix @ bone.head_local
+                head_world = tgt_arm.matrix_world @ bone.head_local
+                import numpy as _np
+                world_by_idx[i] = _np.array([head_world.x, head_world.y, head_world.z])
+            renamed_dict = rename_for_anytop(
+                joint_idxs, parent_by_idx, world_by_idx, name_by_idx, force=True,
+            )
+            labels = renamed_dict
+            print(f"[rokoko-single] labels recovered via "
+                  f"puppeteer_joint_renamer ({len(labels)} entries)")
+        else:
+            print(f"[rokoko-single] WARN no labels.json AND no renamer "
+                  f"-> Rokoko auto-detect will likely fail")
+            labels = {}
+
+    if labels:
 
         # Map our extractor vocabulary -> Mixamo-style names that
-        # Rokoko's bone-list auto-detect recognises.
+        # Rokoko's bone-list auto-detect recognises. Includes both
+        # humanoid (LeftArm/RightLeg/...) AND quadruped (FrontLeftLeg/
+        # RearLeftLeg/Tail/...) vocabularies. Rokoko's auto-detect
+        # only recognises humanoid names — for quadruped chains we
+        # invent our own canonical names; Rokoko ignores the dictionary
+        # match and just uses whatever string we put in
+        # rsl_retargeting_bone_list, so the auto-detect path is
+        # effectively bypassed.
         MIXAMO_NAME = {
+            # Humanoid
             "Hips":      "Hips",
             "Spine00":   "Spine",
             "Spine01":   "Spine1",
@@ -129,6 +179,7 @@ def run_single_retarget():
             "Spine03":   "Spine3",
             "Neck00":    "Neck",
             "Neck01":    "Neck1",
+            "Neck02":    "Neck2",
             "Head00":    "Head",
             "LeftArm00":  "LeftShoulder",
             "LeftArm01":  "LeftArm",
@@ -146,6 +197,51 @@ def run_single_retarget():
             "RightLeg01": "RightLeg",
             "RightLeg02": "RightFoot",
             "RightLeg03": "RightToeBase",
+            # Quadruped — invented canonical names, mapped directly
+            # via EXPLICIT_PAIRS at the rsl_bone_list step below.
+            "RearLeftLeg00":  "RearLeftUpLeg",
+            "RearLeftLeg01":  "RearLeftLeg",
+            "RearLeftLeg02":  "RearLeftAnkle",
+            "RearLeftLeg03":  "RearLeftFoot",
+            "RearLeftLeg04":  "RearLeftToeBase",
+            "RearRightLeg00": "RearRightUpLeg",
+            "RearRightLeg01": "RearRightLeg",
+            "RearRightLeg02": "RearRightAnkle",
+            "RearRightLeg03": "RearRightFoot",
+            "RearRightLeg04": "RearRightToeBase",
+            "FrontLeftLeg00":  "FrontLeftShoulder",
+            "FrontLeftLeg01":  "FrontLeftUpLeg",
+            "FrontLeftLeg02":  "FrontLeftLeg",
+            "FrontLeftLeg03":  "FrontLeftFoot",
+            "FrontLeftLeg04":  "FrontLeftToeBase",
+            "FrontRightLeg00": "FrontRightShoulder",
+            "FrontRightLeg01": "FrontRightUpLeg",
+            "FrontRightLeg02": "FrontRightLeg",
+            "FrontRightLeg03": "FrontRightFoot",
+            "Tail00": "Tail",
+            "Tail01": "Tail1",
+            "Tail02": "Tail2",
+            "Tail03": "Tail3",
+            "Tail04": "Tail4",
+            "Tail05": "Tail5",
+            "Tail06": "Tail6",
+            # Winged biped (dragons / wyverns)
+            "LeftLeg04":  "LeftFoot4",
+            "LeftLeg05":  "LeftFoot5",
+            "LeftLeg06":  "LeftToeBase",
+            "RightLeg04": "RightFoot4",
+            "RightLeg05": "RightFoot5",
+            "RightLeg06": "RightToeBase",
+            "LeftWing00":  "LeftWingArm",
+            "LeftWing01":  "LeftWingForearm",
+            "LeftWing02":  "LeftWingHand",
+            "LeftWing03":  "LeftWingFinger1",
+            "LeftWing04":  "LeftWingFinger2",
+            "RightWing00": "RightWingArm",
+            "RightWing01": "RightWingForearm",
+            "RightWing02": "RightWingHand",
+            "RightWing03": "RightWingFinger1",
+            "RightWing04": "RightWingFinger2",
         }
         renamed = 0
         for pred_idx, lbl in labels.items():
@@ -191,13 +287,10 @@ def run_single_retarget():
     if hasattr(scn, "rsl_retargeting_use_pose"):
         scn.rsl_retargeting_use_pose = "REST"
 
-    # 2026-06-11: bypass Rokoko's auto-detect (it maps multiple Apovivor
-    # twist/share/clavicle bones to the same Mixamo target -> "Duplicate
-    # target bone entries"). Pre-populate the bone_list explicitly with
-    # a known-good source->target mapping. Source names follow Apovivor
-    # orc_m1 / Mixamo convention; target names were just renamed via
-    # labels.json above.
-    EXPLICIT_PAIRS = [
+    # 2026-06-11: bypass Rokoko's auto-detect. Pick humanoid vs
+    # quadruped mapping based on what we see in the source FBX
+    # (presence of "thigh_l" or "LizardLFrontLeg*").
+    EXPLICIT_PAIRS_HUMANOID = [
         ("pelvis",       "Hips"),
         ("spine_01",     "Spine"),
         ("spine_02",     "Spine1"),
@@ -222,8 +315,203 @@ def run_single_retarget():
         ("foot_r",       "RightFoot"),
         ("ball_r",       "RightToeBase"),
     ]
+
+    # Lizard / Apovivor quadruped naming. Source bone names have
+    # arbitrary numeric suffixes (e.g. "LizardLLegThigh11",
+    # "LizardLLegCalf323") -> match by prefix instead.
+    QUADRUPED_PREFIX_MAP = [
+        ("LizardSpine1",            "Hips"),
+        ("LizardSpine2",            "Spine"),
+        ("LizardSpine3",            "Spine1"),
+        ("LizardSpine4",            "Spine2"),
+        ("LizardSpine5",            "Spine3"),
+        ("LizardSpine6",            "Spine3"),  # collapses if Spine3 already used
+        ("LizardRibcage",           "Spine3"),
+        ("LizardNeck1",             "Neck"),
+        ("LizardNeck2",             "Neck1"),
+        ("LizardNeck3",             "Neck2"),
+        ("LizardNeck4",             "Neck2"),
+        ("LizardHead",              "Head"),
+        ("LizardLLegThigh",         "RearLeftUpLeg"),
+        ("LizardLLegCalf",          "RearLeftLeg"),
+        ("LizardLLegAnkle",         "RearLeftAnkle"),
+        ("LizardLLegDigit",         "RearLeftFoot"),
+        ("LizardRRearLegThigh",     "RearRightUpLeg"),
+        ("LizardRRearLegCalf",      "RearRightLeg"),
+        ("LizardRRearLegAnkle",     "RearRightAnkle"),
+        ("LizardRRearLegDigit",     "RearRightFoot"),
+        ("LizardLFrontLegCollarbone", "FrontLeftShoulder"),
+        ("LizardLFrontLegUpper",      "FrontLeftUpLeg"),
+        ("LizardLFrontLegLower",      "FrontLeftLeg"),
+        ("LizardLFrontLegPalm",       "FrontLeftFoot"),
+        ("LizardLFrontLegDigit",      "FrontLeftToeBase"),
+        ("LizardRFrontLegCollarbone", "FrontRightShoulder"),
+        ("LizardRFrontLegUpper",      "FrontRightUpLeg"),
+        ("LizardRFrontLegLower",      "FrontRightLeg"),
+        ("LizardRFrontLegPalm",       "FrontRightFoot"),
+        ("LizardTail1",  "Tail"),
+        ("LizardTail2",  "Tail1"),
+        ("LizardTail3",  "Tail2"),
+        ("LizardTail4",  "Tail3"),
+        ("LizardTail5",  "Tail4"),
+        ("LizardTail6",  "Tail5"),
+        ("LizardTail7",  "Tail6"),
+    ]
+
+    # Winged biped (mountain dragon) source bone prefix mapping.
+    # Source bones have a leading "MOUNTAIN_DRAGON_" prefix plus a SPACE
+    # before the bone short name (e.g. "MOUNTAIN_DRAGON_ Pelvis").
+    WINGED_BIPED_PREFIX_MAP = [
+        ("MOUNTAIN_DRAGON_ Pelvis",   "Hips"),
+        ("MOUNTAIN_DRAGON_ Spine2",   "Spine01"),  # Trellis target is shorter
+        ("MOUNTAIN_DRAGON_ Spine1",   "Spine00"),  # Spine -> Hips
+        ("MOUNTAIN_DRAGON_ Neck5",    "Neck01"),
+        ("MOUNTAIN_DRAGON_ Neck1",    "Neck00"),
+        ("MOUNTAIN_DRAGON_ Head",     "Head00"),
+        ("MOUNTAIN_DRAGON_ L Thigh",  "LeftLeg00"),
+        ("MOUNTAIN_DRAGON_ L Calf",   "LeftLeg01"),
+        ("MOUNTAIN_DRAGON_ L HorseLink", "LeftLeg02"),
+        ("MOUNTAIN_DRAGON_ L Foot",   "LeftLeg03"),
+        ("MOUNTAIN_DRAGON_ L Toe0",   "LeftLeg04"),
+        ("MOUNTAIN_DRAGON_ L Toe1",   "LeftLeg05"),
+        ("MOUNTAIN_DRAGON_ R Thigh",  "RightLeg00"),
+        ("MOUNTAIN_DRAGON_ R Calf",   "RightLeg01"),
+        ("MOUNTAIN_DRAGON_ R HorseLink", "RightLeg02"),
+        ("MOUNTAIN_DRAGON_ R Foot",   "RightLeg03"),
+        ("MOUNTAIN_DRAGON_ R Toe0",   "RightLeg04"),
+        ("MOUNTAIN_DRAGON_ R Toe1",   "RightLeg05"),
+        ("MOUNTAIN_DRAGON_WING_L_ARM",     "LeftWing00"),
+        ("MOUNTAIN_DRAGON_WING_L_FOREARM", "LeftWing01"),
+        ("MOUNTAIN_DRAGON_WING_L_HAND",    "LeftWing02"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_A_1", "LeftWing03"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_A_2", "LeftWing04"),
+        ("MOUNTAIN_DRAGON_WING_R_ARM",     "RightWing00"),
+        ("MOUNTAIN_DRAGON_WING_R_FOREARM", "RightWing01"),
+        ("MOUNTAIN_DRAGON_WING_R_HAND",    "RightWing02"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_A_1", "RightWing03"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_A_2", "RightWing04"),
+        ("MOUNTAIN_DRAGON_ Tail",  "Tail00"),
+        ("MOUNTAIN_DRAGON_ Tail1", "Tail01"),
+        ("MOUNTAIN_DRAGON_ Tail3", "Tail02"),
+        ("MOUNTAIN_DRAGON_ Tail5", "Tail03"),
+        ("MOUNTAIN_DRAGON_ Tail7", "Tail04"),
+        ("MOUNTAIN_DRAGON_ Tail9", "Tail05"),
+        ("MOUNTAIN_DRAGON_ Tail11", "Tail06"),
+    ]
+
+    # Now apply the same MIXAMO_NAME map to TARGET roles (Hips/Spine00/...)
+    # so the rsl_retargeting_bone_list keys match the renamed bones.
+    def _to_mixamo_target(role):
+        return MIXAMO_NAME.get(role, role)
+    WINGED_BIPED_PAIRS_MAPPED = [(s, _to_mixamo_target(t))
+                                 for s, t in WINGED_BIPED_PREFIX_MAP]
+
+    src_names = [b.name for b in src_arm.data.bones]
+    is_quadruped = any(n.startswith("Lizard") for n in src_names)
+    is_winged_biped = any(n.startswith("MOUNTAIN_DRAGON") for n in src_names)
+    if is_winged_biped:
+        # Resolve prefix matches for mountain dragon source.
+        EXPLICIT_PAIRS = []
+        used_src = set()
+        used_tgt = set()
+        for prefix, tgt in WINGED_BIPED_PAIRS_MAPPED:
+            for n in src_names:
+                if n.startswith(prefix) and n not in used_src and tgt not in used_tgt:
+                    EXPLICIT_PAIRS.append((n, tgt))
+                    used_src.add(n)
+                    used_tgt.add(tgt)
+                    break
+        print(f"[rokoko-single] mode=WINGED_BIPED ({len(EXPLICIT_PAIRS)} pairs resolved)")
+    elif is_quadruped:
+        # Resolve prefix matches: for each prefix, find the first
+        # source bone that starts with it (skip if already used).
+        EXPLICIT_PAIRS = []
+        used_src = set()
+        used_tgt = set()
+        for prefix, tgt in QUADRUPED_PREFIX_MAP:
+            for n in src_names:
+                if n.startswith(prefix) and n not in used_src and tgt not in used_tgt:
+                    EXPLICIT_PAIRS.append((n, tgt))
+                    used_src.add(n)
+                    used_tgt.add(tgt)
+                    break
+        print(f"[rokoko-single] mode=QUADRUPED ({len(EXPLICIT_PAIRS)} explicit pairs resolved)")
+    else:
+        EXPLICIT_PAIRS = EXPLICIT_PAIRS_HUMANOID
+        print(f"[rokoko-single] mode=HUMANOID ({len(EXPLICIT_PAIRS)} explicit pairs)")
     src_bone_names = {b.name for b in src_arm.data.bones}
     tgt_bone_names = {b.name for b in tgt_arm.data.bones}
+
+    # 2026-06-12: AUTO-DETECT forward axis alignment.
+    # The Apovivor source FBX always faces some consistent direction
+    # (Mixamo: +Y forward in Z-up world; Blender FBX import flips to
+    # +Y forward in Y-up world). The Trellis+Puppeteer target faces
+    # an arbitrary direction depending on how Trellis oriented the mesh
+    # during generation. Without alignment, Rokoko's COPY_ROTATION
+    # constraint copies local rotations into target bone-local frames
+    # that don't share source's forward axis -> "pas chassé" (legs
+    # swing laterally instead of forward/back).
+    # Fix: rotate the target armature object around its UP axis so its
+    # rest-pose forward (Hips->Head horizontal vector) aligns with the
+    # source rest-pose forward.
+    def _horizontal_forward(arm_obj, hips_name, head_candidates):
+        """Return a unit vector pointing FROM hips TO head, with the
+        UP component zeroed out. Up = world Z in Blender."""
+        import mathutils
+        if hips_name not in arm_obj.data.bones:
+            return None
+        hips_world = arm_obj.matrix_world @ arm_obj.data.bones[hips_name].head_local
+        head_world = None
+        for n in head_candidates:
+            if n in arm_obj.data.bones:
+                head_world = arm_obj.matrix_world @ arm_obj.data.bones[n].head_local
+                break
+        if head_world is None:
+            return None
+        v = head_world - hips_world
+        v.z = 0.0  # project onto horizontal plane (Blender world is Z-up)
+        if v.length < 1e-6:
+            return None
+        return v.normalized()
+
+    src_fwd = _horizontal_forward(src_arm, "pelvis" if "pelvis" in src_bone_names
+                                          else next((n for n in src_bone_names
+                                                     if "pelvis" in n.lower() or "hip" in n.lower()
+                                                     or "lizardspine1" in n.lower()), None),
+                                  ["head", "Head"] +
+                                  [n for n in src_bone_names if n.lower().startswith("lizardhead")])
+    tgt_fwd = _horizontal_forward(tgt_arm, "Hips",
+                                  ["Head", "Neck", "Neck1", "Neck2"])
+    if src_fwd is not None and tgt_fwd is not None:
+        import mathutils, math
+        # Angle from tgt_fwd to src_fwd around world Z (signed).
+        # cross.z > 0 -> src is COUNTERCLOCKWISE from tgt (looking down Z).
+        dot = max(-1.0, min(1.0, src_fwd.dot(tgt_fwd)))
+        ang = math.acos(dot)
+        cross_z = tgt_fwd.x * src_fwd.y - tgt_fwd.y * src_fwd.x
+        if cross_z < 0:
+            ang = -ang
+        print(f"[rokoko-single] forward auto-align: src_fwd={src_fwd[:]} "
+              f"tgt_fwd={tgt_fwd[:]} rotation around Z = {math.degrees(ang):.1f} deg")
+        # Rotate target armature object by `ang` around world Z so its
+        # rest-pose forward now matches source's forward.
+        if abs(math.degrees(ang)) > 1.0:
+            tgt_arm.rotation_mode = "XYZ"
+            tgt_arm.rotation_euler = (
+                tgt_arm.rotation_euler.x,
+                tgt_arm.rotation_euler.y,
+                tgt_arm.rotation_euler.z + ang,
+            )
+            # Apply the rotation into the armature DATA so the rest
+            # pose itself rotates (otherwise it's just an object-level
+            # rotation that gets reset by our TRS cleanup later).
+            bpy.context.view_layer.objects.active = tgt_arm
+            bpy.ops.object.select_all(action="DESELECT")
+            tgt_arm.select_set(True)
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+    else:
+        print(f"[rokoko-single] forward auto-align SKIPPED (src_fwd={src_fwd}, "
+              f"tgt_fwd={tgt_fwd})")
 
     try:
         # Clear then add explicit entries
@@ -247,6 +535,38 @@ def run_single_retarget():
         print("[rokoko-single] retarget failed:")
         traceback.print_exc()
         sys.exit(6)
+
+    # 2026-06-11 (workflow w0llhdmri fix #2): clean the export so each
+    # output GLB has exactly one animation (the retarget) and no baked
+    # Armature scale.
+    # (a) Reset target armature TRS. Rokoko bakes the source FBX scale
+    #     (0.01 from Unreal Take FBXs) into the target Armature's
+    #     scale on its object-level action when it copies the source
+    #     animation, even though the bones themselves are correctly
+    #     retargeted. Reset object TRS to identity.
+    tgt_arm.location = (0.0, 0.0, 0.0)
+    tgt_arm.rotation_euler = (0.0, 0.0, 0.0)
+    if tgt_arm.rotation_mode == "QUATERNION":
+        tgt_arm.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+    tgt_arm.scale = (1.0, 1.0, 1.0)
+    # (b) Strip object-level fcurves (location/scale/rotation_*) from
+    #     all actions — only keep pose.bones[...]
+    for action in bpy.data.actions:
+        bad = [fc for fc in action.fcurves
+               if not fc.data_path.startswith("pose.bones[")]
+        for fc in bad:
+            action.fcurves.remove(fc)
+    # (c) Remove the source 'Base Layer' action so only the retargeted
+    #     clip ends up in the GLB.
+    for a in list(bpy.data.actions):
+        if "Retarget" not in a.name:
+            bpy.data.actions.remove(a)
+    # (d) Make sure the target armature is using the Retarget action
+    if tgt_arm.animation_data is None:
+        tgt_arm.animation_data_create()
+    retarget_actions = [a for a in bpy.data.actions if "Retarget" in a.name]
+    if retarget_actions:
+        tgt_arm.animation_data.action = retarget_actions[0]
 
     # Export the target rig + mesh as GLB with the new animation
     bpy.ops.object.select_all(action="DESELECT")
