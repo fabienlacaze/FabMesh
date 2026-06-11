@@ -235,23 +235,31 @@ def run_single_retarget():
             "LeftWing00":  "LeftWingArm",
             "LeftWing01":  "LeftWingForearm",
             "LeftWing02":  "LeftWingHand",
-            "LeftWing03":  "LeftWingFinger1",
-            "LeftWing04":  "LeftWingFinger2",
+            # 2026-06-12 FIX wings (workflow wyxzfsg1x): do NOT rewrite
+            # LeftWing03/04 into LeftWingFinger1/2 because labels.json
+            # may already declare distinct bones with those names —
+            # Blender auto-suffixes `.001` on collision and the
+            # EXPLICIT_PAIRS lookup at `tgt_name not in tgt_bone_names`
+            # silently drops the pair. Keep `LeftWingFingerAN/BN/CN`
+            # literal so each finger has a unique target name.
             "RightWing00": "RightWingArm",
             "RightWing01": "RightWingForearm",
             "RightWing02": "RightWingHand",
-            "RightWing03": "RightWingFinger1",
-            "RightWing04": "RightWingFinger2",
         }
         renamed = 0
         for pred_idx, lbl in labels.items():
-            new_name = MIXAMO_NAME.get(lbl)
-            if new_name is None:
-                continue
+            new_name = MIXAMO_NAME.get(lbl, lbl)
             old_name = f"joint{pred_idx}"
-            if old_name in tgt_arm.data.bones:
-                tgt_arm.data.bones[old_name].name = new_name
-                renamed += 1
+            if old_name not in tgt_arm.data.bones:
+                continue
+            # 2026-06-12 FIX wings (workflow wyxzfsg1x): collision-guard.
+            # Never rename onto an existing bone name — Blender silently
+            # auto-suffixes `.001` and the EXPLICIT_PAIRS lookup later
+            # drops the pair because `tgt_name not in tgt_bone_names`.
+            if new_name in tgt_arm.data.bones and new_name != old_name:
+                continue
+            tgt_arm.data.bones[old_name].name = new_name
+            renamed += 1
         print(f"[rokoko-single] renamed {renamed} target bones via labels.json "
               f"-> Mixamo vocab")
     else:
@@ -383,13 +391,25 @@ def run_single_retarget():
         ("MOUNTAIN_DRAGON_WING_L_ARM",     "LeftWing00"),
         ("MOUNTAIN_DRAGON_WING_L_FOREARM", "LeftWing01"),
         ("MOUNTAIN_DRAGON_WING_L_HAND",    "LeftWing02"),
-        ("MOUNTAIN_DRAGON_WING_L_FINGER_A_1", "LeftWing03"),
-        ("MOUNTAIN_DRAGON_WING_L_FINGER_A_2", "LeftWing04"),
+        # 2026-06-12 FIX wings: full A/B/C finger coverage. Mountain
+        # Dragon has 4 finger chains per wing (A/B/C/D). FINGER_B is
+        # the LONGEST — it drives the wing tip + leading-edge membrane.
+        # Mapping only A_1/A_2 left the wing visually static.
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_A_1", "LeftWingFingerA0"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_A_2", "LeftWingFingerA1"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_B_1", "LeftWingFingerB0"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_B_2", "LeftWingFingerB1"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_C_1", "LeftWingFingerC0"),
+        ("MOUNTAIN_DRAGON_WING_L_FINGER_C_2", "LeftWingFingerC1"),
         ("MOUNTAIN_DRAGON_WING_R_ARM",     "RightWing00"),
         ("MOUNTAIN_DRAGON_WING_R_FOREARM", "RightWing01"),
         ("MOUNTAIN_DRAGON_WING_R_HAND",    "RightWing02"),
-        ("MOUNTAIN_DRAGON_WING_R_FINGER_A_1", "RightWing03"),
-        ("MOUNTAIN_DRAGON_WING_R_FINGER_A_2", "RightWing04"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_A_1", "RightWingFingerA0"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_A_2", "RightWingFingerA1"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_B_1", "RightWingFingerB0"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_B_2", "RightWingFingerB1"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_C_1", "RightWingFingerC0"),
+        ("MOUNTAIN_DRAGON_WING_R_FINGER_C_2", "RightWingFingerC1"),
         ("MOUNTAIN_DRAGON_ Tail",  "Tail00"),
         ("MOUNTAIN_DRAGON_ Tail1", "Tail01"),
         ("MOUNTAIN_DRAGON_ Tail3", "Tail02"),
@@ -474,14 +494,36 @@ def run_single_retarget():
             return None
         return v.normalized()
 
-    src_fwd = _horizontal_forward(src_arm, "pelvis" if "pelvis" in src_bone_names
-                                          else next((n for n in src_bone_names
-                                                     if "pelvis" in n.lower() or "hip" in n.lower()
-                                                     or "lizardspine1" in n.lower()), None),
-                                  ["head", "Head"] +
-                                  [n for n in src_bone_names if n.lower().startswith("lizardhead")])
+    # 2026-06-12 FIX wings (workflow wyxzfsg1x): previous head_candidates
+    # used exact match. Mountain Dragon source bones are named
+    # "MOUNTAIN_DRAGON_ Head" (with trailing space prefix), so neither
+    # pelvis nor head matched -> src_fwd=None -> auto-align silently
+    # skipped -> wing flap plane wrong + messy body skeleton.
+    def _find_bone_loose(arm, candidates):
+        names = [b.name for b in arm.data.bones]
+        # Exact match first
+        for c in candidates:
+            if c in names:
+                return c
+        # Case-insensitive substring match
+        for c in candidates:
+            cl = c.lower()
+            for n in names:
+                if cl in n.lower():
+                    return n
+        return None
+
+    src_hips = _find_bone_loose(src_arm,
+        ["pelvis", "Pelvis", "Hips", "LizardSpine1"])
+    src_head = _find_bone_loose(src_arm,
+        ["Head", "Neck1", "Neck5", "LizardHead"])
+    src_fwd = _horizontal_forward(src_arm, src_hips,
+                                  [src_head] if src_head else [])
     tgt_fwd = _horizontal_forward(tgt_arm, "Hips",
-                                  ["Head", "Neck", "Neck1", "Neck2"])
+                                  ["Head", "Head00", "Neck", "Neck00", "Neck1"])
+    print(f"[rokoko-single] forward auto-align inputs: "
+          f"src_hips={src_hips} src_head={src_head} "
+          f"src_fwd={src_fwd} tgt_fwd={tgt_fwd}")
     if src_fwd is not None and tgt_fwd is not None:
         import mathutils, math
         # Angle from tgt_fwd to src_fwd around world Z (signed).
