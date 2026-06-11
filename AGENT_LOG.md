@@ -1,5 +1,127 @@
 # FabMesh Agent Log
 
+## 2026-06-11 (feat — Plan B1: Rokoko Blender pipeline E2E validated)
+
+**End-to-end Rokoko retarget MARCHE visuellement** : dwarf
+humanoid_05 + Apovivor Robot1_Walk → mesh dwarf animé proprement
+avec hache, jambes en mouvement de marche, bras qui swingent.
+Premier visuel "vraie marche" du Plan B1.
+
+**Workflows utilisés** :
+- `w96ogz3vm` : verify Rokoko Studio Live Blender addon = LGPL-3.0
+  (confirmé via GitHub API + LICENSE.md FSF verbatim), commercial-safe
+  pour Steam-sale tant qu'on ne bundle pas le code de l'addon
+- `w0llhdmri` : diagnostic viewer noir = (a) clip 0 est la source FBX
+  avec scale=0.01 qui ratatine 100×, retarget est dans clip 1
+  ("Base Layer Retarget"), (b) frustumCulled actif sur SkinnedMesh
+  cull le mesh quand le root motion sort du frustum
+
+**Setup** :
+- Blender 4.4.3 télécharge dans `c:/tools/blender-4.4.3-windows-x64/`
+  (pas 5.x : issues #131/#135 cassent le addon)
+- Addon Rokoko v1.4.3 installé via `bpy.ops.preferences.addon_install`
+  (le zip GitHub releases est sous le tag `v1-4-3`, l'archive auto
+  `archive/refs/tags/v1-4-3.zip` extrait dans un dossier suffixé
+  qu'il faut repackager `rokoko-studio-live-blender.zip` pour que
+  Blender l'accepte)
+- `bpy.ops.rsl.*` ops dispo en headless (login Rokoko ID PAS requis
+  pour les operators)
+
+**Nouveau fichier** :
+
+`scripts/rokoko_batch_retarget.py` (~250 LOC) — dual-mode :
+- Inside Blender : `--src-fbx X --tgt-glb Y --out-dir Z` retarget 1 pair
+- Hors Blender : `--motions-dir`, `--rigs-dir`, `--jobs N` orchestrateur
+  qui spawn N processes Blender en parallèle.
+
+Pipeline interne (mode single) :
+1. Import target GLB → obtient Armature avec joint0..jointN
+2. Rename les bones via labels.json sidecar
+   (`<glb>.labels.json` produit par puppeteer_semantic_extractor) →
+   vocabulaire Mixamo : Hips, Spine, LeftShoulder, LeftArm, etc.
+3. Import source FBX (Apovivor, 117 bones nommés)
+4. **Skip Rokoko auto-detect** (bypasse "Duplicate target bone
+   entries" sur LeftShoulder/RightShoulder à cause des
+   cc_base_*_clavicle vs clavicle_*) — populate explicitement
+   `scn.rsl_retargeting_bone_list` avec 23 EXPLICIT_PAIRS
+   (pelvis→Hips, thigh_l→LeftUpLeg, etc.).
+5. `bpy.ops.rsl.retarget_animation()` (COPY_ROTATION constraint +
+   nla.bake)
+6. Export target armature + mesh comme GLB (use_selection=True)
+
+**Patches viewer** `c:/tmp/training_meshes/anim_preview.html` :
+- Sélectionne automatiquement la clip dont le nom matche
+  `/retarget/i` (fallback : dernière clip)
+- `frustumCulled=false` sur tous les Skinned/Mesh
+- DoubleSide + bbox computed AFTER animation play(frame 0)
+- `?noroot=1` query string strip les root-bone .position tracks
+- `?glb=...` query string permet de pointer un autre GLB
+
+**Reste à patcher** (workflow w0llhdmri fix #2) — dans
+`rokoko_batch_retarget.py` AVANT export :
+- Reset `tgt_arm.location/rotation/scale` à identité
+- Strip object-level fcurves des actions (garder pose.bones[*])
+- Supprimer les actions non-Retarget
+
+Sans ça, chaque GLB sortant contient 2 anims (source FBX + retarget)
+et un Armature scale=0.01 baked qui demande au viewer de chercher
+la bonne clip. À fixer avant batch (sinon process_new_skeleton
+risque de prendre la mauvaise clip).
+
+**Étape suivante** :
+- Patch pipeline pour clean GLB output
+- Fallback labels via `puppeteer_joint_renamer` (les 50 humanoid rigs
+  existants n'ont pas de sidecar `.pred.txt` — rigés avant le patch
+  bridge)
+- Batch 50 rigs × 50 motions humanoid = 2,500 paires test, jobs=8
+  CPU
+- Si qualité constante : full batch 50 × 1099 = 55k overnight, puis
+  prep AnyTop dataset, puis training.
+
+## 2026-06-11 (wip — Plan B1: IBM-aware world-delta retarget + Rokoko pivot)
+
+**Workflow `wuzh237ob`** (5 angles math/source/target/industry/symmetry)
+a identifié la cause racine : `puppeteer_world_delta_retarget.py`
+lisait `node.rotation` du target rig pour récupérer le rest world,
+mais Puppeteer/Trellis **n'écrivent jamais** `node.rotation` — toute
+l'orientation rest vit dans `skin.inverseBindMatrices`. Résultat :
+`tgt_bind_world_q` = identité → la formule canonique de retargeting
+dégénère en `local = inv(src_W) * src_local` qui ne marche que si
+source/target frames bone-local coïncident.
+
+Le hack `R_axis = (-0.5,-0.5,-0.5,0.5)` ajouté empiriquement
+**masquait** ce bug en biaisant globalement, mais cassait
+l'invariance L/R sur les distal joints (LeftLeg03→Z vs
+RightLeg03→X observé dans diag).
+
+**Fix appliqué** :
+- `target_rig_bind_world_quats()` rewrite pour extraire le world rest
+  via `skin.inverseBindMatrices` + SVD polar decomposition +
+  Shepperd quat-from-matrix (méthode validée `anytop_retarget.py`
+  L1306-1331)
+- Suppression du bloc `R_axis` — la formule canonique absorbe
+  automatiquement les différences de convention d'axes via
+  `inv(src_W_rest) * tgt_W_rest`
+- Fallback `_node_rotation_fk()` pour rigs qui auraient
+  effectivement écrit node.rotation
+
+**Résultat mesuré** (`c:/tmp/diag_full_traj.py`) :
+- AVANT fix : 0 bones non-identité dans target_rest, LeftLeg03 Z dom
+  vs RightLeg03 X dom (asymétrique)
+- APRÈS fix : 21 bones non-identité, LeftLeg03 X dom +
+  RightLeg03 X dom (**symétrie L/R restaurée**)
+
+**Reste imparfait** : LeftArm03 asymétrie persistante + frame-0 source
+n'est pas une vraie T-pose (thigh_l euler = (12.46, 17.83, 11.86)
+au lieu de identity), donc certaines frames mid-walk produisent un
+split-stance visuel.
+
+**Pivot stratégique** : au lieu de continuer à hacker rest-pose
+extraction, on passe à **Rokoko Studio Live Blender addon** (GPL,
+gratuit, industry-standard). Scriptable headless via `bpy.ops.rsl.*`.
+Plan : install addon → batch script (1099 motions × 50 rigs ≈ 6h
+overnight RTX 5080) → dataset training AnyTop.
+
 ## 2026-06-11 (wip — Plan B1: delta-from-rest retarget + diag tooling)
 
 **Pourquoi** : la rotation-transfer du commit précédent (51d83e8)

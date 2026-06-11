@@ -148,10 +148,13 @@ _SRC_PATS = [
     (re.compile(r"(?i)upperarm_r|r_upperarm|r_arm|biped_r_upperarm|clavicle_r"), ("arm", "r", 0)),
     (re.compile(r"(?i)lowerarm_r|r_lowerarm|r_forearm|biped_r_forearm"), ("arm", "r", 1)),
     (re.compile(r"(?i)hand_r|r_hand|biped_r_hand"), ("arm", "r", 2)),
-    (re.compile(r"(?i)^spine_\d+|^spine\d+|^spine$"), ("spine", None)),
-    (re.compile(r"(?i)^neck"), ("neck", None)),
-    (re.compile(r"(?i)^head"), ("head", None)),
 ]
+
+# Spine/neck/head have variable chain depth — extract chain_idx from the
+# digit suffix instead of using the static _SRC_PATS table.
+_SPINE_RE = re.compile(r"(?i)^spine[_]?(\d+)?$")
+_NECK_RE = re.compile(r"(?i)^neck[_]?(\d+)?$")
+_HEAD_RE = re.compile(r"(?i)^head[_]?(\d+)?$")
 
 
 _SKIP_PATTERNS = re.compile(
@@ -171,6 +174,23 @@ def classify_source(name: str):
     """
     if _SKIP_PATTERNS.search(name):
         return None
+    # Spine / Neck / Head: extract chain_idx from the digit suffix
+    # ("spine_01" -> 0, "spine_02" -> 1, ...).
+    m = _SPINE_RE.match(name)
+    if m:
+        n = m.group(1)
+        ci = (int(n) - 1) if n else 0
+        return ("spine", None, max(0, ci))
+    m = _NECK_RE.match(name)
+    if m:
+        n = m.group(1)
+        ci = (int(n) - 1) if n else 0
+        return ("neck", None, max(0, ci))
+    m = _HEAD_RE.match(name)
+    if m:
+        n = m.group(1)
+        ci = (int(n) - 1) if n else 0
+        return ("head", None, max(0, ci))
     for pat, *res in _SRC_PATS:
         if pat.search(name):
             r = res[0]
