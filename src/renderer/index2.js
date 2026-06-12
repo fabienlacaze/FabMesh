@@ -10674,14 +10674,19 @@ function renderAnimVersions(p) {
 function _selectAnim(anim) {
   if (!anim) return;
   _selectedAnim = anim;
-  const previewArea = document.getElementById('ws-anim-preview-area');
-  if (!previewArea) return;
-  const viewer = previewArea.querySelector('div');
-  if (!viewer) return;
-  viewer.innerHTML = `
-    <canvas id="ws-anim-result-canvas" style="width:100%; height:280px; background:#0a0a0e; border-radius:6px; display:block;"></canvas>
-    <div style="margin-top:4px; font-size:11px; color:var(--text-2); text-align:center;">${anim.motionLabel || anim.filename || ''} · ${anim.verdict || ''}</div>
-  `;
+  // The HTML for #ws-anim-preview now follows the same shape as
+  // #ws-mesh-preview (Step 2) — canvas + placeholder + filename below.
+  const previewBox = document.getElementById('ws-anim-preview');
+  const placeholder = document.getElementById('ws-anim-preview-placeholder');
+  const canvas = document.getElementById('ws-anim-result-canvas');
+  const fnEl = document.getElementById('ws-anim-filename');
+  if (!previewBox || !canvas) return;
+  if (placeholder) placeholder.style.display = 'none';
+  canvas.style.display = 'block';
+  if (fnEl) {
+    fnEl.textContent = (anim.motionLabel || anim.filename || '')
+      + (anim.verdict ? ` · judge: ${anim.verdict}` : '');
+  }
   // Re-render version strip to flip the selected class.
   try { renderAnimVersions(state.currentProject); } catch (_) {}
   (async () => {

@@ -848,19 +848,32 @@
                 <span class="stage-title">Edit selected</span>
                 <span class="stage-hint">Pick a clip, preview or export</span>
               </summary>
-              <div class="stage-body">
-                <div id="ws-anim-versions" class="version-strip" style="display:flex; gap:8px; padding:8px; flex-wrap:wrap;"></div>
-                <div id="ws-anim-preview-area" style="display:flex; gap:12px; padding:8px;">
-                  <div style="flex:1; min-height:200px; background:#0a0a0e; border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:12px;">
-                    No animation selected
+              <div class="stage-body stage-edit-with-side">
+                <div class="stage-edit-form">
+                  <div id="ws-anim-preview" class="stage-source-img stage-source-mesh" style="min-height:320px; background:#0a0a0e; border-radius:6px; position:relative; display:flex; align-items:center; justify-content:center;">
+                    <div id="ws-anim-preview-placeholder" class="preview-placeholder">No animation selected</div>
+                    <canvas id="ws-anim-result-canvas" style="display:none; width:100%; height:100%; background:#0a0a0e; border-radius:6px;"></canvas>
                   </div>
-                  <div style="width:200px; display:flex; flex-direction:column; gap:8px;">
-                    <div class="step-tools-label">File</div>
-                    <button id="ws-anim-export-btn" class="ghost-btn tool-btn rig-tool-btn">&#128229; Export FBX</button>
-                    <button id="ws-anim-folder-btn" class="ghost-btn tool-btn rig-tool-btn">&#128193; Show in folder</button>
-                    <div class="step-tools-label">Playback</div>
-                    <button id="ws-anim-play-btn" class="ghost-btn tool-btn rig-tool-btn">&#9654; Play</button>
-                    <button id="ws-anim-loop-btn" class="ghost-btn tool-btn rig-tool-btn">&#128257; Loop</button>
+                  <div id="ws-anim-filename" class="viewer-filename"></div>
+                  <div id="ws-anim-stats" class="viewer-stats"></div>
+                </div>
+                <div class="stage-edit-side">
+                  <div id="ws-anim-versions" class="versions-strip"></div>
+                  <div class="step-tools-scroll">
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">File</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-anim-export-btn" class="ghost-btn tool-btn">&#128229; Export FBX</button>
+                        <button id="ws-anim-folder-btn" class="ghost-btn tool-btn">&#128193; Show in folder</button>
+                      </div>
+                    </div>
+                    <div class="step-tools-group">
+                      <div class="step-tools-label">Playback</div>
+                      <div class="step-tools-grid">
+                        <button id="ws-anim-play-btn" class="ghost-btn tool-btn">&#9654; Play</button>
+                        <button id="ws-anim-loop-btn" class="ghost-btn tool-btn">&#128257; Loop</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
