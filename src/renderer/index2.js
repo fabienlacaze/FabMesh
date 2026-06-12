@@ -10736,11 +10736,20 @@ function _initAnimResultViewer(anim) {
       if (pickIdx < 0) pickIdx = clips.length - 1;
       console.log('[anim-result] mesh+skin loaded, clips=' + clips.length + ' pick=' + pickIdx);
       if (clips[pickIdx]) {
+        const clip = clips[pickIdx];
+        console.log('[anim-result] clip name=', clip.name, 'duration=', clip.duration, 'tracks=', clip.tracks.length);
         mixer = new THREE.AnimationMixer(root);
-        action = mixer.clipAction(clips[pickIdx]);
-        action.setLoop(_animLoop ? THREE.LoopRepeat : THREE.LoopOnce);
-        if (_animPlaying) action.play();
-        mixer.update(0);
+        action = mixer.clipAction(clip);
+        action.setLoop(THREE.LoopRepeat);
+        action.clampWhenFinished = false;
+        action.enabled = true;
+        action.reset();
+        action.play();
+        _animPlaying = true;
+        // Debug: log mixer.time after 1s to confirm it advances
+        setTimeout(() => console.log('[anim-result] mixer.time after 1s =', mixer ? mixer.time.toFixed(3) : 'null'), 1000);
+      } else {
+        console.warn('[anim-result] no clips found in GLB');
       }
       const box = new THREE.Box3();
       if (sk) {
