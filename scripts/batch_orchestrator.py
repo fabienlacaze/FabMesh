@@ -73,7 +73,7 @@ from typing import Optional
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
 
-AUTO_LABEL = SCRIPTS / "auto_label_rig.py"
+AUTO_LABEL = SCRIPTS / "label_by_topology.py"  # was auto_label_rig.py — topology-based gives +7 pts mean score on humanoid smoke test
 ROKOKO_BATCH = SCRIPTS / "rokoko_batch_retarget.py"
 JUDGE = SCRIPTS / "judge_retarget.py"  # optional — inline fallback below
 
@@ -165,11 +165,12 @@ def ensure_labels(row: Row, log_fp) -> tuple[bool, str]:
     if labels_path.is_file():
         return True, "cached"
 
+    # label_by_topology.py does not take a --class flag (it's humanoid-only
+    # right now — topology-based identification of the 22 canonical bones).
     cmd = [
         sys.executable, str(AUTO_LABEL),
         "--rig", row.mesh_glb,
         "--out", str(labels_path),
-        "--class", row.cls,
     ]
     try:
         rc = subprocess.run(
