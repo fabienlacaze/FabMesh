@@ -478,12 +478,15 @@ def run_single_retarget():
         """Return a unit vector pointing FROM hips TO head, with the
         UP component zeroed out. Up = world Z in Blender."""
         import mathutils
-        if hips_name not in arm_obj.data.bones:
+        # 2026-06-13 FIX: hips_name can be None when _find_bone_loose
+        # didn't match any candidate (rare quadruped/winged source FBXs).
+        # `None in bpy_prop_collection` throws TypeError; bail cleanly.
+        if not hips_name or hips_name not in arm_obj.data.bones:
             return None
         hips_world = arm_obj.matrix_world @ arm_obj.data.bones[hips_name].head_local
         head_world = None
         for n in head_candidates:
-            if n in arm_obj.data.bones:
+            if n and n in arm_obj.data.bones:
                 head_world = arm_obj.matrix_world @ arm_obj.data.bones[n].head_local
                 break
         if head_world is None:

@@ -10639,16 +10639,25 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     }
     const motion = matching[0];
     setStatus(`Picked "${motion.label || motion.id}" (${matching.length} candidates), starting…`);
+    console.log('[anim] rigPath:', rigPath, 'motion:', motion);
     setStatus(`Retargeting "${motion.name}" (${mode})…`);
     const result = await window.meshyAPI.animRetarget({
-      rigPath, motionPath: motion.fbxPath, mode,
+      meshPath: rigPath,
+      motionId: motion.id,
+      mode,
     });
-    if (!result?.ok) {
+    if (!result?.success) {
       setStatus(`Retarget failed: ${result?.error || 'unknown'}`, true);
       btn.disabled = false;
       return;
     }
-    setStatus(`Done — ${result.outPath?.split(/[\\/]/).pop()} (judge: ${result.verdict || 'n/a'})`);
+    // Run the auto-judge for a quick verdict
+    let verdict = 'n/a';
+    try {
+      const judged = await window.meshyAPI.animJudge({ glbPath: result.glbPath });
+      verdict = judged?.verdict || 'n/a';
+    } catch (_) {}
+    setStatus(`Done — ${result.glbPath?.split(/[\\/]/).pop()} (judge: ${verdict})`);
     // Refresh the project animations strip if the project model supports it
     try {
       await reloadCurrentProject?.();

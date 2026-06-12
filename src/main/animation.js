@@ -77,24 +77,36 @@ function _resolveMotionLib() {
  * map class prefixes to the three Puppeteer anchors.
  */
 function _buildMotionIndex(libRoot) {
-  const PREFIX_TO_CLASS = {
-    AS:   'humanoid',     // Asset Studio = humanoids in Apovivor's naming
-    HUM:  'humanoid',
-    QUAD: 'quadruped',
-    DOG:  'quadruped',
-    DRAG: 'winged_biped',
-    WING: 'winged_biped',
-  };
+  // 2026-06-13: Apovivor naming is inconsistent (ANIM_<animal>_<verb> for
+  // animals, ANIM_AS_<Robot>_<verb> for humanoids, ANIM_MOUNTAIN_DRAGON_<verb>
+  // for dragons). Use a substring rule list instead of strict prefix match.
+  const CLASS_RULES = [
+    { keywords: ['mountain_dragon', 'wyvern', 'crow', 'phoenix'],
+      cls: 'winged_biped' },
+    { keywords: ['comodo_dragon', 'wolfhound', 'lizard', 'elephant',
+                 'wolf', 'tiger', 'bear', 'horse', 'lion', 'cat', 'dog',
+                 'fox', 'deer', 'sheep', 'spider', 'hexapod'],
+      cls: 'quadruped' },
+    { keywords: ['as_robot', '_robot', 'samurai', 'peasant', 'orc',
+                 'humanoid', 'human', 'soldier', 'warrior'],
+      cls: 'humanoid' },
+  ];
+  function detectClass(filename) {
+    const lc = filename.toLowerCase();
+    for (const rule of CLASS_RULES) {
+      if (rule.keywords.some((k) => lc.includes(k))) return rule.cls;
+    }
+    return 'humanoid';  // safe fallback
+  }
   const out = { generatedAt: Date.now(), root: libRoot, motions: [] };
   const files = fs.readdirSync(libRoot).filter((f) => f.toLowerCase().endsWith('.fbx'));
   for (const fname of files) {
     const base = fname.replace(/\.fbx$/i, '');
     const tokens = base.split('_');
-    const prefix = (tokens[1] || '').toUpperCase();
-    const cls = PREFIX_TO_CLASS[prefix] || 'humanoid';
+    const cls = detectClass(base);
     out.motions.push({
-      id: base,                                 // stable filename-based id
-      label: (tokens.slice(2).join(' ') || base),
+      id: base,
+      label: (tokens.slice(1).join(' ') || base),
       cls,
       fbxPath: path.join(libRoot, fname),
       thumb: path.join(MOTION_THUMBS_DIR, `${base}.webp`),
