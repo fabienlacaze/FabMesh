@@ -360,25 +360,57 @@ def auto_label(rig_pred_txt: Path, class_hint: str | None = None,
     used_labels: set[str] = set()
     # Sort target joints by importance: Hips/Spine first, then limbs
     target_joints = sorted(positions.keys())
+
+    # 2026-06-12 FIX L/R confusion: k-NN matches features that may not
+    # disambiguate Left vs Right (positions are root-relative and may
+    # flip across rigs). Enforce side based on the target joint's
+    # actual X sign (after centering on root). Left side = X < 0,
+    # Right side = X > 0 (Mixamo/Trellis convention: character faces -Z
+    # or +Y depending on rig, but L/R is consistently along X).
+    # We compute the centered X per joint and use it to constrain the
+    # label's "Left"/"Right" prefix.
+
+    # Centered X per joint (root at origin)
+    root_x = positions[root_idx][0]
+    centered_x = {j: positions[j][0] - root_x for j in positions}
+
+    def desired_side(j):
+        x = centered_x[j]
+        # Joints very close to center (|x| < 5% of span) have no side
+        if abs(x) < 0.05 * span:
+            return None  # center bone
+        return "Left" if x < 0 else "Right"
+
+    def flip_side(label):
+        if label.startswith("Left"):
+            return "Right" + label[4:]
+        if label.startswith("Right"):
+            return "Left" + label[5:]
+        return label
+
     # We do a greedy 1-to-1 assignment: for each target joint, pick the
-    # best matching anchor joint whose label is still available.
+    # best matching anchor joint whose label is still available AND
+    # whose Left/Right matches the target joint's X sign.
     for j in target_joints:
         v = feats[j]
-        # Cosine similarity vs each anchor row
-        # Note: small-dim vectors, use raw L2 distance instead — more robust
         d = np.linalg.norm(anchor_feats - v[None, :], axis=1)
-        # Sort anchor joints by distance, pick the first whose label isn't used
         order = np.argsort(d)
+        side_wanted = desired_side(j)
         chosen = None
         for k in order:
             ai = anchor_joint_idxs[k]
             lbl = anchor_labels_by_idx[ai]
+            # If side is enforced, possibly flip Left<->Right of the label
+            if side_wanted is not None:
+                if side_wanted == "Left" and lbl.startswith("Right"):
+                    lbl = flip_side(lbl)
+                elif side_wanted == "Right" and lbl.startswith("Left"):
+                    lbl = flip_side(lbl)
             if lbl not in used_labels:
                 chosen = lbl
                 used_labels.add(lbl)
                 break
         if chosen is None:
-            # All labels used — pick best non-Hips
             ai = anchor_joint_idxs[int(order[0])]
             chosen = anchor_labels_by_idx[ai]
         out_labels[j] = chosen
