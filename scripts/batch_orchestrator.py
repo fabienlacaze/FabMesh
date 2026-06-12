@@ -230,7 +230,7 @@ def judge_external(out_glb: Path, report_path: Path, log_fp, timeout_s: int = 90
         return None
     cmd = [
         sys.executable, str(JUDGE),
-        "--glb", str(out_glb),
+        str(out_glb),
         "--out", str(report_path),
     ]
     try:
