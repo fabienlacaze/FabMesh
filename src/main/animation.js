@@ -327,14 +327,19 @@ function register(deps) {
     const jobId = _safeId();
     const outDir = path.join(MESHES_DIR || os.tmpdir(), 'animated');
     _ensureDir(outDir);
-    const baseName = path.basename(meshPath, path.extname(meshPath))
-      .replace(/[^a-zA-Z0-9_-]/g, '_');
-    const outGlb = path.join(outDir,
-      `${baseName}__${motion.id}_${Date.now()}.glb`);
+    // 2026-06-13: align with rokoko_batch_retarget.py:997 which writes
+    // `${Path(src_fbx).stem}__${Path(tgt_glb).stem}.glb` — we must
+    // compute the same filename so fs.existsSync(outGlb) succeeds at
+    // proc.close. Previously animation.js used a timestamped name
+    // that never existed -> "Blender exited code=0" misleading.
+    const motionStem = path.basename(motion.fbxPath, path.extname(motion.fbxPath));
+    const rigStem = path.basename(meshPath, path.extname(meshPath));
+    const outGlb = path.join(outDir, `${motionStem}__${rigStem}.glb`);
 
+    const motionDisplay = motion.label || motion.id || 'motion';
     _sendToAllWindows(BrowserWindow, 'anim:progress',
       { jobId, phase: 'start', pct: 0,
-        msg: `Retargeting ${motion.label} (${mode})` });
+        msg: `Retargeting "${motionDisplay}" (${mode})` });
 
     try {
       const runner = (mode === 'cloud')

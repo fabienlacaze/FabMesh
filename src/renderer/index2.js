@@ -10648,7 +10648,49 @@ function renderAnimVersions(p) {
   `).join('');
 }
 
-// 2026-06-12: wired v1 Rokoko library backend.
+// 2026-06-13: blocking progress overlay shown during the Rokoko retarget
+// (~8-20s on local Blender). Listens to anim:progress for streaming
+// status, falls back to a generic "Working…" spinner.
+function _showAnimWorkingOverlay(initialMsg) {
+  let overlay = document.getElementById('anim-working-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'anim-working-overlay';
+    overlay.innerHTML = `
+      <div style="background:#1a1a24; border:1px solid var(--border); border-radius:10px; padding:24px 32px; max-width:420px; box-shadow:0 12px 36px rgba(0,0,0,0.6); text-align:center;">
+        <div style="margin:0 auto 14px auto; width:48px; height:48px; border:4px solid rgba(255,255,255,0.1); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite;"></div>
+        <div id="anim-working-title" style="font-size:14px; font-weight:600; margin-bottom:6px;">Generating animation…</div>
+        <div id="anim-working-msg" style="font-size:12px; color:var(--text-2); min-height:14px;">${initialMsg || ''}</div>
+        <div style="margin-top:14px;"><button id="anim-working-cancel" class="ghost-btn" style="font-size:11px;">Cancel</button></div>
+      </div>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    `;
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); display:flex; align-items:center; justify-content:center; z-index:9999;';
+    document.body.appendChild(overlay);
+  } else {
+    overlay.style.display = 'flex';
+    const m = overlay.querySelector('#anim-working-msg');
+    if (m && initialMsg) m.textContent = initialMsg;
+  }
+}
+function _updateAnimWorkingOverlay(msg) {
+  const m = document.getElementById('anim-working-msg');
+  if (m) m.textContent = msg || '';
+}
+function _hideAnimWorkingOverlay() {
+  const overlay = document.getElementById('anim-working-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+// Hook progress events from main.js so the overlay reflects each step.
+if (window.meshyAPI?.onAnimProgress) {
+  window.meshyAPI.onAnimProgress((data) => {
+    if (data?.msg) _updateAnimWorkingOverlay(data.msg);
+    if (data?.phase === 'done' || data?.phase === 'error') {
+      setTimeout(_hideAnimWorkingOverlay, 600);
+    }
+  });
+}
+
 document.getElementById('ws-generate-anim')?.addEventListener('click', async () => {
   const engine = document.getElementById('ws-anim-engine')?.value || 'rokoko_library';
   const animType = document.getElementById('ws-anim-type')?.value || 'walk';
@@ -10680,6 +10722,7 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   else if (lower.includes('winged') || lower.includes('dragon')) detectedClass = 'winged_biped';
 
   btn.disabled = true;
+  _showAnimWorkingOverlay('Searching motion library…');
   try {
     setStatus(`Listing ${animType} motions for ${detectedClass}…`);
     const list = await window.meshyAPI.animListMotions({ class: detectedClass });
@@ -10732,6 +10775,7 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     setStatus(`Error: ${err.message || err}`, true);
   } finally {
     btn.disabled = false;
+    _hideAnimWorkingOverlay();
   }
 });
 
