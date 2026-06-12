@@ -324,47 +324,422 @@ def run_single_retarget():
         ("ball_r",       "RightToeBase"),
     ]
 
-    # Lizard / Apovivor quadruped naming. Source bone names have
-    # arbitrary numeric suffixes (e.g. "LizardLLegThigh11",
-    # "LizardLLegCalf323") -> match by prefix instead.
-    QUADRUPED_PREFIX_MAP = [
-        ("LizardSpine1",            "Hips"),
-        ("LizardSpine2",            "Spine"),
-        ("LizardSpine3",            "Spine1"),
-        ("LizardSpine4",            "Spine2"),
-        ("LizardSpine5",            "Spine3"),
-        ("LizardSpine6",            "Spine3"),  # collapses if Spine3 already used
-        ("LizardRibcage",           "Spine3"),
-        ("LizardNeck1",             "Neck"),
-        ("LizardNeck2",             "Neck1"),
-        ("LizardNeck3",             "Neck2"),
-        ("LizardNeck4",             "Neck2"),
-        ("LizardHead",              "Head"),
-        ("LizardLLegThigh",         "RearLeftUpLeg"),
-        ("LizardLLegCalf",          "RearLeftLeg"),
-        ("LizardLLegAnkle",         "RearLeftAnkle"),
-        ("LizardLLegDigit",         "RearLeftFoot"),
-        ("LizardRRearLegThigh",     "RearRightUpLeg"),
-        ("LizardRRearLegCalf",      "RearRightLeg"),
-        ("LizardRRearLegAnkle",     "RearRightAnkle"),
-        ("LizardRRearLegDigit",     "RearRightFoot"),
-        ("LizardLFrontLegCollarbone", "FrontLeftShoulder"),
-        ("LizardLFrontLegUpper",      "FrontLeftUpLeg"),
-        ("LizardLFrontLegLower",      "FrontLeftLeg"),
-        ("LizardLFrontLegPalm",       "FrontLeftFoot"),
-        ("LizardLFrontLegDigit",      "FrontLeftToeBase"),
-        ("LizardRFrontLegCollarbone", "FrontRightShoulder"),
-        ("LizardRFrontLegUpper",      "FrontRightUpLeg"),
-        ("LizardRFrontLegLower",      "FrontRightLeg"),
-        ("LizardRFrontLegPalm",       "FrontRightFoot"),
-        ("LizardTail1",  "Tail"),
-        ("LizardTail2",  "Tail1"),
-        ("LizardTail3",  "Tail2"),
-        ("LizardTail4",  "Tail3"),
-        ("LizardTail5",  "Tail4"),
-        ("LizardTail6",  "Tail5"),
-        ("LizardTail7",  "Tail6"),
-    ]
+    # 2026-06-13: Per-source-kind quadruped prefix maps. The Apovivor
+    # motion library ships FBXs with WILDLY different bone naming
+    # schemas (Lizard*, Panther*, Wolf_, Fox_, LION_, ELEPHANT_,
+    # RootPart1_M, Scapula_, Cow_*SHJnt, Spider*, MOUNTAIN_DRAGON_).
+    # Each one needs its own prefix -> target-role mapping. The
+    # detect_source_kind() helper below sniffs source bone names and
+    # picks the right map; if nothing matches we fall back to the
+    # humanoid map (which will fail loudly rather than silently).
+    QUADRUPED_PREFIX_MAPS = {
+        "lizard": [
+            ("LizardSpine1",            "Hips"),
+            ("LizardSpine2",            "Spine"),
+            ("LizardSpine3",            "Spine1"),
+            ("LizardSpine4",            "Spine2"),
+            ("LizardSpine5",            "Spine3"),
+            ("LizardSpine6",            "Spine3"),
+            ("LizardRibcage",           "Spine3"),
+            ("LizardNeck1",             "Neck"),
+            ("LizardNeck2",             "Neck1"),
+            ("LizardNeck3",             "Neck2"),
+            ("LizardNeck4",             "Neck2"),
+            ("LizardHead",              "Head"),
+            ("LizardLLegThigh",         "RearLeftUpLeg"),
+            ("LizardLLegCalf",          "RearLeftLeg"),
+            ("LizardLLegAnkle",         "RearLeftAnkle"),
+            ("LizardLLegDigit",         "RearLeftFoot"),
+            ("LizardRRearLegThigh",     "RearRightUpLeg"),
+            ("LizardRRearLegCalf",      "RearRightLeg"),
+            ("LizardRRearLegAnkle",     "RearRightAnkle"),
+            ("LizardRRearLegDigit",     "RearRightFoot"),
+            ("LizardLFrontLegCollarbone", "FrontLeftShoulder"),
+            ("LizardLFrontLegUpper",      "FrontLeftUpLeg"),
+            ("LizardLFrontLegLower",      "FrontLeftLeg"),
+            ("LizardLFrontLegPalm",       "FrontLeftFoot"),
+            ("LizardLFrontLegDigit",      "FrontLeftToeBase"),
+            ("LizardRFrontLegCollarbone", "FrontRightShoulder"),
+            ("LizardRFrontLegUpper",      "FrontRightUpLeg"),
+            ("LizardRFrontLegLower",      "FrontRightLeg"),
+            ("LizardRFrontLegPalm",       "FrontRightFoot"),
+            ("LizardTail1",  "Tail"),
+            ("LizardTail2",  "Tail1"),
+            ("LizardTail3",  "Tail2"),
+            ("LizardTail4",  "Tail3"),
+            ("LizardTail5",  "Tail4"),
+            ("LizardTail6",  "Tail5"),
+            ("LizardTail7",  "Tail6"),
+        ],
+        "panther_cat": [
+            ("PantherSpine1",  "Hips"),
+            ("PantherSpine2",  "Spine"),
+            ("PantherSpine3",  "Spine1"),
+            ("PantherSpine4",  "Spine2"),
+            ("PantherSpine5",  "Spine3"),
+            ("PantherSpine6",  "Spine3"),
+            ("PantherRibcage", "Spine3"),
+            ("PantherNeck1",   "Neck"),
+            ("PantherNeck2",   "Neck1"),
+            ("PantherNeck3",   "Neck2"),
+            ("PantherNeck4",   "Neck2"),
+            ("PantherHead",    "Head"),
+            ("PantherLLegShoulderblade", "FrontLeftShoulder"),
+            ("PantherLLegCollarbone",    "FrontLeftShoulder"),
+            ("PantherRLegShoulderblade", "FrontRightShoulder"),
+            ("PantherRLegCollarbone",    "FrontRightShoulder"),
+            ("PantherLLeg1",     "RearLeftUpLeg"),
+            ("PantherLLeg2",     "RearLeftLeg"),
+            ("PantherLLegPalm",  "RearLeftFoot"),
+            ("PantherLLegDigit0", "RearLeftToeBase"),
+            ("PantherRLeg1",     "RearRightUpLeg"),
+            ("PantherRLeg2",     "RearRightLeg"),
+            ("PantherRLegPalm",  "RearRightFoot"),
+            ("PantherRLegDigit0", "RearRightFoot"),
+            ("PantherTail1", "Tail"),
+            ("PantherTail2", "Tail1"),
+            ("PantherTail3", "Tail2"),
+            ("PantherTail4", "Tail3"),
+            ("PantherTail5", "Tail4"),
+            ("PantherTail6", "Tail5"),
+            ("PantherTail7", "Tail6"),
+        ],
+        "wolf_biped": [
+            ("Wolf_ Pelvis",     "Hips"),
+            ("Wolf_ Spine1",     "Spine1"),
+            ("Wolf_ Spine",      "Spine"),
+            ("Wolf_ Neck2",      "Neck2"),
+            ("Wolf_ Neck1",      "Neck1"),
+            ("Wolf_ Neck",       "Neck"),
+            ("Wolf_ Head",       "Head"),
+            ("Wolf_ L Clavicle", "FrontLeftShoulder"),
+            ("Wolf_ L UpperArm", "FrontLeftUpLeg"),
+            ("Wolf_ L Forearm",  "FrontLeftLeg"),
+            ("Wolf_ L Hand",     "FrontLeftFoot"),
+            ("Wolf_ L Finger0",  "FrontLeftToeBase"),
+            ("Wolf_ R Clavicle", "FrontRightShoulder"),
+            ("Wolf_ R UpperArm", "FrontRightUpLeg"),
+            ("Wolf_ R Forearm",  "FrontRightLeg"),
+            ("Wolf_ R Hand",     "FrontRightFoot"),
+            ("Wolf_ L Thigh",    "RearLeftUpLeg"),
+            ("Wolf_ L Calf",     "RearLeftLeg"),
+            ("Wolf_ L HorseLink", "RearLeftAnkle"),
+            ("Wolf_ L Foot",     "RearLeftFoot"),
+            ("Wolf_ R Thigh",    "RearRightUpLeg"),
+            ("Wolf_ R Calf",     "RearRightLeg"),
+            ("Wolf_ R HorseLink", "RearRightAnkle"),
+            ("Wolf_ R Foot",     "RearRightFoot"),
+            ("Wolf_ Tail5", "Tail5"),
+            ("Wolf_ Tail4", "Tail4"),
+            ("Wolf_ Tail3", "Tail3"),
+            ("Wolf_ Tail2", "Tail2"),
+            ("Wolf_ Tail1", "Tail1"),
+            ("Wolf_ Tail",  "Tail"),
+        ],
+        "fox_biped": [
+            ("Fox_ Pelvis",     "Hips"),
+            ("Fox_ Spine1",     "Spine1"),
+            ("Fox_ Spine",      "Spine"),
+            ("Fox_ Neck2",      "Neck2"),
+            ("Fox_ Neck1",      "Neck1"),
+            ("Fox_ Neck",       "Neck"),
+            ("Fox_ Head",       "Head"),
+            ("Fox_ L Clavicle", "FrontLeftShoulder"),
+            ("Fox_ L UpperArm", "FrontLeftUpLeg"),
+            ("Fox_ L Forearm",  "FrontLeftLeg"),
+            ("Fox_ L Hand",     "FrontLeftFoot"),
+            ("Fox_ L Finger0",  "FrontLeftToeBase"),
+            ("Fox_ R Clavicle", "FrontRightShoulder"),
+            ("Fox_ R UpperArm", "FrontRightUpLeg"),
+            ("Fox_ R Forearm",  "FrontRightLeg"),
+            ("Fox_ R Hand",     "FrontRightFoot"),
+            ("Fox_ L Thigh",    "RearLeftUpLeg"),
+            ("Fox_ L Calf",     "RearLeftLeg"),
+            ("Fox_ L HorseLink", "RearLeftAnkle"),
+            ("Fox_ L Foot",     "RearLeftFoot"),
+            ("Fox_ R Thigh",    "RearRightUpLeg"),
+            ("Fox_ R Calf",     "RearRightLeg"),
+            ("Fox_ R HorseLink", "RearRightAnkle"),
+            ("Fox_ R Foot",     "RearRightFoot"),
+            ("Fox_ Tail5", "Tail5"),
+            ("Fox_ Tail4", "Tail4"),
+            ("Fox_ Tail3", "Tail3"),
+            ("Fox_ Tail2", "Tail2"),
+            ("Fox_ Tail1", "Tail1"),
+            ("Fox_ Tail",  "Tail"),
+        ],
+        "lion_biped": [
+            ("LION_ Pelvis",     "Hips"),
+            ("LION_ Spine2",     "Spine2"),
+            ("LION_ Spine1",     "Spine1"),
+            ("LION_ Spine",      "Spine"),
+            ("LION_ Neck1",      "Neck1"),
+            ("LION_ Neck",       "Neck"),
+            ("LION_ Head",       "Head"),
+            ("LION_ L Clavicle", "FrontLeftShoulder"),
+            ("LION_ L UpperArm", "FrontLeftUpLeg"),
+            ("LION_ L Forearm",  "FrontLeftLeg"),
+            ("LION_ L Hand",     "FrontLeftFoot"),
+            ("LION_ L Finger0",  "FrontLeftToeBase"),
+            ("LION_ R Clavicle", "FrontRightShoulder"),
+            ("LION_ R UpperArm", "FrontRightUpLeg"),
+            ("LION_ R Forearm",  "FrontRightLeg"),
+            ("LION_ R Hand",     "FrontRightFoot"),
+            ("LION_ L Thigh",    "RearLeftUpLeg"),
+            ("LION_ L Calf",     "RearLeftLeg"),
+            ("LION_ L HorseLink", "RearLeftAnkle"),
+            ("LION_ L Foot",     "RearLeftFoot"),
+            ("LION_ L Toe0",     "RearLeftToeBase"),
+            ("LION_ R Thigh",    "RearRightUpLeg"),
+            ("LION_ R Calf",     "RearRightLeg"),
+            ("LION_ R HorseLink", "RearRightAnkle"),
+            ("LION_ R Foot",     "RearRightFoot"),
+            ("LION_ Tail6", "Tail6"),
+            ("LION_ Tail5", "Tail5"),
+            ("LION_ Tail4", "Tail4"),
+            ("LION_ Tail3", "Tail3"),
+            ("LION_ Tail2", "Tail2"),
+            ("LION_ Tail1", "Tail1"),
+            ("LION_ Tail",  "Tail"),
+        ],
+        "elephant_biped": [
+            ("ELEPHANT_ Pelvis",     "Hips"),
+            ("ELEPHANT_ Spine1",     "Spine1"),
+            ("ELEPHANT_ Spine",      "Spine"),
+            ("ELEPHANT_ Neck1",      "Neck1"),
+            ("ELEPHANT_ Neck",       "Neck"),
+            ("ELEPHANT_ Head",       "Head"),
+            ("ELEPHANT_ L Clavicle", "FrontLeftShoulder"),
+            ("ELEPHANT_ L UpperArm", "FrontLeftUpLeg"),
+            ("ELEPHANT_ L Forearm",  "FrontLeftLeg"),
+            ("ELEPHANT_ L Hand",     "FrontLeftFoot"),
+            ("ELEPHANT_ R Clavicle", "FrontRightShoulder"),
+            ("ELEPHANT_ R UpperArm", "FrontRightUpLeg"),
+            ("ELEPHANT_ R Forearm",  "FrontRightLeg"),
+            ("ELEPHANT_ R Hand",     "FrontRightFoot"),
+            ("ELEPHANT_ L Thigh",    "RearLeftUpLeg"),
+            ("ELEPHANT_ L Calf",     "RearLeftLeg"),
+            ("ELEPHANT_ L Foot",     "RearLeftFoot"),
+            ("ELEPHANT_ R Thigh",    "RearRightUpLeg"),
+            ("ELEPHANT_ R Calf",     "RearRightLeg"),
+            ("ELEPHANT_ R Foot",     "RearRightFoot"),
+            ("ELEPHANT_ Tail6", "Tail6"),
+            ("ELEPHANT_ Tail5", "Tail5"),
+            ("ELEPHANT_ Tail4", "Tail4"),
+            ("ELEPHANT_ Tail3", "Tail3"),
+            ("ELEPHANT_ Tail2", "Tail2"),
+            ("ELEPHANT_ Tail1", "Tail1"),
+            ("ELEPHANT_ Tail",  "Tail"),
+        ],
+        "anatomical_M": [
+            ("RootPart1_M",   "Hips"),
+            ("Spine1Part1_M", "Spine1"),
+            ("Spine1Part2_M", "Spine2"),
+            ("Spine1_M",      "Spine"),
+            ("Chest_M",       "Spine3"),
+            ("Neck4_M",       "Neck2"),
+            ("Neck3_M",       "Neck2"),
+            ("Neck2_M",       "Neck2"),
+            ("Neck1_M",       "Neck1"),
+            ("NeckPart3_M",   "Neck2"),
+            ("NeckPart2_M",   "Neck2"),
+            ("NeckPart1_M",   "Neck1"),
+            ("Neck_M",        "Neck"),
+            ("Head_M",        "Head"),
+            ("frontHip_L",    "FrontLeftUpLeg"),
+            ("frontRump_L",   "FrontLeftShoulder"),
+            ("frontKnee_L",   "FrontLeftLeg"),
+            ("frontAnkle_L",  "FrontLeftFoot"),
+            ("frontToes_L",   "FrontLeftToeBase"),
+            ("frontHip_R",    "FrontRightUpLeg"),
+            ("frontRump_R",   "FrontRightShoulder"),
+            ("frontKnee_R",   "FrontRightLeg"),
+            ("frontAnkle_R",  "FrontRightFoot"),
+            ("backHip_L",     "RearLeftUpLeg"),
+            ("backRump_L",    "RearLeftUpLeg"),
+            ("backKnee_L",    "RearLeftLeg"),
+            ("backAnkle_L",   "RearLeftAnkle"),
+            ("backToes_L",    "RearLeftFoot"),
+            ("backHip_R",     "RearRightUpLeg"),
+            ("backRump_R",    "RearRightUpLeg"),
+            ("backKnee_R",    "RearRightLeg"),
+            ("backAnkle_R",   "RearRightAnkle"),
+            ("backToes_R",    "RearRightFoot"),
+            ("Tail6_M", "Tail6"),
+            ("Tail5_M", "Tail5"),
+            ("Tail4_M", "Tail4"),
+            ("Tail3_M", "Tail3"),
+            ("Tail2_M", "Tail2"),
+            ("Tail1_M", "Tail1"),
+            ("Tail0_M", "Tail"),
+        ],
+        "horse_anatomical": [
+            ("RootPart1_M",   "Hips"),
+            ("RootPart2_M",   "Hips"),
+            ("Spine1Part1_M", "Spine1"),
+            ("Spine1Part2_M", "Spine2"),
+            ("Spine1_M",      "Spine"),
+            ("Chest_M",       "Spine3"),
+            ("Neck4_M",       "Neck2"),
+            ("Neck3_M",       "Neck2"),
+            ("Neck2_M",       "Neck1"),
+            ("Neck1_M",       "Neck1"),
+            ("Neck_M",        "Neck"),
+            ("Head_M",        "Head"),
+            ("Scapula_L",     "FrontLeftShoulder"),
+            ("Shoulder_L",    "FrontLeftUpLeg"),
+            ("Elbow_L",       "FrontLeftLeg"),
+            ("Wrist_L",       "FrontLeftFoot"),
+            ("Fingers1_L",    "FrontLeftToeBase"),
+            ("Scapula_R",     "FrontRightShoulder"),
+            ("Shoulder_R",    "FrontRightUpLeg"),
+            ("Elbow_R",       "FrontRightLeg"),
+            ("Wrist_R",       "FrontRightFoot"),
+            ("Hip_L",         "RearLeftUpLeg"),
+            ("Knee_L",        "RearLeftLeg"),
+            ("Ankle_L",       "RearLeftAnkle"),
+            ("Toes1_L",       "RearLeftFoot"),
+            ("Hip_R",         "RearRightUpLeg"),
+            ("Knee_R",        "RearRightLeg"),
+            ("Ankle_R",       "RearRightAnkle"),
+            ("Toes1_R",       "RearRightFoot"),
+            ("Tail4_M", "Tail4"),
+            ("Tail3_M", "Tail3"),
+            ("Tail2_M", "Tail2"),
+            ("Tail1_M", "Tail1"),
+            ("Tail0_M", "Tail"),
+        ],
+        "spider_octopod_A": [
+            ("Pelvis",     "Hips"),
+            ("Head_M",     "Head"),
+            ("Tail1_M",    "Tail"),
+            ("FrontLeg1_L", "FrontLeftShoulder"),
+            ("FrontLeg2_L", "FrontLeftUpLeg"),
+            ("FrontLeg3_L", "FrontLeftLeg"),
+            ("FrontLeg4_L", "FrontLeftFoot"),
+            ("FrontLeg1_R", "FrontRightShoulder"),
+            ("FrontLeg2_R", "FrontRightUpLeg"),
+            ("FrontLeg3_R", "FrontRightLeg"),
+            ("FrontLeg4_R", "FrontRightFoot"),
+            ("MiddleLeg1_L", "Spine"),
+            ("MiddleLeg2_L", "Spine1"),
+            ("MiddleLeg3_L", "Spine2"),
+            ("MiddleLeg4_L", "Spine3"),
+            ("BackLeg1_L",  "RearLeftUpLeg"),
+            ("BackLeg2_L",  "RearLeftLeg"),
+            ("BackLeg3_L",  "RearLeftAnkle"),
+            ("BackLeg4_L",  "RearLeftFoot"),
+            ("BackLeg1_R",  "RearRightUpLeg"),
+            ("BackLeg2_R",  "RearRightLeg"),
+            ("BackLeg3_R",  "RearRightAnkle"),
+            ("BackLeg4_R",  "RearRightFoot"),
+        ],
+        "spider_octopod_B": [
+            ("Spider100",   "Hips"),
+            ("Spider200",   "Spine"),
+            ("SpiderLLeg1", "FrontLeftShoulder"),
+            ("SpiderLLeg2", "FrontLeftUpLeg"),
+            ("SpiderLLeg3", "FrontLeftLeg"),
+            ("SpiderLLeg4", "FrontLeftFoot"),
+            ("SpiderRLeg1", "FrontRightShoulder"),
+            ("SpiderRLeg2", "FrontRightUpLeg"),
+            ("SpiderRLeg3", "FrontRightLeg"),
+            ("SpiderRLeg4", "FrontRightFoot"),
+            ("SpiderRLeg04", "RearRightUpLeg"),
+            ("SpiderRLeg05", "RearRightLeg"),
+        ],
+        "cow_maya": [
+            ("Cow_ROOTSHJnt",         "Hips"),
+            ("Cow_Spine_01SHJnt",     "Spine"),
+            ("Cow_Spine_02SHJnt",     "Spine1"),
+            ("Cow_Spine_03SHJnt",     "Spine2"),
+            ("Cow_Spine_04SHJnt",     "Spine3"),
+            ("Cow_Spine_TopSHJnt",    "Spine3"),
+            ("Cow_Neck_01SHJnt",      "Neck"),
+            ("Cow_Neck_02SHJnt",      "Neck1"),
+            ("Cow_Neck_TopSHJnt",     "Neck2"),
+            ("Cow_Head_TopSHJnt",     "Head"),
+            ("Cow_l_Clavicle_01_01SHJnt",    "FrontLeftShoulder"),
+            ("Cow_l_FrontLeg_HipSHJnt",      "FrontLeftUpLeg"),
+            ("Cow_l_FrontLeg_Knee1SHJnt",    "FrontLeftLeg"),
+            ("Cow_l_FrontLeg_Knee2SHJnt",    "FrontLeftLeg"),
+            ("Cow_l_FrontLeg_AnkleSHJnt",    "FrontLeftFoot"),
+            ("Cow_l_FrontLeg_BallSHJnt",     "FrontLeftToeBase"),
+            ("Cow_l_FrontLeg_ToeSHJnt",      "FrontLeftToeBase"),
+            ("Cow_r_Clavicle_01_01SHJnt",    "FrontRightShoulder"),
+            ("Cow_r_FrontLeg_HipSHJnt",      "FrontRightUpLeg"),
+            ("Cow_r_FrontLeg_Knee1SHJnt",    "FrontRightLeg"),
+            ("Cow_r_FrontLeg_Knee2SHJnt",    "FrontRightLeg"),
+            ("Cow_r_FrontLeg_AnkleSHJnt",    "FrontRightFoot"),
+            ("Cow_r_FrontLeg_BallSHJnt",     "FrontRightFoot"),
+            ("Cow_l_HindLeg_HipSHJnt",       "RearLeftUpLeg"),
+            ("Cow_l_HindLeg_Knee1SHJnt",     "RearLeftLeg"),
+            ("Cow_l_HindLeg_Knee2SHJnt",     "RearLeftLeg"),
+            ("Cow_l_HindLeg_AnkleSHJnt",     "RearLeftAnkle"),
+            ("Cow_l_HindLeg_BallSHJnt",      "RearLeftFoot"),
+            ("Cow_r_HindLeg_HipSHJnt",       "RearRightUpLeg"),
+            ("Cow_r_HindLeg_Knee1SHJnt",     "RearRightLeg"),
+            ("Cow_r_HindLeg_Knee2SHJnt",     "RearRightLeg"),
+            ("Cow_r_HindLeg_AnkleSHJnt",     "RearRightAnkle"),
+            ("Cow_r_HindLeg_BallSHJnt",      "RearRightFoot"),
+            ("Cow_Tail_01_06SHJnt", "Tail6"),
+            ("Cow_Tail_01_05SHJnt", "Tail5"),
+            ("Cow_Tail_01_04SHJnt", "Tail4"),
+            ("Cow_Tail_01_03SHJnt", "Tail3"),
+            ("Cow_Tail_01_02SHJnt", "Tail2"),
+            ("Cow_Tail_01_01SHJnt", "Tail"),
+        ],
+    }
+
+    def detect_source_kind(src_names):
+        """Sniff source bone names, return source_key or None.
+
+        Order matters: more specific checks first. Lowercased compare so
+        casing variants ("ELEPHANT" vs "ELEPHANt") don't matter.
+        """
+        lowered = [n.lower() for n in src_names]
+        joined = "\n".join(lowered)
+
+        def has_prefix(prefix):
+            p = prefix.lower()
+            return any(n.startswith(p) for n in lowered)
+
+        # 1. WINGED BIPED (handled separately below, but detect first).
+        if has_prefix("mountain_dragon"):
+            return "winged_biped_dragon"
+        # 2. LIZARD (comodo + green lizard).
+        if has_prefix("lizard"):
+            return "lizard"
+        # 3. PANTHER / CAT.
+        if has_prefix("panther"):
+            return "panther_cat"
+        # 4. SPIDER schema B before A (avoid Spider100 misclassification).
+        if has_prefix("spiderrleg") or has_prefix("spiderlleg"):
+            return "spider_octopod_B"
+        # 5. SPIDER schema A (unique MiddleLeg).
+        if has_prefix("middleleg1_") or has_prefix("middleleg2_"):
+            return "spider_octopod_A"
+        # 6. COW (Maya SHJnt suffix + Cow_ prefix).
+        if has_prefix("cow_root") or has_prefix("cow_spine_") or \
+                ("shjnt" in joined and has_prefix("cow_")):
+            return "cow_maya"
+        # 7. BIPED-PREFIXED quadrupeds.
+        if has_prefix("wolf_"):
+            return "wolf_biped"
+        if has_prefix("fox_"):
+            return "fox_biped"
+        if has_prefix("lion_"):
+            return "lion_biped"
+        if has_prefix("elephant_"):
+            return "elephant_biped"
+        # 8. HORSE anatomical (equestrian Scapula_ + Wrist_).
+        if has_prefix("scapula_") and has_prefix("wrist_"):
+            return "horse_anatomical"
+        # 9. ANATOMICAL _M (wolfhound / tiger / African elephant).
+        if has_prefix("rootpart1_m") or \
+                (has_prefix("fronthip_") and has_prefix("backhip_")):
+            return "anatomical_M"
+        return None
 
     # Winged biped (mountain dragon) source bone prefix mapping.
     # Source bones have a leading "MOUNTAIN_DRAGON_" prefix plus a SPACE
@@ -427,38 +802,39 @@ def run_single_retarget():
                                  for s, t in WINGED_BIPED_PREFIX_MAP]
 
     src_names = [b.name for b in src_arm.data.bones]
-    is_quadruped = any(n.startswith("Lizard") for n in src_names)
-    is_winged_biped = any(n.startswith("MOUNTAIN_DRAGON") for n in src_names)
-    if is_winged_biped:
-        # Resolve prefix matches for mountain dragon source.
-        EXPLICIT_PAIRS = []
+    source_kind = detect_source_kind(src_names)
+    print(f"[rokoko-single] source_kind detected: {source_kind}")
+
+    def _resolve_prefix_pairs(prefix_map):
+        """For each (prefix, target_role) try to find the first source
+        bone starting with prefix that's not yet used; skip if the
+        target role has already been claimed."""
+        pairs = []
         used_src = set()
         used_tgt = set()
-        for prefix, tgt in WINGED_BIPED_PAIRS_MAPPED:
+        for prefix, tgt in prefix_map:
             for n in src_names:
                 if n.startswith(prefix) and n not in used_src and tgt not in used_tgt:
-                    EXPLICIT_PAIRS.append((n, tgt))
+                    pairs.append((n, tgt))
                     used_src.add(n)
                     used_tgt.add(tgt)
                     break
+        return pairs
+
+    if source_kind == "winged_biped_dragon":
+        EXPLICIT_PAIRS = _resolve_prefix_pairs(WINGED_BIPED_PAIRS_MAPPED)
         print(f"[rokoko-single] mode=WINGED_BIPED ({len(EXPLICIT_PAIRS)} pairs resolved)")
-    elif is_quadruped:
-        # Resolve prefix matches: for each prefix, find the first
-        # source bone that starts with it (skip if already used).
-        EXPLICIT_PAIRS = []
-        used_src = set()
-        used_tgt = set()
-        for prefix, tgt in QUADRUPED_PREFIX_MAP:
-            for n in src_names:
-                if n.startswith(prefix) and n not in used_src and tgt not in used_tgt:
-                    EXPLICIT_PAIRS.append((n, tgt))
-                    used_src.add(n)
-                    used_tgt.add(tgt)
-                    break
-        print(f"[rokoko-single] mode=QUADRUPED ({len(EXPLICIT_PAIRS)} explicit pairs resolved)")
+    elif source_kind in QUADRUPED_PREFIX_MAPS:
+        EXPLICIT_PAIRS = _resolve_prefix_pairs(QUADRUPED_PREFIX_MAPS[source_kind])
+        print(f"[rokoko-single] mode=QUADRUPED:{source_kind} "
+              f"({len(EXPLICIT_PAIRS)} explicit pairs resolved)")
     else:
+        # No quadruped schema matched -> fall back to humanoid. Will fail
+        # downstream if the source is actually a quadruped, but at least
+        # we don't silently ship an empty bone_list.
         EXPLICIT_PAIRS = EXPLICIT_PAIRS_HUMANOID
-        print(f"[rokoko-single] mode=HUMANOID ({len(EXPLICIT_PAIRS)} explicit pairs)")
+        print(f"[rokoko-single] mode=HUMANOID fallback "
+              f"({len(EXPLICIT_PAIRS)} explicit pairs)")
     src_bone_names = {b.name for b in src_arm.data.bones}
     tgt_bone_names = {b.name for b in tgt_arm.data.bones}
 
