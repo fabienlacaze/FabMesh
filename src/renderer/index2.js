@@ -10631,6 +10631,11 @@ document.getElementById('ws-anim-engine')?.addEventListener('change', _wsAnimEng
 document.getElementById('ws-anim-type')?.addEventListener('change', _wsAnimEngineSync);
 _wsAnimEngineSync();
 
+// 2026-06-13: animation selection state + Three.js animated viewer
+let _selectedAnim = null;
+let _animPlaying = true;
+let _animLoop = true;
+
 function renderAnimVersions(p) {
   const strip = document.getElementById('ws-anim-versions');
   if (!strip) return;
@@ -10639,54 +10644,157 @@ function renderAnimVersions(p) {
     strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
     return;
   }
+  const iconFor = (t) => t === 'idle' ? '😴' : t === 'walk' ? '🚶'
+    : t === 'run' ? '🏃' : t === 'attack' ? '⚔️'
+    : t === 'death' ? '💀' : t === 'fly' ? '✈️' : '🎬';
+  const selectedIdx = anims.findIndex(a => _selectedAnim && a.id === _selectedAnim.id);
+  const activeIdx = selectedIdx >= 0 ? selectedIdx : 0;
   strip.innerHTML = anims.map((a, i) => `
-    <div class="version-thumb${i === 0 ? ' selected' : ''}" data-anim-idx="${i}" style="width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === 0 ? 'var(--accent)' : 'transparent'};">
-      <span style="font-size:18px;">${a.type === 'idle' ? '😴' : a.type === 'walk' ? '🚶' : a.type === 'run' ? '🏃' : a.type === 'attack' ? '⚔️' : a.type === 'death' ? '💀' : a.type === 'fly' ? '✈️' : '🎬'}</span>
+    <div class="version-thumb${i === activeIdx ? ' selected' : ''}" data-anim-idx="${i}" style="width:80px; height:80px; background:#1a1a24; border-radius:6px; padding:6px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:2px solid ${i === activeIdx ? 'var(--accent)' : 'transparent'};" title="${(a.motionLabel || a.filename || '').replace(/"/g, '&quot;')}">
+      <span style="font-size:18px;">${iconFor(a.type)}</span>
       <span style="font-size:11px; font-weight:600;">${a.type || 'clip'}</span>
-      <span style="font-size:9px; color:var(--text-2);">v${i}</span>
+      <span style="font-size:9px; color:var(--text-2);">v${anims.length - 1 - i}</span>
     </div>
   `).join('');
+  // Wire clicks: select on thumb
+  strip.querySelectorAll('.version-thumb').forEach((el) => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.dataset.animIdx, 10);
+      if (Number.isFinite(idx) && anims[idx]) _selectAnim(anims[idx]);
+    });
+  });
+  // Auto-select first if nothing selected yet
+  if (!_selectedAnim && anims[0]) _selectAnim(anims[0]);
 }
 
-// 2026-06-13: blocking progress overlay shown during the Rokoko retarget
-// (~8-20s on local Blender). Listens to anim:progress for streaming
-// status, falls back to a generic "Working…" spinner.
-function _showAnimWorkingOverlay(initialMsg) {
-  let overlay = document.getElementById('anim-working-overlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'anim-working-overlay';
-    overlay.innerHTML = `
-      <div style="background:#1a1a24; border:1px solid var(--border); border-radius:10px; padding:24px 32px; max-width:420px; box-shadow:0 12px 36px rgba(0,0,0,0.6); text-align:center;">
-        <div style="margin:0 auto 14px auto; width:48px; height:48px; border:4px solid rgba(255,255,255,0.1); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite;"></div>
-        <div id="anim-working-title" style="font-size:14px; font-weight:600; margin-bottom:6px;">Generating animation…</div>
-        <div id="anim-working-msg" style="font-size:12px; color:var(--text-2); min-height:14px;">${initialMsg || ''}</div>
-        <div style="margin-top:14px;"><button id="anim-working-cancel" class="ghost-btn" style="font-size:11px;">Cancel</button></div>
-      </div>
-      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
-    `;
-    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); display:flex; align-items:center; justify-content:center; z-index:9999;';
-    document.body.appendChild(overlay);
-  } else {
-    overlay.style.display = 'flex';
-    const m = overlay.querySelector('#anim-working-msg');
-    if (m && initialMsg) m.textContent = initialMsg;
-  }
+// Renders the animated GLB in the EDIT SELECTED preview area using
+// Three.js (GLTFLoader + AnimationMixer), reusing the same pattern
+// as c:/tmp/training_meshes/anim_preview.html which we already
+// validated end-to-end on dwarf/wolf/dragon.
+function _selectAnim(anim) {
+  if (!anim) return;
+  _selectedAnim = anim;
+  const previewArea = document.getElementById('ws-anim-preview-area');
+  if (!previewArea) return;
+  const viewer = previewArea.querySelector('div');
+  if (!viewer) return;
+  viewer.innerHTML = `
+    <canvas id="ws-anim-result-canvas" style="width:100%; height:280px; background:#0a0a0e; border-radius:6px; display:block;"></canvas>
+    <div style="margin-top:4px; font-size:11px; color:var(--text-2); text-align:center;">${anim.motionLabel || anim.filename || ''} · ${anim.verdict || ''}</div>
+  `;
+  // Re-render version strip to flip the selected class.
+  try { renderAnimVersions(state.currentProject); } catch (_) {}
+  (async () => {
+    try {
+      const THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js');
+      const { GLTFLoader } = await import('https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
+      const { OrbitControls } = await import('https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js');
+      const canvas = document.getElementById('ws-anim-result-canvas');
+      if (!canvas) return;
+      const w = canvas.clientWidth || 400, h = canvas.clientHeight || 280;
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(w, h, false);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0a0e);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+      sun.position.set(2, 3, 2); scene.add(sun);
+      const cam = new THREE.PerspectiveCamera(35, w / h, 0.001, 1000);
+      cam.position.set(2, 1, 2);
+      const ctl = new OrbitControls(cam, canvas); ctl.enableDamping = true;
+      let mixer = null, action = null;
+      const url = anim.url || ('file:///' + (anim.path || '').replace(/\\/g, '/'));
+      new GLTFLoader().load(url, (g) => {
+        const root = g.scene; scene.add(root);
+        let sk = null;
+        root.traverse(o => {
+          if (o.isMesh || o.isSkinnedMesh) {
+            o.frustumCulled = false;
+            if (o.geometry) { o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere(); }
+          }
+          if (o.isSkinnedMesh && !sk) sk = o.skeleton;
+        });
+        // Pick the Retarget clip if present (Rokoko leaves source clip as [0])
+        const clips = g.animations || [];
+        let pickIdx = clips.findIndex(a => /retarget/i.test(a.name || ''));
+        if (pickIdx < 0) pickIdx = clips.length - 1;
+        if (clips[pickIdx]) {
+          mixer = new THREE.AnimationMixer(root);
+          action = mixer.clipAction(clips[pickIdx]);
+          action.setLoop(_animLoop ? THREE.LoopRepeat : THREE.LoopOnce);
+          if (_animPlaying) action.play();
+          mixer.update(0);
+        }
+        const box = new THREE.Box3();
+        if (sk) {
+          const v = new THREE.Vector3();
+          sk.bones.forEach(b => { b.updateMatrixWorld(true); v.setFromMatrixPosition(b.matrixWorld); box.expandByPoint(v); });
+        } else {
+          box.setFromObject(root);
+        }
+        const sz = new THREE.Vector3(); box.getSize(sz);
+        const c = new THREE.Vector3(); box.getCenter(c);
+        const d = Math.max(sz.x, sz.y, sz.z) || 1;
+        cam.position.set(c.x + d * 1.8, c.y + d * 1.0, c.z + d * 1.8);
+        cam.near = Math.max(d * 0.001, 0.001);
+        cam.far = d * 100;
+        cam.updateProjectionMatrix();
+        ctl.target.copy(c); ctl.update();
+        if (sk) {
+          const helper = new THREE.SkeletonHelper(root);
+          helper.material.linewidth = 2;
+          helper.material.color = new THREE.Color(0xff8800);
+          scene.add(helper);
+        }
+      }, undefined, (err) => console.error('[anim-result] load failed:', err));
+      const clk = new THREE.Clock();
+      (function tick() {
+        requestAnimationFrame(tick);
+        if (mixer && _animPlaying) mixer.update(clk.getDelta());
+        ctl.update();
+        renderer.render(scene, cam);
+      })();
+    } catch (e) {
+      console.error('[anim-result] init failed:', e);
+    }
+  })();
 }
-function _updateAnimWorkingOverlay(msg) {
-  const m = document.getElementById('anim-working-msg');
-  if (m) m.textContent = msg || '';
-}
-function _hideAnimWorkingOverlay() {
-  const overlay = document.getElementById('anim-working-overlay');
-  if (overlay) overlay.style.display = 'none';
-}
-// Hook progress events from main.js so the overlay reflects each step.
+
+// Wire EDIT SELECTED toolbar buttons (Play / Loop / Export FBX / Show in folder)
+document.getElementById('ws-anim-play-btn')?.addEventListener('click', () => {
+  _animPlaying = !_animPlaying;
+});
+document.getElementById('ws-anim-loop-btn')?.addEventListener('click', () => {
+  _animLoop = !_animLoop;
+});
+document.getElementById('ws-anim-folder-btn')?.addEventListener('click', async () => {
+  if (!_selectedAnim?.path) return;
+  try { await window.meshyAPI.showInFolder?.(_selectedAnim.path); } catch (_) {}
+});
+document.getElementById('ws-anim-export-btn')?.addEventListener('click', async () => {
+  if (!_selectedAnim?.path) return;
+  try {
+    const res = await window.meshyAPI.animExport?.({ glbPath: _selectedAnim.path, format: 'fbx' });
+    if (res?.success) showToast?.(`Exported: ${res.path}`, 'success');
+    else showToast?.(`Export failed: ${res?.error || 'unknown'}`, 'error');
+  } catch (e) { showToast?.(`Export error: ${e.message}`, 'error'); }
+});
+
+// 2026-06-13: reuse the existing pushJob/completeJob "Running task"
+// modal (same UX as image-to-3D / rig / refine) for the animation
+// retarget. Active jobs in this session are tracked here so the
+// streaming anim:progress channel can keep updating the right one.
+let _activeAnimJob = null;
 if (window.meshyAPI?.onAnimProgress) {
   window.meshyAPI.onAnimProgress((data) => {
-    if (data?.msg) _updateAnimWorkingOverlay(data.msg);
-    if (data?.phase === 'done' || data?.phase === 'error') {
-      setTimeout(_hideAnimWorkingOverlay, 600);
+    if (!_activeAnimJob || typeof updateJobProgress !== 'function') return;
+    // Drive the progress bar by phase (no real % from the backend yet).
+    const phaseToPct = { start: 5, search: 15, match: 25, retarget: 60, bake: 85, judge: 95, done: 100 };
+    const pct = (typeof data?.pct === 'number' && data.pct > 0)
+      ? data.pct : (phaseToPct[data?.phase] ?? null);
+    if (pct != null) {
+      try { updateJobProgress(_activeAnimJob.id, pct, data.msg); } catch (_) {}
     }
   });
 }
@@ -10722,7 +10830,18 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
   else if (lower.includes('winged') || lower.includes('dragon')) detectedClass = 'winged_biped';
 
   btn.disabled = true;
-  _showAnimWorkingOverlay('Searching motion library…');
+  // Open the standard "Running task" modal so the user sees the same UX
+  // as the other steps (image-to-3D, rig, refine, etc.).
+  const meshNameDisplay = (rigPath || '').split(/[\\/]/).pop();
+  _activeAnimJob = (typeof pushJob === 'function')
+    ? pushJob(`Animate: ${animType}`, null, {
+        Engine: 'MyFabmesh.AI Anim (local, Rokoko)',
+        'Source mesh': meshNameDisplay,
+        Class: detectedClass,
+        Animation: animType,
+        Mode: mode,
+      }, 20000, { sourceImageUrl: rigPath, projectName: proj?.name })
+    : null;
   try {
     setStatus(`Listing ${animType} motions for ${detectedClass}…`);
     const list = await window.meshyAPI.animListMotions({ class: detectedClass });
@@ -10767,15 +10886,45 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
       verdict = judged?.verdict || 'n/a';
     } catch (_) {}
     setStatus(`Done — ${result.glbPath?.split(/[\\/]/).pop()} (judge: ${verdict})`);
-    // Refresh the project animations strip if the project model supports it
-    try {
-      await reloadCurrentProject?.();
-    } catch (_) {}
+
+    // 2026-06-13: push the new animation into the project model so the
+    // version strip + EDIT SELECTED viewer pick it up, matching the
+    // cloud renderer pattern in cloud/public/app/index2.js:653.
+    const proj2 = state.currentProject;
+    if (proj2) {
+      proj2.animations = proj2.animations || [];
+      const filename = result.glbPath.split(/[\\/]/).pop();
+      proj2.animations.unshift({
+        id: result.jobId || `${Date.now()}`,
+        batchId: `local_${Date.now()}`,
+        type: animType,
+        filename,
+        path: result.glbPath,
+        url: 'file:///' + result.glbPath.replace(/\\/g, '/'),
+        engine: 'rokoko_library',
+        mode,
+        motionId: motion.id,
+        motionLabel: motion.label,
+        verdict,
+        created: new Date().toISOString(),
+      });
+      // Refresh the version strip + EDIT SELECTED viewer.
+      try { renderAnimVersions(proj2); } catch (_) {}
+      try { _selectAnim?.(proj2.animations[0]); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('anim:new', { detail: proj2.animations[0] })); } catch (_) {}
+    }
+    if (_activeAnimJob && typeof completeJob === 'function') {
+      try { completeJob(_activeAnimJob.id, true); } catch (_) {}
+      _activeAnimJob = null;
+    }
   } catch (err) {
     setStatus(`Error: ${err.message || err}`, true);
+    if (_activeAnimJob && typeof completeJob === 'function') {
+      try { completeJob(_activeAnimJob.id, false, String(err.message || err)); } catch (_) {}
+      _activeAnimJob = null;
+    }
   } finally {
     btn.disabled = false;
-    _hideAnimWorkingOverlay();
   }
 });
 
