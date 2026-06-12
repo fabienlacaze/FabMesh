@@ -10607,20 +10607,38 @@ document.getElementById('ws-generate-anim')?.addEventListener('click', async () 
     setStatus('No rigged mesh on this project. Run Step 3 first.', true);
     return;
   }
+  // Detect class from rig filename: looks for "quadruped" / "winged" / etc.
+  const lower = rigPath.toLowerCase();
+  let detectedClass = 'humanoid';
+  if (lower.includes('quadruped') || lower.includes('quadrup')) detectedClass = 'quadruped';
+  else if (lower.includes('winged') || lower.includes('dragon')) detectedClass = 'winged_biped';
 
   btn.disabled = true;
   try {
-    setStatus(`Listing ${animType} motions…`);
-    const list = await window.meshyAPI.animListMotions({ class: 'humanoid' });
-    const matching = (list.motions || []).filter(m =>
-      (m.name || '').toLowerCase().includes(animType.toLowerCase())
-    );
+    setStatus(`Listing ${animType} motions for ${detectedClass}…`);
+    const list = await window.meshyAPI.animListMotions({ class: detectedClass });
+    const target = animType.toLowerCase();
+    // Match against id (= filename) and label (= human-readable tokens)
+    const matching = (list.motions || []).filter(m => {
+      const id = (m.id || '').toLowerCase();
+      const label = (m.label || '').toLowerCase();
+      return id.includes(target) || label.includes(target);
+    });
     if (!matching.length) {
-      setStatus(`No "${animType}" motion found in library (${list.total || 0} indexed).`, true);
-      btn.disabled = false;
-      return;
+      // Fallback: any class (motion library may be sparse for non-humanoid)
+      const allList = await window.meshyAPI.animListMotions({});
+      const anyMatch = (allList.motions || []).filter(m =>
+        ((m.id || '') + (m.label || '')).toLowerCase().includes(target)
+      );
+      if (!anyMatch.length) {
+        setStatus(`No "${animType}" motion found in library (${list.total || 0} for ${detectedClass}, ${allList.total || 0} total).`, true);
+        btn.disabled = false;
+        return;
+      }
+      matching.push(...anyMatch);
     }
     const motion = matching[0];
+    setStatus(`Picked "${motion.label || motion.id}" (${matching.length} candidates), starting…`);
     setStatus(`Retargeting "${motion.name}" (${mode})…`);
     const result = await window.meshyAPI.animRetarget({
       rigPath, motionPath: motion.fbxPath, mode,
