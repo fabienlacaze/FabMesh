@@ -6785,11 +6785,11 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
       `;
       try { setViewerLoading('ws-anim-source-preview', true, 'Loading rig…'); } catch (_) {}
       const clearLoading = () => { try { setViewerLoading('ws-anim-source-preview', false); } catch (_) {} };
-      (async () => {
+      (() => {
         try {
-          const THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js');
-          const { GLTFLoader } = await import('https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
-          const { OrbitControls } = await import('https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js');
+          // Use locally-bundled three / GLTFLoader / OrbitControls
+          // (imports at the top of this file). The previous unpkg.com
+          // dynamic imports were blocked by Electron's default CSP.
           const canvas = document.getElementById('ws-anim-rig-canvas');
           if (!canvas) { clearLoading(); return; }
           const w = canvas.clientWidth || 300, h = canvas.clientHeight || 200;
@@ -6860,7 +6860,7 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
           console.error('[anim-source] preview init failed:', err);
           clearLoading();
         }
-      })();
+      })(); /* end source-rig viewer */
     }
     const genBtn = document.getElementById('ws-generate-anim');
     if (genBtn) {
@@ -10687,83 +10687,99 @@ function _selectAnim(anim) {
     fnEl.textContent = (anim.motionLabel || anim.filename || '')
       + (anim.verdict ? ` · judge: ${anim.verdict}` : '');
   }
-  // Re-render version strip to flip the selected class.
-  try { renderAnimVersions(state.currentProject); } catch (_) {}
-  (async () => {
-    try {
-      const THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js');
-      const { GLTFLoader } = await import('https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
-      const { OrbitControls } = await import('https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js');
-      const canvas = document.getElementById('ws-anim-result-canvas');
-      if (!canvas) return;
-      const w = canvas.clientWidth || 400, h = canvas.clientHeight || 280;
-      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-      renderer.setPixelRatio(devicePixelRatio);
-      renderer.setSize(w, h, false);
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0a0a0e);
-      scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-      const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-      sun.position.set(2, 3, 2); scene.add(sun);
-      const cam = new THREE.PerspectiveCamera(35, w / h, 0.001, 1000);
-      cam.position.set(2, 1, 2);
-      const ctl = new OrbitControls(cam, canvas); ctl.enableDamping = true;
-      let mixer = null, action = null;
-      const url = anim.url || ('file:///' + (anim.path || '').replace(/\\/g, '/'));
-      new GLTFLoader().load(url, (g) => {
-        const root = g.scene; scene.add(root);
-        let sk = null;
-        root.traverse(o => {
-          if (o.isMesh || o.isSkinnedMesh) {
-            o.frustumCulled = false;
-            if (o.geometry) { o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere(); }
-          }
-          if (o.isSkinnedMesh && !sk) sk = o.skeleton;
-        });
-        // Pick the Retarget clip if present (Rokoko leaves source clip as [0])
-        const clips = g.animations || [];
-        let pickIdx = clips.findIndex(a => /retarget/i.test(a.name || ''));
-        if (pickIdx < 0) pickIdx = clips.length - 1;
-        if (clips[pickIdx]) {
-          mixer = new THREE.AnimationMixer(root);
-          action = mixer.clipAction(clips[pickIdx]);
-          action.setLoop(_animLoop ? THREE.LoopRepeat : THREE.LoopOnce);
-          if (_animPlaying) action.play();
-          mixer.update(0);
+  // Dispose any previous renderer/mixer so we don't leak across selects
+  if (_animViewer) {
+    try { _animViewer.cleanup(); } catch (_) {}
+    _animViewer = null;
+  }
+  _initAnimResultViewer(anim);
+}
+
+let _animViewer = null;
+function _initAnimResultViewer(anim) {
+  const canvas = document.getElementById('ws-anim-result-canvas');
+  if (!canvas) { console.warn('[anim-result] no canvas in DOM yet'); return; }
+  // The canvas inherits 100% × 100% from .step-card-preview canvas CSS;
+  // .step-card-preview itself is 440px tall. Wait one frame so layout
+  // has settled before we read clientWidth/Height (otherwise both are 0
+  // and the renderer doesn't draw anything).
+  requestAnimationFrame(() => {
+    const w = canvas.clientWidth || 400, h = canvas.clientHeight || 440;
+    console.log('[anim-result] canvas size', w, 'x', h);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.setSize(w, h, false);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0e);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    sun.position.set(2, 3, 2); scene.add(sun);
+    const cam = new THREE.PerspectiveCamera(35, w / h, 0.001, 1000);
+    cam.position.set(2, 1, 2);
+    const ctl = new OrbitControls(cam, canvas); ctl.enableDamping = true;
+    let mixer = null, action = null, raf = 0, disposed = false;
+    const url = anim.url || ('file:///' + (anim.path || '').replace(/\\/g, '/'));
+    console.log('[anim-result] loading', url);
+    new GLTFLoader().load(url, (g) => {
+      if (disposed) return;
+      const root = g.scene; scene.add(root);
+      let sk = null;
+      root.traverse(o => {
+        if (o.isMesh || o.isSkinnedMesh) {
+          o.frustumCulled = false;
+          if (o.geometry) { o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere(); }
         }
-        const box = new THREE.Box3();
-        if (sk) {
-          const v = new THREE.Vector3();
-          sk.bones.forEach(b => { b.updateMatrixWorld(true); v.setFromMatrixPosition(b.matrixWorld); box.expandByPoint(v); });
-        } else {
-          box.setFromObject(root);
-        }
-        const sz = new THREE.Vector3(); box.getSize(sz);
-        const c = new THREE.Vector3(); box.getCenter(c);
-        const d = Math.max(sz.x, sz.y, sz.z) || 1;
-        cam.position.set(c.x + d * 1.8, c.y + d * 1.0, c.z + d * 1.8);
-        cam.near = Math.max(d * 0.001, 0.001);
-        cam.far = d * 100;
-        cam.updateProjectionMatrix();
-        ctl.target.copy(c); ctl.update();
-        if (sk) {
-          const helper = new THREE.SkeletonHelper(root);
-          helper.material.linewidth = 2;
-          helper.material.color = new THREE.Color(0xff8800);
-          scene.add(helper);
-        }
-      }, undefined, (err) => console.error('[anim-result] load failed:', err));
-      const clk = new THREE.Clock();
-      (function tick() {
-        requestAnimationFrame(tick);
-        if (mixer && _animPlaying) mixer.update(clk.getDelta());
-        ctl.update();
-        renderer.render(scene, cam);
-      })();
-    } catch (e) {
-      console.error('[anim-result] init failed:', e);
-    }
-  })();
+        if (o.isSkinnedMesh && !sk) sk = o.skeleton;
+      });
+      const clips = g.animations || [];
+      let pickIdx = clips.findIndex(a => /retarget/i.test(a.name || ''));
+      if (pickIdx < 0) pickIdx = clips.length - 1;
+      console.log('[anim-result] mesh+skin loaded, clips=' + clips.length + ' pick=' + pickIdx);
+      if (clips[pickIdx]) {
+        mixer = new THREE.AnimationMixer(root);
+        action = mixer.clipAction(clips[pickIdx]);
+        action.setLoop(_animLoop ? THREE.LoopRepeat : THREE.LoopOnce);
+        if (_animPlaying) action.play();
+        mixer.update(0);
+      }
+      const box = new THREE.Box3();
+      if (sk) {
+        const v = new THREE.Vector3();
+        sk.bones.forEach(b => { b.updateMatrixWorld(true); v.setFromMatrixPosition(b.matrixWorld); box.expandByPoint(v); });
+      } else {
+        box.setFromObject(root);
+      }
+      const sz = new THREE.Vector3(); box.getSize(sz);
+      const c = new THREE.Vector3(); box.getCenter(c);
+      const d = Math.max(sz.x, sz.y, sz.z) || 1;
+      cam.position.set(c.x + d * 1.8, c.y + d * 1.0, c.z + d * 1.8);
+      cam.near = Math.max(d * 0.001, 0.001);
+      cam.far = d * 100;
+      cam.updateProjectionMatrix();
+      ctl.target.copy(c); ctl.update();
+      if (sk) {
+        const helper = new THREE.SkeletonHelper(root);
+        helper.material.linewidth = 2;
+        helper.material.color = new THREE.Color(0xff8800);
+        scene.add(helper);
+      }
+    }, undefined, (err) => console.error('[anim-result] GLTFLoader failed:', err));
+    const clk = new THREE.Clock();
+    (function tick() {
+      if (disposed) return;
+      raf = requestAnimationFrame(tick);
+      if (mixer && _animPlaying) mixer.update(clk.getDelta());
+      ctl.update();
+      renderer.render(scene, cam);
+    })();
+    _animViewer = {
+      cleanup() {
+        disposed = true;
+        cancelAnimationFrame(raf);
+        try { renderer.dispose(); } catch (_) {}
+      }
+    };
+  });
 }
 
 // Wire EDIT SELECTED toolbar buttons (Play / Loop / Export FBX / Show in folder)
