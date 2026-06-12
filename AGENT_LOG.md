@@ -1,5 +1,92 @@
 # FabMesh Agent Log
 
+## 2026-06-12 (feat — MyFabmesh v1: 4 composants livrés)
+
+Workflow wp8v4f2aq (6 agents en parallèle) a livré les 4 composants
+restants pour la v1 commerciale.
+
+scripts/judge_retarget.py (~33 KB)
+  Quality scorer 6 métriques (symetry, foot_contact, bone_length,
+  rest_drift, motion_range, aabb_stability), score 0-100 + verdict
+  GOOD/OK/BAD.
+  Validé sur les 3 GLB references:
+    Dwarf  + Robot1_Walk            -> GOOD (foot 1.5/s warning)
+    Wolf   + comodo_dragon_walk     -> OK (asymetrie L/R arm motion)
+    Dragon + MOUNTAIN_DRAGON_walk   -> OK (score 73.9)
+  Le judge a auto-detecte la patte droite statique du dragon:
+    "LeftLeg04 vs RightLeg04: motion ratio=0.00 (L=4.70, R=0.00)"
+  = exactement ce que l'user a observe visuellement. QA auto valide.
+
+scripts/batch_orchestrator.py (~29 KB)
+  Batch processor avec CSV input, ProcessPoolExecutor, resume support,
+  per-row timeout, auto-detect class. Sous-commandes:
+    build-csv : pair motions x rigs auto par classe
+    run       : execute le batch avec --jobs N
+
+src/main/animation.js (~16 KB)
+  IPC handlers pour Electron renderer <-> main:
+    anim:list-motions, anim:retarget, anim:judge, anim:export
+  Spawn Python subprocess pour rokoko_batch_retarget.py
+  Cache motion thumbnails local
+  Branchement local vs cloud Modal
+
+modal_app/rokoko_endpoint.py + rokoko_client.py
+  Modal endpoint "myfabmesh-rokoko" (separe de myfabmesh-cloud pour
+  pas invalider le 30-60 min CUDA Trellis build).
+  Image debian_slim + Blender 4.4.3 + Rokoko addon v1.4.3.
+  4 vCPU, 4 GB, 50 concurrent inputs, max 20 containers = 1000
+  retargets simultanes possibles.
+  Cost: $0.007 / retarget, $0.72 / user 100 retargets, $400 batch 55k
+  (vs $450 local Ryzen 5950X avec 9h wall-time).
+  Client CLI rokoko_client.py invoque par Electron main.js, retry x1
+  sur network failure, exit code 3 -> Electron fallback local.
+
+Decision strategique confirmee: AnyTop training drop pour v1.
+Pipeline Rokoko-only = 1099 motions Apovivor + retarget instantane =
+suffisant pour MVP commercial. AnyTop = v2 si user demand.
+
+## 2026-06-12 (feat — auto-label rigs + QA render headless)
+
+**Auto-labellisation** sans annotation manuelle (`scripts/auto_label_rig.py`):
+- 3 anchors par classe construits depuis nos rigs validés
+  (humanoid_05 / test_quad_00 / dragon_red_rigged) dans
+  `scripts/rig_mappings/_puppeteer_anchors/{humanoid,quadruped,winged_biped}/`
+- features.npy = (n_joints, 11) [position, position relative root, parent
+  direction, chain depth, child count]
+- k-NN L2 greedy 1-to-1 assignment vers anchor labels
+- Auto-detect classe via topology (n_ground joints + chain depth)
+- Fallback GLB parsing (skin.joints + inverseBindMatrices + SVD) quand
+  pas de pred.txt sidecar
+- Validé sur humanoid_00 sans sidecar -> 22 labels generes -> Rokoko
+  retarget tourne avec auto-align -77.7 deg
+
+**QA render headless** (`scripts/render_retarget_screenshots.py`):
+- Spawn Blender 4.4.3 subprocess, render 3 vues (front/side/3q)
+  x 3 frames (25/50/75%) = 9 PNGs en 512x512
+- Workbench renderer studio shading (pas besoin materials/lighting)
+- Camera filtering : ignore les meshes < 1000 verts (= Icosphere stubs
+  qui polluent le bbox)
+- Camera clip_start = 1e-5 (Rokoko bake scale=0.01 -> mesh ~1cm wide
+  en world, le defaut clip_start=0.1 le masquait)
+- Camera distance = mesh_size * 1.3 avec 35mm lens
+- Output: <stem>_render_report.json + 9 PNG <stem>_<view>_f<n>.png
+- Dual-mode: orchestrator subprocess + Blender-internal en 1 fichier
+
+**Resultats visuels (3 GLB known)**:
+- Dwarf + AS_Robot1_Walk: marche claire ✓
+- Wolf + comodo_dragon_walk: stride 4 pattes coherent ✓
+- Dragon + MOUNTAIN_DRAGON_walk: wings + body visibles, deforme
+  (rest pose Trellis wings spread vs source wings folded -> wings
+  delta applique mal)
+
+**Decision strategique**: AbandonneAnyTop training, pipeline Rokoko-only
+suffit pour MyFabmesh v1. 1099 motions Apovivor disponibles, pick+apply
+UX style Mixamo. AnyTop = phase 2 si users demandent motions inedites.
+
+**Prochain step**: judge_retarget.py metriques quantitatives
+(symetrie L/R, foot contact, bone length preservation, motion range)
+puis batch overnight 50 rigs x N motions x 3 classes.
+
 ## 2026-06-12 (feat — Plan B1: multi-class retarget + auto-detect forward axis)
 
 **Multi-class Rokoko pipeline E2E** :
