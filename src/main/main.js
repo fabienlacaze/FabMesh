@@ -5801,6 +5801,24 @@ function isPathAllowed(p) {
   return allowed.some(d => real === d || real.startsWith(d + path.sep));
 }
 
+// =============================================================================
+// 2026-06-12: register the v1 animation pipeline (Rokoko retarget + judge +
+// motion library). Defined in ./animation.js — exposes:
+//   anim:list-motions  (filtered by detected class)
+//   anim:motion-thumb  (lazy thumbnail)
+//   anim:retarget      (local subprocess or Modal cloud)
+//   anim:judge         (quality scorer)
+//   anim:export        (GLB / FBX / USD)
+// =============================================================================
+try {
+  require('./animation').register({
+    ipcMain, app, BrowserWindow,
+    MESHES_DIR, isPathAllowed, trackProc,
+  });
+} catch (e) {
+  console.error('[animation] register failed:', e.message);
+}
+
 // Delete an entire project: image folders matching the name, all meshes
 // derived from it, and the version history folder.
 ipcMain.handle('delete-project', (event, { projectName }) => {

@@ -196,5 +196,15 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),
   revertImage: (opts) => ipcRenderer.invoke('revert-image', opts),
-  imageQuickEdit: (opts) => ipcRenderer.invoke('image-quick-edit', opts)
+  imageQuickEdit: (opts) => ipcRenderer.invoke('image-quick-edit', opts),
+
+  // 2026-06-12: v1 animation pipeline (Rokoko retarget + judge + library)
+  animListMotions: (opts) => ipcRenderer.invoke('anim:list-motions', opts || {}),
+  animMotionThumb: (opts) => ipcRenderer.invoke('anim:motion-thumb', opts),
+  animRetarget: (opts) => ipcRenderer.invoke('anim:retarget', opts),
+  animJudge: (opts) => ipcRenderer.invoke('anim:judge', opts),
+  animExport: (opts) => ipcRenderer.invoke('anim:export', opts),
+  animCancel: (opts) => ipcRenderer.invoke('anim:cancel', opts),
+  animCostEstimate: (opts) => ipcRenderer.invoke('anim:cost-estimate', opts),
+  onAnimProgress: (cb) => ipcRenderer.on('anim-progress', (e, data) => cb(data)),
 });

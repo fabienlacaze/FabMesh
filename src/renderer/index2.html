@@ -764,7 +764,7 @@
              Generate idle/walk/run/attack clips for the rigged mesh.
              Backend: Modal Seed3D Puppeteer animation endpoint (TBD)
              ============================================================ -->
-        <article class="step-card disabled" id="step-card-animation" style="position:relative;">
+        <article class="step-card" id="step-card-animation" style="position:relative;">
           <header class="step-card-header">
             <span class="step-badge" data-step="4">4</span>
             <h3>Animation</h3>
@@ -782,12 +782,20 @@
                 <div class="stage-create-form">
                   <!-- Engine dropdown hidden: AnyTop is the only wired
                        engine. Re-show when Procedural / Seed3D land. -->
-                  <div class="form-row" style="display:none;">
+                  <div class="form-row">
                     <label>Engine</label>
                     <select id="ws-anim-engine">
-                      <option value="anytop" selected>AnyTop (skeleton-adaptive, BVH)</option>
-                      <option value="seed3d_puppeteer" disabled>Seed3D Puppeteer (deferred — outputs frames not BVH)</option>
+                      <option value="rokoko_library" selected>Motion Library (1099 Apovivor motions, Rokoko retarget)</option>
+                      <option value="anytop" disabled>AnyTop (deferred — generative motion model)</option>
+                      <option value="seed3d_puppeteer" disabled>Seed3D Puppeteer (deferred)</option>
                       <option value="procedural" disabled>Procedural (deferred — humanoid only)</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label>Mode</label>
+                    <select id="ws-anim-mode" style="width:100%;">
+                      <option value="local" selected>Local (uses Blender + Rokoko)</option>
+                      <option value="cloud">Cloud (Modal, faster scaling)</option>
                     </select>
                   </div>
                   <div class="form-row">
@@ -810,7 +818,8 @@
                     <label for="ws-anim-video">Reference video (Seed3D)</label>
                     <input id="ws-anim-video" type="file" accept="video/mp4,video/webm,video/quicktime" style="width:100%;">
                   </div>
-                  <button id="ws-generate-anim" class="primary-btn" disabled title="Backend not wired yet — Seed3D Puppeteer animation endpoint TBD">Generate Animation</button>
+                  <button id="ws-generate-anim" class="primary-btn">Generate Animation</button>
+                  <div id="ws-anim-status" style="margin-top:6px; font-size:11px; color:var(--text-2); min-height:14px;"></div>
                 </div>
                 <div class="stage-create-source">
                   <div class="stage-source-label">Source rig</div>

@@ -6802,8 +6802,8 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
       genBtn.title = '';
     }
     const engineSel = document.getElementById('ws-anim-engine');
-    if (engineSel && engineSel.value !== 'anytop') {
-      engineSel.value = 'anytop';
+    if (engineSel && !engineSel.value) {
+      engineSel.value = 'rokoko_library';
       engineSel.dispatchEvent(new Event('change'));
     }
   } catch (e) { console.warn('[anim-source] preview populate failed:', e); }
@@ -10582,13 +10582,64 @@ function renderAnimVersions(p) {
   `).join('');
 }
 
-document.getElementById('ws-generate-anim')?.addEventListener('click', () => {
-  const engine = document.getElementById('ws-anim-engine')?.value || 'seed3d_puppeteer';
-  customError(
-    `The ${engine === 'seed3d_puppeteer' ? 'Seed3D Puppeteer' : engine === 'anytop' ? 'AnyTop' : 'Procedural'} animation backend is not wired yet. ` +
-    `Step 4 UI is scaffolded; the Modal endpoint and integration will come in a follow-up commit.`,
-    'Animation backend not ready',
-  );
+// 2026-06-12: wired v1 Rokoko library backend.
+document.getElementById('ws-generate-anim')?.addEventListener('click', async () => {
+  const engine = document.getElementById('ws-anim-engine')?.value || 'rokoko_library';
+  const animType = document.getElementById('ws-anim-type')?.value || 'walk';
+  const mode = document.getElementById('ws-anim-mode')?.value || 'local';
+  const status = document.getElementById('ws-anim-status');
+  const btn = document.getElementById('ws-generate-anim');
+  const setStatus = (msg, isErr = false) => {
+    if (status) {
+      status.textContent = msg;
+      status.style.color = isErr ? 'var(--danger, #f55)' : 'var(--text-2)';
+    }
+  };
+
+  if (engine !== 'rokoko_library') {
+    customError(`${engine} not wired yet — only Motion Library is available in v1.`, 'Engine not ready');
+    return;
+  }
+  // Resolve the current rigged GLB from the active project state
+  const proj = state.currentProject;
+  const rigPath = proj?.activeRigPath || proj?.rigs?.[proj.rigs.length - 1]?.path;
+  if (!rigPath) {
+    setStatus('No rigged mesh on this project. Run Step 3 first.', true);
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    setStatus(`Listing ${animType} motions…`);
+    const list = await window.meshyAPI.animListMotions({ class: 'humanoid' });
+    const matching = (list.motions || []).filter(m =>
+      (m.name || '').toLowerCase().includes(animType.toLowerCase())
+    );
+    if (!matching.length) {
+      setStatus(`No "${animType}" motion found in library (${list.total || 0} indexed).`, true);
+      btn.disabled = false;
+      return;
+    }
+    const motion = matching[0];
+    setStatus(`Retargeting "${motion.name}" (${mode})…`);
+    const result = await window.meshyAPI.animRetarget({
+      rigPath, motionPath: motion.fbxPath, mode,
+    });
+    if (!result?.ok) {
+      setStatus(`Retarget failed: ${result?.error || 'unknown'}`, true);
+      btn.disabled = false;
+      return;
+    }
+    setStatus(`Done — ${result.outPath?.split(/[\\/]/).pop()} (judge: ${result.verdict || 'n/a'})`);
+    // Refresh the project animations strip if the project model supports it
+    try {
+      await reloadCurrentProject?.();
+    } catch (_) {}
+  } catch (err) {
+    setStatus(`Error: ${err.message || err}`, true);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // ============================================================
