@@ -848,11 +848,11 @@
                 <span class="stage-title">Edit selected</span>
                 <span class="stage-hint">Pick a clip, preview or export</span>
               </summary>
-              <div class="stage-body stage-edit-with-side">
-                <div class="stage-edit-form">
-                  <div id="ws-anim-preview" class="stage-source-img stage-source-mesh" style="min-height:320px; background:#0a0a0e; border-radius:6px; position:relative; display:flex; align-items:center; justify-content:center;">
-                    <div id="ws-anim-preview-placeholder" class="preview-placeholder">No animation selected</div>
-                    <canvas id="ws-anim-result-canvas" style="display:none; width:100%; height:100%; background:#0a0a0e; border-radius:6px;"></canvas>
+              <div class="stage-body stage-edit-body">
+                <div class="step-preview-col">
+                  <div class="step-card-preview" id="ws-anim-preview">
+                    <canvas id="ws-anim-result-canvas"></canvas>
+                    <div class="preview-placeholder" id="ws-anim-preview-placeholder">No animation selected</div>
                   </div>
                   <div id="ws-anim-filename" class="viewer-filename"></div>
                   <div id="ws-anim-stats" class="viewer-stats"></div>

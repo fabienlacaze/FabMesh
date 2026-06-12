@@ -10674,15 +10674,15 @@ function renderAnimVersions(p) {
 function _selectAnim(anim) {
   if (!anim) return;
   _selectedAnim = anim;
-  // The HTML for #ws-anim-preview now follows the same shape as
-  // #ws-mesh-preview (Step 2) — canvas + placeholder + filename below.
+  // The HTML now mirrors Step 2: .step-card-preview wraps a <canvas>
+  // (full-bleed via CSS) + a placeholder overlay. Hide the placeholder
+  // and let Three.js paint on the canvas.
   const previewBox = document.getElementById('ws-anim-preview');
   const placeholder = document.getElementById('ws-anim-preview-placeholder');
   const canvas = document.getElementById('ws-anim-result-canvas');
   const fnEl = document.getElementById('ws-anim-filename');
   if (!previewBox || !canvas) return;
   if (placeholder) placeholder.style.display = 'none';
-  canvas.style.display = 'block';
   if (fnEl) {
     fnEl.textContent = (anim.motionLabel || anim.filename || '')
       + (anim.verdict ? ` · judge: ${anim.verdict}` : '');
