@@ -158,6 +158,24 @@ def _load_hf_fallback_token():
 HF_FALLBACK_TOKEN = _load_hf_fallback_token()
 
 
+def _already_installed(repo, expected_mb):
+    """True when the repo is already in the HF cache at (at least) the
+    size we'd expect to download. Re-running the wizard then skips it
+    instantly instead of re-pulling the whole repo.
+
+    The on-disk cache for a completed model is always >= expected_mb
+    (often 2-4x, because HF stores every weight variant + multiple
+    revisions). A partially-downloaded repo is < expected_mb, so the
+    threshold cleanly separates "done" from "needs more". We use 0.95x
+    as a small safety margin against variant/compression differences.
+    """
+    try:
+        cache_mb = _hf_cache_size_mb(repo)
+        return cache_mb >= expected_mb * 0.95
+    except Exception:
+        return False
+
+
 def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
     """Use huggingface_hub.snapshot_download. A background thread emits
     progress events every second based on actual cache growth, so the
@@ -165,6 +183,20 @@ def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
     the embedded read-only token if anonymous hits a rate-limit."""
     from huggingface_hub import snapshot_download
     from huggingface_hub.utils import HfHubHTTPError
+
+    # 2026-06-13: skip already-installed repos. Without this, re-entering
+    # the wizard re-pulls the FULL repo (snapshot_download has no
+    # allow_patterns, so it fetches every weight variant) even though the
+    # app only needs a subset that's already on disk.
+    if _already_installed(repo, expected_mb):
+        cache_mb = _hf_cache_size_mb(repo)
+        total_done_mb_ref[0] += expected_mb
+        emit({'id': item_id, 'pct': 100, 'done': True,
+              'speed_mbps': 0, 'eta': '–', 'elapsed_s': 0,
+              'msg': f'already installed ({cache_mb} MB on disk)',
+              'total_done_mb': total_done_mb_ref[0]})
+        return
+
     emit({'id': item_id, 'pct': 0, 'done': False,
           'in_progress': True, 'elapsed_s': 0,
           'total_done_mb': total_done_mb_ref[0]})
