@@ -2564,17 +2564,17 @@ function _updateGenButtonsEstimate() {
   const bm = document.getElementById('ws-generate-mesh');
   if (bm) {
     const base = (p && p.meshes && p.meshes.length > 0) ? 'Generate new 3D version' : 'Generate 3D';
-    bm.textContent = bm.disabled ? base : `${base} · ${_fmtEta(_estimateMeshMs())}`;
+    bm.textContent = bm.disabled ? base : `${base} : ${_fmtEta(_estimateMeshMs())}`;
   }
   const bi = document.getElementById('ws-generate-image');
   if (bi) {
     const base = (p && p.images && p.images.length > 0) ? 'Generate new version' : 'Generate';
-    bi.textContent = bi.disabled ? base : `${base} · ${_fmtEta(_estimateImageMs())}`;
+    bi.textContent = bi.disabled ? base : `${base} : ${_fmtEta(_estimateImageMs())}`;
   }
   const br = document.getElementById('ws-generate-rig-ai');
-  if (br) br.textContent = br.disabled ? 'Generate Rig' : `Generate Rig · ${_fmtEta(90000)}`;
+  if (br) br.textContent = br.disabled ? 'Generate Rig' : `Generate Rig : ${_fmtEta(90000)}`;
   const ba = document.getElementById('ws-generate-anim');
-  if (ba) ba.textContent = ba.disabled ? 'Generate Animation' : `Generate Animation · ${_fmtEta(20000)}`;
+  if (ba) ba.textContent = ba.disabled ? 'Generate Animation' : `Generate Animation : ${_fmtEta(20000)}`;
 }
 [
   'ws-3d-engine', 'ws-3d-quality', 'ws-3d-triangles', 'ws-3d-buildstages',
