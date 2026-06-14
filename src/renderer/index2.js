@@ -480,6 +480,18 @@ async function refreshProjectsPage() {
     p.rigs   = _dedupeBy(p.rigs,   r => (r.url || r.path || r.filename || '').toLowerCase());
     p.animations = _dedupeBy(p.animations, a => (a.url || a.path || a.filename || '').toLowerCase());
     p.images = _dedupeBy(p.images, im => (typeof im === 'string' ? im : im?.path || '').toLowerCase());
+    // 2026-06-13: factor in rigs and animations into latestTimestamp so
+    // a project that was just animated bubbles up to the top of the
+    // grid, not just on the most-recent mesh generation.
+    const candidates = [
+      ...p.meshes.map(m => m.mtime || (m.created && new Date(m.created).getTime()) || 0),
+      ...p.rigs.map(r => r.mtime || (r.created && new Date(r.created).getTime()) || 0),
+      ...p.animations.map(a => a.mtime || (a.created && new Date(a.created).getTime()) || 0),
+    ].filter(Boolean);
+    if (candidates.length) {
+      const maxTs = Math.max(...candidates);
+      if (maxTs > p.latestTimestamp) p.latestTimestamp = maxTs;
+    }
   }
 
   state.projects = Array.from(projectsMap.values()).sort((a, b) => b.latestTimestamp - a.latestTimestamp);
@@ -1406,6 +1418,22 @@ document.getElementById('btn-import-image')?.addEventListener('click', async () 
 // ============================================================
 async function openProject(p) {
   state.currentProject = p;
+  // 2026-06-13: reset the Step 4 EDIT SELECTED viewer when switching
+  // projects so the previously-selected animation (from another
+  // project) doesn't leak into the new project's canvas.
+  try {
+    _selectedAnim = null;
+    if (_animViewer) { try { _animViewer.cleanup(); } catch (_) {} _animViewer = null; }
+    const ph = document.getElementById('ws-anim-preview-placeholder');
+    if (ph) ph.style.display = '';
+    const canv = document.getElementById('ws-anim-result-canvas');
+    if (canv) {
+      const ctx = canv.getContext('2d');
+      if (ctx) { ctx.clearRect(0, 0, canv.width, canv.height); }
+    }
+    const fn = document.getElementById('ws-anim-filename');
+    if (fn) fn.textContent = '';
+  } catch (_) {}
   showPage('workspace');
   populateWorkspace(p);
   // For each step that already has content, expand the card and open its
