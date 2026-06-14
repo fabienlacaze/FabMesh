@@ -1,6 +1,6 @@
 {
   "name": "myfabmesh-ai",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "MyFabmesh.AI — image-to-3D mesh generator with local AI.",
   "main": "src/main/main.js",
   "author": {
