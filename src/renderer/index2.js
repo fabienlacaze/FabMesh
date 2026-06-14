@@ -10725,8 +10725,17 @@ function _selectAnim(anim) {
 
 let _animViewer = null;
 function _initAnimResultViewer(anim) {
-  const canvas = document.getElementById('ws-anim-result-canvas');
+  // 2026-06-13: replace the canvas with a fresh one on every select.
+  // Three.js WebGLRenderer.dispose() doesn't release the WebGL context
+  // cleanly, so re-using the same canvas after a previous renderer was
+  // disposed (project switch, or new generation overwriting the previous
+  // viewer) gives a black/blank canvas. Cloning the node detaches the
+  // old context and lets us spin up a fresh renderer.
+  let canvas = document.getElementById('ws-anim-result-canvas');
   if (!canvas) { console.warn('[anim-result] no canvas in DOM yet'); return; }
+  const fresh = canvas.cloneNode(false);
+  canvas.parentNode.replaceChild(fresh, canvas);
+  canvas = fresh;
   // The canvas inherits 100% × 100% from .step-card-preview canvas CSS;
   // .step-card-preview itself is 440px tall. Wait one frame so layout
   // has settled before we read clientWidth/Height (otherwise both are 0
