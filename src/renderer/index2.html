@@ -1572,6 +1572,12 @@
             <span class="settings-field-label">Processes</span>
             <span style="font-size:11px; color:var(--text-2);"><span id="set-python-count">0</span> active &middot; AI engine <span id="set-python-sdxl">stopped</span></span>
           </div>
+          <!-- 2026-06-14: live per-process list with an independent Kill
+               button per row. Populated by refreshProcList() every 2s
+               while the Settings panel is open. -->
+          <div id="set-proc-list" style="margin:4px 0 8px; max-height:180px; overflow-y:auto;">
+            <div style="font-size:11px;color:var(--text-2);padding:4px 0;">No active process.</div>
+          </div>
           <div style="display:flex; gap:6px;">
             <button id="set-kill-sdxl" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill AI engine</button>
             <button id="set-kill-python" class="ghost-btn danger" style="flex:1; padding:6px 8px; font-size:11px;" disabled>Kill Processes</button>

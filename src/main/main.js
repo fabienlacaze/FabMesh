@@ -1638,6 +1638,80 @@ ipcMain.handle('jobs:kill-all', () => {
   return { ok: true, killed: n };
 });
 
+// 2026-06-14: per-process detail + independent kill for the Settings
+// SYSTEM > Processes panel.
+// Batched RAM lookup (one tasklist spawn, not per-row) -> Map<pid, ramMB>.
+function _ramByPidWin() {
+  const m = new Map();
+  if (process.platform !== 'win32') return m;
+  try {
+    const out = require('child_process').execFileSync(
+      'tasklist', ['/FI', 'IMAGENAME eq python.exe', '/FO', 'CSV', '/NH'],
+      { encoding: 'utf-8', timeout: 5000 });
+    out.split(/\r?\n/).forEach(line => {
+      const mm = line.match(/^"python\.exe","(\d+)".*,"([\d.,]+) K"\s*$/);
+      if (mm) m.set(parseInt(mm[1]), Math.round(parseInt(mm[2].replace(/[.,]/g, ''), 10) / 1024));
+    });
+  } catch (_) {}
+  return m;
+}
+
+ipcMain.handle('list-processes', () => {
+  const now = Date.now();
+  const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
+  const ram = _ramByPidWin();
+  const rows = [];
+  for (const proc of Array.from(allActiveProcs)) {  // snapshot — exit handler mutates the Set
+    if (!proc || !proc.pid) continue;
+    if (proc.exitCode !== null && proc.exitCode !== undefined) continue;  // already exited
+    const isAiEngine = proc.pid === sdxlPid;
+    rows.push({
+      pid: proc.pid,
+      label: isAiEngine
+        ? (sdxlReady ? 'AI engine (image model loaded)' : 'AI engine (loading…)')
+        : _jobLabelFromArgs(proc.spawnargs),
+      kind: isAiEngine ? 'image' : _jobKindFromArgs(proc.spawnargs),
+      elapsedMs: now - (proc.__startedAt || now),
+      ramMb: ram.get(proc.pid) || null,
+      suspended: !!proc._suspended,
+      isAiEngine,
+    });
+  }
+  // Safety net: surface the SDXL engine even if it isn't in the Set.
+  if (sdxlProc && !rows.some(r => r.pid === sdxlPid)) {
+    rows.push({ pid: sdxlPid,
+      label: sdxlReady ? 'AI engine (image model loaded)' : 'AI engine (loading…)',
+      kind: 'image', elapsedMs: now - (sdxlProc.__startedAt || now),
+      ramMb: ram.get(sdxlPid) || null, suspended: false, isAiEngine: true });
+  }
+  rows.sort((a, b) => (a.isAiEngine === b.isAiEngine) ? a.pid - b.pid : (a.isAiEngine ? 1 : -1));
+  return { procs: rows, sdxl: sdxlProc != null && sdxlReady };
+});
+
+ipcMain.handle('kill-process', (event, arg) => {
+  const pid = (arg && typeof arg === 'object') ? arg.pid : arg;
+  if (!pid) return { ok: false, error: 'no pid' };
+  const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
+  // AI engine row -> clean shutdown path (HTTP /shutdown + VRAM free +
+  // sdxlProc=null bookkeeping). Never killProcTree the SDXL pid directly
+  // or the idle timer / state vars desync.
+  if (pid === sdxlPid) {
+    try { stopSdxlServer(); return { ok: true, killed: pid, engine: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  }
+  // Independent per-row kill: prefer the tracked object (its exit handler
+  // removes it from the Set); fall back to a {pid} shim for orphans
+  // (killProcTree's win32 branch only reads proc.pid).
+  const target = Array.from(allActiveProcs).find(p => p && p.pid === pid);
+  try {
+    killProcTree(target || { pid });
+    if (target) allActiveProcs.delete(target);
+    return { ok: true, killed: pid };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 app.on('window-all-closed', () => {
   fullCleanup();
   app.quit();
@@ -1740,6 +1814,7 @@ const activeProcs = new Map(); // jobId -> proc
 const allActiveProcs = new Set();
 function trackProc(proc) {
   if (!proc) return proc;
+  proc.__startedAt = Date.now();   // 2026-06-14: powers the per-process elapsed column
   allActiveProcs.add(proc);
   proc.on('exit', () => allActiveProcs.delete(proc));
   return proc;

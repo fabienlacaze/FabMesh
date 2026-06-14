@@ -11981,6 +11981,7 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
 // SETTINGS MODAL
 // ============================================================
 let _gpuPollTimer = null;
+let _lastProcList = 0;  // 2026-06-14: throttle list-processes to ~2s inside the 500ms GPU poll
 // GPU usage limits (persisted in localStorage). We clamp the loaded values
 // to a sensible minimum so a user can never lock themselves out by dragging
 // the slider too low (a previous bug allowed vram=28%, which made the queue
@@ -12193,6 +12194,48 @@ async function refreshPythonStats() {
   } catch (e) {}
 }
 
+// 2026-06-14: live per-process list with an independent Kill per row.
+// Driven by the existing Settings poll (throttled to 2s). p.label is a
+// fixed whitelist from _jobLabelFromArgs, so innerHTML interpolation is
+// safe here; if labels ever become path/user-derived, switch to
+// textContent.
+async function refreshProcList() {
+  const box = document.getElementById('set-proc-list');
+  if (!box || !API.listProcesses) return;
+  let r;
+  try { r = await API.listProcesses(); } catch (_) { return; }
+  const procs = (r && r.procs) || [];
+  if (!procs.length) {
+    box.innerHTML = '<div style="font-size:11px;color:var(--text-2);padding:4px 0;">No active process.</div>';
+    return;
+  }
+  const fmtMs = ms => {
+    const s = Math.round(ms / 1000);
+    return s < 60 ? s + 's' : Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0');
+  };
+  box.innerHTML = procs.map(p => {
+    const ram = p.ramMb != null ? ` · ${(p.ramMb / 1024).toFixed(1)} GB` : '';
+    const susp = p.suspended ? ' <span style="color:var(--warning)">(suspended)</span>' : '';
+    const tag = p.isAiEngine ? 'AI engine' : (p.kind || 'job');
+    return `<div class="proc-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--border);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.label}${susp}</div>
+        <div style="font-size:10px;color:var(--text-2);">pid ${p.pid} · ${tag} · ${fmtMs(p.elapsedMs)}${ram}</div>
+      </div>
+      <button class="ghost-btn danger proc-kill" data-pid="${p.pid}" style="padding:3px 8px;font-size:10px;flex:none;">Kill</button>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.proc-kill').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pid = parseInt(btn.dataset.pid, 10);
+      btn.disabled = true; btn.textContent = '…';
+      try { await API.killProcess(pid); showToast?.('Process ' + pid + ' killed.', 'success'); }
+      catch (e) { showToast?.('Kill failed: ' + e.message, 'error'); }
+      setTimeout(() => { refreshPythonStats(); refreshProcList(); }, 600);
+    });
+  });
+}
+
 // ============================================================
 // JOB QUEUE: throttle generation when GPU is too busy
 // ============================================================
@@ -12395,6 +12438,8 @@ async function refreshGpuStats() {
   if (_draggingGpuLimit) return;
   try {
     refreshPythonStats();
+    // Throttle the per-process list to ~2s while reusing the 500ms tick.
+    if (Date.now() - _lastProcList > 2000) { _lastProcList = Date.now(); refreshProcList(); }
     const gpu = await API.checkGPU();
     if (!gpu || !gpu.available) {
       document.getElementById('set-gpu-name').textContent = 'GPU info unavailable';

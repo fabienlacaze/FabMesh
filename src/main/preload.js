@@ -202,6 +202,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   listAnimations: () => ipcRenderer.invoke('list-animations'),
   jobsRunningCount: () => ipcRenderer.invoke('jobs:running-count'),
   jobsKillAll: () => ipcRenderer.invoke('jobs:kill-all'),
+  listProcesses: () => ipcRenderer.invoke('list-processes'),
+  killProcess: (pid) => ipcRenderer.invoke('kill-process', pid),
   onJobsResumed: (cb) => ipcRenderer.on('jobs-resumed', (_e, data) => cb(data)),
   onJobPidExited: (cb) => ipcRenderer.on('job-pid-exited', (_e, data) => cb(data)),
   animListMotions: (opts) => ipcRenderer.invoke('anim:list-motions', opts || {}),
