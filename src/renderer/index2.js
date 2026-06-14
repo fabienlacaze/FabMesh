@@ -15338,30 +15338,72 @@ setInterval(() => {
 // ============================================================
 // CLOSE CONFIRMATION (when jobs are running)
 // ============================================================
+// 2026-06-13: styled 3-choice quit modal. Returns 'stop' | 'keep' | 'cancel'.
+function customQuitChoice(runningCount) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-quit-jobs');
+    const msg = document.getElementById('quit-jobs-message');
+    const stopBtn = document.getElementById('quit-jobs-stop');
+    const keepBtn = document.getElementById('quit-jobs-keep');
+    const cancelBtn = document.getElementById('quit-jobs-cancel');
+    if (!modal) { resolve('stop'); return; }
+    msg.textContent = `${runningCount} job${runningCount > 1 ? 's are' : ' is'} still running.`;
+    modal.classList.remove('hidden');
+    function cleanup(result) {
+      modal.classList.add('hidden');
+      stopBtn.removeEventListener('click', onStop);
+      keepBtn.removeEventListener('click', onKeep);
+      cancelBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onOverlay);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    }
+    function onStop() { cleanup('stop'); }
+    function onKeep() { cleanup('keep'); }
+    function onCancel() { cleanup('cancel'); }
+    function onOverlay(e) { if (e.target === modal) cleanup('cancel'); }
+    function onKey(e) { if (e.key === 'Escape') cleanup('cancel'); }
+    stopBtn.addEventListener('click', onStop);
+    keepBtn.addEventListener('click', onKeep);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onOverlay);
+    document.addEventListener('keydown', onKey);
+    setTimeout(() => cancelBtn.focus(), 50);
+  });
+}
+
 if (API.onAppCloseRequested) {
   API.onAppCloseRequested(async () => {
-    const runningCount = state.jobs.filter(j => j.status === 'running').length;
+    // Count BOTH the renderer-tracked jobs and any subprocess still
+    // alive in main.js (in case the renderer was F5'd while a job ran).
+    let runningCount = state.jobs.filter(j => j.status === 'running').length;
+    try {
+      const backend = await API.jobsRunningCount?.();
+      if (typeof backend === 'number') runningCount = Math.max(runningCount, backend);
+    } catch (_) {}
     if (runningCount === 0) {
-      // No job running, just confirm immediately
-      API.confirmAppClose();
+      API.confirmAppClose({ killJobs: true });
       return;
     }
-    const ok = await customConfirm(
-      `${runningCount} task${runningCount > 1 ? 's are' : ' is'} running. They will be cancelled if you quit now. Continue?`,
-      'Quit MyFabmesh.AI',
-      'Quit and cancel'
-    );
-    if (ok) {
-      // Cancel all running jobs first (so the user sees them stop), then quit
+    const choice = await customQuitChoice(runningCount);
+    if (choice === 'cancel') {
+      // Stay open — main.js already called event.preventDefault() and we
+      // never reply, so the window doesn't close.
+      return;
+    }
+    if (choice === 'stop') {
+      // Cancel renderer jobs first so the user sees them stop, then tell
+      // main to kill everything + close.
       try {
         for (const j of state.jobs.filter(j => j.status === 'running')) {
           if (API.cancelJob) await API.cancelJob(j.id);
         }
-      } catch (e) {}
-      API.confirmAppClose();
+      } catch (_) {}
+      API.confirmAppClose({ killJobs: true });
+    } else if (choice === 'keep') {
+      // Close the window but leave subprocesses running.
+      API.confirmAppClose({ killJobs: false });
     }
-    // If "ok === false", we do nothing — the close is cancelled because
-    // main.js called event.preventDefault() and we never sent the confirm IPC.
   });
 }
 

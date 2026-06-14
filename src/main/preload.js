@@ -148,7 +148,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   deleteFile: (filePath) => ipcRenderer.invoke('delete-file', filePath),
   deleteProject: (opts) => ipcRenderer.invoke('delete-project', opts),
   onAppCloseRequested: (cb) => ipcRenderer.on('app-close-requested', () => cb()),
-  confirmAppClose: () => ipcRenderer.send('app-close-confirmed'),
+  confirmAppClose: (opts) => ipcRenderer.send('app-close-confirmed', opts || {}),
   openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
   calibRun: (opts) => ipcRenderer.invoke('calib-run', opts || {}),
   calibLastReport: () => ipcRenderer.invoke('calib-last-report'),

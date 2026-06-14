@@ -1662,6 +1662,34 @@
       </div>
     </div>
 
+    <!-- 2026-06-13: styled quit-with-running-jobs modal (replaces the
+         native Electron dialog). Shown BEFORE the window closes. -->
+    <div id="modal-quit-jobs" class="modal-overlay hidden" style="z-index:10001;">
+      <div class="modal-card" style="width:460px; max-width:92vw; padding:0;">
+        <div style="padding:14px 18px; border-bottom:1px solid var(--border); background:var(--bg-1); display:flex; align-items:center; gap:10px;">
+          <span style="font-size:18px;">&#9881;&#65039;</span>
+          <h3 style="margin:0; font-size:14px; flex:1;">Jobs are running</h3>
+        </div>
+        <div style="padding:16px 18px;">
+          <p id="quit-jobs-message" style="margin:0 0 14px 0; line-height:1.5; color:var(--text-1);"></p>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <button id="quit-jobs-stop" class="primary-btn danger" style="padding:10px 14px; text-align:left;">
+              &#9632; Stop jobs &amp; quit
+              <span style="display:block; font-size:11px; font-weight:400; color:rgba(255,255,255,0.7); margin-top:2px;">Kills every running subprocess (Python / Blender) and closes the app.</span>
+            </button>
+            <button id="quit-jobs-keep" class="ghost-btn" style="padding:10px 14px; text-align:left;">
+              &#8631; Quit &amp; keep jobs running
+              <span style="display:block; font-size:11px; font-weight:400; color:var(--text-2); margin-top:2px;">Closes the app but leaves the jobs running in the background.</span>
+            </button>
+            <button id="quit-jobs-cancel" class="ghost-btn" style="padding:10px 14px; text-align:left;">
+              &#10005; Cancel
+              <span style="display:block; font-size:11px; font-weight:400; color:var(--text-2); margin-top:2px;">Return to the app to pause or finish the jobs yourself.</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <style>
       .tier-spinner {
         display: inline-block;

@@ -813,8 +813,14 @@ function createWindow() {
     event.preventDefault();
     mainWindow.webContents.send('app-close-requested');
   });
-  ipcMain.on('app-close-confirmed', () => {
+  ipcMain.on('app-close-confirmed', (_e, opts) => {
     closeConfirmed = true;
+    // 2026-06-13: "Quit and keep jobs running" sends { killJobs: false }.
+    // Set the global so fullCleanup() (fired by window-all-closed)
+    // skips killAllActiveProcs and the subprocesses are left alive.
+    if (opts && opts.killJobs === false) {
+      _keepJobsOnQuit = true;
+    }
     mainWindow.close();
   });
 
@@ -1367,70 +1373,44 @@ function killAllActiveProcs() {
 }
 
 let _isQuitting = false;
+// 2026-06-13: set true when the user picks "Quit and keep jobs running"
+// so fullCleanup leaves the Python/Blender subprocesses alive.
+let _keepJobsOnQuit = false;
 function fullCleanup() {
   if (_isQuitting) return;
   _isQuitting = true;
-  killAllActiveProcs();
-  stopSdxlServer();
-  try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
+  if (!_keepJobsOnQuit) {
+    killAllActiveProcs();
+    stopSdxlServer();
+    // WSL shutdown also kills any WSL-side work — skip when keeping jobs.
+    try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
+  } else {
+    log.info('main', 'fullCleanup: keeping jobs running per user choice (subprocesses left alive)');
+  }
 }
 
-// 2026-06-13: when the user tries to close the app while subprocess
-// jobs are running, ask them what to do instead of silently orphaning
-// the Python/Blender children.
+// 2026-06-13: number of live tracked subprocesses, exposed to the
+// renderer so its styled quit modal can count backend jobs even after
+// a renderer F5 (main.js process didn't reload, children still tracked).
 function _runningJobsCount() {
   try { return allActiveProcs ? allActiveProcs.size : 0; } catch (_) { return 0; }
 }
-let _quitConfirmed = false;
-function _confirmQuitWithRunningJobs() {
-  const n = _runningJobsCount();
-  if (n === 0) return true;
-  const { dialog } = require('electron');
-  const pick = dialog.showMessageBoxSync({
-    type: 'warning',
-    buttons: ['Stop jobs and quit', 'Quit and keep jobs running', 'Cancel'],
-    defaultId: 0,
-    cancelId: 2,
-    title: 'Jobs are running',
-    message: `${n} job${n > 1 ? 's are' : ' is'} still running.`,
-    detail: 'Stop kills every subprocess (Python / Blender). '
-      + 'Quit-and-keep leaves them running but you will no longer see '
-      + 'their progress and they may keep using GPU/CPU. Cancel returns '
-      + 'to the app so you can pause or finish them yourself.',
-  });
-  if (pick === 2) return false;        // Cancel — stay open
-  _quitConfirmed = true;
-  if (pick === 0) {                    // Stop and quit
-    fullCleanup();
-  }
-  // pick === 1: orphan + quit. Skip fullCleanup so killAllActiveProcs
-  // doesn't fire. The OS will reclaim them eventually but we don't
-  // touch them.
-  return true;
-}
-
-// IPC for the renderer to know whether subprocesses are still alive.
-// Lets the Running task modal (re)mount itself after a renderer F5
-// if main.js still has tracked children from before the reload.
 ipcMain.handle('jobs:running-count', () => _runningJobsCount());
 ipcMain.handle('jobs:kill-all', () => {
-  fullCleanup();
-  _quitConfirmed = true;
-  return { ok: true, killed: _runningJobsCount() };
+  const n = _runningJobsCount();
+  killAllActiveProcs();
+  return { ok: true, killed: n };
 });
 
 app.on('window-all-closed', () => {
   fullCleanup();
   app.quit();
 });
-app.on('before-quit', (e) => {
-  if (_quitConfirmed) { fullCleanup(); return; }
-  if (!_confirmQuitWithRunningJobs()) { e.preventDefault(); return; }
-  // when user picks "Quit and keep jobs running", we let the quit
-  // proceed but skip fullCleanup.
+app.on('before-quit', () => {
+  fullCleanup();
 });
 app.on('will-quit', () => {
-  if (_quitConfirmed) fullCleanup();
+  fullCleanup();
 });
 
 // Show file in explorer
