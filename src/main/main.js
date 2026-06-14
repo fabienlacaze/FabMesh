@@ -1375,15 +1375,62 @@ function fullCleanup() {
   try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
 }
 
+// 2026-06-13: when the user tries to close the app while subprocess
+// jobs are running, ask them what to do instead of silently orphaning
+// the Python/Blender children.
+function _runningJobsCount() {
+  try { return allActiveProcs ? allActiveProcs.size : 0; } catch (_) { return 0; }
+}
+let _quitConfirmed = false;
+function _confirmQuitWithRunningJobs() {
+  const n = _runningJobsCount();
+  if (n === 0) return true;
+  const { dialog } = require('electron');
+  const pick = dialog.showMessageBoxSync({
+    type: 'warning',
+    buttons: ['Stop jobs and quit', 'Quit and keep jobs running', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Jobs are running',
+    message: `${n} job${n > 1 ? 's are' : ' is'} still running.`,
+    detail: 'Stop kills every subprocess (Python / Blender). '
+      + 'Quit-and-keep leaves them running but you will no longer see '
+      + 'their progress and they may keep using GPU/CPU. Cancel returns '
+      + 'to the app so you can pause or finish them yourself.',
+  });
+  if (pick === 2) return false;        // Cancel — stay open
+  _quitConfirmed = true;
+  if (pick === 0) {                    // Stop and quit
+    fullCleanup();
+  }
+  // pick === 1: orphan + quit. Skip fullCleanup so killAllActiveProcs
+  // doesn't fire. The OS will reclaim them eventually but we don't
+  // touch them.
+  return true;
+}
+
+// IPC for the renderer to know whether subprocesses are still alive.
+// Lets the Running task modal (re)mount itself after a renderer F5
+// if main.js still has tracked children from before the reload.
+ipcMain.handle('jobs:running-count', () => _runningJobsCount());
+ipcMain.handle('jobs:kill-all', () => {
+  fullCleanup();
+  _quitConfirmed = true;
+  return { ok: true, killed: _runningJobsCount() };
+});
+
 app.on('window-all-closed', () => {
   fullCleanup();
   app.quit();
 });
-app.on('before-quit', () => {
-  fullCleanup();
+app.on('before-quit', (e) => {
+  if (_quitConfirmed) { fullCleanup(); return; }
+  if (!_confirmQuitWithRunningJobs()) { e.preventDefault(); return; }
+  // when user picks "Quit and keep jobs running", we let the quit
+  // proceed but skip fullCleanup.
 });
 app.on('will-quit', () => {
-  fullCleanup();
+  if (_quitConfirmed) fullCleanup();
 });
 
 // Show file in explorer

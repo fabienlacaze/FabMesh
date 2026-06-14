@@ -200,6 +200,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
 
   // 2026-06-12: v1 animation pipeline (Rokoko retarget + judge + library)
   listAnimations: () => ipcRenderer.invoke('list-animations'),
+  jobsRunningCount: () => ipcRenderer.invoke('jobs:running-count'),
+  jobsKillAll: () => ipcRenderer.invoke('jobs:kill-all'),
   animListMotions: (opts) => ipcRenderer.invoke('anim:list-motions', opts || {}),
   animMotionThumb: (opts) => ipcRenderer.invoke('anim:motion-thumb', opts),
   animRetarget: (opts) => ipcRenderer.invoke('anim:retarget', opts),
