@@ -11510,6 +11510,12 @@ function _jobStepIndex(j) {
   const n = (j && j.name) || '';
   // Step 1 (image) — generation, edits, variants, view rectifiers.
   if (/^(generate images?|generating (back|6) views|generate back views|multi[- ]?views|modify|inpaint|face[- ]?fix|remove[- ]?bg|rectif|upscal|back[- ]?view|t[- ]?pose|re[- ]?roll|variant|img2img|sdxl|flux|image[- ]?to[- ]?image)/i.test(n)) return 1;
+  // 2026-06-14: manual image-edit tools are named "Manual mask inpaint",
+  // "Clone stamp: ...", "Draw mask: ...", etc. — they don't START with an
+  // image keyword, so the anchored test above missed them and they never
+  // showed in the Image step's GENERATING widget (only in the global
+  // running-jobs panel). Match them anywhere in the name.
+  if (/(mask inpaint|manual (mask|inpaint|paint|crop)|clone stamp|draw mask|brightness|symmetri[sz]e|color pick|blur brush|\bcrop\b|\bpaint\b)/i.test(n)) return 1;
   if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;

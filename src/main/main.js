@@ -1317,26 +1317,16 @@ async function _handleMultiviewInheritance(newImagePath) {
       }
     }
 
-    // No silhouette match — trigger Zero123++ asynchronously, don't block
-    // the caller. The user will see the new views appear once done. UI
-    // toast is handled by the existing multiview-progress stream.
-    log.info('mv-inherit', `new=${newStem} no silhouette match — regenerating`);
-    const script = _mvScriptForEngine();
-    const env = { ...process.env, PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' };
-    const proc = execFile('python', [script, newImagePath, newMvDir], {
-      timeout: 600000, maxBuffer: 10 * 1024 * 1024, env,
-    }, (err, stdout, stderr) => {
-      if (err) log.warn('mv-inherit', `regen failed: ${err.message}`);
-      else log.info('mv-inherit', `regen done for ${newStem}`);
-      if (mainWindow && mainWindow.webContents) {
-        mainWindow.webContents.send('mv-inherit-done', {
-          imagePath: newImagePath,
-          success: !err,
-        });
-      }
-    });
-    proc.stdout?.on('data', d => safeSend('multiview-progress', d.toString()));
-    return { inherited: false, regenerated: true, hash: newHash };
+    // 2026-06-14: NO silhouette match — previously this auto-fired
+    // Zero123++/MV-Adapter to regenerate multi-views. That surprised the
+    // user: a simple "Remove background" or "Draw mask" edit changes the
+    // silhouette, so it never matched and silently kicked off an
+    // expensive (minutes, GPU-heavy) multi-view regeneration they never
+    // asked for. We now SKIP auto-regeneration. The edited image simply
+    // has no multi-views until the user explicitly clicks the
+    // "Multi-Views" button — which is the expected behaviour for an edit.
+    log.info('mv-inherit', `new=${newStem} no silhouette match — skipping auto-regen (use Multi-Views button to generate)`);
+    return { inherited: false, regenerated: false, hash: newHash };
   } catch (e) {
     log.error('mv-inherit', `error: ${e.message}`);
     return { inherited: false, regenerated: false, hash: '' };
