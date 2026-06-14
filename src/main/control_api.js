@@ -23,7 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
-const { ipcMain } = require('electron');
+const { ipcMain, app } = require('electron');
 
 const PORT = 7331;
 const HOST = '127.0.0.1';
@@ -45,10 +45,14 @@ function _initAuthToken() {
   } catch (e) {
     console.error('[test_api] could not write token file:', e.message);
   }
-  // Also write to project root for the bash helper
+  // Also write to project root for the bash helper — DEV ONLY.
+  // In a packaged build __dirname/../.. is the read-only install dir
+  // (app.asar / WindowsApps), so this write always fails; skip it.
   try {
-    const projectToken = path.join(__dirname, '..', '..', '.test_api_token');
-    fs.writeFileSync(projectToken, _authToken, { encoding: 'utf-8', mode: 0o600 });
+    if (!(app && app.isPackaged)) {
+      const projectToken = path.join(__dirname, '..', '..', '.test_api_token');
+      fs.writeFileSync(projectToken, _authToken, { encoding: 'utf-8', mode: 0o600 });
+    }
   } catch (_) {}
   console.log('[test_api] auth token written to', tokenFile);
 }
@@ -214,13 +218,19 @@ function tailFile(filePath, lines) {
 // Start HTTP server
 // ============================================================
 function startControlApi(mainWindow, opts = {}) {
-  // Always-on by default. Hard-disable with FABMESH_CONTROL_API=0.
+  // Default OFF in packaged/Store builds: an always-listening localhost
+  // HTTP control plane is exactly the kind of thing a Store reviewer /
+  // static analyzer flags, and its token write targets a read-only dir.
+  // Dev box: still always-on. Force-enable in prod with FABMESH_CONTROL_API=1.
   // Legacy FABMESH_TEST_API=1 still forces enable for scripts that set it.
   const envDisabled = process.env.FABMESH_CONTROL_API === '0';
+  const envForced = process.env.FABMESH_CONTROL_API === '1';
   const legacyForce = process.env.FABMESH_TEST_API === '1';
-  const enabled = (!envDisabled && opts.force !== false) || legacyForce;
+  const packaged = !!(app && app.isPackaged);
+  const enabled = legacyForce || envForced
+    || (!envDisabled && opts.force !== false && !packaged);
   if (!enabled) {
-    console.log('[control_api] disabled (FABMESH_CONTROL_API=0)');
+    console.log('[control_api] disabled (packaged=' + packaged + ')');
     return null;
   }
 

@@ -7,6 +7,47 @@
   <title>MyFabmesh.AI</title>
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/index2.css">
+  <!-- Defensive boot guard: a module-resolution failure (e.g. a missing
+       three/addons import in a packaged build) would otherwise leave a
+       silent BLANK window, which Microsoft Store certification treats as
+       a launch crash. This classic <script> runs before the ES module
+       graph and surfaces ANY uncaught error / failed import as a visible
+       panel + a log line, so the window always paints something. -->
+  <script>
+    (function () {
+      function showBootError(msg) {
+        try {
+          if (document.getElementById('fab-boot-error')) return;
+          var d = document.createElement('div');
+          d.id = 'fab-boot-error';
+          d.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#0b0b14;color:#e6e6f0;'
+            + 'font-family:system-ui,sans-serif;padding:32px;overflow:auto;';
+          d.innerHTML = '<h2 style="color:#ff6b6b;margin:0 0 12px">MyFabmesh.AI failed to start</h2>'
+            + '<p>An error occurred during startup. The app is still running; please report this with the log below.</p>'
+            + '<pre style="white-space:pre-wrap;background:#16161f;padding:12px;border-radius:8px;'
+            + 'border:1px solid #2a2a3a;font-size:12px">' + String(msg).replace(/[<>&]/g, function (c) {
+                return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
+              }) + '</pre>'
+            + '<p style="opacity:.7;font-size:12px">Log: %APPDATA%\\myfabmesh-ai\\renderer.log and startup.log</p>';
+          (document.body || document.documentElement).appendChild(d);
+        } catch (_) {}
+      }
+      function logBoot(m) {
+        try { window.meshyAPI && window.meshyAPI.rendererLog && window.meshyAPI.rendererLog({ tag: 'boot', msg: m }); } catch (_) {}
+      }
+      window.addEventListener('error', function (e) {
+        var m = (e && e.error && e.error.stack) || (e && e.message) || 'Unknown error';
+        logBoot('error: ' + m);
+        showBootError(m);
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e && e.reason;
+        var m = (r && r.stack) || (r && r.message) || String(r);
+        logBoot('reject: ' + m);
+        showBootError(m);
+      });
+    })();
+  </script>
 </head>
 <body class="advanced-mode">
   <!-- Auto-update toast: hidden by default. Appears when the main
@@ -2078,8 +2119,8 @@
   <script type="importmap">
     {
       "imports": {
-        "three": "../../node_modules/three/build/three.module.js",
-        "three/addons/": "../../node_modules/three/examples/jsm/"
+        "three": "./lib/three.module.js",
+        "three/addons/": "./lib/"
       }
     }
   </script>

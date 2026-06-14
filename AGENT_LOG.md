@@ -1,5 +1,36 @@
 # FabMesh Agent Log
 
+## 2026-06-14 (fix — Store cert crash-at-launch 10.1.2.10)
+
+Microsoft Store a refusé l'appx: "product crashes at launch" sur Win11
+22631 (VM propre, no GPU/Python/Blender/HF-cache). Deux blockers
+indépendants identifiés et corrigés:
+
+1. main.js:421-432 — mkdirSync top-level dans le dossier d'install
+   (read-only sous WindowsApps / dans app.asar). Throw synchrone au
+   chargement du module = mort avant whenReady, non rattrapable par
+   uncaughtException. Fix: DATA_BASE = app.isPackaged ?
+   getPath('userData') : repo-root; SCRIPTS_DIR pointe vers
+   process.resourcesPath/scripts (read-only extraResources); boucle
+   mkdir entourée d'un try/catch. MCP_TOKEN_FILE déplacé sous DATA_BASE.
+
+2. index2.html importmap pointait three/addons vers
+   node_modules/three/examples/jsm (élagué par electron-builder dans
+   l'asar) => index2.js échoue son import ES au top-level => fenêtre
+   blanche = "crash". Fix: importmap repointe "three" et "three/addons/"
+   vers les copies vendored locales src/renderer/lib/ (three r170
+   self-consistante). GLTFExporter.js ajouté à lib/exporters/ (les 3
+   autres addons étaient déjà vendored).
+
+Durcissement: handler global uncaughtException/unhandledRejection qui
+montre une fenêtre fallback (jamais de sortie silencieuse); whenReady
+crée la fenêtre EN PREMIER puis chaque subsystem optionnel
+(resumePausedJobs, startMcpBridge, updater) est guardé individuellement
++ .catch() final; index2.html a un guard inline window.onerror qui
+affiche un panneau d'erreur visible; control_api OFF par défaut en build
+packagé (FABMESH_CONTROL_API=1 pour forcer) et n'écrit plus son token
+dans le dossier d'install en prod.
+
 ## 2026-06-12 (feat — MyFabmesh v1: 4 composants livrés)
 
 Workflow wp8v4f2aq (6 agents en parallèle) a livré les 4 composants

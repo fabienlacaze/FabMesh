@@ -418,17 +418,47 @@ function safeSend(channel, data) {
   }
 }
 
-const MESHES_DIR = path.join(__dirname, '..', '..', 'meshes');
-const SCRIPTS_DIR = path.join(__dirname, '..', '..', 'scripts');
-const PREVIEWS_DIR = path.join(__dirname, '..', '..', 'previews');
-const IMAGES_DIR = path.join(__dirname, '..', '..', 'images');
-const HISTORY_DIR = path.join(__dirname, '..', '..', 'history');
-const LOGS_DIR = path.join(__dirname, '..', '..', 'logs');
-const CONFIG_PATH = path.join(__dirname, '..', '..', 'config.json');
+// ------------------------------------------------------------
+// Writable data root vs read-only install dir.
+// In a packaged build (NSIS, and ESPECIALLY the MSIX/APPX Store
+// build) the install dir lives under a READ-ONLY location
+// (C:\Program Files\WindowsApps\… and/or inside app.asar). Any
+// fs.mkdirSync/createWriteStream against __dirname/../.. throws
+// EPERM/EACCES/EROFS/ENOTDIR at MODULE LOAD — before app.whenReady,
+// before any window — which the process.on('uncaughtException')
+// handlers CANNOT rescue (they only catch async throws). Result:
+// silent crash at launch = the Microsoft Store 10.1.2.10 failure.
+//
+// Fix: writable data goes under app.getPath('userData') (safe to
+// call before whenReady). Read-only assets (the Python scripts,
+// shipped via extraResources) come from process.resourcesPath.
+// ------------------------------------------------------------
+const DATA_BASE = app.isPackaged
+  ? app.getPath('userData')
+  : path.join(__dirname, '..', '..');
 
-// Ensure directories exist
-[MESHES_DIR, SCRIPTS_DIR, PREVIEWS_DIR, IMAGES_DIR, HISTORY_DIR, LOGS_DIR].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+const MESHES_DIR   = path.join(DATA_BASE, 'meshes');
+const PREVIEWS_DIR = path.join(DATA_BASE, 'previews');
+const IMAGES_DIR   = path.join(DATA_BASE, 'images');
+const HISTORY_DIR  = path.join(DATA_BASE, 'history');
+const LOGS_DIR     = path.join(DATA_BASE, 'logs');
+const CONFIG_PATH  = path.join(DATA_BASE, 'config.json');
+
+// SCRIPTS_DIR is READ-ONLY: in prod the .py files are copied to
+// process.resourcesPath/scripts by electron-builder extraResources.
+// In dev they live at repo-root/scripts. Never mkdir this one.
+const SCRIPTS_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, 'scripts')
+  : path.join(__dirname, '..', '..', 'scripts');
+
+// Ensure WRITABLE directories exist. Guarded: a failed mkdir must
+// NEVER abort module evaluation (that is what crashed the cert VM).
+[MESHES_DIR, PREVIEWS_DIR, IMAGES_DIR, HISTORY_DIR, LOGS_DIR].forEach(dir => {
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    _log('warn', 'mkdir failed for ' + dir + ': ' + (e && e.message));
+  }
 });
 
 // ============================================================
@@ -475,12 +505,57 @@ const log = {
   error: (src, m) => { console.error(`[${src}]`, m); logToFile('ERROR', src, m); },
   debug: (src, m) => { logToFile('DEBUG', src, m); },
 };
-// Capture uncaught exceptions / unhandled rejections of the main process
+// ------------------------------------------------------------
+// Last-resort fallback window. If the real window failed to be
+// created (createWindow threw, loadFile rejected, a startup
+// subsystem blew up), we MUST still paint *a* window — the
+// Microsoft Store reviewer treats "no window appears" identically
+// to "crashes at launch" (10.1.2.10). This shows a minimal error
+// page so the product visibly launches and the user gets a log
+// pointer instead of a silent exit.
+// ------------------------------------------------------------
+let _fallbackWindow = null;
+function showFallbackWindow(err) {
+  try {
+    if (typeof app === 'undefined' || !app.isReady || !app.isReady()) return; // can't make a window yet
+    // A real, visible window already exists? Don't stack a second one.
+    if (typeof mainWindow !== 'undefined' && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) return;
+    if (_fallbackWindow && !_fallbackWindow.isDestroyed()) return;
+    _fallbackWindow = new BrowserWindow({
+      width: 720, height: 480, show: true, backgroundColor: '#0b0b14',
+      title: 'MyFabmesh.AI', webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+    const msg = ((err && (err.stack || err.message)) || String(err || 'Unknown error'))
+      .replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+      + '<style>body{background:#0b0b14;color:#e6e6f0;font-family:system-ui,sans-serif;padding:28px}'
+      + 'h2{color:#ff6b6b;margin:0 0 12px}pre{white-space:pre-wrap;background:#16161f;padding:12px;'
+      + 'border-radius:8px;border:1px solid #2a2a3a;font-size:12px}</style></head><body>'
+      + '<h2>MyFabmesh.AI could not start normally</h2>'
+      + '<p>The app started but hit an error during initialization. Please report this with the log file.</p>'
+      + '<pre>' + msg + '</pre>'
+      + '<p style="opacity:.7;font-size:12px">Log: %APPDATA%\\myfabmesh-ai\\logs\\fabmesh.log and %APPDATA%\\fabmesh\\startup.log</p>'
+      + '</body></html>';
+    _fallbackWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    _fallbackWindow.setMenuBarVisibility(false);
+  } catch (e2) {
+    _log('fatal', 'showFallbackWindow itself failed: ' + (e2 && e2.message));
+  }
+}
+
+// Capture uncaught exceptions / unhandled rejections of the main process.
+// NEVER let one of these kill the process silently: log it everywhere we
+// can, and if no visible window exists yet, surface a fallback window so
+// the app still "launches" from the reviewer's / user's point of view.
 process.on('uncaughtException', (e) => {
-  log.error('main', 'uncaughtException: ' + (e.stack || e.message || e));
+  log.error('main', 'uncaughtException: ' + (e && (e.stack || e.message) || e));
+  _log('fatal', 'uncaughtException: ' + (e && (e.stack || e.message) || e));
+  try { showFallbackWindow(e); } catch (_) {}
 });
 process.on('unhandledRejection', (reason) => {
   log.error('main', 'unhandledRejection: ' + (reason && reason.stack || reason));
+  _log('fatal', 'unhandledRejection: ' + (reason && (reason.stack || reason.message) || reason));
+  try { showFallbackWindow(reason); } catch (_) {}
 });
 log.info('main', '======================================');
 log.info('main', `FabMesh started at ${new Date().toISOString()}`);
@@ -864,7 +939,10 @@ function createWindow() {
 // Gate every request behind a Bearer token written to a 0600 file at
 // repo root; only processes that can read that file are allowed.
 const MCP_BRIDGE_PORT = 7555;
-const MCP_TOKEN_FILE = path.join(__dirname, '..', '..', '.mcp_bridge_token');
+// Token must live in a WRITABLE location. In a packaged build the
+// install dir is read-only, so use DATA_BASE (userData) like all
+// other runtime state.
+const MCP_TOKEN_FILE = path.join(DATA_BASE, '.mcp_bridge_token');
 
 function _loadOrCreateMcpToken() {
   try {
@@ -1305,28 +1383,47 @@ print("OK")
 const HEADLESS = process.argv.includes('--headless');
 
 app.whenReady().then(() => {
-  if (HEADLESS) {
-    log.info('main', 'Starting in HEADLESS mode (no UI window, MCP bridge only)');
-    // In headless mode we still need mainWindow for IPC handlers that
-    // reference it, but we never show it. Create a hidden window.
-    mainWindow = new BrowserWindow({
-      width: 800, height: 600, show: false,
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true, nodeIntegration: false,
-      },
-    });
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
-  } else {
-    createWindow();
+  // ----------------------------------------------------------
+  // STEP 1 — Create & paint the window FIRST, in isolation.
+  // Everything else (job resume, MCP bridge, updater, control
+  // API) is OPTIONAL and must never be able to prevent the
+  // window from appearing. If createWindow throws, we still
+  // surface a fallback window so the app visibly launches.
+  // ----------------------------------------------------------
+  try {
+    if (HEADLESS) {
+      log.info('main', 'Starting in HEADLESS mode (no UI window, MCP bridge only)');
+      // In headless mode we still need mainWindow for IPC handlers that
+      // reference it, but we never show it. Create a hidden window.
+      mainWindow = new BrowserWindow({
+        width: 800, height: 600, show: false,
+        webPreferences: {
+          preload: path.join(__dirname, 'preload.js'),
+          contextIsolation: true, nodeIntegration: false,
+        },
+      });
+      mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index2.html'));
+    } else {
+      createWindow();
+    }
+  } catch (e) {
+    log.error('main', 'createWindow threw: ' + (e && (e.stack || e.message)));
+    _log('fatal', 'createWindow threw: ' + (e && (e.stack || e.message)));
+    if (!HEADLESS) { try { showFallbackWindow(e); } catch (_) {} }
   }
+
+  // ----------------------------------------------------------
+  // STEP 2 — Optional subsystems, each independently guarded.
+  // A failure in any one must NOT stop the others and must NOT
+  // crash the process or hide the window.
+  // ----------------------------------------------------------
 
   // 2026-06-13: resume any jobs the user paused on the last quit.
   try { resumePausedJobs(); } catch (e) { log.warn('main', `resumePausedJobs failed: ${e.message}`); }
 
   // MCP Bridge HTTP server — always started (headless or not) so Claude
   // can dispatch commands whether FabMesh is visible or hidden.
-  startMcpBridge();
+  try { startMcpBridge(); } catch (e) { log.warn('main', `startMcpBridge failed: ${e.message}`); }
 
   // Trigger an update check 30 seconds after launch so we don't compete
   // with the heavy first-paint of the main app. Silent if already
@@ -1341,6 +1438,11 @@ app.whenReady().then(() => {
     log.info('main', `Headless mode ready. MCP bridge on http://127.0.0.1:${MCP_BRIDGE_PORT}`);
     log.info('main', 'Waiting for commands... (Ctrl+C to stop)');
   }
+}).catch((e) => {
+  // whenReady itself rejected — last line of defense.
+  log.error('main', 'whenReady rejected: ' + (e && (e.stack || e.message)));
+  _log('fatal', 'whenReady rejected: ' + (e && (e.stack || e.message)));
+  try { showFallbackWindow(e); } catch (_) {}
 });
 
 // Ensure the SDXL server is running. Returns a promise that resolves when the
