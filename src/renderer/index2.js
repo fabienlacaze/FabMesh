@@ -10520,7 +10520,12 @@ function fitRigVwCamera(obj) {
 function renderRigVersions(p) {
   const strip = document.getElementById('ws-rig-versions');
   strip.innerHTML = '';
-  p.rigs.forEach((r, i) => {
+  // Defensive newest-first sort by real timestamp (same as renderMeshVersions)
+  // so the freshest rig always gets the highest v# and the selected (i===0)
+  // slot, regardless of how p.rigs was assembled upstream.
+  const _ts = (m) => { if (!m) return 0; const t = new Date(m.created || m.mtime || 0).getTime(); return Number.isFinite(t) ? t : 0; };
+  const rigs = (p.rigs || []).slice().sort((a, b) => _ts(b) - _ts(a));
+  rigs.forEach((r, i) => {
     const t = document.createElement('div');
     t.className = 'version-thumb';
     if (i === 0) t.classList.add('selected');
@@ -10858,7 +10863,9 @@ let _animLoop = true;
 function renderAnimVersions(p) {
   const strip = document.getElementById('ws-anim-versions');
   if (!strip) return;
-  const anims = p?.animations || [];
+  // Defensive newest-first sort by real timestamp (same as the other strips).
+  const _ts = (m) => { if (!m) return 0; const t = new Date(m.created || m.mtime || 0).getTime(); return Number.isFinite(t) ? t : 0; };
+  const anims = (p?.animations || []).slice().sort((a, b) => _ts(b) - _ts(a));
   if (!anims.length) {
     strip.innerHTML = '<div style="color:var(--text-2); font-size:12px; padding:4px;">No animations yet. Pick an engine and click Generate Animation.</div>';
     return;
@@ -12366,7 +12373,10 @@ async function refreshProcList() {
     return s < 60 ? s + 's' : Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0');
   };
   box.innerHTML = procs.map(p => {
-    const ram = p.ramMb != null ? ` · ${(p.ramMb / 1024).toFixed(1)} GB` : '';
+    const ram = p.ramMb != null ? ` · ${(p.ramMb / 1024).toFixed(1)} GB RAM` : '';
+    // The AI engine (image model) holds several GB of VRAM that the tiny RAM
+    // figure hides — surface it so killing it isn't a surprise -8 GB.
+    const vram = p.vramMb != null ? ` · <span style="color:var(--accent)">${(p.vramMb / 1024).toFixed(1)} GB VRAM</span>` : '';
     const susp = p.suspended ? ' <span style="color:var(--warning)">(suspended)</span>' : '';
     const tag = p.isAiEngine ? 'AI engine' : (p.kind || 'job');
     // "Go to" only when we resolved a project to navigate to.
@@ -12376,7 +12386,7 @@ async function refreshProcList() {
     return `<div class="proc-row" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid var(--border);">
       <div style="flex:1;min-width:0;">
         <div style="font-size:11px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.label}${susp}</div>
-        <div style="font-size:10px;color:var(--text-2);">pid ${p.pid} · ${tag} · ${fmtMs(p.elapsedMs)}${ram}</div>
+        <div style="font-size:10px;color:var(--text-2);">pid ${p.pid} · ${tag} · ${fmtMs(p.elapsedMs)}${ram}${vram}</div>
       </div>
       ${goBtn}
       <button class="ghost-btn danger proc-kill" data-pid="${p.pid}" style="padding:3px 8px;font-size:10px;flex:none;">Kill</button>

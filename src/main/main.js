@@ -662,6 +662,39 @@ function markSdxlUsed() {
   }, 10000);
 }
 
+// Cache the AI-engine (SDXL server) VRAM so the Processes panel shows its
+// REAL GPU footprint. The process RAM is tiny (~1.8 GB) but the loaded image
+// model holds several GB of VRAM — without this the row looks small yet
+// killing it frees ~8 GB. Windows (WDDM) doesn't expose per-process VRAM to
+// nvidia-smi, so we ask the server itself (/ping returns vram_gb).
+let _sdxlVramGb = null;
+let _sdxlVramAt = 0;
+function _refreshSdxlVram() {
+  if (!sdxlProc || !sdxlReady) { _sdxlVramGb = null; return Promise.resolve(); }
+  if (Date.now() - _sdxlVramAt < 3000) return Promise.resolve();  // throttle
+  return new Promise((resolve) => {
+    try {
+      const req = require('http').request(
+        { host: '127.0.0.1', port: SDXL_PORT, path: '/ping', method: 'GET', timeout: 800 },
+        (res) => {
+          let body = '';
+          res.on('data', c => body += c);
+          res.on('end', () => {
+            try {
+              const j = JSON.parse(body);
+              if (typeof j.vram_gb === 'number') { _sdxlVramGb = j.vram_gb; _sdxlVramAt = Date.now(); }
+            } catch (_) {}
+            resolve();
+          });
+        }
+      );
+      req.on('error', () => resolve());
+      req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve(); });
+      req.end();
+    } catch (_) { resolve(); }
+  });
+}
+
 function startSdxlServer() {
   if (sdxlProc) return;
   const serverScript = path.join(__dirname, '..', '..', 'scripts', 'sdxl_server.py');
@@ -1775,7 +1808,10 @@ function _projectNameFromArgs(spawnargs) {
 ipcMain.handle('list-processes', async () => {
   const now = Date.now();
   const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
-  const ram = await _ramByPidWin();  // async — never blocks the main process
+  const [ram] = await Promise.all([
+    _ramByPidWin(),     // async — never blocks the main process
+    _refreshSdxlVram(), // refresh the AI-engine VRAM (cached, throttled 3s)
+  ]);
   const rows = [];
   for (const proc of Array.from(allActiveProcs)) {  // snapshot — exit handler mutates the Set
     if (!proc || !proc.pid) continue;
@@ -1790,6 +1826,7 @@ ipcMain.handle('list-processes', async () => {
       projectName: isAiEngine ? null : _projectNameFromArgs(proc.spawnargs),
       elapsedMs: now - (proc.__startedAt || now),
       ramMb: ram.get(proc.pid) || null,
+      vramMb: isAiEngine && _sdxlVramGb != null ? Math.round(_sdxlVramGb * 1024) : null,
       suspended: !!proc._suspended,
       isAiEngine,
     });
@@ -1799,7 +1836,9 @@ ipcMain.handle('list-processes', async () => {
     rows.push({ pid: sdxlPid,
       label: sdxlReady ? 'AI engine (image model loaded)' : 'AI engine (loading…)',
       kind: 'image', elapsedMs: now - (sdxlProc.__startedAt || now),
-      ramMb: ram.get(sdxlPid) || null, suspended: false, isAiEngine: true });
+      ramMb: ram.get(sdxlPid) || null,
+      vramMb: _sdxlVramGb != null ? Math.round(_sdxlVramGb * 1024) : null,
+      suspended: false, isAiEngine: true });
   }
   rows.sort((a, b) => (a.isAiEngine === b.isAiEngine) ? a.pid - b.pid : (a.isAiEngine ? 1 : -1));
   return { procs: rows, sdxl: sdxlProc != null && sdxlReady };
