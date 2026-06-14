@@ -2255,10 +2255,18 @@ function installAllLimitsSafetyKill(proc, jobName) {
     const _ramLimitMB = parseFloat(process.env.FABMESH_RAM_LIMIT_MB || '');
     let _tripped = null;
     let _detail = '';
+    // RAM is NEVER a suspend trigger. Suspending a process does NOT free
+    // its RAM — the working set stays allocated and merely frozen, so the
+    // suspend can never bring usage back down. The resume hysteresis
+    // (usage < 85% of limit) then never fires because nothing releases the
+    // memory → the job DEADLOCKS suspended forever (observed: stuck at 40%,
+    // RAM 30.9/27 GB). Windows' pagefile (virtual memory) safely absorbs
+    // RAM overflow instead: the high-res TRELLIS pass spills to disk (a bit
+    // slower) rather than crashing. So for RAM we ONLY warn, never suspend.
     if (_ramLimitMB > 0 && _usedMB > _ramLimitMB * SAFETY_FRACTION) {
       _breaches.ram += 1;
-      _detail = `RAM ${_usedMB.toFixed(0)} MB > ${(_ramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (${(SAFETY_FRACTION*100).toFixed(0)}% of ${_ramLimitMB} MB limit)`;
-      if (_breaches.ram >= _ramBreachThreshold) _tripped = 'ram';
+      _detail = `RAM ${_usedMB.toFixed(0)} MB > ${(_ramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (${(SAFETY_FRACTION*100).toFixed(0)}% of ${_ramLimitMB} MB limit) — pagefile absorbs overflow, NOT suspending`;
+      // intentionally NO `_tripped = 'ram'` — see comment above
     } else _breaches.ram = 0;
     // --- VRAM + GPU + TEMP via single nvidia-smi call ---
     if (!_tripped) {
@@ -4604,6 +4612,22 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   }
   const useTwoView = false;
 
+  // RAM guard — Ultra Quality (1536_cascade) peaks at ~27 GB system RAM
+  // (8 models stay resident ~15 GB + ~8 GB high-res SLat pass + ~3 GB
+  // export). On a machine with < 24 GB it can't fit and stalls. The UI
+  // already disables the checkbox below 24 GB, but enforce it server-side
+  // too (in case the request comes from a saved project / older renderer):
+  // auto-downgrade to Quality+ (1024_cascade, ~19 GB, validated).
+  let ultraQ = trellis2UltraQ;
+  try {
+    const _totalGB = require('os').totalmem() / (1024 ** 3);
+    if (ultraQ && _totalGB < 24) {
+      log.warn('main', `image-to-3d: Ultra Quality requested but RAM=${_totalGB.toFixed(1)}GB < 24 — downgrading to 1024_cascade`);
+      try { safeSend('ai3d-progress', `[main] Ultra Quality (1536) nécessite ~24 GB RAM, détecté ${_totalGB.toFixed(0)} GB → bascule sur Quality+ (1024)\n`); } catch (_) {}
+      ultraQ = false;
+    }
+  } catch (_) {}
+
   // PRE-PROCESS: auto-rectify the source image to a canonical view.
   // - assetType='character' -> strict orthographic front (good for MV-Adapter
   //   and ControlNet OpenPose paths, T-pose symmetric).
@@ -4780,7 +4804,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       } : {}),
       // Quality presets: Ultra Quality (1536_cascade) > Quality+ (1024_cascade)
       // > default (1024). Ultra wins if both checked.
-      ...(engine === 'trellis2_native' && trellis2UltraQ
+      ...(engine === 'trellis2_native' && ultraQ
         ? {
             FABMESH_TRELLIS2_NATIVE_MODE: '1536_cascade',
             FABMESH_TRELLIS2_NATIVE_DECIM: '1500000',

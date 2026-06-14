@@ -1,5 +1,39 @@
 # FabMesh Agent Log
 
+## 2026-06-14 (fix — RAM-suspend deadlock + Ultra Quality RAM gating + Go-to highlight)
+
+Trois changements liés au pic RAM de TRELLIS-2 1536_cascade (Ultra Quality).
+
+1. **Deadlock RAM-suspend (cause du "stall à 40%")** — main.js
+   installAllLimitsSafetyKill: la RAM ne déclenche PLUS de suspend
+   (NtSuspendProcess). Suspendre un process ne libère PAS sa RAM (working
+   set gelé), donc l'usage ne repasse jamais sous le seuil de reprise
+   (85%) → blocage permanent (observé: figé à 40%, RAM 30.9/27 GB). La
+   RAM se gère par le pagefile (mémoire virtuelle). Seule la VRAM garde
+   la suspension (pas de pagefile, vrai risque OOM). RAM = warning only.
+
+2. **Gating Ultra Quality par RAM** — Workflow d'audit (wirrxclxr, 4
+   agents) a chiffré le pic 1536_cascade à ~27 GB = plancher ~15 GB (8
+   modèles résidents en RAM, low_vram=True garde tout) + ~8 GB passe HR
+   1536 + ~3 GB export. Ne tient pas sur < 24 GB. Donc:
+   - renderer index2.js: gateUltraQualityByRAM() désactive la case
+     #ws-trellis2-ultra-q si totalGB < 24 et garde Quality+ (1024) en
+     repli; ré-appelée après _applyAssetOptionsProfile.
+   - main.js handler image-to-3d: garde-fou serveur — si Ultra demandé
+     et RAM < 24 GB, downgrade ultraQ=false (1024_cascade) + message
+     ai3d-progress. Variable trellis2UltraQ → ultraQ dans le bloc env.
+
+3. **Go-to highlight** — renderer _navigateToProcess: route désormais
+   vers le JOB réel (window._navigateToJobStep → highlight du tile
+   .step-progress-item de la génération) au lieu de seulement la carte
+   conteneur. Fallback: highlight carte + tile actif.
+
+Piste suivante (non appliquée, à valider sur machine 16 GB): patchs de
+réduction du pic dans external/TRELLIS2_win (sampler trajectory OFF +
+del slat LR/empty_cache + cap tokens HR 49152→32768) → pic ~21-23 GB;
+puis réduction du plancher modèles (del/reload ou mmap) pour viser
+~14-16 GB et rouvrir Ultra sur 16 GB. Backup de branche requis avant.
+
 ## 2026-06-14 (fix — Store cert crash-at-launch 10.1.2.10)
 
 Microsoft Store a refusé l'appx: "product crashes at launch" sur Win11

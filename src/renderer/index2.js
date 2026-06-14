@@ -1357,6 +1357,40 @@ const ASSET_OPTIONS_PROFILE = {
   },
 };
 
+// 2026-06-14: gate "Ultra Quality (1536_cascade)" by available system RAM.
+// 1536_cascade peaks at ~27 GB RAM (8 models stay resident ~15 GB + ~8 GB
+// for the high-res SLat pass + ~3 GB export). On a < 24 GB machine it stalls
+// (the safety watchdog used to suspend → deadlock). So on those machines we
+// DISABLE Ultra and silently keep Quality+ (1024_cascade, ~19 GB peak,
+// validated). main.js applies the same guard server-side (belt + suspenders).
+const ULTRA_Q_MIN_RAM_GB = 24;
+let _cachedTotalRamGB = null;
+async function gateUltraQualityByRAM() {
+  try {
+    const ultra = document.getElementById('ws-trellis2-ultra-q');
+    if (!ultra) return;
+    if (_cachedTotalRamGB == null) {
+      if (!API.checkRAM) return;
+      const ram = await API.checkRAM();
+      _cachedTotalRamGB = (ram && ram.totalGB) ? ram.totalGB : null;
+    }
+    if (_cachedTotalRamGB == null || _cachedTotalRamGB >= ULTRA_Q_MIN_RAM_GB) return;
+    // Low-RAM machine: force-off + disable Ultra, keep Quality+ as fallback.
+    ultra.checked = false;
+    ultra.disabled = true;
+    const row = ultra.closest('.form-row') || ultra.closest('label');
+    if (row) {
+      row.style.opacity = '0.5';
+      row.title =
+        `Ultra Quality (1536) nécessite ~${ULTRA_Q_MIN_RAM_GB} GB de RAM. ` +
+        `Détecté : ${_cachedTotalRamGB.toFixed(0)} GB → Quality+ (1024) est ` +
+        `utilisé pour éviter un blocage mémoire.`;
+    }
+    const qplus = document.getElementById('ws-trellis2-quality-plus');
+    if (qplus && !qplus.disabled) qplus.checked = true;
+  } catch (e) { console.warn('gateUltraQualityByRAM failed', e); }
+}
+
 function _applyAssetOptionsProfile(assetType) {
   const profile = ASSET_OPTIONS_PROFILE[assetType] || ASSET_OPTIONS_PROFILE.custom;
   for (const [id, state] of Object.entries(profile)) {
@@ -1371,6 +1405,9 @@ function _applyAssetOptionsProfile(assetType) {
       cb.checked = !!state;
     }
   }
+  // Re-apply the RAM gate AFTER the profile so a low-RAM machine never ends
+  // up with Ultra Quality re-checked by the asset profile.
+  try { gateUltraQualityByRAM(); } catch (_) {}
 }
 (function _wireAssetOptionsProfile() {
   const sel = document.getElementById('ws-asset-type');
@@ -12355,6 +12392,33 @@ async function _navigateToProcess(projectName, kind) {
   if (!projectName) return;
   // Close the Settings modal so the user lands on the workspace.
   try { document.getElementById('modal-settings')?.classList.add('hidden'); } catch (_) {}
+
+  // Prefer routing to the actual running JOB so we highlight the GENERATION
+  // itself (its progress tile), not just the step card that contains it.
+  // Match a live job in this project whose step matches the process kind.
+  const kindToStep = { image: 1, inpaint: 1, mesh: 2, rig: 3, anim: 4 };
+  const wantStep = kindToStep[kind] || 2;
+  try {
+    const jobs = (state.jobs || []).filter(j => {
+      if (!j || _jobProjectName(j) !== projectName) return false;
+      return _jobStepIndex(j) === wantStep;
+    });
+    // Prefer an active job (running/queued/paused) over a finished one.
+    const rank = (j) => {
+      const s = String(j.status || '').toLowerCase();
+      if (s === 'running' || s === 'active') return 0;
+      if (s === 'queued' || s === 'paused' || s === '') return 1;
+      return 2;
+    };
+    jobs.sort((a, b) => rank(a) - rank(b));
+    if (jobs.length && typeof window._navigateToJobStep === 'function') {
+      await window._navigateToJobStep(jobs[0].id);
+      return;
+    }
+  } catch (_) {}
+
+  // Fallback (no matching job object): open the project, highlight the step
+  // card AND the active progress tile inside it (not just the card).
   const cur = state.currentProject && state.currentProject.name;
   if (projectName !== cur) {
     try {
@@ -12376,6 +12440,16 @@ async function _navigateToProcess(projectName, kind) {
   try {
     card.classList.add('pulse-highlight');
     setTimeout(() => card.classList.remove('pulse-highlight'), 1600);
+  } catch (_) {}
+  // Highlight the running generation tile inside the card, not just the card.
+  try {
+    const tile = card.querySelector('.step-progress-item.running')
+      || card.querySelector('.step-progress-item.active')
+      || card.querySelector('.step-progress-item');
+    if (tile) {
+      tile.classList.add('pulse-highlight');
+      setTimeout(() => tile.classList.remove('pulse-highlight'), 1600);
+    }
   } catch (_) {}
 }
 
