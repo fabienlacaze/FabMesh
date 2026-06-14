@@ -2003,7 +2003,7 @@
     <div id="mask-modal" class="modal hidden">
       <div class="modal-content" style="width:95vw; height:95vh; max-width: 95vw; max-height: 95vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 600px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h3 style="margin:0;">Draw Mask (paint to remove)</h3>
+          <h3 style="margin:0;">Draw Mask (paint the area to replace or remove)</h3>
           <button id="mask-modal-close" class="small-btn" style="font-size:18px;">&#10005;</button>
         </div>
         <div style="font-size: 11px; color: var(--text-muted);">
@@ -2038,7 +2038,7 @@
         </div>
         <div style="display:flex; align-items:center; gap:10px;">
           <label for="mask-prompt" style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">Replace with:</label>
-          <input type="text" id="mask-prompt" placeholder="Describe replacement (empty = just remove)" style="flex: 1; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 13px;" />
+          <input type="text" id="mask-prompt" placeholder="Describe what to put in the masked area — leave empty to just remove it" style="flex: 1; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; font-size: 13px;" />
         </div>
         <div style="display:flex; justify-content:flex-end; gap:8px;">
           <button id="mask-cancel" class="secondary-btn">Cancel</button>
