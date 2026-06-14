@@ -12268,11 +12268,15 @@ async function refreshPythonStats() {
   try {
     if (!API.countPython) return;
     const r = await API.countPython();
-    const countEl = document.getElementById('set-python-count');
     const sdxlEl = document.getElementById('set-python-sdxl');
     const killBtn = document.getElementById('set-kill-python');
     const n = r.count || 0;
-    if (countEl) countEl.textContent = String(n);
+    // 2026-06-14: the "N active" count is set by refreshProcList from the
+    // number of JOB rows (top-level tracked processes), NOT here from the
+    // raw python.exe count. A single 3D-mesh job spawns a worker child, so
+    // tasklist sees 2 python.exe while the list shows 1 job — that
+    // mismatch confused the user. The kill-button enable logic still uses
+    // the raw python count (n) so it works even for orphan children.
     if (sdxlEl) {
       sdxlEl.textContent = r.sdxl ? 'running' : 'stopped';
       sdxlEl.style.color = r.sdxl ? 'var(--warning)' : '';
@@ -12296,6 +12300,11 @@ async function refreshProcList() {
   let r;
   try { r = await API.listProcesses(); } catch (_) { return; }
   const procs = (r && r.procs) || [];
+  // 2026-06-14: the "N active" header counts JOB rows (top-level tracked
+  // processes), so it always matches the list below. Worker children a
+  // job spawns are part of that job, not separate rows.
+  const countEl = document.getElementById('set-python-count');
+  if (countEl) countEl.textContent = String(procs.length);
   if (!procs.length) {
     box.innerHTML = '<div style="font-size:11px;color:var(--text-2);padding:4px 0;">No active process.</div>';
     return;
@@ -12624,6 +12633,7 @@ async function openSettings() {
   applyGpuLimitMarkers();
   setupGpuLimitDragging();
   refreshGpuStats();
+  refreshProcList();  // 2026-06-14: immediate first paint of the process list + count
   checkClaudeDesktopStatus();
   refreshParentalStatus();
   // Ensure main process has the current RAM limit
