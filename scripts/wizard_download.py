@@ -190,11 +190,20 @@ def download_hf(item_id, repo, expected_mb, total_done_mb_ref):
     # app only needs a subset that's already on disk.
     if _already_installed(repo, expected_mb):
         cache_mb = _hf_cache_size_mb(repo)
-        total_done_mb_ref[0] += expected_mb
-        emit({'id': item_id, 'pct': 100, 'done': True,
-              'speed_mbps': 0, 'eta': '–', 'elapsed_s': 0,
-              'msg': f'already installed ({cache_mb} MB on disk)',
-              'total_done_mb': total_done_mb_ref[0]})
+        # Quick cosmetic ramp 0->100 (~320 ms) so the bar visibly fills
+        # instead of snapping to 100. The download loop is sequential, so
+        # the bars animate one after another. Real downloads ignore this.
+        base = total_done_mb_ref[0]
+        for pct in (12, 38, 66, 100):
+            emit({'id': item_id, 'pct': pct,
+                  'done': pct >= 100,
+                  'in_progress': pct < 100,
+                  'speed_mbps': 0, 'eta': '–', 'elapsed_s': 0,
+                  'msg': (f'already installed ({cache_mb} MB on disk)' if pct >= 100 else 'verifying…'),
+                  'total_done_mb': base + (expected_mb * pct // 100)})
+            if pct < 100:
+                time.sleep(0.08)
+        total_done_mb_ref[0] = base + expected_mb
         return
 
     emit({'id': item_id, 'pct': 0, 'done': False,
