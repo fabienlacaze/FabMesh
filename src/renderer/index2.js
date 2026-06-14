@@ -12217,11 +12217,16 @@ async function refreshProcList() {
     const ram = p.ramMb != null ? ` · ${(p.ramMb / 1024).toFixed(1)} GB` : '';
     const susp = p.suspended ? ' <span style="color:var(--warning)">(suspended)</span>' : '';
     const tag = p.isAiEngine ? 'AI engine' : (p.kind || 'job');
-    return `<div class="proc-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--border);">
+    // "Go to" only when we resolved a project to navigate to.
+    const goBtn = p.projectName
+      ? `<button class="ghost-btn proc-goto" data-project="${encodeURIComponent(p.projectName)}" data-kind="${p.kind || ''}" style="padding:3px 8px;font-size:10px;flex:none;">Go to</button>`
+      : '';
+    return `<div class="proc-row" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid var(--border);">
       <div style="flex:1;min-width:0;">
         <div style="font-size:11px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.label}${susp}</div>
         <div style="font-size:10px;color:var(--text-2);">pid ${p.pid} · ${tag} · ${fmtMs(p.elapsedMs)}${ram}</div>
       </div>
+      ${goBtn}
       <button class="ghost-btn danger proc-kill" data-pid="${p.pid}" style="padding:3px 8px;font-size:10px;flex:none;">Kill</button>
     </div>`;
   }).join('');
@@ -12234,6 +12239,44 @@ async function refreshProcList() {
       setTimeout(() => { refreshPythonStats(); refreshProcList(); }, 600);
     });
   });
+  box.querySelectorAll('.proc-goto').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const project = decodeURIComponent(btn.dataset.project || '');
+      const kind = btn.dataset.kind || '';
+      _navigateToProcess(project, kind);
+    });
+  });
+}
+
+// 2026-06-14: navigate from a process row to its project + the step the
+// process is working on. Reuses openProject + the step-card scroll/pulse
+// pattern from _navigateToJobStep.
+async function _navigateToProcess(projectName, kind) {
+  if (!projectName) return;
+  // Close the Settings modal so the user lands on the workspace.
+  try { document.getElementById('modal-settings')?.classList.add('hidden'); } catch (_) {}
+  const cur = state.currentProject && state.currentProject.name;
+  if (projectName !== cur) {
+    try {
+      const p = (state.projects || []).find(x => x && x.name === projectName);
+      if (p && typeof openProject === 'function') await openProject(p);
+      else if (typeof window.openProjectByName === 'function') await window.openProjectByName(projectName);
+    } catch (_) {}
+  }
+  const kindToCard = {
+    image: 'step-card-image', inpaint: 'step-card-image',
+    mesh: 'step-card-mesh', rig: 'step-card-rig', anim: 'step-card-animation',
+  };
+  const cardId = kindToCard[kind] || 'step-card-mesh';
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  card.classList.remove('collapsed', 'disabled');
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+  try {
+    card.classList.add('pulse-highlight');
+    setTimeout(() => card.classList.remove('pulse-highlight'), 1600);
+  } catch (_) {}
 }
 
 // ============================================================

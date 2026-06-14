@@ -1656,6 +1656,19 @@ function _ramByPidWin() {
   return m;
 }
 
+// Derive the owning project name from a subprocess command line so the
+// Settings process list can offer a "Go to" button. Most jobs pass an
+// images/<folder>/ path; the folder is <project>_<timestamp>, and the
+// renderer groups projects by stripping that trailing _<digits>.
+function _projectNameFromArgs(spawnargs) {
+  const j = Array.isArray(spawnargs) ? spawnargs.join(' ') : String(spawnargs || '');
+  let m = j.match(/[\\/]images[\\/]([^\\/]+)[\\/]/i);
+  if (m) return m[1].replace(/_\d+$/, '');
+  m = j.match(/[\\/]meshes[\\/]([^\\/]+?)(?:_trellis2|_rigged|_unirig|\.glb)/i);
+  if (m) return m[1].replace(/_\d+$/, '');
+  return null;
+}
+
 ipcMain.handle('list-processes', () => {
   const now = Date.now();
   const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
@@ -1671,6 +1684,7 @@ ipcMain.handle('list-processes', () => {
         ? (sdxlReady ? 'AI engine (image model loaded)' : 'AI engine (loading…)')
         : _jobLabelFromArgs(proc.spawnargs),
       kind: isAiEngine ? 'image' : _jobKindFromArgs(proc.spawnargs),
+      projectName: isAiEngine ? null : _projectNameFromArgs(proc.spawnargs),
       elapsedMs: now - (proc.__startedAt || now),
       ramMb: ram.get(proc.pid) || null,
       suspended: !!proc._suspended,
