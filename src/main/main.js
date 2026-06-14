@@ -815,10 +815,14 @@ function createWindow() {
   });
   ipcMain.on('app-close-confirmed', (_e, opts) => {
     closeConfirmed = true;
-    // 2026-06-13: "Quit and keep jobs running" sends { killJobs: false }.
-    // Set the global so fullCleanup() (fired by window-all-closed)
-    // skips killAllActiveProcs and the subprocesses are left alive.
-    if (opts && opts.killJobs === false) {
+    // 2026-06-13:
+    //   { killJobs: false }  -> keep running (orphan), skip cleanup
+    //   { pauseJobs: true }  -> suspend trees + persist manifests, skip cleanup
+    // Both leave the subprocesses alive across the Electron exit.
+    if (opts && opts.pauseJobs === true) {
+      try { pauseAndPersistJobs(opts.jobStates); } catch (e) { log.warn('main', `pause on quit failed: ${e.message}`); }
+      _keepJobsOnQuit = true;
+    } else if (opts && opts.killJobs === false) {
       _keepJobsOnQuit = true;
     }
     mainWindow.close();
@@ -1317,6 +1321,9 @@ app.whenReady().then(() => {
     createWindow();
   }
 
+  // 2026-06-13: resume any jobs the user paused on the last quit.
+  try { resumePausedJobs(); } catch (e) { log.warn('main', `resumePausedJobs failed: ${e.message}`); }
+
   // MCP Bridge HTTP server — always started (headless or not) so Claude
   // can dispatch commands whether FabMesh is visible or hidden.
   startMcpBridge();
@@ -1373,8 +1380,234 @@ function killAllActiveProcs() {
 }
 
 let _isQuitting = false;
+// =============================================================================
+// 2026-06-13: PAUSE / RESUME running subprocess trees across app restarts.
+//
+// Windows has no built-in "suspend process" CLI, but ntdll exports
+// NtSuspendProcess / NtResumeProcess. We P/Invoke them from a short
+// PowerShell snippet (no external binary needed — verified working).
+// A process *tree* is suspended/resumed by enumerating descendants via
+// CIM Win32_Process(ParentProcessId).
+//
+// On "Quit & pause jobs":
+//   1. For every tracked subprocess: collect its descendant tree, suspend
+//      every PID, and write a manifest to userData/paused_jobs/<pid>.json
+//      recording { rootPid, treePids, spawnfile, spawnargs }.
+//   2. Skip killAllActiveProcs so the (now-suspended) children survive the
+//      parent Electron exit (Node child_process doesn't job-object them).
+//
+// On next launch resumePausedJobs():
+//   - Read every manifest. If the root PID is still alive, resume the whole
+//     tree and notify the renderer. If it's dead (e.g. reboot), drop the
+//     manifest. Output files the job writes are picked up by the normal
+//     list-* scans / a renderer refresh.
+// =============================================================================
+const PAUSED_JOBS_DIR = path.join(app.getPath('userData'), 'paused_jobs');
+
+function _ensurePausedDir() {
+  try { if (!fs.existsSync(PAUSED_JOBS_DIR)) fs.mkdirSync(PAUSED_JOBS_DIR, { recursive: true }); } catch (_) {}
+}
+
+// Collect a PID + all its descendant PIDs (depth-first) via CIM.
+function _collectProcTree(rootPid) {
+  try {
+    const ps = `$ErrorActionPreference='SilentlyContinue';`
+      + `$all=Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId;`
+      + `$out=New-Object System.Collections.Generic.List[int];`
+      + `function Walk($pid){ $out.Add([int]$pid); foreach($c in $all){ if($c.ParentProcessId -eq $pid){ Walk $c.ProcessId } } }`
+      + `Walk ${rootPid}; $out -join ','`;
+    const res = require('child_process').execFileSync(
+      'powershell', ['-NoProfile', '-Command', ps],
+      { timeout: 8000, encoding: 'utf-8' });
+    return res.trim().split(',').map(s => parseInt(s, 10)).filter(n => Number.isFinite(n));
+  } catch (e) {
+    return [rootPid];
+  }
+}
+
+// Suspend or resume a list of PIDs via NtSuspendProcess / NtResumeProcess.
+function _ntSuspendResume(pids, action) {
+  if (!pids || !pids.length) return;
+  const fn = action === 'resume' ? 'NtResumeProcess' : 'NtSuspendProcess';
+  const list = pids.join(',');
+  const ps = `$sig=@"
+[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h);
+[DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);
+"@;`
+    + `$nt=Add-Type -MemberDefinition $sig -Name NtCtl -Namespace W -PassThru;`
+    + `foreach($id in @(${list})){ try{ $h=(Get-Process -Id $id -ErrorAction Stop).Handle; [void]$nt::${fn}($h) }catch{} }`;
+  try {
+    require('child_process').execFileSync(
+      'powershell', ['-NoProfile', '-Command', ps],
+      { timeout: 15000 });
+  } catch (e) {
+    log.warn('main', `_ntSuspendResume(${action}) failed: ${e.message}`);
+  }
+}
+
+// Best-effort human label for a job from its spawn command line.
+function _jobLabelFromArgs(spawnargs) {
+  const j = Array.isArray(spawnargs) ? spawnargs.join(' ').toLowerCase() : String(spawnargs || '').toLowerCase();
+  if (j.includes('rokoko_batch_retarget')) return 'Animation (retarget)';
+  if (j.includes('trellis')) return '3D Mesh generation';
+  if (j.includes('puppeteer') || j.includes('unirig')) return 'Auto-rig';
+  if (j.includes('sdxl') || j.includes('realvis') || j.includes('text2image')) return 'Image generation';
+  if (j.includes('refine')) return 'Mesh refine';
+  return 'Background job';
+}
+
+// Coarse job kind from the spawn command line — must use the SAME
+// vocabulary as the renderer's inferKind() so we can match each tracked
+// subprocess back to the renderer-side job state at pause time.
+function _jobKindFromArgs(spawnargs) {
+  const j = Array.isArray(spawnargs) ? spawnargs.join(' ').toLowerCase() : String(spawnargs || '').toLowerCase();
+  if (j.includes('rokoko_batch_retarget')) return 'anim';
+  if (j.includes('trellis')) return 'mesh';
+  if (j.includes('puppeteer') || j.includes('unirig')) return 'rig';
+  if (j.includes('inpaint') || j.includes('mask')) return 'inpaint';
+  if (j.includes('sdxl') || j.includes('realvis') || j.includes('text2image')) return 'image';
+  return 'other';
+}
+
+// Map the renderer's inferKind vocabulary onto _jobKindFromArgs so the
+// two sides agree. inferKind returns: inpaint/mesh/rig/bg/img2img/image.
+function _normalizeRendererKind(k) {
+  if (k === 'mesh') return 'mesh';
+  if (k === 'rig') return 'rig';
+  if (k === 'inpaint') return 'inpaint';
+  if (k === 'image' || k === 'img2img' || k === 'bg') return 'image';
+  if (k === 'anim') return 'anim';
+  return 'other';
+}
+
+// Suspend every tracked job tree + persist manifests. Called on quit-pause.
+// `jobStates` (from the renderer) carries each running job's progress so
+// the bar can resume where it was: [{kind,label,expectedMs,pausedElapsed}].
+function pauseAndPersistJobs(jobStates) {
+  _ensurePausedDir();
+  // Pool the renderer states by normalized kind so we can hand the right
+  // progress snapshot to each matching subprocess.
+  const pool = {};
+  for (const s of (Array.isArray(jobStates) ? jobStates : [])) {
+    const k = _normalizeRendererKind(s.kind);
+    (pool[k] = pool[k] || []).push(s);
+  }
+  let count = 0;
+  for (const proc of Array.from(allActiveProcs)) {
+    const pid = proc && proc.pid;
+    if (!pid) continue;
+    try {
+      const tree = _collectProcTree(pid);
+      _ntSuspendResume(tree, 'suspend');
+      const kind = _jobKindFromArgs(proc.spawnargs);
+      // Pull a renderer state of the same kind (FIFO), else any leftover.
+      let state = (pool[kind] && pool[kind].shift()) || null;
+      if (!state) {
+        for (const k of Object.keys(pool)) {
+          if (pool[k].length) { state = pool[k].shift(); break; }
+        }
+      }
+      const manifest = {
+        rootPid: pid,
+        treePids: tree,
+        spawnfile: proc.spawnfile || null,
+        spawnargs: proc.spawnargs || null,
+        kind,
+        label: (state && state.label) || _jobLabelFromArgs(proc.spawnargs),
+        expectedMs: (state && state.expectedMs) || null,
+        progress: (state && state.progress) || null,
+        pausedElapsed: (state && state.pausedElapsed) || null,
+        pausedAt: Date.now(),
+      };
+      fs.writeFileSync(
+        path.join(PAUSED_JOBS_DIR, `${pid}.json`),
+        JSON.stringify(manifest, null, 2));
+      count++;
+    } catch (e) {
+      log.warn('main', `pauseAndPersistJobs: failed for pid=${pid}: ${e.message}`);
+    }
+  }
+  log.info('main', `pauseAndPersistJobs: suspended ${count} job tree(s)`);
+  return count;
+}
+
+// Poll a resumed (orphaned) PID until it exits, then tell the renderer
+// so it can complete the Running task popup. We resumed but did not
+// spawn the process, so there's no exit code — completion is neutral.
+function _watchResumedPid(rootPid, label) {
+  const iv = setInterval(() => {
+    let alive = false;
+    try { process.kill(rootPid, 0); alive = true; } catch (_) { alive = false; }
+    if (!alive) {
+      clearInterval(iv);
+      try {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('job-pid-exited', { rootPid, label });
+        }
+      } catch (_) {}
+    }
+  }, 2500);
+  // Don't let the watcher keep the event loop alive on quit.
+  if (iv.unref) iv.unref();
+}
+
+// On launch: resume any manifests whose root PID is still alive.
+function resumePausedJobs() {
+  _ensurePausedDir();
+  let files;
+  try { files = fs.readdirSync(PAUSED_JOBS_DIR).filter(f => f.endsWith('.json')); }
+  catch (_) { return; }
+  let dropped = 0;
+  const resumedJobs = [];  // { rootPid, label }
+  for (const f of files) {
+    const full = path.join(PAUSED_JOBS_DIR, f);
+    let m;
+    try { m = JSON.parse(fs.readFileSync(full, 'utf-8')); } catch (_) { try { fs.unlinkSync(full); } catch (_) {} continue; }
+    // Is the root PID still alive?
+    let alive = false;
+    try { process.kill(m.rootPid, 0); alive = true; } catch (_) { alive = false; }
+    if (alive) {
+      // Re-enumerate the tree (children may have changed) + resume.
+      const tree = _collectProcTree(m.rootPid);
+      _ntSuspendResume(tree.length ? tree : (m.treePids || [m.rootPid]), 'resume');
+      resumedJobs.push({
+        rootPid: m.rootPid,
+        label: m.label || 'Background job',
+        expectedMs: m.expectedMs || null,
+        progress: m.progress || null,
+        pausedElapsed: m.pausedElapsed || null,
+      });
+    } else {
+      dropped++;
+    }
+    try { fs.unlinkSync(full); } catch (_) {}
+  }
+  const resumed = resumedJobs.length;
+  if (resumed || dropped) {
+    log.info('main', `resumePausedJobs: resumed ${resumed}, dropped ${dropped} dead`);
+    // Tell the renderer so it can re-create the "Running task" popup for
+    // each resumed job and toast the user. Then watch each PID and notify
+    // on exit so the popup can complete.
+    const send = () => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('jobs-resumed', { resumed, dropped, jobs: resumedJobs });
+        }
+      } catch (_) {}
+    };
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.once('did-finish-load', send);
+      setTimeout(send, 4000);  // fallback if load already fired
+    }
+    for (const job of resumedJobs) {
+      _watchResumedPid(job.rootPid, job.label);
+    }
+  }
+}
+
 // 2026-06-13: set true when the user picks "Quit and keep jobs running"
-// so fullCleanup leaves the Python/Blender subprocesses alive.
+// (or "pause jobs") so fullCleanup leaves the Python/Blender
+// subprocesses alive instead of killing them.
 let _keepJobsOnQuit = false;
 function fullCleanup() {
   if (_isQuitting) return;

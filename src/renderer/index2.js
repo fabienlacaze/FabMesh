@@ -15338,12 +15338,14 @@ setInterval(() => {
 // ============================================================
 // CLOSE CONFIRMATION (when jobs are running)
 // ============================================================
-// 2026-06-13: styled 3-choice quit modal. Returns 'stop' | 'keep' | 'cancel'.
+// 2026-06-13: styled 4-choice quit modal.
+// Returns 'stop' | 'pause' | 'keep' | 'cancel'.
 function customQuitChoice(runningCount) {
   return new Promise((resolve) => {
     const modal = document.getElementById('modal-quit-jobs');
     const msg = document.getElementById('quit-jobs-message');
     const stopBtn = document.getElementById('quit-jobs-stop');
+    const pauseBtn = document.getElementById('quit-jobs-pause');
     const keepBtn = document.getElementById('quit-jobs-keep');
     const cancelBtn = document.getElementById('quit-jobs-cancel');
     if (!modal) { resolve('stop'); return; }
@@ -15352,6 +15354,7 @@ function customQuitChoice(runningCount) {
     function cleanup(result) {
       modal.classList.add('hidden');
       stopBtn.removeEventListener('click', onStop);
+      pauseBtn.removeEventListener('click', onPause);
       keepBtn.removeEventListener('click', onKeep);
       cancelBtn.removeEventListener('click', onCancel);
       modal.removeEventListener('click', onOverlay);
@@ -15359,16 +15362,75 @@ function customQuitChoice(runningCount) {
       resolve(result);
     }
     function onStop() { cleanup('stop'); }
+    function onPause() { cleanup('pause'); }
     function onKeep() { cleanup('keep'); }
     function onCancel() { cleanup('cancel'); }
     function onOverlay(e) { if (e.target === modal) cleanup('cancel'); }
     function onKey(e) { if (e.key === 'Escape') cleanup('cancel'); }
     stopBtn.addEventListener('click', onStop);
+    pauseBtn.addEventListener('click', onPause);
     keepBtn.addEventListener('click', onKeep);
     cancelBtn.addEventListener('click', onCancel);
     modal.addEventListener('click', onOverlay);
     document.addEventListener('keydown', onKey);
     setTimeout(() => cancelBtn.focus(), 50);
+  });
+}
+
+// 2026-06-13: re-create the "Running task" popup for jobs that main.js
+// resumed on launch. We lost the original stdout pipe, so progress is
+// indeterminate — the popup shows the job is in-flight, and main.js
+// watches the PID and fires job-pid-exited when it finishes so we can
+// complete the popup. Map rootPid -> renderer jobId.
+const _resumedJobByPid = new Map();
+if (window.meshyAPI?.onJobsResumed) {
+  window.meshyAPI.onJobsResumed(({ resumed, dropped, jobs }) => {
+    if (Array.isArray(jobs)) {
+      for (const job of jobs) {
+        try {
+          const expectedMs = job.expectedMs || 120000;
+          const j = (typeof pushJob === 'function')
+            ? pushJob(`${job.label} (resumed)`, null, {
+                State: 'Resumed from a paused session',
+              }, expectedMs)
+            : null;
+          if (j) {
+            // Resume the time-based bar EXACTLY where it was: set
+            // startedAt back so elapsed = the pausedElapsed we saved,
+            // and restore the last known % so it doesn't visibly dip.
+            if (job.pausedElapsed != null) {
+              j.startedAt = Date.now() - job.pausedElapsed;
+            }
+            if (job.progress != null) {
+              j.progress = Math.max(j.progress || 0, job.progress);
+            }
+            try { renderJobs?.(); } catch (_) {}
+            _resumedJobByPid.set(job.rootPid, j.id);
+          }
+        } catch (_) {}
+      }
+    }
+    if (resumed > 0) {
+      showToast?.(`Resumed ${resumed} paused job${resumed > 1 ? 's' : ''} — finishing in the background.`, 'success', 8000);
+    }
+    if (dropped > 0) {
+      showToast?.(`${dropped} paused job${dropped > 1 ? 's' : ''} could not be resumed (process no longer alive). Re-generate if needed.`, 'error', 8000);
+    }
+  });
+}
+if (window.meshyAPI?.onJobPidExited) {
+  window.meshyAPI.onJobPidExited(({ rootPid }) => {
+    const jobId = _resumedJobByPid.get(rootPid);
+    if (jobId != null && typeof completeJob === 'function') {
+      try { completeJob(jobId, true); } catch (_) {}
+      _resumedJobByPid.delete(rootPid);
+    }
+    // Refresh the current view so the new output (mesh / rig / animation)
+    // appears without the user having to manually reload.
+    try {
+      if (state.page === 'projects') refreshProjectsPage?.();
+      else if (state.currentProject) reloadCurrentProject?.();
+    } catch (_) {}
   });
 }
 
@@ -15400,6 +15462,22 @@ if (API.onAppCloseRequested) {
         }
       } catch (_) {}
       API.confirmAppClose({ killJobs: true });
+    } else if (choice === 'pause') {
+      // Snapshot each running job's progress so it can resume EXACTLY
+      // where it was. pausedElapsed = how much wall-time the time-based
+      // bar had accumulated; on resume we set startedAt = now -
+      // pausedElapsed so the bar picks up at the same %.
+      const jobStates = state.jobs
+        .filter(j => j.status === 'running')
+        .map(j => ({
+          kind: j.kind || inferKind(j.name || ''),
+          label: j.name || 'Background job',
+          expectedMs: j.expectedMs || 60000,
+          progress: j.progress || 5,
+          pausedElapsed: Math.max(0, Date.now() - (j.startedAt || Date.now())),
+        }));
+      // Suspend the subprocess trees + persist; they resume on next launch.
+      API.confirmAppClose({ pauseJobs: true, jobStates });
     } else if (choice === 'keep') {
       // Close the window but leave subprocesses running.
       API.confirmAppClose({ killJobs: false });
