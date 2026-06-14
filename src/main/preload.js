@@ -199,6 +199,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   imageQuickEdit: (opts) => ipcRenderer.invoke('image-quick-edit', opts),
 
   // 2026-06-12: v1 animation pipeline (Rokoko retarget + judge + library)
+  listAnimations: () => ipcRenderer.invoke('list-animations'),
   animListMotions: (opts) => ipcRenderer.invoke('anim:list-motions', opts || {}),
   animMotionThumb: (opts) => ipcRenderer.invoke('anim:motion-thumb', opts),
   animRetarget: (opts) => ipcRenderer.invoke('anim:retarget', opts),

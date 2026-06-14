@@ -5739,6 +5739,45 @@ ipcMain.handle('get-mesh-path', (event, filename) => {
   return path.join(MESHES_DIR, filename);
 });
 
+// 2026-06-13: list everything in meshes/animated/ so the renderer can
+// rebuild p.animations after a reload. Rokoko outputs land here as
+// `${motionFbxStem}__${rigGlbStem}.glb`, so we can attribute each
+// clip back to its source rig by suffix match.
+ipcMain.handle('list-animations', async () => {
+  const animDir = path.join(MESHES_DIR, 'animated');
+  if (!fs.existsSync(animDir)) return [];
+  const fsp = fs.promises;
+  let files;
+  try { files = await fsp.readdir(animDir); } catch (e) { return []; }
+  const glbs = files.filter(f => f.toLowerCase().endsWith('.glb'));
+  const results = await Promise.all(glbs.map(async (f) => {
+    const fullPath = path.join(animDir, f);
+    let stats;
+    try { stats = await fsp.stat(fullPath); } catch (e) { return null; }
+    const base = f.replace(/\.glb$/i, '');
+    const sep = base.indexOf('__');
+    const motionStem = sep > 0 ? base.slice(0, sep) : base;
+    const rigStem    = sep > 0 ? base.slice(sep + 2) : '';
+    // Pull a friendly animation type out of the motion stem when present.
+    const lc = motionStem.toLowerCase();
+    const KNOWN = ['idle', 'walk', 'run', 'attack', 'death', 'fly',
+                   'jump', 'dance', 'bite', 'hit', 'sit', 'crawl'];
+    const type = KNOWN.find(t => lc.includes(t)) || 'clip';
+    return {
+      filename: f,
+      path: fullPath,
+      size: stats.size,
+      created: stats.birthtime,
+      mtime: stats.mtimeMs,
+      url: 'file:///' + fullPath.replace(/\\/g, '/'),
+      motionStem,
+      rigStem,
+      type,
+    };
+  }));
+  return results.filter(Boolean).sort((a, b) => b.mtime - a.mtime);
+});
+
 ipcMain.handle('delete-mesh', (event, filename) => {
   // Delete from meshes/
   const meshPath = path.join(MESHES_DIR, filename);

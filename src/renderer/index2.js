@@ -369,6 +369,11 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
 async function refreshProjectsPage() {
   const folders = (await API.listImageFolders()) || [];
   const meshes  = (await API.listMeshes()) || [];
+  // 2026-06-13: scan meshes/animated/ so persisted Rokoko outputs come
+  // back into the project model after a refresh. Each animation's
+  // rigStem (= the target GLB basename without extension) lets us
+  // attribute the clip back to its source rig later in this function.
+  const animsOnDisk = (await API.listAnimations?.()) || [];
 
   // Group by project name (folder = base name without trailing _NNN)
   const projectsMap = new Map();
@@ -475,6 +480,36 @@ async function refreshProjectsPage() {
     }
     return out;
   }
+  // 2026-06-13: attribute each on-disk animation to its source rig's
+  // project. The animation filename layout is
+  // `${motionStem}__${rigStem}.glb` (rokoko_batch_retarget.py:997), so
+  // matching p.rigs[i].filename's basename to the animation's rigStem
+  // bucket-sorts the clips back to their projects.
+  for (const a of animsOnDisk) {
+    if (!a.rigStem) continue;
+    for (const p of projectsMap.values()) {
+      const hit = (p.rigs || []).some(r => {
+        const rBase = (r.filename || '').replace(/\.[^.]+$/, '');
+        return rBase === a.rigStem;
+      });
+      if (hit) {
+        p.animations.push({
+          id: a.filename,
+          batchId: a.filename,  // each on-disk file is its own batch
+          type: a.type,
+          filename: a.filename,
+          path: a.path,
+          url: a.url,
+          motionId: a.motionStem,
+          motionLabel: a.motionStem.replace(/^ANIM_/, '').replace(/_/g, ' '),
+          created: a.created,
+          mtime: a.mtime,
+        });
+        break;
+      }
+    }
+  }
+
   for (const p of projectsMap.values()) {
     p.meshes = _dedupeBy(p.meshes, m => (m.url || m.path || m.filename || '').toLowerCase());
     p.rigs   = _dedupeBy(p.rigs,   r => (r.url || r.path || r.filename || '').toLowerCase());
