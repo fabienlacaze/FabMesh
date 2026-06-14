@@ -1733,19 +1733,30 @@ ipcMain.handle('jobs:kill-all', () => {
 // 2026-06-14: per-process detail + independent kill for the Settings
 // SYSTEM > Processes panel.
 // Batched RAM lookup (one tasklist spawn, not per-row) -> Map<pid, ramMB>.
+// 2026-06-14 FIX: was execFileSync — under heavy generation load tasklist
+// can take several seconds, and a synchronous spawn BLOCKS the Electron
+// main process, freezing the whole UI (the user reported "les stats ont
+// freeze durant la génération"). Now async (execFile + Promise) so the
+// event loop keeps turning. Caller awaits it.
 function _ramByPidWin() {
-  const m = new Map();
-  if (process.platform !== 'win32') return m;
-  try {
-    const out = require('child_process').execFileSync(
-      'tasklist', ['/FI', 'IMAGENAME eq python.exe', '/FO', 'CSV', '/NH'],
-      { encoding: 'utf-8', timeout: 5000 });
-    out.split(/\r?\n/).forEach(line => {
-      const mm = line.match(/^"python\.exe","(\d+)".*,"([\d.,]+) K"\s*$/);
-      if (mm) m.set(parseInt(mm[1]), Math.round(parseInt(mm[2].replace(/[.,]/g, ''), 10) / 1024));
-    });
-  } catch (_) {}
-  return m;
+  return new Promise((resolve) => {
+    const m = new Map();
+    if (process.platform !== 'win32') { resolve(m); return; }
+    try {
+      require('child_process').execFile(
+        'tasklist', ['/FI', 'IMAGENAME eq python.exe', '/FO', 'CSV', '/NH'],
+        { encoding: 'utf-8', timeout: 5000, windowsHide: true },
+        (err, stdout) => {
+          if (!err && stdout) {
+            stdout.split(/\r?\n/).forEach(line => {
+              const mm = line.match(/^"python\.exe","(\d+)".*,"([\d.,]+) K"\s*$/);
+              if (mm) m.set(parseInt(mm[1]), Math.round(parseInt(mm[2].replace(/[.,]/g, ''), 10) / 1024));
+            });
+          }
+          resolve(m);
+        });
+    } catch (_) { resolve(m); }
+  });
 }
 
 // Derive the owning project name from a subprocess command line so the
@@ -1761,10 +1772,10 @@ function _projectNameFromArgs(spawnargs) {
   return null;
 }
 
-ipcMain.handle('list-processes', () => {
+ipcMain.handle('list-processes', async () => {
   const now = Date.now();
   const sdxlPid = sdxlProc ? sdxlProc.pid : -1;
-  const ram = _ramByPidWin();
+  const ram = await _ramByPidWin();  // async — never blocks the main process
   const rows = [];
   for (const proc of Array.from(allActiveProcs)) {  // snapshot — exit handler mutates the Set
     if (!proc || !proc.pid) continue;
