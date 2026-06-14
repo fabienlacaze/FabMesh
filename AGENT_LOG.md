@@ -1,5 +1,38 @@
 # FabMesh Agent Log
 
+## 2026-06-14 (fix — THE real SLat slowness: sparse-attn MATH backend → EFFICIENT)
+
+LE vrai goulot (pas le suspend, pas le sdpa-vs-flash en soi). Mesuré : la
+phase "Sampling shape SLat" (40→80 dans la barre) prenait **8+ minutes**
+même en mode=1024 Fast, GPU à 99% (compute-bound). sparse_struct (les 40%)
+restait rapide (~15s).
+
+CAUSE — benchmark direct sur la RTX 5080 (sm_120), c:/tmp/sdpa_bench.py :
+le chemin sparse-attn sdpa (modules/sparse/attention/full_attn.py, le
+[blackwell_fix]) forçait SDPBackend.MATH. MATH **matérialise la matrice
+N×N** des scores d'attention. Sur une grande séquence de voxels (SLat) :
+  - seqlen 16384 → MATH tente d'allouer 16 GB → OOM/thrash
+  - seqlen 32768 → 64 GB → OOM
+EFFICIENT (mem-efficient, intégré torch, AUCUN .pyd → SAC-safe) streame
+l'attention (mémoire O(N)) :
+  - seqlen 8192 : MATH 46ms vs EFFICIENT 18ms (2.5×), maxerr **0.0000**
+  - seqlen 16384/32768 : MATH OOM, EFFICIENT 70/272ms
+  → bit-à-bit identique à MATH en fp32 (zéro risque correction Blackwell).
+FLASH intégré torch : "No available kernel" sur sm_120 (indispo).
+
+FIX : modules/sparse/attention/full_attn.py — sdpa_kernel([MATH]) →
+sdpa_kernel([EFFICIENT_ATTENTION, MATH]) (EFFICIENT préféré, MATH en
+fallback). fp32 conservé. Ajouté à scripts/apply_trellis2_ram_patches.py
+(patch #4, gitignore-safe).
+NON touché : modules/attention/full_attn.py:139 (non-sparse) garde MATH —
+son blackwell_fix dit qu'EFFICIENT casse en bf16 (Y-axis collapse), et il
+sert la phase sparse_struct qui était DÉJÀ rapide → pas le goulot.
+
+Bonus : watchdog warn-only loggait CHAQUE seconde (fabmesh.log → 72 MB) +
+nvidia-smi synchrone chaque seconde. Rate-limité (1×/30s) + cadence 1s→5s.
+Label popup "Quality" reflète maintenant le preset TRELLIS-2 (Fast) au lieu
+du vieux select ws-3d-quality (montrait "High" à tort).
+
 ## 2026-06-14 (fix — VRAM-suspend deadlock + SLat RAM-paging patches)
 
 Suite directe de l'entrée ci-dessous. Le "stall à 40%" persistait MÊME

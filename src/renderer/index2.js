@@ -7256,9 +7256,17 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     assetType: document.getElementById('ws-asset-type')?.value || 'character',
   };
   const qualityLabels = { draft: 'Draft', standard: 'Standard', high: 'High' };
+  // For TRELLIS-2 native, the user-facing quality is the QUALITY PRESET
+  // dropdown (ws-trellis2-preset), NOT the legacy ws-3d-quality select. Show
+  // that so the running-task popup matches what the user actually picked
+  // (was showing "High" while the user selected "Fast").
+  const t2PresetLabels = { fast: 'Fast', balanced: 'Balanced', quality: 'Quality', ultra_8k: 'Ultra 8K' };
+  const qualityDisplay = (engine === 'trellis2_native')
+    ? (t2PresetLabels[trellis2Preset] || trellis2Preset)
+    : (qualityLabels[quality] || quality);
   const jobParams = {
     Engine: engineLabel(engine),
-    Quality: qualityLabels[quality] || quality,
+    Quality: qualityDisplay,
     'Target triangles': triPreset.label,
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   };

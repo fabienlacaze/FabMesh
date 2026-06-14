@@ -30,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 T2 = ROOT / "external" / "TRELLIS2_win" / "src" / "trellis2" / "pipelines"
 FLOW = T2 / "samplers" / "flow_euler.py"
 IMG = T2 / "trellis2_image_to_3d.py"
+SATTN = (ROOT / "external" / "TRELLIS2_win" / "src" / "trellis2" / "modules"
+         / "sparse" / "attention" / "full_attn.py")
 
 # Each patch: (file, anchor-old, replacement-new, already-applied-marker)
 PATCHES = [
@@ -93,6 +95,12 @@ PATCHES = [
         # Check pipeline type
         pipeline_type = pipeline_type or self.default_pipeline_type''',
         "_os.environ.get('FABMESH_TRELLIS2_MAX_TOKENS')",
+    ),
+    (
+        SATTN,
+        "            _kernel_ctx = sdpa_kernel([SDPBackend.MATH])",
+        "            _kernel_ctx = sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH])",
+        "sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION",
     ),
 ]
 

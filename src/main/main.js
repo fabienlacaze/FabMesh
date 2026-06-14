@@ -2394,9 +2394,19 @@ function installAllLimitsSafetyKill(proc, jobName) {
         }
       }
     } else if (_detail) {
-      log.warn('main', `[safety] ${_detail} (consecutive ${Math.max(_breaches.ram, _breaches.vram, _breaches.gpu, _breaches.temp)}/2)`);
+      // Throttle: the watchdog is warn-only now, so it must NOT log every
+      // tick — that bloated fabmesh.log to tens of MB and buried the real
+      // pipeline output. Warn at most once per 30s per process.
+      const _now = Date.now();
+      if (!proc._lastSafetyWarn || _now - proc._lastSafetyWarn > 30000) {
+        proc._lastSafetyWarn = _now;
+        log.warn('main', `[safety] ${_detail} (consecutive ${Math.max(_breaches.ram, _breaches.vram, _breaches.gpu, _breaches.temp)}/2)`);
+      }
     }
-  }, 1000);
+    // 5s cadence (was 1s): nothing suspends anymore, so the watchdog only
+    // needs to advise. Polling nvidia-smi synchronously every second was
+    // pure overhead (and ran nvidia-smi ON the GPU the job is using).
+  }, 5000);
   proc.on('exit', () => clearInterval(_interval));
   proc.on('close', () => clearInterval(_interval));
 }
