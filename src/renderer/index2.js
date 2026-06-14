@@ -10760,24 +10760,32 @@ function _selectAnim(anim) {
 
 let _animViewer = null;
 function _initAnimResultViewer(anim) {
-  // 2026-06-13: replace the canvas with a fresh one on every select.
-  // Three.js WebGLRenderer.dispose() doesn't release the WebGL context
-  // cleanly, so re-using the same canvas after a previous renderer was
-  // disposed (project switch, or new generation overwriting the previous
-  // viewer) gives a black/blank canvas. Cloning the node detaches the
-  // old context and lets us spin up a fresh renderer.
   let canvas = document.getElementById('ws-anim-result-canvas');
   if (!canvas) { console.warn('[anim-result] no canvas in DOM yet'); return; }
+  // Replace the canvas with a fresh node so any previous WebGL context
+  // (from a disposed renderer) is detached. cloneNode(false) drops the
+  // children but keeps the id + class.
   const fresh = canvas.cloneNode(false);
   canvas.parentNode.replaceChild(fresh, canvas);
   canvas = fresh;
-  // The canvas inherits 100% × 100% from .step-card-preview canvas CSS;
-  // .step-card-preview itself is 440px tall. Wait one frame so layout
-  // has settled before we read clientWidth/Height (otherwise both are 0
-  // and the renderer doesn't draw anything).
-  requestAnimationFrame(() => {
-    const w = canvas.clientWidth || 400, h = canvas.clientHeight || 440;
-    console.log('[anim-result] canvas size', w, 'x', h);
+  // Wait for layout. If the containing <details> is still collapsing
+  // (or the project just opened), clientWidth/Height may still be 0
+  // on the first rAF. Poll up to ~500ms before bailing.
+  let tries = 0;
+  function waitForSize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if ((w === 0 || h === 0) && tries < 30) {
+      tries++;
+      setTimeout(waitForSize, 16);
+      return;
+    }
+    _bootAnimResultViewer(canvas, anim, w || 400, h || 440);
+  }
+  requestAnimationFrame(waitForSize);
+}
+
+function _bootAnimResultViewer(canvas, anim, w, h) {
+  console.log('[anim-result] canvas size', w, 'x', h);
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(devicePixelRatio);
     renderer.setSize(w, h, false);
@@ -10853,14 +10861,13 @@ function _initAnimResultViewer(anim) {
       ctl.update();
       renderer.render(scene, cam);
     })();
-    _animViewer = {
-      cleanup() {
-        disposed = true;
-        cancelAnimationFrame(raf);
-        try { renderer.dispose(); } catch (_) {}
-      }
-    };
-  });
+  _animViewer = {
+    cleanup() {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      try { renderer.dispose(); } catch (_) {}
+    }
+  };
 }
 
 // Wire EDIT SELECTED toolbar buttons (Play / Loop / Export FBX / Show in folder)
