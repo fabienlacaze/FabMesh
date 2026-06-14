@@ -462,12 +462,12 @@
                         Ultra Quality (1536_cascade, fine face detail, +~50s)
                       </label>
                     </div>
-                    <div class="form-row check-row" style="margin-top:4px;">
-                      <label class="inline-check" style="font-size:11px;" title="Upscale the baseColor atlas to 8192² (no hallucination, lossless detail recovery). Final GLB ~120 MB.">
-                        <input type="checkbox" id="ws-trellis2-ultra-hd" checked />
-                        Ultra HD 8K texture (+~5min)
-                      </label>
-                    </div>
+                    <!-- 2026-06-14: "Ultra HD 8K texture" checkbox removed —
+                         the 8K upscale is now chosen purely via the quality
+                         preset dropdown (Ultra 8K). A hidden input keeps the
+                         id alive so the JS that reads it stays simple; it
+                         tracks the preset's forceUltraHd via JS. -->
+                    <input type="checkbox" id="ws-trellis2-ultra-hd" style="display:none;" />
                     <div class="form-row check-row" style="margin-top:4px;">
                       <label class="inline-check" style="font-size:11px;" title="Post-process the baseColor atlas to refine the face zone. Fixes blurry or distorted faces on characters. Strength 0.45.">
                         <input type="checkbox" id="ws-trellis2-face-fix" />

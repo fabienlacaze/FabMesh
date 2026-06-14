@@ -2490,30 +2490,15 @@ document.getElementById('ws-3d-engine')?.addEventListener('change', _ws3dEngineS
 _ws3dEngineSync();
 // ----------------------------------------------------------------
 
-// 2026-06-13: the "Ultra 8K" quality preset already forces the 8K atlas
-// upscale (forceUltraHd), so the standalone "Ultra HD 8K texture"
-// checkbox is redundant + confusing when that preset is picked. Auto-
-// check + disable it (with a hint) so the user sees it's included, and
-// re-enable it for the lower presets where it's an independent option.
+// 2026-06-14: the standalone "Ultra HD 8K texture" checkbox was removed —
+// 8K is now chosen only via the quality preset dropdown. The hidden
+// #ws-trellis2-ultra-hd input just mirrors whether the Ultra 8K preset
+// is active, so the existing read logic (effectiveUltraHD = checkbox ||
+// preset.forceUltraHd) keeps working unchanged.
 function _wsTrellis2UltraHdSync() {
   const preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
   const cb = document.getElementById('ws-trellis2-ultra-hd');
-  if (!cb) return;
-  const lbl = cb.closest('label');
-  if (preset === 'ultra_8k') {
-    cb.checked = true;
-    cb.disabled = true;
-    if (lbl) {
-      lbl.style.opacity = '0.6';
-      lbl.title = 'Included in the Ultra 8K preset — always on.';
-    }
-  } else {
-    cb.disabled = false;
-    if (lbl) {
-      lbl.style.opacity = '';
-      lbl.title = 'Upscale the baseColor atlas to 8192² (no hallucination, lossless detail recovery). Final GLB ~120 MB.';
-    }
-  }
+  if (cb) cb.checked = (preset === 'ultra_8k');
 }
 document.getElementById('ws-trellis2-preset')?.addEventListener('change', _wsTrellis2UltraHdSync);
 _wsTrellis2UltraHdSync();

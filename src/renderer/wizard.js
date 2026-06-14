@@ -280,11 +280,31 @@ async function runFinalTest() {
 
   try {
     const result = await window.wizardAPI.runFinalTest(chosenMode);
-    status.textContent = result.success
-      ? '✓ Test passed in ' + result.duration_s + 's. MyFabmesh.AI is ready.'
-      : '⚠ Test failed: ' + result.error;
-    status.classList.toggle('error', !result.success);
-    document.getElementById('btn-launch').disabled = !result.success;
+    if (result.success) {
+      // 2026-06-14: animated success — a checkmark that draws itself in
+      // a popping circle, then the text fades up. Replaces the plain
+      // "✓ Test passed" line.
+      status.classList.remove('error');
+      status.innerHTML = `
+        <div class="wiz-test-success">
+          <svg class="wiz-check" viewBox="0 0 52 52" aria-hidden="true">
+            <circle class="wiz-check-circle" cx="26" cy="26" r="24" fill="none"/>
+            <path class="wiz-check-path" fill="none" d="M14 27 l8 8 l16 -18"/>
+          </svg>
+          <div class="wiz-test-success-text">
+            <div class="wiz-test-success-title">Test passed</div>
+            <div class="wiz-test-success-sub">Completed in ${result.duration_s}s · MyFabmesh.AI is ready</div>
+          </div>
+        </div>`;
+      // Trigger the launch button with a subtle highlight.
+      const launch = document.getElementById('btn-launch');
+      launch.disabled = false;
+      launch.classList.add('wiz-launch-ready');
+    } else {
+      status.textContent = '⚠ Test failed: ' + result.error;
+      status.classList.add('error');
+      document.getElementById('btn-launch').disabled = true;
+    }
   } catch (e) {
     status.textContent = '⚠ Test crashed: ' + e.message;
     status.classList.add('error');

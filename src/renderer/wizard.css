@@ -345,3 +345,64 @@
   white-space: pre-wrap;
   line-height: 1.5;
 }
+
+/* 2026-06-14: animated "Test passed" success block --------------- */
+.wiz-test-success {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.wiz-check {
+  width: 46px;
+  height: 46px;
+  flex: none;
+}
+.wiz-check-circle {
+  stroke: #34d399;
+  stroke-width: 3;
+  stroke-dasharray: 151;
+  stroke-dashoffset: 151;
+  animation: wiz-check-circle 0.5s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+.wiz-check-path {
+  stroke: #34d399;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: wiz-check-path 0.35s 0.45s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+.wiz-test-success-text {
+  opacity: 0;
+  transform: translateY(6px);
+  animation: wiz-fade-up 0.4s 0.55s ease forwards;
+}
+.wiz-test-success-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #34d399;
+  letter-spacing: 0.2px;
+}
+.wiz-test-success-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+@keyframes wiz-check-circle {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes wiz-check-path {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes wiz-fade-up {
+  to { opacity: 1; transform: translateY(0); }
+}
+/* gentle glow pulse on the launch button once the test passes */
+.primary-btn.wiz-launch-ready {
+  animation: wiz-launch-pulse 1.6s ease-in-out 0.7s 2;
+}
+@keyframes wiz-launch-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+  50%      { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0.25); }
+}
