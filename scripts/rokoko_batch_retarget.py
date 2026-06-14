@@ -120,44 +120,56 @@ def run_single_retarget():
         else:
             labels = {int(k): v for k, v in raw.items()}
     else:
-        # 2026-06-11: fallback for rigs without labels.json sidecar.
-        # The 50 humanoid rigs in c:/tmp/training_rigs/ were rigged
-        # before the puppeteer_bridge sidecar patch. Use the renamer's
-        # geometric heuristic to recover per-joint role names without
-        # needing the pred.txt sidecar.
+        # 2026-06-13: prefer label_by_topology.py (produces canonical
+        # Hips/Spine00/LeftLeg00/... names that map cleanly through
+        # MIXAMO_NAME below) over the older puppeteer_joint_renamer
+        # (which gave us a different vocabulary that didn't match the
+        # MIXAMO_NAME keys, so only 1 bone got renamed and only 1 source
+        # pair matched -> Rokoko baked a static animation).
         sys.path.insert(0, r"c:/Users/Utilisateur/Desktop/FabWare/MeshyMyself/scripts")
+        labels = {}
         try:
-            from puppeteer_joint_renamer import rename_for_anytop
-        except Exception as e:
-            print(f"[rokoko-single] WARN renamer import failed: {e}")
-            rename_for_anytop = None
-        if rename_for_anytop is not None:
-            joint_idxs = []
-            parent_by_idx = {}
-            world_by_idx = {}
-            name_by_idx = {}
-            # Walk the GLB's armature in Blender to get rest world pose
-            for i, bone in enumerate(tgt_arm.data.bones):
-                joint_idxs.append(i)
-                name_by_idx[i] = bone.name
-                parent_by_idx[i] = (
-                    list(tgt_arm.data.bones).index(bone.parent)
-                    if bone.parent is not None else -1
-                )
-                # Rest world position: armature_matrix @ bone.head_local
+            from label_by_topology import topology_label
+            # Walk the GLB armature in Blender to gather positions+parents
+            import numpy as _np
+            positions = {}
+            parent_of = {}
+            children = {}
+            bones_list = list(tgt_arm.data.bones)
+            for i, bone in enumerate(bones_list):
                 head_world = tgt_arm.matrix_world @ bone.head_local
-                import numpy as _np
-                world_by_idx[i] = _np.array([head_world.x, head_world.y, head_world.z])
-            renamed_dict = rename_for_anytop(
-                joint_idxs, parent_by_idx, world_by_idx, name_by_idx, force=True,
-            )
-            labels = renamed_dict
-            print(f"[rokoko-single] labels recovered via "
-                  f"puppeteer_joint_renamer ({len(labels)} entries)")
-        else:
-            print(f"[rokoko-single] WARN no labels.json AND no renamer "
-                  f"-> Rokoko auto-detect will likely fail")
-            labels = {}
+                positions[i] = (head_world.x, head_world.y, head_world.z)
+                if bone.parent is not None:
+                    pi = bones_list.index(bone.parent)
+                    parent_of[i] = pi
+                    children.setdefault(pi, []).append(i)
+                else:
+                    parent_of[i] = -1
+            roots = [i for i, p in parent_of.items() if p < 0]
+            root_idx = roots[0] if roots else 0
+            labels = topology_label(positions, parent_of, children, root_idx)
+            print(f"[rokoko-single] labels via label_by_topology "
+                  f"({sum(1 for v in labels.values() if not v.startswith('Aux'))} canonical, "
+                  f"{sum(1 for v in labels.values() if v.startswith('Aux'))} aux)")
+        except Exception as e:
+            print(f"[rokoko-single] WARN label_by_topology failed: {e}, "
+                  f"falling back to puppeteer_joint_renamer")
+            try:
+                from puppeteer_joint_renamer import rename_for_anytop
+                joint_idxs = []; parent_by_idx = {}; world_by_idx = {}; name_by_idx = {}
+                for i, bone in enumerate(tgt_arm.data.bones):
+                    joint_idxs.append(i)
+                    name_by_idx[i] = bone.name
+                    parent_by_idx[i] = (list(tgt_arm.data.bones).index(bone.parent)
+                                        if bone.parent is not None else -1)
+                    head_world = tgt_arm.matrix_world @ bone.head_local
+                    import numpy as _np
+                    world_by_idx[i] = _np.array([head_world.x, head_world.y, head_world.z])
+                labels = rename_for_anytop(joint_idxs, parent_by_idx, world_by_idx, name_by_idx, force=True)
+                print(f"[rokoko-single] labels via puppeteer_joint_renamer fallback ({len(labels)})")
+            except Exception as e2:
+                print(f"[rokoko-single] WARN no labels.json AND no labellers ({e2})")
+                labels = {}
 
     if labels:
 
