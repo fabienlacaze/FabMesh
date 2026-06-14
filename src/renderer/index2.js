@@ -1346,6 +1346,43 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-ultra-hd':     true,
     'ws-trellis2-face-fix':     null,
   },
+  // Per-category "Other …" types mirror their category's checkbox profile.
+  other_living: {   // like creature
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       false,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      true,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     true,
+  },
+  other_vehicle: {  // like vehicle (refine OFF on smooth surfaces)
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       null,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  other_built: {    // like building
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
+  other_item: {     // like prop
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       true,
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      null,
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,
+  },
   custom: {
     'ws-trellis2-rectify':      true,
     'ws-trellis2-smooth':       true,
@@ -4005,11 +4042,14 @@ const ASSET_TYPE_PROMPTS = {
   avion: 'ONE complete passenger aircraft only, single plane, only one instance, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI, no duplicate, no second plane, no formation',
   bateau: 'ONE complete boat only, single vessel, only one instance, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI, no duplicate, no second boat',
   animal: '3D game asset reference sheet, full body character reference, long shot, full figure shot, wide establishing shot, distant camera, entire animal visible from nose to tail to feet, body fills 60 percent of frame, ONE animal only, single creature with ONE single tail only, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, exactly one tail, no extra tails, no multiple tails, no extra limbs, no humanoid anthropomorphism, no second animal, no duplicate, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot, NOT head and shoulders',
-  // Generic catch-all: studio/single-instance/framing staging but NO
-  // object-noun bias, so the user's own subject drives the result (e.g. a
-  // catapult, cart, tank, statue…). Unlike 'custom' (empty), it still keeps
-  // the clean isolated reference look the 3D pipeline expects.
-  other: 'ONE subject only, single instance, isolated, complete object, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second instance',
+  // Per-category "Other …" presets: keep the category's framing/staging but
+  // drop the SPECIFIC-object bias, so e.g. a catapult under "Other vehicle"
+  // stays a vehicle (not a car) instead of a random studio object. A fully
+  // generic prompt was too vague (produced a camera on a tripod).
+  other_living:  'ONE creature only, single creature, one subject only, full body, isolated, plain white background, even studio lighting, no shadows, no other creatures, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second creature',
+  other_vehicle: 'ONE vehicle only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second vehicle, no twin',
+  other_built:   'ONE structure only, single structure, only one instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate, no second structure',
+  other_item:    'ONE item only, single item, only one instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate, no second item',
   custom: '',
 };
 
