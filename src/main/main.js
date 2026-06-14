@@ -2148,6 +2148,20 @@ ipcMain.handle('cancel-job', (event, jobId) => {
 // being launched.
 function setProcessHardMemoryLimit(proc, jobName) {
   if (process.platform !== 'win32' || !proc || !proc.pid) return;
+  // 2026-06-14: the HARD working-set cap (QUOTA_LIMITS_HARDWS_MAX_ENABLE) is
+  // OFF by default. It was the 3rd and worst cause of the "stuck at 40%":
+  // Windows force-trims the process's HOT pages to disk the instant it hits
+  // the cap (27 GB from the RAM slider), even though 32 GB is physically
+  // present. The shape-SLat pass then thrashes at ~104 s/iteration instead
+  // of ~1.4 s/it. A hard cap trims hot pages; the pagefile pages cold ones —
+  // the latter is far cheaper. With the watchdog now warn-only, the pagefile
+  // is the graceful overflow path. Re-enable the hard cap only if the user
+  // explicitly opts in via FABMESH_HARD_RAM_CAP=1 (e.g. a true low-RAM box
+  // where bounding the working set matters more than speed).
+  if (process.env.FABMESH_HARD_RAM_CAP !== '1') {
+    log.info('main', `[ram-cap] hard working-set cap DISABLED for ${jobName} pid=${proc.pid} (pagefile handles overflow; set FABMESH_HARD_RAM_CAP=1 to force it)`);
+    return;
+  }
   const pid = proc.pid;
   const _os = require('os');
   const totalRam = _os.totalmem();

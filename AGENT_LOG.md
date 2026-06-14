@@ -48,6 +48,23 @@ Deux causes de blocage corrigées :
    ré-appliqués par scripts/apply_trellis2_ram_patches.py (idempotent,
    tracké) — à relancer après tout re-setup TRELLIS-2.
 
+3. **VRAIE cause racine du 104 s/it : le plafond hard de working-set**
+   (setProcessHardMemoryLimit). Preuve : logs/enfant_mesh1536.log du
+   21 mai (run sain) montre la passe "Sampling shape SLat" HR à
+   **1,68 s/it** (~20s). Aujourd'hui : **104 s/it** = 60× plus lent sur
+   le MÊME calcul → c'est de la mémoire, pas du compute (le GPU à 99%
+   est trompeur, nvidia-smi capte un kernel en cours). setProcess-
+   HardMemoryLimit posait un cap DUR via SetProcessWorkingSetSizeEx +
+   QUOTA_LIMITS_HARDWS_MAX_ENABLE (flag 0x5) à 27 GB (= slider RAM).
+   Windows force-trim les pages CHAUDES vers le disque dès 27 GB, même
+   avec 31,8 GB physiques → thrashing. (Un cap dur trime les pages
+   chaudes ; le pagefile ne pousse que les froides — bien moins cher.)
+   FIX : le cap hard est désormais OPT-IN (FABMESH_HARD_RAM_CAP=1),
+   désactivé par défaut. Le pagefile + le watchdog warn-only gèrent
+   l'overflow proprement. Objectif : retour aux ~1,68 s/it de mai.
+   (Cap retiré aussi à chaud sur le job en cours via
+   SetProcessWorkingSetSizeEx(-1,-1,0) pendant le debug.)
+
 ## 2026-06-14 (fix — RAM-suspend deadlock + Ultra Quality RAM gating + Go-to highlight)
 
 Trois changements liés au pic RAM de TRELLIS-2 1536_cascade (Ultra Quality).
