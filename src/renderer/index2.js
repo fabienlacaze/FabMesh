@@ -4229,8 +4229,10 @@ function stripKnownPromptSuffixes(raw) {
     'one single environment piece',
     'ONE car only', 'ONE building only', 'ONE weapon only',
     'ONE prop only', 'ONE creature only', 'ONE environment piece only',
-    'one character only', 'single vehicle', 'only one instance',
-    'single instance', 'isolated', 'complete vehicle',
+    'ONE vehicle only', 'ONE structure only', 'ONE item only', 'ONE subject only',
+    'one character only', 'single vehicle', 'single structure', 'single item',
+    'single creature', 'only one instance',
+    'single instance', 'isolated', 'complete vehicle', 'complete object',
     // staging / lighting / framing
     'plain white background', 'even studio lighting', 'no shadows',
     'no characters', 'no other characters', 'no other creatures',
@@ -4238,6 +4240,8 @@ function stripKnownPromptSuffixes(raw) {
     'full body', 'full structure', 'full weapon', 'full item',
     // dedup negatives (sometimes leak into positive)
     'no duplicate', 'no second car', 'no second building',
+    'no second vehicle', 'no second structure', 'no second item',
+    'no second creature', 'no second instance',
     'no twin', 'no rear view inset',
     // T-pose tokens (legacy character)
     'T-pose neutral stance', 'arms extended horizontally', 'legs apart',
