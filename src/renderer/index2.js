@@ -1676,6 +1676,11 @@ function resetWorkspaceUI() {
 }
 
 function populateWorkspace(p) {
+  // 2026-06-13: populate Step 4 EDIT SELECTED with the project's
+  // on-disk animations (from listAnimations -> p.animations in
+  // refreshProjectsPage). Without this, the version-thumb strip was
+  // empty after a refresh even though the GLBs existed on disk.
+  try { if (p && Array.isArray(p.animations) && p.animations.length) renderAnimVersions(p); } catch (e) { console.warn('[populate] renderAnimVersions failed:', e); }
   // 2026-06-02 (mirror cloud c5866be): dispose any 3D viewer state held
   // over from a PREVIOUS project before we re-render the DOM for the
   // new project. NOTE: by the time we get here, openProject has ALREADY
