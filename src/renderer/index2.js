@@ -2515,7 +2515,7 @@ function _fmtEta(ms) {
   const s = Math.round(ms / 1000);
   if (s < 60) return `~${s}s`;
   const m = Math.floor(s / 60), r = s % 60;
-  return r ? `~${m}m${String(r).padStart(2, '0')}` : `~${m}m`;
+  return r ? `~${m}m${String(r).padStart(2, '0')}s` : `~${m}m`;
 }
 function _estimateImageMs() {
   const engine = document.getElementById('ws-engine')?.value || 'local-flux';
