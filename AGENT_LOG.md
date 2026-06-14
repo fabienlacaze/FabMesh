@@ -1,5 +1,53 @@
 # FabMesh Agent Log
 
+## 2026-06-14 (fix — VRAM-suspend deadlock + SLat RAM-paging patches)
+
+Suite directe de l'entrée ci-dessous. Le "stall à 40%" persistait MÊME
+sans checkbox cochée. Diagnostic complet via le popup d'erreur (output
+brut du job) :
+
+- "Sampling sparse structure: 12/12 [00:15, 1.30s/it]" → 15 s, c'est
+  EXACTEMENT la barre à 40%.
+- "Sampling shape SLat: 5/12 [08:36, 104.53s/it]" → **104 s/itération**
+  (vs ~1,4 s/it pour le sparse) = ~75× plus lent. CAUSE : le working
+  set de la passe SLat dépasse la RAM physique → paging disque.
+- Header: "expandable_segments not supported on this platform" → l'opt
+  alloc CUDA est OFF sous Windows, ce qui aggrave le débordement RAM.
+
+Deux causes de blocage corrigées :
+
+1. **VRAM-suspend deadlock** — main.js installAllLimitsSafetyKill : la
+   VRAM ne déclenche PLUS de suspend (comme la RAM). Log observé :
+   "SUSPEND VRAM: 15350 > 13939 MB (95% of 90% cap)". Suspendre ne
+   libère pas la VRAM (contexte CUDA gelé) → jamais sous le seuil de
+   reprise → deadlock. Et un dépassement VRAM ne crashe pas le PC (CUDA
+   OOM rattrapé par PyTorch). TRELLIS-2 a besoin de ~15,6/16 GB, au-
+   dessus d'un slider à 90% → suspendre gelait un job sain. Watchdog
+   désormais 100% warn-only (RAM via pagefile, VRAM via CUDA OOM-guard).
+   Régression "ça marchait avant" : avant le suspend PowerShell timeout-
+   ait sous charge (_suspendGaveUp) et le job tournait ; maintenant il
+   réussit et fige. + un parent suspendu bloque le relai stdout du
+   worker enfant caché (pid parent .venv → child system-python) → la
+   barre ne bouge plus alors que le GPU calcule à 99%.
+
+2. **3 patchs de réduction RAM de la passe SLat** (validés safe par
+   workflow d'audit, byte-exact, aucun consommateur ne lit la data
+   supprimée) — appliqués dans external/TRELLIS2_win (GITIGNORE) :
+   - (a) flow_euler.py : ne garde plus la trajectoire complète (24
+     copies de latent/passe) sauf return_traj=True. .samples inchangé
+     → géométrie identique au bit près.
+   - (c) trellis2_image_to_3d.py : del slat/hr_coords/quant_coords +
+     gc + empty_cache avant la passe HR.
+   - (b) trellis2_image_to_3d.py : honore FABMESH_TRELLIS2_MAX_TOKENS
+     (32768) pour plafonner le budget tokens HR ; main.js Ultra-block
+     ajoute l'env + DECIM 1500000→1200000.
+   Pic visé ~21-23 GB (tient sans paging sur 32 GB → SLat revient à
+   ~1,4 s/it). Cible 16 GB nécessiterait de réduire le plancher des 8
+   modèles résidents (non fait).
+   IMPORTANT : external/TRELLIS2_win étant gitignore, les patchs sont
+   ré-appliqués par scripts/apply_trellis2_ram_patches.py (idempotent,
+   tracké) — à relancer après tout re-setup TRELLIS-2.
+
 ## 2026-06-14 (fix — RAM-suspend deadlock + Ultra Quality RAM gating + Go-to highlight)
 
 Trois changements liés au pic RAM de TRELLIS-2 1536_cascade (Ultra Quality).

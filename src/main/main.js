@@ -2283,13 +2283,25 @@ function installAllLimitsSafetyKill(proc, jobName) {
           const _vramFrac = parseFloat(process.env.FABMESH_VRAM_FRACTION || '');
           const _gpuLimit = parseFloat(process.env.FABMESH_GPU_LIMIT || '');
           const _tempLimitSlider = parseFloat(process.env.FABMESH_TEMP_LIMIT || '');
-          // VRAM
+          // VRAM — WARN ONLY, never suspend (2026-06-14). Suspending the
+          // Python process does NOT free its VRAM: the CUDA context keeps
+          // every allocation resident while the process is frozen, so VRAM
+          // never falls back under the resume threshold → the job DEADLOCKS
+          // suspended forever (observed: SUSPEND VRAM 15350>13939 MB, stuck
+          // at 40%, GPU still 99%). And a real VRAM overrun does NOT crash
+          // the PC — CUDA returns an out-of-memory error that PyTorch's
+          // allocator (expandable_segments) retries/handles. TRELLIS-2
+          // legitimately needs ~15.6/16 GB, which exceeds a 90% slider cap,
+          // so suspending here only freezes a perfectly healthy job. Like
+          // GPU%/TEMP below, the VRAM slider stays a SOFT limit (throttle
+          // via gpu_throttle.py), not a panic suspend.
           if (_vramFrac > 0 && vramTotal > 0) {
             const _vramLimitMB = vramTotal * _vramFrac;
             if (vramUsed > _vramLimitMB * SAFETY_FRACTION) {
               _breaches.vram += 1;
-              _detail = `VRAM ${vramUsed.toFixed(0)} MB > ${(_vramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (${(SAFETY_FRACTION*100).toFixed(0)}% of ${(_vramFrac * 100).toFixed(0)}% cap on ${vramTotal} MB)`;
-              if (_breaches.vram >= _vramBreachThreshold) _tripped = 'vram';
+              _detail = `VRAM ${vramUsed.toFixed(0)} MB > ${(_vramLimitMB * SAFETY_FRACTION).toFixed(0)} MB (${(SAFETY_FRACTION*100).toFixed(0)}% of ${(_vramFrac * 100).toFixed(0)}% cap on ${vramTotal} MB) — CUDA OOM-guards, NOT suspending`;
+              // intentionally NO `_tripped = 'vram'` — suspending can't free
+              // VRAM and would deadlock the job. See comment above.
             } else _breaches.vram = 0;
           }
           // NOTE: GPU util % and TEMP are NOT safety-killed here.
@@ -4807,7 +4819,8 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
       ...(engine === 'trellis2_native' && ultraQ
         ? {
             FABMESH_TRELLIS2_NATIVE_MODE: '1536_cascade',
-            FABMESH_TRELLIS2_NATIVE_DECIM: '1500000',
+            FABMESH_TRELLIS2_NATIVE_DECIM: '1200000',
+            FABMESH_TRELLIS2_MAX_TOKENS: '32768',
           }
         : (engine === 'trellis2_native' && trellis2QualityPlus
             ? {
