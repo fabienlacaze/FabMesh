@@ -6812,11 +6812,18 @@ async function renderMeshVersions(p) {
   // older jobs. The renderer labels by index (v(N-1-i)) and assumes
   // i=0 is newest, so re-sort defensively here.
   if (Array.isArray(meshes)) {
-    meshes = meshes.slice().sort((a, b) => {
-      const ka = (a && (a.created || a.mtime)) || '';
-      const kb = (b && (b.created || b.mtime)) || '';
-      return String(kb).localeCompare(String(ka));
-    });
+    // Sort NEWEST-FIRST by real timestamp. `created` arrives as a Date (it's
+    // fs birthtime) and `mtime` may be epoch-ms or a Date — compare them
+    // NUMERICALLY via getTime(). The previous String(date).localeCompare()
+    // compared the locale string "Wed Jun 14 2026 ..." by DAY-OF-WEEK, so
+    // meshes from different days sorted randomly and a freshly-generated mesh
+    // could land last (labelled v0 on the right). Regression from ef475f2.
+    const _ts = (m) => {
+      if (!m) return 0;
+      const t = new Date(m.created || m.mtime || 0).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+    meshes = meshes.slice().sort((a, b) => _ts(b) - _ts(a));
   }
   let restricted = true;
   try {
