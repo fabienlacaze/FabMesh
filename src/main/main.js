@@ -1588,7 +1588,10 @@ function resumePausedJobs() {
     // Tell the renderer so it can re-create the "Running task" popup for
     // each resumed job and toast the user. Then watch each PID and notify
     // on exit so the popup can complete.
+    let _sentOnce = false;
     const send = () => {
+      if (_sentOnce) return;  // guard: did-finish-load AND the fallback
+      _sentOnce = true;       // timeout both call this — fire only once.
       try {
         if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
           mainWindow.webContents.send('jobs-resumed', { resumed, dropped, jobs: resumedJobs });
