@@ -2110,7 +2110,7 @@ function installAllLimitsSafetyKill(proc, jobName) {
       // allocating. Windows can then swap its pages out, RAM falls,
       // and we resume the process. The job slows down (stop/start) but
       // stays alive and never crashes the PC.
-      if (!proc._suspended) {
+      if (!proc._suspended && !proc._suspendGaveUp) {
         log.warn('main', `[safety] SUSPEND ${_tripped.toUpperCase()}: ${_detail} — freezing pid=${proc.pid} (will resume when below 85% of limit)`);
         try { safeSend('limit-suspend', { metric: _tripped, detail: _detail, job: jobName }); } catch (e) {}
         try {
@@ -2120,11 +2120,26 @@ function installAllLimitsSafetyKill(proc, jobName) {
               `Add-Type -MemberDefinition $sig -Name N -Namespace W -ErrorAction SilentlyContinue; ` +
               `$p=Get-Process -Id ${proc.pid} -ErrorAction SilentlyContinue; ` +
               `if ($p) { [W.N]::NtSuspendProcess($p.Handle) | Out-Null }`
-            ], { stdio: 'ignore', timeout: 3000 }
+            // 2026-06-13: 3000ms was too short — PowerShell cold-start +
+            // Add-Type C# compile takes 5-8s when the box is already
+            // under heavy GPU/RAM load (exactly when this fires), so it
+            // ETIMEDOUT every tick and spam-spawned PowerShell, making
+            // the load worse. Bumped to 15s + give-up backoff below.
+            ], { stdio: 'ignore', timeout: 15000 }
           );
           proc._suspended = true;
+          proc._suspendFails = 0;
         } catch (e) {
-          log.warn('main', `[safety] suspend failed for pid=${proc.pid}: ${e.message}`);
+          proc._suspendFails = (proc._suspendFails || 0) + 1;
+          log.warn('main', `[safety] suspend failed for pid=${proc.pid} (attempt ${proc._suspendFails}): ${e.message}`);
+          // After 2 failed attempts, stop trying — re-spawning PowerShell
+          // every monitoring tick only compounds the load it's meant to
+          // relieve. Let the process run; nvidia-smi/torch will OOM-guard
+          // on their own, and the user can still cancel manually.
+          if (proc._suspendFails >= 2) {
+            proc._suspendGaveUp = true;
+            log.warn('main', `[safety] giving up suspend for pid=${proc.pid} after ${proc._suspendFails} timeouts — letting it run`);
+          }
         }
       }
     } else if (proc._suspended) {
@@ -2145,7 +2160,7 @@ function installAllLimitsSafetyKill(proc, jobName) {
               `Add-Type -MemberDefinition $sig -Name N -Namespace W -ErrorAction SilentlyContinue; ` +
               `$p=Get-Process -Id ${proc.pid} -ErrorAction SilentlyContinue; ` +
               `if ($p) { [W.N]::NtResumeProcess($p.Handle) | Out-Null }`
-            ], { stdio: 'ignore', timeout: 3000 }
+            ], { stdio: 'ignore', timeout: 15000 }
           );
           proc._suspended = false;
         } catch (e) {
