@@ -4728,15 +4728,24 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
           proc.stderr?.on('data', d => safeSend('ai3d-progress', '[stderr] ' + d.toString()));
         };
 
+        const REFINE_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_refine.py');
         const SMOOTH_SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'texture_smooth.py');
         const FACE_SCRIPT   = path.join(__dirname, '..', '..', 'scripts', 'face_inpaint_atlas.py');
         const UPSCALE_SCRIPT= path.join(__dirname, '..', '..', 'scripts', 'texture_upscale.py');
 
+        // 2026-06-13: wire "Detail refine". texture_refine.py was already
+        // present (SDXL Tile img2img on the baked atlas) but the checkbox
+        // (trellis2Refine) was destructured and never used — a dead toggle.
+        // Run it FIRST (refine the 4k atlas) so smooth/face/upscale operate
+        // on the sharpened texture. Low default strength (0.22) so it adds
+        // micro-detail without inventing damage; the per-asset-type UI
+        // defaults already turn it OFF for smooth surfaces (vehicles/icons).
+        const runRefine  = (next) => trellis2Refine   ? runStep('refine',  REFINE_SCRIPT,  ['--strength', '0.22', '--controlnet_tile'], 240000, next) : next();
         const runSmooth  = (next) => trellis2Smooth   ? runStep('smooth',  SMOOTH_SCRIPT,  [],                                    120000, next) : next();
         const runFaceFix = (next) => trellis2FaceFix  ? runStep('face',    FACE_SCRIPT,    ['--strength', '0.45'],                240000, next) : next();
         const runUpscale = (next) => trellis2UltraHD  ? runStep('8k',      UPSCALE_SCRIPT, ['--scale', '2', '--tile', '512'],     600000, next) : next();
 
-        runSmooth(() => runFaceFix(() => runUpscale(finishAndResolve)));
+        runRefine(() => runSmooth(() => runFaceFix(() => runUpscale(finishAndResolve))));
       };
       if (jobId) activeProcs.set(jobId, proc);
       // Two-layer memory safety:
