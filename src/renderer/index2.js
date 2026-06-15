@@ -14271,14 +14271,61 @@ window.addEventListener('drop', async (e) => {
   e.preventDefault();
   dragCounter = 0;
   dropOverlay.classList.add('hidden');
+  // Capture dataTransfer SYNCHRONOUSLY — it is invalidated after the first
+  // await (the download below). A file dragged from the OS has a real .path;
+  // an image dragged from a web page (e.g. Google Images) has NO local path,
+  // only a URL in text/html / text/uri-list / text/plain — download it first.
   const files = Array.from(e.dataTransfer?.files || []);
-  if (files.length === 0) return;
-  const f = files[0];
-  const path_ = f.path || '';
-  const isImage = /\.(png|jpg|jpeg|webp)$/i.test(f.name);
-  const isMesh = /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f.name);
+  const dt = e.dataTransfer;
+  const uriList = dt?.getData?.('text/uri-list') || '';
+  const htmlData = dt?.getData?.('text/html') || '';
+  const plainData = dt?.getData?.('text/plain') || '';
+
+  let path_ = '';
+  let fileName = '';
+  const localFile = files[0];
+  if (localFile && localFile.path) {
+    path_ = localFile.path;
+    fileName = localFile.name || '';
+  } else {
+    const _extractUrl = () => {
+      if (htmlData) {
+        const m = htmlData.match(/<img[^>]+src=["']([^"']+)["']/i);
+        if (m && /^https?:/i.test(m[1])) return m[1];
+      }
+      if (uriList) {
+        const line = uriList.split(/\r?\n/).map(s => s.trim())
+          .find(s => s && !s.startsWith('#') && /^https?:/i.test(s));
+        if (line) return line;
+      }
+      const p = (plainData || '').trim();
+      if (/^https?:\/\//i.test(p)) return p;
+      return '';
+    };
+    const webUrl = _extractUrl();
+    if (!webUrl) {
+      showToast?.('Drop a local file, or drag an actual image from a web page.', 'error', 4500);
+      return;
+    }
+    showToast?.('Downloading dragged image…', 'info', 2500);
+    try {
+      const dl = await API.downloadToTemp(webUrl);
+      if (!dl || !dl.success || !dl.path) {
+        showToast?.('Could not download the dragged image: ' + (dl?.error || 'unknown'), 'error', 4500);
+        return;
+      }
+      path_ = dl.path;
+      fileName = dl.filename || '';
+    } catch (err) {
+      showToast?.('Download failed: ' + err.message, 'error', 4500);
+      return;
+    }
+  }
+
+  const isImage = /\.(png|jpg|jpeg|webp|gif)$/i.test(fileName);
+  const isMesh = /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(fileName);
   if (!isImage && !isMesh) {
-    alert('Unsupported file type. Drop a .png, .jpg, .glb, .fbx, .obj, .stl or .ply');
+    showToast?.('Unsupported file type. Use png/jpg/webp or glb/obj/fbx/stl/ply.', 'error', 4500);
     return;
   }
   // Context-aware:

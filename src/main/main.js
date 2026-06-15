@@ -3554,6 +3554,55 @@ ipcMain.handle('import-dropped-file', (event, arg) => {
   }
 });
 
+// Download an image dragged from a web page (no local file path) to a temp
+// file so the normal import flow can handle it. Follows redirects, picks the
+// extension from the content-type, and refuses non-image responses.
+ipcMain.handle('download-to-temp', async (event, url) => {
+  return new Promise((resolve) => {
+    try {
+      if (!url || !/^https?:\/\//i.test(url)) return resolve({ success: false, error: 'invalid url' });
+      const os = require('os');
+      const tmpDir = path.join(os.tmpdir(), 'fabmesh_dl');
+      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (_) {}
+      const doGet = (u, redirects) => {
+        let mod;
+        try { mod = u.startsWith('https') ? require('https') : require('http'); }
+        catch (_) { return resolve({ success: false, error: 'no http module' }); }
+        const req = mod.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 FabMesh/1.0' }, timeout: 20000 }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 5) {
+            res.resume();
+            let next;
+            try { next = new URL(res.headers.location, u).toString(); } catch (_) { next = res.headers.location; }
+            return doGet(next, redirects + 1);
+          }
+          if (res.statusCode !== 200) { res.resume(); return resolve({ success: false, error: 'HTTP ' + res.statusCode }); }
+          const ct = (res.headers['content-type'] || '').toLowerCase();
+          let ext = '';
+          if (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
+          else if (ct.includes('png')) ext = '.png';
+          else if (ct.includes('webp')) ext = '.webp';
+          else if (ct.includes('gif')) ext = '.gif';
+          else if (!ct.includes('image')) { res.resume(); return resolve({ success: false, error: 'not an image (' + (ct || 'unknown') + ')' }); }
+          else ext = '.png';
+          const dest = path.join(tmpDir, `dropped_${Date.now()}${ext}`);
+          const out = fs.createWriteStream(dest);
+          let bytes = 0;
+          res.on('data', (c) => { bytes += c.length; });
+          res.pipe(out);
+          out.on('finish', () => out.close(() => {
+            if (bytes < 100) { try { fs.unlinkSync(dest); } catch (_) {} return resolve({ success: false, error: 'empty download' }); }
+            resolve({ success: true, path: dest, filename: path.basename(dest) });
+          }));
+          out.on('error', (e) => resolve({ success: false, error: e.message }));
+        });
+        req.on('error', (e) => resolve({ success: false, error: e.message }));
+        req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve({ success: false, error: 'timeout' }); });
+      };
+      doGet(url, 0);
+    } catch (e) { resolve({ success: false, error: e.message }); }
+  });
+});
+
 // Duplicate an image into a new version (same project dir, suffix + timestamp).
 // Used by Multi-Views button so the original image stays untouched while the
 // new version receives the 6-view dir + any subsequent view edits.
@@ -6623,7 +6672,7 @@ ipcMain.handle('list-image-folders', () => {
     .map(d => {
       const dir = path.join(IMAGES_DIR, d);
       const imgs = fs.readdirSync(dir)
-        .filter(f => /\.(png|jpg|jpeg)$/i.test(f))
+        .filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f))
         // Exclude debug/auxiliary files (masks, temp files)
         .filter(f => !f.includes('_mask') && !f.startsWith('.') && !f.startsWith('_'))
         .map(f => {
