@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — Re-Texture (trellis2_retex) crash flash_attn manquant)
+
+User : Re-Texture plante. Erreur = ModuleNotFoundError: No module named
+'flash_attn' dans modules/sparse/attention/full_attn.py (sparse attention).
+CAUSE : config.ATTN défaut 'flash_attn', non installé dans le venv texturing.
+Le bridge n'imposait pas le backend (contrairement à la génération de mesh
+qui force SPARSE_ATTN_BACKEND=sdpa via main.js:5145 et marche sur le 5080).
+FIX :
+- mesh_tools.trellis2_retex : env['SPARSE_ATTN_BACKEND']='sdpa' → route vers
+  la branche sdpa (blackwell_fix EFFICIENT_ATTENTION) au lieu de flash_attn.
+- windowed_attn.py : l'attention FENÊTRÉE n'avait QUE xformers/flash_attn (pas
+  de branche sdpa) → forcer sdpa aurait laissé `out` non défini. Ajout d'une
+  branche sdpa (self + cross, 1 SDPA par fenêtre en fp32, calquée sur
+  full_attn). Ajouté à apply_trellis2_ram_patches.py (WATTN, 2 patchs) pour
+  persister malgré le gitignore de external/TRELLIS2_win.
+
 ## 2026-06-15 (feat — outil Watertight (voxel remesh) dans AI Tools)
 
 Distinction faite avec le user : Fill holes = couture des bords (stitching),

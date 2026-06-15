@@ -32,6 +32,95 @@ FLOW = T2 / "samplers" / "flow_euler.py"
 IMG = T2 / "trellis2_image_to_3d.py"
 SATTN = (ROOT / "external" / "TRELLIS2_win" / "src" / "trellis2" / "modules"
          / "sparse" / "attention" / "full_attn.py")
+WATTN = (ROOT / "external" / "TRELLIS2_win" / "src" / "trellis2" / "modules"
+         / "sparse" / "attention" / "windowed_attn.py")
+
+# Shared SDPA window-attention body (one torch SDPA per window, fp32, EFFICIENT
+# kernel) — the texturing model uses windowed sparse attention, which had ONLY
+# xformers/flash_attn branches; with SPARSE_ATTN_BACKEND=sdpa (no flash_attn in
+# the texturing venv) `out` was never assigned. These add the missing branch.
+_WATTN_SELF_NEW = """    elif config.ATTN == 'flash_attn':
+        if 'flash_attn' not in globals():
+            import flash_attn
+        out = flash_attn.flash_attn_varlen_qkvpacked_func(qkv_feats, **attn_func_args)  # [M, H, C]
+    else:
+        # [blackwell_fix] SDPA fallback (sm_120 / no flash_attn) — windowed
+        # self attention, one torch SDPA per window in fp32 (EFFICIENT kernel).
+        # Mirrors the full_attn sdpa branch.
+        from torch.nn.functional import scaled_dot_product_attention as _sdpa
+        try:
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+            _kctx = sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH])
+        except ImportError:
+            import contextlib
+            _kctx = contextlib.nullcontext()
+        q_all, k_all, v_all = qkv_feats.unbind(dim=1)  # each [M, H, C]
+        orig_dtype = q_all.dtype
+        out_list = []
+        off = 0
+        with _kctx:
+            for sl in seq_lens.tolist():
+                sl = int(sl)
+                qi = q_all[off:off+sl].permute(1, 0, 2).unsqueeze(0).contiguous().float()
+                ki = k_all[off:off+sl].permute(1, 0, 2).unsqueeze(0).contiguous().float()
+                vi = v_all[off:off+sl].permute(1, 0, 2).unsqueeze(0).contiguous().float()
+                oi = _sdpa(qi, ki, vi).squeeze(0).permute(1, 0, 2).contiguous().to(orig_dtype)
+                out_list.append(oi)
+                off += sl
+        out = torch.cat(out_list, dim=0)  # [M, H, C]
+
+    out = out[bwd_indices]      # [T, H, C]"""
+_WATTN_SELF_OLD = """    elif config.ATTN == 'flash_attn':
+        if 'flash_attn' not in globals():
+            import flash_attn
+        out = flash_attn.flash_attn_varlen_qkvpacked_func(qkv_feats, **attn_func_args)  # [M, H, C]
+
+    out = out[bwd_indices]      # [T, H, C]"""
+_WATTN_CROSS_NEW = """    elif config.ATTN == 'flash_attn':
+        if 'flash_attn' not in globals():
+            import flash_attn
+        out = flash_attn.flash_attn_varlen_kvpacked_func(q_feats, kv_feats,
+            cu_seqlens_q=q_attn_func_args['cu_seqlens'], cu_seqlens_k=kv_attn_func_args['cu_seqlens'],
+            max_seqlen_q=q_attn_func_args['max_seqlen'], max_seqlen_k=kv_attn_func_args['max_seqlen'],
+        )  # [M, H, C]
+    else:
+        # [blackwell_fix] SDPA fallback (sm_120 / no flash_attn) — windowed
+        # cross attention, one torch SDPA per (q-window, kv-window) pair.
+        from torch.nn.functional import scaled_dot_product_attention as _sdpa
+        try:
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+            _kctx = sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH])
+        except ImportError:
+            import contextlib
+            _kctx = contextlib.nullcontext()
+        k_all, v_all = kv_feats.unbind(dim=1)  # each [M, H, C]
+        q_all = q_feats                        # [M, H, C]
+        orig_dtype = q_all.dtype
+        out_list = []
+        qoff = 0
+        kvoff = 0
+        with _kctx:
+            for ql, kl in zip(q_seq_lens.tolist(), kv_seq_lens.tolist()):
+                ql = int(ql); kl = int(kl)
+                qi = q_all[qoff:qoff+ql].permute(1, 0, 2).unsqueeze(0).contiguous().float()
+                ki = k_all[kvoff:kvoff+kl].permute(1, 0, 2).unsqueeze(0).contiguous().float()
+                vi = v_all[kvoff:kvoff+kl].permute(1, 0, 2).unsqueeze(0).contiguous().float()
+                oi = _sdpa(qi, ki, vi).squeeze(0).permute(1, 0, 2).contiguous().to(orig_dtype)
+                out_list.append(oi)
+                qoff += ql
+                kvoff += kl
+        out = torch.cat(out_list, dim=0)  # [M, H, C]
+
+    out = out[q_bwd_indices]      # [T, H, C]"""
+_WATTN_CROSS_OLD = """    elif config.ATTN == 'flash_attn':
+        if 'flash_attn' not in globals():
+            import flash_attn
+        out = flash_attn.flash_attn_varlen_kvpacked_func(q_feats, kv_feats,
+            cu_seqlens_q=q_attn_func_args['cu_seqlens'], cu_seqlens_k=kv_attn_func_args['cu_seqlens'],
+            max_seqlen_q=q_attn_func_args['max_seqlen'], max_seqlen_k=kv_attn_func_args['max_seqlen'],
+        )  # [M, H, C]
+
+    out = out[q_bwd_indices]      # [T, H, C]"""
 
 # Each patch: (file, anchor-old, replacement-new, already-applied-marker)
 PATCHES = [
@@ -102,6 +191,10 @@ PATCHES = [
         "            _kernel_ctx = sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH])",
         "sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION",
     ),
+    (WATTN, _WATTN_SELF_OLD, _WATTN_SELF_NEW,
+     "# self attention, one torch SDPA per window"),
+    (WATTN, _WATTN_CROSS_OLD, _WATTN_CROSS_NEW,
+     "# cross attention, one torch SDPA per (q-window, kv-window) pair."),
 ]
 
 

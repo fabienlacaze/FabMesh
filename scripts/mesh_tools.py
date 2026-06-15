@@ -482,6 +482,10 @@ def trellis2_retex(input_path, output_path, source_image, preset='fast', seed=42
     env['TORCHDYNAMO_DISABLE'] = '1'
     env['TORCHINDUCTOR_USE_TRITON'] = '0'
     env['TRANSFORMERS_ATTN_IMPLEMENTATION'] = 'eager'
+    # Force the SPARSE attention onto the SDPA backend (the Blackwell/sm_120
+    # path with EFFICIENT_ATTENTION). The default is 'flash_attn', which isn't
+    # installed in the texturing venv → ModuleNotFoundError: flash_attn.
+    env['SPARSE_ATTN_BACKEND'] = 'sdpa'
     # Use kaolin (Apache 2.0) rasterizer instead of nvdiffrast (NVIDIA NC).
     env.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
     quality_args = _TRELLIS2_PRESETS.get(str(preset), _TRELLIS2_PRESETS['fast'])
