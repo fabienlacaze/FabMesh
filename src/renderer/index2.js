@@ -9590,6 +9590,7 @@ function openMeshEdit(mode) {
   meState.selectErase = false;
   document.getElementById('me-sel-add')?.classList.add('tool-active');
   document.getElementById('me-sel-erase')?.classList.remove('tool-active');
+  _meUpdateSelButtons();
 
   // Wait for modal layout then init viewport
   requestAnimationFrame(async () => {
@@ -9941,6 +9942,7 @@ function _meMouseUp() {
         c.geometry._normsDirty = false;
       }
     });
+    if (meState.mode === 'select') _meUpdateSelButtons();
   }
 }
 
@@ -10044,6 +10046,40 @@ function _applyBrushAt(hit, point) {
 function _meSelMap(geom) {
   if (!geom._selSaved) geom._selSaved = new Map();
   return geom._selSaved;
+}
+function _meHasSelection() {
+  let has = false;
+  meState.mesh?.traverse(c => { if (c.isMesh && c.geometry?._selSaved && c.geometry._selSaved.size > 0) has = true; });
+  return has;
+}
+// Position-welded adjacency: GLB meshes often duplicate vertices at seams, so
+// index adjacency alone stops Grow/Shrink at those gaps. Group vertices by
+// rounded position so co-located vertices act as one for organic spreading.
+function _meBuildPosAdj(geom) {
+  if (geom._posGroups && geom._posKeyByIndex) return;
+  const pos = geom.attributes.position;
+  const groups = new Map();
+  const keyByIndex = new Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const k = Math.round(pos.getX(i) * 1e5) + ',' + Math.round(pos.getY(i) * 1e5) + ',' + Math.round(pos.getZ(i) * 1e5);
+    keyByIndex[i] = k;
+    let arr = groups.get(k);
+    if (!arr) { arr = []; groups.set(k, arr); }
+    arr.push(i);
+  }
+  geom._posGroups = groups;
+  geom._posKeyByIndex = keyByIndex;
+}
+// Enable selection-dependent buttons only when something is selected.
+function _meUpdateSelButtons() {
+  const has = _meHasSelection();
+  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete']) {
+    const b = document.getElementById(id);
+    if (!b) continue;
+    b.disabled = !has;
+    b.style.opacity = has ? '' : '0.4';
+    b.style.cursor = has ? '' : 'not-allowed';
+  }
 }
 // Brush application points: the hit point + its mirror across each active
 // symmetry axis (mesh-local space) so paint/select honour symmetry like sculpt.
@@ -10195,8 +10231,11 @@ document.getElementById('me-undo')?.addEventListener('click', _meUndo);
     // Title reflects the active mode.
     const _t = document.getElementById('mesh-edit-title');
     if (_t) _t.textContent = mode === 'sculpt' ? 'Sculpt Mesh' : mode === 'paint' ? 'Vertex Paint' : 'Select Faces';
+    if (mode === 'select') _meUpdateSelButtons();
   });
 });
+// Refresh selection-button enabled state after any Select-panel action.
+document.getElementById('me-select-opts')?.addEventListener('click', () => setTimeout(_meUpdateSelButtons, 0));
 // Sculpt sub-modes
 ['push', 'pull', 'smooth', 'flatten', 'grab', 'inflate'].forEach(sm => {
   document.getElementById('me-sculpt-' + sm)?.addEventListener('click', () => {
@@ -10375,12 +10414,20 @@ document.getElementById('me-sel-grow')?.addEventListener('click', () => {
     if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
     const geom = c.geometry, color = geom.attributes.color, sel = _meSelMap(geom), idx = geom.index.array;
     if (sel.size === 0) return;
-    const toAdd = new Set();
-    for (let i = 0; i < idx.length; i += 3) {
-      const a = idx[i], b = idx[i + 1], d = idx[i + 2];
-      if (sel.has(a) || sel.has(b) || sel.has(d)) for (const v of [a, b, d]) if (!sel.has(v)) toAdd.add(v);
+    _meBuildPosAdj(geom);
+    const keyOf = geom._posKeyByIndex, groups = geom._posGroups;
+    const selKeys = new Set();
+    for (const i of sel.keys()) selKeys.add(keyOf[i]);
+    // Any triangle touching a selected POSITION pulls in all its vertices'
+    // position groups → spreads organically across welded/unwelded seams.
+    const addKeys = new Set();
+    for (let t = 0; t < idx.length; t += 3) {
+      const ka = keyOf[idx[t]], kb = keyOf[idx[t + 1]], kd = keyOf[idx[t + 2]];
+      if (selKeys.has(ka) || selKeys.has(kb) || selKeys.has(kd)) { addKeys.add(ka); addKeys.add(kb); addKeys.add(kd); }
     }
-    for (const v of toAdd) { sel.set(v, [color.getX(v), color.getY(v), color.getZ(v)]); color.setXYZ(v, 0, 1, 1); }
+    for (const k of addKeys) for (const v of groups.get(k)) {
+      if (!sel.has(v)) { sel.set(v, [color.getX(v), color.getY(v), color.getZ(v)]); color.setXYZ(v, 0, 1, 1); }
+    }
     color.needsUpdate = true;
   });
 });
@@ -10389,12 +10436,21 @@ document.getElementById('me-sel-shrink')?.addEventListener('click', () => {
     if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
     const geom = c.geometry, color = geom.attributes.color, sel = _meSelMap(geom), idx = geom.index.array;
     if (sel.size === 0) return;
-    const toRemove = new Set();
-    for (let i = 0; i < idx.length; i += 3) {
-      const a = idx[i], b = idx[i + 1], d = idx[i + 2];
-      if (!sel.has(a) || !sel.has(b) || !sel.has(d)) for (const v of [a, b, d]) if (sel.has(v)) toRemove.add(v);
+    _meBuildPosAdj(geom);
+    const keyOf = geom._posKeyByIndex, groups = geom._posGroups;
+    const selKeys = new Set();
+    for (const i of sel.keys()) selKeys.add(keyOf[i]);
+    // A selected position on the boundary (a triangle that also has an
+    // unselected position) gets peeled off.
+    const removeKeys = new Set();
+    for (let t = 0; t < idx.length; t += 3) {
+      const ka = keyOf[idx[t]], kb = keyOf[idx[t + 1]], kd = keyOf[idx[t + 2]];
+      const sa = selKeys.has(ka), sb = selKeys.has(kb), sd = selKeys.has(kd);
+      if (!(sa && sb && sd)) { if (sa) removeKeys.add(ka); if (sb) removeKeys.add(kb); if (sd) removeKeys.add(kd); }
     }
-    for (const v of toRemove) { const o = sel.get(v); color.setXYZ(v, o[0], o[1], o[2]); sel.delete(v); }
+    for (const k of removeKeys) for (const v of groups.get(k)) {
+      if (sel.has(v)) { const o = sel.get(v); color.setXYZ(v, o[0], o[1], o[2]); sel.delete(v); }
+    }
     color.needsUpdate = true;
   });
 });
