@@ -9619,6 +9619,18 @@ async function _meInitViewport() {
       console.error('[mesh-edit] OrbitControls fallback also failed:', e2);
     }
   }
+  if (meState.controls) {
+    // Left button stays FREE for the brush (paint / sculpt / select directly
+    // on the mesh — no more "click next to the mesh to rotate"). Rotate with
+    // the MIDDLE (wheel) button drag, pan with right, scroll wheel zooms.
+    try {
+      meState.controls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: THREE.MOUSE.ROTATE,
+        RIGHT: THREE.MOUSE.PAN,
+      };
+    } catch (_) {}
+  }
 
   // Lights
   meState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
@@ -10013,7 +10025,7 @@ function _meApplyBrush(hit) {
       const dx = vx - px, dy = vy - py, dz = vz - pz;
       if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
       if (dx * dx + dy * dy + dz * dz > rSq) continue;
-      colorAttr.setXYZ(i, 1.0, 0.3, 0.1); // orange highlight
+      colorAttr.setXYZ(i, 0.0, 1.0, 1.0); // bright cyan highlight (high contrast vs warm/dark mesh)
     }
     colorAttr.needsUpdate = true;
   }
