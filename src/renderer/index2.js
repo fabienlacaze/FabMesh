@@ -386,7 +386,8 @@ function showPage(name) {
     refreshProjectsPage();
     refreshParentalStatus();
   } else {
-    document.getElementById('breadcrumb').textContent = state.currentProject?.name || '';
+    document.getElementById('breadcrumb').textContent =
+      (state.currentProject?.displayName || state.currentProject?.name) || '';
   }
 }
 
