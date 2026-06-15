@@ -1,6 +1,16 @@
 # FabMesh Agent Log
 
-## 2026-06-15 (fix — résidence séquentielle : libérer SDXL avant la passe 3D)
+## 2026-06-15 (feat — cap VRAM branché sur le worker 3D (parité avec image))
+
+User : "pour le GPU on peut faire pareil ?". Trou découvert :
+trellis2_native_full_pipeline.py n'avait NI VRAM fraction NI gpu_throttle ->
+pendant une gen 3D, les limites GPU ne s'appliquaient pas (elles marchent pour
+la gen image via local_juggernaut_bridge make_throttle_callback). FIX : ajout du
+cap VRAM (torch.cuda.set_per_process_memory_fraction(FABMESH_VRAM_FRACTION)) après
+import torch -> vrai cap dur VRAM (OOM rattrapable, pas de freeze). Le throttle
+util/temp (gpu_throttle.throttle_sync, sleep entre steps de diffusion) n'est PAS
+injectable dans TRELLIS (boucle opaque, pas de callback) -> reste image-only ; la
+priorité BELOW_NORMAL couvre partiellement. Script -> pas de restart Electron.
 
 User : "ça dépasse 25 GB" en régime stable (27.8/31.8, GPU 95%). CAUSE : le
 serveur SDXL persistant (~4-6 GB RealVis+inpaint+CLIPSeg) reste résident pendant

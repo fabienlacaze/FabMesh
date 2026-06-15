@@ -195,6 +195,19 @@ def main():
         f'cc={torch.cuda.get_device_capability(0)}')
     log(f'mode={mode} seed={seed} decim={decim} tex_res={tex_res}')
 
+    # GPU VRAM cap — the VRAM slider (Settings) now also applies to 3D, like the
+    # image-gen path. set_per_process_memory_fraction is a REAL hard cap: PyTorch
+    # refuses to allocate past this fraction of the 16 GB (raises a catchable
+    # OutOfMemoryError, never freezes the machine). The RAM budget caps system
+    # RAM; this caps VRAM — same idea, different memory.
+    try:
+        _vf = float(os.environ.get('FABMESH_VRAM_FRACTION', '') or 0)
+        if 0 < _vf <= 1 and torch.cuda.is_available():
+            torch.cuda.set_per_process_memory_fraction(_vf, 0)
+            log(f'VRAM cap: {_vf:.0%} of device 0')
+    except Exception as _e:
+        log(f'VRAM cap skipped: {_e}')
+
     print('LOCAL_TRELLIS2_PROGRESS: 8 image_prep', flush=True)
     img = _prep_image(image_path)
     log(f'image prepared: {img.size}')
