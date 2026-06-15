@@ -257,8 +257,25 @@ def fix_normals(input_path, output_path):
             g.fix_normals()
         except Exception as e:
             log(f'fix_normals skipped: {e}')
+        # Weld normals across UV-seam-split vertices (same position, different
+        # normal) so the saved GLB doesn't show criss-cross "cracked-plate"
+        # shading — matches the renderer's _jsFixNormalsWelded preview.
+        try:
+            verts = np.asarray(g.vertices, dtype=np.float64)
+            vn = np.asarray(g.vertex_normals, dtype=np.float64)
+            if len(verts) and vn.shape == verts.shape:
+                diag = float(np.linalg.norm(verts.max(0) - verts.min(0))) or 1.0
+                keys = np.round(verts * (1e5 / diag)).astype(np.int64)
+                _, inv = np.unique(keys, axis=0, return_inverse=True)
+                acc = np.zeros((inv.max() + 1, 3))
+                np.add.at(acc, inv, vn)
+                ln = np.linalg.norm(acc, axis=1, keepdims=True)
+                ln[ln == 0] = 1.0
+                g.vertex_normals = (acc / ln)[inv]
+        except Exception as e:
+            log(f'normal weld skipped: {e}')
     _export(scene, geoms, output_path)
-    log('normals fixed')
+    log('normals fixed (welded)')
 
 
 def _grouped_boundary_loops(verts, faces, bb_diag, cap=200000):

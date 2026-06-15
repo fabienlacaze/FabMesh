@@ -7749,6 +7749,53 @@ function _jsCenter(geom) {
   return result;
 }
 
+// Fix Normals with UV-seam welding (ported from cloud). Plain
+// computeVertexNormals leaves split vertices at UV seams with different
+// normals → visible criss-cross "cracked-plate" shading on fresh TRELLIS
+// meshes. Welding co-located vertices' normals into one averaged normal kills it.
+function _jsFixNormalsWelded(geom) {
+  const result = geom.clone();
+  result.computeVertexNormals();
+  const pos = result.attributes.position;
+  const norm = result.attributes.normal;
+  if (!pos || !norm) return result;
+  const arr = pos.array, narr = norm.array, n = pos.count;
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = arr[i * 3], y = arr[i * 3 + 1], z = arr[i * 3 + 2];
+    if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+    if (y < mny) mny = y; if (y > mxy) mxy = y;
+    if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+  }
+  const diag = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) || 1;
+  const Q = 1e5 / diag;
+  const groupKey = new Map();
+  const groupOfVertex = new Int32Array(n);
+  let G = 0;
+  for (let v = 0; v < n; v++) {
+    const k = Math.round(arr[v * 3] * Q) + ',' + Math.round(arr[v * 3 + 1] * Q) + ',' + Math.round(arr[v * 3 + 2] * Q);
+    let g = groupKey.get(k);
+    if (g === undefined) { g = G++; groupKey.set(k, g); }
+    groupOfVertex[v] = g;
+  }
+  const groupN = new Float32Array(G * 3);
+  for (let v = 0; v < n; v++) {
+    const g = groupOfVertex[v];
+    groupN[g * 3] += narr[v * 3]; groupN[g * 3 + 1] += narr[v * 3 + 1]; groupN[g * 3 + 2] += narr[v * 3 + 2];
+  }
+  for (let g = 0; g < G; g++) {
+    const x = groupN[g * 3], y = groupN[g * 3 + 1], z = groupN[g * 3 + 2];
+    const len = Math.hypot(x, y, z) || 1;
+    groupN[g * 3] = x / len; groupN[g * 3 + 1] = y / len; groupN[g * 3 + 2] = z / len;
+  }
+  for (let v = 0; v < n; v++) {
+    const g = groupOfVertex[v];
+    narr[v * 3] = groupN[g * 3]; narr[v * 3 + 1] = groupN[g * 3 + 1]; narr[v * 3 + 2] = groupN[g * 3 + 2];
+  }
+  norm.needsUpdate = true;
+  return result;
+}
+
 // Boundary-loop hole finder for the Fill-holes live preview. Returns the
 // green fan-fill triangle positions (geom-local) + per-size outline line
 // vertices (green=will fill, grey=too small, red=too big) + stats. Adapted
@@ -7936,12 +7983,12 @@ const MESH_TOOL_SCHEMAS = {
     preview: (geom, vals) => _jsMidpointSubdivide(geom, Math.max(1, vals.levels | 0)),
   },
   fix_normals: {
-    title: 'Fix normals',
-    subtitle: 'Recompute normals + fix inverted/wrong-winding faces.',
+    title: 'Fix normals (weld UV seams)',
+    subtitle: 'Recompute normals + fix winding, and WELD normals across UV seams — kills the criss-cross "cracked-plate" shading on fresh TRELLIS meshes.',
     needsImage: false,
     params: [],
     build: () => [],
-    preview: (geom) => { const g = geom.clone(); g.computeVertexNormals(); return g; },
+    preview: (geom) => _jsFixNormalsWelded(geom),
   },
   fill_holes: {
     title: 'Fill holes',

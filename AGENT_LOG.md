@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (parity — propagation cloud<->desktop, lot 1: Fix Normals soudé)
+
+User : "mets tout à jour" (parité cloud<->desktop). Lot 1 (cloud -> desktop) :
+Fix Normals avec SOUDURE des normales aux UV-seams (corrige le shading
+"assiette fêlée" des meshes TRELLIS). Porté _jsFixNormalsWelded (preview JS,
+src/renderer/index2.js) + ajout du même weld dans mesh_tools.fix_normals (apply
+Python : groupe par position, moyenne+normalise les normales, g.vertex_normals=
+soudées). Vérifié que les normales custom survivent à l'export GLB trimesh.
+
 ## 2026-06-15 (feat — secrets chiffrés backupables sur GitHub (seal/unseal))
 
 User veut backuper les secrets (hors git) de façon chiffrée SUR GitHub.
