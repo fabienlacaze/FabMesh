@@ -9968,6 +9968,28 @@ function _applyBrushAt(hit, point) {
   geom._normsDirty = true;
 }
 
+// Brush application points: the hit point + its mirror across each active
+// symmetry axis (mesh-local space) so paint/select honour symmetry like sculpt.
+function _meBrushPoints(point) {
+  const pts = [point];
+  const ax = meState.symmetryAxes;
+  if (ax.x || ax.y || ax.z) {
+    const combos = [];
+    if (ax.x) combos.push([-1, 1, 1]);
+    if (ax.y) combos.push([1, -1, 1]);
+    if (ax.z) combos.push([1, 1, -1]);
+    if (ax.x && ax.y) combos.push([-1, -1, 1]);
+    if (ax.x && ax.z) combos.push([-1, 1, -1]);
+    if (ax.y && ax.z) combos.push([1, -1, -1]);
+    if (ax.x && ax.y && ax.z) combos.push([-1, -1, -1]);
+    for (const c of combos) {
+      const mp = point.clone();
+      mp.x *= c[0]; mp.y *= c[1]; mp.z *= c[2];
+      pts.push(mp);
+    }
+  }
+  return pts;
+}
 function _meApplyBrush(hit) {
   const point = hit.point.clone();
   hit.object.worldToLocal(point);
@@ -9998,7 +10020,6 @@ function _meApplyBrush(hit) {
     const r = meState.brushRadius;
     const rSq = r * r;
     const strength = meState.strength;
-    const px = point.x, py = point.y, pz = point.z;
     // Ensure vertex colors exist
     if (!geom.attributes.color) {
       const colors = new Float32Array(pos.count * 3).fill(1);
@@ -10008,11 +10029,16 @@ function _meApplyBrush(hit) {
     }
     const colorAttr = geom.attributes.color;
     const c = new THREE.Color(meState.color);
+    const pts = _meBrushPoints(point);  // main point + symmetry mirrors
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - px, dy = vy - py, dz = vz - pz;
-      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
-      const distSq = dx * dx + dy * dy + dz * dz;
+      let distSq = Infinity;  // nearest brush point (main or mirrored)
+      for (const pt of pts) {
+        const dx = vx - pt.x, dy = vy - pt.y, dz = vz - pt.z;
+        if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < distSq) distSq = d2;
+      }
       if (distSq > rSq) continue;
       const dist = Math.sqrt(distSq);
       const falloff = 1 - (dist / r);
@@ -10031,7 +10057,6 @@ function _meApplyBrush(hit) {
     const pos = geom.attributes.position;
     const r = meState.brushRadius;
     const rSq = r * r;
-    const px = point.x, py = point.y, pz = point.z;
     if (!geom.attributes.color) {
       const colors = new Float32Array(pos.count * 3).fill(0.7);
       geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -10039,13 +10064,18 @@ function _meApplyBrush(hit) {
       hit.object.material.needsUpdate = true;
     }
     const colorAttr = geom.attributes.color;
+    const pts = _meBrushPoints(point);  // main point + symmetry mirrors
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-      const dx = vx - px, dy = vy - py, dz = vz - pz;
-      if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
-      if (dx * dx + dy * dy + dz * dz > rSq) continue;
+      let inBrush = false;
+      for (const pt of pts) {
+        const dx = vx - pt.x, dy = vy - pt.y, dz = vz - pt.z;
+        if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
+        if (dx * dx + dy * dy + dz * dz <= rSq) { inBrush = true; break; }
+      }
+      if (!inBrush) continue;
       if (meState.selectErase) colorAttr.setXYZ(i, 0.7, 0.7, 0.7); // erase = back to unselected base
-      else colorAttr.setXYZ(i, 0.0, 1.0, 1.0); // bright cyan highlight (high contrast vs warm/dark mesh)
+      else colorAttr.setXYZ(i, 0.0, 1.0, 1.0); // bright cyan highlight
     }
     colorAttr.needsUpdate = true;
   }
