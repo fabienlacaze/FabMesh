@@ -4974,22 +4974,39 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   }
   const useTwoView = false;
 
-  // RAM guard — Ultra Quality (1536_cascade) peaks at ~27 GB system RAM
-  // (8 models stay resident ~15 GB + ~8 GB high-res SLat pass + ~3 GB
-  // export). 2026-06-15: gate 24 → 32 GB. A 27 GB machine has a 27 GB peak
-  // with ZERO headroom → it saturates RAM, swaps, and OOM-crashes the
-  // pipeline (observed: tank gen failed on a 27 GB box). You need peak + OS/
-  // Electron headroom (~5-6 GB) = 32 GB+. Below that we auto-downgrade to
-  // Quality+ (1024_cascade, ~19 GB, validated). Enforced server-side too in
-  // case the request comes from a saved project / older renderer.
-  const ULTRA_Q_MIN_RAM_GB = 32;
-  let ultraQ = trellis2UltraQ;
+  // RAM BUDGET guard — the RAM slider (Settings → RAM marker) is the *real*
+  // ceiling the whole pipeline must fit under. We never try to make a child
+  // process "believe" the machine is smaller (a hard cap just OOM-crashes it,
+  // exactly what we want to avoid). Instead we pick the heaviest cascade mode
+  // whose peak still fits the budget, so RAM is never saturated in the first
+  // place.
+  //   budgetGB = min(physical RAM, FABMESH_RAM_LIMIT_MB)   [slider value]
+  //   1536_cascade (Ultra)   peaks ~27 GB → needs budget ≥ 32 GB (peak + OS/
+  //                          Electron headroom ~5 GB; a 27 GB box OOM'd at 27).
+  //   1024_cascade (Quality+) peaks ~19 GB → needs budget ≥ 21 GB.
+  //   below that             → base mode (no cascade, ~10 GB).
+  // Set the slider lower to leave more RAM for the OS; the pipeline scales DOWN
+  // to fit instead of crashing. Enforced server-side too (belt + suspenders).
+  const ULTRA_Q_MIN_RAM_GB    = 32;
+  const QUALITY_PLUS_MIN_RAM  = 21;
+  let ultraQ      = trellis2UltraQ;
+  let qualityPlus = trellis2QualityPlus;
   try {
-    const _totalGB = require('os').totalmem() / (1024 ** 3);
-    if (ultraQ && _totalGB < ULTRA_Q_MIN_RAM_GB) {
-      log.warn('main', `image-to-3d: Ultra Quality requested but RAM=${_totalGB.toFixed(1)}GB < ${ULTRA_Q_MIN_RAM_GB} — downgrading to 1024_cascade`);
-      try { safeSend('ai3d-progress', `[main] Ultra Quality (1536) nécessite ~${ULTRA_Q_MIN_RAM_GB} GB RAM, détecté ${_totalGB.toFixed(0)} GB → bascule sur Quality+ (1024)\n`); } catch (_) {}
+    const _physGB  = require('os').totalmem() / (1024 ** 3);
+    const _limitMB = parseFloat(process.env.FABMESH_RAM_LIMIT_MB || '');
+    const _budgetGB = (_limitMB && _limitMB > 0)
+      ? Math.min(_physGB, _limitMB / 1024)
+      : _physGB;
+    if (ultraQ && _budgetGB < ULTRA_Q_MIN_RAM_GB) {
+      log.warn('main', `image-to-3d: Ultra Quality requested but RAM budget=${_budgetGB.toFixed(1)}GB < ${ULTRA_Q_MIN_RAM_GB} — downgrading to 1024_cascade`);
+      try { safeSend('ai3d-progress', `[main] Ultra Quality (1536) nécessite ~${ULTRA_Q_MIN_RAM_GB} GB de budget RAM, budget actuel ${_budgetGB.toFixed(0)} GB → bascule sur Quality+ (1024)\n`); } catch (_) {}
       ultraQ = false;
+    }
+    if ((ultraQ || qualityPlus) && _budgetGB < QUALITY_PLUS_MIN_RAM) {
+      log.warn('main', `image-to-3d: cascade requested but RAM budget=${_budgetGB.toFixed(1)}GB < ${QUALITY_PLUS_MIN_RAM} — downgrading to base mode`);
+      try { safeSend('ai3d-progress', `[main] Budget RAM ${_budgetGB.toFixed(0)} GB trop bas pour la cascade → mode de base (le plus léger)\n`); } catch (_) {}
+      ultraQ = false;
+      qualityPlus = false;
     }
   } catch (_) {}
 
@@ -5175,7 +5192,7 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
             FABMESH_TRELLIS2_NATIVE_DECIM: '1200000',
             FABMESH_TRELLIS2_MAX_TOKENS: '32768',
           }
-        : (engine === 'trellis2_native' && trellis2QualityPlus
+        : (engine === 'trellis2_native' && qualityPlus
             ? {
                 FABMESH_TRELLIS2_NATIVE_MODE: '1024_cascade',
                 FABMESH_TRELLIS2_NATIVE_DECIM: '1000000',

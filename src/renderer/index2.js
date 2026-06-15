@@ -1498,31 +1498,54 @@ const ASSET_OPTIONS_PROFILE = {
 // (~5-6 GB), i.e. 32 GB+, to run 1536 safely; below that we DISABLE Ultra and
 // silently keep Quality+ (1024_cascade, ~19 GB peak, safe). main.js applies
 // the same guard server-side (belt + suspenders).
-const ULTRA_Q_MIN_RAM_GB = 32;
+// Heaviest cascade peak (GB system RAM) per mode + the budget headroom it
+// needs. The RAM slider (Settings) sets a *budget* = physicalRAM × ram% ; we
+// only let the UI offer a cascade mode whose peak fits that budget, so the box
+// never saturates. Lower the slider → tighter budget → lighter mode chosen.
+const ULTRA_Q_MIN_RAM_GB   = 32;   // 1536_cascade peaks ~27 GB + OS/Electron headroom
+const QUALITY_PLUS_MIN_RAM = 21;   // 1024_cascade peaks ~19 GB + headroom
 let _cachedTotalRamGB = null;
+// Compute the current RAM budget (GB) from physical RAM × the slider %.
+// gpuLimits is defined by the time this runs (callers either await checkRAM
+// first, deferring past module-eval, or fire after the slider exists).
+function _currentRamBudgetGB() {
+  if (_cachedTotalRamGB == null) return null;
+  let ramPct = 85;
+  try { if (gpuLimits && typeof gpuLimits.ram === 'number') ramPct = gpuLimits.ram; } catch (_) {}
+  return _cachedTotalRamGB * (ramPct / 100);
+}
+function _gateCascadeRow(el, ok, title) {
+  if (!el) return;
+  el.disabled = !ok;
+  if (!ok) el.checked = false;
+  const row = el.closest('.form-row') || el.closest('label');
+  if (row) { row.style.opacity = ok ? '' : '0.5'; row.title = ok ? '' : title; }
+}
 async function gateUltraQualityByRAM() {
   try {
     const ultra = document.getElementById('ws-trellis2-ultra-q');
-    if (!ultra) return;
+    const qplus = document.getElementById('ws-trellis2-quality-plus');
+    if (!ultra && !qplus) return;
     if (_cachedTotalRamGB == null) {
       if (!API.checkRAM) return;
       const ram = await API.checkRAM();
       _cachedTotalRamGB = (ram && ram.totalGB) ? ram.totalGB : null;
     }
-    if (_cachedTotalRamGB == null || _cachedTotalRamGB >= ULTRA_Q_MIN_RAM_GB) return;
-    // Low-RAM machine: force-off + disable Ultra, keep Quality+ as fallback.
-    ultra.checked = false;
-    ultra.disabled = true;
-    const row = ultra.closest('.form-row') || ultra.closest('label');
-    if (row) {
-      row.style.opacity = '0.5';
-      row.title =
-        `Ultra Quality (1536) nécessite ~${ULTRA_Q_MIN_RAM_GB} GB de RAM. ` +
-        `Détecté : ${_cachedTotalRamGB.toFixed(0)} GB → Quality+ (1024) est ` +
-        `utilisé pour éviter un blocage mémoire.`;
+    const budgetGB = _currentRamBudgetGB();
+    if (budgetGB == null) return;
+    const bTxt = `${budgetGB.toFixed(0)} GB`;
+    // Ultra (1536_cascade) — needs the largest budget.
+    _gateCascadeRow(ultra, budgetGB >= ULTRA_Q_MIN_RAM_GB,
+      `Ultra Quality (1536) nécessite un budget RAM ≥ ${ULTRA_Q_MIN_RAM_GB} GB. ` +
+      `Budget actuel : ${bTxt}. Monte le curseur RAM (Réglages) ou ajoute de la RAM.`);
+    // Quality+ (1024_cascade) — below this we fall back to the base mode.
+    _gateCascadeRow(qplus, budgetGB >= QUALITY_PLUS_MIN_RAM,
+      `Quality+ (1024) nécessite un budget RAM ≥ ${QUALITY_PLUS_MIN_RAM} GB. ` +
+      `Budget actuel : ${bTxt} → mode de base (le plus léger).`);
+    // If Ultra is locked out but Quality+ is still available, fall back to it.
+    if (ultra && ultra.disabled && qplus && !qplus.disabled && !qplus.checked) {
+      qplus.checked = true;
     }
-    const qplus = document.getElementById('ws-trellis2-quality-plus');
-    if (qplus && !qplus.disabled) qplus.checked = true;
   } catch (e) { console.warn('gateUltraQualityByRAM failed', e); }
 }
 
@@ -13508,6 +13531,10 @@ function saveGpuLimits() {
   if (API.setGpuLimits) {
     API.setGpuLimits({ util: gpuLimits.util, temp: gpuLimits.temp, vram: gpuLimits.vram }).catch(() => {});
   }
+  // The RAM slider IS the budget — re-evaluate which cascade modes fit the new
+  // budget and refresh the marker's GB tooltip live as the user drags it.
+  try { gateUltraQualityByRAM(); } catch (_) {}
+  try { applyGpuLimitMarkers(); } catch (_) {}
 }
 // Push limits on startup so they're set before any job runs
 if (API.setRamLimit) API.setRamLimit(gpuLimits.ram).catch(() => {});
@@ -13520,7 +13547,19 @@ function applyGpuLimitMarkers() {
   if (v) v.style.left = gpuLimits.vram + '%';
   if (u) u.style.left = gpuLimits.util + '%';
   if (t) t.style.left = gpuLimits.temp + '%';
-  if (r) r.style.left = gpuLimits.ram + '%';
+  if (r) {
+    r.style.left = gpuLimits.ram + '%';
+    // Show the budget in GB so the user sets an understandable ceiling:
+    // budget = physical RAM × ram%. This is the real cap the pipeline fits
+    // under (it picks a lighter cascade mode rather than saturating).
+    if (_cachedTotalRamGB != null) {
+      const budgetGB = _cachedTotalRamGB * (gpuLimits.ram / 100);
+      r.title = `Budget RAM : ${budgetGB.toFixed(0)} GB (${gpuLimits.ram}% de ${_cachedTotalRamGB.toFixed(0)} GB). ` +
+        `Glisse pour plafonner ce que l'appli peut utiliser.`;
+    } else {
+      r.title = 'Glisse pour plafonner le budget RAM (max RAM usage)';
+    }
+  }
 }
 function isJobRunning() {
   return state.jobs.some(j => j.status === 'running');
@@ -13591,6 +13630,12 @@ function setupGpuLimitDragging() {
           // tempC → bar width mapping used elsewhere in the UI).
           const c = Math.round(30 + (pct / 100) * 70);
           return c + ' °C';
+        }
+        if (s === 'ram' && _cachedTotalRamGB != null) {
+          // RAM marker = budget ceiling. Show it in GB so the user dials in an
+          // understandable number ("I want a 25 GB budget") instead of a %.
+          const gb = _cachedTotalRamGB * (pct / 100);
+          return Math.round(pct) + ' %  (~' + gb.toFixed(0) + ' GB)';
         }
         return Math.round(pct) + ' %';
       };

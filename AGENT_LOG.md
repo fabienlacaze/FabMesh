@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — budget RAM réglable : le slider RAM plafonne réellement)
+
+User : "si on règle à 25 GB, Electron/TRELLIS/tout doivent croire qu'il n'y a
+que 25 GB au lieu de tout utiliser à fond" puis "je veux qu'on arrive à limiter
+le budget disponible selon ce réglage". On NE PEUT PAS faire croire à un process
+qu'il y a moins de RAM (un cap dur OS = OOM-crash, exactement ce qu'on évite).
+SOLUTION : le slider RAM (Réglages) devient un BUDGET = RAM physique × ram%, et
+le pipeline choisit le mode cascade le plus lourd dont le PIC tient dans ce
+budget -> jamais de saturation.
+- Seuils : Ultra(1536, pic ~27 GB) exige budget >= 32 ; Quality+(1024, pic
+  ~19 GB) exige budget >= 21 ; en dessous -> mode de base (~10 GB).
+- renderer gateUltraQualityByRAM réécrit : budget = _cachedTotalRamGB × ram%,
+  gate Ultra ET Quality+, fallback auto vers le mode le plus lourd qui rentre.
+  Re-évalué LIVE au drag du slider (saveGpuLimits -> gate + markers). Tooltip +
+  bulle de drag affichent le budget en GB ("92 %  (~25 GB)").
+- main.js image-to-3d guard budget-aware : budget = min(physique,
+  FABMESH_RAM_LIMIT_MB), downgrade Ultra->Quality+->base, qualityPlus passé en
+  let et branché dans le bloc cascade. Belt+suspenders côté serveur.
+Pas de token-cap supplémentaire : les seuils garantissent déjà que le pic tient
+sous le budget. main.js = restart Electron.
+
 ## 2026-06-15 (fix — gate RAM 1536_cascade 24->32 GB + ETA dynamique)
 
 User : l'appli sature sa RAM (27/27) et la gen 3D du tank a planté (OOM).
