@@ -7584,7 +7584,13 @@ async function runMeshTool(operation, params = []) {
       // Refresh mesh list
       populateWorkspace(p);
     } else {
-      const msg = (result && result.error) || 'unknown';
+      // Append the subprocess stderr when present — main.js resolves with
+      // result.stderr on a non-zero exit, and that's where the real
+      // bridge/projection cause lives (execFile's own error is generic).
+      const msg = [
+        (result && result.error) || 'unknown',
+        result && result.stderr ? String(result.stderr).slice(-400) : '',
+      ].filter(Boolean).join(' — ');
       showToast(`${operation} failed: ${msg}`, 'error', 5000);
       if (job && typeof completeJob === 'function') completeJob(job.id, false, msg);
     }
@@ -7680,18 +7686,21 @@ function _jsMidpointSubdivide(geom, levels) {
   return g;
 }
 
-// Center: translate vertices so X/Z centroid = 0, min Y = 0.
+// Center: translate vertices so the X/Z BBOX center = 0, min Y = 0.
+// (bbox midpoint, matching the Python center() — not the arithmetic vertex
+// mean, which drifts toward dense regions and won't match the export.)
 function _jsCenter(geom) {
   const result = geom.clone();
   const pos = result.attributes.position;
   const arr = pos.array;
-  let cx = 0, cz = 0, minY = Infinity;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, minY = Infinity;
   for (let i = 0; i < pos.count; i++) {
-    cx += arr[i * 3];
-    cz += arr[i * 3 + 2];
-    if (arr[i * 3 + 1] < minY) minY = arr[i * 3 + 1];
+    const x = arr[i * 3], y = arr[i * 3 + 1], z = arr[i * 3 + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    if (y < minY) minY = y;
   }
-  cx /= pos.count; cz /= pos.count;
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
   for (let i = 0; i < pos.count; i++) {
     arr[i * 3]     -= cx;
     arr[i * 3 + 1] -= minY;
@@ -7743,12 +7752,12 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Cap mesh holes (Python only — no live preview).',
+    subtitle: 'Weld seams, then iteratively cap all mesh holes (Python only — no live preview).',
     needsImage: false,
-    params: [
-      { id: 'max_hole_size', label: 'Max hole size', type: 'range', min: 1, max: 5000, step: 10, default: 100 },
-    ],
-    build: (vals) => [String(vals.max_hole_size)],
+    // No parameters — trimesh fills all holes at once, so the old
+    // "max hole size" slider was a dead no-op. Removed.
+    params: [],
+    build: () => [],
   },
   center: {
     title: 'Center mesh',
@@ -7778,14 +7787,10 @@ const MESH_TOOL_SCHEMAS = {
                   ['balanced','Balanced (24 steps · 2048px · ~130s)'],
                   ['quality','Quality (32 steps · 4096px · ~3min)']] },
     ],
-    build: (vals, ctx) => {
-      // Forward preset via env to mesh_tools → trellis2_retex bridge.
-      // We can't pass env directly from runMeshTool, so we set
-      // window.__trellis2Preset for the IPC layer to pick up if wired,
-      // otherwise the bridge uses its 'fast' default.
-      window.__trellis2Preset = vals.preset;
-      return [ctx.imagePath];
-    },
+    // preset flows as a real CLI param: runMeshTool → mesh-tool IPC →
+    // python mesh_tools.py trellis2_retex <in> <out> <imagePath> <preset>
+    // → bridge --steps/--texture-size/--image-resolution.
+    build: (vals, ctx) => [ctx.imagePath, vals.preset],
   },
 };
 

@@ -200,7 +200,18 @@ def subdivide_glb(input_path, output_path, levels=2):
             visual = None
 
         new_mesh = trimesh.Trimesh(vertices=new_verts, faces=new_faces, visual=visual, process=False)
+        # Re-weld the per-face explode (_subdivide_with_uv gives every
+        # triangle its own 3 unique verts). Without this the saved GLB is a
+        # disconnected per-face soup (~3x verts) that breaks downstream
+        # smoothing/rigging/decimation. merge_vertices (merge_tex defaults
+        # False) collapses coincident corners back to one connected body
+        # while KEEPING genuine UV seams split.
+        try:
+            new_mesh.merge_vertices()
+        except Exception as e:
+            log(f'  {name}: merge_vertices skipped ({e})')
         _ = new_mesh.vertex_normals
+        log(f'  {name}: {len(new_mesh.vertices)} verts after re-weld')
         result_meshes[name] = new_mesh
 
     _export(result_meshes, output_path, t0)

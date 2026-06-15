@@ -1,5 +1,36 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — AI-TOOLS mesh buttons: desktop ramené à parité cloud)
+
+Workflow d'audit (17 agents, desktop vs cloud, vérif adversariale) sur les 8
+boutons AI TOOLS. Le cloud (modal_app/_mesh_op.py) était effectivement plus à
+jour ("Wave 4.2") ; fixes appliqués au desktop (scripts/mesh_tools.py +
+scripts/subdivide.py + src/renderer/index2.js), cloud NON touché.
+
+- **decimate (HIGH)** : fast_simplification jetait les UV → mesh rechargé sans
+  texture (viole l'exigence #1). Préservation via simplify(return_collapses=True)
+  + replay_simplification → idx_map, remap UV, TextureVisuals reconstruit à la
+  nouvelle taille, remplacement de l'entrée geoms[gi]/scene.geometry. Fallback
+  quadric loggué comme perdant les UV.
+- **center** : offset PAR géométrie (déchirait les GLB multi-parties) + centroïde
+  de masse au lieu du centre bbox → un seul offset depuis la bbox jointe, X/Z =
+  (min+max)/2, feet Y=0. _jsCenter (preview) passé en centre-bbox (correct mono-mesh).
+- **fill_holes** : slider mort (no-op) retiré ; weld merge_vertices (tol=clip(diag*1e-3))
+  = fix porteur (sinon trimesh ne voit pas les bords sur seams TRELLIS) + 4 passes
+  fix_winding/broken_faces/fill_holes(use_fan=True) + fix_normals final.
+- **retexture / trellis2_retex** : échec subprocess masqué en succès (no-op montré
+  "done!"). Désormais raise + stderr forwardé ; retexture ne supprime que la copie
+  fraîche (jamais la source in-place). trellis2 : preset fast/balanced/quality
+  CÂBLÉ (était stocké dans window.__trellis2Preset jamais lu) → flags bridge
+  --steps/--texture-size/--image-resolution.
+- **subdivide** : explosion par-face re-weldée (merge_vertices) → plus de soupe
+  déconnectée. PAS de switch vers Loop (Loop jette les UV).
+- **smooth** : durci (nondegenerate_faces + merge_vertices + volume_constraint=False
+  + revert si NaN) contre les meshes dégénérés des générateurs.
+- **fix_normals** : appels repair redondants retirés (no-ops idempotents, vérifiés
+  byte-identiques au cloud sur 240 essais) + guard hasattr/try-except.
+- **renderer** : runMeshTool affiche result.stderr (sinon cause réelle invisible).
+
 ## 2026-06-14 (fix — THE real SLat slowness: sparse-attn MATH backend → EFFICIENT)
 
 LE vrai goulot (pas le suspend, pas le sdpa-vs-flash en soi). Mesuré : la
