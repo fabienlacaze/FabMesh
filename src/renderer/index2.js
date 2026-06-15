@@ -7730,6 +7730,128 @@ function _jsCenter(geom) {
   return result;
 }
 
+// Boundary-loop hole finder for the Fill-holes live preview. Returns the
+// green fan-fill triangle positions (geom-local) + per-size outline line
+// vertices (green=will fill, grey=too small, red=too big) + stats. Adapted
+// from the cloud _jsFillHoles.
+function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
+  const empty = { greenFaces: [], green: [], grey: [], red: [], stats: { loops: 0, filled: 0, tooBig: 0, tooSmall: 0 } };
+  if (!geom.index || !geom.attributes.position) return empty;
+  const arr = geom.attributes.position.array;
+  const n = geom.attributes.position.count;
+  const rawIndices = geom.index.array;
+  const rawTriCount = Math.floor(rawIndices.length / 3);
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = arr[i * 3], y = arr[i * 3 + 1], z = arr[i * 3 + 2];
+    if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+    if (y < mny) mny = y; if (y > mxy) mxy = y;
+    if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+  }
+  const bbDiag = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) || 1;
+  // Strip degenerate triangles (TRELLIS marching cubes emits many).
+  const indices = [];
+  const areaEps = bbDiag * 1e-12;
+  for (let t = 0; t < rawTriCount; t++) {
+    const i0 = rawIndices[t * 3], i1 = rawIndices[t * 3 + 1], i2 = rawIndices[t * 3 + 2];
+    if (i0 === i1 || i1 === i2 || i2 === i0) continue;
+    const ax = arr[i0 * 3], ay = arr[i0 * 3 + 1], az = arr[i0 * 3 + 2];
+    const ex = arr[i1 * 3] - ax, ey = arr[i1 * 3 + 1] - ay, ez = arr[i1 * 3 + 2] - az;
+    const fx = arr[i2 * 3] - ax, fy = arr[i2 * 3 + 1] - ay, fz = arr[i2 * 3 + 2] - az;
+    if (Math.hypot(ey * fz - ez * fy, ez * fx - ex * fz, ex * fy - ey * fx) * 0.5 < areaEps) continue;
+    indices.push(i0, i1, i2);
+  }
+  const triCount = Math.floor(indices.length / 3);
+  // Weld by quantized position (tol = bbDiag*1e-3, matching the Python fill).
+  const Q = 1 / (bbDiag * 1e-3);
+  const keyToId = new Map(); const groupOf = new Int32Array(n); let G = 0;
+  for (let v = 0; v < n; v++) {
+    const k = Math.round(arr[v * 3] * Q) + ',' + Math.round(arr[v * 3 + 1] * Q) + ',' + Math.round(arr[v * 3 + 2] * Q);
+    let gid = keyToId.get(k); if (gid === undefined) { gid = G++; keyToId.set(k, gid); } groupOf[v] = gid;
+  }
+  const repOf = new Int32Array(G).fill(-1);
+  for (let v = 0; v < n; v++) { const g = groupOf[v]; if (repOf[g] === -1) repOf[g] = v; }
+  const cnt = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const g0 = groupOf[indices[t * 3]], g1 = groupOf[indices[t * 3 + 1]], g2 = groupOf[indices[t * 3 + 2]];
+    for (const [a, b] of [[g0, g1], [g1, g2], [g2, g0]]) { if (a === b) continue; const k = a < b ? a + ',' + b : b + ',' + a; cnt.set(k, (cnt.get(k) || 0) + 1); }
+  }
+  const succ = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const g0 = groupOf[indices[t * 3]], g1 = groupOf[indices[t * 3 + 1]], g2 = groupOf[indices[t * 3 + 2]];
+    for (const [a, b] of [[g0, g1], [g1, g2], [g2, g0]]) { if (a === b) continue; const k = a < b ? a + ',' + b : b + ',' + a; if (cnt.get(k) !== 1) continue; if (!succ.has(a)) succ.set(a, []); succ.get(a).push(b); }
+  }
+  const loops = [];
+  const popNext = (g) => { const a = succ.get(g); return a && a.length ? a.pop() : null; };
+  for (const start of succ.keys()) {
+    while ((succ.get(start) || []).length) {
+      const loop = []; let g = start;
+      for (let s = 0; s < 100000; s++) { loop.push(g); const nx = popNext(g); if (nx == null) break; if (nx === start) break; g = nx; }
+      if (loop.length >= 3) loops.push(loop); else break;
+    }
+  }
+  const greenFaces = [], green = [], grey = [], red = [];
+  let filled = 0, tooBig = 0, tooSmall = 0;
+  for (const loop of loops) {
+    let bucket;
+    if (loop.length < minHoleSize) { bucket = grey; tooSmall++; }
+    else if (loop.length > maxHoleSize) { bucket = red; tooBig++; }
+    else { bucket = green; filled++; }
+    for (let i = 0; i < loop.length; i++) {
+      const va = repOf[loop[i]], vb = repOf[loop[(i + 1) % loop.length]];
+      bucket.push(arr[va * 3], arr[va * 3 + 1], arr[va * 3 + 2], arr[vb * 3], arr[vb * 3 + 1], arr[vb * 3 + 2]);
+    }
+    if (bucket !== green) continue;
+    let cx = 0, cy = 0, cz = 0;
+    for (const g of loop) { const v = repOf[g]; cx += arr[v * 3]; cy += arr[v * 3 + 1]; cz += arr[v * 3 + 2]; }
+    cx /= loop.length; cy /= loop.length; cz /= loop.length;
+    for (let i = 0; i < loop.length; i++) {
+      const va = repOf[loop[i]], vb = repOf[loop[(i + 1) % loop.length]];
+      greenFaces.push(arr[va * 3], arr[va * 3 + 1], arr[va * 3 + 2], arr[vb * 3], arr[vb * 3 + 1], arr[vb * 3 + 2], cx, cy, cz);
+    }
+  }
+  return { greenFaces, green, grey, red, stats: { loops: loops.length, filled, tooBig, tooSmall } };
+}
+
+// Remove the Fill-holes preview overlays (green fills + coloured outlines).
+function _mtClearOverlays() {
+  for (const o of (mtState.overlays || [])) {
+    try { if (o.parent) o.parent.remove(o); if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); } catch (_) {}
+  }
+  mtState.overlays = [];
+}
+
+// Build the Fill-holes overlays for the current min/max: a light-green
+// semi-transparent surface over each fillable hole + coloured outlines.
+function _mtBuildFillOverlays(vals) {
+  _mtClearOverlays();
+  const minE = Math.max(3, Number(vals.min_hole_size) || 3);
+  const maxE = Math.max(minE, Number(vals.max_hole_size) || 2000);
+  let loops = 0, filled = 0, tooSmall = 0, tooBig = 0;
+  const addLines = (mesh, verts, color, opacity) => {
+    if (!verts.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthTest: false }));
+    l.renderOrder = 999; mesh.add(l); mtState.overlays.push(l);
+  };
+  for (const e of mtState.origGeoms) {
+    const r = _jsHoleFillPreview(e.originalGeom, minE, maxE);
+    loops += r.stats.loops; filled += r.stats.filled; tooSmall += r.stats.tooSmall; tooBig += r.stats.tooBig;
+    if (r.greenFaces.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(r.greenFaces, 3));
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x66ff99, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
+      m.renderOrder = 998; e.mesh.add(m); mtState.overlays.push(m);
+    }
+    addLines(e.mesh, r.green, 0x33ff77, 0.95);
+    addLines(e.mesh, r.grey, 0x888888, 0.6);
+    addLines(e.mesh, r.red, 0xff4455, 0.9);
+  }
+  return { loops, filled, tooSmall, tooBig };
+}
+
 const MESH_TOOL_SCHEMAS = {
   smooth: {
     title: 'Smooth mesh',
@@ -7804,8 +7926,10 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Weld seams, then fill holes whose boundary loop is between Min and Max edges (Python only — no live preview).',
+    subtitle: 'Holes whose boundary loop is between Min and Max edges show in GREEN (will be filled); grey = too small, red = too big. Apply fills them with texture from the surrounding mesh.',
     needsImage: false,
+    overlayPreview: true,   // green fill + coloured outlines, not a geom swap
+    heavyPreview: true,
     params: [
       { id: 'min_hole_size', label: 'Min hole size (edges)', type: 'range', min: 3, max: 20000, step: 1,  default: 3 },
       { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 20000, step: 10, default: 2000 },
@@ -7857,6 +7981,7 @@ const mtState = {
   schema: null,
   vals: {},
   previewTimer: null,
+  overlays: [],           // Fill-holes preview overlays (green fills + outlines)
 };
 
 function _mtCollectVals(body) {
@@ -7907,6 +8032,7 @@ function _mtRunPreview() {
   const fn = mtState.schema.preview;
   const status = document.getElementById('mt-preview-status');
   const compute = () => {
+    _mtClearOverlays();
     for (const e of mtState.origGeoms) {
       if (!fn) { e.mesh.geometry = e.originalGeom; continue; }
       try {
@@ -7917,17 +8043,24 @@ function _mtRunPreview() {
         e.mesh.geometry = e.originalGeom;
       }
     }
-    if (status) {
+    if (mtState.schema.overlayPreview) {
+      const st = _mtBuildFillOverlays(vals);
+      if (status) {
+        status.textContent = st.loops
+          ? `Trous : ${st.filled} à remplir (vert) · ${st.tooSmall} trop petits (gris) · ${st.tooBig} trop grands (rouge)`
+          : 'Aucun trou à bord simple détecté (mesh déjà fermé ou non-manifold).';
+      }
+    } else if (status) {
       status.textContent = fn
         ? `Live preview · ${Object.entries(vals).map(([k, v]) => `${k}=${v}`).join(' · ')}`
         : 'No live preview for this op · click Apply to run.';
     }
     _mtShowSpinner(false);
   };
-  // Heavy previews (subdivide on a dense mesh) block the main thread, so show
-  // a spinner first and defer the compute past two frames so it actually
-  // paints. Cheap previews run synchronously (no flash).
-  if (fn && mtState.schema.heavyPreview) {
+  // Heavy previews (subdivide / fill-holes scan on a dense mesh) block the
+  // main thread, so show a spinner first and defer the compute past two
+  // frames so it actually paints. Cheap previews run synchronously.
+  if ((fn || mtState.schema.overlayPreview) && mtState.schema.heavyPreview) {
     _mtShowSpinner(true);
     requestAnimationFrame(() => requestAnimationFrame(compute));
   } else {
@@ -8167,6 +8300,7 @@ function openMeshToolModal(toolName) {
     applyBtn.onclick = null;
     cancelBtn.onclick = null;
     if (closeX) closeX.onclick = null;
+    _mtClearOverlays();
     // Restore original geoms (memory hygiene).
     for (const e of mtState.origGeoms) { e.mesh.geometry = e.originalGeom; }
   };
