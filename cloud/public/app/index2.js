@@ -12102,6 +12102,20 @@ function _meMouseDown(e) {
   if (e.button !== 0 || e.altKey) return;
   const hit = _meGetIntersection(e);
   if (!hit) return;
+  // Eyedropper: sample the colour under the cursor instead of painting.
+  if (meState.mode === 'paint' && meState.pickMode) {
+    const geom = hit.object.geometry, fa = hit.face?.a;
+    if (geom.attributes.color && fa != null) {
+      const col = geom.attributes.color;
+      const hex = '#' + [col.getX(fa), col.getY(fa), col.getZ(fa)]
+        .map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+      meState.color = hex;
+      const inp = document.getElementById('me-paint-color'); if (inp) inp.value = hex;
+    }
+    meState.pickMode = false;
+    document.getElementById('me-paint-pick')?.classList.remove('tool-active');
+    return;
+  }
   meState.painting = true;
   _mePushUndo();
   meState.controls.enabled = false;
@@ -12388,6 +12402,10 @@ document.getElementById('me-brush-size')?.addEventListener('input', (e) => {
 document.getElementById('me-strength')?.addEventListener('input', (e) => {
   meState.strength = parseInt(e.target.value) / 100;
   document.getElementById('me-strength-val').textContent = meState.strength.toFixed(2);
+});
+document.getElementById('me-paint-pick')?.addEventListener('click', () => {
+  meState.pickMode = !meState.pickMode;
+  document.getElementById('me-paint-pick')?.classList.toggle('tool-active', meState.pickMode);
 });
 document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
   meState.color = e.target.value;

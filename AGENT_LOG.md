@@ -22,6 +22,8 @@ Crop (+ keep-rest), Flip normals, Smooth (Laplacian sélection), Duplicate
 sections View/Edit). _meRestoreView ajouté à Delete/Save/Close. node --check OK.
 Les handlers ne tournent qu'au clic + _mePushUndo avant tout destructif (undo
 dispo) -> risque contenu. Cloudflare auto-deploy au push.
++ Eyedropper paint (me-paint-pick + pickMode) porté : clic puis clic sur le
+mesh échantillonne la couleur dans me-paint-color (branche dans _meMouseDown).
 
 ## 2026-06-15 (parity — lot 5: Watertight sur cloud (Modal voxel remesh))
 
