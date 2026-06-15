@@ -1,6 +1,15 @@
 # FabMesh Agent Log
 
-## 2026-06-15 (fix — budget RAM = vraie limite sur le TOTAL (headroom-aware))
+## 2026-06-15 (fix — résidence séquentielle : libérer SDXL avant la passe 3D)
+
+User : "ça dépasse 25 GB" en régime stable (27.8/31.8, GPU 95%). CAUSE : le
+serveur SDXL persistant (~4-6 GB RealVis+inpaint+CLIPSeg) reste résident pendant
+la passe TRELLIS alors qu'il ne sert pas -> son baseline s'ajoute au pic TRELLIS
+-> total au-dessus du marqueur. FIX (image-to-3d, engine trellis2_native) :
+stopSdxlServer() AVANT de lancer TRELLIS + attente 1.5s pour que l'OS récupère,
+de sorte que le gate headroom voie la RAM libérée et choisisse un mode mieux
+adapté. SDXL respawn au besoin pour la prochaine op image (~5-10s). Règle :
+jamais deux gros modèles résidents en même temps. main.js -> restart Electron.
 
 User : "les limites marchent vraiment ? la RAM dépasse le marqueur (88% vs 85%),
 ça doit être une LIMITE". Vérif mesurée : process TRELLIS = BelowNormal (priorité

@@ -4994,6 +4994,21 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   }
   const useTwoView = false;
 
+  // SEQUENTIAL RESIDENCY — free the persistent SDXL server's RAM (~4-6 GB:
+  // RealVis + inpaint + CLIPSeg) BEFORE the heavy TRELLIS pass. SDXL is not used
+  // during 3D generation, and keeping it resident is exactly the cross-model
+  // overlap that pushed total RAM over the budget marker. It respawns on demand
+  // for the next image op (~5-10 s). Rule: never hold two big models at once.
+  // We stop it FIRST, then briefly let the OS reclaim, so the RAM gate below
+  // sees the freed headroom and can pick a better-fitting cascade mode.
+  if (engine === 'trellis2_native') {
+    try {
+      stopSdxlServer();
+      safeSend('ai3d-progress', '[main] SDXL libéré pour la passe 3D (rechargé au besoin ensuite)\n');
+      await new Promise(r => setTimeout(r, 1500));
+    } catch (_) {}
+  }
+
   // RAM BUDGET guard — the RAM slider (Settings → RAM marker) is a REAL ceiling
   // on TOTAL system RAM, enforced by picking the heaviest cascade mode whose
   // PEAK still fits the budget HEADROOM = budget − what's ALREADY in use (OS +
