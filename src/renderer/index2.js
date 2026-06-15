@@ -9819,7 +9819,19 @@ function _meMouseMove(e) {
   // Always update cursor position (cheap, no raycasting)
   const cursor = document.getElementById('me-brush-cursor');
   if (cursor) {
-    const screenSize = meState.brushRadius * 500;
+    // Size the ring to the REAL brush footprint in screen pixels (was a fixed
+    // *500 that ignored zoom). Project the world-space brush radius at the
+    // camera→target depth: pxPerWorld = canvasHeight / (2*dist*tan(fov/2)).
+    let screenSize = meState.brushRadius * 500;  // fallback
+    try {
+      const cam = meState.camera, ctrl = meState.controls, rndr = meState.renderer;
+      if (cam && ctrl && rndr) {
+        const dist = cam.position.distanceTo(ctrl.target);
+        const canvasH = rndr.domElement.clientHeight || 600;
+        const pxPerWorld = canvasH / (2 * dist * Math.tan((cam.fov * Math.PI / 180) / 2));
+        screenSize = 2 * meState.brushRadius * pxPerWorld;
+      }
+    } catch (_) {}
     cursor.style.width = screenSize + 'px';
     cursor.style.height = screenSize + 'px';
     cursor.style.left = (e.clientX - screenSize / 2) + 'px';
