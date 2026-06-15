@@ -9824,7 +9824,12 @@ function _meDragPlaneAxis(e) {
   meState.raycaster.setFromCamera(meState.mouse, meState.camera);
   const ray = meState.raycaster.ray;
   const ld = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
-  const w0 = new THREE.Vector3(0, 0, 0).sub(ray.origin);
+  // Line through the handle's (corner) in-plane position, parameterised along
+  // the axis — so dragging the corner handle maps directly to the offset.
+  const handle = meState.symHandles[axis];
+  const lp = handle ? handle.position.clone() : new THREE.Vector3(0, 0, 0);
+  lp[axis] = 0;
+  const w0 = lp.clone().sub(ray.origin);
   const b = ld.dot(ray.direction), d = ld.dot(w0), eDot = ray.direction.dot(w0);
   const denom = 1 - b * b;
   if (Math.abs(denom) > 1e-5) {
@@ -10018,6 +10023,13 @@ function _applyBrushAt(hit, point) {
   geom._normsDirty = true;
 }
 
+// Per-geometry selection set: Map<vertexIndex, [r,g,b]> storing the colour that
+// was under each selected vertex (so deselect/clear restores the paint instead
+// of wiping it). Selection is tracked here, NOT inferred from the cyan colour.
+function _meSelMap(geom) {
+  if (!geom._selSaved) geom._selSaved = new Map();
+  return geom._selSaved;
+}
 // Brush application points: the hit point + its mirror across each active
 // symmetry axis (mesh-local space) so paint/select honour symmetry like sculpt.
 function _meBrushPoints(point) {
@@ -10107,18 +10119,19 @@ function _meApplyBrush(hit) {
     }
     colorAttr.needsUpdate = true;
   } else if (meState.mode === 'select') {
-    // Highlight face
     const geom = hit.object.geometry;
     const pos = geom.attributes.position;
     const r = meState.brushRadius;
     const rSq = r * r;
     if (!geom.attributes.color) {
-      const colors = new Float32Array(pos.count * 3).fill(0.7);
+      // White base so unselected faces keep the texture untinted.
+      const colors = new Float32Array(pos.count * 3).fill(1);
       geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       hit.object.material.vertexColors = true;
       hit.object.material.needsUpdate = true;
     }
     const colorAttr = geom.attributes.color;
+    const sel = _meSelMap(geom);   // index -> saved (paint) colour under the selection
     const pts = _meBrushPoints(point);  // main point + symmetry mirrors
     for (let i = 0; i < pos.count; i++) {
       const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
@@ -10129,8 +10142,15 @@ function _meApplyBrush(hit) {
         if (dx * dx + dy * dy + dz * dz <= rSq) { inBrush = true; break; }
       }
       if (!inBrush) continue;
-      if (meState.selectErase) colorAttr.setXYZ(i, 0.7, 0.7, 0.7); // erase = back to unselected base
-      else colorAttr.setXYZ(i, 0.0, 1.0, 1.0); // bright cyan highlight
+      if (meState.selectErase) {
+        // Deselect: restore the painted colour we saved (NOT gray) so vertex
+        // paint survives an erase.
+        if (sel.has(i)) { const o = sel.get(i); colorAttr.setXYZ(i, o[0], o[1], o[2]); sel.delete(i); }
+      } else {
+        // Select: remember the current (painted) colour, then show cyan.
+        if (!sel.has(i)) sel.set(i, [colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i)]);
+        colorAttr.setXYZ(i, 0.0, 1.0, 1.0);
+      }
     }
     colorAttr.needsUpdate = true;
   }
@@ -10157,6 +10177,9 @@ document.getElementById('me-undo')?.addEventListener('click', _meUndo);
     document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
     document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
     document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
+    // Title reflects the active mode.
+    const _t = document.getElementById('mesh-edit-title');
+    if (_t) _t.textContent = mode === 'sculpt' ? 'Sculpt Mesh' : mode === 'paint' ? 'Vertex Paint' : 'Select Faces';
   });
 });
 // Sculpt sub-modes
@@ -10197,8 +10220,8 @@ function _meUpdateSymPlanes() {
       meState.symPlanes[axis] = plane;
       // Draggable gizmo handle (bright sphere) at the plane centre — drag it
       // along the axis to move the symmetry plane.
-      const hmat = new THREE.MeshBasicMaterial({ color: defs[axis].color, depthTest: false, transparent: true, opacity: 0.95 });
-      handle = new THREE.Mesh(new THREE.SphereGeometry(Math.max(size * 0.045, 0.02), 16, 12), hmat);
+      const hmat = new THREE.MeshBasicMaterial({ color: defs[axis].color, depthTest: false, transparent: true, opacity: 0.9 });
+      handle = new THREE.Mesh(new THREE.SphereGeometry(Math.max(size * 0.026, 0.014), 16, 12), hmat);
       handle.renderOrder = 1000;
       handle.userData.symAxis = axis;  // tag so the pointer handler can grab it
       meState.scene.add(handle);
@@ -10212,9 +10235,17 @@ function _meUpdateSymPlanes() {
     } else if (want && plane) {
       try { plane.geometry.dispose(); plane.geometry = new THREE.PlaneGeometry(size, size); } catch (_) {}
     }
-    // Position plane + handle at the current offset along the axis.
+    // Plane centred at the offset; handle parked at a CORNER of the plane so
+    // it doesn't sit over the mesh. Its axis coord still = the plane offset.
     if (plane) { plane.position.set(0, 0, 0); plane.position[axis] = meState.symOffset[axis]; }
-    if (handle) { handle.position.set(0, 0, 0); handle.position[axis] = meState.symOffset[axis]; }
+    if (handle) {
+      const cc = size * 0.42;
+      const inp = { x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y'] }[axis];
+      handle.position.set(0, 0, 0);
+      handle.position[axis] = meState.symOffset[axis];
+      handle.position[inp[0]] = cc;
+      handle.position[inp[1]] = cc;
+    }
   }
 }
 // Symmetry toggles
@@ -10224,10 +10255,12 @@ function _meUpdateSymPlanes() {
   btn?.addEventListener('click', () => {
     const on = !meState.symmetryAxes[axis];
     meState.symmetryAxes[axis] = on;
-    btn.classList.toggle('tool-active', on);
-    // Fill with the axis colour when active (overrides the default highlight).
-    btn.style.background = on ? col : 'transparent';
-    btn.style.color = on ? '#111' : col;
+    // Active state = the axis colour, NOT the default orange. !important beats
+    // the .tool-active class, and we don't add that class for these buttons.
+    btn.classList.remove('tool-active');
+    btn.style.setProperty('background', on ? col : 'transparent', 'important');
+    btn.style.setProperty('color', on ? '#111' : col, 'important');
+    btn.style.setProperty('border-color', col, 'important');
     _meUpdateSymPlanes();
   });
 });
@@ -10258,36 +10291,33 @@ document.getElementById('me-sel-erase')?.addEventListener('click', () => {
 document.getElementById('me-sel-delete')?.addEventListener('click', () => {
   if (!meState.mesh) return;
   _mePushUndo();
+  let any = false;
   meState.mesh.traverse(c => {
-    if (!c.isMesh || !c.geometry?.attributes?.color) return;
+    if (!c.isMesh || !c.geometry || !c.geometry.index) return;
     const geom = c.geometry;
-    const pos = geom.attributes.position;
-    const color = geom.attributes.color;
-    // Find selected vertices (orange = r>0.9, g<0.5)
+    const sel = geom._selSaved;
+    if (!sel || sel.size === 0) return;
+    const idx = geom.index.array;
     const keep = [];
-    if (geom.index) {
-      const idx = geom.index.array;
-      for (let i = 0; i < idx.length; i += 3) {
-        const a = idx[i], b = idx[i+1], ci2 = idx[i+2];
-        const sel = (color.getX(a) > 0.9 && color.getY(a) < 0.5) ||
-                    (color.getX(b) > 0.9 && color.getY(b) < 0.5) ||
-                    (color.getX(ci2) > 0.9 && color.getY(ci2) < 0.5);
-        if (!sel) keep.push(a, b, ci2);
-      }
-      geom.setIndex(keep);
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i], b = idx[i + 1], d = idx[i + 2];
+      if (!(sel.has(a) || sel.has(b) || sel.has(d))) keep.push(a, b, d);
     }
+    geom.setIndex(keep);
     geom.attributes.position.needsUpdate = true;
+    geom._selSaved = new Map();   // selection consumed
+    any = true;
   });
-  showToast('Selected faces deleted', 'success', 1500);
+  showToast(any ? 'Selected faces deleted' : 'Nothing selected', any ? 'success' : 'info', 1500);
 });
 document.getElementById('me-sel-invert')?.addEventListener('click', () => {
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
+    const sel = _meSelMap(c.geometry);
     for (let i = 0; i < color.count; i++) {
-      const isSelected = color.getX(i) > 0.9 && color.getY(i) < 0.5;
-      if (isSelected) color.setXYZ(i, 0.7, 0.7, 0.7);
-      else color.setXYZ(i, 1.0, 0.3, 0.1);
+      if (sel.has(i)) { const o = sel.get(i); color.setXYZ(i, o[0], o[1], o[2]); sel.delete(i); }
+      else { sel.set(i, [color.getX(i), color.getY(i), color.getZ(i)]); color.setXYZ(i, 0.0, 1.0, 1.0); }
     }
     color.needsUpdate = true;
   });
@@ -10296,10 +10326,13 @@ document.getElementById('me-sel-clear')?.addEventListener('click', () => {
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
-    for (let i = 0; i < color.count; i++) color.setXYZ(i, 0.7, 0.7, 0.7);
-    color.needsUpdate = true;
-    c.material.vertexColors = false;
-    c.material.needsUpdate = true;
+    const sel = c.geometry._selSaved;
+    if (sel && sel.size) {
+      // Deselect everything but KEEP the paint underneath.
+      for (const [i, o] of sel) color.setXYZ(i, o[0], o[1], o[2]);
+      color.needsUpdate = true;
+      c.geometry._selSaved = new Map();
+    }
   });
 });
 // Keyboard
