@@ -1,0 +1,375 @@
+{
+  "_comment": "MountainDragon FBX (3DS Max Biped + custom wings, 102 bones, prefix 'MOUNTAIN_DRAGON_') -> Puppeteer flying_quadruped (47 numeric joints, no semantic names). Source naming uses mixed-case tokens with spaces ('L Thigh', 'R UpperArm') for the biped part and ALL_CAPS_UNDERSCORE ('WING_L_ARM') for the wings. The loader lowercases everything before lookup, so all 'source' keys here are lowercase. The target side has no semantic labels (joint0..joint46) so we deliberately OMIT target_bones \u00e2\u20ac\u201d the retarget core's geometric _target_anatomical_roles heuristic handles target classification.",
+  "source_skeleton_id": "mountain_dragon",
+  "target_family": "flying_quadruped",
+  "axis_convention": {
+    "source": "z_up",
+    "target": "y_up"
+  },
+  "root_strategy": "pelvis_only",
+  "unit_scale": "auto_bbox",
+  "bones": [
+    {
+      "source": "mountain_dragon_ pelvis",
+      "role": "hip",
+      "side": null,
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_ spine",
+      "role": "spine",
+      "side": null,
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ spine1",
+      "role": "spine",
+      "side": null,
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ spine2",
+      "role": "spine",
+      "side": null,
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_ neck",
+      "role": "neck",
+      "side": null,
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ neck1",
+      "role": "neck",
+      "side": null,
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ neck2",
+      "role": "neck",
+      "side": null,
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_ neck3",
+      "role": "neck",
+      "side": null,
+      "chain_idx": 4
+    },
+    {
+      "source": "mountain_dragon_ neck4",
+      "role": "neck",
+      "side": null,
+      "chain_idx": 5
+    },
+    {
+      "source": "mountain_dragon_ neck5",
+      "role": "neck",
+      "side": null,
+      "chain_idx": 6
+    },
+    {
+      "source": "mountain_dragon_ head",
+      "role": "head",
+      "side": null,
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_ l clavicle",
+      "role": "arm",
+      "side": "l",
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_ l upperarm",
+      "role": "arm",
+      "side": "l",
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ l forearm",
+      "role": "arm",
+      "side": "l",
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ l hand",
+      "role": "arm",
+      "side": "l",
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_ r clavicle",
+      "role": "arm",
+      "side": "r",
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_ r upperarm",
+      "role": "arm",
+      "side": "r",
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ r forearm",
+      "role": "arm",
+      "side": "r",
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ r hand",
+      "role": "arm",
+      "side": "r",
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_wing_l_arm",
+      "role": "wing",
+      "side": "l",
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_wing_l_forearm",
+      "role": "wing",
+      "side": "l",
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_wing_l_hand",
+      "role": "wing",
+      "side": "l",
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_wing_r_arm",
+      "role": "wing",
+      "side": "r",
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_wing_r_forearm",
+      "role": "wing",
+      "side": "r",
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_wing_r_hand",
+      "role": "wing",
+      "side": "r",
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ l thigh",
+      "role": "leg",
+      "side": "l",
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ l calf",
+      "role": "leg",
+      "side": "l",
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ l horselink",
+      "role": "leg",
+      "side": "l",
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_ l foot",
+      "role": "leg",
+      "side": "l",
+      "chain_idx": 4
+    },
+    {
+      "source": "mountain_dragon_ r thigh",
+      "role": "leg",
+      "side": "r",
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ r calf",
+      "role": "leg",
+      "side": "r",
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ r horselink",
+      "role": "leg",
+      "side": "r",
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_ r foot",
+      "role": "leg",
+      "side": "r",
+      "chain_idx": 4
+    },
+    {
+      "source": "mountain_dragon_ tail",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 0
+    },
+    {
+      "source": "mountain_dragon_ tail1",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 1
+    },
+    {
+      "source": "mountain_dragon_ tail2",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 2
+    },
+    {
+      "source": "mountain_dragon_ tail3",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 3
+    },
+    {
+      "source": "mountain_dragon_ tail4",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 4
+    },
+    {
+      "source": "mountain_dragon_ tail5",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 5
+    },
+    {
+      "source": "mountain_dragon_ tail6",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 6
+    },
+    {
+      "source": "mountain_dragon_ tail7",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 7
+    },
+    {
+      "source": "mountain_dragon_ tail8",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 8
+    },
+    {
+      "source": "mountain_dragon_ tail9",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 9
+    },
+    {
+      "source": "mountain_dragon_ tail10",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 10
+    },
+    {
+      "source": "mountain_dragon_ tail11",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 11
+    },
+    {
+      "source": "mountain_dragon_ tail12",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 12
+    },
+    {
+      "source": "mountain_dragon_ tail13",
+      "role": "tail",
+      "side": null,
+      "chain_idx": 13
+    }
+  ],
+  "drop_patterns": [
+    "nub$",
+    "ponytail",
+    " finger[0-3]\\d*$",
+    " toe[01]\\d*$",
+    "wing_[lr]_finger_[abcd]_[1-3]$"
+  ],
+  "fingerprint_required_bones": [
+    "mountain_dragon_ pelvis",
+    "mountain_dragon_ l horselink",
+    "mountain_dragon_ r horselink",
+    "mountain_dragon_wing_l_arm",
+    "mountain_dragon_wing_r_arm",
+    "mountain_dragon_ tail13"
+  ],
+  "effectors": [
+    {
+      "name": "hip",
+      "source_bone": "mountain_dragon_ pelvis",
+      "target_node": 46,
+      "chain_root": 46,
+      "chain_bones_target": [46]
+    },
+    {
+      "name": "head_tip",
+      "source_bone": "mountain_dragon_ head",
+      "target_node": 15,
+      "chain_root": 19,
+      "chain_bones_target": [19, 18, 17, 16, 15]
+    },
+    {
+      "name": "tail_tip",
+      "source_bone": "mountain_dragon_ tail13",
+      "target_node": 0,
+      "chain_root": 3,
+      "chain_bones_target": [3, 2, 1, 0]
+    },
+    {
+      "name": "hand_l_tip",
+      "source_bone": "mountain_dragon_ l hand",
+      "target_node": 10,
+      "chain_root": 14,
+      "chain_bones_target": [14, 13, 12, 11, 10]
+    },
+    {
+      "name": "hand_r_tip",
+      "source_bone": "mountain_dragon_ r hand",
+      "target_node": 20,
+      "chain_root": 24,
+      "chain_bones_target": [24, 23, 22, 21, 20]
+    },
+    {
+      "name": "foot_l_tip",
+      "source_bone": "mountain_dragon_ l foot",
+      "target_node": 34,
+      "chain_root": 41,
+      "chain_bones_target": [41, 40, 39, 38, 37, 36, 35, 34]
+    },
+    {
+      "name": "foot_r_tip",
+      "source_bone": "mountain_dragon_ r foot",
+      "target_node": 42,
+      "chain_root": 45,
+      "chain_bones_target": [45, 44, 43, 42]
+    },
+    {
+      "name": "wing_l_tip",
+      "source_bone": "mountain_dragon_wing_l_hand",
+      "target_node": 4,
+      "chain_root": 9,
+      "chain_bones_target": [9, 8, 7, 6, 5, 4]
+    },
+    {
+      "name": "wing_r_tip",
+      "source_bone": "mountain_dragon_wing_r_hand",
+      "target_node": 26,
+      "chain_root": 31,
+      "chain_bones_target": [31, 30, 29, 28, 27, 26]
+    }
+  ]
+}

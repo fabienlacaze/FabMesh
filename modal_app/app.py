@@ -1285,6 +1285,38 @@ class MyFabmeshMesh:
     # @enter (TRELLIS-2 load = 170 s, would blow past Modal's 150 s
     # HTTP timeout even for "instant" enqueue calls).
 
+    @modal.method()
+    def inference_bytes(
+        self,
+        image_bytes: bytes,
+        mode: str = '1024',
+        seed: int = 42,
+        decimation: int = 500_000,
+        texture_size: int = 1024,
+    ) -> bytes:
+        """Batch-friendly TRELLIS-2 inference: image bytes in, GLB bytes out.
+
+        Unlike generate_to_volume() this doesn't need an R2 URL or a
+        job_id — caller passes raw PNG/JPEG bytes via Modal's gRPC
+        and gets the GLB inline. Used by scripts/training_data_trellis_batch.py
+        to materialize the 150-image AnyTop training mesh set without
+        round-tripping through Cloudflare R2.
+
+        Args identical to generate_to_volume's payload (texture_size
+        default lowered to 1024 to fit Modal's 5 min default per-call
+        timeout when batching).
+        """
+        from PIL import Image as _PImg
+        from modal_app._mesh import generate
+        front_img = _PImg.open(io.BytesIO(image_bytes))
+        glb_bytes = generate(
+            self.pipeline, self.o_voxel, front_img,
+            mode=mode, seed=seed,
+            decimation_target=decimation,
+            texture_size=texture_size,
+        )
+        return glb_bytes
+
 
 # Lightweight HTTP endpoints that DELEGATE to the heavy mesh class.
 # These use the regular `image` (text2image + back-view) — no GPU

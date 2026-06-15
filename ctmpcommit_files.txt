@@ -1,0 +1,568 @@
+===cb2f83ed4c9872a93ae0a80e858dc0fa57b4ff8e===fix(anim/retarget): basis-change math via PARENT world rests + UI polish
+
+cloud/public/app/index.html
+cloud/public/app/styles/index2.css
+scripts/anytop_retarget.py
+===6878f7f5e7b54f077a8ee51285325d41db46dc0b===fix(ui): translate empty GENERATING hint to English
+
+cloud/public/app/index2.js
+===485e47bd64fbacb403cd87c4ec4f316f550aaa60===feat(ui): GENERATING icon — gear (⚙) centered in pink circle
+
+cloud/public/app/index.html
+cloud/public/app/styles/index2.css
+===955a49a3606fb244ef0e10ce575b0d5d4b22b085===feat(ui): always-on badge breathe + suppress cold-start toast
+
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===8e51faa70f5a39b90ebccaecf19111c4e7817e0c===fix(ui): GENERATING — spin only on running, respect manual toggle, empty hint
+
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===86cda3102d940806412bb5dca34fbb5c48dcc4f7===feat(ui): step colours, GENERATING section, tile thumbs, liveliness
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===e7e868f3d7b3e5e190e7b33a82168430babd1338===feat(ui): 13 new style presets across Stylized/Genre/Other groups
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===0e5b0115942be96294eedbd496da51aba96436f2===feat(ui): elapsed time + status colours on job tiles
+
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===e64ea20dbd7f9c09faa084b09ec83c620f31dc39===fix(ui): recognize Re-roll/Variant/img2img jobs as Step 1
+
+cloud/public/app/index2.js
+===bbeb3f679e16b2b9d6eb415f4123c3263f263673===feat(jobs): resume in-flight jobs from server on app boot
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===c5866beb2bf40e4d57d897e14a45c541dd92e95e===fix(ui): dispose anim viewer on project switch + longer done-job dwell
+
+cloud/public/app/index2.js
+===cd66ccdeabc81c34f3419eedc8a71f81a03a6ca1===fix(anim/classifier): pick legs via chain span, enumerate all chains per side
+
+modal_app/_anytop_anim.py
+scripts/anytop_retarget.py
+===b4c8a3cb2db272317fa6b47ead0e6dfb1acae4f6===fix(ui): drop stale selected*Path that leaks across projects
+
+cloud/public/app/index2.js
+===ec1cab1ddae081bee968a5dfe0a6247e2ba528a5===fix(anim+ui): relax topology + kill stale-loader leaks in viewers
+
+cloud/public/app/index2.js
+modal_app/_anytop_anim.py
+===fcdae0b228ae5d693a47657e9b7e09a651e5cadb===fix(ui): unconditional auto-pick + 'Used for next step' tooltip
+
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===883b6e19bc0a9211e88965098f33c511834e27f4===fix(ui): Go-to scroll uses scrollIntoView + per-tile pulse CSS
+
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===450447fb70bc8410b9858998d9f5db5d8baf16ac===fix(ui): pulse the specific job tile after Go-to-step, not the card
+
+cloud/public/app/index2.js
+===5f160f444d2abdedd38424f36d275bd0652e1ed8===feat(ui): pulse-highlight destination card on Go-to-step navigation
+
+cloud/public/app/index2.js
+===b6171e8afe5aa6242e929ca20633001f66e31af3===fix(ui): trigger auto-pick-source at project load, not just on toggle
+
+cloud/public/app/index2.js
+===8b929c60ad2e13281328f28e481eb95aa8d8b3c6===fix(anim): always regenerate, no more silent copy-from-existing
+
+cloud/public/app/index2.js
+===d5798eaefacfdbdcd96e49a14065626066d4e96a===feat(ui): loading spinners on source viewers + auto-pick latest source
+
+cloud/public/app/index2.js
+===4a7a82aaa3eb9dca1358eb955e601edb4dfa3c6a===fix(worker): orphan rigs/anims go to _orphans, not the active project
+
+cloud/src/worker.ts
+===5cf879feb3dcfbcd41abb55e40ca1633fca0a9ef===fix(anim/topology): walk full spine for lateral chains, not just root
+
+modal_app/_anytop_anim.py
+===2f5b9330682df3a49d6f40ad5a45c1d303d635f6===fix(anim/router): bump timeout 120→300s + async spawn
+
+modal_app/_anytop_anim.py
+===680c54038daed03bd1921f8373cc18077a2df167===fix(anim/classifier): side_axis=X hardpin + lateral wing detection
+
+modal_app/_anytop_anim.py
+scripts/anytop_retarget.py
+===9fad745875007ff83f6c4b9220ea6a9ae6d264fd===fix(anim/retarget): delta-based retargeting from BVH frame-0 rest
+
+scripts/anytop_retarget.py
+===807b0d7af40ed396d7b2ed374aeb1341286e934a===feat(anim): Strategy 1 — bundled cond + canonical-skeleton retargeting
+
+AGENT_LOG.md
+modal_app/_anytop_anim.py
+scripts/anytop_retarget.py
+===a62aa7aad6fb3dfcbb8089aec55951cd9d60dc44===fix(ui): wait for layout reflow before scrolling to step card
+
+cloud/public/app/index2.js
+===04e3c9c0df5e9ccccad077c29bf27fcae171e76e===feat(ui): per-step progress widget in Create New + Go-to-step button
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===c0f3fbdad85e181df8566cea82062a9258413839===fix(anim): delete jobs row alongside R2 blob on anim delete
+
+cloud/src/worker.ts
+===1f5894dc3f1fa38004332352028d2defaa9e63b6===fix(anim): topology-based ckpt routing + up_axis=Y hardpin
+
+AGENT_LOG.md
+modal_app/_anytop_anim.py
+===f8d894e8f0e77139467afc4d75fdb75d4c7d2bc6===fix(anim): __j<skin_pos> suffix to round-trip GLB index through AnyTop
+
+AGENT_LOG.md
+modal_app/_anytop_anim.py
+scripts/bvh_to_gltf_anim.py
+===6572cdc5704e9c09f0ac09b08f6f250fe691acf4===fix(anim): anatomical joint names + drop alias guard (audit acc4f279)
+
+AGENT_LOG.md
+modal_app/_anytop_anim.py
+===cc4b957cf2b71b68c0b71622692001af33472efb===fix(anim): force flying ckpt for winged creatures + step 4.5 probe
+
+AGENT_LOG.md
+modal_app/_anytop_anim.py
+===190b3f23aae4c5914665496de3ec6bac1803768b===fix(anim): Mode 3 — alias skel_name to trained class to get real motion
+
+modal_app/_anytop_anim.py
+===fc2b26a285cb2329f6f3925f5ea59fe1096a5bb0===feat(history+anim): anim jobs in Supabase + visible bones overlay in anim viewer
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===d4e858f0d0957f4bd7840a088668c59eff18b758===feat(history): asset chain in event detail + auto-rig now appears
+
+cloud/public/app/index.html
+cloud/src/worker.ts
+===477072d0804ee3cf9adc6b05f540939b8dfef7b3===fix(warmup): no false 'Image gen cold' toast for anim/rig jobs
+
+cloud/public/app/cloud-overrides.js
+cloud/public/app/index2.js
+===55397bf505d7623a28b55fe1f41330b7557b8092===fix(fill_holes): aggressive non-manifold cleanup between passes
+
+modal_app/_mesh_op.py
+===ca62c671fd21fdf90713e9569a210cebeb6e60c8===fix: warmup popover (drop timings) + fill_holes robustness + anim bone-mapper enrichment
+
+cloud/public/app/cloud-overrides.js
+modal_app/_mesh_op.py
+scripts/bvh_to_gltf_anim.py
+===9eb18febb6f7c17adabb1054abf327de6f6a1ed1===fix(animal): missing ASSET_TYPE_PROMPTS['animal'] → SDXL defaulted to headshot
+
+cloud/public/app/index.html
+modal_app/_prompts.py
+===fa127ccae3a80edab26edd8598a8de047735bc26===fix(warmup): full audit — popup hint + ETA timer + toast all use the CORRECT container
+
+cloud/public/app/cloud-overrides.js
+cloud/public/app/index2.js
+===efdc00d920b338ceda53644e9af64016ab582042===fix(warmup): infer per-container warm from Supabase jobs.finished_at
+
+cloud/src/worker.ts
+===e5ec0f7f63c2d6b40dc4005200270970bbd059f0===fix(warmup-popover): JS hover with viewport clamping replaces CSS :hover (was failing to render at all)
+
+cloud/public/app/index.html
+===b768e087e94f3460ea4549e18bd33020924bc985===ui(warmup): generic 'Server warming up' pill + hover popover with per-service status
+
+cloud/public/app/cloud-overrides.js
+cloud/public/app/index.html
+===28db330841c5132329dbfc331f139a03112d0a80===fix(mesh-delete): accept shared mesh/<jobId>.glb path with ownership check - persistModalGlb writes user-less paths that the previous <uid>/ guard rejected
+
+cloud/src/worker.ts
+===050a27a370f5f348b24f77de137f5c55bbef198d===feat(warmup): per-container Modal warm-up tracking
+
+cloud/public/app/cloud-overrides.js
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===8db546fa593dd1f1aada39556baee39f7f4df09e===feat(history-detail): clickable project name + source/mesh filenames open the project at that asset
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===737e3226a7afdb11aefe4e73685abf3951de3f79===ui: floating event detail modal + better Modal warm-up surfacing
+
+cloud/public/app/cloud-overrides.js
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===54f9dffc2795f2baf650b01377789b204a648665===feat(history): clickable events with full detail panel
+
+cloud/public/app/index.html
+cloud/src/worker.ts
+===1ab9e8dcdd139306f315355dc40f29872832238c===fix(delete-project): handle _orphans specially - wipe its R2 blobs across mesh-op/rigged/animations prefixes so the card disappears
+
+cloud/src/worker.ts
+===19e66d8a6cacce1d5f8b3222d7e5f7f96d16bb22===feat(mesh): Ultra 8K preset — TRELLIS 4096 + Real-ESRGAN x2 → 8192px
+
+cloud/public/app/cloud-overrides.js
+cloud/public/app/index.html
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===d8f092bc6384893cdc3602fc64b4125da4d1c876===fix(mesh-thumbs): store sourceImage in jobs.options so each mesh version shows the image it was generated FROM, not the project default
+
+cloud/src/worker.ts
+===da134715a96ad2022eddfd9bf50ee4f70a17e493===fix(mesh-delete): handle <uid>/mesh-op/<projectSlug>/ paths
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===8f609dd06bc402e9895c6de2d3584bab4aea978f===ui(jobs-panel): replace close × with down arrow ▾ (collapse hint, not destructive close)
+
+cloud/public/app/index.html
+===65d786db9ffd205a19e74358775103fc891e463c===fix(copy-prompt): surface user_assets.meta.prompt in handleCloudProjects so the Copy prompt button reappears after jobs wipe
+
+cloud/src/worker.ts
+===7405882e2bdf34b0e74236e69c7de8306e0c1a18===fix(image-versions): kill the v1-v0-v1-v0 duplicate render race
+
+cloud/public/app/index2.js
+===1afac1dda0ea84b72421cf0b21ae855d787038fd===feat(landmarks): 'Freeze mesh' toggle — drag bone without warping mesh
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===0703f3daa4fc4e4137d25a16f71f4d1c2ccbdf3a===feat(landmarks): drag marker → bone follows (direct rig edit)
+
+cloud/public/app/index2.js
+===1dba32a295bed3317e8e68d5805d8e26c3f1b64f===ui(landmarks): brighten the modal viewer (hemi 1.0→1.8, dir 1.2→2.0, fill 0.5→1.0, back 0→0.7, ambient 0.3→0.6, exposure 1.0→1.4)
+
+cloud/public/app/index2.js
+===73a0098de5dd448ed90ce84a01ca6d1853df20d1===fix(landmarks): replace SkeletonHelper with custom sphere+cylinder overlay
+
+cloud/public/app/index2.js
+===1887b2f1c23ab988c13eefcd85302bf3876e1825===fix(landmarks): SkeletonHelper accepts floating bones (no SkinnedMesh in AnyTop dragon rig); magenta color for contrast on dark dragon
+
+cloud/public/app/index2.js
+===49690d779f1e37e5b2fd4caf65b4d177966c1043===fix(landmarks): drop unreliable auto-placement, add bone snapping on click
+
+cloud/public/app/index2.js
+===d8774d9f2cc81c6f8978203b4d745ffe46a42255===fix(landmarks/from-rig): walk bone tree hierarchy instead of canonical bbox positions
+
+cloud/public/app/index2.js
+===ae2345d18e758653cca3589c287311ae1aec35a7===fix(landmarks): keep markers off the 3D Mesh main viewer + show SkeletonHelper in landmarks modal
+
+cloud/public/app/index2.js
+===04b553bb887816510e8bb18e989d3fd126b06227===fix(image-ops): await user_assets/record before reloadCurrentProject
+
+cloud/public/app/meshyAPI-cloud.js
+===800b21c3a051a61c3f56536ee7b99c9ce6033419===fix(landmarks): load the selected RIG (not a stale source mesh from another project)
+
+cloud/public/app/index2.js
+===d1496009eb2b3ecb05be6218db1405e3084c0b3a===fix(mesh-start): bump timeout 2 → 4 min + return real error message; Modal cold-start hit the cap on a queued spawn
+
+cloud/src/worker.ts
+===8e6c59b860f9a1b44b21b6fd304a1d4cc0aab2ca===fix(versions): dedupe meshes/rigs/anims/images by URL in worker AND client - belt+braces against multiple R2 prefixes appending the same R2 file
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===0b1387350eab9bf8db6e56dcc09138cc8b736755===fix(images): remove legacy merged.reverse() — server already sorts newest-first, the reverse was making the newest land at v0 right
+
+cloud/public/app/meshyAPI-cloud.js
+===a0ed5570e9c1770357d575247cbb42a46bf951a0===feat(landmarks/from-rig): geometric fallback when bone names are opaque (joint22…)
+
+cloud/public/app/index2.js
+===997fe917d3fc2c75bc6f4cca3a1dc0cc3cc1efe8===fix(delete): images via /api/user-assets/delete + mesh R2 fallback when no jobs row
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+===82563e4626d82728640c471a06ae6402b7d959c9===feat(landmarks): 'From rig' button + auto-extract on modal open if a rig is selected
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===ecd2f2fbe0591fadb97684845809b7bb7b099b7d===fix(mesh-viewer): switch DoubleSide → FrontSide to fix 'see-through painted texture' (red ventral visible from behind on the dragon)
+
+cloud/public/app/index2.js
+===d3ec86a3b6f51ba3ef09bb7ea99f9ce27e211dcd===fix(mesh-versions): remove duplicate #modal-confirm + sort meshes newest-first
+
+cloud/public/app/index.html
+cloud/src/worker.ts
+===8d454c642c65646b964f0ed339f06f6c2bbcbdee===fix(text2image): bump Modal timeout 6 → 10 min — variant gen failed at exact 6m when running concurrently with mesh gen on the same GPU
+
+cloud/src/worker.ts
+===8fa5b1577b1657dcf4a885dedeefbf8a58864ef4===feat(contact): disable Send until all fields filled + screenshot attachments
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===12c1e0ebff3580ce19de817844dc29818c3013ca===fix(images): remove duplicate-thumb causes + bump Modal daily cap
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/wrangler.toml
+===908f61d65e2150e1e1ad3d0ec002474f7598eabf===feat(wipe-all-projects?wipeR2): DELETE jobs rows too (was UPDATE project_name=NULL only) — otherwise mesh_url surfaces broken phantoms after R2 wipe
+
+cloud/src/worker.ts
+===ad8242443628d5d40c3a3091ef0c5677e697fff0===feat(me/wipe-all-projects): add ?wipeR2=true to also delete R2 binaries (preserves <uid>/logs/)
+
+cloud/src/worker.ts
+===eceb44f49ea3eea39b58dcab4859dfffbc3827e6===fix(meshProject): widen rigged_puppeteer/anim filter to match prefix (was exact-match only)
+
+cloud/public/app/index2.js
+===c3ac4c2ae5d8bc29389beb54f67a1cabd33340c1===fix(meshProject): route phantom names (hash, untitled, timestamp_*, bare rigged_puppeteer) to _orphans instead of creating fake projects
+
+cloud/public/app/index2.js
+===87419dab8e7e8bbc81d2a175709c9c3b8ed8500c===feat(me/wipe-all-projects) + diag(auto-rig): nuke reset endpoint + verbose spawn error
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===53871e72669fdb751e6555c57881c315e17b338a===fix(deleteProject): also purge myfm:cloudimages/backphotos/prompt:<name> in localStorage — caches were resurrecting deleted projects via _projectsFromLocalCache
+
+cloud/public/app/meshyAPI-cloud.js
+===b73e75fb12e020424005fcbec513e9609106fca8===diag(delete-project): log call + result + force flush so failures are captured in R2 logs
+
+cloud/public/app/meshyAPI-cloud.js
+===62c46c837adeb0488cc2084e464144d06d158460===fix(cloud-projects/delete): also DELETE user_assets rows for the project — old images were resurrecting on re-create
+
+cloud/src/worker.ts
+===4003dd8896fd8c9e6d3c4fe77a631d5ae5577312===migration: bump guard v3 → v4 to re-run reassign-orphans with 1h window
+
+cloud/public/app/meshyAPI-cloud.js
+===968d63ff010eacf808b5fc5bdafeb8a48420203d===ui(admin): forgot-password link on every admin password prompt + wider migration window
+
+cloud/public/admin.html
+cloud/public/app/meshyAPI-cloud.js
+===95366e07d90b24cdd5048bb32815bfc11c09890e===fix(migration): v3 — reassign _orphans to projects by timestamp matching
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+===58517bc8d20e243054800965a80a058e0caec939===feat(admin): forgot-password — rotate dashboard password via Supabase auth
+
+cloud/public/admin.html
+cloud/src/worker.ts
+===999286d78e204f9d652b57d338d2aa762234d007===feat(admin): Debug logs tab — fetch any user's browser console from R2
+
+cloud/public/admin.html
+cloud/src/worker.ts
+===b6eb706196d199c97fd4d68bd0c0e062495da5b6===fix(migration): v2 — scan all jobs.options keys + R2 listing fallback
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+===0384373f2283f33e84c4593be8ca1abe453ab91d===feat(client-log): also write to stable path _logs/latest/<uid>.log + _any.log
+
+cloud/src/worker.ts
+===2226433409707392a72fbe7349bedb974d50f45f===ui(rig-resume): reopen live job popup for orphan rigs instead of toast
+
+cloud/public/app/index2.js
+===bfd55f57edf0604e2a34da293ec02e38d5bc584f===fix(migration): recover lost project-image mappings via jobs backfill
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+===2e54ed2d77d6ffb8e543eba66f33ca19a9bbe295===feat(thumbs): Phase 2 — mesh thumbnails to R2 + bump per-user cap to 1000
+
+AGENT_LOG.md
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+cloud/wrangler.toml
+===4c7717db49850ce6adb330f41dd38f9e29881f6c===feat(images): Phase 1 — Supabase user_assets replaces localStorage cache
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+===30581c304656f70e8f1a65f7ef13cfddc9e487c8===feat(debug): console-capture + auto-flush to R2 on every job completion
+
+cloud/public/app/console-capture.js
+cloud/public/app/index.html
+cloud/public/app/index2.js
+cloud/src/worker.ts
+cloud/supabase/migrations/20260601_user_assets.sql
+===7756e945d5e12dd19ae9b11c67c365780cce61df===fix(image-versions): aggressive localStorage purge + last-ditch minimal write
+
+cloud/public/app/meshyAPI-cloud.js
+===60da79a82dfc8d4017596abd78b8b1d0a57955a4===diag(image-gen): unconditional logs at generateImages ENTER + success + _appendCloudImages CALLED
+
+cloud/public/app/meshyAPI-cloud.js
+===53f941e14c601d7fc4737d8c957719650c133955===fix(image-versions): recover from localStorage QuotaExceededError in _appendCloudImages
+
+AGENT_LOG.md
+cloud/public/app/index2.js
+cloud/public/app/meshyAPI-cloud.js
+===5a9897ebb87c671c34bd58e893fc57aef3f80c3a===revert(image-versions): undo object-shape change — broke project thumbnails
+
+cloud/public/app/meshyAPI-cloud.js
+===6da854c9147a6f0ddc8b02a8f4dc1ff53af19e5b===fix(image-versions): normalize listImageFolders entries to {path,mtime,jobId} objects
+
+cloud/public/app/meshyAPI-cloud.js
+===1ed25c9044e68d374adb58b35823b6dc8577f031===diag(image-gen): verbose log on _appendCloudImages + renderImageVersions
+
+cloud/public/app/index2.js
+cloud/public/app/meshyAPI-cloud.js
+===b75c7d065afa02b452a8cf03f4200a12e4a448af===fix(post-gen): force-await renderImageVersions so new thumbnail appears before scroll/pulse
+
+cloud/public/app/index2.js
+===5187c38f52c0ec520b14b4b79e151adc523272b0===fix(parental): re-lock special case BEFORE length check ('lock' is 4 chars)
+
+cloud/src/worker.ts
+===c599998ae1c17dbf61faf6de8f312b0100fe95ee===ui(parental): lock icon stays bright + clickable in unrestricted mode
+
+cloud/public/app/index2.js
+===ed63974fadc4a12a08455e61dff6d97ac770f839===fix(parental): hoist 'unrestricted' out of safety block — ReferenceError on Modal call
+
+cloud/src/worker.ts
+===b2cff2f17796a57c47e2b93cbe9b6616f8740f06===feat(parental control): per-user PIN + unrestricted state, matches desktop logic
+
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+modal_app/app.py
+===07edbeee241b531950e43de5e9a50b6db7f9a5a3===fix(nsfw): skin-ratio fallback was false-positive on lion fur — gate by asset_type
+
+modal_app/_nsfw.py
+modal_app/app.py
+===4cdfa3e53624f7e16908191d326a9e6ad27b484d===fix(image-assert): 3-layer placeholder detection — magic + size floor + PNG width
+
+cloud/src/worker.ts
+===95ee628a1c9e2e149009df858f0f5e59737e067b===fix(worker): _assertImageBytes helper applied to every R2-image-put site
+
+cloud/src/worker.ts
+===13b08a5a1459f7e90b340243dd4fef32ffeb30ad===fix(back-view): reject non-image responses (Modal content-filter placeholder)
+
+cloud/src/worker.ts
+===a3be9eb4cbc2707fb2c7828310dac21bd92a2482===fix(viewer): own image-error placeholder + proxy wildcard *.r2.dev
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===e9585bb6e845c833d8d4205840ab9c4e162a0619===fix(nsfw scan): unwrap { results: [] } response — was flagging 'ok' + 'results' as project names
+
+cloud/public/app/index2.js
+===d32c6057de4318c057de32d5f5adf7868ca6ce88===config(R2): add CORS rules for myfabmesh-meshes bucket
+
+cloud/r2-cors.json
+===bc3db6bd59d529b3e8bfbf145401c48a9c35d6ec===fix(viewers + image-gen): force opaque mesh materials + bump image timeout 4m→6m
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===a25502b48445649b950978743311a52a3c23adbe===fix(viewers): brighter lighting + scene purge on rig viewer
+
+cloud/public/app/index2.js
+cloud/public/app/lib/Viewer3D.js
+===09d53d70b8a991db90a9222dd8dc121d24d0e2e3===feat(viewers): unified purple loading spinner + 'Loading…' overlay on all 4 viewers
+
+cloud/public/app/index2.js
+cloud/public/app/styles/index2.css
+===f9fd5e303c5ef42d81a491a453f6468c803d0859===fix(anim viewer): aggressive scene purge — previous-project mesh ghosts behind new one
+
+cloud/public/app/index2.js
+===c5a57ad093d612ddcb419fa963b669813e3e3625===fix(anytop): force fresh import of bvh_to_gltf_anim so warm containers see latest patches
+
+modal_app/_anytop_anim.py
+===01b6b8eab6d86a103594f993e170dc4e47c148c3===fix(bvh→glb): patch both bone translation AND rotation from IBM TRS decomp
+
+scripts/bvh_to_gltf_anim.py
+===3e82182574f3ac4b933fdc004918814081c94b98===diag(bvh→glb): sentinel print at the bone-translation patch entry
+
+scripts/bvh_to_gltf_anim.py
+===f810fecf09f8ea42627021c9550a693cc97ca559===fix(bvh→glb): unconditional bone.translation patch + sample log
+
+scripts/bvh_to_gltf_anim.py
+===fae48e11fcf7dd98cb844caf57fbd5bc03fb5ea4===fix(bvh→glb): patch bone node.translation from IBM offsets → bones + animation finally render
+
+scripts/bvh_to_gltf_anim.py
+===8da7e62ab0cbb173d04f97abe94b36f185a22e18===fix(anim copy): switch to server-side R2→R2 copy — fixes HTTP 413 on big GLBs
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===aaedaa21ab6c26b57f0e939a0a383701bb388c4c===diag(anim-vw): log track-name resolution + helper bbox
+
+cloud/public/app/index2.js
+===55e4ca8e0de85267b062ac537b1c6942a1fec3f0===diag(bvh→glb): log skin reference state + auto-repair if stripped
+
+scripts/bvh_to_gltf_anim.py
+===1bedaea8c615616e7c490b811efc8a0a1a8d42d5===feat(anim modal): generate creates NEW version (vN+1) — copy existing + spawn new types
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===5bbecb470381254f0669b17bec8c3c7deac11b55===feat(anim modal): unchecking an existing type removes it from the version
+
+cloud/public/app/index2.js
+===d55e91cbdb8ea847b41cd2e1513160ad24254b64===fix(anim): hide duplicate non-skinned mesh + grouped batch popup + skip existing types
+
+cloud/public/app/index2.js
+===d6bfd78127b1080c667e0a1c6cdeafbfcbfcba7b===diag(anim-vw): log GLB inventory + mixer state + skeleton bone count on load
+
+cloud/public/app/index2.js
+===594c029752e4e5f201660aead70a3a1cf4dd8c96===feat(anim viewer): replace model-viewer with Three.js Viewer3D + AnimationMixer + native bones
+
+cloud/public/app/index2.js
+===29c96f582e5764c5fa6b3851fdd08d3d90f59450===feat(home stats + anim bones): show 'N anim' on project card, harden Bones toggle
+
+cloud/public/app/index2.js
+===04d75b2c99708aeca3d05d6714612df7ef2f9d5b===feat(anim viewer): Bones toggle + full toolbar wiring (View/Speed/Bg/Light)
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===e52b386648cbcc838e1e70a8b4cce0fa0f1992da===fix(anim modal): pre-check + EXISTING tag now reflect the SELECTED version's types only
+
+cloud/public/app/index2.js
+===d93bc0ee6fcd0dfeb5395a601c1058ee541dd61d===fix(anim modal): rename 'Generate AnyTop AI' → 'Add Animation' + enable disabled-by-default Generate button
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===2e3df15843808a1b3bc49c21b73232d0bf66d198===feat(anim): Generate AnyTop AI now opens dedicated modal, pre-checks existing types
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===52a3eb2dc2b2d69ac4c1a67e66056ef8d419ffef===ui(anim): split 'AI tools' from 'Manual tools' in Step 4 right column
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===e424a53ff1fe98e1408a8b06005b7e991005a305===fix(bvh→glb): jerky animation — normalize quats + sign-flip + SLERP resample
+
+scripts/bvh_to_gltf_anim.py
+===b72d9fb77df6110e104c528ad104407f900eb620===feat(anim versions): match rig — newest = vN highest, project thumbnail + Import GLB
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===6451def357c71633afb15c8f2311bc49f3dccb35===fix(anim delete): use fetch instead of postJSON (postJSON is only in meshyAPI scope)
+
+cloud/public/app/index2.js
+===d7f1ae78047a19cd124c3597fc46a0efb9186e80===ui(anim versions): use .version-delete-btn class to match mesh/rig delete style
+
+cloud/public/app/index2.js
+===7b888c93d6f1076c01f2daa18fc31cf33fbfde73===fix(anytop): perturb motion BVH to break Std collapse + add delete button on versions
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+modal_app/_anytop_anim.py
+===87d0340f168f9cf0c84b22f522152578b7b2da1f===fix(bvh→glb retarget): compose rest * bvh quat so bind pose survives + diag log
+
+scripts/bvh_to_gltf_anim.py
+===72dd972e0fcc7aeff0cd380a4af9c3b31dde5758===feat(anim versioning): batch_id → 1 generation = 1 version (clips inside)
+
+cloud/public/app/index2.js
+cloud/public/app/meshyAPI-cloud.js
+cloud/src/worker.ts
+===9c053e95d318fc7917fa5dc135239ebfafd72c44===feat(anim step): per-type version stacks + force-engage animation on load
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===0eb779f123eb73616b2cee5a14ac34e761ffaf45===feat(anim): multi-select checkbox + sequential batch (one version per checked type)
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===0cf9047fe4e7d222ea8bf12af1de9f7b7629aa88===ux(anim step): versions strip UNDER viewer + Play button fix + 'no tracks' diag
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===9b6c9d7b670fea2596449b4507d6e5d73362bbd7===feat(anim persistence): list animations/ in /api/meshes + populate p.animations on load
+
+cloud/public/app/index2.js
+cloud/src/worker.ts
+===ca3680033339ca7bd117615211ebbbb0cabbae12===feat(animation step): rig-style layout — big viewer left, versions strip right
+
+cloud/public/app/index.html
+cloud/public/app/index2.js
+===e8fa75d596c70c823b14d181978dddccb21c8310===fix(anytop): --object_type must equal --object_name (cond_dict key), not a registry class
+
+modal_app/_anytop_anim.py
+scripts/anytop_bridge.py
+===1373cc53c54fa57469fa0933dd93c203a36410d5===fix(anytop): valid --object_type from AnyTop class registry + sentencepiece dep
+
+modal_app/_anytop_anim.py
+scripts/anytop_bridge.py
+===c31f0efb608f94407a4a9916f6175a9b2d12d146===fix(anytop): add num2words dep — sample.generate imported it at module load
+
+modal_app/_anytop_anim.py
+===9cd814c6ca6cccf7f6b5d6b75b6647c441f3bf8e===fix(anytop): tpos.bvh also needs 30 frames (1-frame got dropped by stats path)
+
+modal_app/_anytop_anim.py
+scripts/anytop_bridge.py
+===52aaa673214821f31f050c2070d35e8b18b064a0===fix(anytop): split tpos.bvh from idle.bvh so process_new_skeleton has motion to iterate
+
+cloud/src/worker.ts
+modal_app/_anytop_anim.py
+scripts/anytop_bridge.py
+===7d38943005267984cc2e06b0a627c7c4e1144679===ux(fill-holes preview): surface that cloud has T-junction split, JS preview doesn't
+
+cloud/public/app/index2.js
