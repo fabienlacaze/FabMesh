@@ -1,3 +1,9 @@
+// @ts-nocheck
+// ^ Kept in the repo as a BACKUP / reference of the single-file Worker router,
+// but it is NOT the build entry (that's worker.ts). The Next.js static-export
+// build typechecks all of src/, and this WIP file has type errors (e.g. R2
+// `onlyIf`), so it is excluded from type-checking to keep `Cloud — Build &
+// Deploy` green. Remove @ts-nocheck only if you promote this to the live worker.
 /**
  * MyFabmesh.AI Cloud — Cloudflare Worker (single-file router).
  *
