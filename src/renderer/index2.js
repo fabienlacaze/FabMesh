@@ -2721,8 +2721,11 @@ function _estimateMeshMs() {
   if (document.getElementById('ws-trellis2-refine')?.checked) ms += 90000;
   if (document.getElementById('ws-trellis2-rectify')?.checked) ms += 36000;
   if (document.getElementById('ws-trellis2-smooth')?.checked) ms += 12000;
-  if (document.getElementById('ws-trellis2-quality-plus')?.checked) ms += 30000;
-  if (document.getElementById('ws-trellis2-ultra-q')?.checked) ms += 50000;
+  // Cascade geometry passes are the real time sinks (the multi-minute SLat
+  // sampling), and on a 16-24 GB box they saturate RAM and swap — the old
+  // +30s/+50s were wildly optimistic vs the observed ~2 min / ~5-6 min.
+  if (document.getElementById('ws-trellis2-quality-plus')?.checked) ms += 120000;  // 1024_cascade ~2min
+  if (document.getElementById('ws-trellis2-ultra-q')?.checked) ms += 360000;       // 1536_cascade ~6min (RAM-heavy)
   if (document.getElementById('ws-trellis2-face-fix')?.checked) ms += 60000;
   const t2preset = document.getElementById('ws-trellis2-preset')?.value || 'fast';
   if (document.getElementById('ws-trellis2-ultra-hd')?.checked || t2preset === 'ultra_8k') ms += 280000;
@@ -7386,9 +7389,9 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
   const trellis2Smooth = document.getElementById('ws-trellis2-smooth')?.checked || false;
   if (trellis2Smooth) expectedMs += 12000;  // ~12s for bilateral smooth
   const trellis2QualityPlus = document.getElementById('ws-trellis2-quality-plus')?.checked || false;
-  if (trellis2QualityPlus) expectedMs += 30000;  // ~30s extra for cascade mode
+  if (trellis2QualityPlus) expectedMs += 120000;  // 1024_cascade ~2min (was 30s — too low)
   const trellis2UltraQ = document.getElementById('ws-trellis2-ultra-q')?.checked || false;
-  if (trellis2UltraQ) expectedMs += 50000;  // ~50s extra for 1536_cascade
+  if (trellis2UltraQ) expectedMs += 360000;  // 1536_cascade ~6min, RAM-heavy (was 50s — way too low)
   const trellis2FaceFix = document.getElementById('ws-trellis2-face-fix')?.checked || false;
   if (trellis2FaceFix) expectedMs += 60000;  // ~60s for SDXL face inpaint
   const trellis2UltraHD = document.getElementById('ws-trellis2-ultra-hd')?.checked || false;
@@ -13226,7 +13229,17 @@ async function refreshJobDetailsModal(id) {
   document.getElementById('jd-status').textContent = j.status === 'running' ? 'Running' : (j.status === 'done' ? 'Done' : 'Error');
   document.getElementById('jd-started').textContent = new Date(j.startedAt).toLocaleTimeString();
   document.getElementById('jd-elapsed').textContent = fmtDuration(Date.now() - j.startedAt);
-  document.getElementById('jd-estimated').textContent = '~' + fmtDuration(j.expectedMs);
+  // Estimated total: start from the static estimate, but once the job has real
+  // progress (>=8%) trust a DYNAMIC estimate (elapsed / fraction) — it adapts
+  // to whatever is actually happening (RAM swap, cascade slowness) that the
+  // static number can't predict.
+  let _estMs = j.expectedMs;
+  if (j.status === 'running' && j.startedAt && typeof j.progress === 'number' && j.progress >= 8 && j.progress < 100) {
+    const _elapsed = Date.now() - j.startedAt;
+    const _dyn = _elapsed / (j.progress / 100);
+    _estMs = Math.max(_dyn, _elapsed);  // never below already-elapsed
+  }
+  document.getElementById('jd-estimated').textContent = '~' + fmtDuration(_estMs);
   // Show the job's OWN project (snapshot at pushJob time) instead of whatever
   // is currently open. If the user switches projects mid-job the popup must
   // keep pointing at the project that started the job.
