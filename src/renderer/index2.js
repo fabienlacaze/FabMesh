@@ -1096,12 +1096,19 @@ async function renderProjectsGrid() {
     `;
     card.querySelector('.card-rename-btn')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const current = p.displayName || p.name;
-      const newName = await customPrompt('New project name:', current, 'Rename project', 'Save');
-      if (newName === null) return;  // cancelled
-      const r = await API.renameProject({ oldName: p.name, newName });
-      if (r?.success) { showToast?.('Project renamed', 'success', 1500); await refreshProjectsPage(); }
-      else showToast?.('Rename failed: ' + (r?.error || 'unknown'), 'error', 4000);
+      const newName = await customPrompt(
+        'New project name — renames the image folder + every mesh / rig / animation file on disk:',
+        p.name, 'Rename project', 'Rename');
+      if (newName === null || !newName.trim() || newName.trim() === p.name) return;
+      const r = await API.renameProjectFiles({ oldName: p.name, newName });
+      if (r?.success) {
+        const c = r.renamed || {};
+        showToast?.(`Renamed to "${r.newName}" — ${(c.meshes||0)+(c.rigs||0)} mesh/rig, ${c.folders||0} folder, ${c.anims||0} anim, ${c.sidecars||0} sidecar files`, 'success', 3500);
+        if (state.currentProject?.name === p.name) state.currentProject = null;
+        await refreshProjectsPage();
+      } else {
+        showToast?.('Rename failed: ' + (r?.error || 'unknown'), 'error', 5000);
+      }
     });
     card.querySelector('.card-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();

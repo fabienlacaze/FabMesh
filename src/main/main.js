@@ -3641,6 +3641,114 @@ ipcMain.handle('get-project-display-names', () => {
   catch (_) { return {}; }
 });
 
+// TRUE project rename = rename the image folder + every mesh/rig/animation
+// file on disk so the derived project name actually becomes newName. Mirrors
+// the renderer's meshProject() to identify which files belong (NOT a naive
+// prefix match — "orc" must not grab "orc_marron_*"). Plans every move first
+// and aborts on any collision, so it never half-renames.
+function _meshProjectBackend(filename) {
+  let base = filename.replace(/\.[^.]+$/, '');
+  base = base.replace(/_rigged_.+$/i, '');
+  const POST = /_(cntile|retexture|decimate|smooth|fill_holes|fix_normals|center|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
+  let prev;
+  do { prev = base; base = base.replace(POST, ''); base = base.replace(/_\d{10,}$/, ''); } while (base !== prev);
+  base = base.replace(/_(sf3d|hunyuan|local|trellis2_native|trellis2|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i, '');
+  base = base.replace(/_\d+$/, '');
+  return base || 'untitled';
+}
+ipcMain.handle('rename-project-files', (event, { oldName, newName }) => {
+  try {
+    if (!oldName) return { success: false, error: 'missing project' };
+    let newProj = String(newName || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)
+      .replace(/_+\d+$/, '').replace(/_+$/, '');   // no trailing digits -> meshProject round-trips
+    if (!newProj) return { success: false, error: 'invalid name' };
+    if (newProj === oldName) return { success: true, newName: oldName, renamed: {} };
+    const _esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const ts = Date.now();
+    const moves = [];   // [src, dest] — planned, executed only if no collision
+
+    // 1. Image folder(s) whose cleanName == oldName.
+    if (fs.existsSync(IMAGES_DIR)) {
+      let fi = 0;
+      for (const d of fs.readdirSync(IMAGES_DIR)) {
+        const full = path.join(IMAGES_DIR, d);
+        try { if (!fs.statSync(full).isDirectory()) continue; } catch (_) { continue; }
+        if (d.replace(/_\d+$/, '') === oldName) {
+          moves.push([full, path.join(IMAGES_DIR, `${newProj}_${ts}${fi ? '_' + fi : ''}`)]);
+          fi++;
+        }
+      }
+    }
+    // 2. Mesh / rig files (+ their .source / _thumb sidecars) belonging to oldName.
+    const meshRe = new RegExp('^' + _esc(oldName) + '(_|\\.)');
+    if (fs.existsSync(MESHES_DIR)) {
+      for (const f of fs.readdirSync(MESHES_DIR)) {
+        const full = path.join(MESHES_DIR, f);
+        try { if (!fs.statSync(full).isFile()) continue; } catch (_) { continue; }
+        // Match the mesh itself OR its sidecars (X.glb.source / X_thumb.png).
+        const meshBase = f.replace(/\.source$/, '').replace(/_thumb\.png$/, '');
+        if (_meshProjectBackend(meshBase) === oldName && meshRe.test(f)) {
+          moves.push([full, path.join(MESHES_DIR, f.replace(meshRe, newProj + '$1'))]);
+        }
+      }
+      // 3. Animations: <motion>__<rigStem>.glb whose rigStem belongs to oldName.
+      const animDir = path.join(MESHES_DIR, 'animated');
+      if (fs.existsSync(animDir)) {
+        for (const f of fs.readdirSync(animDir)) {
+          const sep = f.indexOf('__');
+          if (sep < 0) continue;
+          const rigStem = f.slice(sep + 2).replace(/\.[^.]+$/, '');
+          if (_meshProjectBackend(rigStem) === oldName && new RegExp('__' + _esc(oldName) + '(_|\\.)').test(f)) {
+            moves.push([path.join(animDir, f), path.join(animDir, f.replace('__' + oldName, '__' + newProj))]);
+          }
+        }
+      }
+    }
+    // Collision check — abort before touching anything if any dest exists.
+    for (const [, dest] of moves) {
+      if (fs.existsSync(dest)) return { success: false, error: `target already exists: ${path.basename(dest)}` };
+    }
+    // Execute.
+    const renamed = { folders: 0, meshes: 0, rigs: 0, anims: 0, sidecars: 0 };
+    const folderMap = [];     // [oldFolderBasename, newFolderBasename]
+    const sourceDests = [];   // renamed .glb.source files to repath
+    for (const [src, dest] of moves) {
+      fs.renameSync(src, dest);
+      if (src.includes(path.join(MESHES_DIR, 'animated'))) renamed.anims++;
+      else if (/\.source$/.test(src)) { renamed.sidecars++; sourceDests.push(dest); }
+      else if (/_thumb\.png$/.test(src)) renamed.sidecars++;
+      else if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) { renamed.folders++; folderMap.push([path.basename(src), path.basename(dest)]); }
+      else if (/_rigged_/i.test(path.basename(src))) renamed.rigs++;
+      else renamed.meshes++;
+    }
+    // Repath the source-image path stored inside each renamed .glb.source so it
+    // points at the moved image folder (else the mesh's source link breaks).
+    for (const sp of sourceDests) {
+      try {
+        let txt = fs.readFileSync(sp, 'utf-8');
+        let changed = false;
+        for (const [oldB, newB] of folderMap) {
+          const re = new RegExp('([\\\\/])' + oldB.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([\\\\/])', 'g');
+          const nt = txt.replace(re, '$1' + newB + '$2');
+          if (nt !== txt) { txt = nt; changed = true; }
+        }
+        if (changed) fs.writeFileSync(sp, txt, 'utf-8');
+      } catch (_) {}
+    }
+    // Clear any stale display-name override for the old derived name.
+    try {
+      const config = loadConfig();
+      if (config.projectDisplayNames && config.projectDisplayNames[oldName]) {
+        delete config.projectDisplayNames[oldName];
+        saveConfig(config);
+      }
+    } catch (_) {}
+    return { success: true, newName: newProj, renamed };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Duplicate an image into a new version (same project dir, suffix + timestamp).
 // Used by Multi-Views button so the original image stays untouched while the
 // new version receives the 6-view dir + any subsequent view edits.

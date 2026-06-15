@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   importDroppedFile: (args) => ipcRenderer.invoke('import-dropped-file', args),
   downloadToTemp: (url) => ipcRenderer.invoke('download-to-temp', url),
   renameProject: (args) => ipcRenderer.invoke('rename-project', args),
+  renameProjectFiles: (args) => ipcRenderer.invoke('rename-project-files', args),
   getProjectDisplayNames: () => ipcRenderer.invoke('get-project-display-names'),
   showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
   exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
