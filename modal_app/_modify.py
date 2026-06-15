@@ -16,14 +16,17 @@ from PIL import Image
 import torch
 
 
+# Subject-agnostic on purpose (was person-only: 'same character, same outfit,
+# same pose, bad anatomy, extra limbs' — mis-steered SDXL on objects/vehicles
+# like a catapult). Matches desktop scripts/sdxl_server.py.
 PRESERVE_PREFIX = (
-    'same character, same outfit, same pose, same composition, '
-    'preserve original subject identity, only change: '
+    'same subject, same shape, same proportions, same composition, '
+    'same colors, preserve the original object identity, only change: '
 )
 PRESERVE_NEG = (
-    'different character, changed face, changed outfit, different pose, '
-    'distorted, blurry, low quality, deformed, extra limbs, missing limbs, '
-    'bad anatomy, watermark, multiple subjects'
+    'different subject, changed shape, different proportions, '
+    'different composition, distorted, blurry, low quality, deformed, '
+    'watermark, multiple subjects'
 )
 
 

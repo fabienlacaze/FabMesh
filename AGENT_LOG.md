@@ -1,5 +1,13 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (parity — lot 2: PRESERVE_PREFIX agnostique côté cloud)
+
+modal_app/_modify.py avait encore l'ancien PRESERVE_PREFIX/NEG orienté
+personnage ('same character/outfit/pose, bad anatomy, extra limbs') -> réécrit
+agnostique pour matcher le desktop (sdxl_server.py). Vérifié au passage que les
+boosters mask-inpaint (_CONCEPT_BOOSTERS) sont DÉJÀ identiques desktop/cloud
+(l'audit s'était trompé) -> rien à porter.
+
 ## 2026-06-15 (parity — propagation cloud<->desktop, lot 1: Fix Normals soudé)
 
 User : "mets tout à jour" (parité cloud<->desktop). Lot 1 (cloud -> desktop) :
