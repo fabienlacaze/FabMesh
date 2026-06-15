@@ -25,7 +25,9 @@ Usage:
 """
 import os
 os.environ.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
-os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+# garbage_collection_threshold:0.8 → PyTorch reclaims cached-but-unused VRAM
+# blocks BEFORE hitting OOM (graceful), instead of fragmenting until it fails.
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True,garbage_collection_threshold:0.8')
 os.environ.setdefault('TORCHDYNAMO_DISABLE', '1')
 # Force PyTorch native scaled_dot_product_attention so we don't load
 # flash_attn / xformers compiled CUDA extensions — Windows Smart App
@@ -36,6 +38,41 @@ os.environ.setdefault('ATTN_BACKEND', 'sdpa')
 os.environ.setdefault('SPARSE_ATTN_BACKEND', 'sdpa')
 os.environ.setdefault('TORCHINDUCTOR_USE_TRITON', '0')
 os.environ.setdefault('TRANSFORMERS_ATTN_IMPLEMENTATION', 'eager')
+
+# --- FabMesh graceful self-limiting (a ceiling that does NOT kill the app) ---
+# This is the heavy worker that peaks ~19-27 GB system RAM. We do NOT hard-cap
+# its memory (a hard cap just OOM-crashes it). Instead we keep the PC USABLE
+# while it runs:
+#   - cap CPU threads so the OS keeps cores for the desktop/UI (set before torch
+#     so torch picks up the limit at import),
+#   - drop to background CPU + DISK I/O priority so its paging during the heavy
+#     pass yields the disk to the foreground (the real cause of the freeze).
+# The job still finishes (a bit slower under pressure); it just can't lock up the
+# machine. Disable with FABMESH_NO_WORKER_THROTTLE=1.
+if os.environ.get('FABMESH_NO_WORKER_THROTTLE') != '1':
+    try:
+        _t = os.environ.get('FABMESH_CPU_THREADS') or str(max(2, (os.cpu_count() or 8) // 2))
+        for _k in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+            os.environ.setdefault(_k, _t)
+    except Exception:
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+        _k32 = ctypes.windll.kernel32
+        # Type the calls: on 64-bit Windows GetCurrentProcess() returns the
+        # pseudo-handle (HANDLE)-1; without restype=c_void_p ctypes truncates it
+        # to 32 bits and SetPriorityClass fails (observed: BACKGROUND_BEGIN ->0).
+        _k32.GetCurrentProcess.restype = ctypes.c_void_p
+        _k32.SetPriorityClass.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+        _k32.SetPriorityClass.restype = wintypes.BOOL
+        _h = _k32.GetCurrentProcess()
+        # PROCESS_MODE_BACKGROUND_BEGIN (0x00100000) is the only mode that also
+        # lowers DISK I/O priority; fall back to BELOW_NORMAL (0x00004000).
+        if not _k32.SetPriorityClass(_h, 0x00100000):
+            _k32.SetPriorityClass(_h, 0x00004000)
+    except Exception:
+        pass
 
 import sys
 import time

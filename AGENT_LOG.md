@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — plafond gracieux : workers s'auto-limitent sans crasher)
+
+User : "je veux un plafond qui ne tue pas l'appli". = auto-limitation gracieuse
+(jamais un cap dur OS qui OOM-crashe). Option A de l'audit appliquée aux DEUX
+workers lourds :
+- trellis2_native_full_pipeline.py (le vrai worker qui pique 19-27 Go, lancé via
+  le venv TRELLIS2_win) : avant import torch -> cap threads CPU
+  (OMP/MKL/OPENBLAS/NUMEXPR = cpu_count//2, ici 32->16) + priorité process
+  background (PROCESS_MODE_BACKGROUND_BEGIN 0x00100000, fallback BELOW_NORMAL) ->
+  baisse aussi la priorité DISQUE I/O = le vrai facteur du freeze pendant le
+  paging. + PYTORCH_CUDA_ALLOC_CONF gagne garbage_collection_threshold:0.8
+  (reclaim VRAM gracieux avant OOM). Bug ctypes 64-bit corrigé :
+  GetCurrentProcess().restype=c_void_p sinon handle tronqué -> SetPriorityClass
+  échoue (testé: sans typage ->FAIL, avec ->OK).
+- sdxl_server.py : cap threads CPU uniquement (PAS de background -> serveur
+  interactif). + retiré les 3 enable_attention_slicing() (slowdown torch2.7/SDPA
+  sans gain mémoire) en gardant enable_vae_tiling().
+Désactivable via FABMESH_NO_WORKER_THROTTLE=1 / FABMESH_CPU_THREADS=N. Python
+only -> pas de restart Electron, effet au prochain spawn des workers.
+
 ## 2026-06-15 (fix — Remove BG : surface vraie erreur + timeout vs charge système)
 
 User : "Remove BG failed" message tronqué "Command failed: python …", puis

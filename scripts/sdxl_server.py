@@ -23,6 +23,19 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# FabMesh: cap CPU threads so a heavy phase (VAE decode, preprocessing) can't
+# monopolise every core and freeze the desktop while this server runs. Set
+# BEFORE importing torch/numpy so they pick up the limit at import. No priority
+# drop here — this server handles INTERACTIVE ops (modify/inpaint) the user is
+# actively waiting on. Disable with FABMESH_NO_WORKER_THROTTLE=1.
+if os.environ.get('FABMESH_NO_WORKER_THROTTLE') != '1':
+    try:
+        _t = os.environ.get('FABMESH_CPU_THREADS') or str(max(2, (os.cpu_count() or 8) // 2))
+        for _k in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+            os.environ.setdefault(_k, _t)
+    except Exception:
+        pass
+
 # Faster startup: only import what we need at top
 import torch
 from PIL import Image, ImageFilter
@@ -170,7 +183,8 @@ def load_img2img():
             pipe.text_encoder_2.to(torch.float16)
         except Exception as _e:
             log(f"img2img fp16 cast skipped: {_e}")
-        pipe.enable_attention_slicing()
+        # attention_slicing removed: on torch 2.7 / SDPA it's a serious slowdown
+        # with no memory gain. VAE tiling below is the real VRAM win — keep it.
         pipe.enable_vae_tiling()
         # Safety checker: enabled by default (parental control).
         # Disabled only when FABMESH_UNRESTRICTED=1 env var is set.
@@ -224,7 +238,7 @@ def load_inpaint():
                 pipe.text_encoder_2.to(torch.float16)
             except Exception as _e:
                 log(f"inpaint fp16 cast skipped: {_e}")
-            pipe.enable_attention_slicing()
+            # attention_slicing removed (torch 2.7/SDPA slowdown, no mem gain).
             pipe.enable_vae_tiling()
             if os.environ.get('FABMESH_UNRESTRICTED') == '1':
                 if hasattr(pipe, 'safety_checker'):
@@ -273,7 +287,7 @@ def load_controlnet_tile():
                 pipe.controlnet.to(torch.float16)
         except Exception as _e:
             log(f"controlnet_tile fp16 cast skipped: {_e}")
-        pipe.enable_attention_slicing()
+        # attention_slicing removed (torch 2.7/SDPA slowdown, no mem gain).
         pipe.enable_vae_tiling()
         if os.environ.get('FABMESH_UNRESTRICTED') == '1':
             if hasattr(pipe, 'safety_checker'):
