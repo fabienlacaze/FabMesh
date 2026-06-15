@@ -605,6 +605,7 @@
     'ws-mesh-center-btn':       1,
     'ws-mesh-fixnormals-btn':   1,
     'ws-mesh-fillholes-btn':    1,
+    'ws-mesh-watertight-btn':   1,   // voxel remesh on Modal
     'ws-mesh-subdivide-btn':    1,   // Wave 4.2
     'ws-mesh-aligntex-btn':     1,   // Wave 4.2 (no-op for now)
     'ws-mesh-material-btn':     1,   // Wave 4.2 (PBR normalize)

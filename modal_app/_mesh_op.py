@@ -590,9 +590,45 @@ def normalize_material(glb_bytes: bytes) -> bytes:
 
 
 # Dispatch table for the mesh_start endpoint.
+def watertight(glb_bytes: bytes, resolution: int = 128) -> bytes:
+    """Rebuild a CLOSED, watertight shell via voxel remesh + marching cubes.
+
+    Fuses every disconnected body into one solid with no holes (loses the
+    texture — re-texture afterwards). Mirror of desktop
+    scripts/mesh_tools.watertight."""
+    import numpy as np
+    import trimesh
+    resolution = max(32, min(400, int(resolution)))
+    scene = _load_scene(glb_bytes)
+    meshes = [m for m in _meshes(scene)
+              if hasattr(m, 'vertices') and len(m.vertices)
+              and hasattr(m, 'faces') and len(m.faces)]
+    if not meshes:
+        return _export(scene)
+    mesh = trimesh.util.concatenate(
+        [trimesh.Trimesh(vertices=np.asarray(m.vertices), faces=np.asarray(m.faces)) for m in meshes])
+    diag = float(np.linalg.norm(mesh.bounds[1] - mesh.bounds[0])) or 1.0
+    vg = mesh.voxelized(pitch=diag / resolution)
+    try:
+        vg = vg.fill()
+    except Exception as e:
+        print(f'[mesh-op] watertight fill warn: {e}', flush=True)
+    wt = vg.marching_cubes
+    try:
+        trimesh.smoothing.filter_laplacian(wt, iterations=2, lamb=0.5, volume_constraint=False)
+    except Exception:
+        pass
+    try:
+        wt.fix_normals()
+    except Exception:
+        pass
+    return _export(trimesh.Scene(wt))
+
+
 OPS = {
     'smooth':          smooth,
     'decimate':        decimate,
+    'watertight':      watertight,
     'center':          center,
     'fix_normals':     fix_normals,
     'fill_holes':      fill_holes,
@@ -620,6 +656,8 @@ def run(op_type: str, glb_bytes: bytes, params: dict | None = None):
         return decimate(glb_bytes, target_faces=int(p.get('target_faces', 50_000))), None
     if op_type == 'subdivide':
         return subdivide(glb_bytes, iterations=int(p.get('iterations', 1))), None
+    if op_type == 'watertight':
+        return watertight(glb_bytes, resolution=int(p.get('resolution', 128))), None
     if op_type == 'retex_swap':
         return retex_swap_atlas(glb_bytes, str(p.get('image_url') or '')), None
     if op_type == 'material_adjust':

@@ -8727,6 +8727,16 @@ const MESH_TOOL_SCHEMAS = {
       return parts.join(' · ') + '. Adjust min/max to include more.' + diag;
     },
   },
+  watertight: {
+    title: 'Watertight',
+    subtitle: 'Rebuild a CLOSED, watertight shell (voxel remesh) — fuses every disconnected part into one solid with no holes. This REPLACES the geometry and removes the texture, so Re-Texture afterwards. Higher resolution = more detail, slower.',
+    needsImage: false,
+    confirm: 'Watertight rebuilds the mesh as a new closed shell and removes its texture (re-texture afterwards). Continue?',
+    params: [
+      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 320, step: 8, default: 128 },
+    ],
+    build: (vals) => [String(vals.resolution)],
+  },
   center: {
     title: 'Set pivot point',
     subtitle: 'Place the local origin of the mesh (its pivot) at an AABB landmark, or fine-tune with the X/Y/Z sliders. Yellow gizmo = new pivot.',
@@ -9542,6 +9552,7 @@ document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () =>
 document.getElementById('ws-mesh-subdivide-btn')?.addEventListener('click', () => openMeshToolModal('subdivide'));
 document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => openMeshToolModal('fix_normals'));
 document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => openMeshToolModal('fill_holes'));
+document.getElementById('ws-mesh-watertight-btn')?.addEventListener('click', () => openMeshToolModal('watertight'));
 document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('center'));
 document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => openMeshToolModal('retexture'));
 document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => openMeshToolModal('trellis2_retex'));

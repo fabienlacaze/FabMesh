@@ -1951,7 +1951,7 @@
       const realOp = opMap[operation] || operation;
       const CLOUD_OPS = new Set([
         'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
-        'subdivide', 'align_texture', 'material', 'retex_swap',
+        'subdivide', 'align_texture', 'material', 'retex_swap', 'watertight',
       ]);
       // 'trellis2_retex' = full TRELLIS-2 retexture. On cloud we don't
       // have a texture-only pipeline; the closest equivalent is to
@@ -1994,6 +1994,11 @@
             // build → [levels]; Modal reads `iterations`
             finalParams = {};
             if (a[0] != null) finalParams.iterations = Number(a[0]);
+            break;
+          case 'watertight':
+            // build → [resolution]
+            finalParams = {};
+            if (a[0] != null) finalParams.resolution = Number(a[0]);
             break;
           case 'retex_swap':
             // build (retexture) → [image_url] or empty; fall back to

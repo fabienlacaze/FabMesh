@@ -6477,6 +6477,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
   const allowed = new Set([
     'smooth', 'decimate', 'center', 'fix_normals', 'fill_holes',
     'subdivide', 'align_texture', 'material', 'material_adjust', 'retex_swap',
+    'watertight',
   ]);
   const op = (opType ?? '').toLowerCase();
   if (!allowed.has(op)) {

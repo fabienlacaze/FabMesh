@@ -10,6 +10,18 @@ gizmo jaune en overlay (_mtComputePivot/_makePivotGizmo/_mtBuildPivotGizmo,
 dispatch overlayPreview==='pivot') + bouton "Center"->"Set Pivot" -> set_pivot.
 Ajouté aux regex nom/groupage.
 
+## 2026-06-15 (parity — lot 5: Watertight sur cloud (Modal voxel remesh))
+
+Porté l'op watertight desktop -> cloud : modal_app/_mesh_op.watertight (voxel
+.fill().marching_cubes + laplacian + fix_normals, resolution) + dispatch run()
++ OPS dict ; worker.ts allowed set + meshyAPI CLOUD_OPS + mapping params
+[resolution] ; cloud renderer schéma watertight + bouton ws-mesh-watertight-btn
+(index.html) + wiring + enable cloud-overrides. node --check + AST OK.
+NB : Cloudflare auto-deploy au push ; le BACKEND Modal nécessite `modal deploy
+modal_app/app.py` côté user pour être live (sinon "unknown op" GPU).
+Aussi : material_adjust desktop marche DÉJÀ (modal dédié openMaterialAdjust) ->
+rien à porter.
+
 ## 2026-06-15 (parity — lot 4: Redo + undo-de-l'index sur cloud)
 
 cloud/public/app/index2.js avait l'ancien undo (sans index) et PAS de _meRedo
