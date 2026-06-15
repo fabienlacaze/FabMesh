@@ -10081,12 +10081,50 @@ document.getElementById('me-undo')?.addEventListener('click', _meUndo);
     ['push', 'pull', 'smooth', 'flatten', 'grab', 'inflate'].forEach(s => document.getElementById('me-sculpt-' + s)?.classList.toggle('tool-active', s === sm));
   });
 });
+// Semi-transparent symmetry plane(s) in the viewport — one per active mirror
+// axis (the plane the brush mirrors across, at the world origin). Sized to the
+// mesh bounds. Colours: X=red, Y=green, Z=blue.
+function _meUpdateSymPlanes() {
+  if (!meState.scene) return;
+  if (!meState.symPlanes) meState.symPlanes = { x: null, y: null, z: null };
+  let size = 2;
+  try {
+    if (meState.mesh) {
+      const s = new THREE.Box3().setFromObject(meState.mesh).getSize(new THREE.Vector3());
+      size = (Math.max(s.x, s.y, s.z) || 1.5) * 1.4;
+    }
+  } catch (_) {}
+  const defs = {
+    x: { color: 0xff5577, rot: [0, Math.PI / 2, 0] },   // YZ plane, normal X
+    y: { color: 0x55ff77, rot: [-Math.PI / 2, 0, 0] },  // XZ plane, normal Y
+    z: { color: 0x5599ff, rot: [0, 0, 0] },             // XY plane, normal Z
+  };
+  for (const axis of ['x', 'y', 'z']) {
+    const want = meState.symmetryAxes[axis];
+    const ex = meState.symPlanes[axis];
+    if (want && !ex) {
+      const mat = new THREE.MeshBasicMaterial({ color: defs[axis].color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+      plane.rotation.set(defs[axis].rot[0], defs[axis].rot[1], defs[axis].rot[2]);
+      plane.renderOrder = 999;
+      meState.scene.add(plane);
+      meState.symPlanes[axis] = plane;
+    } else if (!want && ex) {
+      meState.scene.remove(ex);
+      try { ex.geometry.dispose(); ex.material.dispose(); } catch (_) {}
+      meState.symPlanes[axis] = null;
+    } else if (want && ex) {
+      try { ex.geometry.dispose(); ex.geometry = new THREE.PlaneGeometry(size, size); } catch (_) {}
+    }
+  }
+}
 // Symmetry toggles
 ['x', 'y', 'z'].forEach(axis => {
   const btn = document.getElementById('me-sym-' + axis);
   btn?.addEventListener('click', () => {
     meState.symmetryAxes[axis] = !meState.symmetryAxes[axis];
     btn.classList.toggle('tool-active', meState.symmetryAxes[axis]);
+    _meUpdateSymPlanes();
   });
 });
 // Sliders
