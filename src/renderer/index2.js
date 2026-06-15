@@ -9556,6 +9556,10 @@ const meState = {
   undoStack: [],
   redoStack: [],
   symmetryAxes: { x: false, y: false, z: false },
+  symOffset: { x: 0, y: 0, z: 0 },   // symmetry plane position along each axis (mesh-local)
+  symPlanes: { x: null, y: null, z: null },
+  symHandles: { x: null, y: null, z: null },  // draggable gizmo per plane
+  draggingPlane: null,   // axis currently being dragged via its gizmo
   grabAnchor: null,      // mesh-local anchor point captured on pointerdown
   grabScreen: null,      // {x,y} screen coords captured on pointerdown
   grabMesh: null,        // mesh object the grab stroke is acting on
@@ -9798,8 +9802,47 @@ function _meUpdateUndoBtns() {
   if (r) r.disabled = meState.redoStack.length === 0;
 }
 
+// Raycast the symmetry-plane gizmo handles; returns the grabbed axis or null.
+function _meRaycastHandles(e) {
+  const handles = [];
+  for (const a of ['x', 'y', 'z']) if (meState.symHandles[a]) handles.push(meState.symHandles[a]);
+  if (!handles.length) return null;
+  const rect = meState.renderer.domElement.getBoundingClientRect();
+  meState.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  meState.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  meState.raycaster.setFromCamera(meState.mouse, meState.camera);
+  const hits = meState.raycaster.intersectObjects(handles, false);
+  return hits.length ? hits[0].object.userData.symAxis : null;
+}
+// Drag the grabbed symmetry plane along its axis: closest point on the axis
+// line (through the origin) to the mouse ray sets the offset.
+function _meDragPlaneAxis(e) {
+  const axis = meState.draggingPlane;
+  const rect = meState.renderer.domElement.getBoundingClientRect();
+  meState.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  meState.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  meState.raycaster.setFromCamera(meState.mouse, meState.camera);
+  const ray = meState.raycaster.ray;
+  const ld = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+  const w0 = new THREE.Vector3(0, 0, 0).sub(ray.origin);
+  const b = ld.dot(ray.direction), d = ld.dot(w0), eDot = ray.direction.dot(w0);
+  const denom = 1 - b * b;
+  if (Math.abs(denom) > 1e-5) {
+    let s = (b * eDot - d) / denom;
+    s = Math.max(-3, Math.min(3, s));
+    meState.symOffset[axis] = s;
+    _meUpdateSymPlanes();
+  }
+}
 function _meMouseDown(e) {
   if (e.button !== 0 || e.altKey) return;
+  // Grabbing a symmetry-plane gizmo handle starts a drag (not a paint stroke).
+  const gAxis = _meRaycastHandles(e);
+  if (gAxis) {
+    meState.draggingPlane = gAxis;
+    if (meState.controls) meState.controls.enabled = false;
+    return;
+  }
   const hit = _meGetIntersection(e);
   if (!hit) return;
   meState.painting = true;
@@ -9820,6 +9863,8 @@ function _meMouseDown(e) {
 
 let _meLastBrushTime = 0;
 function _meMouseMove(e) {
+  // Dragging a symmetry-plane gizmo handle takes priority over the brush.
+  if (meState.draggingPlane) { _meDragPlaneAxis(e); return; }
   // Always update cursor position (cheap, no raycasting)
   const cursor = document.getElementById('me-brush-cursor');
   if (cursor) {
@@ -9857,6 +9902,11 @@ function _meMouseMove(e) {
 }
 
 function _meMouseUp() {
+  if (meState.draggingPlane) {
+    meState.draggingPlane = null;
+    if (meState.controls) meState.controls.enabled = true;
+    return;
+  }
   if (meState.painting) {
     meState.painting = false;
     meState.controls.enabled = true;
@@ -9973,18 +10023,23 @@ function _applyBrushAt(hit, point) {
 function _meBrushPoints(point) {
   const pts = [point];
   const ax = meState.symmetryAxes;
+  const o = meState.symOffset || { x: 0, y: 0, z: 0 };
   if (ax.x || ax.y || ax.z) {
+    // Each combo = which axes to reflect; reflection across the plane at the
+    // gizmo offset: coord -> 2*offset - coord (not just -coord around origin).
     const combos = [];
-    if (ax.x) combos.push([-1, 1, 1]);
-    if (ax.y) combos.push([1, -1, 1]);
-    if (ax.z) combos.push([1, 1, -1]);
-    if (ax.x && ax.y) combos.push([-1, -1, 1]);
-    if (ax.x && ax.z) combos.push([-1, 1, -1]);
-    if (ax.y && ax.z) combos.push([1, -1, -1]);
-    if (ax.x && ax.y && ax.z) combos.push([-1, -1, -1]);
+    if (ax.x) combos.push([1, 0, 0]);
+    if (ax.y) combos.push([0, 1, 0]);
+    if (ax.z) combos.push([0, 0, 1]);
+    if (ax.x && ax.y) combos.push([1, 1, 0]);
+    if (ax.x && ax.z) combos.push([1, 0, 1]);
+    if (ax.y && ax.z) combos.push([0, 1, 1]);
+    if (ax.x && ax.y && ax.z) combos.push([1, 1, 1]);
     for (const c of combos) {
       const mp = point.clone();
-      mp.x *= c[0]; mp.y *= c[1]; mp.z *= c[2];
+      if (c[0]) mp.x = 2 * o.x - point.x;
+      if (c[1]) mp.y = 2 * o.y - point.y;
+      if (c[2]) mp.z = 2 * o.z - point.z;
       pts.push(mp);
     }
   }
@@ -10131,29 +10186,48 @@ function _meUpdateSymPlanes() {
   };
   for (const axis of ['x', 'y', 'z']) {
     const want = meState.symmetryAxes[axis];
-    const ex = meState.symPlanes[axis];
-    if (want && !ex) {
+    let plane = meState.symPlanes[axis];
+    let handle = meState.symHandles[axis];
+    if (want && !plane) {
       const mat = new THREE.MeshBasicMaterial({ color: defs[axis].color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false });
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+      plane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
       plane.rotation.set(defs[axis].rot[0], defs[axis].rot[1], defs[axis].rot[2]);
       plane.renderOrder = 999;
       meState.scene.add(plane);
       meState.symPlanes[axis] = plane;
-    } else if (!want && ex) {
-      meState.scene.remove(ex);
-      try { ex.geometry.dispose(); ex.material.dispose(); } catch (_) {}
+      // Draggable gizmo handle (bright sphere) at the plane centre — drag it
+      // along the axis to move the symmetry plane.
+      const hmat = new THREE.MeshBasicMaterial({ color: defs[axis].color, depthTest: false, transparent: true, opacity: 0.95 });
+      handle = new THREE.Mesh(new THREE.SphereGeometry(Math.max(size * 0.045, 0.02), 16, 12), hmat);
+      handle.renderOrder = 1000;
+      handle.userData.symAxis = axis;  // tag so the pointer handler can grab it
+      meState.scene.add(handle);
+      meState.symHandles[axis] = handle;
+    } else if (!want && plane) {
+      meState.scene.remove(plane);
+      try { plane.geometry.dispose(); plane.material.dispose(); } catch (_) {}
       meState.symPlanes[axis] = null;
-    } else if (want && ex) {
-      try { ex.geometry.dispose(); ex.geometry = new THREE.PlaneGeometry(size, size); } catch (_) {}
+      if (handle) { meState.scene.remove(handle); try { handle.geometry.dispose(); handle.material.dispose(); } catch (_) {} meState.symHandles[axis] = null; }
+      continue;
+    } else if (want && plane) {
+      try { plane.geometry.dispose(); plane.geometry = new THREE.PlaneGeometry(size, size); } catch (_) {}
     }
+    // Position plane + handle at the current offset along the axis.
+    if (plane) { plane.position.set(0, 0, 0); plane.position[axis] = meState.symOffset[axis]; }
+    if (handle) { handle.position.set(0, 0, 0); handle.position[axis] = meState.symOffset[axis]; }
   }
 }
 // Symmetry toggles
 ['x', 'y', 'z'].forEach(axis => {
   const btn = document.getElementById('me-sym-' + axis);
+  const col = { x: '#ff5577', y: '#55ff77', z: '#5599ff' }[axis];
   btn?.addEventListener('click', () => {
-    meState.symmetryAxes[axis] = !meState.symmetryAxes[axis];
-    btn.classList.toggle('tool-active', meState.symmetryAxes[axis]);
+    const on = !meState.symmetryAxes[axis];
+    meState.symmetryAxes[axis] = on;
+    btn.classList.toggle('tool-active', on);
+    // Fill with the axis colour when active (overrides the default highlight).
+    btn.style.background = on ? col : 'transparent';
+    btn.style.color = on ? '#111' : col;
     _meUpdateSymPlanes();
   });
 });
