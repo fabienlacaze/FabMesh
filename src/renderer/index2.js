@@ -14281,32 +14281,54 @@ window.addEventListener('drop', async (e) => {
     alert('Unsupported file type. Drop a .png, .jpg, .glb, .fbx, .obj, .stl or .ply');
     return;
   }
+  // Context-aware:
+  //  - inside an open project (workspace) -> add a NEW VERSION of the element
+  //    (image / mesh / rig / animation) to the right strip.
+  //  - on the projects grid -> CREATE a new project from the dropped element.
+  const intoProject = !!(state.currentProject && state.page === 'workspace');
+  const _dirOf = (x) => {
+    const s = typeof x === 'string' ? x : (x && x.path) || '';
+    return s.replace(/[\\/][^\\/]*$/, '');
+  };
+  const intoImageDir = intoProject
+    ? _dirOf(state.currentProject.selectedImagePath
+        || state.currentProject.images?.[0]?.path
+        || state.currentProject.images?.[0])
+    : null;
   try {
-    if (isImage && API.importImageFile) {
-      await API.importImageFile(path_);
-    } else if (isMesh && API.importMesh) {
-      await API.importMesh();
+    const r = await API.importDroppedFile({
+      filePath: path_,
+      projectName: intoProject ? state.currentProject.name : null,
+      intoImageDir,
+    });
+    if (!r || !r.success) {
+      showToast?.('Import failed: ' + (r?.error || 'unknown'), 'error', 4000);
+      return;
     }
-    // If a project is open in the workspace, reload it and flip the image
-    // card to its Edit stage so the newly-imported version is highlighted
-    // instead of dropping the user back on the CREATE NEW generator.
-    if (isImage && state.currentProject && state.page === 'workspace') {
+    if (intoProject) {
       if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
-      const imgCard = document.getElementById('step-card-image');
-      if (imgCard) {
-        imgCard.classList.remove('collapsed', 'disabled');
-        const createStage = imgCard.querySelector('.stage-create');
-        const editStage = imgCard.querySelector('.stage-edit');
+      // Flip the strip matching the dropped element to its Edit stage + pulse.
+      const cardId = r.kind === 'image' ? 'step-card-image'
+        : r.kind === 'rig' ? 'step-card-rig'
+        : r.kind === 'anim' ? 'step-card-animation'
+        : 'step-card-mesh';
+      const card = document.getElementById(cardId);
+      if (card) {
+        card.classList.remove('collapsed', 'disabled');
+        const createStage = card.querySelector('.stage-create');
+        const editStage = card.querySelector('.stage-edit');
         if (createStage) createStage.open = false;
         if (editStage) editStage.open = true;
         setTimeout(() => {
-          imgCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          imgCard.classList.add('pulse-highlight');
-          setTimeout(() => imgCard.classList.remove('pulse-highlight'), 1500);
+          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          card.classList.add('pulse-highlight');
+          setTimeout(() => card.classList.remove('pulse-highlight'), 1500);
         }, 120);
       }
+      showToast?.(`Added a new ${r.kind} version`, 'success', 1800);
     } else {
       await refreshProjectsPage();
+      showToast?.('New project created from import', 'success', 1800);
     }
   } catch (err) { alert('Import failed: ' + err.message); }
 });

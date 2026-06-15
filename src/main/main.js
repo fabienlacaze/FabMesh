@@ -3480,6 +3480,80 @@ ipcMain.handle('import-image-file', (event, filePath) => {
   }
 });
 
+// Drag-and-drop import. Context-aware:
+//  - dropped on the projects grid (no projectName) -> CREATE a new project
+//    holding the dropped element.
+//  - dropped inside an open project (projectName + intoImageDir given) -> ADD
+//    a new VERSION of that element to the right strip (image / mesh / rig /
+//    animation), attributed to the current project.
+// File-type routing: image -> project image dir; *_rigged_*.glb -> rig strip;
+// <a>__<b>.glb -> animations; any other model -> mesh strip. Mesh/rig names
+// are crafted so meshProject() maps them back to the target project.
+ipcMain.handle('import-dropped-file', (event, arg) => {
+  try {
+    const { filePath, projectName, intoImageDir } = arg || {};
+    if (!filePath || !fs.existsSync(filePath)) return { success: false, error: 'file not found' };
+    const ext = path.extname(filePath).toLowerCase();
+    const baseName = path.basename(filePath, ext);
+    const ts = Date.now();
+    const IMG = ['.png', '.jpg', '.jpeg', '.webp'];
+    const MODEL = ['.glb', '.gltf', '.obj', '.fbx', '.stl', '.ply'];
+    const isImage = IMG.includes(ext);
+    const isModel = MODEL.includes(ext);
+    if (!isImage && !isModel) return { success: false, error: 'unsupported type' };
+    const intoProj = !!projectName;
+    const safeExt = ext === '.jpeg' ? '.jpg' : ext;
+
+    if (isImage) {
+      if (intoProj && intoImageDir) {
+        // Guard: the target dir must live under IMAGES_DIR.
+        const resolved = path.resolve(intoImageDir);
+        if (!resolved.startsWith(path.resolve(IMAGES_DIR)) || !fs.existsSync(resolved)) {
+          return { success: false, error: 'invalid project dir' };
+        }
+        // ref_ prefix + non-(_/.) name so the folder scan lists it.
+        const dest = path.join(resolved, `ref_imported_${ts}${safeExt}`);
+        fs.copyFileSync(filePath, dest);
+        return { success: true, kind: 'image', version: true, path: dest };
+      }
+      // New project from the dropped image.
+      const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30) || 'imported';
+      const projDir = path.join(IMAGES_DIR, `${safeBase}_${ts}`);
+      fs.mkdirSync(projDir, { recursive: true });
+      const dest = path.join(projDir, `ref_0${safeExt}`);
+      fs.copyFileSync(filePath, dest);
+      try { fs.writeFileSync(path.join(projDir, 'prompt.txt'), '[Imported] ' + path.basename(filePath), 'utf-8'); } catch (_) {}
+      return { success: true, kind: 'image', projectName: safeBase, path: dest };
+    }
+
+    // --- model: mesh / rig / animation ---
+    const lower = path.basename(filePath).toLowerCase();
+    const isRig = /_rigged_|rigged/.test(lower);
+    const isAnim = ext === '.glb' && path.basename(baseName).includes('__');
+    const targetProj = (intoProj ? projectName : baseName)
+      .replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40) || 'imported';
+
+    if (isAnim) {
+      const animDir = path.join(MESHES_DIR, 'animated');
+      fs.mkdirSync(animDir, { recursive: true });
+      // <motion>__<rigStem> layout so it attributes to the project's rig.
+      const dest = path.join(animDir, `imported_${ts}__${targetProj}${ext}`);
+      fs.copyFileSync(filePath, dest);
+      return { success: true, kind: 'anim', path: dest };
+    }
+    // mesh / rig -> MESHES_DIR named so meshProject() maps it to targetProj.
+    const destName = isRig
+      ? `${targetProj}_rigged_imported_${ts}${ext}`
+      : `${targetProj}_${ts}${ext}`;
+    const dest = path.join(MESHES_DIR, destName);
+    fs.copyFileSync(filePath, dest);
+    return { success: true, kind: isRig ? 'rig' : 'mesh', path: dest };
+  } catch (e) {
+    console.error('import-dropped-file failed:', e);
+    return { success: false, error: e.message };
+  }
+});
+
 // Duplicate an image into a new version (same project dir, suffix + timestamp).
 // Used by Multi-Views button so the original image stays untouched while the
 // new version receives the 6-view dir + any subsequent view edits.
