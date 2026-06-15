@@ -3466,7 +3466,9 @@ ipcMain.handle('import-image-file', (event, filePath) => {
     if (!filePath || !fs.existsSync(filePath)) return null;
     const ext = path.extname(filePath).toLowerCase();
     if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) return null;
-    const baseName = path.basename(filePath, ext).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    let baseName = path.basename(filePath, ext).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+      .replace(/_+\d+$/, '').replace(/_+$/, '');   // no trailing digits -> meshProject round-trips
+    if (!baseName) baseName = 'imported';
     const projDir = path.join(IMAGES_DIR, baseName);
     fs.mkdirSync(projDir, { recursive: true });
     const ts = Date.now();
@@ -3516,8 +3518,13 @@ ipcMain.handle('import-dropped-file', (event, arg) => {
         fs.copyFileSync(filePath, dest);
         return { success: true, kind: 'image', version: true, path: dest };
       }
-      // New project from the dropped image.
-      const safeBase = baseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30) || 'imported';
+      // New project from the dropped image. Strip a trailing _<digits> from
+      // the base so the project name doesn't END in digits — otherwise
+      // meshProject() (which strips trailing digits when attributing a mesh)
+      // would later put the generated 3D in a DIFFERENT, shorter project
+      // (the "dropped_<ts>" image vs "dropped" mesh split bug).
+      const safeBase = (baseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+        .replace(/_+\d+$/, '').replace(/_+$/, '')) || 'imported';
       const projDir = path.join(IMAGES_DIR, `${safeBase}_${ts}`);
       fs.mkdirSync(projDir, { recursive: true });
       const dest = path.join(projDir, `ref_0${safeExt}`);
@@ -3530,8 +3537,12 @@ ipcMain.handle('import-dropped-file', (event, arg) => {
     const lower = path.basename(filePath).toLowerCase();
     const isRig = /_rigged_|rigged/.test(lower);
     const isAnim = ext === '.glb' && path.basename(baseName).includes('__');
-    const targetProj = (intoProj ? projectName : baseName)
-      .replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40) || 'imported';
+    // Into an open project: keep its exact name. New project: strip trailing
+    // digits so the mesh's derived project name is stable (see note above).
+    const targetProj = intoProj
+      ? (projectName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40) || 'imported')
+      : ((baseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)
+          .replace(/_+\d+$/, '').replace(/_+$/, '')) || 'imported');
 
     if (isAnim) {
       const animDir = path.join(MESHES_DIR, 'animated');

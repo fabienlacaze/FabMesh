@@ -578,6 +578,19 @@ async function _isProjectNSFW(p) {
     const fname = imgPath.split(/[/\\]/).pop();
     if (_nsfwScanCache[fname]) return true;
   }
+  // 4. Check the displayed THUMBNAIL too — covers mesh-only projects (0
+  //    images) whose card thumb is a NSFW source image, which the images[]
+  //    checks above would otherwise miss.
+  if (p.thumb) {
+    const tname = String(p.thumb).split(/[/\\]/).pop();
+    if (_nsfwScanCache[tname]) return true;
+    if (API.checkImagesNsfwTags) {
+      try {
+        const tags = await API.checkImagesNsfwTags({ images: [String(p.thumb)] });
+        if (tags && tags[String(p.thumb)]) return true;
+      } catch (_) {}
+    }
+  }
   return false;
 }
 
