@@ -434,7 +434,8 @@ def do_img2img(input_path, prompt, output_path, strength=0.55,
 
 
 def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
-                     controlnet_scale=0.7, guidance_scale=6.0, steps=None):
+                     controlnet_scale=0.7, guidance_scale=6.0, steps=None,
+                     seed=42):
     """
     Tile-conditioned img2img: uses the source image as BOTH the init image
     AND the ControlNet Tile condition. This lets us push strength way higher
@@ -472,6 +473,11 @@ def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
                 steps = max(int(round(25 / s)), int(round(1 / s)) + 1)
                 steps = min(steps, 60)
             cns = max(0.0, min(1.5, float(controlnet_scale)))
+            # Seed drives the variation: a different seed = a different texture
+            # from the same atlas (used by the "Texture variations" tool).
+            gen = None
+            if seed is not None and torch.cuda.is_available():
+                gen = torch.Generator('cuda').manual_seed(int(seed))
 
             t0 = time.time()
             with torch.inference_mode():
@@ -483,6 +489,7 @@ def do_img2img_tile(input_path, prompt, output_path, strength=0.55,
                     num_inference_steps=steps,
                     guidance_scale=guidance_scale,
                     controlnet_conditioning_scale=cns,
+                    generator=gen,
                 ).images[0]
 
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -943,6 +950,7 @@ class Handler(BaseHTTPRequestHandler):
                     data.get('controlnet_scale', 0.7),
                     data.get('guidance_scale', 6.0),
                     data.get('steps', None),
+                    data.get('seed', 42),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)
 

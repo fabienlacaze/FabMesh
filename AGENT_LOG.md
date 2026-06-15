@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — outil "Texture variations" (texture-seule, par seed))
+
+User : veut régénérer la TEXTURE SEULE (sans toucher le mesh) pour des
+variantes visuelles — Re-Texture TRELLIS régénère aussi la forme.
+Fondation : scripts/texture_refine.py existait déjà (extrait l'atlas du GLB ->
+SDXL img2img tile -> réinjecte dans le MÊME GLB, géométrie+UV intactes). Seul
+manque : un seed pour varier.
+- texture_refine.py + sdxl_server.do_img2img_tile : ajout `--seed`/`seed` ->
+  generator manual_seed -> seed différent = texture différente.
+- mesh_tools.texture_var(in,out,strength,seed,prompt) : wrappe texture_refine
+  avec --controlnet_tile --cn_scale 0.75 (ancre le layout UV pour que les
+  îlots ne se déchirent pas entre variantes). Via serveur SDXL always-on.
+- UI : bouton AI Tools "Texture variations" + slider strength (15-80%) +
+  champ seed (🎲) + champ style optionnel (rusty/golden/camo). Type de param
+  'text' ajouté au rendu du modal. texture_var ajouté aux regex de nom/groupage.
+NB : geometry-only, contrairement à Re-Texture (TRELLIS) qui régénère la forme.
+
 ## 2026-06-15 (fix — Watertight crash MAX_PATH + wireframe blanc + confirm stylé)
 
 User : Watertight plante, fenêtre confirm pas au style appli, triangles

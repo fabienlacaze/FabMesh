@@ -81,7 +81,8 @@ def _server_alive() -> bool:
 def _img2img_via_server(tile: Image.Image, prompt: str, strength: float,
                         scratch_dir: str, idx: int,
                         use_controlnet_tile: bool = False,
-                        controlnet_scale: float = 0.7) -> Image.Image:
+                        controlnet_scale: float = 0.7,
+                        seed: int = 42) -> Image.Image:
     """Save tile to disk, POST, read result back."""
     in_path = os.path.join(scratch_dir, f'tile_{idx}_in.png')
     out_path = os.path.join(scratch_dir, f'tile_{idx}_out.png')
@@ -90,7 +91,8 @@ def _img2img_via_server(tile: Image.Image, prompt: str, strength: float,
     payload = {'input': in_path,
                'prompt': prompt,
                'output': out_path,
-               'strength': float(strength)}
+               'strength': float(strength),
+               'seed': int(seed)}
     if use_controlnet_tile:
         payload['controlnet_scale'] = float(controlnet_scale)
         # Cap steps to 25 — plenty for a refine pass, and keeps each
@@ -167,7 +169,8 @@ def _feather_mask(tile_w: int, tile_h: int, overlap: int,
 def refine_atlas_image(atlas: Image.Image, prompt: str, strength: float,
                        use_server: bool, scratch_dir: str,
                        use_controlnet_tile: bool = False,
-                       controlnet_scale: float = 0.7) -> Image.Image:
+                       controlnet_scale: float = 0.7,
+                       seed: int = 42) -> Image.Image:
     """Main worker — tile + img2img + feather-blend."""
     W, H = atlas.size
     if (W, H) != (atlas.size[0], atlas.size[1]):
@@ -222,6 +225,7 @@ def refine_atlas_image(atlas: Image.Image, prompt: str, strength: float,
                         scratch_dir, idx,
                         use_controlnet_tile=use_controlnet_tile,
                         controlnet_scale=controlnet_scale,
+                        seed=seed,
                     )
                 else:
                     refined = _img2img_local_fallback(tile, prompt, strength)
@@ -341,7 +345,7 @@ def replace_glb_atlas(input_glb: str, output_glb: str,
 def refine(input_glb: str, output_glb: str, strength: float = 0.25,
            prompt: str | None = None, target: int | None = None,
            use_controlnet_tile: bool = False,
-           controlnet_scale: float = 0.7) -> bool:
+           controlnet_scale: float = 0.7, seed: int = 42) -> bool:
     import trimesh
     t0 = time.time()
     slog = Logger('tex_refine', input=os.path.basename(input_glb)) if Logger else None
@@ -390,6 +394,7 @@ def refine(input_glb: str, output_glb: str, strength: float = 0.25,
             src, prompt, strength, use_server, scratch,
             use_controlnet_tile=use_controlnet_tile,
             controlnet_scale=controlnet_scale,
+            seed=seed,
         )
         # Punch up the atlas: SDXL refine + trilinear filter combine to
         # produce visibly washed-out colours (user feedback 2026-04-15
@@ -433,12 +438,14 @@ if __name__ == '__main__':
                    help='Use ControlNet Tile SDXL for structure-preserving refine')
     p.add_argument('--cn_scale', type=float, default=0.7,
                    help='ControlNet conditioning scale (0=off, 1=rigid). Default 0.7')
+    p.add_argument('--seed', type=int, default=42,
+                   help='Variation seed — a different seed = a different texture')
     args = p.parse_args()
     try:
         ok = refine(args.input, args.output, args.strength,
                     args.prompt, args.target,
                     use_controlnet_tile=args.controlnet_tile,
-                    controlnet_scale=args.cn_scale)
+                    controlnet_scale=args.cn_scale, seed=args.seed)
         sys.exit(0 if ok else 1)
     except Exception as e:
         import traceback

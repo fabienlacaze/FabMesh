@@ -472,7 +472,7 @@ async function refreshProjectsPage() {
     // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
     // fix_normals, center, upscale, refine, augment, vc (vertex color).
     // Optionally followed by a timestamp OR a short tag (_v2, _test, etc.).
-    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|watertight|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
+    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
     let prev;
     do {
       prev = base;
@@ -7573,6 +7573,7 @@ const MESH_TOOL_EXPECTED_MS = {
   fix_normals:    2000,
   fill_holes:     8000,
   watertight:     12000,
+  texture_var:    150000,
   center:         1000,
   retexture:      45000,
   trellis2_retex: 110000,
@@ -7972,6 +7973,18 @@ const MESH_TOOL_SCHEMAS = {
     ],
     build: (vals) => [String(vals.resolution)],
   },
+  texture_var: {
+    title: 'Texture variations',
+    subtitle: 'Regenerate ONLY the texture — geometry & UVs stay exactly the same. Change the Variation seed for a different look; raise Strength for a bigger change. Add a Style word (rusty, golden, camo…) to steer it. ~1–3 min (SDXL).',
+    needsImage: false,
+    params: [
+      { id: 'strength', label: 'Change strength', type: 'range', min: 15, max: 80, step: 5, default: 40 },
+      { id: 'seed', label: 'Variation (seed)', type: 'number', min: 0, max: 999999, step: 1, default: 42, randomize: true },
+      { id: 'style', label: 'Style (optional)', type: 'text', default: '', placeholder: 'rusty, golden, camouflage…' },
+    ],
+    // → python mesh_tools.py texture_var <in> <out> <strength0-1> <seed> <style>
+    build: (vals) => [String((Number(vals.strength) || 40) / 100), String(vals.seed), vals.style || ''],
+  },
   retexture: {
     title: 'Resolution',
     subtitle: 'Re-bake the mesh texture at a different resolution by reprojecting the source photo onto the UVs. Higher resolution (4096+) coming soon — currently capped at 2048 because the upstream UV unwrap is baked at 2K and stretching produces corruption (black patches / bleached areas).',
@@ -8316,6 +8329,13 @@ function openMeshToolModal(toolName) {
         input.type = 'checkbox';
         input.checked = !!spec.default;
         labVal.style.display = 'none';
+      } else if (spec.type === 'text') {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.value = String(spec.default || '');
+        if (spec.placeholder) input.placeholder = spec.placeholder;
+        input.style.width = '100%';
+        labVal.style.display = 'none';
       } else {
         input = document.createElement('input');
         input.type = spec.type === 'range' ? 'range' : 'number';
@@ -8420,6 +8440,7 @@ document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () 
 document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => openMeshToolModal('fill_holes'));
 document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('center'));
 document.getElementById('ws-mesh-watertight-btn')?.addEventListener('click', () => openMeshToolModal('watertight'));
+document.getElementById('ws-mesh-texvar-btn')?.addEventListener('click', () => openMeshToolModal('texture_var'));
 document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => openMeshToolModal('retexture'));
 document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => openMeshToolModal('trellis2_retex'));
 

@@ -510,6 +510,35 @@ def trellis2_retex(input_path, output_path, source_image, preset='fast', seed=42
     log(f'trellis2 retextured (preset={preset}, seed={seed})')
 
 
+def texture_var(input_path, output_path, strength=0.4, seed=42, prompt=''):
+    """Regenerate ONLY the texture (geometry + UVs untouched) — visual variants.
+
+    Wraps scripts/texture_refine.py: extracts the mesh's baked atlas, runs it
+    through SDXL img2img with ControlNet Tile (anchors the UV layout so islands
+    don't tear) at a moderate strength, then re-packs the new atlas into the
+    same GLB. A different `seed` = a different look from the same mesh; bump
+    `strength` for bigger changes. Uses the always-on SDXL server."""
+    import subprocess
+    script = os.path.join(os.path.dirname(__file__), 'texture_refine.py')
+    args = [sys.executable, script, input_path, output_path,
+            '--strength', str(float(strength)),
+            '--controlnet_tile', '--cn_scale', '0.75',
+            '--seed', str(int(seed))]
+    if prompt and str(prompt).strip():
+        args += ['--prompt', str(prompt).strip()]
+    r = subprocess.run(args, capture_output=True, text=True, timeout=900)
+    if r.stdout:
+        print(r.stdout, end='', flush=True)
+    if r.returncode != 0:
+        if r.stderr:
+            print(r.stderr, end='', flush=True)
+        raise RuntimeError(
+            f'texture_refine failed (rc={r.returncode}): {(r.stderr or "")[-500:]}')
+    if not os.path.exists(output_path):
+        raise RuntimeError('texture_refine returned 0 but wrote no output')
+    log(f'texture variation done (strength={strength}, seed={seed})')
+
+
 def retexture(input_path, output_path, source_image, tex_res=2048):
     """Re-project source image texture onto mesh.
 
@@ -656,6 +685,7 @@ if __name__ == '__main__':
         'fill_holes': lambda: fill_holes(inp, out, *params),
         'center': lambda: center(inp, out),
         'watertight': lambda: watertight(inp, out, *params),
+        'texture_var': lambda: texture_var(inp, out, *params),
         'retexture': lambda: retexture(inp, out, *params),
         'trellis2_retex': lambda: trellis2_retex(inp, out, *params),
     }
