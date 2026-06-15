@@ -4761,7 +4761,23 @@ function _offerMultiviewRegenerate() {
 const modifyModal = document.getElementById('modal-modify-image');
 const modStrength = document.getElementById('mod-strength');
 const modStrengthVal = document.getElementById('mod-strength-val');
-modStrength.addEventListener('input', () => { modStrengthVal.textContent = modStrength.value + '%'; });
+// Explain how Strength behaves — high values regenerate so much that the
+// original subject (e.g. a catapult) can drift into something else (a car).
+function _updateModStrengthHint() {
+  const el = document.getElementById('mod-strength-hint');
+  if (!el) return;
+  const v = parseInt(modStrength.value);
+  let t;
+  if (v <= 45) t = 'Low — keeps the subject & composition, just adds/edits fine detail.';
+  else if (v <= 65) t = 'Medium — clear changes while keeping the same subject (recommended for "add X").';
+  else if (v <= 80) t = 'High — strong transformation; the subject may start to drift.';
+  else t = '⚠ Very high — near full re-generation. The original subject can be lost (a catapult can turn into a car). Lower this to keep the shape.';
+  el.textContent = t;
+}
+modStrength.addEventListener('input', () => {
+  modStrengthVal.textContent = modStrength.value + '%';
+  _updateModStrengthHint();
+});
 
 document.getElementById('ws-modify-btn').addEventListener('click', () => {
   const p = state.currentProject;
@@ -4771,6 +4787,7 @@ document.getElementById('ws-modify-btn').addEventListener('click', () => {
   const srcImg = document.getElementById('mod-source-img');
   if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
   modifyModal.dataset.targetPath = target;
+  _updateModStrengthHint();
   modifyModal.classList.remove('hidden');
   setTimeout(() => document.getElementById('mod-prompt').focus(), 50);
 });

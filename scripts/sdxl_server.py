@@ -51,14 +51,17 @@ CONTROLNET_TILE_MODEL = "xinsir/controlnet-tile-sdxl-1.0"
 # colour), prefix their prompt with these tokens so SDXL doesn't drift to a
 # different subject. At high strength (>0.6) the user is going for a re-style
 # so we skip the prefix and let the prompt drive the redraw.
+# Subject-agnostic on purpose: the old wording ('same character, same outfit,
+# same pose, bad anatomy, extra limbs') is person-only and mis-steers SDXL on
+# objects / vehicles / props (a catapult has no 'outfit' or 'pose').
 PRESERVE_PREFIX = (
-    'same character, same outfit, same pose, same composition, '
-    'preserve original subject identity, only change: '
+    'same subject, same shape, same proportions, same composition, '
+    'same colors, preserve the original object identity, only change: '
 )
 PRESERVE_NEG = (
-    'different character, changed face, changed outfit, different pose, '
-    'distorted, blurry, low quality, deformed, extra limbs, missing limbs, '
-    'bad anatomy, watermark, multiple subjects'
+    'different subject, changed shape, different proportions, '
+    'different composition, distorted, blurry, low quality, deformed, '
+    'watermark, multiple subjects'
 )
 # Toggle (default ON). Set FABMESH_MODIFY_PRESERVE=0 to disable the prefix
 # globally — useful if a downstream caller is doing its own prompt scaffolding.

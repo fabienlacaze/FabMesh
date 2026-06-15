@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — Modify image: hint strength + prefix preserve agnostique)
+
+User : le catapulte devient une "voiture" en Modify image -> croit à un prompt
+mémorisé. En fait c'est le STRENGTH à 87% : SDXL ne garde que ~13% du sujet et
+RealVis dérive vers son prior (véhicule détaillé). Pas de prompt caché (le
+renderer envoie le prompt brut, main.js le passe tel quel, le serveur ne
+préfixe qu'à strength <= 0.6).
+- index2 : phrase DYNAMIQUE sous le slider Strength (Low/Medium/High/Very high)
+  qui prévient qu'au-delà de ~80% le sujet d'origine peut être perdu.
+- sdxl_server.py : PRESERVE_PREFIX/NEG réécrits en AGNOSTIQUE (avant : 'same
+  character, same outfit, same pose, bad anatomy, extra limbs' = personne
+  uniquement, inadapté aux objets/véhicules). Effet sur le prochain start du
+  serveur SDXL.
+
 ## 2026-06-15 (fix — Re-Texture (trellis2_retex) crash flash_attn manquant)
 
 User : Re-Texture plante. Erreur = ModuleNotFoundError: No module named
