@@ -1491,11 +1491,14 @@ const ASSET_OPTIONS_PROFILE = {
 
 // 2026-06-14: gate "Ultra Quality (1536_cascade)" by available system RAM.
 // 1536_cascade peaks at ~27 GB RAM (8 models stay resident ~15 GB + ~8 GB
-// for the high-res SLat pass + ~3 GB export). On a < 24 GB machine it stalls
-// (the safety watchdog used to suspend → deadlock). So on those machines we
-// DISABLE Ultra and silently keep Quality+ (1024_cascade, ~19 GB peak,
-// validated). main.js applies the same guard server-side (belt + suspenders).
-const ULTRA_Q_MIN_RAM_GB = 24;
+// for the high-res SLat pass + ~3 GB export). 2026-06-15: bumped the gate
+// 24 → 32 GB. A 27 GB machine has a 27 GB PEAK with ZERO headroom → it
+// saturates RAM, swaps, and the pipeline OOM-crashes (user hit exactly this
+// on a 27 GB box: tank gen failed). You need peak + OS/Electron headroom
+// (~5-6 GB), i.e. 32 GB+, to run 1536 safely; below that we DISABLE Ultra and
+// silently keep Quality+ (1024_cascade, ~19 GB peak, safe). main.js applies
+// the same guard server-side (belt + suspenders).
+const ULTRA_Q_MIN_RAM_GB = 32;
 let _cachedTotalRamGB = null;
 async function gateUltraQualityByRAM() {
   try {

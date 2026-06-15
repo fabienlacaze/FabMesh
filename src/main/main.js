@@ -4976,16 +4976,19 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
 
   // RAM guard — Ultra Quality (1536_cascade) peaks at ~27 GB system RAM
   // (8 models stay resident ~15 GB + ~8 GB high-res SLat pass + ~3 GB
-  // export). On a machine with < 24 GB it can't fit and stalls. The UI
-  // already disables the checkbox below 24 GB, but enforce it server-side
-  // too (in case the request comes from a saved project / older renderer):
-  // auto-downgrade to Quality+ (1024_cascade, ~19 GB, validated).
+  // export). 2026-06-15: gate 24 → 32 GB. A 27 GB machine has a 27 GB peak
+  // with ZERO headroom → it saturates RAM, swaps, and OOM-crashes the
+  // pipeline (observed: tank gen failed on a 27 GB box). You need peak + OS/
+  // Electron headroom (~5-6 GB) = 32 GB+. Below that we auto-downgrade to
+  // Quality+ (1024_cascade, ~19 GB, validated). Enforced server-side too in
+  // case the request comes from a saved project / older renderer.
+  const ULTRA_Q_MIN_RAM_GB = 32;
   let ultraQ = trellis2UltraQ;
   try {
     const _totalGB = require('os').totalmem() / (1024 ** 3);
-    if (ultraQ && _totalGB < 24) {
-      log.warn('main', `image-to-3d: Ultra Quality requested but RAM=${_totalGB.toFixed(1)}GB < 24 — downgrading to 1024_cascade`);
-      try { safeSend('ai3d-progress', `[main] Ultra Quality (1536) nécessite ~24 GB RAM, détecté ${_totalGB.toFixed(0)} GB → bascule sur Quality+ (1024)\n`); } catch (_) {}
+    if (ultraQ && _totalGB < ULTRA_Q_MIN_RAM_GB) {
+      log.warn('main', `image-to-3d: Ultra Quality requested but RAM=${_totalGB.toFixed(1)}GB < ${ULTRA_Q_MIN_RAM_GB} — downgrading to 1024_cascade`);
+      try { safeSend('ai3d-progress', `[main] Ultra Quality (1536) nécessite ~${ULTRA_Q_MIN_RAM_GB} GB RAM, détecté ${_totalGB.toFixed(0)} GB → bascule sur Quality+ (1024)\n`); } catch (_) {}
       ultraQ = false;
     }
   } catch (_) {}

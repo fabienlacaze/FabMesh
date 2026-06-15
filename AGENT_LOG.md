@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — gate RAM 1536_cascade 24->32 GB + ETA dynamique)
+
+User : l'appli sature sa RAM (27/27) et la gen 3D du tank a planté (OOM).
+CAUSE : "Fine mesh shape (1536_cascade)" pique à ~27 GB ; le gate
+ULTRA_Q_MIN_RAM_GB était à 24 -> autorisé sur un PC 27 Go = ZÉRO marge ->
+saturation -> OOM-crash. Un cap RAM DUR ne marche pas (le process crashe, c'est
+ce qui s'est passé ; on avait déjà désactivé le hard working-set cap). Le vrai
+"cap" = ne pas autoriser l'option qui dépasse la RAM. FIX : seuil 24 -> 32 GB
+(renderer gateUltraQualityByRAM + main.js image-to-3d guard) -> sur <32 GB,
+Ultra(1536) auto-downgradé en Quality+ (1024_cascade ~19 GB, sûr). main.js =
+restart Electron.
++ estimations cascade réalistes (QualityPlus 30s->120s, UltraQ 50s->360s) +
+ETA dynamique (elapsed/progress) dans le modal du job (3d-eta).
+
 ## 2026-06-15 (parity — lot 3: Set Pivot Point sur desktop (depuis cloud))
 
 Le cloud avait remplacé "Center" par "Set pivot point" (8 presets + offsets +
