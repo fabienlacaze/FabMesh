@@ -7753,8 +7753,9 @@ const MESH_TOOL_SCHEMAS = {
   },
   subdivide: {
     title: 'Subdivide mesh',
-    subtitle: 'Midpoint subdivision — live preview (×4 triangles per level).',
+    subtitle: 'Midpoint subdivision — splits each triangle into 4 (×4 per level) for a smoother, denser mesh. Live preview.',
     needsImage: false,
+    heavyPreview: true,
     params: [
       { id: 'levels', label: 'Levels', type: 'range', min: 1, max: 3, step: 1, default: 1 },
     ],
@@ -7799,18 +7800,19 @@ const MESH_TOOL_SCHEMAS = {
   },
   trellis2_retex: {
     title: 'Re-Texture (MyFabmesh.AI 3D Native)',
-    subtitle: 'Native PBR texturing via MyFabmesh.AI 3D Native (~90s, GPU).',
+    subtitle: 'Regenerate the mesh texture with MyFabmesh.AI 3D Native PBR (~90s, GPU). Change the Variation seed for a different texture from the same mesh + reference.',
     needsImage: true,
     params: [
       { id: 'preset', label: 'Quality preset', type: 'select', default: 'fast',
         options: [['fast','Fast (12 steps · 2048px · ~90s)'],
                   ['balanced','Balanced (24 steps · 2048px · ~130s)'],
                   ['quality','Quality (32 steps · 4096px · ~3min)']] },
+      { id: 'seed', label: 'Variation (seed)', type: 'number', min: 0, max: 999999, step: 1, default: 42, randomize: true },
     ],
-    // preset flows as a real CLI param: runMeshTool → mesh-tool IPC →
-    // python mesh_tools.py trellis2_retex <in> <out> <imagePath> <preset>
-    // → bridge --steps/--texture-size/--image-resolution.
-    build: (vals, ctx) => [ctx.imagePath, vals.preset],
+    // preset + seed flow as real CLI params: runMeshTool → mesh-tool IPC →
+    // python mesh_tools.py trellis2_retex <in> <out> <imagePath> <preset> <seed>
+    // → bridge --steps/--texture-size/--image-resolution --seed.
+    build: (vals, ctx) => [ctx.imagePath, vals.preset, String(vals.seed)],
   },
 };
 
@@ -7842,6 +7844,28 @@ function _mtSchedulePreview() {
   mtState.previewTimer = setTimeout(_mtRunPreview, 80);
 }
 
+// Spinner overlay on the mesh-tool viewport (shown while a heavy live
+// preview recomputes — the JS subdivide on a dense mesh blocks the thread).
+function _mtShowSpinner(show) {
+  const vp = document.getElementById('mt-viewport');
+  if (!vp) return;
+  let sp = document.getElementById('mt-spinner');
+  if (!sp) {
+    if (!document.getElementById('mt-spin-kf')) {
+      const st = document.createElement('style');
+      st.id = 'mt-spin-kf';
+      st.textContent = '@keyframes mtspin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(st);
+    }
+    sp = document.createElement('div');
+    sp.id = 'mt-spinner';
+    sp.style.cssText = 'position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(10,10,20,0.45); z-index:5; pointer-events:none; gap:12px; flex-direction:column;';
+    sp.innerHTML = '<div style="width:46px; height:46px; border:4px solid rgba(255,255,255,0.16); border-top-color:#6aa6ff; border-radius:50%; animation:mtspin 0.8s linear infinite;"></div><div style="font-size:12px; color:#cdd;">Processing…</div>';
+    vp.appendChild(sp);
+  }
+  sp.style.display = show ? 'flex' : 'none';
+}
+
 function _mtRunPreview() {
   if (!mtState.schema || !mtState.origModel) return;
   const body = document.getElementById('mt-body');
@@ -7849,22 +7873,33 @@ function _mtRunPreview() {
   const vals = _mtCollectVals(body);
   mtState.vals = vals;
   const fn = mtState.schema.preview;
-  // Without preview fn, just restore originals (mesh stays static).
-  for (const e of mtState.origGeoms) {
-    if (!fn) { e.mesh.geometry = e.originalGeom; continue; }
-    try {
-      const out = fn(e.originalGeom, vals);
-      if (out && out.attributes && out.attributes.position) e.mesh.geometry = out;
-    } catch (err) {
-      console.warn('[mesh-tool] preview failed for', mtState.schema.title, err);
-      e.mesh.geometry = e.originalGeom;
-    }
-  }
   const status = document.getElementById('mt-preview-status');
-  if (status) {
-    status.textContent = fn
-      ? `Live preview · ${Object.entries(vals).map(([k,v]) => `${k}=${v}`).join(' · ')}`
-      : 'No live preview for this op · click Apply to run.';
+  const compute = () => {
+    for (const e of mtState.origGeoms) {
+      if (!fn) { e.mesh.geometry = e.originalGeom; continue; }
+      try {
+        const out = fn(e.originalGeom, vals);
+        if (out && out.attributes && out.attributes.position) e.mesh.geometry = out;
+      } catch (err) {
+        console.warn('[mesh-tool] preview failed for', mtState.schema.title, err);
+        e.mesh.geometry = e.originalGeom;
+      }
+    }
+    if (status) {
+      status.textContent = fn
+        ? `Live preview · ${Object.entries(vals).map(([k, v]) => `${k}=${v}`).join(' · ')}`
+        : 'No live preview for this op · click Apply to run.';
+    }
+    _mtShowSpinner(false);
+  };
+  // Heavy previews (subdivide on a dense mesh) block the main thread, so show
+  // a spinner first and defer the compute past two frames so it actually
+  // paints. Cheap previews run synchronously (no flash).
+  if (fn && mtState.schema.heavyPreview) {
+    _mtShowSpinner(true);
+    requestAnimationFrame(() => requestAnimationFrame(compute));
+  } else {
+    compute();
   }
 }
 
@@ -8056,6 +8091,24 @@ function openMeshToolModal(toolName) {
           _mtSchedulePreview();
         };
         wrap.appendChild(rb);
+      }
+      // Optional "🎲 new variation" button (random seed) — each click/open
+      // gives a different texture from the same mesh + reference.
+      if (spec.randomize) {
+        const lo = spec.min || 0, hi = spec.max || 999999;
+        const roll = () => Math.floor(Math.random() * (hi - lo + 1)) + lo;
+        input.value = String(roll());            // fresh variation on open
+        labVal.textContent = String(input.value);
+        const db = document.createElement('button');
+        db.className = 'secondary-btn';
+        db.style.cssText = 'margin-top:4px; padding:4px 8px; font-size:11px; width:100%;';
+        db.textContent = '🎲 Nouvelle variation';
+        db.onclick = () => {
+          input.value = String(roll());
+          labVal.textContent = String(input.value);
+          _mtSchedulePreview();
+        };
+        wrap.appendChild(db);
       }
       body.appendChild(wrap);
     });

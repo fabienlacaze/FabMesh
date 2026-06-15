@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — Re-Texture variations (seed) + spinner preview subdivide)
+
+- **Variations de texture** : trellis2_retex prend désormais un `seed`
+  (4e param) passé au bridge via `--seed` (le bridge le supportait déjà,
+  défaut 42). Un seed différent = texture différente depuis le même mesh +
+  image de réf. UI Re-Texture : champ « Variation (seed) » initialisé
+  aléatoirement à chaque ouverture + bouton « 🎲 Nouvelle variation ».
+- **Spinner preview** : les previews lourdes (subdivide JS sur mesh dense
+  bloquent le thread) affichent un overlay spinner « Processing… » sur
+  #mt-viewport, calcul différé de 2 frames pour qu'il s'affiche. Flag
+  `heavyPreview` sur le schéma (subdivide). Previews légères restent synchrones.
+
 ## 2026-06-15 (fix — AI-TOOLS: crashes réels sur vrai mesh catapulte 473k faces)
 
 Tests sur le VRAI mesh édité (385790 verts) ont révélé des crashes que les

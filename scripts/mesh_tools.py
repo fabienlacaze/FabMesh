@@ -422,13 +422,14 @@ _TRELLIS2_PRESETS = {
 }
 
 
-def trellis2_retex(input_path, output_path, source_image, preset='fast'):
+def trellis2_retex(input_path, output_path, source_image, preset='fast', seed=42):
     """Re-texture mesh via TRELLIS-2-4B native PBR (SOTA quality).
 
     Wraps scripts/trellis2_texturing_bridge.py - runs in the TRELLIS2_win
     venv (flash_attn + DINOv3). ~90s on RTX 5080. `preset` (fast/balanced/
-    quality) selects the bridge's --steps/--texture-size/--image-resolution;
-    it used to be a dead UI selector stashed in an unread window var."""
+    quality) selects the bridge's --steps/--texture-size/--image-resolution.
+    `seed` drives the sampler: a different seed = a different texture
+    VARIATION from the same mesh + reference image."""
     import subprocess
     bridge = os.path.join(os.path.dirname(__file__),
                            'trellis2_texturing_bridge.py')
@@ -443,8 +444,12 @@ def trellis2_retex(input_path, output_path, source_image, preset='fast'):
     # Use kaolin (Apache 2.0) rasterizer instead of nvdiffrast (NVIDIA NC).
     env.setdefault('TRELLIS2_USE_KAOLIN_RASTER', '1')
     quality_args = _TRELLIS2_PRESETS.get(str(preset), _TRELLIS2_PRESETS['fast'])
+    try:
+        seed_args = ['--seed', str(int(seed))]
+    except (TypeError, ValueError):
+        seed_args = []
     r = subprocess.run(
-        [venv_py, bridge, input_path, source_image, output_path, *quality_args],
+        [venv_py, bridge, input_path, source_image, output_path, *quality_args, *seed_args],
         capture_output=True, text=True, timeout=600, env=env)
     if r.stdout:
         print(r.stdout, end='', flush=True)
@@ -457,7 +462,7 @@ def trellis2_retex(input_path, output_path, source_image, preset='fast'):
             f'trellis2 bridge failed (rc={r.returncode}): {(r.stderr or "")[-1000:]}')
     if not os.path.exists(output_path):
         raise RuntimeError('trellis2 bridge returned 0 but wrote no output')
-    log(f'trellis2 retextured (preset={preset})')
+    log(f'trellis2 retextured (preset={preset}, seed={seed})')
 
 
 def retexture(input_path, output_path, source_image, tex_res=2048):
