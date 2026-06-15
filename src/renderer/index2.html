@@ -1268,7 +1268,7 @@
          Title + dynamic params built by openMeshToolModal() in JS.
          ============================================================ -->
     <div id="modal-mesh-tool" class="modal hidden">
-      <div class="modal-content" style="max-width:95vw; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
+      <div class="modal-content" style="width:88vw; height:86vh; max-width:1500px; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
           <h3 style="margin:0;" id="mt-title">Mesh tool</h3>
           <button id="mt-close-x" class="small-btn" style="font-size:18px;">&#10005;</button>
@@ -1280,7 +1280,7 @@
           <!-- Right: 3D viewport -->
           <div id="mt-viewport" style="position:relative; flex:1 1 0; overflow:hidden; background:#1a1a2e; border-radius:4px; min-height:400px;">
             <canvas id="mt-canvas" style="width:100%; height:100%; display:block;"></canvas>
-            <div id="mt-preview-status" style="position:absolute; bottom:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc;">Drag to rotate · wheel to zoom</div>
+            <div id="mt-preview-status" style="position:absolute; bottom:6px; left:8px; right:8px; font-size:11px; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:3px; color:#ccc;">Drag / middle-drag to rotate · right-drag to pan · wheel to zoom</div>
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:8px;">

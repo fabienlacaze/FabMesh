@@ -7159,6 +7159,7 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
           const cam = new THREE.PerspectiveCamera(35, w / h, 0.001, 1000);
           cam.position.set(2, 1, 2);
           const ctl = new OrbitControls(cam, canvas); ctl.enableDamping = true;
+          ctl.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
           new GLTFLoader().load(url, (g) => {
             const root = g.scene; scene.add(root);
             // Disable frustum culling + grab bbox from skeleton bones
@@ -7860,6 +7861,9 @@ async function _mtInitViewport() {
   try {
     mtState.controls = new OrbitControls(mtState.camera, canvas);
     mtState.controls.enableDamping = true;
+    mtState.controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN,
+    };
   } catch (e) { console.error('[mesh-tool] OrbitControls error:', e); }
   mtState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
   const dir = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -8092,6 +8096,9 @@ async function _atInitViewport() {
         atState.controls.enableDamping = true;
       } catch (_) { /* ignore */ }
     }
+    if (atState.controls) atState.controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN,
+    };
     atState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
     const dir = new THREE.DirectionalLight(0xffffff, 1.0);
     dir.position.set(5, 8, 5);
@@ -8620,8 +8627,8 @@ async function _peInitViewport() {
     peState.controls.enableDamping = true;
     peState.controls.mouseButtons = {
       LEFT: null,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.PAN,
     };
   } catch (e) { console.error('[paint-emissive] OrbitControls error:', e); }
   peState.scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 1.0));
@@ -9750,49 +9757,59 @@ function _meGetIntersection(e) {
   return hits.length > 0 ? hits[0] : null;
 }
 
-function _mePushUndo() {
-  // Save vertex positions of all meshes
-  const snapshot = [];
+function _meSnapshot() {
+  const snap = [];
   meState.mesh?.traverse(c => {
     if (c.isMesh && c.geometry) {
-      snapshot.push({
+      snap.push({
         mesh: c,
         positions: c.geometry.attributes.position.array.slice(),
         colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
+        // Capture the index too — Delete rewrites it, so without this undo
+        // can't bring deleted faces back.
+        index: c.geometry.index ? c.geometry.index.array.slice() : null,
       });
     }
   });
-  meState.undoStack.push(snapshot);
+  return snap;
+}
+function _meRestore(snapshot) {
+  for (const s of snapshot) {
+    const geom = s.mesh.geometry;
+    geom.attributes.position.array.set(s.positions);
+    geom.attributes.position.needsUpdate = true;
+    if (s.colors && geom.attributes.color) {
+      geom.attributes.color.array.set(s.colors);
+      geom.attributes.color.needsUpdate = true;
+    }
+    if (s.index) geom.setIndex(new THREE.BufferAttribute(s.index, 1));
+    // Selection + adjacency caches reference indices/positions that just
+    // changed — drop them so they rebuild, and the restored faces aren't
+    // left "selected".
+    geom._selSaved = new Map();
+    geom._posGroups = null;
+    geom._posKeyByIndex = null;
+    geom.computeVertexNormals();
+  }
+}
+function _mePushUndo() {
+  meState.undoStack.push(_meSnapshot());
   if (meState.undoStack.length > 20) meState.undoStack.shift();
   meState.redoStack = [];
   _meUpdateUndoBtns();
 }
-
 function _meUndo() {
   if (meState.undoStack.length === 0) return;
-  // Save current for redo
-  const current = [];
-  meState.mesh?.traverse(c => {
-    if (c.isMesh && c.geometry) {
-      current.push({
-        mesh: c,
-        positions: c.geometry.attributes.position.array.slice(),
-        colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
-      });
-    }
-  });
-  meState.redoStack.push(current);
-  // Restore
-  const snapshot = meState.undoStack.pop();
-  for (const s of snapshot) {
-    s.mesh.geometry.attributes.position.array.set(s.positions);
-    s.mesh.geometry.attributes.position.needsUpdate = true;
-    if (s.colors && s.mesh.geometry.attributes.color) {
-      s.mesh.geometry.attributes.color.array.set(s.colors);
-      s.mesh.geometry.attributes.color.needsUpdate = true;
-    }
-    s.mesh.geometry.computeVertexNormals();
-  }
+  meState.redoStack.push(_meSnapshot());   // current -> redo
+  _meRestore(meState.undoStack.pop());
+  _meUpdateSelButtons();
+  _meUpdateUndoBtns();
+}
+function _meRedo() {
+  if (meState.redoStack.length === 0) return;
+  meState.undoStack.push(_meSnapshot());   // current -> undo
+  _meRestore(meState.redoStack.pop());
+  _meUpdateSelButtons();
   _meUpdateUndoBtns();
 }
 
@@ -10219,6 +10236,7 @@ document.getElementById('ws-mesh-selectface-btn')?.addEventListener('click', () 
 document.getElementById('me-close-x')?.addEventListener('click', _closeMeshEdit);
 document.getElementById('me-cancel')?.addEventListener('click', _closeMeshEdit);
 document.getElementById('me-undo')?.addEventListener('click', _meUndo);
+document.getElementById('me-redo')?.addEventListener('click', _meRedo);
 
 // Mode switching
 ['sculpt', 'paint', 'select'].forEach(mode => {
@@ -10511,7 +10529,8 @@ document.addEventListener('keydown', (e) => {
   const modal = document.getElementById('modal-mesh-edit');
   if (!modal || modal.classList.contains('hidden')) return;
   if (e.key === 'Escape') _closeMeshEdit();
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); _meUndo(); }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); _meUndo(); }
+  if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) { e.preventDefault(); _meRedo(); }
 });
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {
@@ -11514,6 +11533,7 @@ function _bootAnimResultViewer(canvas, anim, w, h) {
     const cam = new THREE.PerspectiveCamera(35, w / h, 0.001, 1000);
     cam.position.set(2, 1, 2);
     const ctl = new OrbitControls(cam, canvas); ctl.enableDamping = true;
+    ctl.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
     let mixer = null, action = null, raf = 0, disposed = false;
     const url = anim.url || ('file:///' + (anim.path || '').replace(/\\/g, '/'));
     console.log('[anim-result] loading', url);
@@ -15795,6 +15815,7 @@ function initLmFullscreen() {
   lmFsCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
   lmFsControls = new OrbitControls(lmFsCamera, canvasA);
   lmFsControls.enableDamping = true;
+  lmFsControls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
   // Clear the "active view" button highlight when the user actually ROTATES
   // the camera — not on any mousedown. We detect a real rotation by comparing
   // the current camera azimuth/polar to the snapshot we took the last time a
@@ -15811,6 +15832,7 @@ function initLmFullscreen() {
     lmFsCameraB = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
     lmFsControlsB = new OrbitControls(lmFsCameraB, canvasB);
     lmFsControlsB.enableDamping = true;
+    lmFsControlsB.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
     lmFsControlsB.addEventListener('change', () => {
       _checkLmFsPresetDrift('b');
     });

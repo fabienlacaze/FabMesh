@@ -6,8 +6,8 @@
  *
  * Navigation controls (IDENTICAL across every instance):
  *   - Left-click drag    = orbit (rotate around target)
+ *   - Middle-click drag  = orbit (rotate around target)
  *   - Right-click drag   = pan
- *   - Middle-click drag  = pan
  *   - Mouse wheel        = zoom
  *   - Pinch (touch)      = zoom
  *   - Double-click       = reset camera (viewer-specific handler)
@@ -77,6 +77,13 @@ export class Viewer3D {
     // Controls
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = opts.damping !== false;
+    // Middle (wheel) button drag rotates too — users expect to grab the
+    // wheel and orbit; the OrbitControls default maps MIDDLE to dolly/zoom.
+    this.controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.PAN,
+    };
 
     // Lighting (optional)
     if (opts.lighting !== false) {
