@@ -10098,7 +10098,7 @@ function _meBuildPosAdj(geom) {
 // Enable selection-dependent buttons only when something is selected.
 function _meUpdateSelButtons() {
   const has = _meHasSelection();
-  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete', 'me-sel-duplicate', 'me-sel-crop', 'me-sel-isolate', 'me-sel-hide']) {
+  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete', 'me-sel-duplicate', 'me-sel-crop', 'me-sel-isolate', 'me-sel-hide', 'me-sel-flip', 'me-sel-smooth']) {
     const b = document.getElementById(id);
     if (!b) continue;
     b.disabled = !has;
@@ -10526,9 +10526,11 @@ function _meApplyView(mode) {
 document.getElementById('me-sel-isolate')?.addEventListener('click', () => _meApplyView('isolate'));
 document.getElementById('me-sel-hide')?.addEventListener('click', () => _meApplyView('hide'));
 
-// --- Crop: keep ONLY the selected faces (inverse of Delete). ---
+// --- Crop: keep ONLY the selected faces — or, when "Garder le reste" is
+// checked, keep the REST and drop the selection instead. ---
 document.getElementById('me-sel-crop')?.addEventListener('click', () => {
   if (!meState.mesh || !_meHasSelection()) return;
+  const keepRest = !!document.getElementById('me-sel-crop-keeprest')?.checked;
   _meRestoreView();
   _mePushUndo();
   let any = false;
@@ -10538,10 +10540,12 @@ document.getElementById('me-sel-crop')?.addEventListener('click', () => {
     if (!sel || !sel.size) return;
     const idx = geom.index.array, keep = [];
     for (let i = 0; i < idx.length; i += 3) {
-      if (sel.has(idx[i]) || sel.has(idx[i + 1]) || sel.has(idx[i + 2])) keep.push(idx[i], idx[i + 1], idx[i + 2]);
+      const hit = sel.has(idx[i]) || sel.has(idx[i + 1]) || sel.has(idx[i + 2]);
+      // keepRest → keep the unselected faces; else → keep the selected faces.
+      if (keepRest ? !hit : hit) keep.push(idx[i], idx[i + 1], idx[i + 2]);
     }
-    // Restore the selection's real colours (drop the cyan highlight) before
-    // we lose the rest of the mesh, then clear the selection.
+    // Restore the selection's real colours (drop the cyan highlight), then
+    // clear the selection.
     const color = geom.attributes.color;
     if (color) { for (const [i, o] of sel) color.setXYZ(i, o[0], o[1], o[2]); color.needsUpdate = true; }
     geom.setIndex(keep);
@@ -10551,7 +10555,78 @@ document.getElementById('me-sel-crop')?.addEventListener('click', () => {
     any = true;
   });
   _meUpdateSelButtons();
-  showToast(any ? 'Cropped to selection' : 'Nothing selected', any ? 'success' : 'info', 1500);
+  showToast(any ? (keepRest ? 'Kept the rest (selection removed)' : 'Cropped to selection') : 'Nothing selected', any ? 'success' : 'info', 1600);
+});
+
+// --- Flip normals: reverse the winding of every selected face so an
+// inside-out patch faces the right way. ---
+document.getElementById('me-sel-flip')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meHasSelection()) return;
+  _meRestoreView();
+  _mePushUndo();
+  let n = 0;
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index) return;
+    const geom = c.geometry, sel = geom._selSaved;
+    if (!sel || !sel.size) return;
+    const idx = geom.index.array;
+    for (let i = 0; i < idx.length; i += 3) {
+      if (sel.has(idx[i]) || sel.has(idx[i + 1]) || sel.has(idx[i + 2])) {
+        const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t;  // swap b,c
+        n++;
+      }
+    }
+    geom.index.needsUpdate = true;
+    geom.computeVertexNormals();
+  });
+  showToast(n ? `Flipped ${n} faces` : 'Nothing selected', n ? 'success' : 'info', 1400);
+});
+
+// --- Smooth selection: Laplacian smoothing applied ONLY to selected
+// vertices (position-welded so it crosses GLB seams). ---
+document.getElementById('me-sel-smooth')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meHasSelection()) return;
+  _meRestoreView();
+  _mePushUndo();
+  let moved = 0;
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.position) return;
+    const geom = c.geometry, sel = geom._selSaved;
+    if (!sel || !sel.size) return;
+    const pos = geom.attributes.position, idx = geom.index.array;
+    _meBuildPosAdj(geom);
+    const keyOf = geom._posKeyByIndex, groups = geom._posGroups;
+    // One-ring neighbours by position key (welds seams).
+    const neigh = new Map();
+    const addN = (a, b) => { let s = neigh.get(keyOf[a]); if (!s) { s = new Set(); neigh.set(keyOf[a], s); } s.add(keyOf[b]); };
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i], b = idx[i + 1], d = idx[i + 2];
+      addN(a, b); addN(a, d); addN(b, a); addN(b, d); addN(d, a); addN(d, b);
+    }
+    // Average position per key.
+    const keyPos = new Map();
+    for (const [k, ids] of groups) { const v = ids[0]; keyPos.set(k, [pos.getX(v), pos.getY(v), pos.getZ(v)]); }
+    const lambda = 0.5;
+    for (let it = 0; it < 2; it++) {
+      const next = new Map();
+      for (const [k, ns] of neigh) {
+        if (!ns.size) continue;
+        let sx = 0, sy = 0, sz = 0;
+        for (const nk of ns) { const p = keyPos.get(nk); sx += p[0]; sy += p[1]; sz += p[2]; }
+        const inv = 1 / ns.size, cur = keyPos.get(k);
+        next.set(k, [cur[0] + lambda * (sx * inv - cur[0]), cur[1] + lambda * (sy * inv - cur[1]), cur[2] + lambda * (sz * inv - cur[2])]);
+      }
+      for (const [k, p] of next) keyPos.set(k, p);
+    }
+    // Write back ONLY selected vertices.
+    for (const v of sel.keys()) {
+      const p = keyPos.get(keyOf[v]);
+      if (p) { pos.setXYZ(v, p[0], p[1], p[2]); moved++; }
+    }
+    pos.needsUpdate = true;
+    geom.computeVertexNormals();
+  });
+  showToast(moved ? 'Smoothed selection' : 'Nothing selected', moved ? 'success' : 'info', 1400);
 });
 
 // --- Duplicate: copy the selected faces into new geometry, nudged along
