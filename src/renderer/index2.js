@@ -343,7 +343,9 @@ function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
 // Lightweight text-input modal (customConfirm has no input). Self-contained —
 // builds its own DOM so no index2.html change is needed. Resolves to the
 // trimmed string on OK / Enter, or null on Cancel / Escape / overlay click.
-function customPrompt(message, defaultValue = '', title = 'Rename', okLabel = 'Save') {
+// `validate(value)` (optional) returns an error string to show INLINE (popup
+// stays open) or null/'' to accept. May be async.
+function customPrompt(message, defaultValue = '', title = 'Rename', okLabel = 'Save', validate = null) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
@@ -353,6 +355,7 @@ function customPrompt(message, defaultValue = '', title = 'Rename', okLabel = 'S
       <div style="font-size:14px;font-weight:600;color:var(--text-1,#eee);margin-bottom:8px;">${title}</div>
       <div style="font-size:12px;color:var(--text-2,#aaa);margin-bottom:10px;">${message}</div>
       <input type="text" class="cp-input" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border,#444);background:#0e0e16;color:#fff;font-size:13px;" />
+      <div class="cp-error" style="display:none;color:#ff6b6b;font-size:11.5px;margin-top:7px;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
         <button class="cp-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border,#444);background:transparent;color:#ccc;cursor:pointer;font-size:12px;">Cancel</button>
         <button class="cp-ok" style="padding:6px 14px;border-radius:6px;border:none;background:linear-gradient(90deg,#e0457b,#9b5de5);color:#fff;cursor:pointer;font-size:12px;font-weight:600;">${okLabel}</button>
@@ -360,11 +363,22 @@ function customPrompt(message, defaultValue = '', title = 'Rename', okLabel = 'S
     overlay.appendChild(box);
     document.body.appendChild(overlay);
     const input = box.querySelector('.cp-input');
+    const errorEl = box.querySelector('.cp-error');
     input.value = defaultValue || '';
     const cleanup = (val) => { try { document.body.removeChild(overlay); } catch (_) {} document.removeEventListener('keydown', onKey); resolve(val); };
-    const onOk = () => cleanup((input.value || '').trim());
+    const onOk = async () => {
+      const val = (input.value || '').trim();
+      if (validate) {
+        let err = null;
+        try { err = await validate(val); } catch (_) {}
+        if (err) { errorEl.textContent = err; errorEl.style.display = 'block'; input.focus(); input.select(); return; }
+      }
+      cleanup(val);
+    };
     const onCancel = () => cleanup(null);
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); else if (e.key === 'Enter') onOk(); };
+    // Clear the inline error as soon as the user edits the field.
+    input.addEventListener('input', () => { errorEl.style.display = 'none'; });
     box.querySelector('.cp-ok').addEventListener('click', onOk);
     box.querySelector('.cp-cancel').addEventListener('click', onCancel);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) onCancel(); });
@@ -1096,9 +1110,19 @@ async function renderProjectsGrid() {
     `;
     card.querySelector('.card-rename-btn')?.addEventListener('click', async (e) => {
       e.stopPropagation();
+      const _sanitizeProj = (s) => String(s || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 40).replace(/_+\d+$/, '').replace(/_+$/, '');
+      const validate = (val) => {
+        const np = _sanitizeProj(val);
+        if (!np) return 'Please enter a valid name.';
+        if (np === p.name) return null;  // same project — no-op, allowed
+        if (state.projects.some(pr => pr && pr.name === np))
+          return `A project named "${np}" already exists — choose a different name.`;
+        return null;
+      };
       const newName = await customPrompt(
         'New project name — renames the image folder + every mesh / rig / animation file on disk:',
-        p.name, 'Rename project', 'Rename');
+        p.name, 'Rename project', 'Rename', validate);
       if (newName === null || !newName.trim() || newName.trim() === p.name) return;
       const r = await API.renameProjectFiles({ oldName: p.name, newName });
       if (r?.success) {
