@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (chore — backup: commit du code custom jamais trackés)
+
+Audit workflow (couverture GitHub). Tout était récupérable (branche
+backup-full = snapshot git add -A) mais ~31 fichiers custom n'étaient JAMAIS
+sur master. Commit propre : cloud/src/worker_master_test.ts (routeur Worker
+480KB), modal_app/{_puppeteer_animate,_animateanymesh,_train_anytop}.py,
+scripts/training_* + batch_fbx_to_bvh + fix_glb_ibms + ik_solver +
+puppeteer_anim_to_glb + ue5_* (+READMEs), scripts/rig_mappings/
+mountain_dragon__flying_quadruped.json, docs/{anytop_*,marklalon_*,track_b_*}.md,
++ external_patches/TRELLIS2_win/test_rope_blackwell.py (dernier fichier externe
+custom non couvert). NON commités : les 13 fichiers junk 'c:tmp...' (colon
+fullwidth, à supprimer) et les secrets .env/tokens (backup chiffré hors git).
+
 ## 2026-06-15 (feat — outil "Texture variations" (texture-seule, par seed))
 
 User : veut régénérer la TEXTURE SEULE (sans toucher le mesh) pour des
