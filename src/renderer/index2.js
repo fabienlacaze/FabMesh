@@ -9582,6 +9582,10 @@ function openMeshEdit(mode) {
   // Was missing — opening straight into Select mode left the Selection/Edit
   // panel hidden until you clicked the Select button a second time.
   document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
+  // Default the Select sub-mode to Add each time the panel opens.
+  meState.selectErase = false;
+  document.getElementById('me-sel-add')?.classList.add('tool-active');
+  document.getElementById('me-sel-erase')?.classList.remove('tool-active');
 
   // Wait for modal layout then init viewport
   requestAnimationFrame(async () => {
@@ -10040,7 +10044,8 @@ function _meApplyBrush(hit) {
       const dx = vx - px, dy = vy - py, dz = vz - pz;
       if (Math.abs(dx) > r || Math.abs(dy) > r || Math.abs(dz) > r) continue;
       if (dx * dx + dy * dy + dz * dz > rSq) continue;
-      colorAttr.setXYZ(i, 0.0, 1.0, 1.0); // bright cyan highlight (high contrast vs warm/dark mesh)
+      if (meState.selectErase) colorAttr.setXYZ(i, 0.7, 0.7, 0.7); // erase = back to unselected base
+      else colorAttr.setXYZ(i, 0.0, 1.0, 1.0); // bright cyan highlight (high contrast vs warm/dark mesh)
     }
     colorAttr.needsUpdate = true;
   }
@@ -10095,6 +10100,17 @@ document.getElementById('me-strength')?.addEventListener('input', (e) => {
 });
 document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
   meState.color = e.target.value;
+});
+// Select sub-mode: paint to Add (cyan) vs Erase (back to unselected base).
+document.getElementById('me-sel-add')?.addEventListener('click', () => {
+  meState.selectErase = false;
+  document.getElementById('me-sel-add')?.classList.add('tool-active');
+  document.getElementById('me-sel-erase')?.classList.remove('tool-active');
+});
+document.getElementById('me-sel-erase')?.addEventListener('click', () => {
+  meState.selectErase = true;
+  document.getElementById('me-sel-erase')?.classList.add('tool-active');
+  document.getElementById('me-sel-add')?.classList.remove('tool-active');
 });
 // Select actions
 document.getElementById('me-sel-delete')?.addEventListener('click', () => {

@@ -2457,19 +2457,14 @@
             <button id="me-sculpt-grab" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#9995; Grab</button>
             <button id="me-sculpt-inflate" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#8853; Inflate</button>
           </div>
-          <!-- Symmetry mirror -->
-          <div id="me-sym-opts" style="display:flex; flex-direction:column; gap:4px; padding-top:8px; border-top:1px solid var(--border, #333);">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Symmetry mirror</span>
-            <div style="display:flex; gap:4px;">
-              <button id="me-sym-x" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; flex:1;">X</button>
-              <button id="me-sym-y" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; flex:1;">Y</button>
-              <button id="me-sym-z" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; flex:1;">Z</button>
-            </div>
-          </div>
           <!-- Select options -->
           <div id="me-select-opts" style="display:none; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Selection</span>
-            <span style="font-size:9px; color:var(--text-muted);">Paint to select faces, then:</span>
+            <span style="font-size:9px; color:var(--text-muted);">Paint to add faces, erase to remove:</span>
+            <div style="display:flex; gap:4px;">
+              <button id="me-sel-add" class="secondary-btn tool-btn tool-active" style="padding:4px 8px; font-size:11px; flex:1;">&#9998; Add</button>
+              <button id="me-sel-erase" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; flex:1;">&#129529; Erase</button>
+            </div>
             <button id="me-sel-invert" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#8634; Invert</button>
             <button id="me-sel-clear" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#10005; Clear</button>
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border, #333);">Edit</span>
@@ -2480,14 +2475,25 @@
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
             <input type="color" id="me-paint-color" value="#ff0000" style="width:36px; height:36px; border:none; cursor:pointer; border-radius:6px;" />
           </div>
-          <!-- Brush size -->
-          <div style="display:flex; flex-direction:column; gap:2px;">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Radius <span id="me-brush-val" style="color:var(--text-1);">0.05</span></span>
-            <input type="range" id="me-brush-size" min="1" max="100" value="25" style="width:100%;" />
-          </div>
-          <div style="display:flex; flex-direction:column; gap:2px;">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Strength <span id="me-strength-val" style="color:var(--text-1);">0.5</span></span>
-            <input type="range" id="me-strength" min="1" max="100" value="50" style="width:100%;" />
+          <!-- General controls (always visible): symmetry + brush sliders -->
+          <div style="display:flex; flex-direction:column; gap:6px; padding-top:8px; border-top:1px solid var(--border, #333);">
+            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">General</span>
+            <div id="me-sym-opts" style="display:flex; flex-direction:column; gap:3px;">
+              <span style="font-size:9px; color:var(--text-muted);">Symmetry mirror</span>
+              <div style="display:flex; gap:4px;">
+                <button id="me-sym-x" class="secondary-btn tool-btn" style="padding:3px 6px; font-size:11px; flex:1;">X</button>
+                <button id="me-sym-y" class="secondary-btn tool-btn" style="padding:3px 6px; font-size:11px; flex:1;">Y</button>
+                <button id="me-sym-z" class="secondary-btn tool-btn" style="padding:3px 6px; font-size:11px; flex:1;">Z</button>
+              </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:1px;">
+              <span style="font-size:9px; color:var(--text-muted);">Radius <span id="me-brush-val" style="color:var(--text-1);">0.05</span></span>
+              <input type="range" id="me-brush-size" min="1" max="100" value="25" style="width:85%; height:12px; margin:0;" />
+            </div>
+            <div style="display:flex; flex-direction:column; gap:1px;">
+              <span style="font-size:9px; color:var(--text-muted);">Strength <span id="me-strength-val" style="color:var(--text-1);">0.5</span></span>
+              <input type="range" id="me-strength" min="1" max="100" value="50" style="width:85%; height:12px; margin:0;" />
+            </div>
           </div>
         </div>
         <!-- Right: 3D viewport -->
