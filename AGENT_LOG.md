@@ -10,6 +10,19 @@ gizmo jaune en overlay (_mtComputePivot/_makePivotGizmo/_mtBuildPivotGizmo,
 dispatch overlayPreview==='pivot') + bouton "Center"->"Set Pivot" -> set_pivot.
 Ajouté aux regex nom/groupage.
 
+## 2026-06-15 (parity — lot 6: éditeur Select complet sur cloud)
+
+Le cloud n'avait que Delete/Invert/Clear. Découvert qu'il utilise un modèle de
+sélection ORANGE (r>0.9 & g<0.5) directement dans l'attribut color (pas la Map
+_selSaved du desktop). Donc porté les outils desktop ADAPTÉS au test orange
+(pas de réconciliation de 2 systèmes) : Select all, Grow/Shrink (adjacence
+position-welded _meBuildPosAdj), Isolate/Hide (view toggles avec _viewBackup),
+Crop (+ keep-rest), Flip normals, Smooth (Laplacian sélection), Duplicate
+(copie faces orange + UV, décalées normale). HTML panel restructuré (boutons +
+sections View/Edit). _meRestoreView ajouté à Delete/Save/Close. node --check OK.
+Les handlers ne tournent qu'au clic + _mePushUndo avant tout destructif (undo
+dispo) -> risque contenu. Cloudflare auto-deploy au push.
+
 ## 2026-06-15 (parity — lot 5: Watertight sur cloud (Modal voxel remesh))
 
 Porté l'op watertight desktop -> cloud : modal_app/_mesh_op.watertight (voxel

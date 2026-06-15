@@ -12342,6 +12342,7 @@ function _meApplyBrush(hit) {
 
 // Close mesh edit
 function _closeMeshEdit() {
+  if (typeof _meRestoreView === 'function') _meRestoreView();
   document.getElementById('modal-mesh-edit')?.classList.add('hidden');
 }
 
@@ -12394,6 +12395,7 @@ document.getElementById('me-paint-color')?.addEventListener('input', (e) => {
 // Select actions
 document.getElementById('me-sel-delete')?.addEventListener('click', () => {
   if (!meState.mesh) return;
+  _meRestoreView();
   _mePushUndo();
   meState.mesh.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
@@ -12430,6 +12432,7 @@ document.getElementById('me-sel-invert')?.addEventListener('click', () => {
   });
 });
 document.getElementById('me-sel-clear')?.addEventListener('click', () => {
+  _meRestoreView();
   meState.mesh?.traverse(c => {
     if (!c.isMesh || !c.geometry?.attributes?.color) return;
     const color = c.geometry.attributes.color;
@@ -12438,6 +12441,220 @@ document.getElementById('me-sel-clear')?.addEventListener('click', () => {
     c.material.vertexColors = false;
     c.material.needsUpdate = true;
   });
+});
+
+// ── Extended Select tools (ported from desktop, adapted to the cloud's
+// orange-selection model: a vertex is selected when r>0.9 & g<0.5). ──
+const _meOrange = (col, i) => col.getX(i) > 0.9 && col.getY(i) < 0.5;
+function _meEnsureSelColor(c) {
+  const geom = c.geometry;
+  if (!geom.attributes.color) {
+    geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geom.attributes.position.count * 3).fill(0.7), 3));
+  }
+  c.material.vertexColors = true; c.material.needsUpdate = true;
+  return geom.attributes.color;
+}
+function _meSelHas() {
+  let has = false;
+  meState.mesh?.traverse(c => {
+    if (has || !c.isMesh || !c.geometry?.attributes?.color) return;
+    const col = c.geometry.attributes.color;
+    for (let i = 0; i < col.count; i++) { if (_meOrange(col, i)) { has = true; break; } }
+  });
+  return has;
+}
+function _meBuildPosAdj(geom) {
+  if (geom._posGroups && geom._posKeyByIndex) return;
+  const pos = geom.attributes.position;
+  const groups = new Map(), keyByIndex = new Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const k = Math.round(pos.getX(i) * 1e5) + ',' + Math.round(pos.getY(i) * 1e5) + ',' + Math.round(pos.getZ(i) * 1e5);
+    keyByIndex[i] = k;
+    let arr = groups.get(k); if (!arr) { arr = []; groups.set(k, arr); } arr.push(i);
+  }
+  geom._posGroups = groups; geom._posKeyByIndex = keyByIndex;
+}
+function _meRestoreView() {
+  if (!meState.viewMode || meState.viewMode === 'none') return;
+  meState.mesh?.traverse(c => {
+    if (c.isMesh && c.geometry && c.geometry._viewBackup) {
+      c.geometry.setIndex(c.geometry._viewBackup);
+      c.geometry._viewBackup = null;
+      c.geometry.attributes.position.needsUpdate = true;
+    }
+  });
+  meState.viewMode = 'none';
+  document.getElementById('me-sel-isolate')?.classList.remove('tool-active');
+  document.getElementById('me-sel-hide')?.classList.remove('tool-active');
+}
+function _meApplyView(mode) {
+  if (!meState.mesh) return;
+  const wasActive = meState.viewMode === mode;
+  _meRestoreView();
+  if (wasActive) return;
+  if (!_meSelHas()) { showToast('Select faces first', 'info', 1400); return; }
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array;
+    geom._viewBackup = new THREE.BufferAttribute(idx.slice(), 1);
+    const keep = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      const hit = _meOrange(col, idx[i]) || _meOrange(col, idx[i + 1]) || _meOrange(col, idx[i + 2]);
+      if (mode === 'isolate' ? hit : !hit) keep.push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    geom.setIndex(keep);
+    geom.attributes.position.needsUpdate = true;
+  });
+  meState.viewMode = mode;
+  document.getElementById('me-sel-' + mode)?.classList.add('tool-active');
+}
+document.getElementById('me-sel-isolate')?.addEventListener('click', () => _meApplyView('isolate'));
+document.getElementById('me-sel-hide')?.addEventListener('click', () => _meApplyView('hide'));
+document.getElementById('me-sel-all')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.position) return;
+    const col = _meEnsureSelColor(c);
+    for (let i = 0; i < col.count; i++) col.setXYZ(i, 1.0, 0.3, 0.1);
+    col.needsUpdate = true;
+  });
+});
+document.getElementById('me-sel-grow')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array;
+    _meBuildPosAdj(geom);
+    const keyOf = geom._posKeyByIndex, groups = geom._posGroups, selKeys = new Set();
+    for (let i = 0; i < col.count; i++) if (_meOrange(col, i)) selKeys.add(keyOf[i]);
+    if (!selKeys.size) return;
+    const addKeys = new Set();
+    for (let t = 0; t < idx.length; t += 3) {
+      const ka = keyOf[idx[t]], kb = keyOf[idx[t + 1]], kd = keyOf[idx[t + 2]];
+      if (selKeys.has(ka) || selKeys.has(kb) || selKeys.has(kd)) { addKeys.add(ka); addKeys.add(kb); addKeys.add(kd); }
+    }
+    for (const k of addKeys) for (const v of groups.get(k)) col.setXYZ(v, 1.0, 0.3, 0.1);
+    col.needsUpdate = true;
+  });
+});
+document.getElementById('me-sel-shrink')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array;
+    _meBuildPosAdj(geom);
+    const keyOf = geom._posKeyByIndex, groups = geom._posGroups, selKeys = new Set();
+    for (let i = 0; i < col.count; i++) if (_meOrange(col, i)) selKeys.add(keyOf[i]);
+    if (!selKeys.size) return;
+    const removeKeys = new Set();
+    for (let t = 0; t < idx.length; t += 3) {
+      const ka = keyOf[idx[t]], kb = keyOf[idx[t + 1]], kd = keyOf[idx[t + 2]];
+      const sa = selKeys.has(ka), sb = selKeys.has(kb), sd = selKeys.has(kd);
+      if (!(sa && sb && sd)) { if (sa) removeKeys.add(ka); if (sb) removeKeys.add(kb); if (sd) removeKeys.add(kd); }
+    }
+    for (const k of removeKeys) for (const v of groups.get(k)) col.setXYZ(v, 0.7, 0.7, 0.7);
+    col.needsUpdate = true;
+  });
+});
+document.getElementById('me-sel-crop')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meSelHas()) return;
+  const keepRest = !!document.getElementById('me-sel-crop-keeprest')?.checked;
+  _meRestoreView(); _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array, keep = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      const hit = _meOrange(col, idx[i]) || _meOrange(col, idx[i + 1]) || _meOrange(col, idx[i + 2]);
+      if (keepRest ? !hit : hit) keep.push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    geom.setIndex(keep); geom.attributes.position.needsUpdate = true;
+    geom._posGroups = null; geom._posKeyByIndex = null;
+  });
+  showToast(keepRest ? 'Kept the rest' : 'Cropped to selection', 'success', 1500);
+});
+document.getElementById('me-sel-flip')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meSelHas()) return;
+  _meRestoreView(); _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, col = geom.attributes.color, idx = geom.index.array;
+    for (let i = 0; i < idx.length; i += 3) {
+      if (_meOrange(col, idx[i]) || _meOrange(col, idx[i + 1]) || _meOrange(col, idx[i + 2])) {
+        const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t;
+      }
+    }
+    geom.index.needsUpdate = true; geom.computeVertexNormals();
+  });
+  showToast('Flipped selected faces', 'success', 1400);
+});
+document.getElementById('me-sel-smooth')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meSelHas()) return;
+  _meRestoreView(); _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.position || !c.geometry.attributes.color) return;
+    const geom = c.geometry, pos = geom.attributes.position, col = geom.attributes.color, idx = geom.index.array;
+    _meBuildPosAdj(geom);
+    const keyOf = geom._posKeyByIndex, groups = geom._posGroups, neigh = new Map();
+    const addN = (a, b) => { let s = neigh.get(keyOf[a]); if (!s) { s = new Set(); neigh.set(keyOf[a], s); } s.add(keyOf[b]); };
+    for (let i = 0; i < idx.length; i += 3) { const a = idx[i], b = idx[i + 1], d = idx[i + 2]; addN(a, b); addN(a, d); addN(b, a); addN(b, d); addN(d, a); addN(d, b); }
+    const keyPos = new Map();
+    for (const [k, ids] of groups) { const v = ids[0]; keyPos.set(k, [pos.getX(v), pos.getY(v), pos.getZ(v)]); }
+    const lambda = 0.5;
+    for (let it = 0; it < 2; it++) {
+      const next = new Map();
+      for (const [k, ns] of neigh) {
+        if (!ns.size) continue;
+        let sx = 0, sy = 0, sz = 0; for (const nk of ns) { const p = keyPos.get(nk); sx += p[0]; sy += p[1]; sz += p[2]; }
+        const inv = 1 / ns.size, cur = keyPos.get(k);
+        next.set(k, [cur[0] + lambda * (sx * inv - cur[0]), cur[1] + lambda * (sy * inv - cur[1]), cur[2] + lambda * (sz * inv - cur[2])]);
+      }
+      for (const [k, p] of next) keyPos.set(k, p);
+    }
+    for (let i = 0; i < col.count; i++) if (_meOrange(col, i)) { const p = keyPos.get(keyOf[i]); if (p) pos.setXYZ(i, p[0], p[1], p[2]); }
+    pos.needsUpdate = true; geom.computeVertexNormals();
+  });
+  showToast('Smoothed selection', 'success', 1400);
+});
+document.getElementById('me-sel-duplicate')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meSelHas()) return;
+  _meRestoreView(); _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, col = geom.attributes.color, pos = geom.attributes.position, idx = geom.index.array, tris = [];
+    for (let i = 0; i < idx.length; i += 3) { if (_meOrange(col, idx[i]) || _meOrange(col, idx[i + 1]) || _meOrange(col, idx[i + 2])) tris.push(idx[i], idx[i + 1], idx[i + 2]); }
+    if (!tris.length) return;
+    geom.computeBoundingBox();
+    const bb = geom.boundingBox, eps = (bb ? bb.min.distanceTo(bb.max) : 1) * 0.01;
+    const oldV = pos.count, addV = tris.length;
+    const newPos = new Float32Array((oldV + addV) * 3); newPos.set(pos.array.subarray(0, oldV * 3));
+    const newCol = new Float32Array((oldV + addV) * 3); newCol.set(col.array.subarray(0, oldV * 3));
+    const uv = geom.attributes.uv || null;
+    const newUV = uv ? new Float32Array((oldV + addV) * 2) : null;
+    if (uv) newUV.set(uv.array.subarray(0, oldV * 2));
+    const newIdx = Array.from(idx);
+    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vD = new THREE.Vector3(), n = new THREE.Vector3(), tmp = new THREE.Vector3();
+    let w = oldV;
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = tris[t], b = tris[t + 1], d = tris[t + 2];
+      vA.fromBufferAttribute(pos, a); vB.fromBufferAttribute(pos, b); vD.fromBufferAttribute(pos, d);
+      n.subVectors(vB, vA).cross(tmp.subVectors(vD, vA)).normalize().multiplyScalar(eps);
+      const base = w, ids = [a, b, d];
+      for (let k = 0; k < 3; k++) {
+        const s = ids[k];
+        newPos[w * 3] = pos.getX(s) + n.x; newPos[w * 3 + 1] = pos.getY(s) + n.y; newPos[w * 3 + 2] = pos.getZ(s) + n.z;
+        newCol[w * 3] = 1.0; newCol[w * 3 + 1] = 0.3; newCol[w * 3 + 2] = 0.1;
+        if (uv) { newUV[w * 2] = uv.getX(s); newUV[w * 2 + 1] = uv.getY(s); }
+        w++;
+      }
+      newIdx.push(base, base + 1, base + 2);
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(newCol, 3));
+    if (uv) geom.setAttribute('uv', new THREE.BufferAttribute(newUV, 2));
+    geom.setIndex(newIdx);
+    geom._posGroups = null; geom._posKeyByIndex = null;
+    geom.attributes.position.needsUpdate = true; geom.attributes.color.needsUpdate = true;
+    geom.computeVertexNormals();
+    c.material.vertexColors = true; c.material.needsUpdate = true;
+  });
+  showToast('Duplicated selection', 'success', 1500);
 });
 // Keyboard
 document.addEventListener('keydown', (e) => {
@@ -12449,6 +12666,7 @@ document.addEventListener('keydown', (e) => {
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
+  _meRestoreView();   // never bake an isolated/hidden view into the saved GLB
   const projName = state.currentProject?.name || '';
   const job = pushJob(`Save mesh edit: ${projName}`, null, null, 8000, undefined, {
     projectName: projName,
