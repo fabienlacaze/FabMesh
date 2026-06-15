@@ -256,6 +256,17 @@ function customErrorWithAction(message, title, actionLabel) {
 // surface the "API key not configured" error the same way.
 function reportPipelineError(errMsg, title) {
   const raw = String(errMsg || '').trim();
+  // Content-filter block → offer a direct "Unlock" shortcut straight to the
+  // parental-control disable flow (legal warning popup + PIN) instead of making
+  // the user hunt through Settings. The action button reuses customErrorWithAction.
+  if (/content filter|parental control|unrestricted mode/i.test(raw)) {
+    customErrorWithAction(raw, title || 'Blocked by content filter', '🔓 Unlock')
+      .then((unlock) => {
+        // Let the shared modal fully close/reset before the warning re-opens it.
+        if (unlock) setTimeout(() => { try { toggleParentalControl(); } catch (_) {} }, 60);
+      });
+    return;
+  }
   // Extract the most useful error line from a potentially huge Python dump.
   // Python tracebacks end with the actual error on the last non-empty line
   // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")

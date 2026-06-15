@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — bouton "Unlock" sur l'erreur filtre de contenu)
+
+User : popup "Image generation failed / Content filter ... Disable parental
+control in Settings" -> voudrait un bouton qui amène direct à la popup de
+warning. reportPipelineError() détecte désormais les messages filtre de contenu
+(/content filter|parental control|unrestricted mode/i) et affiche via
+customErrorWithAction un bouton primaire "🔓 Unlock" qui lance
+toggleParentalControl() (popup warning légal + PIN) après fermeture du modal
+partagé (setTimeout 60ms anti-race). Renderer only -> Ctrl+R.
+
 ## 2026-06-15 (feat — watertight plus fin + garde la texture (vertex colours))
 
 User : "watertight trop grossier on peut améliorer, pas de texture non plus".
