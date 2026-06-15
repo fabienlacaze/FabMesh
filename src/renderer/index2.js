@@ -340,6 +340,39 @@ function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
   });
 }
 
+// Lightweight text-input modal (customConfirm has no input). Self-contained —
+// builds its own DOM so no index2.html change is needed. Resolves to the
+// trimmed string on OK / Enter, or null on Cancel / Escape / overlay click.
+function customPrompt(message, defaultValue = '', title = 'Rename', okLabel = 'Save') {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--panel,#1a1a24);border:1px solid var(--border,#333);border-radius:10px;padding:18px 20px;width:min(420px,90vw);box-shadow:0 10px 40px rgba(0,0,0,0.5);';
+    box.innerHTML = `
+      <div style="font-size:14px;font-weight:600;color:var(--text-1,#eee);margin-bottom:8px;">${title}</div>
+      <div style="font-size:12px;color:var(--text-2,#aaa);margin-bottom:10px;">${message}</div>
+      <input type="text" class="cp-input" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border,#444);background:#0e0e16;color:#fff;font-size:13px;" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+        <button class="cp-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border,#444);background:transparent;color:#ccc;cursor:pointer;font-size:12px;">Cancel</button>
+        <button class="cp-ok" style="padding:6px 14px;border-radius:6px;border:none;background:linear-gradient(90deg,#e0457b,#9b5de5);color:#fff;cursor:pointer;font-size:12px;font-weight:600;">${okLabel}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const input = box.querySelector('.cp-input');
+    input.value = defaultValue || '';
+    const cleanup = (val) => { try { document.body.removeChild(overlay); } catch (_) {} document.removeEventListener('keydown', onKey); resolve(val); };
+    const onOk = () => cleanup((input.value || '').trim());
+    const onCancel = () => cleanup(null);
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); else if (e.key === 'Enter') onOk(); };
+    box.querySelector('.cp-ok').addEventListener('click', onOk);
+    box.querySelector('.cp-cancel').addEventListener('click', onCancel);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) onCancel(); });
+    document.addEventListener('keydown', onKey);
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+  });
+}
+
 // ============================================================
 // ROUTING
 // ============================================================
@@ -530,6 +563,11 @@ async function refreshProjectsPage() {
   }
 
   state.projects = Array.from(projectsMap.values()).sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+  // Apply user display-name overrides (project rename) without touching files.
+  try {
+    const _dn = (await API.getProjectDisplayNames?.()) || {};
+    for (const _p of state.projects) _p.displayName = _dn[_p.name] || null;
+  } catch (_) {}
   renderProjectsGrid();
   // Start background NSFW scan (non-blocking, re-renders when done)
   _runNsfwBackgroundScan();
@@ -1040,7 +1078,10 @@ async function renderProjectsGrid() {
           : `<span class="project-card-thumb-empty">No image</span>`}
       </div>
       <div class="project-card-body">
-        <div class="project-card-name">${escapeHtml(p.name)}</div>
+        <div class="project-card-name" style="display:flex;align-items:center;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.displayName || p.name)}</span>
+          <button class="card-rename-btn" title="Rename project">&#9998;</button>
+        </div>
         <div class="project-card-meta">
           ${p.images.length} img · ${p.meshes.length} mesh · ${p.rigs.length} rig · ${(p.animations||[]).length} anim
         </div>
@@ -1052,9 +1093,18 @@ async function renderProjectsGrid() {
         </div>
       </div>
     `;
+    card.querySelector('.card-rename-btn')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const current = p.displayName || p.name;
+      const newName = await customPrompt('New project name:', current, 'Rename project', 'Save');
+      if (newName === null) return;  // cancelled
+      const r = await API.renameProject({ oldName: p.name, newName });
+      if (r?.success) { showToast?.('Project renamed', 'success', 1500); await refreshProjectsPage(); }
+      else showToast?.('Rename failed: ' + (r?.error || 'unknown'), 'error', 4000);
+    });
     card.querySelector('.card-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!await customConfirm(`Delete project "${p.name}" and all its files?`, 'Delete project')) return;
+      if (!await customConfirm(`Delete project "${p.displayName || p.name}" and all its files?`, 'Delete project')) return;
       const r = await API.deleteProject({ projectName: p.name });
       if (r?.ok) await refreshProjectsPage();
       else alert('Delete failed: ' + (r?.error || 'unknown'));
@@ -7239,9 +7289,23 @@ document.getElementById('ws-3d-triangles')?.addEventListener('change', updateMes
   sync();
 })();
 
+// Count of 3D mesh generations currently IN FLIGHT per project. Used to ASK
+// before launching a 2nd gen of the SAME project (the user's earlier "two
+// Untitled gens fighting" confusion) — not to hard-block, since a big GPU may
+// have room. The VRAM-aware concurrency gate below decides whether it actually
+// runs now or queues.
+const _meshGenInFlight = new Map(); // projectName -> count
 document.getElementById('ws-generate-mesh').addEventListener('click', async () => {
   const p = state.currentProject;
   if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  if ((_meshGenInFlight.get(p.name) || 0) > 0) {
+    const proceed = await customConfirm(
+      'A 3D generation is already running for this project. Start another one in parallel anyway? It will queue automatically if the GPU is busy.',
+      '3D generation already running',
+      'Generate anyway'
+    );
+    if (!proceed) return;
+  }
   const engine = document.getElementById('ws-3d-engine').value;
   const quality = document.getElementById('ws-3d-quality')?.value || 'standard';
   const triLevel = document.getElementById('ws-3d-triangles')?.value || '0';
@@ -7339,6 +7403,8 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     'Target triangles': triPreset.label,
     'Source image': p.selectedImagePath ? p.selectedImagePath.split(/[/\\]/).pop() : '--',
   };
+  const _projName = p.name;
+  _meshGenInFlight.set(_projName, (_meshGenInFlight.get(_projName) || 0) + 1);
   gatedRun('mesh', `Generate 3D: ${p.name}`, async () => {
     const job = pushJob(`Generate 3D: ${p.name}`, null, jobParams, expectedMs, { sourceImageUrl: p.selectedImagePath, projectName: p.name });
     try {
@@ -7362,6 +7428,11 @@ document.getElementById('ws-generate-mesh').addEventListener('click', async () =
     } catch (e) {
       completeJob(job.id, false, e?.error || e?.message || String(e));
       if (!job.cancelled) reportPipelineError(e?.error || e?.message || String(e), '3D generation error');
+    } finally {
+      // Free this project's in-flight slot (count-aware: a parallel gen of the
+      // same project keeps its own slot).
+      const _c = (_meshGenInFlight.get(_projName) || 1) - 1;
+      if (_c > 0) _meshGenInFlight.set(_projName, _c); else _meshGenInFlight.delete(_projName);
     }
   });
 });
@@ -12556,6 +12627,14 @@ const JOB_VRAM_COST_GB = {
   'rig':     4,    // UniRig (~3 GB) + margin
   'bg':      1,    // rembg u2net (~150 MB) — effectively unrestricted
 };
+// Realistic PEAK VRAM per heavy job — used ONLY to decide how many can run in
+// PARALLEL (maxConcurrent = floor(vramLimit / peak)). Distinct from the lighter
+// COST above (which gates the FIRST job's headroom). TRELLIS-2 mesh genuinely
+// peaks ~15 GB (≈ a whole 16 GB card), so a 16 GB card runs 1 at a time while a
+// 48 GB card runs ~3.
+const JOB_VRAM_PEAK_GB = {
+  'image': 9, 'img2img': 9, 'inpaint': 10, 'mesh': 15, 'rig': 5, 'bg': 1,
+};
 const queuedJobs = []; // [{ kind, run: () => Promise }]
 let _queueProcessing = false;
 
@@ -12578,8 +12657,27 @@ async function hasVramHeadroomFor(kind) {
   // compare against the user's slider limit. This correctly blocks a job that
   // would push VRAM from 85% → 98% when the slider is at 92%, which the old
   // AND-based logic missed because it only looked at current usage.
-  if (isHeavyJobRunning() && kind !== 'bg') {
-    return { ok: false, reason: "Un autre job lourd est en cours d'exécution." };
+  // VRAM-aware concurrency (replaces the old "one heavy job at a time" hard
+  // block that needlessly serialized even on big GPUs). Allow as many heavy
+  // jobs in parallel as the card's VRAM budget fits: maxConcurrent =
+  // floor(vramLimit / realPeak). A 16 GB card runs 1 TRELLIS at a time, a
+  // 48 GB card ~3. The per-project confirm dialog handles same-project dupes.
+  if (kind !== 'bg') {
+    const runningHeavy = state.jobs.filter(j => j.status === 'running' && j.kind && j.kind !== 'bg').length;
+    if (runningHeavy > 0) {
+      let maxConcurrent = 1;
+      try {
+        const gpu = await API.checkGPU();
+        if (gpu && gpu.available && gpu.totalGB) {
+          const peak = JOB_VRAM_PEAK_GB[kind] || 12;
+          const limitGB = gpu.totalGB * ((gpuLimits?.vram || 90) / 100);
+          maxConcurrent = Math.max(1, Math.floor(limitGB / peak));
+        }
+      } catch (_) {}
+      if (runningHeavy >= maxConcurrent) {
+        return { ok: false, reason: `${runningHeavy} génération(s) lourde(s) en cours — ta carte en supporte ${maxConcurrent} en parallèle. La suivante attend qu'une se libère.` };
+      }
+    }
   }
   const cost = JOB_VRAM_COST_GB[kind] || 8;
   // Background removal (u2net) is tiny — never gate it.

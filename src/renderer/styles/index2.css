@@ -372,6 +372,19 @@ body.workspace-mode #back-to-projects { display: inline-flex; }
   transition: all 0.15s;
 }
 .project-card:hover .card-delete-btn { display: inline-flex; }
+.card-rename-btn {
+  display: none;
+  margin-left: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-2, #aaa);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  flex: none;
+}
+.project-card:hover .card-rename-btn { display: inline-block; }
+.card-rename-btn:hover { color: var(--accent, #e0457b); }
 .card-delete-btn:hover {
   background: var(--error);
   border-color: var(--error);

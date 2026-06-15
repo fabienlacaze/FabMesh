@@ -3614,6 +3614,33 @@ ipcMain.handle('download-to-temp', async (event, url) => {
   });
 });
 
+// Project rename = a DISPLAY-NAME override (stored in config), not a file
+// rename. Renaming the image folder + every mesh/rig/animation filename would
+// be error-prone (meshProject() parsing, animation rigStem links), so we keep
+// the on-disk names as the stable internal key and only override what the UI
+// shows. config.projectDisplayNames maps derivedName -> displayName.
+ipcMain.handle('rename-project', (event, { oldName, newName }) => {
+  try {
+    if (!oldName) return { success: false, error: 'missing project' };
+    const clean = String(newName || '').trim().slice(0, 60);
+    const config = loadConfig();
+    if (!config.projectDisplayNames) config.projectDisplayNames = {};
+    if (!clean || clean === oldName) {
+      delete config.projectDisplayNames[oldName];  // reset to derived name
+      saveConfig(config);
+      return { success: true, displayName: null };
+    }
+    config.projectDisplayNames[oldName] = clean;
+    saveConfig(config);
+    return { success: true, displayName: clean };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('get-project-display-names', () => {
+  try { return loadConfig().projectDisplayNames || {}; }
+  catch (_) { return {}; }
+});
+
 // Duplicate an image into a new version (same project dir, suffix + timestamp).
 // Used by Multi-Views button so the original image stays untouched while the
 // new version receives the 6-view dir + any subsequent view edits.

@@ -173,6 +173,8 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   importImageFile: (filePath) => ipcRenderer.invoke('import-image-file', filePath),
   importDroppedFile: (args) => ipcRenderer.invoke('import-dropped-file', args),
   downloadToTemp: (url) => ipcRenderer.invoke('download-to-temp', url),
+  renameProject: (args) => ipcRenderer.invoke('rename-project', args),
+  getProjectDisplayNames: () => ipcRenderer.invoke('get-project-display-names'),
   showNotification: (opts) => ipcRenderer.invoke('show-notification', opts),
   exportToUnreal: (opts) => ipcRenderer.invoke('export-to-unreal', opts),
   autoRig: (opts) => ipcRenderer.invoke('auto-rig', opts),
