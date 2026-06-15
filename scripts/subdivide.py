@@ -48,7 +48,7 @@ def _subdivide_with_uv(vertices, faces, uv, levels):
         exploded_uv = uv[faces.flatten()].reshape(-1, 2)          # (F*3, 2)
         exploded_faces = np.arange(n_faces * 3).reshape(n_faces, 3)  # [[0,1,2],[3,4,5],...]
 
-        # Build edge→UV midpoint map keyed by VERTEX INDEX pair (not position)
+        # Build edge->UV midpoint map keyed by VERTEX INDEX pair (not position)
         edge_uv = {}
         for face in exploded_faces:
             for ei in range(3):
@@ -70,7 +70,7 @@ def _subdivide_with_uv(vertices, faces, uv, levels):
             old_in_face = [v for v in face if v < n_old]
             new_in_face = [v for v in face if v >= n_old]
             if len(old_in_face) == 2 and len(new_in_face) == 1:
-                # Face like [old_a, old_b, new_c] — new_c is midpoint of some edge
+                # Face like [old_a, old_b, new_c] - new_c is midpoint of some edge
                 # But we need to figure out WHICH edge. new_c connects to both old verts
                 # so it could be midpoint of (old_a, X) or (old_b, X)
                 pass
@@ -78,7 +78,7 @@ def _subdivide_with_uv(vertices, faces, uv, levels):
             for ei in range(3):
                 a, b = int(face[ei]), int(face[(ei + 1) % 3])
                 if a >= n_old and b < n_old:
-                    # a is new, b is old — a is midpoint of an edge containing b
+                    # a is new, b is old - a is midpoint of an edge containing b
                     if a not in new_vert_parents:
                         new_vert_parents[a] = set()
                     new_vert_parents[a].add(b)
@@ -173,19 +173,36 @@ def subdivide_glb(input_path, output_path, levels=2):
         return True
 
     # ==================================================================
-    # SUBDIVISION (levels > 0) — edge-based UV interpolation
+    # SUBDIVISION (levels > 0) - edge-based UV interpolation
     # ==================================================================
+    # Face-budget guard: each midpoint level ×4 faces (×3 more from the
+    # per-face explode + a slow pure-Python UV scan). Level 3 on a dense
+    # mesh = tens of millions of faces -> the op never finishes. Clamp the
+    # effective levels so the result stays under ~1.5M faces.
+    FACE_BUDGET = 2_000_000
     result_meshes = {}
     for idx, geom in enumerate(geometries):
         name = list(scene.geometry.keys())[idx] if hasattr(scene, 'geometry') else f'mesh_{idx}'
         verts = np.asarray(geom.vertices, dtype=np.float64)
         faces = np.asarray(geom.faces, dtype=np.int32)
+        eff_levels = int(levels)
+        cur = len(faces)
+        while eff_levels > 0 and cur * (4 ** eff_levels) > FACE_BUDGET:
+            eff_levels -= 1
+        if eff_levels < 1:
+            eff_levels = 1 if len(faces) * 4 <= FACE_BUDGET * 4 else 0
+        if eff_levels != int(levels):
+            log(f'  {name}: levels {levels} -> {eff_levels} (face budget {FACE_BUDGET}, '
+                f'{len(faces)} faces in)')
         log(f'  {name}: {len(verts)} verts, {len(faces)} faces before subdivision')
 
         has_uv = hasattr(geom.visual, 'uv') and geom.visual.uv is not None and len(geom.visual.uv) > 0
         uv = np.asarray(geom.visual.uv, dtype=np.float64) if has_uv else None
 
-        verts, faces, uv = _subdivide_with_uv(verts, faces, uv, levels)
+        if eff_levels >= 1:
+            verts, faces, uv = _subdivide_with_uv(verts, faces, uv, eff_levels)
+        else:
+            log(f'  {name}: skipped - already too dense to subdivide within budget')
         log(f'  {name}: {len(verts)} verts, {len(faces)} faces after subdivision')
 
         new_verts = np.asarray(verts, dtype=np.float32)

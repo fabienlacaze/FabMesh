@@ -1,5 +1,5 @@
 """
-FabMesh Mesh Tools — automated mesh operations.
+FabMesh Mesh Tools - automated mesh operations.
 ================================================
 
 Usage:
@@ -24,7 +24,7 @@ import numpy as np
 # Cloud-parity preset registry.
 # Activated via env var `FABMESH_MESH_PRESET=cloud_parity` (or
 # `FABMESH_MESH_PRESET=cloud`) or the `--preset cloud_parity` CLI flag.
-# Default 'desktop' preserves existing behavior — DO NOT change defaults
+# Default 'desktop' preserves existing behavior - DO NOT change defaults
 # silently because the renderer's UI buttons pass explicit positional args
 # for the "Quick" preset (smooth 3 iter, decimate 5000 faces) that we must
 # keep honoring.
@@ -79,7 +79,7 @@ def smooth(input_path, output_path, iterations=None, lamb=None):
         # ('shapes (N,N) and (M,3) not aligned'), and volume_constraint
         # (trimesh's default) NaNs genuinely zero-volume geometry via the
         # (vol_ini/vol_new)**(1/3) divide. merge_vertices fixes the former,
-        # volume_constraint=False the latter — both are required.
+        # volume_constraint=False the latter - both are required.
         verts_backup = np.asarray(g.vertices).copy()
         try:
             try:
@@ -100,7 +100,7 @@ def smooth(input_path, output_path, iterations=None, lamb=None):
             if np.isnan(np.asarray(g.vertices)).any():
                 raise ValueError('smooth produced NaN')
         except Exception as e:
-            log(f'smooth skipped a geom ({type(e).__name__}: {e}) — kept original')
+            log(f'smooth skipped a geom ({type(e).__name__}: {e}) - kept original')
             try:
                 if len(verts_backup) == len(g.vertices):
                     g.vertices[:] = verts_backup
@@ -116,7 +116,7 @@ def decimate(input_path, output_path, target_faces=None):
     When `target_faces` is None, value comes from the active preset
     (desktop: 5000, cloud_parity: 50_000). Cloud-parity safety rails
     (early-out when already below target, ratio clamp, skip tiny meshes)
-    are applied unconditionally — they only kick in for edge cases."""
+    are applied unconditionally - they only kick in for edge cases."""
     import trimesh
     target_faces = int(_preset('decimate_target_faces', target_faces))
     scene = trimesh.load(input_path)
@@ -128,7 +128,7 @@ def decimate(input_path, output_path, target_faces=None):
         max_faces = max((len(g.faces) for g in geoms if hasattr(g, 'faces')),
                         default=0)
         if 0 < max_faces <= target_faces:
-            log(f'decimate skipped — already at {max_faces} <= target {target_faces}')
+            log(f'decimate skipped - already at {max_faces} <= target {target_faces}')
             _export(scene, geoms, output_path)
             return
     for gi, g in enumerate(geoms):
@@ -136,12 +136,13 @@ def decimate(input_path, output_path, target_faces=None):
         if not hasattr(g, 'faces') or len(g.faces) < 100:
             continue
         if len(g.faces) > target_faces:
-            # Cloud-parity ratio clamp [0.05, 1.0].
-            ratio = max(0.05, min(1.0, target_faces / len(g.faces)))
+            # Clamp [0.01, 1.0] - let the user reach an aggressive game-asset
+            # target (e.g. 7400 from 470k) while guarding against collapse.
+            ratio = max(0.01, min(1.0, target_faces / len(g.faces)))
             # Preserve the texture: fast_simplification drops UVs, so we
             # replay the collapse list to remap the per-vertex UV array and
             # rebuild a fresh TextureVisuals at the NEW vertex count. Without
-            # this the reduced mesh reloads untextured (visual.uv == None) —
+            # this the reduced mesh reloads untextured (visual.uv == None) -
             # a violation of FabMesh's #1 texture-match requirement.
             is_tex = isinstance(getattr(g, 'visual', None), trimesh.visual.TextureVisuals)
             old_uv = (np.asarray(g.visual.uv, dtype=np.float32).copy()
@@ -151,15 +152,21 @@ def decimate(input_path, output_path, target_faces=None):
             faces = np.asarray(g.faces, dtype=np.int32)
             try:
                 import fast_simplification
+                points, faces_out = fast_simplification.simplify(
+                    verts, faces, target_reduction=1.0 - ratio)
+                new_uv = None
                 if old_uv is not None and old_uv.shape[0] == verts.shape[0]:
-                    points, faces_out, collapses = fast_simplification.simplify(
-                        verts, faces, target_reduction=1.0 - ratio,
-                        return_collapses=True)
-                    # idx_map: length = ORIGINAL vert count, old->new index.
-                    _, _, idx_map = fast_simplification.replay_simplification(
-                        verts, faces, collapses)
-                    new_uv = np.zeros((len(points), 2), dtype=np.float32)
-                    new_uv[idx_map] = old_uv  # representative UV per merged cluster
+                    # Transfer UVs by nearest ORIGINAL vertex. (replay_simplifi-
+                    # cation crashes on some real meshes - IndexError - so we
+                    # use a robust KD-tree nearest-neighbour transfer instead.)
+                    try:
+                        from scipy.spatial import cKDTree
+                        _, nn = cKDTree(verts).query(np.asarray(points, dtype=np.float64))
+                        new_uv = old_uv[nn]
+                    except Exception as e:
+                        log(f'decimate UV transfer failed ({e}) - mesh kept untextured')
+                        new_uv = None
+                if new_uv is not None:
                     g_new = trimesh.Trimesh(vertices=points, faces=faces_out, process=False)
                     g_new.visual = trimesh.visual.TextureVisuals(uv=new_uv, material=old_mat)
                     geoms[gi] = g_new
@@ -167,26 +174,23 @@ def decimate(input_path, output_path, target_faces=None):
                         scene.geometry[geom_names[gi]] = g_new
                     g = g_new
                 else:
-                    # No usable per-vertex UV (or seam-split mismatch): plain
-                    # simplify, accept it stays vertex-color / untextured.
-                    points, faces_out = fast_simplification.simplify(
-                        verts, faces, target_reduction=1.0 - ratio)
+                    # No usable per-vertex UV: plain simplify in place.
                     g.vertices = points
                     g.faces = faces_out
             except ImportError:
                 # Fallback: trimesh's built-in (itself fast_simplification on
-                # trimesh 4.x) — also drops UVs.
+                # trimesh 4.x) - also drops UVs.
                 n = max(50, int(len(g.faces) * ratio))
                 g_new = g.simplify_quadric_decimation(n)
                 g.vertices = g_new.vertices
                 g.faces = g_new.faces
-                log('decimate fallback (quadric) — UVs/texture not preserved')
+                log('decimate fallback (quadric) - UVs/texture not preserved')
             log(f'decimated to {len(g.faces)} faces (target: {target_faces}, preset={ACTIVE_PRESET})')
     _export(scene, geoms, output_path)
 
 
 def subdivide_mesh(input_path, output_path, levels=1, mode=None):
-    """Subdivision — midpoint by default, Loop when preset=cloud_parity.
+    """Subdivision - midpoint by default, Loop when preset=cloud_parity.
 
     `mode` ('midpoint' or 'loop') overrides the preset choice.
     Loop subdivision (smoother, used by the cloud worker) is run in-process
@@ -196,7 +200,7 @@ def subdivide_mesh(input_path, output_path, levels=1, mode=None):
     levels = int(levels) if levels is not None else _preset('subdivide_levels')
 
     if mode == 'loop':
-        # Cloud-parity Loop subdivision — in-process via trimesh.
+        # Cloud-parity Loop subdivision - in-process via trimesh.
         # Safety rails ported verbatim from cloud: cap to 2 iterations max,
         # bail when a mesh already exceeds 500_000 faces.
         import trimesh
@@ -208,7 +212,7 @@ def subdivide_mesh(input_path, output_path, levels=1, mode=None):
             try:
                 for _ in range(max(1, min(2, int(levels)))):
                     if hasattr(g, 'faces') and len(g.faces) > 500_000:
-                        log(f'subdivide_loop bail — mesh already at {len(g.faces)} faces')
+                        log(f'subdivide_loop bail - mesh already at {len(g.faces)} faces')
                         break
                     sub = g.subdivide_loop()
                     g.vertices = sub.vertices
@@ -257,17 +261,76 @@ def fix_normals(input_path, output_path):
     log('normals fixed')
 
 
-def fill_holes(input_path, output_path, max_hole_size=None):
-    """Fill holes in the mesh (ported from modal_app/_mesh_op.py).
+def _boundary_loops(g, cap=20000):
+    """Return the mesh's open boundary loops as lists of vertex indices.
 
-    The load-bearing fix is WELDING sub-millimetre vertex gaps first: the AI
-    generators (TRELLIS/SF3D/Hi3DGen) leave seams unwelded, so trimesh
-    detects no boundary edges and a naive single fill_holes pass silently
-    no-ops (watertight stays False). After welding we run up to 4 repair
-    passes (fix_winding + broken-face cleanup + fan fill) then a final
-    fix_normals. `max_hole_size` is accepted but unused (the UI slider was a
-    dead no-op — trimesh.repair.fill_holes fills all holes at once)."""
+    A boundary edge is used by exactly one triangle; we chain them into
+    closed cycles. `cap` bounds how many loops we trace so a pathological
+    mesh can't hang the op."""
     import trimesh
+    edges = g.edges_sorted
+    uniq, counts = np.unique(edges, axis=0, return_counts=True)
+    boundary = uniq[counts == 1]
+    if len(boundary) == 0:
+        return []
+    from collections import defaultdict
+    adj = defaultdict(list)
+    for a, b in boundary.tolist():
+        adj[a].append(b)
+        adj[b].append(a)
+    seen = set()
+    loops = []
+    for a0, b0 in boundary.tolist():
+        e0 = (a0, b0) if a0 < b0 else (b0, a0)
+        if e0 in seen:
+            continue
+        seen.add(e0)
+        loop = [a0, b0]
+        prev, cur = a0, b0
+        guard = 0
+        while cur != a0 and guard < 100000:
+            guard += 1
+            nxt = None
+            for x in adj[cur]:
+                if x == prev:
+                    continue
+                e = (cur, x) if cur < x else (x, cur)
+                if e in seen:
+                    continue
+                nxt = x
+                seen.add(e)
+                break
+            if nxt is None:
+                break
+            loop.append(nxt)
+            prev, cur = cur, nxt
+        if cur == a0 and len(loop) >= 4:
+            loops.append(loop[:-1])  # drop the closing duplicate
+        if len(loops) >= cap:
+            break
+    return loops
+
+
+def fill_holes(input_path, output_path, min_hole_size=3, max_hole_size=2000):
+    """Fill mesh holes whose boundary loop is between min and max EDGES.
+
+    Pipeline per mesh (ported from modal_app/_mesh_op.py + a size gate):
+      1. drop degenerate faces + unreferenced verts
+      2. WELD sub-mm seam gaps (load-bearing: the AI generators leave seams
+         unwelded, so trimesh sees no boundary edges and a naive fill no-ops)
+      3. fix_winding
+      4. enumerate boundary loops; fan-fill only those with
+         min_hole_size <= edges <= max_hole_size
+      5. final fix_normals
+
+    The size gate gives the UI sliders real meaning (cloud parity): small
+    loops below `min` and large openings above `max` are left untouched."""
+    import trimesh
+    try:
+        min_e = max(3, int(min_hole_size))
+        max_e = max(min_e, int(max_hole_size))
+    except (TypeError, ValueError):
+        min_e, max_e = 3, 2000
     scene = trimesh.load(input_path)
     geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
     for g in geoms:
@@ -290,55 +353,44 @@ def fill_holes(input_path, output_path, max_hole_size=None):
                 g.merge_vertices()
         except Exception as e:
             log(f'fill_holes weld skipped: {e}')
-        # Iterated repair.
-        prev_boundary = None
-        for _ in range(4):
-            try:
-                trimesh.repair.fix_winding(g)
-            except Exception:
-                pass
-            try:
-                g.update_faces(g.unique_faces())
-            except Exception:
-                pass
-            try:
-                broken = trimesh.repair.broken_faces(g)
-                if broken is not None and len(broken):
-                    mask = np.ones(len(g.faces), dtype=bool)
-                    mask[broken] = False
-                    g.update_faces(mask)
-            except Exception:
-                pass
-            try:
-                trimesh.repair.fill_holes(g, use_fan=True)
-            except TypeError:
-                trimesh.repair.fill_holes(g)
-            except Exception:
-                pass
-            if g.is_watertight:
-                break
-            # Stop when boundary edges stop shrinking (no progress).
-            try:
-                edges = g.edges_sorted
-                _, counts = np.unique(edges, axis=0, return_counts=True)
-                boundary = int((counts == 1).sum())
-            except Exception:
-                boundary = None
-            if boundary is not None and prev_boundary is not None and boundary >= prev_boundary:
-                break
-            prev_boundary = boundary
+        try:
+            trimesh.repair.fix_winding(g)
+            g.update_faces(g.unique_faces())
+        except Exception:
+            pass
+        # Size-gated fan fill.
+        filled = skipped_small = skipped_big = 0
+        try:
+            loops = _boundary_loops(g)
+            new_faces = []
+            for loop in loops:
+                n = len(loop)
+                if n < min_e:
+                    skipped_small += 1
+                    continue
+                if n > max_e:
+                    skipped_big += 1
+                    continue
+                for i in range(1, n - 1):
+                    new_faces.append((loop[0], loop[i], loop[i + 1]))
+                filled += 1
+            if new_faces:
+                g.faces = np.vstack([np.asarray(g.faces), np.asarray(new_faces, dtype=np.int64)])
+        except Exception as e:
+            log(f'fill_holes gate skipped: {e}')
         try:
             g.fix_normals()
         except Exception:
             pass
-        log(f'holes filled (watertight: {g.is_watertight})')
+        log(f'holes filled: {filled} (skipped {skipped_small} < {min_e}, '
+            f'{skipped_big} > {max_e} edges) watertight={g.is_watertight}')
     _export(scene, geoms, output_path)
 
 
 def center(input_path, output_path):
     """Center the JOINT bbox on X/Z at origin, feet (joint min Y) at Y=0.
 
-    One shared offset from the joint bounding box of ALL geometries — the
+    One shared offset from the joint bounding box of ALL geometries - the
     previous per-geometry centroid offset tore multi-part GLBs apart (each
     part moved by a different amount) and used the mass centroid instead of
     the geometric bbox center. Ported from modal_app/_mesh_op.py::center."""
@@ -348,7 +400,7 @@ def center(input_path, output_path):
     verts = [g.vertices for g in geoms if hasattr(g, 'vertices') and len(g.vertices)]
     if not verts:
         _export(scene, geoms, output_path)
-        log('centered (no vertices — passthrough)')
+        log('centered (no vertices - passthrough)')
         return
     all_verts = np.concatenate(verts)
     cx = (all_verts[:, 0].min() + all_verts[:, 0].max()) / 2.0
@@ -373,7 +425,7 @@ _TRELLIS2_PRESETS = {
 def trellis2_retex(input_path, output_path, source_image, preset='fast'):
     """Re-texture mesh via TRELLIS-2-4B native PBR (SOTA quality).
 
-    Wraps scripts/trellis2_texturing_bridge.py — runs in the TRELLIS2_win
+    Wraps scripts/trellis2_texturing_bridge.py - runs in the TRELLIS2_win
     venv (flash_attn + DINOv3). ~90s on RTX 5080. `preset` (fast/balanced/
     quality) selects the bridge's --steps/--texture-size/--image-resolution;
     it used to be a dead UI selector stashed in an unread window var."""
@@ -425,13 +477,13 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
     made_copy = os.path.abspath(input_path) != os.path.abspath(output_path)
     if made_copy:
         shutil.copy(input_path, output_path)
-    # Auto-detect Hi3DGen by filename — same pattern as the meshProject
+    # Auto-detect Hi3DGen by filename - same pattern as the meshProject
     # regex in the renderer.
     env = dict(os.environ)
     if '_hi3dgen_' in os.path.basename(input_path).lower():
         env['FABMESH_TEXPROJ_HI3DGEN_UNDO'] = '1'
         env['FABMESH_UV_REPACK'] = '0'
-        log('Hi3DGen mesh detected — applying axis fix '
+        log('Hi3DGen mesh detected - applying axis fix '
             '(FABMESH_TEXPROJ_HI3DGEN_UNDO=1)')
     r = subprocess.run(
         [sys.executable, script, output_path, source_image, output_path, str(tex_res)],
@@ -441,7 +493,7 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
     if r.returncode != 0:
         if r.stderr:
             print(r.stderr, end='', flush=True)  # surface the real error
-        # Only delete the freshly-made copy — never the user's in-place source.
+        # Only delete the freshly-made copy - never the user's in-place source.
         if made_copy and os.path.exists(output_path):
             try:
                 os.remove(output_path)
@@ -452,23 +504,73 @@ def retexture(input_path, output_path, source_image, tex_res=2048):
     log('retextured')
 
 
+def _sanitize_for_export(geoms):
+    """Strip vertex-attribute landmines before GLB export.
+
+    The mesh-edit Save (three.js GLTFExporter) bakes a 3-wide COLOR_0
+    accessor; trimesh loads it into TextureVisuals.vertex_attributes['color']
+    as (N,3) and its GLB exporter then crashes with
+    'cannot reshape array of size N*3 into shape (4)'. On a textured mesh the
+    texture is the source of truth, so we drop the stray vertex color. We
+    also drop any vertex_attribute whose row count no longer matches the
+    vertices (e.g. after a merge/decimate that changed the count)."""
+    import trimesh
+    for g in geoms:
+        vis = getattr(g, 'visual', None)
+        va = getattr(vis, 'vertex_attributes', None)
+        if not va:
+            continue
+        n = len(g.vertices) if hasattr(g, 'vertices') else None
+        for key in list(va.keys()):
+            try:
+                arr = np.asarray(va[key])
+            except Exception:
+                continue
+            if key == 'color' and isinstance(vis, trimesh.visual.TextureVisuals):
+                del va[key]
+            elif n is not None and arr.shape and arr.shape[0] != n:
+                del va[key]
+
+
 def _export(scene, geoms, output_path):
     """Export mesh(es) to GLB.
 
     When the active preset enables `extension_webp` AND the target is a
     .glb, we pass `extension_webp=True` so trimesh writes WebP textures
-    (EXT_texture_webp glTF extension). Cloud parity — smaller GLBs.
+    (EXT_texture_webp glTF extension). Cloud parity - smaller GLBs.
     """
+    import trimesh
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     webp = bool(PRESETS[ACTIVE_PRESET].get('extension_webp', False))
     kwargs = {}
     if webp and output_path.lower().endswith('.glb'):
         kwargs['extension_webp'] = True
         kwargs.setdefault('file_type', 'glb')
-    if len(geoms) == 1:
-        geoms[0].export(output_path, **kwargs)
-    else:
-        scene.export(output_path, **kwargs)
+    _sanitize_for_export(geoms)
+
+    def _do():
+        if len(geoms) == 1:
+            geoms[0].export(output_path, **kwargs)
+        else:
+            scene.export(output_path, **kwargs)
+
+    try:
+        _do()
+    except Exception as e:
+        # Last-resort: rebuild visuals from scratch (keep texture uv+material,
+        # else plain colours) so a malformed attribute can't block the save.
+        log(f'export failed ({type(e).__name__}: {e}); retrying with visuals reset')
+        for g in geoms:
+            try:
+                vis = getattr(g, 'visual', None)
+                if isinstance(vis, trimesh.visual.TextureVisuals):
+                    g.visual = trimesh.visual.TextureVisuals(
+                        uv=getattr(vis, 'uv', None), material=getattr(vis, 'material', None))
+                else:
+                    g.visual = trimesh.visual.ColorVisuals(g)
+            except Exception:
+                pass
+        _do()
 
 
 if __name__ == '__main__':

@@ -1,5 +1,30 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — AI-TOOLS: crashes réels sur vrai mesh catapulte 473k faces)
+
+Tests sur le VRAI mesh édité (385790 verts) ont révélé des crashes que les
+meshes synthétiques ne montraient pas. Tout re-testé end-to-end sur ce mesh :
+les 6 ops passent désormais (textured=True, uv_ok=True partout).
+
+- **_export (cause de fix_normals/fill_holes/center FAIL)** : le Save mesh-edit
+  (GLTFExporter three.js) bake un attribut COLOR_0 en VEC3 ; trimesh le charge
+  dans TextureVisuals.vertex_attributes['color'] (N,3) et son export GLB crashe
+  ('cannot reshape array of size N*3 into shape (4)'). Ajout _sanitize_for_export :
+  drop le color parasite sur mesh texturé + tout attribut de taille != verts +
+  retry visuals reset. → fix_normals/center/smooth/fill_holes exportent.
+- **decimate** : replay_simplification CRASHE (IndexError: index 77779 oob 77754)
+  sur vrai mesh. Remplacé par transfert UV nearest-neighbour KDTree (robuste).
+  Plancher ratio 0.05→0.01 pour atteindre des cibles agressives.
+- **subdivide ne finissait pas** : level 3 sur 473k faces = explosion + scan
+  Python O(faces) → hang. Garde-fou FACE_BUDGET=2M qui clampe les niveaux
+  (level 3→1 ici) ; finit en 12s, re-weld OK, texture OK.
+- **fill_holes min/max (comme cloud)** : sliders min/max (edges) remis + Python
+  énumère les boucles de bord et ne remplit en éventail que les trous dans
+  [min,max]. 19 trous remplis sur catapulte, texture préservée.
+- **UnicodeEncodeError** : em-dashes/arrows dans les logs crashaient sur pipe
+  Windows cp1252. Logs passés en ASCII + main.js force PYTHONUTF8/PYTHONIOENCODING
+  sur le spawn mesh-tool (blindage).
+
 ## 2026-06-15 (fix — AI-TOOLS mesh buttons: desktop ramené à parité cloud)
 
 Workflow d'audit (17 agents, desktop vs cloud, vérif adversariale) sur les 8

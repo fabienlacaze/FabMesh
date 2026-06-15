@@ -5641,7 +5641,10 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   const args = [script, operation, meshPath, outPath, ...(params || [])];
 
   return new Promise((resolve) => {
-    execFile('python', args, { timeout: 300000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    // Force UTF-8 stdio so a non-ASCII log line (accent, arrow, …) can't
+    // crash the script with a cp1252 UnicodeEncodeError on Windows.
+    const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
+    execFile('python', args, { timeout: 300000, maxBuffer: 10 * 1024 * 1024, env }, (error, stdout, stderr) => {
       if (stdout) log.info('mesh-tool', stdout.trim());
       if (error) {
         log.error('mesh-tool', error.message);

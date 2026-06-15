@@ -7752,12 +7752,13 @@ const MESH_TOOL_SCHEMAS = {
   },
   fill_holes: {
     title: 'Fill holes',
-    subtitle: 'Weld seams, then iteratively cap all mesh holes (Python only — no live preview).',
+    subtitle: 'Weld seams, then fill holes whose boundary loop is between Min and Max edges (Python only — no live preview).',
     needsImage: false,
-    // No parameters — trimesh fills all holes at once, so the old
-    // "max hole size" slider was a dead no-op. Removed.
-    params: [],
-    build: () => [],
+    params: [
+      { id: 'min_hole_size', label: 'Min hole size (edges)', type: 'range', min: 3, max: 20000, step: 1,  default: 3 },
+      { id: 'max_hole_size', label: 'Max hole size (edges)', type: 'range', min: 3, max: 20000, step: 10, default: 2000 },
+    ],
+    build: (vals) => [String(vals.min_hole_size), String(vals.max_hole_size)],
   },
   center: {
     title: 'Center mesh',
@@ -10098,6 +10099,9 @@ function _meBuildPosAdj(geom) {
 // Enable selection-dependent buttons only when something is selected.
 function _meUpdateSelButtons() {
   const has = _meHasSelection();
+  // The "Garder le reste" row only makes sense alongside a usable Crop.
+  const keepRestRow = document.getElementById('me-sel-crop-keeprest-row');
+  if (keepRestRow) keepRestRow.style.display = has ? 'flex' : 'none';
   for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete', 'me-sel-duplicate', 'me-sel-crop', 'me-sel-isolate', 'me-sel-hide', 'me-sel-flip', 'me-sel-smooth']) {
     const b = document.getElementById(id);
     if (!b) continue;
