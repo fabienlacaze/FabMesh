@@ -7581,7 +7581,17 @@ async function runMeshTool(operation, params = []) {
     if (result && result.success) {
       showToast(`${operation} done!`, 'success');
       if (job && typeof completeJob === 'function') completeJob(job.id, true);
-      // Refresh mesh list
+      // Register the new mesh version. populateWorkspace only RENDERS
+      // p.meshes — it does not re-scan disk — so without this the decimated/
+      // filled/… output never appears as a new version and the user keeps
+      // seeing the old triangle count.
+      const newPath = result.newPath || result.path;
+      if (newPath) {
+        p.meshes = p.meshes || [];
+        const filename = result.filename || newPath.replace(/\\/g, '/').split('/').pop();
+        p.meshes.unshift({ path: newPath, filename, size: result.size || 0, mtime: Date.now() });
+        p.selectedMeshPath = newPath;  // show the result as the active mesh
+      }
       populateWorkspace(p);
     } else {
       // Append the subprocess stderr when present — main.js resolves with
@@ -7728,7 +7738,7 @@ const MESH_TOOL_SCHEMAS = {
     subtitle: 'Reduce triangle count (Python only — no live preview).',
     needsImage: false,
     params: [
-      { id: 'target_faces', label: 'Target triangles', type: 'range', min: 100, max: 100000, step: 100, default: 5000 },
+      { id: 'target_faces', label: 'Target triangles', type: 'range', min: 100, max: 100000, step: 100, default: 5000, resetToCurrent: true },
     ],
     build: (vals) => [String(vals.target_faces)],
   },
@@ -7921,10 +7931,31 @@ function _mtLoadMesh(meshPath) {
           mtState.origGeoms.push({ mesh: child, originalGeom: child.geometry });
         }
       });
-      // Now that geoms are cached, run the initial preview.
+      // Now that geoms are cached, run the initial preview + refresh the
+      // "↺ Actuel" button with the real triangle count.
+      _mtRefreshResetBtn();
       _mtRunPreview();
     });
   });
+}
+
+// Current triangle count of the mesh loaded in the mesh-tool viewport.
+function _mtCurrentTriCount() {
+  let n = 0;
+  for (const e of (mtState.origGeoms || [])) {
+    const g = e.originalGeom;
+    if (!g) continue;
+    n += g.index ? g.index.count / 3 : (g.attributes?.position ? g.attributes.position.count / 3 : 0);
+  }
+  return Math.round(n);
+}
+// Refresh the "reset to current" button label once the mesh has loaded.
+function _mtRefreshResetBtn() {
+  const btn = document.getElementById('mt-reset-current');
+  if (!btn) return;
+  const n = _mtCurrentTriCount();
+  btn.textContent = n ? `↺ Actuel : ${n.toLocaleString('fr-FR')}` : '↺ Actuel';
+  btn.disabled = !n;
 }
 
 function openMeshToolModal(toolName) {
@@ -8000,6 +8031,23 @@ function openMeshToolModal(toolName) {
       });
       input.addEventListener('change', () => _mtSchedulePreview());
       wrap.appendChild(input);
+      // Optional "reset to the mesh's current triangle count" button.
+      if (spec.resetToCurrent) {
+        const rb = document.createElement('button');
+        rb.id = 'mt-reset-current';
+        rb.className = 'secondary-btn';
+        rb.style.cssText = 'margin-top:4px; padding:4px 8px; font-size:11px; width:100%;';
+        rb.textContent = '↺ Actuel';
+        rb.onclick = () => {
+          const n = _mtCurrentTriCount();
+          if (!n) { showToast('Mesh pas encore chargé', 'info', 1200); return; }
+          if (n > Number(input.max)) input.max = String(n);  // let the slider reach it
+          input.value = String(n);
+          labVal.textContent = String(n);
+          _mtSchedulePreview();
+        };
+        wrap.appendChild(rb);
+      }
       body.appendChild(wrap);
     });
   }
