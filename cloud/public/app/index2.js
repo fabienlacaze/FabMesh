@@ -12028,49 +12028,55 @@ function _meGetIntersection(e) {
   return hits.length > 0 ? hits[0] : null;
 }
 
-function _mePushUndo() {
-  // Save vertex positions of all meshes
-  const snapshot = [];
+function _meSnapshot() {
+  const snap = [];
   meState.mesh?.traverse(c => {
     if (c.isMesh && c.geometry) {
-      snapshot.push({
+      snap.push({
         mesh: c,
         positions: c.geometry.attributes.position.array.slice(),
         colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
+        // Capture the index too — Delete rewrites it, so without this undo
+        // can't bring deleted faces back.
+        index: c.geometry.index ? c.geometry.index.array.slice() : null,
       });
     }
   });
-  meState.undoStack.push(snapshot);
+  return snap;
+}
+function _meRestore(snapshot) {
+  for (const s of snapshot) {
+    const geom = s.mesh.geometry;
+    geom.attributes.position.array.set(s.positions);
+    geom.attributes.position.needsUpdate = true;
+    if (s.colors && geom.attributes.color) {
+      geom.attributes.color.array.set(s.colors);
+      geom.attributes.color.needsUpdate = true;
+    }
+    if (s.index) geom.setIndex(new THREE.BufferAttribute(s.index, 1));
+    geom._selSaved = new Map();
+    geom._posGroups = null;
+    geom._posKeyByIndex = null;
+    geom.computeVertexNormals();
+  }
+  if (typeof _meUpdateSelButtons === 'function') _meUpdateSelButtons();
+}
+function _mePushUndo() {
+  meState.undoStack.push(_meSnapshot());
   if (meState.undoStack.length > 20) meState.undoStack.shift();
   meState.redoStack = [];
   _meUpdateUndoBtns();
 }
-
 function _meUndo() {
   if (meState.undoStack.length === 0) return;
-  // Save current for redo
-  const current = [];
-  meState.mesh?.traverse(c => {
-    if (c.isMesh && c.geometry) {
-      current.push({
-        mesh: c,
-        positions: c.geometry.attributes.position.array.slice(),
-        colors: c.geometry.attributes.color ? c.geometry.attributes.color.array.slice() : null,
-      });
-    }
-  });
-  meState.redoStack.push(current);
-  // Restore
-  const snapshot = meState.undoStack.pop();
-  for (const s of snapshot) {
-    s.mesh.geometry.attributes.position.array.set(s.positions);
-    s.mesh.geometry.attributes.position.needsUpdate = true;
-    if (s.colors && s.mesh.geometry.attributes.color) {
-      s.mesh.geometry.attributes.color.array.set(s.colors);
-      s.mesh.geometry.attributes.color.needsUpdate = true;
-    }
-    s.mesh.geometry.computeVertexNormals();
-  }
+  meState.redoStack.push(_meSnapshot());   // current -> redo
+  _meRestore(meState.undoStack.pop());
+  _meUpdateUndoBtns();
+}
+function _meRedo() {
+  if (meState.redoStack.length === 0) return;
+  meState.undoStack.push(_meSnapshot());   // current -> undo
+  _meRestore(meState.redoStack.pop());
   _meUpdateUndoBtns();
 }
 
@@ -12335,6 +12341,7 @@ document.getElementById('ws-mesh-selectface-btn')?.addEventListener('click', () 
 document.getElementById('me-close-x')?.addEventListener('click', _closeMeshEdit);
 document.getElementById('me-cancel')?.addEventListener('click', _closeMeshEdit);
 document.getElementById('me-undo')?.addEventListener('click', _meUndo);
+document.getElementById('me-redo')?.addEventListener('click', _meRedo);
 
 // Mode switching
 ['sculpt', 'paint', 'select'].forEach(mode => {

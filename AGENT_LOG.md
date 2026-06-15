@@ -10,6 +10,13 @@ gizmo jaune en overlay (_mtComputePivot/_makePivotGizmo/_mtBuildPivotGizmo,
 dispatch overlayPreview==='pivot') + bouton "Center"->"Set Pivot" -> set_pivot.
 Ajouté aux regex nom/groupage.
 
+## 2026-06-15 (parity — lot 4: Redo + undo-de-l'index sur cloud)
+
+cloud/public/app/index2.js avait l'ancien undo (sans index) et PAS de _meRedo
+(bouton me-redo mort). Porté la version desktop : _meSnapshot/_meRestore
+capturent+restaurent geometry.index (undo après Delete ramène les faces) +
+_meRedo ajouté + bouton me-redo câblé. node --check OK. Push -> auto-deploy.
+
 ## 2026-06-15 (parity — lot 2: PRESERVE_PREFIX agnostique côté cloud)
 
 modal_app/_modify.py avait encore l'ancien PRESERVE_PREFIX/NEG orienté
