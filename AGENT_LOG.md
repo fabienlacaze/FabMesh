@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — watertight sortait à l'échelle voxel-index (x~resolution))
+
+User : "watertight ne marche pas" puis "ça marche mais on le voit pas, faut
+beaucoup zoomer". Diagnostic bounds : mesh watertight diag=129.6 centré
+(25,28.9,51.3) vs source diag=1.24 centré origine -> x104 trop gros + décalé.
+CAUSE : trimesh VoxelGrid.marching_cubes renvoie la surface en coordonnées
+d'INDEX voxel (0..resolution), pas en monde -> hors-champ dans le viewer
+principal (le Paint modal auto-cadre donc y paraissait OK). FIX dans
+watertight() : après marching_cubes, rescale+recenter uniforme sur la bbox du
+mesh source (voxels cubiques -> scale unique exact ; robuste si une future
+version de trimesh applique déjà le transform -> scale~1). + réparé le GLB v2
+déjà généré in-place (diag 1.24 OK). Pas de restart Electron (script Python) ;
+recharger la version pour la voir cadrée.
+
 ## 2026-06-15 (feat — budget RAM réglable : le slider RAM plafonne réellement)
 
 User : "si on règle à 25 GB, Electron/TRELLIS/tout doivent croire qu'il n'y a

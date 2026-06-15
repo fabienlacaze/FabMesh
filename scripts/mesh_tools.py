@@ -498,6 +498,29 @@ def watertight(input_path, output_path, resolution=128):
     except Exception as e:
         log(f'watertight fill warn: {e}')
     wt = vg.marching_cubes
+    # trimesh's VoxelGrid.marching_cubes returns the surface in VOXEL-INDEX
+    # space (0..resolution), NOT world coordinates — so the shell comes out
+    # ~`resolution`x too big and offset by the grid origin. Left as-is the mesh
+    # is invisible in the viewer (off-frame / tiny relative to the camera).
+    # Rescale + recenter it back onto the SOURCE mesh's bounding box. Voxels are
+    # cubic so a single uniform scale + center alignment is exact; this is also
+    # robust if a future trimesh already applies the transform (scale->~1).
+    try:
+        src_lo, src_hi = mesh.bounds
+        src_ctr = (src_lo + src_hi) / 2.0
+        src_size = src_hi - src_lo
+        wt_lo, wt_hi = wt.bounds
+        wt_ctr = (wt_lo + wt_hi) / 2.0
+        wt_size = np.maximum(wt_hi - wt_lo, 1e-9)
+        scale = float(np.median(src_size / wt_size))
+        if not np.isfinite(scale) or scale <= 0:
+            scale = 1.0
+        wt.apply_translation(-wt_ctr)
+        wt.apply_scale(scale)
+        wt.apply_translation(src_ctr)
+        log(f'watertight: rescaled voxel mesh to source bounds (scale={scale:.5f})')
+    except Exception as e:
+        log(f'watertight rescale warn: {e}')
     # Smooth away the voxel staircase a little.
     try:
         trimesh.smoothing.filter_laplacian(wt, iterations=2, lamb=0.5, volume_constraint=False)
