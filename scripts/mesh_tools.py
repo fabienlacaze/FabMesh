@@ -415,6 +415,47 @@ def center(input_path, output_path):
     log('centered (joint bbox X/Z=0, feet Y=0)')
 
 
+def watertight(input_path, output_path, resolution=128):
+    """Rebuild a CLOSED, watertight shell via voxel remesh + marching cubes.
+
+    Unlike fill_holes (which stitches existing boundary loops), this fuses
+    ALL the disconnected bodies into one solid surface with no holes — the
+    proper "make it watertight / printable" op. It loses the original UVs /
+    texture (the surface is brand new), so re-texture afterwards. Higher
+    `resolution` = finer detail but slower + heavier."""
+    import trimesh
+    resolution = max(32, min(400, int(resolution)))
+    scene = trimesh.load(input_path)
+    src = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
+    geoms = [g for g in src if hasattr(g, 'vertices') and len(g.vertices) and hasattr(g, 'faces') and len(g.faces)]
+    if not geoms:
+        _export(scene, src, output_path)
+        log('watertight: no geometry - passthrough')
+        return
+    mesh = trimesh.util.concatenate(
+        [trimesh.Trimesh(vertices=np.asarray(g.vertices), faces=np.asarray(g.faces)) for g in geoms])
+    bb_diag = float(np.linalg.norm(mesh.bounds[1] - mesh.bounds[0])) or 1.0
+    pitch = bb_diag / resolution
+    vg = mesh.voxelized(pitch=pitch)
+    try:
+        vg = vg.fill()
+    except Exception as e:
+        log(f'watertight fill warn: {e}')
+    wt = vg.marching_cubes
+    # Smooth away the voxel staircase a little.
+    try:
+        trimesh.smoothing.filter_laplacian(wt, iterations=2, lamb=0.5, volume_constraint=False)
+    except Exception:
+        pass
+    try:
+        wt.fix_normals()
+    except Exception:
+        pass
+    log(f'watertight: {len(wt.faces)} faces, watertight={wt.is_watertight}, '
+        f'bodies={wt.body_count} (resolution={resolution})')
+    _export(None, [wt], output_path)
+
+
 _TRELLIS2_PRESETS = {
     'fast':     ['--steps', '12', '--texture-size', '2048', '--image-resolution', '1024'],
     'balanced': ['--steps', '24', '--texture-size', '2048', '--image-resolution', '1024'],
@@ -610,6 +651,7 @@ if __name__ == '__main__':
         'fix_normals': lambda: fix_normals(inp, out),
         'fill_holes': lambda: fill_holes(inp, out, *params),
         'center': lambda: center(inp, out),
+        'watertight': lambda: watertight(inp, out, *params),
         'retexture': lambda: retexture(inp, out, *params),
         'trellis2_retex': lambda: trellis2_retex(inp, out, *params),
     }

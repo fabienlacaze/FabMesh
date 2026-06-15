@@ -7555,6 +7555,7 @@ const MESH_TOOL_EXPECTED_MS = {
   subdivide:      15000,
   fix_normals:    2000,
   fill_holes:     8000,
+  watertight:     12000,
   center:         1000,
   retexture:      45000,
   trellis2_retex: 110000,
@@ -7943,6 +7944,16 @@ const MESH_TOOL_SCHEMAS = {
     params: [],
     build: () => [],
     preview: (geom) => _jsCenter(geom),
+  },
+  watertight: {
+    title: 'Watertight',
+    subtitle: 'Rebuild a CLOSED, watertight shell (voxel remesh). Fuses every disconnected part into one solid with no holes — this REPLACES the geometry and removes the texture, so Re-Texture afterwards. Higher resolution = more detail, slower.',
+    needsImage: false,
+    confirm: 'Watertight rebuilds the mesh as a new closed shell and removes its texture (re-texture afterwards). Continue?',
+    params: [
+      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 320, step: 8, default: 128 },
+    ],
+    build: (vals) => [String(vals.resolution)],
   },
   retexture: {
     title: 'Resolution',
@@ -8391,6 +8402,7 @@ document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () =>
 document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => openMeshToolModal('fix_normals'));
 document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => openMeshToolModal('fill_holes'));
 document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('center'));
+document.getElementById('ws-mesh-watertight-btn')?.addEventListener('click', () => openMeshToolModal('watertight'));
 document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => openMeshToolModal('retexture'));
 document.getElementById('ws-mesh-trellis2-btn')?.addEventListener('click', () => openMeshToolModal('trellis2_retex'));
 

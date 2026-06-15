@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — outil Watertight (voxel remesh) dans AI Tools)
+
+Distinction faite avec le user : Fill holes = couture des bords (stitching),
+Watertight = vraie coque fermée. Nouvel op `watertight` dans mesh_tools.py :
+voxelize (pitch=bbdiag/resolution) -> fill() -> marching_cubes -> laplacian
+2 passes -> fix_normals. Fusionne tous les corps disjoints en une surface
+étanche. PERD les UV/texture (surface neuve) -> re-texturer après. Testé sur
+catapulte 473k/17k-bodies : res 128 -> 78922 faces, watertight=True, 7.2s.
+UI : bouton AI Tools "Watertight" + slider Resolution (48-320, défaut 128) +
+confirm (remplace la géométrie / enlève la texture). Pas de live preview
+(voxel trop lourd en JS).
+
 ## 2026-06-15 (feat — Fill holes preview vert + algo cohérent preview/apply)
 
 Demande : voir les trous en vert (façon Unreal) et remplir avec la texture
