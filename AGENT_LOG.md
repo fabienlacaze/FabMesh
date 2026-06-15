@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — Watertight crash MAX_PATH + wireframe blanc + confirm stylé)
+
+User : Watertight plante, fenêtre confirm pas au style appli, triangles
+invisibles.
+- **Watertight crash = Windows MAX_PATH (260)**. Chaque op mesh-tool ajoutait
+  `_<op>_<ts>` au nom déjà long → après ~6 ops le chemin faisait 261 chars ->
+  FileNotFoundError sur open("wb") à l'export. Vérifié : nom 176 chars ->
+  chemin 261. FIX : le handler mesh-tool (main.js) strip les chaînes d'op
+  (OP_SUFFIX) avant d'ajouter la nouvelle -> base bornée
+  (catapulte_trellis2_native_<gents>, 39 chars), + cap dur à 90. Vérifié :
+  watertight OK sur le mesh long (chemin 121). `watertight`/`subdivide`/
+  `trellis2_retex` ajoutés aux POST regex (renderer + _meshProjectBackend)
+  pour que ces versions groupent sous le bon projet.
+- **Wireframe (△ Triangles)** : couleur 0x10131a (quasi-noir, invisible sur
+  mesh sombre) -> blanc 0xffffff opacity 0.45.
+- **Confirm** : schema.confirm utilisait confirm() natif Windows -> remplacé
+  par customConfirm (modal stylé de l'appli).
+
 ## 2026-06-15 (fix — Modify image: hint strength + prefix preserve agnostique)
 
 User : le catapulte devient une "voiture" en Modify image -> croit à un prompt

@@ -472,7 +472,7 @@ async function refreshProjectsPage() {
     // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
     // fix_normals, center, upscale, refine, augment, vc (vertex color).
     // Optionally followed by a timestamp OR a short tag (_v2, _test, etc.).
-    const POST_SUFFIX = /_(cntile|retexture|decimate|smooth|fill_holes|fix_normals|center|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
+    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|watertight|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
     let prev;
     do {
       prev = base;
@@ -8076,7 +8076,7 @@ function _mtBuildWireframes() {
     if (!g) continue;
     const lines = new THREE.LineSegments(
       new THREE.WireframeGeometry(g),
-      new THREE.LineBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.28, depthTest: true }));
+      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthTest: true }));
     lines.renderOrder = 997;
     e.mesh.add(lines);
     mtState.wireframes.push(lines);
@@ -8387,7 +8387,7 @@ function openMeshToolModal(toolName) {
   if (closeX) closeX.onclick = close;
   applyBtn.onclick = async () => {
     const vals = _mtCollectVals(body);
-    if (schema.confirm && !confirm(schema.confirm)) return;
+    if (schema.confirm && !await customConfirm(schema.confirm, schema.title, 'Continue')) return;
     const ctx = { imagePath: p.selectedImagePath, meshPath: p.selectedMeshPath };
     // A schema can pick the operation at apply time (e.g. Triangle count
     // decides decimate vs subdivide from the target vs the current count).
