@@ -3664,6 +3664,24 @@ ipcMain.handle('rename-project-files', (event, { oldName, newName }) => {
     if (!newProj) return { success: false, error: 'invalid name' };
     if (newProj === oldName) return { success: true, newName: oldName, renamed: {} };
     const _esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Reject if a DIFFERENT project already uses this derived name — two
+    // projects with the same cleanName would silently MERGE in the grid.
+    const _nameTaken = () => {
+      if (fs.existsSync(IMAGES_DIR)) {
+        for (const d of fs.readdirSync(IMAGES_DIR)) {
+          try { if (!fs.statSync(path.join(IMAGES_DIR, d)).isDirectory()) continue; } catch (_) { continue; }
+          if (d.replace(/_\d+$/, '') === newProj) return true;
+        }
+      }
+      if (fs.existsSync(MESHES_DIR)) {
+        for (const f of fs.readdirSync(MESHES_DIR)) {
+          if (!/\.(glb|gltf|obj|fbx|stl|ply)$/i.test(f)) continue;
+          if (_meshProjectBackend(f) === newProj) return true;
+        }
+      }
+      return false;
+    };
+    if (_nameTaken()) return { success: false, error: `A project named "${newProj}" already exists — choose a different name.` };
     const ts = Date.now();
     const moves = [];   // [src, dest] — planned, executed only if no collision
 
