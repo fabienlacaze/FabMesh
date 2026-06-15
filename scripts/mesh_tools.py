@@ -261,70 +261,70 @@ def fix_normals(input_path, output_path):
     log('normals fixed')
 
 
-def _boundary_loops(g, cap=20000):
-    """Return the mesh's open boundary loops as lists of vertex indices.
+def _grouped_boundary_loops(verts, faces, bb_diag, cap=200000):
+    """Boundary loops in position-group space — IDENTICAL logic to the
+    renderer's _jsHoleFillPreview so the green preview matches the fill.
 
-    A boundary edge is used by exactly one triangle; we chain them into
-    closed cycles. `cap` bounds how many loops we trace so a pathological
-    mesh can't hang the op."""
-    import trimesh
-    edges = g.edges_sorted
-    uniq, counts = np.unique(edges, axis=0, return_counts=True)
-    boundary = uniq[counts == 1]
-    if len(boundary) == 0:
-        return []
+    Returns loops as lists of REPRESENTATIVE original-vertex indices."""
     from collections import defaultdict
-    adj = defaultdict(list)
-    for a, b in boundary.tolist():
-        adj[a].append(b)
-        adj[b].append(a)
-    seen = set()
+    # Strip degenerate triangles (zero-area / duplicate index) so they don't
+    # register as false boundary edges — same as the JS preview.
+    if len(faces):
+        f0, f1, f2 = faces[:, 0], faces[:, 1], faces[:, 2]
+        nondup = (f0 != f1) & (f1 != f2) & (f2 != f0)
+        cr = np.cross(verts[f1] - verts[f0], verts[f2] - verts[f0])
+        keep = nondup & (np.linalg.norm(cr, axis=1) * 0.5 >= bb_diag * 1e-12)
+        faces = faces[keep]
+    if not len(faces):
+        return []
+    Q = 1.0 / (bb_diag * 1e-3)
+    keys = np.round(verts * Q).astype(np.int64)
+    uniq, first_idx, inv = np.unique(keys, axis=0, return_index=True, return_inverse=True)
+    group = inv.astype(np.int64)
+    rep = first_idx.astype(np.int64)          # original vertex index per group
+    Gn = len(uniq)
+    g0 = group[faces[:, 0]]; g1 = group[faces[:, 1]]; g2 = group[faces[:, 2]]
+    ea = np.concatenate([g0, g1, g2]); eb = np.concatenate([g1, g2, g0])
+    m = ea != eb
+    ea, eb = ea[m], eb[m]
+    lo = np.minimum(ea, eb); hi = np.maximum(ea, eb)
+    keyud = lo * Gn + hi
+    uvals, ucounts = np.unique(keyud, return_counts=True)
+    cntper = ucounts[np.searchsorted(uvals, keyud)]
+    isb = cntper == 1
+    succ = defaultdict(list)
+    for a, b in zip(ea[isb].tolist(), eb[isb].tolist()):
+        succ[a].append(b)
     loops = []
-    for a0, b0 in boundary.tolist():
-        e0 = (a0, b0) if a0 < b0 else (b0, a0)
-        if e0 in seen:
-            continue
-        seen.add(e0)
-        loop = [a0, b0]
-        prev, cur = a0, b0
-        guard = 0
-        while cur != a0 and guard < 100000:
-            guard += 1
-            nxt = None
-            for x in adj[cur]:
-                if x == prev:
-                    continue
-                e = (cur, x) if cur < x else (x, cur)
-                if e in seen:
-                    continue
-                nxt = x
-                seen.add(e)
+    for start in list(succ.keys()):
+        while succ.get(start):
+            loop = []
+            g = start
+            for _ in range(100000):
+                loop.append(g)
+                lst = succ.get(g)
+                nx = lst.pop() if lst else None
+                if nx is None or nx == start:
+                    break
+                g = nx
+            if len(loop) >= 3:
+                loops.append([int(rep[x]) for x in loop])
+            else:
                 break
-            if nxt is None:
-                break
-            loop.append(nxt)
-            prev, cur = cur, nxt
-        if cur == a0 and len(loop) >= 4:
-            loops.append(loop[:-1])  # drop the closing duplicate
-        if len(loops) >= cap:
-            break
+            if len(loops) >= cap:
+                return loops
     return loops
 
 
 def fill_holes(input_path, output_path, min_hole_size=3, max_hole_size=2000):
     """Fill mesh holes whose boundary loop is between min and max EDGES.
 
-    Pipeline per mesh (ported from modal_app/_mesh_op.py + a size gate):
-      1. drop degenerate faces + unreferenced verts
-      2. WELD sub-mm seam gaps (load-bearing: the AI generators leave seams
-         unwelded, so trimesh sees no boundary edges and a naive fill no-ops)
-      3. fix_winding
-      4. enumerate boundary loops; fan-fill only those with
-         min_hole_size <= edges <= max_hole_size
-      5. final fix_normals
-
-    The size gate gives the UI sliders real meaning (cloud parity): small
-    loops below `min` and large openings above `max` are left untouched."""
+    Uses the SAME position-group boundary detection as the renderer's live
+    green preview (_jsHoleFillPreview), so the holes shown in green are
+    exactly the ones filled. Each in-range loop is closed by a fan: a
+    size-3 hole gets one triangle, larger holes a centroid fan whose new
+    centre vertex takes the average UV of the loop so the patch inherits
+    the surrounding texture."""
     import trimesh
     try:
         min_e = max(3, int(min_hole_size))
@@ -332,58 +332,58 @@ def fill_holes(input_path, output_path, min_hole_size=3, max_hole_size=2000):
     except (TypeError, ValueError):
         min_e, max_e = 3, 2000
     scene = trimesh.load(input_path)
+    geom_names = list(scene.geometry.keys()) if hasattr(scene, 'geometry') else [None]
     geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
-    for g in geoms:
-        if not hasattr(g, 'faces') or not hasattr(g, 'vertices'):
+    for gi, g in enumerate(geoms):
+        if not hasattr(g, 'faces') or not hasattr(g, 'vertices') or len(g.faces) == 0:
             continue
-        try:
-            g.update_faces(g.nondegenerate_faces())
-            g.remove_unreferenced_vertices()
-        except Exception:
-            pass
-        # Weld seam gaps so boundary edges become detectable.
-        try:
-            bb = np.asarray(g.bounds)
-            bb_diag = float(np.linalg.norm(bb[1] - bb[0])) or 1.0
-            tol = float(np.clip(bb_diag * 1e-3, 1e-6, bb_diag * 1e-2))
-            digits = max(1, int(round(-np.log10(tol))))
-            try:
-                g.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=digits)
-            except TypeError:
-                g.merge_vertices()
-        except Exception as e:
-            log(f'fill_holes weld skipped: {e}')
-        try:
-            trimesh.repair.fix_winding(g)
-            g.update_faces(g.unique_faces())
-        except Exception:
-            pass
-        # Size-gated fan fill.
+        verts = np.asarray(g.vertices, dtype=np.float64)
+        faces = np.asarray(g.faces, dtype=np.int64)
+        is_tex = isinstance(getattr(g, 'visual', None), trimesh.visual.TextureVisuals)
+        old_uv = None
+        if is_tex and getattr(g.visual, 'uv', None) is not None and len(g.visual.uv) == len(verts):
+            old_uv = np.asarray(g.visual.uv, dtype=np.float64)
+        old_mat = getattr(g.visual, 'material', None) if is_tex else None
+        bb_diag = float(np.linalg.norm(verts.max(0) - verts.min(0))) or 1.0
+        loops = _grouped_boundary_loops(verts, faces, bb_diag)
+        new_verts, new_uv, new_faces = [], [], []
         filled = skipped_small = skipped_big = 0
-        try:
-            loops = _boundary_loops(g)
-            new_faces = []
-            for loop in loops:
-                n = len(loop)
-                if n < min_e:
-                    skipped_small += 1
-                    continue
-                if n > max_e:
-                    skipped_big += 1
-                    continue
-                for i in range(1, n - 1):
-                    new_faces.append((loop[0], loop[i], loop[i + 1]))
-                filled += 1
-            if new_faces:
-                g.faces = np.vstack([np.asarray(g.faces), np.asarray(new_faces, dtype=np.int64)])
-        except Exception as e:
-            log(f'fill_holes gate skipped: {e}')
+        base = len(verts)
+        for loop in loops:
+            nL = len(loop)
+            if nL < min_e:
+                skipped_small += 1
+                continue
+            if nL > max_e:
+                skipped_big += 1
+                continue
+            if nL == 3:
+                new_faces.append((loop[0], loop[1], loop[2]))
+            else:
+                ci = base + len(new_verts)
+                new_verts.append(verts[loop].mean(0))
+                if old_uv is not None:
+                    new_uv.append(old_uv[loop].mean(0))
+                for i in range(nL):
+                    new_faces.append((loop[i], loop[(i + 1) % nL], ci))
+            filled += 1
+        if new_faces:
+            allverts = np.vstack([verts, np.asarray(new_verts, dtype=np.float64)]) if new_verts else verts
+            allfaces = np.vstack([faces, np.asarray(new_faces, dtype=np.int64)])
+            ng = trimesh.Trimesh(vertices=allverts, faces=allfaces, process=False)
+            if old_uv is not None:
+                alluv = np.vstack([old_uv, np.asarray(new_uv, dtype=np.float64)]) if new_uv else old_uv
+                ng.visual = trimesh.visual.TextureVisuals(uv=alluv, material=old_mat)
+            geoms[gi] = ng
+            if geom_names[gi] is not None:
+                scene.geometry[geom_names[gi]] = ng
+            g = ng
         try:
             g.fix_normals()
         except Exception:
             pass
         log(f'holes filled: {filled} (skipped {skipped_small} < {min_e}, '
-            f'{skipped_big} > {max_e} edges) watertight={g.is_watertight}')
+            f'{skipped_big} > {max_e} edges)')
     _export(scene, geoms, output_path)
 
 

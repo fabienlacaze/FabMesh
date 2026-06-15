@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — Fill holes preview vert + algo cohérent preview/apply)
+
+Demande : voir les trous en vert (façon Unreal) et remplir avec la texture
+autour.
+- **Preview vert (renderer)** : _jsHoleFillPreview détecte les boucles de bord
+  (strip dégénéré + weld par position 1e-3 + arêtes count==1, porté du cloud
+  _jsFillHoles), gating min/max edges. Trous dans la plage = surface vert
+  clair + contour vert ; trop petits = gris, trop grands = rouge. Overlays
+  enfants du mesh (héritent le transform), nettoyés à chaque update + close.
+- **Apply cohérent (mesh_tools.fill_holes)** : RÉÉCRIT pour utiliser le MÊME
+  algorithme de groupes de position que le preview (au lieu de trimesh
+  merge_vertices) → ce qui est vert = ce qui est rempli. Fan-fill : trou de 3
+  arêtes = 1 triangle, plus grand = fan depuis un centroïde dont l'UV = moyenne
+  des UV du bord (la rustine prend la texture autour). Testé : 473k faces ->
+  ~24k trous remplis en ~22s, texture+UV préservées. (Écart preview 22167 vs
+  apply 23892 = ordre de parcours aux jonctions T, mêmes arêtes couvertes.)
+
 ## 2026-06-15 (feat — Re-Texture variations (seed) + spinner preview subdivide)
 
 - **Variations de texture** : trellis2_retex prend désormais un `seed`
