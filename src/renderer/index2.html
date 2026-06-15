@@ -1567,16 +1567,6 @@
           </div>
           <div class="gpu-stat">
             <div class="gpu-stat-row">
-              <span class="gpu-stat-label">VRAM</span>
-              <span class="gpu-stat-val" id="set-gpu-vram-val">--</span>
-            </div>
-            <div class="gpu-bar" data-stat="vram">
-              <div class="gpu-bar-fill" id="set-gpu-vram-fill"></div>
-              <div class="gpu-bar-limit" id="set-gpu-vram-limit" style="left:90%" title="Drag to set max VRAM"></div>
-            </div>
-          </div>
-          <div class="gpu-stat">
-            <div class="gpu-stat-row">
               <span class="gpu-stat-label">GPU</span>
               <span class="gpu-stat-val" id="set-gpu-util-val">--</span>
             </div>
@@ -1593,6 +1583,16 @@
             <div class="gpu-bar" data-stat="temp">
               <div class="gpu-bar-fill" id="set-gpu-temp-fill"></div>
               <div class="gpu-bar-limit" id="set-gpu-temp-limit" style="left:80%" title="Drag to set max temperature"></div>
+            </div>
+          </div>
+          <div class="gpu-stat">
+            <div class="gpu-stat-row">
+              <span class="gpu-stat-label">VRAM</span>
+              <span class="gpu-stat-val" id="set-gpu-vram-val">--</span>
+            </div>
+            <div class="gpu-bar" data-stat="vram">
+              <div class="gpu-bar-fill" id="set-gpu-vram-fill"></div>
+              <div class="gpu-bar-limit" id="set-gpu-vram-limit" style="left:90%" title="Drag to set max VRAM"></div>
             </div>
           </div>
 
@@ -1936,9 +1936,9 @@
     <div id="modal-job-details" class="modal-overlay hidden">
       <div class="modal-card" style="max-width: 480px;">
         <div id="job-gpu-monitor" class="job-gpu-monitor">
-          <div class="jgm-row"><span class="jgm-label">VRAM</span><span class="jgm-val" id="jgm-vram">--</span></div>
           <div class="jgm-row"><span class="jgm-label">GPU</span><span class="jgm-val" id="jgm-util">--</span></div>
           <div class="jgm-row"><span class="jgm-label">TEMP</span><span class="jgm-val" id="jgm-temp">--</span></div>
+          <div class="jgm-row"><span class="jgm-label">VRAM</span><span class="jgm-val" id="jgm-vram">--</span></div>
           <div class="jgm-row"><span class="jgm-label">RAM</span><span class="jgm-val" id="jgm-ram">--</span></div>
         </div>
         <div class="job-details-head">
