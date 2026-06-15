@@ -7982,6 +7982,8 @@ const mtState = {
   vals: {},
   previewTimer: null,
   overlays: [],           // Fill-holes preview overlays (green fills + outlines)
+  wireframes: [],         // wireframe overlays (△ Triangles toggle)
+  showWire: false,
 };
 
 function _mtCollectVals(body) {
@@ -8023,6 +8025,52 @@ function _mtShowSpinner(show) {
   sp.style.display = show ? 'flex' : 'none';
 }
 
+// Wireframe overlay — "△ Triangles" toggle. Shows the triangle edges of the
+// CURRENT (preview) geometry over the textured mesh, so the user can see the
+// density change as they decimate / subdivide.
+function _mtClearWireframes() {
+  for (const w of (mtState.wireframes || [])) {
+    try { if (w.parent) w.parent.remove(w); if (w.geometry) w.geometry.dispose(); if (w.material) w.material.dispose(); } catch (_) {}
+  }
+  mtState.wireframes = [];
+}
+function _mtBuildWireframes() {
+  _mtClearWireframes();
+  if (!mtState.showWire) return;
+  let total = 0;
+  for (const e of mtState.origGeoms) {
+    const g = e.mesh.geometry;
+    total += g?.index ? g.index.count / 3 : ((g?.attributes?.position?.count || 0) / 3);
+  }
+  if (total > 1500000) { showToast('Trop de triangles pour l’affichage filaire ici', 'info', 1800); return; }
+  for (const e of mtState.origGeoms) {
+    const g = e.mesh.geometry;
+    if (!g) continue;
+    const lines = new THREE.LineSegments(
+      new THREE.WireframeGeometry(g),
+      new THREE.LineBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.28, depthTest: true }));
+    lines.renderOrder = 997;
+    e.mesh.add(lines);
+    mtState.wireframes.push(lines);
+  }
+}
+function _mtCreateWireButton() {
+  const vp = document.getElementById('mt-viewport');
+  if (!vp || document.getElementById('mt-wire-toggle')) return;
+  const b = document.createElement('button');
+  b.id = 'mt-wire-toggle';
+  b.className = 'secondary-btn';
+  b.style.cssText = 'position:absolute; top:8px; left:8px; z-index:6; padding:5px 10px; font-size:11px;';
+  b.textContent = '△ Triangles';
+  const sync = () => {
+    b.style.background = mtState.showWire ? 'var(--accent, #6aa6ff)' : '';
+    b.style.color = mtState.showWire ? '#fff' : '';
+  };
+  b.onclick = () => { mtState.showWire = !mtState.showWire; sync(); _mtBuildWireframes(); };
+  sync();
+  vp.appendChild(b);
+}
+
 function _mtRunPreview() {
   if (!mtState.schema || !mtState.origModel) return;
   const body = document.getElementById('mt-body');
@@ -8055,6 +8103,7 @@ function _mtRunPreview() {
         ? `Live preview · ${Object.entries(vals).map(([k, v]) => `${k}=${v}`).join(' · ')}`
         : 'No live preview for this op · click Apply to run.';
     }
+    _mtBuildWireframes();  // refresh wireframe to match the new geometry
     _mtShowSpinner(false);
   };
   // Heavy previews (subdivide / fill-holes scan on a dense mesh) block the
@@ -8112,6 +8161,7 @@ async function _mtInitViewport() {
       mtState.camera.updateProjectionMatrix();
     }
   }).observe(container);
+  _mtCreateWireButton();
 }
 
 function _mtLoadMesh(meshPath) {
@@ -8301,6 +8351,7 @@ function openMeshToolModal(toolName) {
     cancelBtn.onclick = null;
     if (closeX) closeX.onclick = null;
     _mtClearOverlays();
+    _mtClearWireframes();
     // Restore original geoms (memory hygiene).
     for (const e of mtState.origGeoms) { e.mesh.geometry = e.originalGeom; }
   };
