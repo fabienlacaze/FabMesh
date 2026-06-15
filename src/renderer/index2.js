@@ -7668,8 +7668,10 @@ function _jsMidpointSubdivide(geom, levels) {
   }
   for (let lv = 0; lv < levels; lv++) {
     const pos = g.attributes.position;
-    const idx = g.index.array;
+    const uvAttr = g.attributes.uv;  // carry UVs through — without them the
+    const idx = g.index.array;        // textured material renders all black.
     const newPos = Array.from(pos.array);
+    const newUV = uvAttr ? Array.from(uvAttr.array) : null;
     const newIdx = [];
     const midCache = new Map();
     const getMid = (a, b) => {
@@ -7679,6 +7681,12 @@ function _jsMidpointSubdivide(geom, levels) {
       const bx = pos.array[b * 3], by = pos.array[b * 3 + 1], bz = pos.array[b * 3 + 2];
       const m = newPos.length / 3;
       newPos.push((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      if (newUV) {
+        newUV.push(
+          (uvAttr.array[a * 2] + uvAttr.array[b * 2]) / 2,
+          (uvAttr.array[a * 2 + 1] + uvAttr.array[b * 2 + 1]) / 2,
+        );
+      }
       midCache.set(k, m);
       return m;
     };
@@ -7689,6 +7697,7 @@ function _jsMidpointSubdivide(geom, levels) {
     }
     const newGeom = new THREE.BufferGeometry();
     newGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
+    if (newUV) newGeom.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(newUV), 2));
     newGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(newIdx), 1));
     g = newGeom;
   }
