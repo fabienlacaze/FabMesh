@@ -14352,6 +14352,21 @@ window.addEventListener('drop', async (e) => {
       showToast?.('Import failed: ' + (r?.error || 'unknown'), 'error', 4000);
       return;
     }
+    // NSFW filter on the dropped element (esp. images dragged from the web).
+    // batchCheckNsfw runs nsfw_scan.py which writes the .nsfw sidecar for
+    // flagged images; the version strips already hide tagged images when
+    // parental control is on. Returns {} in unrestricted mode (no-op).
+    if (r.kind === 'image' && r.path && API.batchCheckNsfw) {
+      try {
+        const nsfw = await API.batchCheckNsfw({ images: [r.path] });
+        if (nsfw && nsfw[r.path]) {
+          if (intoProject) { if (typeof reloadCurrentProject === 'function') await reloadCurrentProject(); }
+          else await refreshProjectsPage();
+          showToast?.('Image blocked by the content filter (NSFW).', 'error', 4000);
+          return;
+        }
+      } catch (e) { console.warn('[drop] NSFW scan failed:', e); }
+    }
     if (intoProject) {
       if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
       // Flip the strip matching the dropped element to its Edit stage + pulse.
