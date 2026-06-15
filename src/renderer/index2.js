@@ -8114,11 +8114,11 @@ const MESH_TOOL_SCHEMAS = {
   },
   watertight: {
     title: 'Watertight',
-    subtitle: 'Rebuild a CLOSED, watertight shell (voxel remesh). Fuses every disconnected part into one solid with no holes — this REPLACES the geometry and removes the texture, so Re-Texture afterwards. Higher resolution = more detail, slower.',
+    subtitle: 'Rebuild a CLOSED, watertight shell (voxel remesh). Fuses every disconnected part into one solid with no holes. The original texture is baked onto the new shell as vertex colours (run Re-Texture for crisp PBR). Higher resolution = more detail, slower & heavier.',
     needsImage: false,
-    confirm: 'Watertight rebuilds the mesh as a new closed shell and removes its texture (re-texture afterwards). Continue?',
+    confirm: 'Watertight rebuilds the mesh as a new closed shell (texture kept as vertex colours). Continue?',
     params: [
-      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 320, step: 8, default: 128 },
+      { id: 'resolution', label: 'Resolution', type: 'range', min: 48, max: 400, step: 8, default: 192 },
     ],
     build: (vals) => [String(vals.resolution)],
   },

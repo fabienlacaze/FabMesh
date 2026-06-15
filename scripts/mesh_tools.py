@@ -490,6 +490,22 @@ def watertight(input_path, output_path, resolution=128):
         return
     mesh = trimesh.util.concatenate(
         [trimesh.Trimesh(vertices=np.asarray(g.vertices), faces=np.asarray(g.faces)) for g in geoms])
+    # Capture the SOURCE surface colours (sample the texture per source vertex)
+    # so we can bake them back onto the new shell as vertex colours — the voxel
+    # remesh has brand-new topology with no UVs, so without this it's plain grey.
+    _src_xyz, _src_rgba = [], []
+    for g in geoms:
+        try:
+            vis = getattr(g, 'visual', None)
+            cv = vis.to_color() if (vis is not None and hasattr(vis, 'to_color')) else vis
+            vc = np.asarray(getattr(cv, 'vertex_colors', None)) if cv is not None else None
+            if vc is not None and len(vc) == len(g.vertices) and vc.shape[-1] >= 3:
+                _src_xyz.append(np.asarray(g.vertices, dtype=np.float64))
+                rgba = vc[:, :4] if vc.shape[1] >= 4 else np.column_stack(
+                    [vc[:, :3], np.full(len(vc), 255, np.uint8)])
+                _src_rgba.append(rgba.astype(np.uint8))
+        except Exception as e:
+            log(f'watertight colour capture warn: {e}')
     bb_diag = float(np.linalg.norm(mesh.bounds[1] - mesh.bounds[0])) or 1.0
     pitch = bb_diag / resolution
     vg = mesh.voxelized(pitch=pitch)
@@ -521,15 +537,29 @@ def watertight(input_path, output_path, resolution=128):
         log(f'watertight: rescaled voxel mesh to source bounds (scale={scale:.5f})')
     except Exception as e:
         log(f'watertight rescale warn: {e}')
-    # Smooth away the voxel staircase a little.
+    # Smooth away the voxel staircase — but LESS at high resolution (the
+    # staircase is already tiny there, so heavy smoothing just melts detail).
     try:
-        trimesh.smoothing.filter_laplacian(wt, iterations=2, lamb=0.5, volume_constraint=False)
+        _iters = 1 if resolution >= 192 else 2
+        trimesh.smoothing.filter_laplacian(wt, iterations=_iters, lamb=0.5, volume_constraint=False)
     except Exception:
         pass
     try:
         wt.fix_normals()
     except Exception:
         pass
+    # Bake the captured source colours onto the new shell (nearest source vertex
+    # in world space — valid because we already rescaled wt onto the source bbox).
+    if _src_xyz:
+        try:
+            from scipy.spatial import cKDTree
+            sx = np.vstack(_src_xyz)
+            sc = np.vstack(_src_rgba)
+            _, idx = cKDTree(sx).query(np.asarray(wt.vertices, dtype=np.float64), k=1)
+            wt.visual = trimesh.visual.ColorVisuals(wt, vertex_colors=sc[idx])
+            log(f'watertight: baked source colours onto {len(wt.vertices)} verts')
+        except Exception as e:
+            log(f'watertight colour bake warn: {e}')
     log(f'watertight: {len(wt.faces)} faces, watertight={wt.is_watertight}, '
         f'bodies={wt.body_count} (resolution={resolution})')
     _export(None, [wt], output_path)

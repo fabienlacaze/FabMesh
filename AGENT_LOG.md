@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — watertight plus fin + garde la texture (vertex colours))
+
+User : "watertight trop grossier on peut améliorer, pas de texture non plus".
+(1) FIN : défaut résolution 128->192, max 320->400, et lissage laplacien
+adaptatif (1 itér si res>=192 sinon 2) pour ne pas faire fondre le détail à
+haute résolution. (2) TEXTURE : avant le voxel-remesh on échantillonne la
+couleur par sommet du mesh source (visual.to_color()), puis après le rescale
+sur la bbox source on rebake ces couleurs sur la nouvelle coque par plus-proche-
+voisin (scipy cKDTree, comme decimate) -> ColorVisuals. Testé res 192 : 226k
+faces, watertight=True, 112k vertex colours dont 20768 uniques (kaki du tank
+transféré), 4s. Sous-titre/confirm MAJ (texture conservée). Re-Texture reste
+dispo pour un PBR net. Script Python -> pas de restart Electron.
+
 ## 2026-06-15 (fix — watertight sortait à l'échelle voxel-index (x~resolution))
 
 User : "watertight ne marche pas" puis "ça marche mais on le voit pas, faut
