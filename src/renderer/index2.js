@@ -13274,7 +13274,14 @@ async function refreshJobDetailsModal(id) {
   if (j.status === 'running' && j.startedAt && typeof j.progress === 'number' && j.progress >= 8 && j.progress < 100) {
     const _elapsed = Date.now() - j.startedAt;
     const _dyn = _elapsed / (j.progress / 100);
-    _estMs = Math.max(_dyn, _elapsed);  // never below already-elapsed
+    // Blend static + dynamic, weighted by progress. The early phases (model
+    // load, rembg, rectify) are disproportionately slow, so a raw elapsed/
+    // fraction extrapolation BALLOONS the estimate ("ça se rallonge sans
+    // cesse"). We trust the static estimate while progress is low and only lean
+    // on the dynamic one as the job nears completion (where it's accurate).
+    const _w = Math.min(1, j.progress / 100);
+    const _blended = _w * _dyn + (1 - _w) * (j.expectedMs || _dyn);
+    _estMs = Math.max(_blended, _elapsed);  // never below already-elapsed
   }
   document.getElementById('jd-estimated').textContent = '~' + fmtDuration(_estMs);
   // Show the job's OWN project (snapshot at pushJob time) instead of whatever
@@ -13625,6 +13632,11 @@ function setupGpuLimitDragging() {
       const stat = bar.dataset.stat;
       const liveStats = new Set(['util', 'temp']);
       if (isJobRunning() && !liveStats.has(stat)) {
+        // CRITICAL: reset the drag flag before bailing. refreshGpuStats() early-
+        // returns while _draggingGpuLimit is true, so leaving it stuck here (the
+        // mouseup handler is never attached on this path) FROZE the whole live
+        // hardware panel until the next Settings re-open.
+        _draggingGpuLimit = false;
         customError('VRAM/RAM limits can only be changed between jobs — they apply at subprocess start. GPU usage and temperature limits can be dragged live.', 'Locked');
         return;
       }

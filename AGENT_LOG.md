@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — moniteur HW gelé + ETA qui balloon + priorité trop dure)
+
+User : gen 3D "se rallonge sans cesse" + "valeurs HW figées" (panneau Réglages)
+alors que le mini-panneau du job bouge.
+1. PANNEAU GELÉ (vrai bug) : drag du marqueur VRAM/RAM PENDANT un job ->
+   _draggingGpuLimit=true puis customError('Locked') + return SANS remettre
+   _draggingGpuLimit=false (le mouseup n'est jamais attaché sur ce chemin).
+   refreshGpuStats() early-return tant que ce flag est true -> moniteur gelé
+   jusqu'au prochain openSettings. FIX : reset _draggingGpuLimit=false avant le
+   return du cas "Locked".
+2. ETA QUI BALLOON : l'ETA dynamique extrapolait elapsed/progress brut depuis 8%
+   -> les phases early (load/rembg/rectify, lentes) gonflaient l'estimation.
+   FIX : mélange pondéré par la progression (w=progress) entre static et
+   dynamique -> à 8% on suit le static, on penche vers le dynamique en fin.
+3. PRIORITÉ TROP DURE : PROCESS_MODE_BACKGROUND_BEGIN affamait les threads qui
+   nourrissent le GPU (GPU ~12%, gen ~2x plus lente). Remplacé par
+   BELOW_NORMAL_PRIORITY_CLASS (bureau réactif sans starver le job GPU ; le
+   budget RAM gère déjà le paging que le mode background visait).
+Renderer -> Ctrl+R ; python -> prochaine gen. Pas de restart Electron.
+
 ## 2026-06-15 (feat — plafond gracieux : workers s'auto-limitent sans crasher)
 
 User : "je veux un plafond qui ne tue pas l'appli". = auto-limitation gracieuse
