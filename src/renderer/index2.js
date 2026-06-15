@@ -9595,8 +9595,11 @@ function openMeshEdit(mode) {
   document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
   // Default the Select sub-mode to Add each time the panel opens.
   meState.selectErase = false;
+  meState.viewMode = 'none';
   document.getElementById('me-sel-add')?.classList.add('tool-active');
   document.getElementById('me-sel-erase')?.classList.remove('tool-active');
+  document.getElementById('me-sel-isolate')?.classList.remove('tool-active');
+  document.getElementById('me-sel-hide')?.classList.remove('tool-active');
   _meUpdateSelButtons();
 
   // Wait for modal layout then init viewport
@@ -10090,7 +10093,7 @@ function _meBuildPosAdj(geom) {
 // Enable selection-dependent buttons only when something is selected.
 function _meUpdateSelButtons() {
   const has = _meHasSelection();
-  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete']) {
+  for (const id of ['me-sel-grow', 'me-sel-shrink', 'me-sel-clear', 'me-sel-delete', 'me-sel-duplicate', 'me-sel-crop', 'me-sel-isolate', 'me-sel-hide']) {
     const b = document.getElementById(id);
     if (!b) continue;
     b.disabled = !has;
@@ -10226,6 +10229,7 @@ function _meApplyBrush(hit) {
 
 // Close mesh edit
 function _closeMeshEdit() {
+  _meRestoreView();
   document.getElementById('modal-mesh-edit')?.classList.add('hidden');
 }
 
@@ -10362,6 +10366,7 @@ document.getElementById('me-sel-erase')?.addEventListener('click', () => {
 // Select actions
 document.getElementById('me-sel-delete')?.addEventListener('click', () => {
   if (!meState.mesh) return;
+  _meRestoreView();
   _mePushUndo();
   let any = false;
   meState.mesh.traverse(c => {
@@ -10472,6 +10477,138 @@ document.getElementById('me-sel-shrink')?.addEventListener('click', () => {
     color.needsUpdate = true;
   });
 });
+// --- View toggles: Isolate (show only selection) / Hide (hide selection) ---
+// Non-destructive: backs up the live index, never touches the undo stack.
+function _meRestoreView() {
+  if (!meState.viewMode || meState.viewMode === 'none') return;
+  meState.mesh?.traverse(c => {
+    if (c.isMesh && c.geometry && c.geometry._viewBackup) {
+      c.geometry.setIndex(c.geometry._viewBackup);
+      c.geometry._viewBackup = null;
+      c.geometry.attributes.position.needsUpdate = true;
+    }
+  });
+  meState.viewMode = 'none';
+  document.getElementById('me-sel-isolate')?.classList.remove('tool-active');
+  document.getElementById('me-sel-hide')?.classList.remove('tool-active');
+}
+function _meApplyView(mode) {
+  if (!meState.mesh) return;
+  const wasActive = meState.viewMode === mode;
+  _meRestoreView();                  // always start from the full mesh
+  if (wasActive) return;             // clicking the active toggle turns it off
+  if (!_meHasSelection()) { showToast('Select faces first', 'info', 1400); return; }
+  let any = false;
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index) return;
+    const geom = c.geometry, sel = geom._selSaved;
+    if (!sel || !sel.size) return;
+    geom._viewBackup = new THREE.BufferAttribute(geom.index.array.slice(), 1);
+    const idx = geom.index.array, keep = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      const hit = sel.has(idx[i]) || sel.has(idx[i + 1]) || sel.has(idx[i + 2]);
+      if (mode === 'isolate' ? hit : !hit) keep.push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    geom.setIndex(keep);
+    geom.attributes.position.needsUpdate = true;
+    any = true;
+  });
+  if (any) {
+    meState.viewMode = mode;
+    document.getElementById('me-sel-' + mode)?.classList.add('tool-active');
+  }
+}
+document.getElementById('me-sel-isolate')?.addEventListener('click', () => _meApplyView('isolate'));
+document.getElementById('me-sel-hide')?.addEventListener('click', () => _meApplyView('hide'));
+
+// --- Crop: keep ONLY the selected faces (inverse of Delete). ---
+document.getElementById('me-sel-crop')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meHasSelection()) return;
+  _meRestoreView();
+  _mePushUndo();
+  let any = false;
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index) return;
+    const geom = c.geometry, sel = geom._selSaved;
+    if (!sel || !sel.size) return;
+    const idx = geom.index.array, keep = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      if (sel.has(idx[i]) || sel.has(idx[i + 1]) || sel.has(idx[i + 2])) keep.push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    // Restore the selection's real colours (drop the cyan highlight) before
+    // we lose the rest of the mesh, then clear the selection.
+    const color = geom.attributes.color;
+    if (color) { for (const [i, o] of sel) color.setXYZ(i, o[0], o[1], o[2]); color.needsUpdate = true; }
+    geom.setIndex(keep);
+    geom.attributes.position.needsUpdate = true;
+    geom._selSaved = new Map();
+    geom._posGroups = null; geom._posKeyByIndex = null;
+    any = true;
+  });
+  _meUpdateSelButtons();
+  showToast(any ? 'Cropped to selection' : 'Nothing selected', any ? 'success' : 'info', 1500);
+});
+
+// --- Duplicate: copy the selected faces into new geometry, nudged along
+// their normals so the copy is visible, then select the copy. ---
+document.getElementById('me-sel-duplicate')?.addEventListener('click', () => {
+  if (!meState.mesh || !_meHasSelection()) return;
+  _meRestoreView();
+  _mePushUndo();
+  let total = 0;
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index) return;
+    const geom = c.geometry, sel = geom._selSaved;
+    if (!sel || !sel.size) return;
+    const idx = geom.index.array, pos = geom.attributes.position, col = _meEnsureColor(c);
+    // Collect selected triangles (any vertex selected).
+    const tris = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      if (sel.has(idx[i]) || sel.has(idx[i + 1]) || sel.has(idx[i + 2])) tris.push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    if (!tris.length) return;
+    // Restore the source faces' real colours first so both copies show paint,
+    // not the cyan highlight.
+    for (const [i, o] of sel) col.setXYZ(i, o[0], o[1], o[2]);
+    geom.computeBoundingBox();
+    const bb = geom.boundingBox;
+    const eps = (bb ? bb.min.distanceTo(bb.max) : 1) * 0.01;
+    const oldV = pos.count, addV = tris.length;
+    const newPos = new Float32Array((oldV + addV) * 3); newPos.set(pos.array.subarray(0, oldV * 3));
+    const newCol = new Float32Array((oldV + addV) * 3); newCol.set(col.array.subarray(0, oldV * 3));
+    const newIdx = Array.from(idx);
+    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vD = new THREE.Vector3(), n = new THREE.Vector3(), tmp = new THREE.Vector3();
+    let w = oldV;
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = tris[t], b = tris[t + 1], d = tris[t + 2];
+      vA.fromBufferAttribute(pos, a); vB.fromBufferAttribute(pos, b); vD.fromBufferAttribute(pos, d);
+      n.subVectors(vB, vA).cross(tmp.subVectors(vD, vA)).normalize().multiplyScalar(eps);
+      const base = w, ids = [a, b, d];
+      for (let k = 0; k < 3; k++) {
+        const s = ids[k];
+        newPos[w * 3] = pos.getX(s) + n.x; newPos[w * 3 + 1] = pos.getY(s) + n.y; newPos[w * 3 + 2] = pos.getZ(s) + n.z;
+        newCol[w * 3] = col.getX(s); newCol[w * 3 + 1] = col.getY(s); newCol[w * 3 + 2] = col.getZ(s);
+        w++;
+      }
+      newIdx.push(base, base + 1, base + 2);
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(newCol, 3));
+    geom.setIndex(newIdx);
+    // Select the duplicate (cyan), drop the old selection.
+    const nsel = new Map(), ncol = geom.attributes.color;
+    for (let v = oldV; v < w; v++) { nsel.set(v, [ncol.getX(v), ncol.getY(v), ncol.getZ(v)]); ncol.setXYZ(v, 0, 1, 1); }
+    geom._selSaved = nsel;
+    geom._posGroups = null; geom._posKeyByIndex = null;
+    geom.attributes.position.needsUpdate = true;
+    geom.attributes.color.needsUpdate = true;
+    geom.computeVertexNormals();
+    total += addV / 3;
+  });
+  _meUpdateSelButtons();
+  showToast(total ? `Duplicated ${total} faces` : 'Nothing selected', total ? 'success' : 'info', 1500);
+});
+
 // --- Extra Paint tools: Pick / Fill / Smooth / Reset ---
 document.getElementById('me-paint-pick')?.addEventListener('click', () => {
   meState.pickMode = !meState.pickMode;
@@ -10535,6 +10672,7 @@ document.addEventListener('keydown', (e) => {
 // Save
 document.getElementById('me-save')?.addEventListener('click', async () => {
   if (!meState.mesh || !meState.meshPath) return;
+  _meRestoreView();   // never bake an isolated/hidden view into the saved GLB
   const projName = state.currentProject?.name || '';
   const job = pushJob(`Save mesh edit: ${projName}`, null, null, 8000, { sourceImageUrl: meState.meshPath, projectName: projName });
   try {
