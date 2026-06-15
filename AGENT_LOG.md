@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (parity — lot 3: Set Pivot Point sur desktop (depuis cloud))
+
+Le cloud avait remplacé "Center" par "Set pivot point" (8 presets + offsets +
+gizmo). Porté sur desktop : op Python set_pivot(mode,ox,oy,oz) (bbox jointe ->
+pivot par preset -> translation partagée, testé bottom/center/top/world_origin,
+texture OK) + schéma renderer (select preset + 3 sliders offset) + preview
+gizmo jaune en overlay (_mtComputePivot/_makePivotGizmo/_mtBuildPivotGizmo,
+dispatch overlayPreview==='pivot') + bouton "Center"->"Set Pivot" -> set_pivot.
+Ajouté aux regex nom/groupage.
+
 ## 2026-06-15 (parity — lot 2: PRESERVE_PREFIX agnostique côté cloud)
 
 modal_app/_modify.py avait encore l'ancien PRESERVE_PREFIX/NEG orienté

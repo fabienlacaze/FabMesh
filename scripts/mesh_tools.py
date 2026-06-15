@@ -432,6 +432,45 @@ def center(input_path, output_path):
     log('centered (joint bbox X/Z=0, feet Y=0)')
 
 
+def set_pivot(input_path, output_path, mode='bottom', ox=0.0, oy=0.0, oz=0.0):
+    """Move the mesh so its pivot (local origin) lands at an AABB landmark.
+
+    `mode`: center/bottom/top/left/right/front/back/world_origin, fine-tuned
+    by ox/oy/oz offsets. Computed from the JOINT bbox of all geoms and applied
+    as ONE shared translation (keeps multi-part meshes assembled). Ported from
+    the cloud's Set-pivot tool — replaces the old plain 'center'."""
+    import trimesh
+    mode = str(mode).lower()
+    try:
+        ox, oy, oz = float(ox), float(oy), float(oz)
+    except (TypeError, ValueError):
+        ox = oy = oz = 0.0
+    scene = trimesh.load(input_path)
+    geoms = list(scene.geometry.values()) if hasattr(scene, 'geometry') else [scene]
+    verts = [g.vertices for g in geoms if hasattr(g, 'vertices') and len(g.vertices)]
+    if not verts:
+        _export(scene, geoms, output_path)
+        log('set_pivot (no vertices - passthrough)')
+        return
+    av = np.concatenate(verts)
+    mn, mx = av.min(0), av.max(0)
+    cx, cy, cz = (mn + mx) / 2.0
+    if mode == 'center':         px, py, pz = cx, cy, cz
+    elif mode == 'top':          px, py, pz = cx, mx[1], cz
+    elif mode == 'left':         px, py, pz = mn[0], cy, cz
+    elif mode == 'right':        px, py, pz = mx[0], cy, cz
+    elif mode == 'front':        px, py, pz = cx, cy, mx[2]
+    elif mode == 'back':         px, py, pz = cx, cy, mn[2]
+    elif mode == 'world_origin': px, py, pz = 0.0, 0.0, 0.0
+    else:                        px, py, pz = cx, mn[1], cz   # bottom (default)
+    px += ox; py += oy; pz += oz
+    for g in geoms:
+        if hasattr(g, 'vertices') and len(g.vertices):
+            g.vertices[:, 0] -= px; g.vertices[:, 1] -= py; g.vertices[:, 2] -= pz
+    _export(scene, geoms, output_path)
+    log(f'set_pivot ({mode}, offset {ox},{oy},{oz})')
+
+
 def watertight(input_path, output_path, resolution=128):
     """Rebuild a CLOSED, watertight shell via voxel remesh + marching cubes.
 
@@ -701,6 +740,7 @@ if __name__ == '__main__':
         'fix_normals': lambda: fix_normals(inp, out),
         'fill_holes': lambda: fill_holes(inp, out, *params),
         'center': lambda: center(inp, out),
+        'set_pivot': lambda: set_pivot(inp, out, *params),
         'watertight': lambda: watertight(inp, out, *params),
         'texture_var': lambda: texture_var(inp, out, *params),
         'retexture': lambda: retexture(inp, out, *params),

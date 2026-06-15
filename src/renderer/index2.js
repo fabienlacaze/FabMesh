@@ -472,7 +472,7 @@ async function refreshProjectsPage() {
     // Known suffixes: cntile, retexture, decimate, smooth, fill_holes,
     // fix_normals, center, upscale, refine, augment, vc (vertex color).
     // Optionally followed by a timestamp OR a short tag (_v2, _test, etc.).
-    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
+    const POST_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
     let prev;
     do {
       prev = base;
@@ -7575,6 +7575,7 @@ const MESH_TOOL_EXPECTED_MS = {
   watertight:     12000,
   texture_var:    150000,
   center:         1000,
+  set_pivot:      1500,
   retexture:      45000,
   trellis2_retex: 110000,
 };
@@ -7882,9 +7883,63 @@ function _jsHoleFillPreview(geom, minHoleSize, maxHoleSize) {
 // Remove the Fill-holes preview overlays (green fills + coloured outlines).
 function _mtClearOverlays() {
   for (const o of (mtState.overlays || [])) {
-    try { if (o.parent) o.parent.remove(o); if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); } catch (_) {}
+    try {
+      if (o.parent) o.parent.remove(o);
+      o.traverse?.(c => { c.geometry?.dispose?.(); c.material?.dispose?.(); });
+      if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose();
+    } catch (_) {}
   }
   mtState.overlays = [];
+}
+
+// --- Set Pivot Point (ported from cloud) — preview shows a yellow gizmo at
+// the chosen pivot WITHOUT moving the mesh; Apply (Python set_pivot) moves it. ---
+function _mtComputePivot(mode, ox, oy, oz) {
+  let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (const e of mtState.origGeoms) {
+    const g = e.originalGeom; if (!g?.attributes?.position) continue;
+    const a = g.attributes.position.array, n = g.attributes.position.count;
+    for (let i = 0; i < n; i++) {
+      const x = a[i * 3], y = a[i * 3 + 1], z = a[i * 3 + 2];
+      if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+      if (y < mny) mny = y; if (y > mxy) mxy = y;
+      if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+    }
+  }
+  if (!isFinite(mnx)) return null;
+  const cx = (mnx + mxx) / 2, cy = (mny + mxy) / 2, cz = (mnz + mxz) / 2;
+  let px, py, pz;
+  switch ((mode || 'bottom')) {
+    case 'center': px = cx; py = cy; pz = cz; break;
+    case 'top': px = cx; py = mxy; pz = cz; break;
+    case 'left': px = mnx; py = cy; pz = cz; break;
+    case 'right': px = mxx; py = cy; pz = cz; break;
+    case 'front': px = cx; py = cy; pz = mxz; break;
+    case 'back': px = cx; py = cy; pz = mnz; break;
+    case 'world_origin': px = 0; py = 0; pz = 0; break;
+    default: px = cx; py = mny; pz = cz; break;  // bottom
+  }
+  return { pivot: [px + (ox || 0), py + (oy || 0), pz + (oz || 0)], diag: Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) || 1 };
+}
+function _makePivotGizmo(size) {
+  const grp = new THREE.Group();
+  const axes = new THREE.AxesHelper(size);
+  axes.material.depthTest = false; axes.material.transparent = true; axes.renderOrder = 999;
+  grp.add(axes);
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(size * 0.18, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffe066, depthTest: false, transparent: true, opacity: 0.95 }));
+  sphere.renderOrder = 999; grp.add(sphere);
+  return grp;
+}
+function _mtBuildPivotGizmo(vals) {
+  _mtClearOverlays();
+  if (!mtState.origModel) return;
+  const r = _mtComputePivot(vals.pivot || 'bottom', Number(vals.offset_x) || 0, Number(vals.offset_y) || 0, Number(vals.offset_z) || 0);
+  if (!r) return;
+  const giz = _makePivotGizmo(r.diag * 0.08);
+  giz.position.set(r.pivot[0], r.pivot[1], r.pivot[2]);
+  mtState.origModel.add(giz);
+  mtState.overlays.push(giz);
 }
 
 // Build the Fill-holes overlays for the current min/max: a light-green
@@ -8009,6 +8064,24 @@ const MESH_TOOL_SCHEMAS = {
     params: [],
     build: () => [],
     preview: (geom) => _jsCenter(geom),
+  },
+  // Set Pivot Point — supersedes the old plain Center (ported from cloud).
+  set_pivot: {
+    title: 'Set pivot point',
+    subtitle: 'Place the mesh origin (pivot) at a bounding-box landmark, fine-tune with X/Y/Z. The yellow gizmo shows where the pivot lands; Apply moves the mesh so the pivot is at (0,0,0).',
+    needsImage: false,
+    overlayPreview: 'pivot',
+    params: [
+      { id: 'pivot', label: 'Pivot preset', type: 'select', default: 'bottom',
+        options: [['center', 'Center'], ['bottom', 'Bottom'], ['top', 'Top'],
+                  ['left', 'Left'], ['right', 'Right'], ['front', 'Front'],
+                  ['back', 'Back'], ['world_origin', 'World Origin']] },
+      { id: 'offset_x', label: 'X offset', type: 'range', min: -1, max: 1, step: 0.01, default: 0 },
+      { id: 'offset_y', label: 'Y offset', type: 'range', min: -1, max: 1, step: 0.01, default: 0 },
+      { id: 'offset_z', label: 'Z offset', type: 'range', min: -1, max: 1, step: 0.01, default: 0 },
+    ],
+    build: (vals) => [String(vals.pivot || 'bottom'), String(vals.offset_x || 0),
+                      String(vals.offset_y || 0), String(vals.offset_z || 0)],
   },
   watertight: {
     title: 'Watertight',
@@ -8179,7 +8252,10 @@ function _mtRunPreview() {
         e.mesh.geometry = e.originalGeom;
       }
     }
-    if (mtState.schema.overlayPreview) {
+    if (mtState.schema.overlayPreview === 'pivot') {
+      _mtBuildPivotGizmo(vals);
+      if (status) status.textContent = `Pivot: ${vals.pivot || 'bottom'} — le gizmo jaune montre où sera l'origine. Apply déplace le mesh.`;
+    } else if (mtState.schema.overlayPreview) {
       const st = _mtBuildFillOverlays(vals);
       if (status) {
         status.textContent = st.loops
@@ -8485,7 +8561,7 @@ document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () =>
 (() => { const b = document.getElementById('ws-mesh-subdivide-btn'); if (b) b.style.display = 'none'; })();
 document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => openMeshToolModal('fix_normals'));
 document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => openMeshToolModal('fill_holes'));
-document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('center'));
+document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('set_pivot'));
 document.getElementById('ws-mesh-watertight-btn')?.addEventListener('click', () => openMeshToolModal('watertight'));
 document.getElementById('ws-mesh-texvar-btn')?.addEventListener('click', () => openMeshToolModal('texture_var'));
 document.getElementById('ws-mesh-retexture-btn')?.addEventListener('click', () => openMeshToolModal('retexture'));

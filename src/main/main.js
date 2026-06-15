@@ -3649,7 +3649,7 @@ ipcMain.handle('get-project-display-names', () => {
 function _meshProjectBackend(filename) {
   let base = filename.replace(/\.[^.]+$/, '');
   base = base.replace(/_rigged_.+$/i, '');
-  const POST = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
+  const POST = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|upscale|refine|augment|vc)(?:_[A-Za-z0-9]{1,16})*$/i;
   let prev;
   do { prev = base; base = base.replace(POST, ''); base = base.replace(/_\d{10,}$/, ''); } while (base !== prev);
   base = base.replace(/_(sf3d|hunyuan|local|trellis2_native|trellis2|triposg|hi3dgen|ai)(?:_[A-Za-z0-9]{1,16})*$/i, '');
@@ -5641,7 +5641,7 @@ ipcMain.handle('mesh-tool', async (_event, { operation, meshPath, params }) => {
   // Windows MAX_PATH (260) after repeated ops (e.g. _smooth_…_fill_holes_…_
   // watertight_… → FileNotFoundError on export). Versions still group: the
   // renderer derives the project from the stripped root either way.
-  const OP_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|watertight|texture_var|trellis2_retex|edited|upscale|refine|augment|vc)(?:_\d{6,})?$/i;
+  const OP_SUFFIX = /_(cntile|retexture|decimate|subdivide|smooth|fill_holes|fix_normals|center|set_pivot|watertight|texture_var|trellis2_retex|edited|upscale|refine|augment|vc)(?:_\d{6,})?$/i;
   let _prev;
   do { _prev = base; base = base.replace(OP_SUFFIX, ''); } while (base !== _prev);
   if (base.length > 90) base = base.slice(0, 90);  // hard cap, belt-and-braces
