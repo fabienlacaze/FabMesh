@@ -1388,9 +1388,16 @@ print("OK")
 `;
   return new Promise((resolve) => {
     execFile('python', ['-c', pyCode, imagePath, outPath],
-        { timeout: 120000 }, (error, stdout, stderr) => {
+        { timeout: 300000 }, (error, stdout, stderr) => {
       if (error || !fs.existsSync(outPath)) {
-        resolve({ success: false, error: error?.message || 'rembg failed' });
+        const st = (stderr || '').trim();
+        let msg;
+        if (error && (error.killed || /timed out|ETIMEDOUT/i.test(error.message || ''))) {
+          msg = 'Remove BG a expiré (timeout). Le système était probablement saturé (RAM/CPU) par un autre traitement — attends qu\'il finisse puis relance.';
+        } else {
+          msg = st ? st.slice(-1500) : (error?.message || 'rembg failed');
+        }
+        resolve({ success: false, error: msg });
       } else {
         _handleMultiviewInheritance(outPath).catch(() => {});
         resolve({ success: true, newPath: outPath });
@@ -4111,10 +4118,23 @@ ipcMain.handle('remove-background', async (event, imagePath) => {
     }
 
     const script = path.join(__dirname, '..', '..', 'scripts', 'remove_bg.py');
-    const proc = execFile('python', [script, newImagePath], { timeout: 60000 }, (error, stdout, stderr) => {
+    // 300s, not 60s: Remove BG is normally <5s, but under system memory/CPU
+    // pressure (a heavy job paging to disk) onnxruntime inference can crawl and
+    // the old 60s timeout KILLED it — the user then only saw an opaque "Command
+    // failed". The wider timeout + surfacing real stderr makes it diagnosable.
+    const proc = execFile('python', [script, newImagePath], { timeout: 300000 }, (error, stdout, stderr) => {
       if (error) {
         cleanup();
-        resolve({ success: false, error: error.message, stderr });
+        const st = (stderr || '').trim();
+        let msg;
+        if (error.killed || /timed out|ETIMEDOUT/i.test(error.message || '')) {
+          msg = 'Remove BG a expiré (timeout). Le système était probablement saturé (RAM/CPU) par un autre traitement — attends qu\'il finisse puis relance.';
+        } else {
+          // Surface the REAL Python error (stderr) instead of the useless
+          // "Command failed: python …" that execFile puts in error.message.
+          msg = st ? st.slice(-1500) : (error.message || 'Remove BG failed');
+        }
+        resolve({ success: false, error: msg, stderr: st });
       } else {
         // Script may output a different path (e.g. .png instead of .jpeg)
         const outMatch = (stdout || '').match(/OK:\s*(.+)/);

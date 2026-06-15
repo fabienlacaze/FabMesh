@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — Remove BG : surface vraie erreur + timeout vs charge système)
+
+User : "Remove BG failed" message tronqué "Command failed: python …", puis
+"remove background n'a jamais duré aussi longtemps". Modèle u2net.onnx en cache
+depuis le 5 avril (176 Mo) -> PAS un téléchargement. Le run a duré ~50s (normal
+<5s) puis tué par le timeout 60s -> le système était saturé (RAM/CPU) par un
+autre traitement. Le handler 4113 affichait error.message ("Command failed …")
+au lieu du stderr -> cause invisible (rien dans les logs). FIX : timeout 60s->
+300s (4113) et 120s->300s (1376) + remonter le vrai stderr (slice -1500) et un
+message clair en cas de timeout ("système saturé, attends puis relance").
+main.js -> restart Electron (PAS relancé : user a demandé d'attendre).
+
 ## 2026-06-15 (feat — bouton "Unlock" sur l'erreur filtre de contenu)
 
 User : popup "Image generation failed / Content filter ... Disable parental
