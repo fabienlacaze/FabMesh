@@ -7742,6 +7742,38 @@ const MESH_TOOL_SCHEMAS = {
     build: (vals) => [String(vals.iterations), String(vals.lambda)],
     preview: (geom, vals) => _jsLaplacianSmooth(geom, Math.max(1, vals.iterations | 0), vals.lambda),
   },
+  // Merged Triangle-count tool: one slider centered on the current count.
+  // Below current → decimate (reduce); above → subdivide (×4 steps).
+  triangle_count: {
+    title: 'Triangle count',
+    subtitle: 'Set the target triangle count. Below the current count REDUCES (decimate); above it INCREASES (subdivide, ×4 steps). ↺ Actuel recenters on the current count.',
+    needsImage: false,
+    heavyPreview: true,
+    params: [
+      { id: 'target_faces', label: 'Target triangles', type: 'range', min: 100, max: 200000, step: 100, default: 20000, resetToCurrent: true, pivotCurrent: true },
+    ],
+    resolveOp: (vals) => {
+      const cur = _mtCurrentTriCount() || 0;
+      const target = Number(vals.target_faces);
+      if (!cur || target < cur * 0.97) return { operation: 'decimate', params: [String(target)] };
+      if (target > cur * 1.3) {
+        const levels = Math.max(1, Math.min(3, Math.round(Math.log(target / cur) / Math.log(4))));
+        return { operation: 'subdivide', params: [String(levels)] };
+      }
+      return null;  // target ≈ current — nothing to do
+    },
+    preview: (geom, vals) => {
+      const cur = geom.index ? geom.index.count / 3 : (geom.attributes?.position ? geom.attributes.position.count / 3 : 0);
+      const target = Number(vals.target_faces);
+      if (cur && target > cur * 1.3) {
+        const levels = Math.max(1, Math.min(2, Math.round(Math.log(target / cur) / Math.log(4))));
+        return _jsMidpointSubdivide(geom, levels);
+      }
+      return null;  // decimate / no-op: no cheap live preview
+    },
+  },
+  // Kept as a backend op (reached via triangle_count.resolveOp), not opened
+  // directly anymore.
   decimate: {
     title: 'Triangle count',
     subtitle: 'Reduce triangle count (Python only — no live preview).',
@@ -7976,8 +8008,9 @@ function _mtLoadMesh(meshPath) {
         }
       });
       // Now that geoms are cached, run the initial preview + refresh the
-      // "↺ Actuel" button with the real triangle count.
+      // "↺ Actuel" button and center any pivot slider on the real count.
       _mtRefreshResetBtn();
+      _mtInitPivotSliders();
       _mtRunPreview();
     });
   });
@@ -8000,6 +8033,20 @@ function _mtRefreshResetBtn() {
   const n = _mtCurrentTriCount();
   btn.textContent = n ? `↺ Actuel : ${n.toLocaleString('fr-FR')}` : '↺ Actuel';
   btn.disabled = !n;
+}
+// Center any "pivot" slider (Triangle count) on the mesh's current count and
+// widen its max so the user can both reduce (decimate) and increase
+// (subdivide) from that midpoint.
+function _mtInitPivotSliders() {
+  const cur = _mtCurrentTriCount();
+  if (!cur) return;
+  const body = document.getElementById('mt-body');
+  if (!body) return;
+  body.querySelectorAll('input[data-pivot-current="1"]').forEach((input) => {
+    input.max = String(Math.max(Number(input.max) || 0, cur * 4));
+    input.value = String(cur);
+    input.dispatchEvent(new Event('input'));  // updates the value label + preview
+  });
 }
 
 function openMeshToolModal(toolName) {
@@ -8069,6 +8116,7 @@ function openMeshToolModal(toolName) {
       }
       input.dataset.paramId = spec.id;
       input.dataset.paramType = spec.type || 'number';
+      if (spec.pivotCurrent) input.dataset.pivotCurrent = '1';
       input.addEventListener('input', () => {
         if (spec.type === 'range' || spec.type === 'number') labVal.textContent = String(input.value);
         _mtSchedulePreview();
@@ -8128,6 +8176,15 @@ function openMeshToolModal(toolName) {
     const vals = _mtCollectVals(body);
     if (schema.confirm && !confirm(schema.confirm)) return;
     const ctx = { imagePath: p.selectedImagePath, meshPath: p.selectedMeshPath };
+    // A schema can pick the operation at apply time (e.g. Triangle count
+    // decides decimate vs subdivide from the target vs the current count).
+    if (typeof schema.resolveOp === 'function') {
+      const r = schema.resolveOp(vals, ctx);
+      if (!r || !r.operation) { showToast('Cible ≈ compte actuel — rien à faire', 'info', 1800); return; }
+      close();
+      runMeshTool(r.operation, r.params || []);
+      return;
+    }
     const params = schema.build(vals, ctx);
     close();
     runMeshTool(toolName, params);
@@ -8142,8 +8199,10 @@ function openMeshToolModal(toolName) {
 }
 
 document.getElementById('ws-mesh-smooth-btn')?.addEventListener('click', () => openMeshToolModal('smooth'));
-document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () => openMeshToolModal('decimate'));
-document.getElementById('ws-mesh-subdivide-btn')?.addEventListener('click', () => openMeshToolModal('subdivide'));
+document.getElementById('ws-mesh-decimate-btn')?.addEventListener('click', () => openMeshToolModal('triangle_count'));
+// Subdivide is merged into Triangle count (drag above the current count) —
+// hide the standalone button.
+(() => { const b = document.getElementById('ws-mesh-subdivide-btn'); if (b) b.style.display = 'none'; })();
 document.getElementById('ws-mesh-fixnormals-btn')?.addEventListener('click', () => openMeshToolModal('fix_normals'));
 document.getElementById('ws-mesh-fillholes-btn')?.addEventListener('click', () => openMeshToolModal('fill_holes'));
 document.getElementById('ws-mesh-center-btn')?.addEventListener('click', () => openMeshToolModal('center'));
