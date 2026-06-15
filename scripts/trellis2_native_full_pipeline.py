@@ -62,15 +62,18 @@ if os.environ.get('FABMESH_NO_WORKER_THROTTLE') != '1':
         _k32 = ctypes.windll.kernel32
         # Type the calls: on 64-bit Windows GetCurrentProcess() returns the
         # pseudo-handle (HANDLE)-1; without restype=c_void_p ctypes truncates it
-        # to 32 bits and SetPriorityClass fails (observed: BACKGROUND_BEGIN ->0).
+        # to 32 bits and SetPriorityClass fails silently.
         _k32.GetCurrentProcess.restype = ctypes.c_void_p
         _k32.SetPriorityClass.argtypes = [ctypes.c_void_p, wintypes.DWORD]
         _k32.SetPriorityClass.restype = wintypes.BOOL
-        _h = _k32.GetCurrentProcess()
-        # PROCESS_MODE_BACKGROUND_BEGIN (0x00100000) is the only mode that also
-        # lowers DISK I/O priority; fall back to BELOW_NORMAL (0x00004000).
-        if not _k32.SetPriorityClass(_h, 0x00100000):
-            _k32.SetPriorityClass(_h, 0x00004000)
+        # BELOW_NORMAL_PRIORITY_CLASS (0x00004000): keep the desktop responsive
+        # WITHOUT starving this FOREGROUND GPU job. We deliberately do NOT use
+        # PROCESS_MODE_BACKGROUND_BEGIN — it throttles I/O + memory priority so
+        # aggressively it starves the CPU threads feeding the GPU (observed: GPU
+        # dropped to ~12% and the gen ran ~2x slower). The RAM budget (lighter
+        # cascade) already prevents the paging that background mode was meant to
+        # soften, so BELOW_NORMAL is the right, gentle trade-off.
+        _k32.SetPriorityClass(_k32.GetCurrentProcess(), 0x00004000)
     except Exception:
         pass
 
