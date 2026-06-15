@@ -13205,10 +13205,10 @@ async function refreshJobGpuMonitor() {
       else if (vramPct > 70) vram.classList.add('warn');
     }
     if (util) {
-      util.textContent = (gpu.gpuUtil || 0) + ' / ' + utilLimitPct + '%';
+      // GPU at 100% is normal during a gen (unlike RAM saturation) — show the
+      // usage plainly, never colour it red.
+      util.textContent = (gpu.gpuUtil || 0) + '%';
       util.classList.remove('warn', 'error');
-      if ((gpu.gpuUtil || 0) > utilLimitPct) util.classList.add('error');
-      else if ((gpu.gpuUtil || 0) > 70) util.classList.add('warn');
     }
     if (temp) {
       temp.textContent = (gpu.tempC || 0) + ' / ' + tempLimitC + '°C';
@@ -14132,7 +14132,7 @@ async function refreshGpuStats() {
     const util = gpu.gpuUtil || 0;
     document.getElementById('set-gpu-util-val').textContent = util.toFixed(0) + '%';
     document.getElementById('set-gpu-util-fill').style.width = util + '%';
-    document.querySelector('.gpu-bar[data-stat="util"]')?.classList.toggle('over-limit', util > gpuLimits.util);
+    document.querySelector('.gpu-bar[data-stat="util"]')?.classList.remove('over-limit');  // GPU at 100% is normal — never flag it red
     // Temperature (scale 0-100°C → 0-100% bar, red zone after 80)
     const temp = gpu.tempC || 0;
     document.getElementById('set-gpu-temp-val').textContent = temp.toFixed(0) + ' °C';
