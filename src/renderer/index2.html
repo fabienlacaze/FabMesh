@@ -242,7 +242,12 @@
                      - vehicle / building / weapon / prop / env -> front only
                      The old <select id="ws-mv-scope"> was removed 2026-05-20;
                      a hidden input keeps backend compat. -->
-                <input type="hidden" id="ws-mv-scope" value="auto" />
+                <!-- TEMP (2026-06-15): back-view auto-gen disabled for testing.
+                     Was value="auto" (→ front_back for character/creature/animal,
+                     but the generated back view was never used because the
+                     ws-trellis2-multiref checkbox is unchecked/hidden). Set this
+                     back to "auto" to restore the auto back view. -->
+                <input type="hidden" id="ws-mv-scope" value="front_only" />
                 <!-- Hidden compat: existing back-photo pipeline reuses these
                      elements. We force 2view mode and hide the 6-view opts. -->
                 <div id="ws-mv-mode-row" class="form-row hidden" style="display:none;">
