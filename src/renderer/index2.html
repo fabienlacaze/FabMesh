@@ -2482,6 +2482,11 @@
               <button id="me-sel-add" class="secondary-btn tool-btn tool-active" style="padding:4px 8px; font-size:11px; flex:1;">&#9998; Add</button>
               <button id="me-sel-erase" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; flex:1;">&#129529; Erase</button>
             </div>
+            <div style="display:flex; gap:4px;">
+              <button id="me-sel-all" class="secondary-btn tool-btn" style="padding:4px 4px; font-size:10px; flex:1;">All</button>
+              <button id="me-sel-grow" class="secondary-btn tool-btn" style="padding:4px 4px; font-size:10px; flex:1;">Grow +</button>
+              <button id="me-sel-shrink" class="secondary-btn tool-btn" style="padding:4px 4px; font-size:10px; flex:1;">Shrink &minus;</button>
+            </div>
             <button id="me-sel-invert" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#8634; Invert</button>
             <button id="me-sel-clear" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#10005; Clear</button>
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border, #333);">Edit</span>
@@ -2491,6 +2496,10 @@
           <div id="me-paint-opts" style="display:none; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
             <input type="color" id="me-paint-color" value="#ff0000" style="width:36px; height:36px; border:none; cursor:pointer; border-radius:6px;" />
+            <button id="me-paint-pick" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#128167; Pick color</button>
+            <button id="me-paint-fill" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#129529; Fill all</button>
+            <button id="me-paint-smooth" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#10024; Smooth</button>
+            <button id="me-paint-reset" class="secondary-btn tool-btn" style="padding:4px 8px; font-size:11px; width:100%;">&#8634; Reset paint</button>
           </div>
         </div>
         <!-- Right: 3D viewport -->

@@ -9850,6 +9850,21 @@ function _meMouseDown(e) {
   }
   const hit = _meGetIntersection(e);
   if (!hit) return;
+  // Eyedropper: sample the colour under the cursor instead of painting.
+  if (meState.mode === 'paint' && meState.pickMode) {
+    const geom = hit.object.geometry;
+    const fa = hit.face?.a;
+    if (geom.attributes.color && fa != null) {
+      const col = geom.attributes.color;
+      const hex = '#' + [col.getX(fa), col.getY(fa), col.getZ(fa)]
+        .map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+      meState.color = hex;
+      const inp = document.getElementById('me-paint-color'); if (inp) inp.value = hex;
+    }
+    meState.pickMode = false;
+    document.getElementById('me-paint-pick')?.classList.remove('tool-active');
+    return;
+  }
   meState.painting = true;
   _mePushUndo();
   meState.controls.enabled = false;
@@ -10334,6 +10349,106 @@ document.getElementById('me-sel-clear')?.addEventListener('click', () => {
       c.geometry._selSaved = new Map();
     }
   });
+});
+// --- Extra Select tools: All / Grow / Shrink ---
+function _meEnsureColor(c) {
+  const geom = c.geometry;
+  if (!geom.attributes.color) {
+    geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geom.attributes.position.count * 3).fill(1), 3));
+    c.material.vertexColors = true; c.material.needsUpdate = true;
+  }
+  return geom.attributes.color;
+}
+document.getElementById('me-sel-all')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.position) return;
+    const color = _meEnsureColor(c), sel = _meSelMap(c.geometry);
+    for (let i = 0; i < color.count; i++) {
+      if (!sel.has(i)) sel.set(i, [color.getX(i), color.getY(i), color.getZ(i)]);
+      color.setXYZ(i, 0, 1, 1);
+    }
+    color.needsUpdate = true;
+  });
+});
+document.getElementById('me-sel-grow')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, color = geom.attributes.color, sel = _meSelMap(geom), idx = geom.index.array;
+    if (sel.size === 0) return;
+    const toAdd = new Set();
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i], b = idx[i + 1], d = idx[i + 2];
+      if (sel.has(a) || sel.has(b) || sel.has(d)) for (const v of [a, b, d]) if (!sel.has(v)) toAdd.add(v);
+    }
+    for (const v of toAdd) { sel.set(v, [color.getX(v), color.getY(v), color.getZ(v)]); color.setXYZ(v, 0, 1, 1); }
+    color.needsUpdate = true;
+  });
+});
+document.getElementById('me-sel-shrink')?.addEventListener('click', () => {
+  meState.mesh?.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, color = geom.attributes.color, sel = _meSelMap(geom), idx = geom.index.array;
+    if (sel.size === 0) return;
+    const toRemove = new Set();
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i], b = idx[i + 1], d = idx[i + 2];
+      if (!sel.has(a) || !sel.has(b) || !sel.has(d)) for (const v of [a, b, d]) if (sel.has(v)) toRemove.add(v);
+    }
+    for (const v of toRemove) { const o = sel.get(v); color.setXYZ(v, o[0], o[1], o[2]); sel.delete(v); }
+    color.needsUpdate = true;
+  });
+});
+// --- Extra Paint tools: Pick / Fill / Smooth / Reset ---
+document.getElementById('me-paint-pick')?.addEventListener('click', () => {
+  meState.pickMode = !meState.pickMode;
+  document.getElementById('me-paint-pick')?.classList.toggle('tool-active', meState.pickMode);
+});
+document.getElementById('me-paint-fill')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  const col = new THREE.Color(meState.color);
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.position) return;
+    const color = _meEnsureColor(c);
+    for (let i = 0; i < color.count; i++) color.setXYZ(i, col.r, col.g, col.b);
+    color.needsUpdate = true;
+  });
+  showToast('Filled with current colour', 'success', 1200);
+});
+document.getElementById('me-paint-reset')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.attributes?.color) return;
+    const color = c.geometry.attributes.color;
+    for (let i = 0; i < color.count; i++) color.setXYZ(i, 1, 1, 1);
+    color.needsUpdate = true;
+    c.geometry._selSaved = new Map();
+  });
+  showToast('Paint reset', 'success', 1200);
+});
+document.getElementById('me-paint-smooth')?.addEventListener('click', () => {
+  if (!meState.mesh) return;
+  _mePushUndo();
+  meState.mesh.traverse(c => {
+    if (!c.isMesh || !c.geometry?.index || !c.geometry.attributes.color) return;
+    const geom = c.geometry, color = geom.attributes.color, idx = geom.index.array, n = color.count;
+    const sr = new Float32Array(n), sg = new Float32Array(n), sb = new Float32Array(n), cnt = new Float32Array(n);
+    const acc = (i, j) => { sr[i] += color.getX(j); sg[i] += color.getY(j); sb[i] += color.getZ(j); cnt[i]++; };
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t + 1], d = idx[t + 2];
+      acc(a, b); acc(a, d); acc(b, a); acc(b, d); acc(d, a); acc(d, b);
+    }
+    for (let i = 0; i < n; i++) {
+      if (!cnt[i]) continue;
+      color.setXYZ(i,
+        color.getX(i) * 0.4 + (sr[i] / cnt[i]) * 0.6,
+        color.getY(i) * 0.4 + (sg[i] / cnt[i]) * 0.6,
+        color.getZ(i) * 0.4 + (sb[i] / cnt[i]) * 0.6);
+    }
+    color.needsUpdate = true;
+  });
+  showToast('Colours smoothed', 'success', 1200);
 });
 // Keyboard
 document.addEventListener('keydown', (e) => {
