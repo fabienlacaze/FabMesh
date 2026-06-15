@@ -9579,6 +9579,9 @@ function openMeshEdit(mode) {
   });
   document.getElementById('me-sculpt-opts').style.display = mode === 'sculpt' ? 'flex' : 'none';
   document.getElementById('me-paint-opts').style.display = mode === 'paint' ? 'flex' : 'none';
+  // Was missing — opening straight into Select mode left the Selection/Edit
+  // panel hidden until you clicked the Select button a second time.
+  document.getElementById('me-select-opts').style.display = mode === 'select' ? 'flex' : 'none';
 
   // Wait for modal layout then init viewport
   requestAnimationFrame(async () => {
