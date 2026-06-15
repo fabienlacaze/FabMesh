@@ -4994,37 +4994,43 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
   }
   const useTwoView = false;
 
-  // RAM BUDGET guard — the RAM slider (Settings → RAM marker) is the *real*
-  // ceiling the whole pipeline must fit under. We never try to make a child
-  // process "believe" the machine is smaller (a hard cap just OOM-crashes it,
-  // exactly what we want to avoid). Instead we pick the heaviest cascade mode
-  // whose peak still fits the budget, so RAM is never saturated in the first
-  // place.
-  //   budgetGB = min(physical RAM, FABMESH_RAM_LIMIT_MB)   [slider value]
-  //   1536_cascade (Ultra)   peaks ~27 GB → needs budget ≥ 32 GB (peak + OS/
-  //                          Electron headroom ~5 GB; a 27 GB box OOM'd at 27).
-  //   1024_cascade (Quality+) peaks ~19 GB → needs budget ≥ 21 GB.
-  //   below that             → base mode (no cascade, ~10 GB).
-  // Set the slider lower to leave more RAM for the OS; the pipeline scales DOWN
-  // to fit instead of crashing. Enforced server-side too (belt + suspenders).
-  const ULTRA_Q_MIN_RAM_GB    = 32;
-  const QUALITY_PLUS_MIN_RAM  = 21;
+  // RAM BUDGET guard — the RAM slider (Settings → RAM marker) is a REAL ceiling
+  // on TOTAL system RAM, enforced by picking the heaviest cascade mode whose
+  // PEAK still fits the budget HEADROOM = budget − what's ALREADY in use (OS +
+  // Electron + SDXL server + other apps). Gating on the raw budget alone (the
+  // old bug) let the total drift OVER the marker, because the worker's peak was
+  // added ON TOP of the existing baseline. We never hard-cap the process (that
+  // just OOM-crashes it); we degrade the mode so the TOTAL provably stays under
+  // the marker — at worst dropping to base mode (lower quality) on a tight box.
+  //   peak(1536_cascade Ultra)   ≈ 27 GB worker RAM
+  //   peak(1024_cascade Quality+) ≈ 20 GB worker RAM  (measured WS)
+  //   peak(base mode)             ≈ 10 GB
+  // A mode is allowed only if its peak ≤ headroom. Lower the slider → tighter
+  // ceiling → lighter mode chosen. Enforced server-side (belt + suspenders).
+  const PEAK_1536_GB = 27;
+  const PEAK_1024_GB = 20;
   let ultraQ      = trellis2UltraQ;
   let qualityPlus = trellis2QualityPlus;
   try {
-    const _physGB  = require('os').totalmem() / (1024 ** 3);
+    const _os = require('os');
+    const _physGB  = _os.totalmem() / (1024 ** 3);
+    const _usedGB  = (_os.totalmem() - _os.freemem()) / (1024 ** 3);
     const _limitMB = parseFloat(process.env.FABMESH_RAM_LIMIT_MB || '');
     const _budgetGB = (_limitMB && _limitMB > 0)
       ? Math.min(_physGB, _limitMB / 1024)
       : _physGB;
-    if (ultraQ && _budgetGB < ULTRA_Q_MIN_RAM_GB) {
-      log.warn('main', `image-to-3d: Ultra Quality requested but RAM budget=${_budgetGB.toFixed(1)}GB < ${ULTRA_Q_MIN_RAM_GB} — downgrading to 1024_cascade`);
-      try { safeSend('ai3d-progress', `[main] Ultra Quality (1536) nécessite ~${ULTRA_Q_MIN_RAM_GB} GB de budget RAM, budget actuel ${_budgetGB.toFixed(0)} GB → bascule sur Quality+ (1024)\n`); } catch (_) {}
+    // Headroom under the budget right now. The chosen mode's peak must fit here
+    // for the TOTAL (baseline + worker) to stay under the marker.
+    const _headroomGB = _budgetGB - _usedGB;
+    log.info('main', `image-to-3d RAM gate: budget=${_budgetGB.toFixed(1)}GB used=${_usedGB.toFixed(1)}GB headroom=${_headroomGB.toFixed(1)}GB`);
+    if (ultraQ && PEAK_1536_GB > _headroomGB) {
+      log.warn('main', `image-to-3d: Ultra (1536, ~${PEAK_1536_GB}GB) > headroom ${_headroomGB.toFixed(1)}GB — downgrading to Quality+ (1024)`);
+      try { safeSend('ai3d-progress', `[main] Ultra (1536, ~${PEAK_1536_GB} GB) dépasse le budget restant (${_headroomGB.toFixed(0)} GB libres sous le marqueur) → Quality+ (1024)\n`); } catch (_) {}
       ultraQ = false;
     }
-    if ((ultraQ || qualityPlus) && _budgetGB < QUALITY_PLUS_MIN_RAM) {
-      log.warn('main', `image-to-3d: cascade requested but RAM budget=${_budgetGB.toFixed(1)}GB < ${QUALITY_PLUS_MIN_RAM} — downgrading to base mode`);
-      try { safeSend('ai3d-progress', `[main] Budget RAM ${_budgetGB.toFixed(0)} GB trop bas pour la cascade → mode de base (le plus léger)\n`); } catch (_) {}
+    if ((ultraQ || qualityPlus) && PEAK_1024_GB > _headroomGB) {
+      log.warn('main', `image-to-3d: Quality+ (1024, ~${PEAK_1024_GB}GB) > headroom ${_headroomGB.toFixed(1)}GB — downgrading to base mode`);
+      try { safeSend('ai3d-progress', `[main] Quality+ (1024, ~${PEAK_1024_GB} GB) dépasse le budget restant (${_headroomGB.toFixed(0)} GB libres sous le marqueur) → mode de base (~10 GB)\n`); } catch (_) {}
       ultraQ = false;
       qualityPlus = false;
     }

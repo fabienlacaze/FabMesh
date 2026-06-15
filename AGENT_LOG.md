@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (fix — budget RAM = vraie limite sur le TOTAL (headroom-aware))
+
+User : "les limites marchent vraiment ? la RAM dépasse le marqueur (88% vs 85%),
+ça doit être une LIMITE". Vérif mesurée : process TRELLIS = BelowNormal (priorité
+OK) + 20 GB WS (1024_cascade OK), mais total système 28/31.8 = 88% > marqueur.
+CAUSE : le gate budget comparait le pic du mode au budget BRUT (% du physique),
+sans soustraire ce qui est DÉJÀ utilisé (OS+Electron+SDXL ~8 GB) -> le pic du
+worker s'ajoutait au baseline -> total au-dessus du marqueur. FIX : gate
+headroom-aware -> le pic du mode doit tenir dans (budget − RAM utilisée).
+peak(1536)=27, peak(1024)=20, base=10. Sur 31.8 GB à 85% (27 GB) avec ~8 GB
+pris -> headroom 19 -> 1024 (20) ne rentre pas -> mode base. Le marqueur devient
+une vraie limite sur le TOTAL ; compromis : qualité plus basse sur machine
+serrée (monter le marqueur ou fermer des apps pour récupérer 1024). Toujours pas
+de cap dur qui crashe (dégradation de mode). main.js -> restart Electron.
+
 ## 2026-06-15 (fix — moniteur HW gelé + ETA qui balloon + priorité trop dure)
 
 User : gen 3D "se rallonge sans cesse" + "valeurs HW figées" (panneau Réglages)
