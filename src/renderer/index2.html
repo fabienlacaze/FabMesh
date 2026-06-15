@@ -2430,23 +2430,40 @@
   <!-- Mesh Edit modal (Sculpt / Paint / Select) -->
   <div id="modal-mesh-edit" class="modal hidden">
     <div class="modal-content" style="width:92vw; height:92vh; max-width:1600px; max-height:95vh; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:600px; overflow:hidden;">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-        <h3 style="margin:0;" id="mesh-edit-title">Mesh Edit</h3>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0; gap:12px;">
+        <h3 style="margin:0; flex-shrink:0;" id="mesh-edit-title">Mesh Edit</h3>
+        <!-- Main tools: mode selector (top, centered) -->
+        <div style="display:flex; gap:6px;">
+          <button id="me-tool-sculpt" class="secondary-btn tool-btn tool-active" style="padding:6px 18px; font-size:12px;">&#9997; Sculpt</button>
+          <button id="me-tool-paint" class="secondary-btn tool-btn" style="padding:6px 18px; font-size:12px;">&#127912; Paint</button>
+          <button id="me-tool-select" class="secondary-btn tool-btn" style="padding:6px 18px; font-size:12px;">&#9634; Select</button>
+        </div>
         <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
           <button id="me-undo" class="secondary-btn tool-btn" disabled title="Undo">&#8630;</button>
           <button id="me-redo" class="secondary-btn tool-btn" disabled title="Redo">&#8631;</button>
           <button id="me-close-x" class="small-btn" style="font-size:18px; margin-left:4px;">&#10005;</button>
         </div>
       </div>
-      <div style="display:flex; flex:1 1 0; gap:12px; min-height:500px;">
+      <!-- General controls toolbar (always visible): symmetry + brush sliders -->
+      <div style="display:flex; align-items:center; gap:18px; flex-shrink:0; padding:6px 2px; border-top:1px solid var(--border, #333); border-bottom:1px solid var(--border, #333); flex-wrap:wrap;">
+        <div id="me-sym-opts" style="display:flex; align-items:center; gap:6px;">
+          <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Mirror</span>
+          <button id="me-sym-x" class="secondary-btn tool-btn" style="padding:3px 10px; font-size:11px;">X</button>
+          <button id="me-sym-y" class="secondary-btn tool-btn" style="padding:3px 10px; font-size:11px;">Y</button>
+          <button id="me-sym-z" class="secondary-btn tool-btn" style="padding:3px 10px; font-size:11px;">Z</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:10px; color:var(--text-muted);">Radius <span id="me-brush-val" style="color:var(--text-1);">0.05</span></span>
+          <input type="range" id="me-brush-size" min="1" max="100" value="25" style="width:130px;" />
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:10px; color:var(--text-muted);">Strength <span id="me-strength-val" style="color:var(--text-1);">0.5</span></span>
+          <input type="range" id="me-strength" min="1" max="100" value="50" style="width:130px;" />
+        </div>
+      </div>
+      <div style="display:flex; flex:1 1 0; gap:12px; min-height:400px;">
         <!-- Left panel: tools — scrolls vertically when controls (incl. Tolerance) overflow. -->
         <div style="display:flex; flex-direction:column; gap:10px; width:130px; flex-shrink:0; padding:8px 4px 8px 0; overflow-y:auto;">
-          <div style="display:flex; flex-direction:column; gap:4px;">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Mode</span>
-            <button id="me-tool-sculpt" class="secondary-btn tool-btn tool-active" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9997; Sculpt</button>
-            <button id="me-tool-paint" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#127912; Paint</button>
-            <button id="me-tool-select" class="secondary-btn tool-btn" style="padding:5px 10px; font-size:11px; text-align:left; width:100%;">&#9634; Select</button>
-          </div>
           <!-- Sculpt options -->
           <div id="me-sculpt-opts" style="display:flex; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Sculpt</span>
@@ -2474,26 +2491,6 @@
           <div id="me-paint-opts" style="display:none; flex-direction:column; gap:4px;">
             <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Color</span>
             <input type="color" id="me-paint-color" value="#ff0000" style="width:36px; height:36px; border:none; cursor:pointer; border-radius:6px;" />
-          </div>
-          <!-- General controls (always visible): symmetry + brush sliders -->
-          <div style="display:flex; flex-direction:column; gap:6px; padding-top:8px; border-top:1px solid var(--border, #333);">
-            <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">General</span>
-            <div id="me-sym-opts" style="display:flex; flex-direction:column; gap:3px;">
-              <span style="font-size:9px; color:var(--text-muted);">Symmetry mirror</span>
-              <div style="display:flex; gap:4px;">
-                <button id="me-sym-x" class="secondary-btn tool-btn" style="padding:3px 6px; font-size:11px; flex:1;">X</button>
-                <button id="me-sym-y" class="secondary-btn tool-btn" style="padding:3px 6px; font-size:11px; flex:1;">Y</button>
-                <button id="me-sym-z" class="secondary-btn tool-btn" style="padding:3px 6px; font-size:11px; flex:1;">Z</button>
-              </div>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:1px;">
-              <span style="font-size:9px; color:var(--text-muted);">Radius <span id="me-brush-val" style="color:var(--text-1);">0.05</span></span>
-              <input type="range" id="me-brush-size" min="1" max="100" value="25" style="width:85%; height:12px; margin:0;" />
-            </div>
-            <div style="display:flex; flex-direction:column; gap:1px;">
-              <span style="font-size:9px; color:var(--text-muted);">Strength <span id="me-strength-val" style="color:var(--text-1);">0.5</span></span>
-              <input type="range" id="me-strength" min="1" max="100" value="50" style="width:85%; height:12px; margin:0;" />
-            </div>
           </div>
         </div>
         <!-- Right: 3D viewport -->
