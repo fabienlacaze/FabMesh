@@ -18,17 +18,19 @@ hold is your **secrets** — restore those from your encrypted vault (Step 1).
 - Account access: **HuggingFace**, **Cloudflare**, **Supabase**, **Stripe**,
   **Modal**, **Replicate** (for regenerating/reading secrets).
 
-## 1. Restore secrets (NOT on GitHub)
-Copy these back from your encrypted vault into the repo root:
+## 1. Restore secrets (NOT on GitHub in plaintext)
+The secret files (`.env`, `.mcp_bridge_token`, `.test_api_token`, `config.json`)
+are gitignored. They are backed up **encrypted** in this repo as
+`secrets.sealed` (AES-256-GCM). Restore them with your passphrase:
 ```
-.env              # HF / Replicate / Modal / app keys
-.mcp_bridge_token
-.test_api_token
-config.json
+python scripts/secrets_unseal.py        # asks for the passphrase, restores the files
 ```
-If lost, regenerate each key from its provider dashboard. Cloud-deploy secrets
-(Cloudflare/Stripe/Supabase) also live in **GitHub → Settings → Secrets**, used
-by the Actions deploy — those survive on their own.
+(To re-seal after changing a secret: `python scripts/secrets_seal.py` then
+`git add secrets.sealed && git commit && git push`.)
+
+If `secrets.sealed` is missing or you forgot the passphrase, regenerate each
+key from its provider dashboard. Cloud-deploy secrets (Cloudflare/Stripe/
+Supabase) also live in **GitHub → Settings → Secrets** for the Actions deploy.
 
 ## 2. Clone the repo
 ```

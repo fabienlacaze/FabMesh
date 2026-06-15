@@ -1,5 +1,15 @@
 # FabMesh Agent Log
 
+## 2026-06-15 (feat — secrets chiffrés backupables sur GitHub (seal/unseal))
+
+User veut backuper les secrets (hors git) de façon chiffrée SUR GitHub.
+scripts/secrets_seal.py : bundle .env/.mcp_bridge_token/.test_api_token/
+config.json -> AES-256-GCM (clé scrypt n=2^16 dérivée d'une passphrase getpass,
+jamais en argv/log) -> secrets.sealed (trackable, safe à pusher). unseal restore
+sur machine neuve ; mauvaise passphrase = échec propre (InvalidTag, rc=2, aucun
+écrasement). Round-trip testé en bac à sable (passphrase jetable). .gitignore
+déjà OK (clairs ignorés, secrets.sealed trackable). RECOVERY.md mis à jour.
+
 ## 2026-06-15 (chore — backup: commit du code custom jamais trackés)
 
 Audit workflow (couverture GitHub). Tout était récupérable (branche
