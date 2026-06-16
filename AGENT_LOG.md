@@ -1,6 +1,19 @@
 # FabMesh Agent Log
 
-## 2026-06-15 (feat — cap VRAM branché sur le worker 3D (parité avec image))
+## 2026-06-16 (perf — scan NSFW idempotent : supprime le pic CPU au démarrage)
+
+Monitoring seconde/seconde : à l'ouverture de FabMesh, CPU bloqué à ~38% pendant
+20-30s. CAUSE (pas les thumbnails comme supposé) : _runNsfwBackgroundScan ->
+batchCheckNsfw -> nsfw_scan.py chargeait 2 modèles ViT et RE-classifiait TOUTE la
+bibliothèque à CHAQUE lancement, car (a) le cache renderer _nsfwScanCache est en
+mémoire (vidé au démarrage) et (b) nsfw_scan n'écrivait un sidecar QUE pour les
+images bloquées (.nsfw) -> les images propres, sans marqueur, re-scannées sans
+fin. FIX idempotent : nsfw_scan.py écrit aussi .nsfwok pour les images propres,
+pré-filtre les déjà-décidées, et ne charge les modèles que s'il reste du nouveau
+(testé: tout-en-cache = 189ms sans transformers). main.js batch-check-nsfw skippe
+les images avec sidecar .nsfw/.nsfwok et ne lance Python QUE pour les jamais-vues
+(rien de neuf -> aucun spawn). Le 1er lancement post-fix scanne encore une fois
+pour écrire les .nsfwok, ensuite démarrages instantanés. main.js -> restart.
 
 User : "pour le GPU on peut faire pareil ?". Trou découvert :
 trellis2_native_full_pipeline.py n'avait NI VRAM fraction NI gpu_throttle ->

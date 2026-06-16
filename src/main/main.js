@@ -2121,23 +2121,42 @@ ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
   const imgList = images.filter(p => fs.existsSync(p));
   if (imgList.length === 0) return {};
 
+  // IDEMPOTENT: skip images that already carry a persisted verdict. Flagged
+  // images have a `.nsfw` sidecar, clean ones a `.nsfwok` sidecar (both written
+  // by nsfw_scan.py). Only never-seen images go to the AI scanner — so on a
+  // relaunch with no new images we DON'T spawn Python at all. This removes the
+  // ~38% CPU / 20-30s startup spike where the whole library was re-classified
+  // through two CPU ViT models every launch (verdicts were renderer-RAM only).
+  const decided = {};
+  const toScan = [];
+  for (const p of imgList) {
+    if (fs.existsSync(p + '.nsfw'))        decided[p] = true;
+    else if (fs.existsSync(p + '.nsfwok')) decided[p] = false;
+    else                                   toScan.push(p);
+  }
+  if (toScan.length === 0) {
+    log.info('main', `NSFW scan: all ${imgList.length} already decided (sidecars) — no AI run`);
+    return decided;
+  }
+
   // Write paths to a temp file (use forward slashes to avoid JSON escape issues)
   const tmpFile = path.join(LOGS_DIR, '_nsfw_scan_paths.json');
   const outFile = path.join(LOGS_DIR, '_nsfw_scan_results.json');
-  fs.writeFileSync(tmpFile, JSON.stringify(imgList), 'utf-8');
+  fs.writeFileSync(tmpFile, JSON.stringify(toScan), 'utf-8');
   const scanScript = path.join(__dirname, '..', '..', 'scripts', 'nsfw_scan.py');
 
   return new Promise((resolve) => {
     execFile('python', [scanScript, tmpFile, outFile], { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       try { fs.unlinkSync(tmpFile); } catch(_) {}
-      if (error) { log.error('main', `NSFW scan failed: ${stderr?.slice(-200) || error.message}`); resolve({}); return; }
-      if (!fs.existsSync(outFile)) { resolve({}); return; }
+      if (error) { log.error('main', `NSFW scan failed: ${stderr?.slice(-200) || error.message}`); resolve(decided); return; }
+      if (!fs.existsSync(outFile)) { resolve(decided); return; }
       try {
         const results = JSON.parse(fs.readFileSync(outFile, 'utf-8'));
         try { fs.unlinkSync(outFile); } catch(_) {}
-        log.info('main', `NSFW scan: ${Object.keys(results).length} images scanned, ${Object.values(results).filter(v=>v).length} NSFW`);
-        resolve(results);
-      } catch (_) { resolve({}); }
+        const merged = { ...decided, ...results };
+        log.info('main', `NSFW scan: ${toScan.length} new scanned (${imgList.length - toScan.length} cached), ${Object.values(merged).filter(v=>v).length} NSFW`);
+        resolve(merged);
+      } catch (_) { resolve(decided); }
     });
   });
 });
