@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Auto-Inpaint cloud Preview fix + drapeau + i18n FR complet)
+
+- **Modal redeploy** (modal_app/app.py depuis la RACINE du repo, pas depuis modal_app/
+  sinon le mount `modal_app/front_tpose_skeleton.png` cherche `modal_app/modal_app/...`
+  et echoue) : l'op `segment` (CLIPSeg detect-only pour "Preview mask") + les fixes
+  VAE upcast + CLIPSeg 512px etaient codes mais JAMAIS deployes. Symptome cloud : le
+  bouton "Preview mask" n'affichait aucun masque ET ne deduisait aucun credit -> en fait
+  l'appel `op:'segment'` etait rejete par l'ancien Modal -> le worker remboursait
+  (handleSegmentPreview catch -> addCredits). Redeploy OK (`MyFabmeshBackview.router`
+  live) => Preview renvoie le masque + deduit 1 credit.
+- **Badge cout sur le bouton Preview** (cloud-overrides.js) : MODAL_CREDIT_CONFIG
+  'modal-auto-inpaint' a maintenant `previewBtn:'ai-preview-btn', previewCost:'segment'` ;
+  _COST_DEFAULTS gagne `segment:1` ; installModalCreditBadges injecte le badge sur le
+  previewBtn. Le bouton "Preview mask" affiche desormais ⚡1 (Apply reste ⚡3).
+- **Drapeau langue** (i18n.js + index.html x2) : Windows n'affiche pas les emoji-drapeaux
+  -> petit drapeau SVG inline (#lang-flag) a gauche du <select>, mis a jour par applyLang.
+- **i18n FR complet** : +358 paires extraites de index.html (tout l'UI : steps, modals,
+  settings, calibration, export, publish, paint, mesh-edit, about, contact, usage). Le
+  francais couvre maintenant quasi tout l'UI statique (avant ~90 chaines starter).
+
 ## 2026-06-16 (i18n : systeme de traduction + selecteur de langue, desktop+cloud)
 
 User veut pouvoir choisir la langue (tout est en anglais en dur). Choix : systeme i18n

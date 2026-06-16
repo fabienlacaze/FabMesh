@@ -779,7 +779,8 @@
   const MODAL_CREDIT_CONFIG = {
     'modal-modify-image':      { cost: 'modify',       applyBtn: 'mod-apply' },
     'modal-multiview-options': { cost: 'multi_view',   applyBtn: 'mv-opt-start' },
-    'modal-auto-inpaint':      { cost: 'auto_inpaint', applyBtn: 'ai-go' },
+    'modal-auto-inpaint':      { cost: 'auto_inpaint', applyBtn: 'ai-go',
+                                 previewBtn: 'ai-preview-btn', previewCost: 'segment' },
     'mask-modal':              { cost: 'mask_inpaint', applyBtn: 'mask-apply' },
     'modal-resolution':        { cost: 'upscale_image', applyBtn: 'res-upscale', extraBtns: ['res-downscale'] },
     // variant-modal: dynamic cost handled in index2.js (var-apply-cost-badge).
@@ -794,7 +795,7 @@
   // immediately with the default and syncLivePricing rewrites later.
   const _COST_DEFAULTS = {
     modify: 2, multi_view: 6, auto_inpaint: 3,
-    mask_inpaint: 3, upscale_image: 2,
+    mask_inpaint: 3, upscale_image: 2, segment: 1,
   };
 
   function _ensureModalBalanceStyle() {
@@ -868,6 +869,9 @@
       const cost = _COST_DEFAULTS[conf.cost] ?? 1;
       if (conf.applyBtn) _injectModalCostBadge(conf.applyBtn, cost);
       (conf.extraBtns || []).forEach((id) => _injectModalCostBadge(id, cost));
+      // Secondary action priced differently (e.g. Auto-Inpaint "Preview mask"
+      // = 1 segment credit, distinct from the 3-credit Apply).
+      if (conf.previewBtn) _injectModalCostBadge(conf.previewBtn, _COST_DEFAULTS[conf.previewCost] ?? 1);
     }
     // First refresh — fills the "…" with the actual balance. The
     // refresh function is exported on window so the existing topbar
