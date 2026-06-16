@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (parite cloud finitions : engine caches + variant refondu en 1 panneau)
+
+User a repere 2 ecarts visuels cloud vs desktop sur captures :
+- ENGINE : les selects engine (Image ws-engine, Mesh ws-3d-engine, Rig ws-rig-engine,
+  + Modify mod-engine) etaient encore visibles sur cloud alors que desktop les masque
+  depuis ce matin. Porte le _hideFixedEngineFields desktop sur cloud index2.js : cache
+  la .form-row de chaque select engine mono-option (garde le <select> cache dans le DOM
+  pour .value). PAS ws-anim-engine (3 options dont 2 disabled -> reste, comme desktop).
+- VARIANT : le modal cloud avait encore 2 onglets (Re-roll seed | Img2img strength),
+  desktop = 1 panneau (apercu + Variation amount + hint descriptif + Number of variants
+  + Generate variant). Refonte complete du modal-variant cloud sur le modele desktop
+  (var-source-img, var-strength 25-90 %, _updateVarStrengthHint Subtle/Moderate/Strong/
+  Very-strong, var-count, boucle count x img2img). Splice par ancres (Python).
+Cloud only, build+deploy.
+
 ## 2026-06-16 (parite cloud 11/11 : inpaint mask preview via bouton "Preview mask")
 
 User a choisi "Bouton Preview mask" (vs live). Implemente sur 4 niveaux :

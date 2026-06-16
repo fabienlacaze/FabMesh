@@ -2751,186 +2751,72 @@ _ws3dEngineSync();
 // that new version's <stem>_multiview/ dir, (c) reload the project
 // so the gallery shows the new version with MV badge.
 // ============================================================
-// ✨ CREATE VARIANT — two tabs in one modal:
-//   - Re-roll seed: re-generate the same prompt N times with new
-//     seeds. Each variant lands as a new image version.
-//   - Img2img strength: feed the current image back into the
-//     generator with a configurable variation strength + optional
-//     extra hint. Useful for "same scene, slightly different mood".
+// ✨ CREATE VARIANT — single panel (parity with desktop modal-variant):
+// pick a Variation amount (img2img strength) + Number of variants, then
+// loop img2img (a fresh seed per call) so you get distinct takes.
 // ============================================================
-(() => {
-  const open = () => {
-    const p = state.currentProject;
-    if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-    const m = document.getElementById('variant-modal');
-    if (m) m.classList.remove('hidden');
-    // If the project has no prompt, switch to the Img2img tab on open
-    // (the re-roll path falls back to img2img anyway). Also surface a
-    // small "no prompt — re-roll will use img2img" note inline.
-    const hasPrompt = !!(p.prompt || p.initialPrompt);
-    const noPromptNote = document.getElementById('var-no-prompt-note');
-    if (noPromptNote) noPromptNote.style.display = hasPrompt ? 'none' : 'flex';
-    if (!hasPrompt) {
-      // Defer to next tick so showTab is defined.
-      queueMicrotask(() => {
-        const strengthTab = document.getElementById('var-tab-strength');
-        if (strengthTab) strengthTab.click();
-      });
+function _updateVarStrengthHint() {
+  const el = document.getElementById('var-strength-hint');
+  const slider = document.getElementById('var-strength');
+  if (!el || !slider) return;
+  const v = parseInt(slider.value);
+  let t;
+  if (v <= 40) t = 'Subtle — small tweaks, stays very close to the original.';
+  else if (v <= 60) t = 'Moderate — clear variation, same subject & composition.';
+  else if (v <= 75) t = 'Strong — noticeable changes; the subject may shift a little.';
+  else t = '⚠ Very strong — big re-interpretation; can drift away from the original.';
+  el.textContent = t;
+}
+document.getElementById('ws-variant-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const modal = document.getElementById('variant-modal');
+  if (!modal) return;
+  const srcImg = document.getElementById('var-source-img');
+  if (srcImg) srcImg.src = _toFileUrl(p.selectedImagePath) + (String(p.selectedImagePath).includes('?') ? '&' : '?') + 't=' + Date.now();
+  const badge = document.getElementById('var-apply-cost-badge');
+  if (badge) badge.textContent = document.getElementById('var-count')?.value || '1';
+  _updateVarStrengthHint();
+  modal.classList.remove('hidden');
+});
+document.getElementById('var-strength')?.addEventListener('input', (e) => {
+  document.getElementById('var-strength-val').textContent = e.target.value + '%';
+  _updateVarStrengthHint();
+});
+document.getElementById('var-count')?.addEventListener('input', (e) => {
+  document.getElementById('var-count-val').textContent = e.target.value;
+  const b = document.getElementById('var-apply-cost-badge');
+  if (b) b.textContent = e.target.value;
+});
+const _varClose = () => document.getElementById('variant-modal')?.classList.add('hidden');
+document.getElementById('var-cancel')?.addEventListener('click', _varClose);
+document.getElementById('var-close-x')?.addEventListener('click', _varClose);
+document.getElementById('var-apply')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
+  const strength = (parseInt(document.getElementById('var-strength').value) || 50) / 100;
+  const count = parseInt(document.getElementById('var-count').value) || 1;
+  _varClose();
+  const variantSource = p.selectedImagePath;
+  const prompt = (p.prompt || p.initialPrompt) || 'variation';
+  const job = (typeof pushJob === 'function')
+    ? pushJob(`Variant${count > 1 ? 's' : ''}: ${p.name}`, null,
+        { Variants: count, Variation: Math.round(strength * 100) + '%' }, 30000 * count, undefined,
+        { sourceImageUrl: variantSource, projectName: p.name })
+    : null;
+  try {
+    for (let i = 0; i < count; i++) {
+      const r = await window.meshyAPI?.img2img({ imagePath: variantSource, prompt, strength });
+      if (!r?.success) throw new Error(r?.error || 'img2img failed');
     }
-  };
-  const close = () => document.getElementById('variant-modal')?.classList.add('hidden');
-  document.getElementById('ws-variant-btn')?.addEventListener('click', open);
-  document.getElementById('var-close-x')?.addEventListener('click', close);
-  document.getElementById('var-cancel')?.addEventListener('click', close);
-  // Tab switching.
-  const showTab = (tab) => {
-    const panels = { reroll: document.getElementById('var-panel-reroll'),
-                     strength: document.getElementById('var-panel-strength') };
-    const tabs = { reroll: document.getElementById('var-tab-reroll'),
-                   strength: document.getElementById('var-tab-strength') };
-    Object.entries(panels).forEach(([k, el]) => { if (el) el.style.display = (k === tab) ? 'flex' : 'none'; });
-    Object.entries(tabs).forEach(([k, el]) => {
-      if (!el) return;
-      const on = k === tab;
-      el.classList.toggle('tool-active', on);
-      el.style.borderBottomColor = on ? 'var(--accent, #5a4fcf)' : 'transparent';
-      el.style.color = on ? 'var(--text-1)' : 'var(--text-2)';
-    });
-    document.getElementById('variant-modal').dataset.tab = tab;
-    // Sync the Generate button credit badge with the active tab:
-    // re-roll uses the slider value, strength is always 1.
-    const applyBadge = document.getElementById('var-apply-cost-badge');
-    if (applyBadge) {
-      const n = tab === 'reroll'
-        ? Number(document.getElementById('var-reroll-count')?.value || 1)
-        : 1;
-      applyBadge.textContent = String(n);
-    }
-  };
-  document.getElementById('var-tab-reroll')?.addEventListener('click', () => showTab('reroll'));
-  document.getElementById('var-tab-strength')?.addEventListener('click', () => showTab('strength'));
-  showTab('reroll');
-  // Slider live values.
-  const rerollSlider = document.getElementById('var-reroll-count');
-  const rerollVal    = document.getElementById('var-reroll-count-val');
-  const rerollCost   = document.getElementById('var-reroll-cost');
-  const syncReroll = () => {
-    const n = Number(rerollSlider.value);
-    rerollVal.textContent = String(n);
-    // Update both badges: the inline "Total cost: <badge>" and the
-    // Generate-button badge that mirrors the live total cost. Img2img
-    // tab is always 1 credit (handled in showTab).
-    const badge = document.getElementById('var-reroll-cost-badge');
-    if (badge) badge.textContent = String(n);
-    const applyBadge = document.getElementById('var-apply-cost-badge');
-    const tab = document.getElementById('variant-modal')?.dataset.tab || 'reroll';
-    if (applyBadge && tab === 'reroll') applyBadge.textContent = String(n);
-  };
-  rerollSlider?.addEventListener('input', syncReroll);
-  syncReroll();
-  const strengthSlider = document.getElementById('var-strength');
-  const strengthVal    = document.getElementById('var-strength-val');
-  const syncStrength = () => { strengthVal.textContent = Number(strengthSlider.value).toFixed(2); };
-  strengthSlider?.addEventListener('input', syncStrength);
-  syncStrength();
-  const strengthCountSlider = document.getElementById('var-strength-count');
-  const strengthCountVal    = document.getElementById('var-strength-count-val');
-  const syncStrengthCount = () => { if (strengthCountVal && strengthCountSlider) strengthCountVal.textContent = strengthCountSlider.value; };
-  strengthCountSlider?.addEventListener('input', syncStrengthCount);
-  syncStrengthCount();
-  // Apply — dispatch to the active tab.
-  document.getElementById('var-apply')?.addEventListener('click', async () => {
-    const p = state.currentProject;
-    if (!p || !p.selectedImagePath) { showToast('Pick an image first.', 'error'); return; }
-    const tab = document.getElementById('variant-modal').dataset.tab || 'reroll';
-    close();
-    if (tab === 'reroll') {
-      // Re-roll N variants of the same prompt. We use the project's
-      // current prompt + style; the generator picks a fresh seed
-      // for each call. Wrapped in a single job that completes once
-      // every variant has come back.
-      const n = Number(document.getElementById('var-reroll-count').value) || 1;
-      const prompt = p.prompt || p.initialPrompt || '';
-      // No prompt available (imported image, or project predates the
-      // prompt-saving fix) — silently fall back to N img2img variants
-      // of the current image so the user isn't blocked. Strength 0.6
-      // is a sweet spot: clearly different takes without losing the
-      // composition entirely.
-      if (!prompt) {
-        showToast('No prompt on project — using img2img variation of current image instead.', 'info', 4000);
-        const rerollSource = p.selectedImagePath;
-        const job = (typeof pushJob === 'function')
-          ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Mode: 'img2img-fallback' }, 30_000 * n, undefined, {
-              sourceImageUrl: rerollSource, projectName: p.name,
-            })
-          : null;
-        try {
-          for (let i = 0; i < n; i++) {
-            const r = await window.meshyAPI?.img2img({
-              imagePath: p.selectedImagePath, prompt: 'variation', strength: 0.6,
-            });
-            if (!r?.success) throw new Error(r?.error || 'img2img failed');
-          }
-          if (job && typeof completeJob === 'function') completeJob(job.id, true);
-          if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
-          showToast(`✓ ${n} variant${n > 1 ? 's' : ''} generated.`, 'success');
-        } catch (e) {
-          if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
-          showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
-        }
-        return;
-      }
-      const job = (typeof pushJob === 'function')
-        ? pushJob(`Re-roll variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Prompt: prompt }, 60_000 * n)
-        : null;
-      try {
-        for (let i = 0; i < n; i++) {
-          const r = await (window.meshyAPI?.generateImages
-            ? window.meshyAPI.generateImages({ prompt, userPrompt: prompt, engine: 'cloud', numImages: 1, projectName: p.name, seed: Math.floor(Math.random() * 1_000_000) })
-            : { success: false, error: 'generateImages API missing' });
-          if (!r?.success) throw new Error(r?.error || 'generation failed');
-        }
-        if (job && typeof completeJob === 'function') completeJob(job.id, true);
-        if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
-        showToast(`✓ ${n} variant${n > 1 ? 's' : ''} generated.`, 'success');
-      } catch (e) {
-        if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
-        showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
-      }
-    } else {
-      // Img2img — keep the current image as a starting frame, render
-      // N varied versions at the given strength + optional hint. Looping
-      // img2img (the backend picks a fresh seed per call) yields several
-      // distinct takes at the SAME strength — combining variation-amount
-      // AND count in one panel (parity with desktop modal-variant).
-      const strength = Number(document.getElementById('var-strength').value) || 0.4;
-      const n = Number(document.getElementById('var-strength-count')?.value) || 1;
-      const hint = document.getElementById('var-strength-hint').value.trim();
-      const basePrompt = p.prompt || p.initialPrompt || '';
-      const prompt = hint ? (basePrompt + ', ' + hint) : (basePrompt || 'variation');
-      const variantSource = p.selectedImagePath;
-      const job = (typeof pushJob === 'function')
-        ? pushJob(`Img2img variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Strength: strength.toFixed(2), Hint: hint || '(none)' }, 30_000 * n, undefined, {
-            sourceImageUrl: variantSource, projectName: p.name,
-          })
-        : null;
-      try {
-        for (let i = 0; i < n; i++) {
-          const r = await window.meshyAPI?.img2img({
-            imagePath: p.selectedImagePath, prompt, strength,
-          });
-          if (!r?.success) throw new Error(r?.error || 'img2img failed');
-        }
-        if (job && typeof completeJob === 'function') completeJob(job.id, true);
-        if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
-        showToast(`✓ ${n} variant${n > 1 ? 's' : ''} generated.`, 'success');
-      } catch (e) {
-        if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
-        showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
-      }
-    }
-  });
-})();
+    if (job && typeof completeJob === 'function') completeJob(job.id, true);
+    if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+    showToast(`✓ ${count} variant${count > 1 ? 's' : ''} generated.`, 'success');
+  } catch (e) {
+    if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
+    showToast('Variant failed: ' + (e?.message || e), 'error', 5000);
+  }
+});
 
 document.getElementById('ws-multiview-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
@@ -4355,6 +4241,30 @@ const ASSET_STYLE_PROMPTS = {
   'art-deco':      'art deco, geometric gold ornament, elegant symmetrical 1920s luxury',
   custom:       '',
 };
+
+// Each step has a single fixed engine, so don't show the ENGINE field at all
+// (parity with desktop). Keep the hidden <select> in the DOM — generators
+// still read its .value — and just hide the row / label.
+(function _hideFixedEngineFields() {
+  // Same list as desktop _hideFixedEngineFields — NOT ws-anim-engine, which
+  // has multiple (some disabled) options and stays a real dropdown.
+  ['ws-engine', 'ws-3d-engine', 'ws-rig-engine', 'mod-engine'].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    if (sel.options && sel.options.length > 1) return;  // a real choice → keep it
+    const row = sel.closest('.form-row');
+    if (row) { row.style.display = 'none'; return; }
+    // Modal case (no .form-row): hide the select + a preceding engine-static
+    // box + the label right before it.
+    sel.style.display = 'none';
+    let prev = sel.previousElementSibling;
+    if (prev && prev.classList && prev.classList.contains('engine-static')) {
+      prev.style.display = 'none';
+      prev = prev.previousElementSibling;
+    }
+    if (prev && prev.tagName === 'LABEL') prev.style.display = 'none';
+  });
+})();
 
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
