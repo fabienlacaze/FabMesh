@@ -4809,10 +4809,10 @@ function _updateModStrengthHint() {
   if (!el) return;
   const v = parseInt(modStrength.value);
   let t;
-  if (v <= 45) t = 'Low — keeps the subject & composition, just adds/edits fine detail.';
-  else if (v <= 65) t = 'Medium — clear changes while keeping the same subject (recommended for "add X").';
-  else if (v <= 80) t = 'High — strong transformation; the subject may start to drift.';
-  else t = '⚠ Very high — near full re-generation. The original subject can be lost (a catapult can turn into a car). Lower this to keep the shape.';
+  if (v <= 45) t = 'Low (30–45%) — keeps the subject & composition, only adds/edits fine detail.';
+  else if (v <= 65) t = 'Medium (46–65%) — clear changes while keeping the same subject (recommended for "add X").';
+  else if (v <= 80) t = 'High (66–80%) — strong transformation; the subject may start to drift.';
+  else t = '⚠ Very high (81–95%) — near full re-generation. The original subject can be lost (a catapult can turn into a car). Lower it to keep the shape.';
   el.textContent = t;
 }
 modStrength.addEventListener('input', () => {

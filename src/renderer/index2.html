@@ -146,7 +146,8 @@
               <div class="stage-body">
                 <div class="form-row">
                   <label>Engine</label>
-                  <select id="ws-engine">
+                  <div class="engine-static" style="padding:8px 10px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; font-size:13px; color:var(--text-1);">MyFabmesh.AI Image Engine (local)</div>
+                  <select id="ws-engine" style="display:none">
                     <option value="local-flux" selected>MyFabmesh.AI Image Engine (local)</option>
                   </select>
                 </div>
@@ -427,7 +428,8 @@
                 <div class="stage-create-form">
                   <div class="form-row">
                     <label>Engine</label>
-                    <select id="ws-3d-engine">
+                    <div class="engine-static" style="padding:8px 10px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; font-size:13px; color:var(--text-1);">MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s)</div>
+                    <select id="ws-3d-engine" style="display:none">
                       <option value="trellis2_native" selected>MyFabmesh.AI 3D Native (mesh + PBR in one shot, ~100s, recommended)</option>
                     </select>
                   </div>
@@ -693,7 +695,8 @@
                 <div class="stage-create-form">
                   <div class="form-row">
                     <label>Engine</label>
-                    <select id="ws-rig-engine">
+                    <div class="engine-static" style="padding:8px 10px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; font-size:13px; color:var(--text-1);">MyFabmesh.AI Rig</div>
+                    <select id="ws-rig-engine" style="display:none">
                       <option value="puppeteer" selected>MyFabmesh.AI Rig</option>
                     </select>
                   </div>
@@ -2009,7 +2012,8 @@
             <label>Modification prompt</label>
             <textarea id="mod-prompt" rows="3" placeholder="make it red, add more details, anime style..."></textarea>
             <label>Engine</label>
-            <select id="mod-engine">
+            <div class="engine-static" style="padding:8px 10px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; font-size:13px; color:var(--text-1);">MyFabmesh.AI Image Engine (local)</div>
+            <select id="mod-engine" style="display:none">
               <option value="local-sdxl" selected>MyFabmesh.AI Image Engine (local)</option>
             </select>
             <label>Strength <span id="mod-strength-val" class="slider-val">55%</span></label>
