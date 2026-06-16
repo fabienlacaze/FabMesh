@@ -175,13 +175,19 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         )
         try:
             pipe.unet.to(torch.float16)
-            pipe.vae.to(torch.float16)
             pipe.text_encoder.to(torch.float16)
             pipe.text_encoder_2.to(torch.float16)
             if hasattr(pipe, 'controlnet'):
                 pipe.controlnet.to(torch.float16)
         except Exception as _e:
             print(f"LOCAL_REALVIS: fp16 cast skipped: {_e}", flush=True)
+        # Upcast VAE to fp32 — SDXL's fp16 VAE NaNs to a flat grey image.
+        try:
+            pipe.upcast_vae()
+        except Exception as _e:
+            try: pipe.vae.to(torch.float32)
+            except Exception: pass
+            print(f"LOCAL_REALVIS: upcast_vae fallback ({_e})", flush=True)
         pipe.enable_model_cpu_offload()
         _ctrl_pipe = pipe
         steps = min(int(steps), 8)
@@ -198,13 +204,23 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         )
         try:
             pipe.unet.to(torch.float16)
-            pipe.vae.to(torch.float16)
             pipe.text_encoder.to(torch.float16)
             pipe.text_encoder_2.to(torch.float16)
         except Exception as _e:
             print(f"LOCAL_REALVIS: fp16 cast skipped: {_e}", flush=True)
+        # SDXL's VAE is NUMERICALLY UNSTABLE in fp16: it overflows to NaN latents
+        # and decodes a FLAT GREY/black image (observed: ref_0 grey ~165, var~0,
+        # triggered while changing the quality/steps slider). Upcast the VAE to
+        # fp32 (diffusers handles the fp16->fp32 decode); fall back to a plain
+        # fp32 cast. This is the standard fix for SDXL grey/black outputs.
+        try:
+            pipe.upcast_vae()
+        except Exception as _e:
+            try: pipe.vae.to(torch.float32)
+            except Exception: pass
+            print(f"LOCAL_REALVIS: upcast_vae fallback ({_e})", flush=True)
         pipe.enable_model_cpu_offload()
-        print("LOCAL_REALVIS: Loaded with CPU offload (VAE decodes on CPU if needed)")
+        print("LOCAL_REALVIS: Loaded with fp32 VAE (no grey/NaN) + CPU offload")
         sys.stdout.flush()
     if _is_tpose:
         # T-pose/front mode: reinforce strict symmetry, arms out horizontally,

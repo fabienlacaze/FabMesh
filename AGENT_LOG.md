@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (fix — images grises = VAE SDXL fp16 instable (NaN), upcast fp32)
+
+User : changer le slider qualite donne des images toutes grises. Diagnostic :
+ref_0/ref_1 gris plats (avg ~165, variance ~0). CAUSE : local_juggernaut_bridge
+castait le VAE de SDXL en fp16 (pipe.vae.to(torch.float16)). Le VAE SDXL est
+numeriquement INSTABLE en fp16 -> overflow NaN sur les latents -> decode un gris/
+noir uni. Certains step counts declenchent l'instabilite (d'ou le lien slider).
+FIX : pipe.upcast_vae() (fp32, diffusers gere le decode fp16->fp32 ; fallback
+vae.to(float32)) sur les 2 chemins (RealVis XL + ControlNet Lightning). PAS
+NSFW (le blanc NSFW serait noir/30, pas 165). sdxl_server (img2img) laisse tel
+quel (part d'une vraie image, latents stables, pas de gris). Bridge respawn par
+gen -> pas de restart.
+
+
 ## 2026-06-16 (fix — badge emissive 💡 (clé chemin) + masquer champ ENGINE)
 
 1. BADGE EMISSIVE invisible après paint : _emissiveLayerSet/Get/Has utilisaient
