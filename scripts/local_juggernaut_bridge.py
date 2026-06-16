@@ -425,10 +425,27 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                         with open(img_path + '.nsfw', 'w') as _nf:
                             _nf.write(f'{_nsfw_score:.4f}')
                     except: pass
-                    from PIL import ImageDraw
-                    gen_img = Image.new('RGB', gen_img.size, (30, 30, 30))
+                    # Replace with a clear RED "NSFW" stamp so a blocked image is
+                    # obviously a block (not a mysterious grey/failed render).
+                    from PIL import ImageDraw, ImageFont
+                    W, H = gen_img.size
+                    gen_img = Image.new('RGB', (W, H), (26, 20, 22))
                     draw = ImageDraw.Draw(gen_img)
-                    draw.text((gen_img.width//2 - 120, gen_img.height//2 - 10), "Blocked by content filter", fill=(200, 50, 50))
+                    for _b in range(max(4, W // 110)):
+                        draw.rectangle([_b, _b, W - 1 - _b, H - 1 - _b], outline=(205, 40, 45))
+                    try:
+                        _big = ImageFont.truetype("arialbd.ttf", max(28, int(H * 0.18)))
+                        _sml = ImageFont.truetype("arial.ttf", max(12, int(H * 0.05)))
+                    except Exception:
+                        _big = ImageFont.load_default(); _sml = ImageFont.load_default()
+                    _t = "NSFW"
+                    _tb = draw.textbbox((0, 0), _t, font=_big)
+                    draw.text(((W - (_tb[2] - _tb[0])) // 2, H // 2 - int(H * 0.16)),
+                              _t, fill=(235, 55, 55), font=_big)
+                    _s = "Blocked by content filter"
+                    _sb = draw.textbbox((0, 0), _s, font=_sml)
+                    draw.text(((W - (_sb[2] - _sb[0])) // 2, H // 2 + int(H * 0.10)),
+                              _s, fill=(205, 120, 120), font=_sml)
                 else:
                     print(f"LOCAL_REALVIS: safety check passed (nsfw={_nsfw_score:.0%})", flush=True)
             except Exception as _se:

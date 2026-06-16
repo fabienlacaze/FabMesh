@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (feat — tampon NSFW rouge sur les images bloquees)
+
+User : si une image est grisee a cause du NSFW, mettre un tampon rouge NSFW.
+(Les grises du slider qualite etaient en fait le VAE fp16, pas NSFW.) Pour les
+VRAIES images bloquees par le scan ViT du bridge, le placeholder gris sombre +
+petit texte devient un tampon clair : fond sombre + bordure rouge + gros "NSFW"
+rouge + sous-titre "Blocked by content filter". Bridge respawn par gen.
+
+
 ## 2026-06-16 (feat — emissive : Fill emissive-aware + stockage fichier projet)
 
 User : (b) verifier que l'emissive est generee+stockee dans le dossier projet,
