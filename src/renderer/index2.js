@@ -13387,10 +13387,22 @@ async function refreshJobDetailsModal(id) {
   if (hintEl) {
     const elapsed = Date.now() - j.startedAt;
     const isEarly = j.status === 'running' && elapsed < 15000;
-    const isLocalGpu = /realvis|sf3d|stable fast|unirig|sdxl|inpaint/i.test(
-      (j.params?.Engine || '') + ' ' + (j.name || '')
-    );
-    hintEl.classList.toggle('hidden', !(isEarly && isLocalGpu));
+    const blob = (j.params?.Engine || '') + ' ' + (j.name || '') + ' ' + (j.kind || '');
+    const isLocalGpu = /realvis|sf3d|stable fast|unirig|sdxl|inpaint|img2img|style|modify/i.test(blob);
+    const isImageJob = /realvis|sdxl|inpaint|img2img|style|modify|image/i.test(blob);
+    let show = isEarly && isLocalGpu;
+    // Image ops reuse the PERSISTENT SDXL server: if it's already loaded (a gen
+    // ran just before), there is no ~7 GB cold load — the op finishes in
+    // seconds — so the "first run after idle" notice is misleading. Hide it when
+    // the AI engine is already resident. (3D/rig spawn a fresh process each run,
+    // so they genuinely cold-load every time → keep the hint for them.)
+    if (show && isImageJob && API.listProcesses) {
+      try {
+        const pl = await API.listProcesses();
+        if (((pl && pl.procs) || []).some(p => p.isAiEngine)) show = false;
+      } catch (_) {}
+    }
+    hintEl.classList.toggle('hidden', !show);
   }
   // Cancel button: only enabled while running
   const cancelBtn = document.getElementById('job-details-cancel');
