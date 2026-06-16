@@ -589,6 +589,7 @@ const PRICING_DEFAULTS = {
   text2image:       2,
   back_view:        2,
   modify:           2,
+  segment:          1,  // CLIPSeg detect-only (Auto Inpaint live mask preview) — each = a GPU call
   auto_inpaint:     3,
   mask_inpaint:     3,
   face_fix_image:   2,
@@ -6230,7 +6231,7 @@ async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
   if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
   if (!targetText) return err(400, 'targetText required');
 
-  const cost = 1;
+  const cost = await getPrice(env, 'segment');  // admin-configurable (Pricing tab)
   const estimatedTotal = 0.05;
   const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
   if (remainingBudget == null) {

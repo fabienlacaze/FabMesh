@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Auto Inpaint : message 1ere detection + facturation de la detection cloud)
+
+- 1ERE DETECTION ~15s (cold-load CLIPSeg / cold-start GPU cloud) = NORMAL. Ajoute un
+  message dynamique sous le spinner : "Warming up the AI... first detection ~15s, then
+  instant" au 1er passage (flag _aiFirstDetectDone), puis "Detecting target...". Label
+  #ai-detect-label, desktop + cloud.
+- FACTURATION detection cloud : chaque detection live = un appel GPU Modal -> ca coute.
+  segment ajoute a PRICING_DEFAULTS (worker.ts, defaut 1 credit, PricingKey auto via
+  keyof). handleSegmentPreview branche sur getPrice(env,'segment') (etait hardcode 1).
+  Apparait auto dans le tableau de prix admin (data-driven) + description ajoutee dans
+  admin.html PRICING_DESCRIPTIONS. Admin peut ajuster le cout.
+
 ## 2026-06-16 (Auto Inpaint : 3 fixes via workflow diagnostic — vitesse, precision, removal)
 
 User : detection ~10s, masque pas assez precis, "laisser vide" regenere une porte au

@@ -15938,6 +15938,7 @@ function _aiHideMaskOverlay() {
   const ov = document.getElementById('ai-mask-overlay');
   if (ov) { ov.style.display = 'none'; ov.removeAttribute('src'); }
 }
+let _aiFirstDetectDone = false;  // first cloud detection cold-starts the GPU (~15s)
 async function _aiUpdateMaskPreview() {
   const p = state.currentProject;
   const imagePath = editTarget(p);
@@ -15946,11 +15947,16 @@ async function _aiUpdateMaskPreview() {
   const spinner = document.getElementById('ai-detect-spinner');
   if (!target) { _aiHideMaskOverlay(); if (spinner) spinner.style.display = 'none'; return; }
   const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
+  const label = document.getElementById('ai-detect-label');
+  if (label) label.textContent = _aiFirstDetectDone
+    ? 'Detecting target…'
+    : 'Warming up the cloud GPU… the first detection takes ~15s, then it’s fast.';
   if (spinner) spinner.style.display = 'flex';
   try {
     const r = await window.meshyAPI.segmentMask({ imagePath, targetText: target, dilate });
     // Stale? a newer keystroke superseded us — let the newer call own the UI.
     if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
+    _aiFirstDetectDone = true;
     if (spinner) spinner.style.display = 'none';
     const ov = document.getElementById('ai-mask-overlay');
     if (r?.success && r.maskUrl && ov) {

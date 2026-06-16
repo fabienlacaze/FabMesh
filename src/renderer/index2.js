@@ -13744,6 +13744,7 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
 // repaint before committing. Debounced on the TARGET text + padding slider. ---
 let _aiSrcPath = null;
 let _aiPreviewTimer = null;
+let _aiFirstDetectDone = false;  // the FIRST detection loads the model (~15s) — reassure the user
 async function _aiUpdateMaskPreview() {
   const srcImg = document.getElementById('ai-source-img');
   if (!srcImg || !_aiSrcPath) return;
@@ -13753,6 +13754,10 @@ async function _aiUpdateMaskPreview() {
   if (!target) { srcImg.src = origUrl; srcImg.style.opacity = ''; return; }
   if (!API.segmentMask) return;
   const spinner = document.getElementById('ai-detect-spinner');
+  const label = document.getElementById('ai-detect-label');
+  if (label) label.textContent = _aiFirstDetectDone
+    ? 'Detecting target…'
+    : 'Warming up the AI… the first detection takes ~15s (loading the model), then it’s instant.';
   if (spinner) spinner.style.display = 'flex';   // loading circle on the image
   srcImg.style.opacity = '0.6';
   try {
@@ -13760,6 +13765,7 @@ async function _aiUpdateMaskPreview() {
     // Ignore a stale response if the target changed while we were detecting —
     // the newer in-flight call owns the UI (and will hide the spinner).
     if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
+    _aiFirstDetectDone = true;   // engine warm now → next detections are fast
     srcImg.style.opacity = '';
     if (spinner) spinner.style.display = 'none';
     if (r && r.success && r.overlayPath) {
