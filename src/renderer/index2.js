@@ -13150,7 +13150,7 @@ function renderJobs() {
         <div class="job-item-2-bar">
           <div class="job-item-2-bar-fill queued-fill" style="width:0%"></div>
         </div>
-        <div class="job-item-2-pct" style="color:var(--text-2);">queued</div>
+        <div class="job-item-2-pct" style="color:var(--warning, #f59e0b); font-weight:600;">queued</div>
       </div>
     `).join('');
   }
