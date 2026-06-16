@@ -101,19 +101,19 @@
       box.classList.add('verdict-full');
       box.textContent = '✓ Compatible — Full mode unlocked';
       cta.innerHTML =
-        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 24,99 €</a>' +
+        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 49,99 € TTC</a>' +
         '<a href="index.html#cloud-soon" class="btn-ghost">Or try Cloud</a>';
     } else if (v === 'standard') {
       box.classList.add('verdict-std');
       box.textContent = '✓ Compatible — Standard mode';
       cta.innerHTML =
-        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 24,99 €</a>' +
+        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 49,99 € TTC</a>' +
         '<a href="index.html#cloud-soon" class="btn-ghost">Or try Cloud</a>';
     } else if (v === 'lite') {
       box.classList.add('verdict-lite');
       box.textContent = '⚠ Compatible — Lite mode only';
       cta.innerHTML =
-        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 24,99 €</a>' +
+        '<a href="index.html#buy-desktop" class="btn-primary">Buy Desktop — 49,99 € TTC</a>' +
         '<a href="index.html#cloud-soon" class="btn-ghost">Cloud may be smoother</a>';
     } else if (v === 'unknown') {
       box.classList.add('verdict-std');
