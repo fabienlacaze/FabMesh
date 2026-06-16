@@ -1285,6 +1285,8 @@ function renderProjectsBulkBar() {
 function openNewProjectModal() {
   document.getElementById('np-name').value = '';
   document.getElementById('np-prompt').value = '';
+  document.getElementById('np-block-msg')?.classList.add('hidden');
+  const _npu = document.getElementById('np-unlock'); if (_npu) _npu.style.display = 'none';
   document.getElementById('modal-new-project').classList.remove('hidden');
   setTimeout(() => document.getElementById('np-name').focus(), 50);
 }
@@ -1292,6 +1294,19 @@ function closeNewProjectModal() {
   document.getElementById('modal-new-project').classList.add('hidden');
 }
 document.getElementById('btn-new-project').addEventListener('click', openNewProjectModal);
+// Unlock from the New Project popup: run the legal-warning + PIN flow, then if
+// the user is now unrestricted, retry creating the project automatically.
+document.getElementById('np-unlock')?.addEventListener('click', async () => {
+  try { await toggleParentalControl(); } catch (_) {}
+  try {
+    const status = API.getParentalStatus ? await API.getParentalStatus() : null;
+    if (status && status.unrestricted) {
+      document.getElementById('np-block-msg')?.classList.add('hidden');
+      const _u = document.getElementById('np-unlock'); if (_u) _u.style.display = 'none';
+      document.getElementById('np-create')?.click();  // retry now that it's unlocked
+    }
+  } catch (_) {}
+});
 document.getElementById('project-search')?.addEventListener('input', () => renderProjectsGrid());
 document.getElementById('np-cancel').addEventListener('click', closeNewProjectModal);
 document.getElementById('np-create').addEventListener('click', async () => {
@@ -1319,10 +1334,20 @@ document.getElementById('np-create').addEventListener('click', async () => {
       return new RegExp('\\b' + escaped + '\\b').test(text);
     });
     if (blocked) {
-      showToast(`Blocked: "${blocked}" is not allowed with parental control active.`, 'error', 5000);
+      // Show the block INSIDE the popup (not a toast) + an Unlock shortcut.
+      const _msg = document.getElementById('np-block-msg');
+      if (_msg) {
+        _msg.textContent = `Blocked: "${blocked}" is not allowed with parental control active. Unlock to disable the content filter.`;
+        _msg.classList.remove('hidden');
+      }
+      const _ub = document.getElementById('np-unlock');
+      if (_ub) _ub.style.display = '';
       return;
     }
   }
+  // Passed the filter (or unrestricted) — clear any prior block UI.
+  document.getElementById('np-block-msg')?.classList.add('hidden');
+  const _ub2 = document.getElementById('np-unlock'); if (_ub2) _ub2.style.display = 'none';
 
   closeNewProjectModal();
   // Create an empty project shell and open it
