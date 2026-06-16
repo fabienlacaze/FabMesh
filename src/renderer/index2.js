@@ -13382,16 +13382,22 @@ async function refreshJobDetailsModal(id) {
   // primary button that opens Settings and focuses the Meshy key field.
   const errBox = document.getElementById('jd-error-box');
   const openSettingsBtn = document.getElementById('job-details-open-settings');
+  const unlockBtn = document.getElementById('job-details-unlock');
   if (errBox && openSettingsBtn) {
     if (j.status === 'error' && j.errorMessage) {
       errBox.textContent = j.errorMessage;
       errBox.classList.remove('hidden');
       const needsApiKey = /api key not configured/i.test(j.errorMessage);
       openSettingsBtn.style.display = needsApiKey ? '' : 'none';
+      // Content-filter block → offer a direct Unlock shortcut to the parental-
+      // control disable flow (legal warning + PIN), like reportPipelineError does.
+      const isContentFilter = /content filter|parental control|unrestricted mode/i.test(j.errorMessage);
+      if (unlockBtn) unlockBtn.style.display = isContentFilter ? '' : 'none';
     } else {
       errBox.textContent = '';
       errBox.classList.add('hidden');
       openSettingsBtn.style.display = 'none';
+      if (unlockBtn) unlockBtn.style.display = 'none';
     }
   }
   // Go-to-step button: visible whenever this job maps to a Create New
@@ -13408,6 +13414,11 @@ async function refreshJobDetailsModal(id) {
   }
 }
 document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
+document.getElementById('job-details-unlock')?.addEventListener('click', () => {
+  // Close this modal first, then open the legal-warning + PIN flow.
+  closeJobDetails();
+  setTimeout(() => { try { toggleParentalControl(); } catch (_) {} }, 60);
+});
 document.getElementById('job-details-goto-step')?.addEventListener('click', () => {
   const id = state._jobDetailsOpenId;
   if (!id) return;
