@@ -5441,7 +5441,7 @@ async function callModalTpose(env: Env, userId: string, input: {
  *  Returns either the persisted R2 URL or a discriminated mask-empty
  *  shape for the auto_inpaint case (so the Worker can refund). */
 async function callModalImageOp(env: Env, userId: string, input: {
-  op: 'modify' | 'auto_inpaint' | 'mask_inpaint' | 'face_fix_image' | 'upscale';
+  op: 'modify' | 'auto_inpaint' | 'mask_inpaint' | 'face_fix_image' | 'upscale' | 'segment';
   imageUrl: string;
   prompt?: string;
   strength?: number;          // modify + face_fix_image
@@ -5468,7 +5468,7 @@ async function callModalImageOp(env: Env, userId: string, input: {
     body.strength = input.strength ?? 0.55;
     body.seed = input.seed;
     body.steps = input.steps;
-  } else if (input.op === 'auto_inpaint') {
+  } else if (input.op === 'auto_inpaint' || input.op === 'segment') {
     body.target_text = input.targetText ?? '';
     body.dilate = input.dilate ?? 15;
   } else if (input.op === 'mask_inpaint') {
@@ -6211,6 +6211,65 @@ async function handleModifyImage(req: Request, env: Env): Promise<Response> {
   await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
                      'succeeded', { op: 'modify', strength });
   return json({ ok: true, success: true, path: url, newPath: url, creditsRemaining: remaining });
+}
+
+/** Mask preview — detect-only CLIPSeg for the Auto Inpaint "Preview mask"
+ *  button. ONE GPU call on demand (not live-on-keystroke, which would be
+ *  cost-prohibitive on serverless). Returns the soft mask as an R2 image URL
+ *  the renderer overlays on the source. Cheap (1 credit) but still gated by
+ *  the Modal budget + per-user call limit since it's a real GPU hit. */
+async function handleSegmentPreview(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MODAL_IMAGE_OP_URL) return err(503, 'mask preview backend unavailable');
+  const { imagePath, imageUrl, targetText, dilate } = await req.json() as {
+    imagePath?: string; imageUrl?: string; targetText?: string; dilate?: number;
+  };
+  const src = imageUrl || imagePath;
+  if (!src) return err(400, 'imageUrl or imagePath required');
+  if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
+  if (!targetText) return err(400, 'targetText required');
+
+  const cost = 1;
+  const estimatedTotal = 0.05;
+  const remainingBudget = await checkAndIncrementModalSpend(env, estimatedTotal);
+  if (remainingBudget == null) {
+    return json({ ok: false, success: false,
+      error: 'daily Cloud GPU budget reached. Try again after midnight UTC.' }, { status: 429 });
+  }
+  const remainingUserCalls = await checkAndIncrementUserCalls(env, user.id);
+  if (remainingUserCalls == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: 'per-user daily generation limit reached.' }, { status: 429 });
+  }
+  const remaining = await spendCredits(env, user.id, cost);
+  if (remaining == null) {
+    await refundModalSpend(env, estimatedTotal);
+    return json({ ok: false, success: false,
+      error: `insufficient credits — mask preview costs ${cost} credit` }, { status: 402 });
+  }
+
+  const opStart = Date.now();
+  try {
+    const result = await callModalImageOp(env, user.id, {
+      op: 'segment',
+      imageUrl: src, targetText, dilate,
+    }, 'segment');
+    if ('maskEmpty' in result) {
+      await addCredits(env, user.id, cost);
+      await refundModalSpend(env, estimatedTotal);
+      return json({ ok: false, success: false,
+        error: `"${targetText}" not found in the image (credit refunded)` }, { status: 422 });
+    }
+    await logOperation(env, user.id, 'text2image', cost, opStart, Date.now(),
+                       'succeeded', { op: 'segment', target: targetText });
+    return json({ ok: true, success: true, maskUrl: result.url, url: result.url, creditsRemaining: remaining });
+  } catch (e) {
+    await addCredits(env, user.id, cost);
+    await refundModalSpend(env, estimatedTotal);
+    return err(502, `mask preview failed (credit refunded): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Auto-inpaint HTTP handler — desktop "Auto Inpaint" tool. NSFW
@@ -10665,6 +10724,7 @@ export default {
       const MODAL_PATHS = new Set([
         '/api/generate', '/api/generate-image', '/api/generate-back-view',
         '/api/rectify-image', '/api/modify-image', '/api/auto-inpaint',
+        '/api/segment-preview',
         '/api/mask-inpaint', '/api/face-fix-image', '/api/upscale-image',
         '/api/face-fix-mesh', '/api/mesh-op', '/api/text2image-tpose',
         '/api/auto-rig', '/api/auto-rig-status',
@@ -10813,6 +10873,7 @@ export default {
         if (pathname === '/api/rectify-image'         && method === 'POST') return await handleRectifyImage(req, env);
         if (pathname === '/api/modify-image'          && method === 'POST') return await handleModifyImage(req, env);
         if (pathname === '/api/auto-inpaint'          && method === 'POST') return await handleAutoInpaint(req, env);
+        if (pathname === '/api/segment-preview'       && method === 'POST') return await handleSegmentPreview(req, env);
         if (pathname === '/api/mask-inpaint'          && method === 'POST') return await handleMaskInpaint(req, env);
         if (pathname === '/api/face-fix-image'        && method === 'POST') return await handleFaceFixImage(req, env);
         if (pathname === '/api/copy-mesh-to-project'  && method === 'POST') return await handleCopyMeshToProject(req, env);

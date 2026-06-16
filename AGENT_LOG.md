@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (parite cloud 11/11 : inpaint mask preview via bouton "Preview mask")
+
+User a choisi "Bouton Preview mask" (vs live). Implemente sur 4 niveaux :
+- modal_app/app.py : nouvelle op "segment" sur l'endpoint image_op -> CLIPSeg _segment
+  detect-only (reutilise _auto_inpaint._segment, models lazy de _get_auto_inpaint_models),
+  renvoie le masque PNG (blanc sur noir) a la taille d'origine. Pas de SDXL inpaint.
+- cloud/src/worker.ts : op 'segment' dans callModalImageOp (union + body target_text/
+  dilate) + handler handleSegmentPreview (auth + budget GPU + quota user, cout 1 credit,
+  refund si echec) + route /api/segment-preview + MODAL_PATHS.
+- cloud/public/app/meshyAPI-cloud.js : shim segmentMask -> POST /api/segment-preview,
+  renvoie { success, maskUrl }.
+- cloud/public/app/index2.js + index.html : bouton "Preview mask" dans le modal Auto
+  Inpaint + overlay #ai-mask-overlay (mix-blend screen + tint rouge) sur ai-source-img.
+  Le masque est invalide (cache) quand target/dilate change ou a l'ouverture.
+1 appel GPU a la demande (pas de live-on-keystroke, inadapte au serverless). Modal
+redeploy + cloud build/deploy requis.
+
 ## 2026-06-16 (parite cloud vague 3 : variant-modal ; inpaint-preview = decision design)
 
 - variant-modal : le tab img2img/strength cloud ne faisait qu'1 image. Ajout d'un

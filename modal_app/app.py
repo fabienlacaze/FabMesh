@@ -891,9 +891,9 @@ class MyFabmeshBackview:
         image_url = (payload.get("image_url") or "").strip()
         if not image_url:
             raise HTTPException(status_code=400, detail="image_url required")
-        if op not in ("modify", "auto_inpaint", "mask_inpaint", "face_fix_image", "upscale"):
+        if op not in ("modify", "auto_inpaint", "mask_inpaint", "face_fix_image", "upscale", "segment"):
             raise HTTPException(status_code=400,
-                detail="op must be 'modify', 'auto_inpaint', 'mask_inpaint', 'face_fix_image' or 'upscale'")
+                detail="op must be 'modify', 'auto_inpaint', 'mask_inpaint', 'face_fix_image', 'upscale' or 'segment'")
 
         try:
             src_img = _fetch_image(image_url)
@@ -962,6 +962,35 @@ class MyFabmeshBackview:
                 # No face detected — caller refunds credits.
                 raise HTTPException(status_code=422, detail=str(e))
             tag = "face_fix_image"
+
+        elif op == "segment":
+            # Detect-only CLIPSeg mask for the on-demand "Preview mask" button —
+            # no SDXL inpaint, just the soft mask so the user sees what Auto
+            # Inpaint will target before spending a generation.
+            from modal_app._auto_inpaint import _segment as ai_segment
+            from PIL import Image as _PILImg
+            target_text = (payload.get("target_text") or "").strip()
+            if not target_text:
+                raise HTTPException(status_code=400, detail="target_text required for segment")
+            seg_proc, seg_model, _ = self._get_auto_inpaint_models()
+            _src = src_img.convert("RGB")
+            _ow, _oh = _src.size
+            _md = 1024
+            if max(_ow, _oh) > _md:
+                if _ow > _oh:
+                    _ww, _wh = _md, int(_oh * _md / _ow)
+                else:
+                    _wh, _ww = _md, int(_ow * _md / _oh)
+            else:
+                _ww, _wh = _ow, _oh
+            _ww = (_ww // 8) * 8 or 8
+            _wh = (_wh // 8) * 8 or 8
+            _work = _src.resize((_ww, _wh), _PILImg.LANCZOS)
+            mask = ai_segment(seg_proc, seg_model, _work, target_text,
+                              _ww, _wh, int(payload.get("dilate") or 15))
+            # White mask on black, upscaled back to the original size.
+            img = mask.convert("RGB").resize((_ow, _oh), _PILImg.NEAREST)
+            tag = "segment"
 
         else:  # upscale
             from modal_app._upscale import generate as upscale_generate

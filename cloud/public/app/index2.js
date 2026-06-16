@@ -15987,12 +15987,59 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   // what the user is looking at in the workspace.
   const srcImg = document.getElementById('ai-source-img');
   if (srcImg) srcImg.src = _toFileUrl(target) + '?t=' + Date.now();
+  _aiHideMaskOverlay();  // fresh modal → clear any stale mask preview
   document.getElementById('modal-auto-inpaint').classList.remove('hidden');
 });
 const aiDilate = document.getElementById('ai-dilate');
 if (aiDilate) aiDilate.addEventListener('input', () => {
   document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
+  _aiHideMaskOverlay();  // dilation changed → previous preview is stale
 });
+
+// Preview mask (on-demand CLIPSeg) — ONE GPU call, overlays the detected
+// region on the source so the user can check the target BEFORE spending a
+// full Auto Inpaint generation. NOT live-on-keystroke (cost-prohibitive on
+// serverless); the user clicks the button when they want a check.
+function _aiHideMaskOverlay() {
+  const ov = document.getElementById('ai-mask-overlay');
+  if (ov) { ov.style.display = 'none'; ov.removeAttribute('src'); }
+}
+document.getElementById('ai-target')?.addEventListener('input', _aiHideMaskOverlay);
+document.getElementById('ai-preview-btn')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const imagePath = editTarget(p);
+  if (!imagePath) { showToast('Pick an image first.', 'error'); return; }
+  const target = document.getElementById('ai-target').value.trim();
+  if (!target) {
+    showToast('Type what to find first (e.g. "hat", "background")', 'error');
+    document.getElementById('ai-target')?.focus();
+    return;
+  }
+  const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
+  const btn = document.getElementById('ai-preview-btn');
+  const prevHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Detecting…'; }
+  try {
+    const r = await window.meshyAPI?.segmentMask({ imagePath, targetText: target, dilate });
+    if (r?.success && r.maskUrl) {
+      const ov = document.getElementById('ai-mask-overlay');
+      if (ov) {
+        ov.src = r.maskUrl + (r.maskUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+        ov.style.display = 'block';
+      }
+      showToast('Mask preview ready (highlighted = will be inpainted).', 'success', 3000);
+    } else {
+      _aiHideMaskOverlay();
+      showToast('Mask preview failed: ' + (r?.error || 'unknown'), 'error', 5000);
+    }
+  } catch (e) {
+    _aiHideMaskOverlay();
+    showToast('Mask preview error: ' + (e?.message || e), 'error', 5000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+  }
+});
+
 document.getElementById('ai-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-auto-inpaint').classList.add('hidden');
 });

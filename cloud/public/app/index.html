@@ -1348,8 +1348,9 @@
         <h2>Auto Inpaint</h2>
         <p class="modal-subtitle">Describe what to replace — the AI finds and repaints it.</p>
         <div class="modal-with-image">
-          <div class="modal-image-side">
+          <div class="modal-image-side" style="position:relative;">
             <img id="ai-source-img" alt="" />
+            <img id="ai-mask-overlay" alt="" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; pointer-events:none; opacity:0.55; mix-blend-mode:screen; filter:sepia(1) saturate(7) hue-rotate(-25deg);" />
           </div>
           <div class="modal-form-side">
             <label>Target (what to find)</label>
@@ -1363,6 +1364,7 @@
         </div>
         <div class="modal-actions">
           <button class="ghost-btn" id="ai-cancel">Cancel</button>
+          <button class="ghost-btn" id="ai-preview-btn">&#128065; Preview mask</button>
           <button class="primary-btn" id="ai-go">Apply</button>
         </div>
       </div>

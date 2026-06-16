@@ -1547,6 +1547,23 @@
         return { success: false, error: r?.error || 'unknown' };
       } catch (e) { return { success: false, error: String(e) }; }
     },
+    segmentMask: async ({ imagePath, targetText, dilate } = {}) => {
+      // Detect-only CLIPSeg mask for the Auto Inpaint "Preview mask" button.
+      // ONE GPU call on demand (not live-on-keystroke); returns { success,
+      // maskUrl } so the renderer overlays the detected region on the source.
+      if (!imagePath)  return { success: false, error: 'imagePath required' };
+      if (!targetText) return { success: false, error: 'targetText required' };
+      try {
+        const r = await postJSON('/api/segment-preview', {
+          imageUrl: imagePath, targetText, dilate: dilate || 15,
+        });
+        if (typeof window.__cloudCreditsRefresh === 'function') window.__cloudCreditsRefresh();
+        if (r?.success && (r.maskUrl || r.url)) {
+          return { success: true, maskUrl: r.maskUrl || r.url };
+        }
+        return { success: false, error: r?.error || 'unknown' };
+      } catch (e) { return { success: false, error: String(e) }; }
+    },
     maskInpaint: async ({ imagePath, maskDataUrl, prompt } = {}) => {
       // Cloud port of the desktop /mask-inpaint IPC (main.js:2790).
       // Frontend sends image URL + base64 mask + prompt; Worker
