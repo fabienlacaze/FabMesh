@@ -1496,8 +1496,8 @@ function _applyAssetOptionsProfile(assetType) {
     const at = document.getElementById('ws-asset-type')?.value || 'character';
     const row = document.getElementById('ws-img-buildstages-row');
     if (!row) return;
-    // No build stages for living subjects or for flat 2D icons.
-    const hide = (at === 'character' || at === 'creature' || at === 'icon');
+    // No build stages for living subjects (character/creature/animal) or flat 2D icons.
+    const hide = (at === 'character' || at === 'creature' || at === 'animal' || at === 'icon');
     row.style.display = hide ? 'none' : '';
     if (hide) {
       const cb = document.getElementById('ws-img-buildstages');
