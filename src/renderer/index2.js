@@ -13545,33 +13545,68 @@ document.getElementById('jobs-close-2').addEventListener('click', () => {
 // ============================================================
 // AUTO INPAINT (CLIPSeg target + replace)
 // ============================================================
-// Variant: one-click re-roll of the current image — img2img at moderate
-// strength with a FRESH random seed → a visual variation, same subject.
+// Variant: open a modal to choose the variation AMOUNT (img2img strength) and
+// the number of variants, then re-roll via img2img (a fresh random seed each).
+function _updateVarStrengthHint() {
+  const el = document.getElementById('var-strength-hint');
+  const slider = document.getElementById('var-strength');
+  if (!el || !slider) return;
+  const v = parseInt(slider.value);
+  let t;
+  if (v <= 40) t = 'Subtle — small tweaks, stays very close to the original.';
+  else if (v <= 60) t = 'Moderate — clear variation, same subject & composition.';
+  else if (v <= 75) t = 'Strong — noticeable changes; the subject may shift a little.';
+  else t = '⚠ Very strong — big re-interpretation; can drift away from the original.';
+  el.textContent = t;
+}
 document.getElementById('ws-variant-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   const target = editTarget(p);
   if (!target) { showToast('Pick an image first.', 'error'); return; }
+  const modal = document.getElementById('modal-variant');
+  if (!modal) return;
+  const srcImg = document.getElementById('var-source-img');
+  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
+  modal.dataset.targetPath = target;
+  _updateVarStrengthHint();
+  modal.classList.remove('hidden');
+});
+document.getElementById('var-strength')?.addEventListener('input', (e) => {
+  document.getElementById('var-strength-val').textContent = e.target.value + '%';
+  _updateVarStrengthHint();
+});
+document.getElementById('var-count')?.addEventListener('input', (e) => {
+  document.getElementById('var-count-val').textContent = e.target.value;
+});
+document.getElementById('var-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-variant')?.classList.add('hidden');
+});
+document.getElementById('var-apply')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const modal = document.getElementById('modal-variant');
+  const target = (modal && modal.dataset.targetPath) || editTarget(p);
+  if (!target) return;
+  const strength = (parseInt(document.getElementById('var-strength').value) || 50) / 100;
+  const count = parseInt(document.getElementById('var-count').value) || 1;
+  if (modal) modal.classList.add('hidden');
   const prompt = (p && (p.prompt || p.initialPrompt)) || 'high quality, detailed';
-  const seed = Math.floor(Math.random() * 1000000);
-  showToast('Generating variant…', 'info', 2000);
-  gatedRun('img2img', `Variant: ${p.name}`, async () => {
-    const job = pushJob(`Variant: ${p.name}`, null, { Seed: seed, Strength: '45%' }, 30000,
-      { sourceImageUrl: target, projectName: p.name });
-    try {
-      const r = await API.img2img({ imagePath: target, prompt, strength: 0.45, engine: 'local-sdxl', seed });
-      if (r?.success) {
-        completeJob(job.id, true);
-        await reloadCurrentProject();
-        showToast('Variant created!', 'success');
-      } else {
-        completeJob(job.id, false, r?.error);
-        showToast('Variant failed: ' + (r?.error || 'unknown'), 'error');
+  showToast(`Generating ${count} variant${count > 1 ? 's' : ''}…`, 'info', 2000);
+  for (let i = 0; i < count; i++) {
+    const seed = Math.floor(Math.random() * 1000000);
+    const label = count > 1 ? `Variant ${i + 1}/${count}: ${p.name}` : `Variant: ${p.name}`;
+    gatedRun('img2img', label, async () => {
+      const job = pushJob(`Variant: ${p.name}`, null,
+        { Seed: seed, Variation: Math.round(strength * 100) + '%' }, 30000,
+        { sourceImageUrl: target, projectName: p.name });
+      try {
+        const r = await API.img2img({ imagePath: target, prompt, strength, engine: 'local-sdxl', seed });
+        if (r?.success) { completeJob(job.id, true); await reloadCurrentProject(); }
+        else { completeJob(job.id, false, r?.error); showToast('Variant failed: ' + (r?.error || 'unknown'), 'error'); }
+      } catch (e) {
+        completeJob(job.id, false, e?.error || e?.message || String(e));
       }
-    } catch (e) {
-      completeJob(job.id, false, e?.error || e?.message || String(e));
-      showToast('Variant error', 'error');
-    }
-  });
+    });
+  }
 });
 
 document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
