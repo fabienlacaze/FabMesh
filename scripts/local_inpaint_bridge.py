@@ -65,7 +65,7 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
 
     # Threshold: pixels > 50% probability are the mask
     mask_arr = np.array(mask_img)
-    binary = (mask_arr > 100).astype(np.uint8) * 255
+    binary = (mask_arr > 60).astype(np.uint8) * 255   # assouplir (was 100)
     mask_binary = Image.fromarray(binary, mode="L")
 
     # Dilate the mask to include some surrounding context
@@ -77,7 +77,7 @@ def auto_inpaint(input_path, target_text, prompt, output_path, dilate=15):
     mask_coverage = (np.array(mask_binary) > 128).mean() * 100
     print(f"INPAINT: Mask covers {mask_coverage:.1f}% of image", flush=True)
 
-    if mask_coverage < 0.5:
+    if mask_coverage < 0.2:
         print("INPAINT_ERROR: Mask empty - target not found in image", flush=True)
         sys.exit(1)
 

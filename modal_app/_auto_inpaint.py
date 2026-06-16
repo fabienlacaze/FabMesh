@@ -34,7 +34,7 @@ def _segment(seg_processor, seg_model, image: Image.Image, target_text: str,
     mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize(
         (work_w, work_h), Image.BILINEAR)
     arr = np.array(mask_img)
-    binary = (arr > 100).astype(np.uint8) * 255
+    binary = (arr > 60).astype(np.uint8) * 255   # assouplir (was 100): detect fainter CLIPSeg responses
     m = Image.fromarray(binary, mode='L')
     if dilate > 0:
         m = m.filter(ImageFilter.MaxFilter(dilate * 2 + 1))
@@ -75,7 +75,7 @@ def generate(
     coverage = (np.array(mask) > 128).mean() * 100
     print(f'[auto-inpaint] mask covers {coverage:.1f}% '
           f'(target="{target_text[:60]}")', flush=True)
-    if coverage < 0.5:
+    if coverage < 0.2:
         raise ValueError(f'mask empty — "{target_text}" not found in image')
 
     # Detect "remove" intent — same heuristic as desktop.

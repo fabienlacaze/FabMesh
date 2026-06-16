@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Auto Inpaint : masque preview lisse + loading circle + detection assouplie)
+
+User (desktop live mask preview, dessine avant Apply) : masque trop grossier + met
+longtemps a apparaitre + detecter plus facilement.
+- MASQUE LISSE (scripts/sdxl_server.py do_segment) : upscale CLIPSeg BILINEAR -> LANCZOS
+  + masque feathered soft (GaussianBlur scale a l'image) pour l'overlay -> bords lisses
+  au lieu d'un binaire blocky.
+- LOADING CIRCLE : spinner (animation:spin existante) sur ai-source-img pendant la
+  detection (avant: juste opacity 0.55). _aiUpdateMaskPreview montre/cache le spinner.
+- PLUS RAPIDE : debounce du preview 550ms -> 300ms.
+- ASSOUPLIR le seuil CLIPSeg (binary > 100 -> > 60, coverage floor 0.5 -> 0.2) sur les
+  4 chemins de detection : sdxl_server.do_segment (preview) + do_inpaint (Apply local) +
+  scripts/local_inpaint_bridge.py + modal_app/_auto_inpaint.py (cloud).
+Desktop : restart sdxl_server (ou respawn idle) pour les changements .py. Cloud : Modal
+redeploy. Preview = desktop-only (cloud n'a plus de bouton/preview, par choix user).
+
 ## 2026-06-16 (Paint Phase 1 : durete de pinceau + Invert/None selection — desktop+cloud)
 
 User : "le Paint est trop basique, ameliorer (calques + pinceaux + selection)". Le Paint

@@ -13752,22 +13752,29 @@ async function _aiUpdateMaskPreview() {
   const origUrl = 'file:///' + _aiSrcPath.replace(/\\/g, '/') + '?t=0';
   if (!target) { srcImg.src = origUrl; srcImg.style.opacity = ''; return; }
   if (!API.segmentMask) return;
-  srcImg.style.opacity = '0.55';  // "detecting…" cue
+  const spinner = document.getElementById('ai-detect-spinner');
+  if (spinner) spinner.style.display = 'flex';   // loading circle on the image
+  srcImg.style.opacity = '0.6';
   try {
     const r = await API.segmentMask({ imagePath: _aiSrcPath, targetText: target, dilate });
-    // Ignore a stale response if the target changed while we were detecting.
+    // Ignore a stale response if the target changed while we were detecting —
+    // the newer in-flight call owns the UI (and will hide the spinner).
     if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
     srcImg.style.opacity = '';
+    if (spinner) spinner.style.display = 'none';
     if (r && r.success && r.overlayPath) {
       srcImg.src = 'file:///' + r.overlayPath.replace(/\\/g, '/') + '?t=' + Date.now();
     } else {
       srcImg.src = origUrl;  // nothing detected → show the plain image
     }
-  } catch (_) { srcImg.style.opacity = ''; }
+  } catch (_) {
+    srcImg.style.opacity = '';
+    if (spinner) spinner.style.display = 'none';
+  }
 }
 function _aiSchedulePreview() {
   if (_aiPreviewTimer) clearTimeout(_aiPreviewTimer);
-  _aiPreviewTimer = setTimeout(_aiUpdateMaskPreview, 550);
+  _aiPreviewTimer = setTimeout(_aiUpdateMaskPreview, 300);
 }
 document.getElementById('ai-target')?.addEventListener('input', _aiSchedulePreview);
 const aiDilate = document.getElementById('ai-dilate');

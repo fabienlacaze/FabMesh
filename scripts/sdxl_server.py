@@ -566,7 +566,7 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
 
             mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.BILINEAR)
             mask_arr = np.array(mask_img)
-            binary = (mask_arr > 100).astype(np.uint8) * 255
+            binary = (mask_arr > 60).astype(np.uint8) * 255   # assouplir (was 100)
             mask_binary = Image.fromarray(binary, mode="L")
 
             # Dilate mask for context blending
@@ -576,7 +576,7 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
 
             coverage = (np.array(mask_binary) > 128).mean() * 100
-            if coverage < 0.5:
+            if coverage < 0.2:
                 return {"ok": False, "error": f"Target '{target_text}' not detected (coverage {coverage:.1f}%)"}
             if coverage > 80:
                 log(f"WARNING: mask covers {coverage:.0f}% of image", 'warn')
@@ -662,18 +662,22 @@ def do_segment(input_path, target_text, output_path, dilate=15):
             mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
             mask_prob = 1 / (1 + np.exp(-mask_logits))  # sigmoid
             mask_uint8 = (mask_prob * 255).astype(np.uint8)
-            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.BILINEAR)
-            binary = (np.array(mask_img) > 100).astype(np.uint8) * 255
+            # Upscale the low-res CLIPSeg mask with LANCZOS (BILINEAR was blocky).
+            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.LANCZOS)
+            # Assouplir: > 60 (was 100) so fainter CLIPSeg responses still register.
+            binary = (np.array(mask_img) > 60).astype(np.uint8) * 255
             mask_binary = Image.fromarray(binary, mode="L")
             d = max(0, int(dilate))
             if d > 0:
                 mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
-            mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
-            coverage = (np.array(mask_binary) > 128).mean() * 100
+            # Feathered soft mask for a SMOOTH preview overlay (not a blocky binary).
+            _feather = max(3, int(min(work_w, work_h) * 0.012))
+            mask_soft = mask_binary.filter(ImageFilter.GaussianBlur(_feather))
+            coverage = (np.array(mask_soft) > 128).mean() * 100
             # Red overlay so the user sees exactly what will be repainted.
             red = Image.new("RGB", img_work.size, (255, 45, 60))
             tinted = Image.blend(img_work, red, 0.55)
-            overlay = Image.composite(tinted, img_work, mask_binary)
+            overlay = Image.composite(tinted, img_work, mask_soft)
             if (work_w, work_h) != img.size:
                 overlay = overlay.resize(img.size, Image.LANCZOS)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
