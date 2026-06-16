@@ -15939,43 +15939,53 @@ function _aiHideMaskOverlay() {
   if (ov) { ov.style.display = 'none'; ov.removeAttribute('src'); }
 }
 let _aiFirstDetectDone = false;  // first cloud detection cold-starts the GPU (~15s)
-async function _aiUpdateMaskPreview() {
+// On-demand mask preview — each detection is a PAID GPU call on cloud (1 credit),
+// so it runs only when the user clicks "Preview mask", not on every keystroke.
+document.getElementById('ai-preview-btn')?.addEventListener('click', async () => {
   const p = state.currentProject;
   const imagePath = editTarget(p);
-  if (!imagePath || !window.meshyAPI?.segmentMask) return;
+  if (!imagePath || !window.meshyAPI?.segmentMask) { showToast('Pick an image first.', 'error'); return; }
   const target = (document.getElementById('ai-target').value || '').trim();
-  const spinner = document.getElementById('ai-detect-spinner');
-  if (!target) { _aiHideMaskOverlay(); if (spinner) spinner.style.display = 'none'; return; }
+  if (!target) {
+    showToast('Type what to find first (e.g. "hat", "background")', 'error');
+    document.getElementById('ai-target')?.focus();
+    return;
+  }
   const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
+  const spinner = document.getElementById('ai-detect-spinner');
   const label = document.getElementById('ai-detect-label');
+  const btn = document.getElementById('ai-preview-btn');
+  const prevHtml = btn ? btn.innerHTML : '';
   if (label) label.textContent = _aiFirstDetectDone
     ? 'Detecting target…'
-    : 'Warming up the cloud GPU… the first detection takes ~15s, then it’s fast.';
+    : 'Warming up the cloud GPU… first detection ~15s, then fast.';
   if (spinner) spinner.style.display = 'flex';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Detecting…'; }
   try {
     const r = await window.meshyAPI.segmentMask({ imagePath, targetText: target, dilate });
-    // Stale? a newer keystroke superseded us — let the newer call own the UI.
-    if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
     _aiFirstDetectDone = true;
-    if (spinner) spinner.style.display = 'none';
     const ov = document.getElementById('ai-mask-overlay');
     if (r?.success && r.maskUrl && ov) {
       ov.src = r.maskUrl + (r.maskUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
       ov.style.display = 'block';
     } else {
       _aiHideMaskOverlay();
+      showToast('Nothing detected for “' + target + '”.', 'info', 4000);
     }
-  } catch (_) { if (spinner) spinner.style.display = 'none'; }
-}
-function _aiSchedulePreview() {
-  if (_aiPreviewTimer) clearTimeout(_aiPreviewTimer);
-  _aiPreviewTimer = setTimeout(_aiUpdateMaskPreview, 500);
-}
-document.getElementById('ai-target')?.addEventListener('input', _aiSchedulePreview);
+  } catch (e) {
+    _aiHideMaskOverlay();
+    showToast('Mask preview error: ' + (e?.message || e), 'error', 5000);
+  } finally {
+    if (spinner) spinner.style.display = 'none';
+    if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+  }
+});
+// Typing a new target / changing padding invalidates the shown preview.
+document.getElementById('ai-target')?.addEventListener('input', _aiHideMaskOverlay);
 const aiDilate = document.getElementById('ai-dilate');
 if (aiDilate) aiDilate.addEventListener('input', () => {
   document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
-  _aiSchedulePreview();
+  _aiHideMaskOverlay();
 });
 document.getElementById('ai-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-auto-inpaint').classList.add('hidden');
