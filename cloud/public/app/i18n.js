@@ -742,12 +742,87 @@
     hi: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6'><rect width='9' height='6' fill='#fff'/><rect width='9' height='2' fill='#FF9933'/><rect y='4' width='9' height='2' fill='#138808'/><circle cx='4.5' cy='3' r='0.9' fill='none' stroke='#000080' stroke-width='0.16'/><circle cx='4.5' cy='3' r='0.12' fill='#000080'/></svg>",
     ar: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 16'><rect width='24' height='16' fill='#006C35'/><rect x='3' y='10.4' width='15' height='1.1' rx='0.5' fill='#fff'/><path d='M18 11 L21 10.2 L21 11.8 Z' fill='#fff'/></svg>",
   };
+  function _flagSrc(code) {
+    const svg = _FLAG_SVG[code];
+    return svg ? 'data:image/svg+xml,' + encodeURIComponent(svg) : '';
+  }
   function _updateFlag(lang) {
+    const src = _flagSrc(lang);
     const f = document.getElementById('lang-flag');
-    if (!f) return;
-    const svg = _FLAG_SVG[lang];
-    if (svg) { f.src = 'data:image/svg+xml,' + encodeURIComponent(svg); f.style.display = ''; }
-    else f.style.display = 'none';
+    if (f) {
+      // The custom dropdown (once built) carries the flag in its button, so the
+      // standalone left flag is hidden to avoid showing it twice.
+      if (_langDD) f.style.display = 'none';
+      else if (src) { f.src = src; f.style.display = ''; }
+      else f.style.display = 'none';
+    }
+    if (_langDD && _langDD.bimg) {
+      if (src) { _langDD.bimg.src = src; _langDD.bimg.style.display = ''; }
+      else _langDD.bimg.style.display = 'none';
+    }
+  }
+
+  // Custom language dropdown so each option can show its flag — native <select>
+  // <option> elements can't contain <img>. It mirrors the hidden #lang-select
+  // (kept as the source of truth, so change events + value reads still work).
+  let _langDD = null;
+  function _mkFlagImg(code) {
+    const im = document.createElement('img');
+    im.alt = '';
+    const s = _flagSrc(code);
+    if (s) im.src = s; else im.style.display = 'none';
+    im.style.cssText = 'width:22px;height:15px;border-radius:2px;object-fit:cover;box-shadow:0 0 0 1px rgba(255,255,255,0.14);flex:none;';
+    return im;
+  }
+  function _buildLangDropdown() {
+    const sel = document.getElementById('lang-select');
+    if (!sel || sel.__fabCustom) return;
+    sel.__fabCustom = true;
+    sel.style.display = 'none';
+    const opts = Array.from(sel.options).map((o) => ({ value: o.value, label: o.textContent.trim() }));
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative; display:inline-block; min-width:160px;';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.style.cssText = 'display:flex; align-items:center; gap:8px; width:100%; padding:6px 10px; background:var(--bg-2,#1a1a24); color:var(--text-0,#fff); border:1px solid var(--border,#3a3a4a); border-radius:6px; cursor:pointer; font-size:13px;';
+    const bimg = _mkFlagImg(sel.value);
+    const blab = document.createElement('span'); blab.style.cssText = 'flex:1; text-align:start;';
+    const chev = document.createElement('span'); chev.textContent = '▾'; chev.style.cssText = 'opacity:0.6; font-size:11px;';
+    btn.appendChild(bimg); btn.appendChild(blab); btn.appendChild(chev);
+    const menu = document.createElement('div');
+    menu.style.cssText = 'position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--bg-1,#15151d); border:1px solid var(--border,#3a3a4a); border-radius:6px; box-shadow:0 10px 28px rgba(0,0,0,0.55); z-index:99999; overflow:hidden auto; max-height:60vh; display:none;';
+    opts.forEach((o) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer; color:var(--text-0,#fff); font-size:13px;';
+      const lab = document.createElement('span'); lab.textContent = o.label;
+      row.appendChild(_mkFlagImg(o.value)); row.appendChild(lab);
+      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(124,77,255,0.28)'; });
+      row.addEventListener('mouseleave', () => { row.style.background = ''; });
+      row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sel.value = o.value;
+        sel.dispatchEvent(new Event('change'));
+        menu.style.display = 'none';
+      });
+      menu.appendChild(row);
+    });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.style.display = (menu.style.display === 'none') ? 'block' : 'none';
+    });
+    document.addEventListener('click', () => { menu.style.display = 'none'; });
+    wrap.appendChild(btn); wrap.appendChild(menu);
+    sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    _langDD = { btn, bimg, blab, menu };
+    _syncLangDropdownButton();
+  }
+  function _syncLangDropdownButton() {
+    const sel = document.getElementById('lang-select');
+    if (!sel || !_langDD) return;
+    const o = sel.options[sel.selectedIndex];
+    const s = _flagSrc(sel.value);
+    if (s) { _langDD.bimg.src = s; _langDD.bimg.style.display = ''; } else _langDD.bimg.style.display = 'none';
+    _langDD.blab.textContent = o ? o.textContent.trim() : sel.value;
   }
 
   function applyLang(lang) {
@@ -763,6 +838,7 @@
     const sel = document.getElementById('lang-select');
     if (sel && sel.value !== _lang) sel.value = _lang;
     _updateFlag(_lang);
+    _syncLangDropdownButton();
   }
 
   // t(): translate a single string (for JS-built / dynamic UI text).
@@ -808,6 +884,7 @@
     if (sel) {
       sel.value = _lang;
       sel.addEventListener('change', () => applyLang(sel.value));
+      _buildLangDropdown();
     }
     applyLang(_lang);
     try { _mo.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
