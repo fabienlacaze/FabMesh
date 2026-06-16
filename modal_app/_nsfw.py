@@ -66,15 +66,43 @@ def is_safe(image, clf1, clf2, threshold: float = 0.5,
     return True, nsfw_score
 
 
+def _stamp_font(px: int):
+    """Best-available font at ~px size. DejaVu ships on Debian-based
+    Modal images; fall back to Pillow's scalable bundled default
+    (>= 10.1), then the fixed bitmap default. No font file to bundle."""
+    from PIL import ImageFont
+    for _name in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "DejaVuSans-Bold.ttf", "arialbd.ttf",
+    ):
+        try:
+            return ImageFont.truetype(_name, px)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=px)
+    except Exception:
+        return ImageFont.load_default()
+
+
 def make_blocked_placeholder(size: tuple[int, int]) -> _PImage.Image:
-    """Same dark-grey placeholder the desktop script produces when
-    parental control blocks an image."""
+    """Red 'NSFW' stamp so a blocked image is obviously a block (not a
+    mysterious grey/failed render). Mirrors the desktop bridge stamp:
+    dark background, concentric red border rings, big red NSFW + caption."""
     from PIL import ImageDraw
-    img = _PImage.new('RGB', size, (30, 30, 30))
+    W, H = size
+    img = _PImage.new('RGB', (W, H), (26, 20, 22))
     draw = ImageDraw.Draw(img)
-    draw.text(
-        (img.width // 2 - 120, img.height // 2 - 10),
-        "Blocked by content filter",
-        fill=(200, 50, 50),
-    )
+    for _b in range(max(4, W // 110)):
+        draw.rectangle([_b, _b, W - 1 - _b, H - 1 - _b], outline=(205, 40, 45))
+    _big = _stamp_font(max(28, int(H * 0.18)))
+    _sml = _stamp_font(max(12, int(H * 0.05)))
+    _t = "NSFW"
+    _tb = draw.textbbox((0, 0), _t, font=_big)
+    draw.text(((W - (_tb[2] - _tb[0])) // 2, H // 2 - int(H * 0.16)),
+              _t, fill=(235, 55, 55), font=_big)
+    _s = "Blocked by content filter"
+    _sb = draw.textbbox((0, 0), _s, font=_sml)
+    draw.text(((W - (_sb[2] - _sb[0])) // 2, H // 2 + int(H * 0.10)),
+              _s, fill=(205, 120, 120), font=_sml)
     return img
