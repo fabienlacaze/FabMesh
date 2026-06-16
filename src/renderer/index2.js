@@ -6458,9 +6458,21 @@ function _paintDab(ctx, x, y, _lastPt, mgr) {
   ctx.fillStyle = paintState.color;
 
   if (paintState.tool === 'pen') {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
+    // Hardness: 100% = crisp edge, lower = soft radial falloff.
+    const hard = (paintState.hardness != null ? paintState.hardness : 100) / 100;
+    if (hard >= 0.99 || r < 1.5) {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const grad = ctx.createRadialGradient(x, y, Math.max(0, r * hard), x, y, r);
+      grad.addColorStop(0, paintState.color);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else if (paintState.tool === 'spray') {
     const dots = Math.round(r * r * 0.15);
     for (let i = 0; i < dots; i++) {
@@ -6791,6 +6803,24 @@ document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
   paintState.opacity = parseInt(e.target.value);
   document.getElementById('paint-opacity-val').textContent = e.target.value + '%';
   _paintReapplyFill();  // live-update the last fill
+});
+
+// Hardness (Pen soft↔hard edge)
+document.getElementById('paint-hardness')?.addEventListener('input', (e) => {
+  paintState.hardness = parseInt(e.target.value);
+  document.getElementById('paint-hardness-val').textContent = e.target.value + '%';
+});
+
+// Selection refine: Invert flips the current mask; None clears it.
+document.getElementById('paint-sel-invert')?.addEventListener('click', () => {
+  if (!paintState.selection) { showToast('No selection to invert.', 'info', 2000); return; }
+  _paintPushSelUndo();
+  const sel = paintState.selection;
+  for (let i = 0; i < sel.length; i++) sel[i] = sel[i] === 255 ? 0 : 255;
+  _paintShowSelection();
+});
+document.getElementById('paint-sel-none')?.addEventListener('click', () => {
+  _paintClearSelection();
 });
 
 // Tolerance (for Fill / Wand) — re-run the live selection/fill

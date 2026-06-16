@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Paint Phase 1 : durete de pinceau + Invert/None selection — desktop+cloud)
+
+User : "le Paint est trop basique, ameliorer (calques + pinceaux + selection)". Le Paint
+a deja lasso/rect/wand + 7 pinceaux. Phase 1 (rapide, desktop ET cloud par nouvelle
+directive de parite systematique) :
+- DURETE de pinceau (slider paint-hardness 0-100). Le pen passe d'un bord net a un
+  falloff radial doux (createRadialGradient inner=r*hard). 100% = net, bas = doux.
+- Selection : boutons Invert (flip le masque 255<->0) + None (deselect). _paintClear
+  Selection existait sans bouton.
+Desktop : src/renderer/index2.{js,html}. Cloud : cloud/public/app/index2.{js,html}.
+RESTE (Phase 2, le gros) : CALQUES (layers) = changement archi du CanvasManager mono-
+canvas -> multi-calques (add/del/reorder/opacite/visibilite, paint->calque actif,
+composite a la save). A presenter/confirmer avant le gros build.
+
 ## 2026-06-16 (cloud : retrait du bouton "Preview mask" de l'Auto Inpaint)
 
 User : le bouton detect/Preview cloud (mon ajout) ne semble jamais detecter (proba
