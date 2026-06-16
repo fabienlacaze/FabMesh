@@ -705,17 +705,18 @@
   // has no entry, strip a leading icon/emoji run ("💾 Export" -> "💾 " + "Export")
   // and translate the word remainder, so icon-prefixed buttons translate too.
   function _translateNodeValue(node, dict) {
-    if (!dict) return;
     if (node.__i18n === undefined) node.__i18n = node.nodeValue;
     const orig = node.__i18n;
     const key = orig.trim();
     if (!key) return;
-    let translated = orig;
-    if (dict[key]) {
-      translated = orig.replace(key, dict[key]);
-    } else {
-      const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
-      if (m && dict[m[2]]) translated = orig.replace(key, m[1] + dict[m[2]]);
+    let translated = orig;  // dict null = English (source) -> restore the cached original
+    if (dict) {
+      if (dict[key]) {
+        translated = orig.replace(key, dict[key]);
+      } else {
+        const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
+        if (m && dict[m[2]]) translated = orig.replace(key, m[1] + dict[m[2]]);
+      }
     }
     if (node.nodeValue !== translated) node.nodeValue = translated;
   }
@@ -740,7 +741,7 @@
     es: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'><rect width='3' height='2' fill='#AA151B'/><rect y='0.5' width='3' height='1' fill='#F1BF00'/></svg>",
     zh: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 20'><rect width='30' height='20' fill='#DE2910'/><path d='M5 2.6 6.12 6.05 9.75 6.05 6.81 8.18 7.94 11.63 5 9.5 2.06 11.63 3.19 8.18 0.25 6.05 3.88 6.05 Z' fill='#FFDE00'/></svg>",
     hi: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6'><rect width='9' height='6' fill='#fff'/><rect width='9' height='2' fill='#FF9933'/><rect y='4' width='9' height='2' fill='#138808'/><circle cx='4.5' cy='3' r='0.9' fill='none' stroke='#000080' stroke-width='0.16'/><circle cx='4.5' cy='3' r='0.12' fill='#000080'/></svg>",
-    ar: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 16'><rect width='24' height='16' fill='#006C35'/><rect x='3' y='10.4' width='15' height='1.1' rx='0.5' fill='#fff'/><path d='M18 11 L21 10.2 L21 11.8 Z' fill='#fff'/></svg>",
+    ar: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 6'><rect width='12' height='6' fill='#fff'/><rect width='12' height='2' fill='#00732F'/><rect y='4' width='12' height='2' fill='#000'/><rect width='3' height='6' fill='#FF0000'/></svg>",
   };
   function _flagSrc(code) {
     const svg = _FLAG_SVG[code];
