@@ -1,6 +1,20 @@
 # FabMesh Agent Log
 
-## 2026-06-16 (feat — Auto Inpaint : preview live du masque CLIPSeg avant gen)
+## 2026-06-16 (fix — Symmetrize cassé (Missing args) + axe visible + erase mask)
+
+3 bugs Symmetrize signalés :
+1. APPLY CASSÉ ("Task failed: Missing args") : sym-apply envoyait
+   { imagePath } à save-image-data-url qui attend { basePath } -> basePath
+   undefined -> "Missing args". Corrigé imagePath->basePath.
+2. AXE PARFOIS INVISIBLE : la ligne verte (#22c55e) se noyait sur les zones
+   claires. Ajout d'un halo noir sous la ligne + vert plus vif (#3bff6a) +
+   handle avec contour noir -> visible sur tout fond.
+3. ERASE EN MODE MASK : ajout boutons Paint/Erase (sym-paint-mode/sym-erase-mode)
+   + symState.erasing ; _symPaintMask écrit 0 (erase) ou 255 (paint). Reset sur
+   Paint à l'entrée du Mask mode.
+Aussi (commit precedent 998384b) : bouton Variant cable (re-roll img2img seed
+aleatoire ; IPC img2img forwarde le seed) + curseur color picker aligne (rect
+container au lieu du canvas decale). main.js (img2img seed) -> restart Electron.
 
 User : "possible de montrer le masque sélectionné en temps réel avant la
 génération ?". Implémenté : détection seule (pas d'inpaint).

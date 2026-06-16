@@ -5128,28 +5128,31 @@ function _symDrawPreview() {
     }
     octx.putImageData(maskImg, 0, 0);
   }
-  // Draw axis line
+  // Draw axis line — with a dark HALO underneath so the green stays visible on
+  // light areas (white walls) AND dark areas (sky). Without the halo the line
+  // washed out over bright parts of the image and looked "missing".
   octx.save();
-  octx.strokeStyle = '#22c55e';
-  octx.lineWidth = 3;
-  octx.setLineDash([8, 4]);
-  octx.beginPath();
-  // Rotated line (ax, ay already defined above)
   const cos = Math.cos(symState.axisAngle);
   const sin = Math.sin(symState.axisAngle);
   const len = Math.max(w, h);
-  octx.moveTo(ax - sin * len, -cos * len + ay);
-  octx.lineTo(ax + sin * len, cos * len + ay);
-  octx.stroke();
-  // Draw axis handle (circle at center)
-  octx.beginPath();
-  octx.arc(ax, ay, 8, 0, Math.PI * 2);
-  octx.fillStyle = 'rgba(34,197,94,0.5)';
-  octx.fill();
-  octx.strokeStyle = '#22c55e';
+  const x1 = ax - sin * len, y1 = -cos * len + ay;
+  const x2 = ax + sin * len, y2 = cos * len + ay;
+  // Dark halo (solid, thicker)
   octx.setLineDash([]);
-  octx.lineWidth = 2;
-  octx.stroke();
+  octx.strokeStyle = 'rgba(0,0,0,0.75)';
+  octx.lineWidth = 6;
+  octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
+  // Bright green dashed on top
+  octx.strokeStyle = '#3bff6a';
+  octx.lineWidth = 3;
+  octx.setLineDash([9, 5]);
+  octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
+  // Centre handle: filled green disc with a black + green outline
+  octx.setLineDash([]);
+  octx.beginPath(); octx.arc(ax, ay, 8, 0, Math.PI * 2);
+  octx.fillStyle = 'rgba(59,255,106,0.85)'; octx.fill();
+  octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,0.8)'; octx.stroke();
+  octx.lineWidth = 1.5; octx.strokeStyle = '#3bff6a'; octx.stroke();
   octx.restore();
 }
 
@@ -5182,8 +5185,11 @@ document.getElementById('sym-mode-full')?.addEventListener('click', () => {
 });
 document.getElementById('sym-mode-mask')?.addEventListener('click', () => {
   symState.mode = 'mask';
+  symState.erasing = false;  // default to Paint each time Mask mode is entered
   document.getElementById('sym-mode-mask')?.classList.add('tool-active');
   document.getElementById('sym-mode-full')?.classList.remove('tool-active');
+  document.getElementById('sym-paint-mode')?.classList.add('tool-active');
+  document.getElementById('sym-erase-mode')?.classList.remove('tool-active');
   document.getElementById('sym-brush-label').style.display = 'flex';
   _symDrawPreview();
 });
@@ -5192,6 +5198,18 @@ document.getElementById('sym-mode-mask')?.addEventListener('click', () => {
 document.getElementById('sym-brush-size')?.addEventListener('input', (e) => {
   symState.brushSize = parseInt(e.target.value);
   document.getElementById('sym-brush-val').textContent = e.target.value;
+});
+
+// Paint / Erase toggle (Mask mode): paint adds to the mask, erase removes it.
+document.getElementById('sym-paint-mode')?.addEventListener('click', () => {
+  symState.erasing = false;
+  document.getElementById('sym-paint-mode')?.classList.add('tool-active');
+  document.getElementById('sym-erase-mode')?.classList.remove('tool-active');
+});
+document.getElementById('sym-erase-mode')?.addEventListener('click', () => {
+  symState.erasing = true;
+  document.getElementById('sym-erase-mode')?.classList.add('tool-active');
+  document.getElementById('sym-paint-mode')?.classList.remove('tool-active');
 });
 
 // Canvas interactions: drag axis, shift+drag rotate, paint mask
@@ -5282,7 +5300,8 @@ function _symPaintMask(cx, cy) {
       if (dx*dx + dy*dy > r*r) continue;
       const px = Math.round(cx + dx), py = Math.round(cy + dy);
       if (px >= 0 && px < w && py >= 0 && py < h) {
-        symState.maskData[py * w + px] = 255;
+        // Erase mode clears the mask (0), paint mode selects it (255).
+        symState.maskData[py * w + px] = symState.erasing ? 0 : 255;
       }
     }
   }
@@ -5390,7 +5409,7 @@ document.getElementById('sym-apply')?.addEventListener('click', async () => {
   try {
     const dataUrl = canvas.toDataURL('image/png');
     const r = await API.saveImageDataUrl({
-      imagePath: symState.imgPath,
+      basePath: symState.imgPath,
       dataUrl: dataUrl,
       suffix: 'symmetrized',
     });
