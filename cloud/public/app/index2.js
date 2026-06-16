@@ -15930,57 +15930,47 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   _aiHideMaskOverlay();  // fresh modal → clear any stale mask preview
   document.getElementById('modal-auto-inpaint').classList.remove('hidden');
 });
-const aiDilate = document.getElementById('ai-dilate');
-if (aiDilate) aiDilate.addEventListener('input', () => {
-  document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
-  _aiHideMaskOverlay();  // dilation changed → previous preview is stale
-});
-
-// Preview mask (on-demand CLIPSeg) — ONE GPU call, overlays the detected region
-// on the source so the user can check the target BEFORE Apply. On-demand (not
-// live) because each call is a GPU hit on serverless; a spinner shows progress.
+// Live CLIPSeg mask preview — auto-detect (debounced) as the user types the
+// TARGET / changes the padding, exactly like desktop (no button). Each detection
+// is a GPU call on serverless, so we debounce; a spinner shows progress.
+let _aiPreviewTimer = null;
 function _aiHideMaskOverlay() {
   const ov = document.getElementById('ai-mask-overlay');
   if (ov) { ov.style.display = 'none'; ov.removeAttribute('src'); }
 }
-document.getElementById('ai-target')?.addEventListener('input', _aiHideMaskOverlay);
-document.getElementById('ai-preview-btn')?.addEventListener('click', async () => {
+async function _aiUpdateMaskPreview() {
   const p = state.currentProject;
   const imagePath = editTarget(p);
-  if (!imagePath) { showToast('Pick an image first.', 'error'); return; }
-  const target = document.getElementById('ai-target').value.trim();
-  if (!target) {
-    showToast('Type what to find first (e.g. "hat", "background")', 'error');
-    document.getElementById('ai-target')?.focus();
-    return;
-  }
-  const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
+  if (!imagePath || !window.meshyAPI?.segmentMask) return;
+  const target = (document.getElementById('ai-target').value || '').trim();
   const spinner = document.getElementById('ai-detect-spinner');
-  const btn = document.getElementById('ai-preview-btn');
-  const prevHtml = btn ? btn.innerHTML : '';
+  if (!target) { _aiHideMaskOverlay(); if (spinner) spinner.style.display = 'none'; return; }
+  const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
   if (spinner) spinner.style.display = 'flex';
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Detecting…'; }
   try {
-    const r = await window.meshyAPI?.segmentMask({ imagePath, targetText: target, dilate });
-    if (r?.success && r.maskUrl) {
-      const ov = document.getElementById('ai-mask-overlay');
-      if (ov) {
-        ov.src = r.maskUrl + (r.maskUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-        ov.style.display = 'block';
-      }
+    const r = await window.meshyAPI.segmentMask({ imagePath, targetText: target, dilate });
+    // Stale? a newer keystroke superseded us — let the newer call own the UI.
+    if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
+    if (spinner) spinner.style.display = 'none';
+    const ov = document.getElementById('ai-mask-overlay');
+    if (r?.success && r.maskUrl && ov) {
+      ov.src = r.maskUrl + (r.maskUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+      ov.style.display = 'block';
     } else {
       _aiHideMaskOverlay();
-      showToast('Mask preview failed: ' + (r?.error || 'unknown'), 'error', 5000);
     }
-  } catch (e) {
-    _aiHideMaskOverlay();
-    showToast('Mask preview error: ' + (e?.message || e), 'error', 5000);
-  } finally {
-    if (spinner) spinner.style.display = 'none';
-    if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
-  }
+  } catch (_) { if (spinner) spinner.style.display = 'none'; }
+}
+function _aiSchedulePreview() {
+  if (_aiPreviewTimer) clearTimeout(_aiPreviewTimer);
+  _aiPreviewTimer = setTimeout(_aiUpdateMaskPreview, 500);
+}
+document.getElementById('ai-target')?.addEventListener('input', _aiSchedulePreview);
+const aiDilate = document.getElementById('ai-dilate');
+if (aiDilate) aiDilate.addEventListener('input', () => {
+  document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
+  _aiSchedulePreview();
 });
-
 document.getElementById('ai-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-auto-inpaint').classList.add('hidden');
 });
