@@ -419,6 +419,13 @@ function customErrorWithAction(message, title, actionLabel) {
 // error line from large Python tracebacks before falling back to the raw text.
 function reportPipelineError(errMsg, title) {
   const raw = String(errMsg || '').trim();
+  // Content-filter block → offer a direct Unlock shortcut to the parental-
+  // control disable flow (legal warning + PIN), then re-run the blocked op.
+  if (/content filter|parental control|unrestricted mode/i.test(raw)) {
+    customErrorWithAction(raw, title || 'Blocked by content filter', '🔓 Unlock')
+      .then((unlock) => { if (unlock) setTimeout(() => { _unlockThenRetry(); }, 60); });
+    return;
+  }
   // Extract the most useful error line from a potentially huge Python dump.
   // Python tracebacks end with the actual error on the last non-empty line
   // (e.g. "OutOfMemoryError: CUDA out of memory. Tried to allocate 1.69 GiB.")
@@ -4827,7 +4834,23 @@ function _offerMultiviewRegenerate() {
 const modifyModal = document.getElementById('modal-modify-image');
 const modStrength = document.getElementById('mod-strength');
 const modStrengthVal = document.getElementById('mod-strength-val');
-modStrength.addEventListener('input', () => { modStrengthVal.textContent = modStrength.value + '%'; });
+// Explain how Strength behaves — high values regenerate so much that the
+// original subject (e.g. a catapult) can drift into something else (a car).
+function _updateModStrengthHint() {
+  const el = document.getElementById('mod-strength-hint');
+  if (!el) return;
+  const v = parseInt(modStrength.value);
+  let t;
+  if (v <= 45) t = 'Low (30–45%) — keeps the subject & composition, only adds/edits fine detail.';
+  else if (v <= 65) t = 'Medium (46–65%) — clear changes while keeping the same subject (recommended for "add X").';
+  else if (v <= 80) t = 'High (66–80%) — strong transformation; the subject may start to drift.';
+  else t = '⚠ Very high (81–95%) — near full re-generation. The original subject can be lost (a catapult can turn into a car). Lower it to keep the shape.';
+  el.textContent = t;
+}
+modStrength.addEventListener('input', () => {
+  modStrengthVal.textContent = modStrength.value + '%';
+  _updateModStrengthHint();
+});
 
 document.getElementById('ws-modify-btn').addEventListener('click', () => {
   const p = state.currentProject;
@@ -5318,10 +5341,25 @@ document.getElementById('sym-mode-full')?.addEventListener('click', () => {
 });
 document.getElementById('sym-mode-mask')?.addEventListener('click', () => {
   symState.mode = 'mask';
+  symState.erasing = false;  // default to Paint each time Mask mode is entered
   document.getElementById('sym-mode-mask')?.classList.add('tool-active');
   document.getElementById('sym-mode-full')?.classList.remove('tool-active');
+  document.getElementById('sym-paint-mode')?.classList.add('tool-active');
+  document.getElementById('sym-erase-mode')?.classList.remove('tool-active');
   document.getElementById('sym-brush-label').style.display = 'flex';
   _symDrawPreview();
+});
+
+// Paint / Erase toggle (Mask mode): paint adds to the mask, erase removes it.
+document.getElementById('sym-paint-mode')?.addEventListener('click', () => {
+  symState.erasing = false;
+  document.getElementById('sym-paint-mode')?.classList.add('tool-active');
+  document.getElementById('sym-erase-mode')?.classList.remove('tool-active');
+});
+document.getElementById('sym-erase-mode')?.addEventListener('click', () => {
+  symState.erasing = true;
+  document.getElementById('sym-erase-mode')?.classList.add('tool-active');
+  document.getElementById('sym-paint-mode')?.classList.remove('tool-active');
 });
 
 // Brush size slider
@@ -5418,7 +5456,8 @@ function _symPaintMask(cx, cy) {
       if (dx*dx + dy*dy > r*r) continue;
       const px = Math.round(cx + dx), py = Math.round(cy + dy);
       if (px >= 0 && px < w && py >= 0 && py < h) {
-        symState.maskData[py * w + px] = 255;
+        // Erase mode clears the mask (0), paint mode selects it (255).
+        symState.maskData[py * w + px] = symState.erasing ? 0 : 255;
       }
     }
   }
@@ -6726,10 +6765,16 @@ function _paintSmudgeDab(ctx, x, y, r) {
 }
 
 // --- Flood fill (paint bucket) ---
-function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
+// `outCtx` (optional): detect the region on `ctx` (the underlying image) but
+// PAINT into a different canvas — used for emissive, so clicking a wall fills
+// that wall's region on the emissive overlay instead of the diffuse image.
+function _paintFloodFill(ctx, startX, startY, fillColor, tolerance, outCtx) {
   const w = _paintMgr.w, h = _paintMgr.h;
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
+  const sepOut = !!(outCtx && outCtx !== ctx);
+  const outImg = sepOut ? outCtx.getImageData(0, 0, w, h) : imgData;
+  const od = outImg.data;
   const idx = (startY * w + startX) * 4;
   const sr = data[idx], sg = data[idx+1], sb = data[idx+2], sa = data[idx+3];
   // Parse fill color
@@ -6737,8 +6782,8 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
   const tc = tmp.getContext('2d'); tc.fillStyle = fillColor; tc.fillRect(0, 0, 1, 1);
   const fc = tc.getImageData(0, 0, 1, 1).data;
   const fr = fc[0], fg = fc[1], fb = fc[2];
-  // Already same color?
-  if (Math.abs(sr - fr) + Math.abs(sg - fg) + Math.abs(sb - fb) < 3) return;
+  // Already same color? (only meaningful when painting back onto the same layer)
+  if (!sepOut && Math.abs(sr - fr) + Math.abs(sg - fg) + Math.abs(sb - fb) < 3) return;
   const tol = tolerance;
   function match(i) {
     return Math.abs(data[i] - sr) <= tol && Math.abs(data[i+1] - sg) <= tol && Math.abs(data[i+2] - sb) <= tol && Math.abs(data[i+3] - sa) <= tol;
@@ -6753,13 +6798,18 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
     const pi = ci * 4;
     if (!match(pi)) continue;
     visited[ci] = 1;
-    data[pi]   = Math.round(data[pi]   * (1 - alpha) + fr * alpha);
-    data[pi+1] = Math.round(data[pi+1] * (1 - alpha) + fg * alpha);
-    data[pi+2] = Math.round(data[pi+2] * (1 - alpha) + fb * alpha);
-    data[pi+3] = 255;
+    if (sepOut) {
+      // Paint the full colour at the chosen opacity onto the (transparent) layer.
+      od[pi] = fr; od[pi+1] = fg; od[pi+2] = fb; od[pi+3] = Math.round(alpha * 255);
+    } else {
+      od[pi]   = Math.round(od[pi]   * (1 - alpha) + fr * alpha);
+      od[pi+1] = Math.round(od[pi+1] * (1 - alpha) + fg * alpha);
+      od[pi+2] = Math.round(od[pi+2] * (1 - alpha) + fb * alpha);
+      od[pi+3] = 255;
+    }
     stack.push([cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]);
   }
-  ctx.putImageData(imgData, 0, 0);
+  (sepOut ? outCtx : ctx).putImageData(outImg, 0, 0);
 }
 
 // --- Magic Wand is now in the selection system above (_paintWandSelect) ---
@@ -6807,13 +6857,19 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
           // the user stays in Fill mode, dragging the Tolerance /
           // Color / Opacity sliders restores the snapshot and re-runs
           // the fill at the same point so they can dial in the value.
+          // In emissive mode, detect the region on the image but paint into
+          // the emissive overlay (so Fill works for emissive too, not just
+          // the brush).
           const rx = Math.round(x), ry = Math.round(y);
+          const outCtx = paintState.emissiveMode ? _paintGetEmissiveCtx(mgr) : null;
+          const snapCtx = outCtx || ctx;
           paintState.lastFill = {
             x: rx, y: ry,
             mgr,
-            snap: ctx.getImageData(0, 0, mgr.w, mgr.h),
+            emissive: !!outCtx,
+            snap: snapCtx.getImageData(0, 0, mgr.w, mgr.h),
           };
-          _paintFloodFill(ctx, rx, ry, paintState.color, paintState.tolerance);
+          _paintFloodFill(ctx, rx, ry, paintState.color, paintState.tolerance, outCtx);
           return false;
         }
         if (paintState.tool === 'wand') {
@@ -6979,8 +7035,10 @@ document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
 function _paintLiveRefillIfFill() {
   const lf = paintState.lastFill;
   if (!lf || paintState.tool !== 'fill' || !_paintMgr) return;
-  _paintMgr.ctx.putImageData(lf.snap, 0, 0);
-  _paintFloodFill(_paintMgr.ctx, lf.x, lf.y, paintState.color, paintState.tolerance);
+  const outCtx = lf.emissive ? _paintGetEmissiveCtx(_paintMgr) : null;
+  const snapCtx = outCtx || _paintMgr.ctx;
+  snapCtx.putImageData(lf.snap, 0, 0);
+  _paintFloodFill(_paintMgr.ctx, lf.x, lf.y, paintState.color, paintState.tolerance, outCtx);
 }
 
 // Tolerance (for Fill / Wand) — re-run wand selection live OR re-run
@@ -7625,9 +7683,28 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
   }
 });
 
-// Wrap a generate handler so it goes through the queue if VRAM is tight
+// Wrap a generate handler so it goes through the queue if VRAM is tight.
+// We also remember the last gated operation so the "Unlock" flow can RE-RUN it
+// after the user disables the content filter (a content-filter-blocked job would
+// otherwise just sit failed — the user expects it to resume once unlocked).
+let _lastGatedRun = null;
 function gatedRun(kind, displayName, runFn) {
+  _lastGatedRun = { kind, displayName, runFn };
   enqueueJob(kind, displayName, runFn);
+}
+
+// Open the legal-warning + PIN flow; if the user completes it (now unrestricted),
+// re-run the operation that was blocked by the content filter.
+async function _unlockThenRetry() {
+  const retry = _lastGatedRun;  // capture before any await
+  try { await toggleParentalControl(); } catch (_) {}
+  try {
+    const status = API.getParentalStatus ? await API.getParentalStatus() : null;
+    if (status && status.unrestricted && retry && typeof retry.runFn === 'function') {
+      showToast('Filtre désactivé — relance de l\'action…', 'info', 2500);
+      gatedRun(retry.kind, retry.displayName, retry.runFn);
+    }
+  } catch (_) {}
 }
 
 // 3D quality presets: map a single dropdown to safe (tex_res, vertex_count) combos.
@@ -15810,13 +15887,18 @@ async function refreshJobDetailsModal(id) {
   // Error box — shown when the job failed with a message.
   const errBox = document.getElementById('jd-error-box');
   const openSettingsBtn = document.getElementById('job-details-open-settings');
+  const unlockBtn = document.getElementById('job-details-unlock');
   if (errBox) {
     if (j.status === 'error' && j.errorMessage) {
       errBox.textContent = j.errorMessage;
       errBox.classList.remove('hidden');
+      // Content-filter block → offer a direct Unlock shortcut.
+      const isContentFilter = /content filter|parental control|unrestricted mode/i.test(j.errorMessage);
+      if (unlockBtn) unlockBtn.style.display = isContentFilter ? '' : 'none';
     } else {
       errBox.textContent = '';
       errBox.classList.add('hidden');
+      if (unlockBtn) unlockBtn.style.display = 'none';
     }
   }
   if (openSettingsBtn) openSettingsBtn.style.display = 'none';
@@ -15834,6 +15916,11 @@ async function refreshJobDetailsModal(id) {
   }
 }
 document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
+document.getElementById('job-details-unlock')?.addEventListener('click', () => {
+  // Close this modal, open the legal-warning + PIN flow, then re-run the blocked job.
+  closeJobDetails();
+  setTimeout(() => { _unlockThenRetry(); }, 60);
+});
 document.getElementById('job-details-goto-step')?.addEventListener('click', () => {
   const id = state._jobDetailsOpenId;
   if (!id) return;

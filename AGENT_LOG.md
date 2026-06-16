@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (parite cloud vague 2 : emissive-fill, symmetrize-erase, strength-hint, unlock x2)
+
+Suite vague 1. Ports cloud (cloud/public/app/index2.js + index.html) :
+- emissive-fill : _paintFloodFill recoit un outCtx -> Fill detecte la region sur
+  l'image mais peint sur l'overlay emissive (handler + _paintLiveRefillIfFill aussi).
+- symmetrize-erase : boutons Paint/Erase (mask mode) + symState.erasing + maskData =
+  erasing ? 0 : 255.
+- engine strength-hint : _updateModStrengthHint (Low/Medium/High/Very-high) sur le
+  slider Modify. (Labels statiques des dropdowns engine = cosmetique, non porte : le
+  ws-engine cloud n'a qu'1 option fonctionnelle.)
+- unlock-jobdetails + unlock-rerun : gatedRun memorise _lastGatedRun, _unlockThenRetry
+  rejoue l'op apres unlock ; branche content-filter dans reportPipelineError (Unlock
+  inline) + bouton job-details-unlock dans le modal Task-failed. Cloud only.
+
+
 ## 2026-06-16 (parite cloud vague 1 + harmonisation des styles)
 
 Suite a la verif de parite (workflow 43 agents) : 11 features du matin en retard sur
