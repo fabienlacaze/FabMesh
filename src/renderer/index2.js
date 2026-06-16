@@ -262,8 +262,9 @@ function reportPipelineError(errMsg, title) {
   if (/content filter|parental control|unrestricted mode/i.test(raw)) {
     customErrorWithAction(raw, title || 'Blocked by content filter', '🔓 Unlock')
       .then((unlock) => {
-        // Let the shared modal fully close/reset before the warning re-opens it.
-        if (unlock) setTimeout(() => { try { toggleParentalControl(); } catch (_) {} }, 60);
+        // Let the shared modal fully close/reset before the warning re-opens it,
+        // then unlock AND re-run the blocked operation.
+        if (unlock) setTimeout(() => { _unlockThenRetry(); }, 60);
       });
     return;
   }
@@ -7307,9 +7308,28 @@ document.getElementById('ws-use-for-anim-btn')?.addEventListener('click', () => 
   }
 });
 
-// Wrap a generate handler so it goes through the queue if VRAM is tight
+// Wrap a generate handler so it goes through the queue if VRAM is tight.
+// We also remember the last gated operation so the "Unlock" flow can RE-RUN it
+// after the user disables the content filter (a content-filter-blocked job would
+// otherwise just sit failed — the user expects it to resume once unlocked).
+let _lastGatedRun = null;
 function gatedRun(kind, displayName, runFn) {
+  _lastGatedRun = { kind, displayName, runFn };
   enqueueJob(kind, displayName, runFn);
+}
+
+// Open the legal-warning + PIN flow; if the user completes it (now unrestricted),
+// re-run the operation that was blocked by the content filter.
+async function _unlockThenRetry() {
+  const retry = _lastGatedRun;  // capture before any await
+  try { await toggleParentalControl(); } catch (_) {}
+  try {
+    const status = API.getParentalStatus ? await API.getParentalStatus() : null;
+    if (status && status.unrestricted && retry && typeof retry.runFn === 'function') {
+      showToast('Filtre désactivé — relance de l\'action…', 'info', 2500);
+      gatedRun(retry.kind, retry.displayName, retry.runFn);
+    }
+  } catch (_) {}
 }
 
 // 3D quality presets: map a single dropdown to safe (tex_res, vertex_count) combos.
@@ -13415,9 +13435,9 @@ async function refreshJobDetailsModal(id) {
 }
 document.getElementById('job-details-close').addEventListener('click', closeJobDetails);
 document.getElementById('job-details-unlock')?.addEventListener('click', () => {
-  // Close this modal first, then open the legal-warning + PIN flow.
+  // Close this modal, open the legal-warning + PIN flow, then re-run the blocked job.
   closeJobDetails();
-  setTimeout(() => { try { toggleParentalControl(); } catch (_) {} }, 60);
+  setTimeout(() => { _unlockThenRetry(); }, 60);
 });
 document.getElementById('job-details-goto-step')?.addEventListener('click', () => {
   const id = state._jobDetailsOpenId;
