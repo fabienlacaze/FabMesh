@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (cloud : re-ajout aperçu masque (bouton) lisse + spinner ; page GPU non-NVIDIA)
+
+User "fais tout" apres avoir clarifie qu'il veut l'apercu masque aussi sur cloud (option
+bouton, le live serverless = trop cher).
+- CLOUD apercu masque RE-AJOUTE : bouton "Preview mask" + overlay rouge + SPINNER (anim
+  spin) pendant la detection + invalidation au changement target/dilate. Reutilise l'op
+  segment + segmentMask (dormants depuis le retrait precedent).
+- Masque cloud LISSE : modal_app/app.py op segment upscale NEAREST -> LANCZOS (etait
+  blocky). + detection deja assouplie (>60) cote _auto_inpaint.
+- PAGE GPU : docs/index.html detecte le GPU via WebGL UNMASKED_RENDERER ; si non-NVIDIA
+  (AMD/Intel/Apple/mobile) -> bandeau d'avertissement sur la carte Desktop + de-emphase
+  (opacity + grayscale du CTA Store) + pousse le Cloud. Soft (laptops hybrides NVIDIA
+  reportent l'iGPU Intel) -> de-emphase, pas masquage. Publie (push).
+Cloud : build+deploy + Modal redeploy. Desktop apercu inchange (deja live+spinner).
+
 ## 2026-06-16 (Auto Inpaint : masque preview lisse + loading circle + detection assouplie)
 
 User (desktop live mask preview, dessine avant Apply) : masque trop grossier + met
