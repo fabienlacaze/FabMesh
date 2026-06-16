@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Drop-to-create: popup nom + Unlock NSFW ; audit legal+securite)
+
+- Bug "dossier bitch" (DESKTOP) : drop d'une image sur le grid -> importDroppedFile
+  avec projectName:null -> le main DERIVAIT le nom du FICHIER (main.js:3572) sans
+  jamais demander. Fix :
+  - main.js `import-dropped-file` : la branche "nouvelle image" utilise `projectName`
+    s'il est fourni (sinon baseName) -> respecte le nom choisi par l'user.
+  - src/renderer/index2.js : drop sur le grid -> stash `window.__pendingDroppedFile`
+    + ouvre la popup New Project (nom pre-rempli depuis le filename). np-create importe
+    le fichier dans le projet nomme puis `openProjectByName`. np-cancel / btn-new-project
+    nettoient le pending.
+  - Unlock NSFW : helper `_nsfwBlockedUnlock` (customConfirm + toggleParentalControl) ;
+    quand une image droppee/importee est flaggee NSFW on propose de DEVERROUILLER le
+    filtre (PIN) au lieu de juste bloquer -> couvre drop-intoProject ET drop-to-create.
+  - main.js modifie => RESTART Electron requis.
+  - CLOUD : avait deja le pattern __pendingDroppedFile + popup (cloud/public/app/index2.js
+    :18262 + np-create:1314) -> aucun changement cloud necessaire.
+- Audit legal + securite (workflow 72 agents, 60 findings retenus : 7 P0 / 12 P1 / 26 P2
+  / 15 P3). Rapport complet garde EN LOCAL UNIQUEMENT dans `audit/` (dossier gitignore) :
+  ne PAS publier sur le repo public, il detaille des failles encore actives. Plusieurs P0
+  bloquent une mise en vente -> voir le rapport local avant de commercialiser.
+
 ## 2026-06-16 (i18n : 6 langues + fix flicker + parité desktop)
 
 - **6 langues les plus parlées** : EN (source) + FR (inline dans i18n.js) + 4

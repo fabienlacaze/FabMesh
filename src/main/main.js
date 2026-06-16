@@ -3564,12 +3564,15 @@ ipcMain.handle('import-dropped-file', (event, arg) => {
         fs.copyFileSync(filePath, dest);
         return { success: true, kind: 'image', version: true, path: dest };
       }
-      // New project from the dropped image. Strip a trailing _<digits> from
-      // the base so the project name doesn't END in digits — otherwise
-      // meshProject() (which strips trailing digits when attributing a mesh)
-      // would later put the generated 3D in a DIFFERENT, shorter project
-      // (the "dropped_<ts>" image vs "dropped" mesh split bug).
-      const safeBase = (baseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+      // New project from the dropped image. If the renderer passed an explicit
+      // projectName (drop on the projects grid -> the user named it in the New
+      // Project popup), use THAT; otherwise derive the name from the filename.
+      // Strip a trailing _<digits> from the base so the project name doesn't END
+      // in digits — otherwise meshProject() (which strips trailing digits when
+      // attributing a mesh) would later put the generated 3D in a DIFFERENT,
+      // shorter project (the "dropped_<ts>" image vs "dropped" mesh split bug).
+      const nameSource = (projectName && String(projectName).trim()) || baseName;
+      const safeBase = (nameSource.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
         .replace(/_+\d+$/, '').replace(/_+$/, '')) || 'imported';
       const projDir = path.join(IMAGES_DIR, `${safeBase}_${ts}`);
       fs.mkdirSync(projDir, { recursive: true });

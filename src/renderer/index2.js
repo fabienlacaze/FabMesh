@@ -313,6 +313,27 @@ function showToast(message, type = 'info', durationMs = 3000) {
   }, durationMs);
 }
 
+// Offer to unlock the content filter when a dropped/imported image is flagged
+// NSFW, instead of silently blocking it. Runs the same parental toggle + PIN
+// flow as the New Project popup. Returns true if content is (now) unrestricted.
+async function _nsfwBlockedUnlock(reloadFn) {
+  try {
+    const ps = API.getParentalStatus ? await API.getParentalStatus() : null;
+    if (ps && ps.unrestricted) return true;
+  } catch (_) {}
+  const ok = await customConfirm(
+    'This image was flagged by the content filter (NSFW). Unlock the content filter to keep and use it?',
+    'Content blocked', 'Unlock'
+  );
+  if (!ok) return false;
+  try { await toggleParentalControl(); } catch (_) {}
+  try {
+    const ps2 = API.getParentalStatus ? await API.getParentalStatus() : null;
+    if (ps2 && ps2.unrestricted) { if (reloadFn) await reloadFn(); return true; }
+  } catch (_) {}
+  return false;
+}
+
 function customConfirm(message, title = 'Confirm', okLabel = 'Delete') {
   return new Promise((resolve) => {
     const modal = document.getElementById('modal-confirm');
@@ -1287,13 +1308,18 @@ function openNewProjectModal() {
   document.getElementById('np-prompt').value = '';
   document.getElementById('np-block-msg')?.classList.add('hidden');
   const _npu = document.getElementById('np-unlock'); if (_npu) _npu.style.display = 'none';
+  // Drop-to-create: suggest a project name from the dropped filename.
+  const _pf = window.__pendingDroppedFile;
+  if (_pf && _pf.fileName) {
+    document.getElementById('np-name').value = _pf.fileName.replace(/\.[^.]+$/, '').slice(0, 40);
+  }
   document.getElementById('modal-new-project').classList.remove('hidden');
-  setTimeout(() => document.getElementById('np-name').focus(), 50);
+  setTimeout(() => { const el = document.getElementById('np-name'); if (el) { el.focus(); if (el.select) el.select(); } }, 50);
 }
 function closeNewProjectModal() {
   document.getElementById('modal-new-project').classList.add('hidden');
 }
-document.getElementById('btn-new-project').addEventListener('click', openNewProjectModal);
+document.getElementById('btn-new-project').addEventListener('click', () => { window.__pendingDroppedFile = null; openNewProjectModal(); });
 // Unlock from the New Project popup: run the legal-warning + PIN flow, then if
 // the user is now unrestricted, retry creating the project automatically.
 document.getElementById('np-unlock')?.addEventListener('click', async () => {
@@ -1308,7 +1334,7 @@ document.getElementById('np-unlock')?.addEventListener('click', async () => {
   } catch (_) {}
 });
 document.getElementById('project-search')?.addEventListener('input', () => renderProjectsGrid());
-document.getElementById('np-cancel').addEventListener('click', closeNewProjectModal);
+document.getElementById('np-cancel').addEventListener('click', () => { window.__pendingDroppedFile = null; closeNewProjectModal(); });
 document.getElementById('np-create').addEventListener('click', async () => {
   const name = document.getElementById('np-name').value.trim() || 'project';
   const prompt = document.getElementById('np-prompt').value.trim();
@@ -1350,6 +1376,32 @@ document.getElementById('np-create').addEventListener('click', async () => {
   const _ub2 = document.getElementById('np-unlock'); if (_ub2) _ub2.style.display = 'none';
 
   closeNewProjectModal();
+
+  // Drop-to-create: the user dropped a file on the projects grid and just NAMED
+  // the project here. Import the file into the freshly-named project instead of
+  // creating an empty shell, with an NSFW unlock affordance if it's flagged.
+  if (window.__pendingDroppedFile) {
+    const pf = window.__pendingDroppedFile;
+    window.__pendingDroppedFile = null;
+    let r;
+    try { r = await API.importDroppedFile({ filePath: pf.filePath, projectName: name }); }
+    catch (e) { r = { success: false, error: e?.message || String(e) }; }
+    if (!r || !r.success) { showToast?.('Import failed: ' + (r?.error || 'unknown'), 'error', 4000); return; }
+    if (r.kind === 'image' && r.path && API.batchCheckNsfw) {
+      try {
+        const nsfw = await API.batchCheckNsfw({ images: [r.path] });
+        if (nsfw && nsfw[r.path]) await _nsfwBlockedUnlock(null);
+      } catch (_) {}
+    }
+    const openName = r.projectName || name;
+    try {
+      if (typeof window.openProjectByName === 'function') await window.openProjectByName(openName);
+      else await refreshProjectsPage();
+    } catch (_) { try { await refreshProjectsPage(); } catch (_) {} }
+    showToast?.('Project created from dropped file', 'success', 1800);
+    return;
+  }
+
   // Create an empty project shell and open it
   const proj = {
     name,
@@ -16053,6 +16105,14 @@ window.addEventListener('drop', async (e) => {
   //    (image / mesh / rig / animation) to the right strip.
   //  - on the projects grid -> CREATE a new project from the dropped element.
   const intoProject = !!(state.currentProject && state.page === 'workspace');
+  if (!intoProject) {
+    // Drop on the projects grid: open the New Project popup so the user NAMES the
+    // project (it used to auto-derive a name from the filename and silently create
+    // a project). np-create imports __pendingDroppedFile into the named project.
+    window.__pendingDroppedFile = { filePath: path_, fileName, isImage, isMesh };
+    openNewProjectModal();
+    return;
+  }
   const _dirOf = (x) => {
     const s = typeof x === 'string' ? x : (x && x.path) || '';
     return s.replace(/[\\/][^\\/]*$/, '');
@@ -16080,10 +16140,14 @@ window.addEventListener('drop', async (e) => {
       try {
         const nsfw = await API.batchCheckNsfw({ images: [r.path] });
         if (nsfw && nsfw[r.path]) {
-          if (intoProject) { if (typeof reloadCurrentProject === 'function') await reloadCurrentProject(); }
-          else await refreshProjectsPage();
-          showToast?.('Image blocked by the content filter (NSFW).', 'error', 4000);
-          return;
+          const kept = await _nsfwBlockedUnlock(async () => {
+            if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+          });
+          if (!kept) {
+            if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
+            return;
+          }
+          // unlocked -> image now allowed; fall through to the normal post-import
         }
       } catch (e) { console.warn('[drop] NSFW scan failed:', e); }
     }

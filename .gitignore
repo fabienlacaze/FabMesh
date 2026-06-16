@@ -113,3 +113,6 @@ logs/*.err
 
 # Puppeteer rigging — Seed3D/Puppeteer cloned at ~22 GB (venv + checkpoints).
 external/Puppeteer/
+
+# Local-only security/legal audit reports (must NOT be published to the public repo)
+audit/
