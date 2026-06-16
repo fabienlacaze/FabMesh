@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (fix — op image après une gen faussement bloquée (VRAM SDXL))
+
+User : "après une génération le AI module consomme bcp de VRAM (6.6 GB), les
+analyses suivantes ne veulent pas se lancer". CAUSE : hasVramHeadroomFor calculait
+projected = VRAM_actuelle + coût_plein pour image/img2img/inpaint, sans tenir
+compte que le serveur SDXL SWAPPE son pipeline (libère l'ancien avant de charger
+le nouveau). Après une gen (engine ~6.6 GB, total ~12.9/16), un 2e op image
+(coût 8) -> projeté 20.9 > 16 -> queué. Et comme img2img/inpaint ne sont pas dans
+la liste auto-kill SDXL (enqueueJob 14042 = mesh/rig/image only), il attendait
+90s (timer idle) puis rechargeait. FIX : pour image/img2img/inpaint, soustraire
+la VRAM live de l'AI engine (via API.listProcesses .vramMb) avant d'ajouter le
+coût -> projected = max(0, used - reusable) + cost ; et free += reusable. Le 2e
+op réutilise SDXL instantanément au lieu d'attendre. Renderer -> Ctrl+R.
+
 ## 2026-06-16 (perf — scan NSFW idempotent : supprime le pic CPU au démarrage)
 
 Monitoring seconde/seconde : à l'ouverture de FabMesh, CPU bloqué à ~38% pendant

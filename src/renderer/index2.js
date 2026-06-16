@@ -13970,11 +13970,22 @@ async function hasVramHeadroomFor(kind) {
     }
 
     // Predicted VRAM after the job allocates its pipeline.
-    // The SDXL server unloads its other pipeline before loading a new one,
-    // so the real cost is capped at ONE pipeline size (~6-7 GB), not the sum.
-    // But we still add the cost to current usage to account for misc buffers
-    // and activations that any running pipeline needs.
-    const projectedUsedGB = gpu.usedGB + cost;
+    // The SDXL server SWAPS its pipeline (frees the loaded one, loads the new)
+    // for image/img2img/inpaint — so a follow-up image op REUSES the VRAM the
+    // engine already holds instead of stacking on top. We subtract the LIVE
+    // AI-engine VRAM before adding this job's cost. Without this, a 2nd image
+    // op right after a gen was falsely queued (projected = 12.9 + 8 > 16 GB) and
+    // waited up to 90s for the idle timer to free SDXL — then reloaded it — when
+    // it could have just reused the loaded model instantly.
+    let reusableGB = 0;
+    if ((kind === 'image' || kind === 'img2img' || kind === 'inpaint') && API.listProcesses) {
+      try {
+        const pl = await API.listProcesses();
+        const eng = ((pl && pl.procs) || []).find(p => p.isAiEngine && p.vramMb != null);
+        if (eng) reusableGB = eng.vramMb / 1024;
+      } catch (_) {}
+    }
+    const projectedUsedGB = Math.max(0, gpu.usedGB - reusableGB) + cost;
     const projectedPct = (projectedUsedGB / gpu.totalGB) * 100;
     if (projectedPct > gpuLimits.vram) {
       return {
@@ -13982,13 +13993,14 @@ async function hasVramHeadroomFor(kind) {
         reason: `VRAM insuffisante: ${gpu.usedGB.toFixed(1)}/${gpu.totalGB.toFixed(1)} GB utilisés, ce job a besoin de ~${cost} GB supplémentaires → ${projectedPct.toFixed(0)}% > limite ${gpuLimits.vram}%. Le job attendra que la VRAM se libère.`
       };
     }
-    // Also check absolute free headroom: even below the slider, refuse to
-    // start if there's genuinely not enough free VRAM on the card.
-    const freeGB = gpu.totalGB - gpu.usedGB;
+    // Also check absolute free headroom: even below the slider, refuse to start
+    // if there's genuinely not enough free VRAM. The engine's VRAM is reclaimable
+    // for reusing kinds, so count it as available.
+    const freeGB = (gpu.totalGB - gpu.usedGB) + reusableGB;
     if (freeGB < cost) {
       return {
         ok: false,
-        reason: `VRAM libre insuffisante: ${freeGB.toFixed(1)} GB disponibles, ce job a besoin de ~${cost} GB. Le job attendra.`
+        reason: `VRAM libre insuffisante: ${(gpu.totalGB - gpu.usedGB).toFixed(1)} GB disponibles, ce job a besoin de ~${cost} GB. Le job attendra.`
       };
     }
   } catch (e) {
