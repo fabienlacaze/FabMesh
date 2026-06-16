@@ -2312,7 +2312,7 @@ async function showStep2SourceImage(imgPath) {
   const target = document.getElementById('ws-3d-source-preview');
   if (!target) return;
   if (imgPath) {
-    target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
+    target.innerHTML = `<img src="${escapeHtml(_toFileUrl(imgPath))}">`;
     // Spinner while the <img> decodes — only relevant for big PNGs.
     // Cleared on load/error or after a 10s safety timeout. Mirrors
     // the cloud d5798ea wiring.
@@ -7297,7 +7297,7 @@ async function renderMeshVersions(p) {
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
     t.innerHTML = `
-      ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
+      ${thumbSrc ? `<img src="${escapeHtml(thumbSrc)}" alt="">` : ''}
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
       ${meshEmissiveBadge}
@@ -12139,7 +12139,7 @@ function renderRigVersions(p) {
       thumbSrc = 'file:///' + p.thumb.replace(/\\/g, '/');
     }
     t.innerHTML = `
-      ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
+      ${thumbSrc ? `<img src="${escapeHtml(thumbSrc)}" alt="">` : ''}
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>
     `;

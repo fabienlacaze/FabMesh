@@ -23,8 +23,10 @@ export default function PrivacyPage() {
 
       <h2>1. Data controller</h2>
       <p>
-        MyFabmesh.AI is operated by <strong>Ayros Studio</strong> (France).
-        Contact for any privacy request:{' '}
+        MyFabmesh.AI is operated by <strong>Ayros Studio</strong> (Fabien
+        Lacaze, France), registered at{' '}
+        <strong>[TO CONFIRM: address + SIREN]</strong>. Contact for any privacy
+        request:{' '}
         <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
       </p>
 
@@ -32,7 +34,8 @@ export default function PrivacyPage() {
       <ul>
         <li>
           <strong>Account data:</strong> email address and password hash, stored
-          by our authentication provider <strong>Supabase</strong> (EU region).
+          by our authentication provider <strong>Supabase</strong> (EU region,
+          AWS <code>eu-west-3</code> / Paris, France).
         </li>
         <li>
           <strong>Generated assets:</strong> images and 3D meshes you produce,
@@ -65,15 +68,43 @@ export default function PrivacyPage() {
         <li>To comply with French and EU law where applicable (legal obligation).</li>
       </ul>
 
-      <h2>4. Third parties we share data with</h2>
+      <h2>4. Sub-processors we share data with</h2>
       <p>We don&apos;t sell your data. We share strictly what each provider needs:</p>
       <ul>
-        <li><strong>Supabase</strong> (Auth + Postgres, EU region) — your account and jobs.</li>
-        <li><strong>Stripe</strong> — your payment session.</li>
-        <li><strong>Cloudflare</strong> — Worker, R2 storage, CDN.</li>
-        <li><strong>Modal Labs</strong> — GPU compute for image / mesh generation. Receives the source image you uploaded for the duration of the job.</li>
-        <li><strong>Replicate</strong> — fallback GPU compute. Same scope as Modal.</li>
+        <li><strong>Supabase</strong> (Auth + Postgres, AWS <code>eu-west-3</code> / Paris, France) — your account and jobs.</li>
+        <li><strong>Stripe</strong> (EU / US) — your payment session.</li>
+        <li><strong>Cloudflare</strong> (global edge) — Worker, R2 storage, CDN.</li>
+        <li><strong>Modal Labs</strong> (United States) — our <strong>primary</strong> GPU compute provider for image / mesh generation. Receives the source image you uploaded for the duration of the job. See &ldquo;International data transfers&rdquo; below.</li>
+        <li><strong>Replicate</strong> (United States) — fallback / overflow GPU compute. Same scope as Modal.</li>
       </ul>
+
+      <h3>4.1 International data transfers</h3>
+      <p>
+        Your account data and generation history are stored in the EU
+        (Supabase, AWS <code>eu-west-3</code> / Paris). However, some of our
+        sub-processors are located outside the European Economic Area &mdash;
+        in particular <strong>Modal Labs</strong> (our primary GPU provider)
+        and <strong>Replicate</strong> are in the <strong>United States</strong>,
+        and Stripe and Cloudflare may process data in the US. When we transfer
+        personal data (such as the source image you upload for a generation job)
+        to these providers, that transfer is governed by Chapter V of the GDPR
+        and is safeguarded by:
+      </p>
+      <ul>
+        <li>
+          the European Commission&apos;s <strong>Standard Contractual
+          Clauses (SCCs)</strong>, 2021/914, incorporated into our agreement
+          with each US sub-processor; and / or
+        </li>
+        <li>
+          where the provider is certified, the <strong>EU&ndash;US Data Privacy
+          Framework (DPF)</strong> and its UK extension / Swiss&ndash;US bridge.
+        </li>
+      </ul>
+      <p>
+        You can request a copy of the relevant transfer safeguards by emailing{' '}
+        <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>.
+      </p>
 
       <h2>5. How long we keep your data</h2>
       <ul>

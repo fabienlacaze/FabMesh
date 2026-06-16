@@ -1222,6 +1222,39 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
       pages++;
     } while (cursor && pages < 50);
   }
+  // PRIV / Art.17: contact-form submissions are stored OUTSIDE the
+  // <user.id>/ prefix (under _meta/contact/*), so the R2 sweep above
+  // misses them. Walk the contact inbox and erase any message — plus
+  // its screenshot folder — that this user authored. Idempotent: a
+  // re-call just skips already-deleted keys.
+  let contactDeleted = 0;
+  if (env.MESHES) {
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const list = await env.MESHES.list({ prefix: '_meta/contact/', cursor, limit: 1000 });
+      for (const obj of list.objects) {
+        if (!obj.key.endsWith('.json')) continue;
+        try {
+          const txt = await r2GetText(env, obj.key);
+          if (!txt) continue;
+          const msg = JSON.parse(txt) as { id?: string; user_id?: string };
+          if (msg?.user_id !== user.id) continue;
+          // Delete the message JSON itself.
+          await env.MESHES.delete(obj.key).catch(() => {});
+          contactDeleted++;
+          // Delete its screenshot folder _meta/contact/<id>/* if present.
+          if (msg.id) {
+            const shPrefix = `_meta/contact/${msg.id}/`;
+            const sh = await env.MESHES.list({ prefix: shPrefix, limit: 1000 });
+            await Promise.all(sh.objects.map((o) => env.MESHES.delete(o.key).catch(() => {})));
+          }
+        } catch {}
+      }
+      cursor = list.truncated ? list.cursor : undefined;
+      pages++;
+    } while (cursor && pages < 50);
+  }
   // Drop rows. payments + jobs cascade via FK on auth.users when we
   // delete the auth.users row, but doing them explicitly here ensures
   // a partial-failure state still leaves an empty account.
@@ -1244,6 +1277,7 @@ async function handleMeDelete(req: Request, env: Env): Promise<Response> {
   return json({
     ok: true,
     r2_objects_deleted: r2Deleted,
+    contact_messages_deleted: contactDeleted,
     auth_user_deleted: authDeleted,
   });
 }
@@ -1448,11 +1482,16 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     return err(502, `screenshot write failed: ${e instanceof Error ? e.message : String(e)}`);
   }
+  // PRIV: do NOT persist the raw client IP (PII). Store only a salted,
+  // truncated SHA-256 so abuse can still be correlated across messages
+  // without keeping a reversible identifier. The rate-limit counters
+  // above already use _safeId(ip) and reset at UTC midnight.
+  const ip_hash = (await _sha256(`contact:${ip}`)).slice(0, 16);
   const payload = {
     id,
     name, email, subject, message,
     user_id, user_email,
-    ip,
+    ip_hash,
     user_agent: req.headers.get('user-agent') ?? null,
     created_at: new Date().toISOString(),
     read: false,
@@ -1482,7 +1521,7 @@ async function handleMarketReport(req: Request, env: Env): Promise<Response> {
   if (!env.MESHES) return err(500, 'storage not configured');
   let body: { listing_id?: string; reason?: string; reporter_email?: string } | null = null;
   try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
-  const listing_id = (body?.listing_id || '').trim();
+  const listing_id = _safeId((body?.listing_id || '').trim());
   if (!listing_id) return err(400, 'listing_id required');
   let user: { id: string } | null = null;
   try { user = await getSessionUser(req, env); } catch {}
@@ -1502,7 +1541,31 @@ async function handleMarketReport(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     return err(502, `report write failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return json({ ok: true });
+  // DSA Art.16 / DMCA: a report soft-hides the listing immediately so
+  // potentially-infringing content stops being served while the report
+  // is reviewed. We set reported_hidden on the listing JSON; the public
+  // read paths (market/list, market/<id>) filter it out. Idempotent:
+  // if the flag is already set (repeat report) we skip the re-write.
+  // The intake above is the source of truth, so a missing/failed flag
+  // here must NOT fail the request — the report is still recorded.
+  let hidden = false;
+  try {
+    const lKey = `_market/listings/${listing_id}.json`;
+    const lTxt = await r2GetText(env, lKey);
+    if (lTxt) {
+      const listing = JSON.parse(lTxt) as MarketListing;
+      if (!listing.reported_hidden) {
+        listing.reported_hidden = true;
+        listing.reported_at = new Date().toISOString();
+        await env.MESHES.put(lKey, JSON.stringify(listing),
+                             { httpMetadata: { contentType: 'application/json' } });
+      }
+      hidden = true;
+    }
+  } catch (e) {
+    console.warn('[market/report] auto-hide failed for', listing_id, e);
+  }
+  return json({ ok: true, hidden });
 }
 
 function _safeId(s: string): string {
@@ -2003,6 +2066,12 @@ type MarketListing = {
   thumbnail_url: string | null;
   status: 'pending' | 'approved' | 'rejected';
   rejection_reason?: string;
+  // DMCA/DSA: set true when an abuse/takedown report comes in. Read
+  // paths (market/list, market/<id>) treat this as soft-hidden so the
+  // listing disappears from public surfaces without touching the
+  // author's status state machine. Cleared by admin after review.
+  reported_hidden?: boolean;
+  reported_at?: string;
   created_at: string;
   approved_at: string | null;
   downloads: number;
@@ -2258,7 +2327,7 @@ async function handleMarketList(_req: Request, env: Env): Promise<Response> {
   const all = await _loadAllListings(env);
   // One bulk pass over _market/ratings/ so we don't N+1 per listing.
   const ratingsByListing = await _loadAllRatingsByListing(env);
-  const visible = all.filter((l) => l.status === 'approved')
+  const visible = all.filter((l) => l.status === 'approved' && !l.reported_hidden)
     .map((l) => {
       const r = ratingsByListing.get(l.id) || { avg: 0, count: 0 };
       return {  // strip the author_email — public surface
@@ -2299,6 +2368,9 @@ async function handleMarketGet(_req: Request, env: Env, id: string): Promise<Res
   try {
     const parsed = JSON.parse(txt);
     if (parsed.status !== 'approved') return err(404, 'listing not visible');
+    // DSA/DMCA soft-hide: a reported listing is treated as not-found on
+    // the public detail page until admin review clears the flag.
+    if (parsed.reported_hidden) return err(404, 'listing not visible');
     const stats = await _loadListingRatings(env, id);
     // If the viewer is logged in, surface their own rating so the UI can
     // pre-select the star they previously gave (idempotent re-vote).
@@ -2420,6 +2492,7 @@ async function handleMarketRate(req: Request, env: Env, id: string): Promise<Res
   try { listing = JSON.parse(txt) as MarketListing; }
   catch (e) { return err(500, e instanceof Error ? e.message : String(e)); }
   if (listing.status !== 'approved') return err(404, 'listing not visible');
+  if (listing.reported_hidden) return err(404, 'listing not visible');
   if (listing.user_id === user.id) return err(403, 'cannot rate your own listing');
 
   const now = new Date().toISOString();
@@ -3002,6 +3075,7 @@ async function handleMarketCheckout(req: Request, env: Env): Promise<Response> {
     try {
       const parsed = JSON.parse(txt) as MarketListing;
       if (parsed.status !== 'approved') continue;
+      if (parsed.reported_hidden) continue;  // DSA/DMCA soft-hide
       if (parsed.price_cents <= 0) continue;
       // Hard reject: a user cannot buy their own listing. The UI hides
       // the Add-to-cart button, but a stale cart or a direct API call
@@ -3258,6 +3332,9 @@ async function handleMarketDownload(req: Request, env: Env, listingId: string): 
   let listing: MarketListing;
   try { listing = JSON.parse(lTxt); } catch { return err(500, 'listing parse failed'); }
   if (listing.status !== 'approved') return err(404, 'listing not visible');
+  // DSA/DMCA: a reported listing stops serving its bytes immediately,
+  // pending admin review of the takedown report.
+  if (listing.reported_hidden) return err(404, 'listing not visible');
   // Paid listings require auth + ownership. Free listings are public.
   if (listing.price_cents > 0) {
     const user = await getSessionUser(req, env);
@@ -5138,10 +5215,18 @@ async function handleJobCancel(req: Request, env: Env): Promise<Response> {
   // Best-effort Replicate cancellation. Continue even if it fails — the
   // local status update is the source of truth for the UI.
   try { await replicateClient(env).predictions.cancel(id); } catch (_) { /* ignore */ }
-  await sb.from('jobs')
+  // Atomic terminal latch: only flip the row if it is still non-terminal,
+  // and only refund when THIS request is the one that won the transition.
+  // Without the status guard + RETURNING check, two concurrent cancels
+  // (or a cancel racing a completion poll) could each pass the read above
+  // and double-refund the credits.
+  const { data: flipped } = await sb.from('jobs')
     .update({ status: 'canceled', finished_at: new Date().toISOString() })
-    .eq('id', id);
-  if (typeof job.credit_cost === 'number') {
+    .eq('id', id)
+    .not('status', 'in', '(succeeded,failed,canceled)')
+    .select('id')
+    .maybeSingle();
+  if (flipped && typeof job.credit_cost === 'number') {
     await addCredits(env, user.id as string, job.credit_cost);
   }
   return json({ ok: true });

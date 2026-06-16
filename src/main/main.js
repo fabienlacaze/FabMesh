@@ -114,6 +114,24 @@ _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion 
     // No DSN configured — silently skip. Dev machines work without it.
     return;
   }
+  // Telemetry opt-out (policy promise). Read the persisted setting directly:
+  // loadConfig()/CONFIG_PATH aren't defined this early in module-eval, so we
+  // recompute the userData config path the same way DATA_BASE/CONFIG_PATH do.
+  // Default = current behaviour (telemetry ON) unless the user explicitly
+  // disabled it. A future renderer toggle just writes telemetryEnabled:false.
+  try {
+    const _dataBase = app.isPackaged
+      ? app.getPath('userData')
+      : path.join(__dirname, '..', '..');
+    const _cfgPath = path.join(_dataBase, 'config.json');
+    if (fs.existsSync(_cfgPath)) {
+      const _cfg = JSON.parse(fs.readFileSync(_cfgPath, 'utf-8'));
+      if (_cfg && _cfg.telemetryEnabled === false) {
+        // User opted out of crash reporting — do not initialise Sentry.
+        return;
+      }
+    }
+  } catch (_) { /* unreadable config → keep default (telemetry on) */ }
   try {
     const Sentry = require('@sentry/electron/main');
     Sentry.init({
@@ -303,6 +321,49 @@ function isUnrestrictedMode() {
   return process.env.FABMESH_UNRESTRICTED === '1';
 }
 
+// --- HARD FLOOR (minors / CSAM) -------------------------------------------
+// These checks protect minors and are NON-BYPASSABLE: they are evaluated
+// BEFORE any `unrestricted`/parental-PIN short-circuit. Unrestricted mode may
+// relax ADULT nudity ONLY — it can NEVER relax anything involving minors.
+// Mirror of cloud/src/nsfw_filter.ts checkHardFloor. Keep in sync with the
+// minors section of NSFW_KEYWORDS and the child×(sexual|violence) combos.
+const HARD_FLOOR_KEYWORDS = [
+  // Children / minors — single keywords that always block
+  'child abuse', 'pedophil', 'paedophil', 'underage', 'minor',
+  'loli', 'shota', 'preteen', 'toddler abuse', 'infant abuse',
+  'enfant', 'mineur',
+];
+
+const HARD_FLOOR_COMBOS = [
+  // Children + nudity/sexual
+  { a: ['child', 'children', 'kid', 'kids', 'boy', 'girl', 'teen', 'teenager', 'young', 'infant', 'baby', 'toddler', 'minor', 'preteen', 'schoolgirl', 'schoolboy', 'enfant', 'fille', 'garcon', 'jeune', 'ado', 'adolescent', 'gamin', 'gamine', 'bebe'],
+    b: ['without clothes', 'no clothes', 'unclothed', 'undressed', 'disrobed', 'bare', 'exposed', 'revealing', 'intimate', 'sensual', 'seductive', 'provocative', 'suggestive', 'sexy', 'hot', 'bath', 'shower', 'bedroom', 'bed', 'lingerie', 'underwear', 'panties', 'bra', 'bikini', 'swimsuit', 'diaper only', 'sans vetement', 'sans habit', 'deshabill', 'nu ', 'nue ', 'nus ', 'nues'] },
+  // Violence + children
+  { a: ['child', 'children', 'kid', 'kids', 'baby', 'infant', 'toddler', 'enfant', 'bebe'],
+    b: ['hurt', 'hit', 'beat', 'punch', 'slap', 'abuse', 'attack', 'weapon', 'knife', 'gun', 'shoot', 'bleed', 'cry', 'scream', 'pain', 'suffer', 'frapper', 'battre', 'blesser'] },
+];
+
+// Minors / CSAM HARD FLOOR. Evaluated FIRST and unconditionally — BEFORE any
+// `unrestricted`/PIN short-circuit. Returns a blocking result on any minor
+// keyword, child×sexual combo, or child×violence combo. NEVER bypassable.
+function checkHardFloor(lower) {
+  for (const kw of HARD_FLOOR_KEYWORDS) {
+    if (_matchesKeyword(lower, kw)) {
+      return { safe: false, blocked: kw,
+        reason: `Content filter: "${kw}" is blocked. Content involving minors is never permitted and this cannot be overridden.` };
+    }
+  }
+  for (const combo of HARD_FLOOR_COMBOS) {
+    const hitA = combo.a.find(w => _matchesKeyword(lower, w));
+    const hitB = combo.b.find(w => _matchesKeyword(lower, w));
+    if (hitA && hitB) {
+      return { safe: false, blocked: `${hitA} + ${hitB}`,
+        reason: `Content filter: combination "${hitA}" + "${hitB}" is blocked. Content involving minors is never permitted and this cannot be overridden.` };
+    }
+  }
+  return { safe: true };
+}
+
 // Dangerous combinations: if ANY word from group A AND ANY word from group B
 // appear together, the prompt is blocked. This catches circumventions like
 // "young child without clothes" that individual keywords miss.
@@ -332,8 +393,14 @@ function _matchesKeyword(text, kw) {
 }
 
 function checkPromptSafety(prompt) {
-  if (isUnrestrictedMode()) return { safe: true };
   const lower = (prompt || '').toLowerCase();
+
+  // HARD FLOOR first — minors/CSAM block UNCONDITIONALLY, even in unrestricted
+  // mode. Unrestricted may only relax adult nudity below, never minors.
+  const hardFloor = checkHardFloor(lower);
+  if (!hardFloor.safe) return hardFloor;
+
+  if (isUnrestrictedMode()) return { safe: true };
 
   // Check individual keywords
   for (const kw of NSFW_KEYWORDS) {
@@ -359,6 +426,10 @@ function checkPromptSafety(prompt) {
 // Layer 3: AI text classifier (async, non-blocking)
 // michellejieli/NSFW_text_classifier — local, Apache 2.0, ~250 MB, no internet after first download
 async function checkPromptSafetyAI(prompt) {
+  // HARD FLOOR first — minors/CSAM block UNCONDITIONALLY, before the
+  // unrestricted short-circuit and before the (optional) Python classifier.
+  const hardFloor = checkHardFloor((prompt || '').toLowerCase());
+  if (!hardFloor.safe) return hardFloor;
   if (isUnrestrictedMode()) return { safe: true };
   return new Promise((resolve) => {
     execFile('python', ['-c', `
@@ -983,7 +1054,16 @@ function createWindow() {
   // any window.open or attempted navigation to a remote/file origin is an
   // injection/exfil vector, so deny by default.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    try { require('electron').shell.openExternal(url); } catch (_) {}
+    // Only forward genuine web links to the OS browser. An injected
+    // window.open('file:///…') or custom-scheme URL must NOT reach
+    // shell.openExternal (which would launch local files / protocol
+    // handlers). Anything that isn't http(s) is denied silently.
+    try {
+      const proto = new URL(url).protocol;
+      if (proto === 'http:' || proto === 'https:') {
+        require('electron').shell.openExternal(url);
+      }
+    } catch (_) {}
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -1038,6 +1118,16 @@ function _loadOrCreateMcpToken() {
 
 let MCP_BRIDGE_TOKEN = '';
 
+// Constant-time comparison of the bridge token to avoid leaking it via
+// response timing. timingSafeEqual throws on unequal lengths, so guard first.
+function _mcpTokenEquals(provided) {
+  if (typeof provided !== 'string' || !MCP_BRIDGE_TOKEN) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(MCP_BRIDGE_TOKEN);
+  if (a.length !== b.length) return false;
+  try { return require('crypto').timingSafeEqual(a, b); } catch (_) { return false; }
+}
+
 function startMcpBridge() {
   MCP_BRIDGE_TOKEN = _loadOrCreateMcpToken();
   const http = require('http');
@@ -1050,7 +1140,7 @@ function startMcpBridge() {
     // (avoids burning CPU on hostile callers).
     const auth = req.headers['authorization'] || '';
     const provided = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    if (!provided || provided !== MCP_BRIDGE_TOKEN) {
+    if (!provided || !_mcpTokenEquals(provided)) {
       log.warn('mcp-bridge', `unauthorized request from ${req.socket.remoteAddress}`);
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: 'unauthorized' }));
@@ -2119,7 +2209,9 @@ ipcMain.handle('get-nsfw-keywords', () => {
 // Falls back to skin-ratio heuristic if the model isn't available.
 // Returns { nsfw: true/false, score: 0.XX }
 ipcMain.handle('check-image-nsfw', async (_event, { imagePath }) => {
-  if (isUnrestrictedMode()) return { nsfw: false, score: 0 };
+  // NOTE: the image scan ALWAYS runs — even in unrestricted mode — so the
+  // minors gate is never bypassed at the image level. Unrestricted relaxes
+  // adult nudity only (handled downstream via the score), never minors.
   if (!imagePath || !fs.existsSync(imagePath)) return { nsfw: false, score: 0 };
   // Image path passed via sys.argv to avoid `r"${imagePath}"` injection.
   const pyCode = `
@@ -2159,7 +2251,9 @@ except Exception as e:
 // Batch scan multiple images for NSFW in one Python process (loads model once).
 // Paths are passed via a temp file to avoid Windows backslash escaping issues.
 ipcMain.handle('batch-check-nsfw', async (_event, { images }) => {
-  if (isUnrestrictedMode()) return {};
+  // NOTE: the image scan ALWAYS runs — even in unrestricted mode — so the
+  // minors gate is never bypassed at the image level. Unrestricted relaxes
+  // adult nudity only (handled downstream via the score), never minors.
   if (!images || images.length === 0) return {};
   const imgList = images.filter(p => fs.existsSync(p));
   if (imgList.length === 0) return {};

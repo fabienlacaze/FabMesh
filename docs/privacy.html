@@ -99,11 +99,22 @@
     The Cloud version (planned, separate sign-up) requires an email-based login. When you use Cloud:
   </p>
   <ul>
-    <li>We store your email, hashed password (handled by Supabase Auth), credit balance, payment history, and generation job history in a Supabase Postgres database hosted in the EU (Frankfurt).</li>
-    <li>Reference images you upload are sent to Replicate (GPU provider) for processing and to Cloudflare R2 for the resulting GLB storage. We never use them for training.</li>
+    <li>We store your email, hashed password (handled by Supabase Auth), credit balance, payment history, and generation job history in a Supabase Postgres database hosted in the EU (region <code>eu-west-3</code>, Paris).</li>
+    <li>Reference images you upload are sent to <strong>Modal Labs</strong> (our primary GPU compute provider, United States) for processing — and, as a fallback, to Replicate — then to Cloudflare R2 for the resulting GLB storage. They are kept only for the duration of the generation job. We never use them for training.</li>
     <li>Payments are processed by Stripe; we never see your full card number.</li>
     <li>You can request deletion of your Cloud account at any time by emailing the address below — we delete everything within 30 days.</li>
   </ul>
+
+  <h3>3.1 International data transfers</h3>
+  <p>
+    Most of your Cloud data stays in the EU (Supabase in <code>eu-west-3</code> / Paris, Cloudflare R2 in the EU).
+    However, GPU compute is performed by <strong>Modal Labs</strong> in the United States (and, as a fallback,
+    by Replicate). When a reference image is processed, it is transferred to the US for the duration of the job.
+    These transfers outside the EU/EEA are covered by the <strong>European Commission's Standard Contractual
+    Clauses (SCC)</strong> and, where the provider is certified, the <strong>EU–US Data Privacy Framework
+    (DPF)</strong>, in accordance with Chapter V of the GDPR. We do not transfer your data to any other country
+    without an equivalent safeguard in place.
+  </p>
 
   <h2>4. Your rights (GDPR / RGPD)</h2>
   <p>You can, at any time, by emailing <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a>:</p>
@@ -129,7 +140,7 @@
   <h2>7. Contact</h2>
   <p>
     For any question: <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a><br>
-    Ayros Studio · Fabien Lacaze · 18 Chemin du Lavoir, 65400 France
+    Ayros Studio · Fabien Lacaze · <strong>[TO CONFIRM: address + SIREN]</strong>
   </p>
 
 </main>

@@ -228,6 +228,9 @@ function MarketPageInner() {
   const [marketDisabled, setMarketDisabled] = useState(false);
   const [marketDisabledReason, setMarketDisabledReason] = useState<string | null>(null);
   const [flashListingId, setFlashListingId] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<{ listingId: string; title: string } | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
   // Gate <model-viewer> behind a mount flag to avoid SSR/static-export
   // hydration mismatch on the custom element (the script loads
   // afterInteractive, so the element is unknown at first paint).
@@ -548,6 +551,37 @@ function MarketPageInner() {
       alert('Save failed: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSavingEdit(false);
+    }
+  }
+
+  // DSA Art.16 / DMCA notice-and-action: any user can report a listing as
+  // illegal / infringing. POSTs to /api/market/report, which records the
+  // report and soft-hides the listing pending review.
+  async function submitReport() {
+    if (!reporting) return;
+    if (!reportReason.trim()) { alert('Please describe why you are reporting this listing.'); return; }
+    setReportBusy(true);
+    try {
+      const r = await fetch('/api/market/report', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          listing_id: reporting.listingId,
+          reason: reportReason.slice(0, 5000),
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+      setReporting(null);
+      setReportReason('');
+      alert('Thank you. Your report has been recorded and the listing has been flagged for review.');
+    } catch (e: unknown) {
+      alert('Report failed: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReportBusy(false);
     }
   }
 
@@ -895,6 +929,56 @@ function MarketPageInner() {
                   {inCart(selected.id) ? '✓ In cart — remove' : '🛒 Add to cart'}
                 </button>
               )}
+            </div>
+            {/* DSA Art.16 / DMCA report — hidden on the user's own listing */}
+            {!(meUserId && selected.user_id === meUserId) && (
+              <div style={{ paddingTop: 8, borderTop: '1px solid var(--border)', textAlign: 'right' }}>
+                <button
+                  onClick={() => { setReporting({ listingId: selected.id, title: selected.title }); setReportReason(''); }}
+                  className="ghost-btn"
+                  style={{ padding: '4px 10px', fontSize: 11, color: 'var(--text-3)' }}
+                  title="Report this listing as illegal or infringing content"
+                >
+                  ⚑ Report this listing
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Report modal (DSA Art.16 / DMCA notice-and-action) */}
+      {reporting && (
+        <div onClick={() => !reportBusy && setReporting(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 103 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, maxWidth: 480, width: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>⚑ Report listing</h2>
+              <button onClick={() => setReporting(null)} disabled={reportBusy} className="ghost-btn" style={{ padding: '4px 12px' }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
+              Reporting: <strong>{reporting.title}</strong>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              Tell us why this listing is illegal or infringing (copyright/DMCA,
+              prohibited content, etc.). Submitting flags the listing for review.
+              See our <a href="/legal/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Terms</a> (DMCA / DSA Art.16).
+            </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-2)' }}>
+              Reason
+              <textarea
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                maxLength={5000}
+                rows={5}
+                placeholder="Describe the issue and, for copyright claims, identify the work you own…"
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text-0)', fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }}
+              />
+            </label>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <button onClick={() => setReporting(null)} disabled={reportBusy} className="ghost-btn" style={{ padding: '8px 16px' }}>Cancel</button>
+              <button onClick={submitReport} disabled={reportBusy} className="primary-btn" style={{ padding: '8px 20px' }}>
+                {reportBusy ? 'Submitting…' : 'Submit report'}
+              </button>
             </div>
           </div>
         </div>

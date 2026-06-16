@@ -1,5 +1,25 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Fix-all passe 3 : ouverts code-fixable fermes, build PASS)
+
+Workflow passe 3 (10 agents) sur branche fix/audit-remediation. 14 fixes, build PASS (wrangler dry-run). Ferme :
+- MOD-03 DESKTOP (src/main/main.js) : checkHardFloor() mineurs (keywords + combos child x sexual/violence) evalue
+  INCONDITIONNELLEMENT AVANT isUnrestrictedMode, dans checkPromptSafety ET checkPromptSafetyAI ; le scan image NSFW ne
+  no-op plus en unrestricted. + opt-out Sentry (config telemetryEnabled). + bonus : window-open http(s)-only,
+  token MCP via timingSafeEqual.
+- Pages legales Next.js OPERANTES : cloud/src/app/legal/licenses/page.tsx CREEE (fini le 404 du lien DINOv3) ;
+  DMCA + DSA Art.16 dans legal/terms/page.tsx ; RGPD corrige dans legal/privacy/page.tsx (Modal US, region Paris
+  eu-west-3, clause transferts SCC/DPF) + miroir docs/privacy.html. Adresse legale = placeholder [A CONFIRMER]
+  (privacy 65400 vs terms 31130 -> le dev tranche).
+- worker.ts : contact form (IP plus stockee brute + handleMeDelete etendu a _meta/contact/*), handleMarketReport
+  (_safeId anti path-traversal + auto-hide du listing), handleJobCancel (latch terminal atomique anti double-refund).
+  Bouton "Report" cable dans la vraie page cloud/src/app/market/page.tsx -> POST /api/market/report.
+- SKIP justifie : sdxl_server.py (aucune securite prompt, downstream de main.js) ; report-ui dans index2.js (les cartes
+  listing sont dans market/page.tsx, pas le browser app).
+RESTE = uniquement actions EXTERNES (hors-code) : run la migration SQL sur la DB live, compte Cloudflare CSAM Scanning,
+rotation secrets + suppression des 13 scratch, signer l'updater, Stripe Tax/portal dashboard, upgrade Electron, URLs R2
+signees (refacto laissee de cote). NB: faire `cd cloud && npm run build` avant deploy (nouvelles pages .tsx).
+
 ## 2026-06-16 (Fix-all passe 2 + audit conformite : 13 fixes, 0 regression)
 
 Workflow fix-all + conformite (16 agents) sur branche fix/audit-remediation. 13 fixes, 0 REGRESSION,

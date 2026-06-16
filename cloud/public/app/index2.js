@@ -1057,7 +1057,7 @@ async function renderProjectsGrid() {
       <button class="card-delete-btn" title="Delete project">&#10005;</button>
       <div class="project-card-thumb">
         ${p.thumb
-          ? `<img src="${_toFileUrl(p.thumb)}" alt="${escapeHtml(p.name)}">`
+          ? `<img src="${escapeHtml(_toFileUrl(p.thumb))}" alt="${escapeHtml(p.name)}">`
           : `<span class="project-card-thumb-empty">No image</span>`}
       </div>
       <div class="project-card-body">
@@ -2256,7 +2256,7 @@ async function showStep2SourceImage(imgPath) {
   const target = document.getElementById('ws-3d-source-preview');
   if (!target) return;
   if (imgPath) {
-    target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
+    target.innerHTML = `<img src="${escapeHtml(_toFileUrl(imgPath))}">`;
     // Spinner while the <img> decodes — only relevant for big PNGs
     // or remote R2 URLs. Cleared on load/error or after 10s safety.
     try { setViewerLoading('ws-3d-source-preview', true, 'Loading image…'); } catch (_) {}
@@ -2341,7 +2341,7 @@ function showStep2BackImage(imgPath) {
   const clearBtn = document.getElementById('ws-3d-source-back-clear');
   if (!target) return;
   if (imgPath) {
-    target.innerHTML = `<img src="${_toFileUrl(imgPath)}">`;
+    target.innerHTML = `<img src="${escapeHtml(_toFileUrl(imgPath))}">`;
     if (clearBtn) clearBtn.style.display = 'inline-block';
   } else {
     target.innerHTML = '<div class="preview-placeholder">+ Add back photo</div>';
@@ -14082,7 +14082,7 @@ function renderAnimVersions(p) {
     const vNum = batches.length - 1 - i;
     return `
       <div class="version-thumb${b.id === _step4SelectedBatch ? ' selected' : ''}" data-batch-id="${b.id}">
-        ${projThumb ? `<img src="${projThumb}" alt="">` : ''}
+        ${projThumb ? `<img src="${escapeHtml(projThumb)}" alt="">` : ''}
         <span class="v-used-badge" title="Used for next step">&#10003;</span>
         <span class="v-label">v${vNum}</span>
         <button class="version-delete-btn" data-batch-id="${b.id}" title="Delete this version">&#10005;</button>
