@@ -5846,10 +5846,11 @@ document.getElementById('ws-style-menu')?.addEventListener('click', async (e) =>
     try {
       const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'local-sdxl' });
       if (r?.success) {
-        // Remember which style was applied to this new image version
+        // Remember which style was applied to this NEW image version only.
+        // We deliberately do NOT tag the source image: it was the INPUT, not a
+        // result of this style — tagging it overwrote the initial version's own
+        // style so going back to v0 wrongly showed the child's style.
         if (r.newPath) _saveImageStyle(r.newPath, style);
-        // Also tag the source image with its style (it was the input)
-        _saveImageStyle(tgt, style);
         completeJob(job.id, true);
         await reloadCurrentProject();
         showToast('Style applied!', 'success');
