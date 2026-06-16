@@ -5951,7 +5951,17 @@ document.getElementById('ws-picker-btn')?.addEventListener('click', () => {
     document.getElementById('cpick-hex').textContent = hex;
     document.getElementById('cpick-rgb').textContent = `rgb(${r}, ${g}, ${b})`;
     const cur = document.getElementById('cpick-cursor');
-    if (cur) { cur.style.left = (e.clientX - rect.left) + 'px'; cur.style.top = (e.clientY - rect.top) + 'px'; cur.style.display = 'block'; }
+    if (cur) {
+      // cpick-cursor's offsetParent is the CONTAINER, but the canvas is
+      // CENTERED inside it (canvas.style.left/top offset). Positioning the dot
+      // with the canvas rect shifted it by that centering offset → it didn't
+      // sit under the mouse. Position relative to the container instead.
+      const cont = document.getElementById('cpick-canvas-container');
+      const cRect = (cont || cpCanvas.parentElement).getBoundingClientRect();
+      cur.style.left = (e.clientX - cRect.left) + 'px';
+      cur.style.top = (e.clientY - cRect.top) + 'px';
+      cur.style.display = 'block';
+    }
     _cpUpdateLoupe(e);
     return hex;
   }
@@ -13495,6 +13505,35 @@ document.getElementById('jobs-close-2').addEventListener('click', () => {
 // ============================================================
 // AUTO INPAINT (CLIPSeg target + replace)
 // ============================================================
+// Variant: one-click re-roll of the current image — img2img at moderate
+// strength with a FRESH random seed → a visual variation, same subject.
+document.getElementById('ws-variant-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  const prompt = (p && (p.prompt || p.initialPrompt)) || 'high quality, detailed';
+  const seed = Math.floor(Math.random() * 1000000);
+  showToast('Generating variant…', 'info', 2000);
+  gatedRun('img2img', `Variant: ${p.name}`, async () => {
+    const job = pushJob(`Variant: ${p.name}`, null, { Seed: seed, Strength: '45%' }, 30000,
+      { sourceImageUrl: target, projectName: p.name });
+    try {
+      const r = await API.img2img({ imagePath: target, prompt, strength: 0.45, engine: 'local-sdxl', seed });
+      if (r?.success) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+        showToast('Variant created!', 'success');
+      } else {
+        completeJob(job.id, false, r?.error);
+        showToast('Variant failed: ' + (r?.error || 'unknown'), 'error');
+      }
+    } catch (e) {
+      completeJob(job.id, false, e?.error || e?.message || String(e));
+      showToast('Variant error', 'error');
+    }
+  });
+});
+
 document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
   const target = editTarget(p);

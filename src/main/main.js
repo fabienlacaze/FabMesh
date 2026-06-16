@@ -3923,7 +3923,7 @@ ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, di
 });
 
 // Img2img: local SDXL by default, or cloud Pollinations if explicitly chosen
-ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine }) => {
+ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine, seed }) => {
   try {
     const safety = checkPromptSafety(prompt);
     if (!safety.safe) return { success: false, error: safety.reason };
@@ -3946,7 +3946,8 @@ ipcMain.handle('img2img', async (event, { imagePath, prompt, strength, engine })
       }
       console.log('[img2img] Using persistent SDXL server (RealVis XL)');
       const r = await sdxlServerCall('/img2img', {
-        input: imagePath, prompt, output: newImagePath, strength: strength || 0.55
+        input: imagePath, prompt, output: newImagePath, strength: strength || 0.55,
+        ...(seed != null ? { seed: parseInt(seed) } : {}),
       });
       if (r.ok) {
         _handleMultiviewInheritance(newImagePath).catch(() => {});
