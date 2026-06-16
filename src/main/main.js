@@ -3852,6 +3852,27 @@ ipcMain.handle('mask-inpaint', async (event, { imagePath, maskDataUrl, prompt })
 });
 
 // Auto-inpaint: CLIPSeg segments target area + SDXL Inpainting replaces it
+// Live mask preview for Auto Inpaint: run CLIPSeg detection ONLY (no inpaint)
+// and return a red-overlay image so the user sees what will be repainted before
+// committing. Reuses one temp file (cache-busted by the renderer).
+ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate }) => {
+  try {
+    if (!imagePath || !targetText || !String(targetText).trim()) return { success: false, error: 'missing target' };
+    await ensureSdxlServer();
+    if (!sdxlReady) return { success: false, error: 'engine not ready' };
+    const outPath = path.join(require('os').tmpdir(), 'fabmesh_mask_preview.png');
+    const r = await sdxlServerCall('/segment', {
+      input: imagePath, target: targetText, output: outPath, dilate: dilate || 15,
+    });
+    if (r && r.ok && fs.existsSync(outPath)) {
+      return { success: true, overlayPath: outPath, coverage: r.coverage };
+    }
+    return { success: false, error: (r && r.error) || 'segment failed' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate }) => {
   try {
     const dir = path.dirname(imagePath);

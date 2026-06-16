@@ -13505,12 +13505,45 @@ document.getElementById('ws-autoinpaint-btn')?.addEventListener('click', () => {
   // (multiview angle if selected, else front) so the preview matches
   // what the user is looking at in the workspace.
   const srcImg = document.getElementById('ai-source-img');
-  if (srcImg) srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now();
+  if (srcImg) { srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now(); srcImg.style.opacity = ''; }
+  _aiSrcPath = target;
   document.getElementById('modal-auto-inpaint').classList.remove('hidden');
 });
+// --- Live mask preview: run CLIPSeg detection ONLY (no inpaint) and overlay the
+// detected region in red, so the user sees EXACTLY what Auto Inpaint will
+// repaint before committing. Debounced on the TARGET text + padding slider. ---
+let _aiSrcPath = null;
+let _aiPreviewTimer = null;
+async function _aiUpdateMaskPreview() {
+  const srcImg = document.getElementById('ai-source-img');
+  if (!srcImg || !_aiSrcPath) return;
+  const target = (document.getElementById('ai-target').value || '').trim();
+  const dilate = parseInt(document.getElementById('ai-dilate').value) || 15;
+  const origUrl = 'file:///' + _aiSrcPath.replace(/\\/g, '/') + '?t=0';
+  if (!target) { srcImg.src = origUrl; srcImg.style.opacity = ''; return; }
+  if (!API.segmentMask) return;
+  srcImg.style.opacity = '0.55';  // "detecting…" cue
+  try {
+    const r = await API.segmentMask({ imagePath: _aiSrcPath, targetText: target, dilate });
+    // Ignore a stale response if the target changed while we were detecting.
+    if (((document.getElementById('ai-target').value || '').trim()) !== target) return;
+    srcImg.style.opacity = '';
+    if (r && r.success && r.overlayPath) {
+      srcImg.src = 'file:///' + r.overlayPath.replace(/\\/g, '/') + '?t=' + Date.now();
+    } else {
+      srcImg.src = origUrl;  // nothing detected → show the plain image
+    }
+  } catch (_) { srcImg.style.opacity = ''; }
+}
+function _aiSchedulePreview() {
+  if (_aiPreviewTimer) clearTimeout(_aiPreviewTimer);
+  _aiPreviewTimer = setTimeout(_aiUpdateMaskPreview, 550);
+}
+document.getElementById('ai-target')?.addEventListener('input', _aiSchedulePreview);
 const aiDilate = document.getElementById('ai-dilate');
 if (aiDilate) aiDilate.addEventListener('input', () => {
   document.getElementById('ai-dilate-val').textContent = aiDilate.value + 'px';
+  _aiSchedulePreview();
 });
 document.getElementById('ai-cancel')?.addEventListener('click', () => {
   document.getElementById('modal-auto-inpaint').classList.add('hidden');

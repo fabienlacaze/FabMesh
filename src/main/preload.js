@@ -198,6 +198,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   batchCheckNsfw: (opts) => ipcRenderer.invoke('batch-check-nsfw', opts),
   img2img: (opts) => ipcRenderer.invoke('img2img', opts),
   autoInpaint: (opts) => ipcRenderer.invoke('auto-inpaint', opts),
+  segmentMask: (opts) => ipcRenderer.invoke('segment-mask', opts),
   maskInpaint: (opts) => ipcRenderer.invoke('mask-inpaint', opts),
   listImageVersions: (imagePath) => ipcRenderer.invoke('list-image-versions', imagePath),
   revertImage: (opts) => ipcRenderer.invoke('revert-image', opts),

@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (feat — Auto Inpaint : preview live du masque CLIPSeg avant gen)
+
+User : "possible de montrer le masque sélectionné en temps réel avant la
+génération ?". Implémenté : détection seule (pas d'inpaint).
+- sdxl_server.py : load_clipseg() (charge SEULEMENT CLIPSeg ~400MB, pas
+  l'inpaint ~6GB) extrait de load_inpaint ; do_segment() recalcule le masque
+  (même pipeline CLIPSeg+seuil>100+dilate+blur que do_inpaint) et sauve un
+  OVERLAY rouge (Image.composite(blend(img,red,0.55), img, mask)) ; route
+  /segment.
+- main.js : IPC segment-mask -> sdxlServerCall('/segment') -> overlay dans un
+  fichier temp réutilisé (fabmesh_mask_preview.png). preload : segmentMask.
+- renderer : dans le modal Auto Inpaint, debounce 550ms sur ai-target + ai-dilate
+  -> segmentMask -> swap ai-source-img vers l'overlay (cache-busté), opacité 0.55
+  pendant la détection, ignore les réponses stale, revient à l'image si rien
+  détecté. main.js+preload -> restart Electron.
+
 ## 2026-06-16 (fix v2 — op image réutilisant SDXL : bypass total du gate VRAM)
 
 Le fix v1 (soustraire la VRAM du moteur) ne suffisait pas : (14.0 − 6.6) + 8 =

@@ -200,14 +200,12 @@ def load_img2img():
     return state.img2img_pipe
 
 
-def load_inpaint():
-    """Lazy-load SDXL Inpainting + CLIPSeg."""
-    if state.inpaint_pipe is not None and state.clipseg_model is not None:
-        state.last_use['inpaint'] = time.time()
-        return state.inpaint_pipe
-
+def load_clipseg():
+    """Lazy-load just CLIPSeg (~400 MB) — used for mask detection/preview
+    without pulling in the heavy ~6 GB SDXL inpaint pipeline."""
+    if state.clipseg_model is not None:
+        return
     with state.load_lock:
-        # CLIPSeg first (small model, ~400 MB)
         if state.clipseg_model is None:
             log(f"Loading {CLIPSEG_MODEL}...")
             from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
@@ -218,6 +216,15 @@ def load_inpaint():
             state.clipseg_model.eval()
             log(f"CLIPSeg loaded in {time.time()-t0:.1f}s")
 
+
+def load_inpaint():
+    """Lazy-load SDXL Inpainting + CLIPSeg."""
+    if state.inpaint_pipe is not None and state.clipseg_model is not None:
+        state.last_use['inpaint'] = time.time()
+        return state.inpaint_pipe
+
+    load_clipseg()
+    with state.load_lock:
         # SDXL Inpainting (large model, ~6 GB)
         if state.inpaint_pipe is None:
             log(f"Loading {SDXL_INPAINT_MODEL}...")
@@ -622,6 +629,51 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             return {"ok": False, "error": str(e)}
 
 
+def do_segment(input_path, target_text, output_path, dilate=15):
+    """CLIPSeg detection ONLY (no inpaint): save a red overlay of the detected
+    mask so the user can preview LIVE what Auto Inpaint will repaint. Loads only
+    the small CLIPSeg model, never the heavy ~6 GB inpaint pipeline."""
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    if not target_text or not target_text.strip():
+        return {"ok": False, "error": "target_text required"}
+    load_clipseg()
+    state.last_use['inpaint'] = time.time()
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+            inputs = state.clipseg_processor(
+                text=[target_text.strip()], images=[img_work],
+                padding=True, return_tensors="pt")
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+            with torch.inference_mode():
+                seg_out = state.clipseg_model(**inputs)
+            mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
+            mask_prob = 1 / (1 + np.exp(-mask_logits))  # sigmoid
+            mask_uint8 = (mask_prob * 255).astype(np.uint8)
+            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.BILINEAR)
+            binary = (np.array(mask_img) > 100).astype(np.uint8) * 255
+            mask_binary = Image.fromarray(binary, mode="L")
+            d = max(0, int(dilate))
+            if d > 0:
+                mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
+            mask_binary = mask_binary.filter(ImageFilter.GaussianBlur(3))
+            coverage = (np.array(mask_binary) > 128).mean() * 100
+            # Red overlay so the user sees exactly what will be repainted.
+            red = Image.new("RGB", img_work.size, (255, 45, 60))
+            tinted = Image.blend(img_work, red, 0.55)
+            overlay = Image.composite(tinted, img_work, mask_binary)
+            if (work_w, work_h) != img.size:
+                overlay = overlay.resize(img.size, Image.LANCZOS)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            overlay.save(output_path)
+            return {"ok": True, "output": output_path, "coverage": round(coverage, 1)}
+        except Exception as e:
+            log(f"segment error: {e}", 'err')
+            return {"ok": False, "error": str(e)}
+
+
 # ========== MASK INPAINT HELPERS (ported from cloud cat8) ==========
 # Concept-specific boosters — SDXL Inpaint v1.0 is weak on bare nouns
 # for distinctive objects. A bare "bazooka" gets generated as a tube
@@ -976,6 +1028,18 @@ class Handler(BaseHTTPRequestHandler):
                     data['input'],
                     data['target'],
                     data.get('prompt', ''),
+                    data['output'],
+                    data.get('dilate', 15),
+                )
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/segment':
+                if 'input' not in data or 'output' not in data or 'target' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output/target"})
+                    return
+                result = do_segment(
+                    data['input'],
+                    data['target'],
                     data['output'],
                     data.get('dilate', 15),
                 )
