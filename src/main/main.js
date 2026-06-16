@@ -2812,6 +2812,26 @@ ipcMain.handle('save-image-data-url', (event, { basePath, dataUrl, suffix }) => 
   }
 });
 
+// Save the emissive mask of an image as a real file in the project folder, in an
+// `_emissive/` subfolder so it never shows up as a gallery version. This makes
+// the emissive map a persistent asset (the 3D pipeline / export can pick it up),
+// not just a localStorage dataURL.
+ipcMain.handle('save-emissive-file', (event, { imagePath, dataUrl }) => {
+  try {
+    if (!imagePath || !dataUrl) return { success: false, error: 'Missing args' };
+    if (!isPathAllowed(imagePath)) return { success: false, error: 'Path not allowed' };
+    const dir = path.join(path.dirname(imagePath), '_emissive');
+    fs.mkdirSync(dir, { recursive: true });
+    const base = path.basename(imagePath, path.extname(imagePath));
+    const outPath = path.join(dir, `${base}.png`);
+    const b64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+    fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
+    return { success: true, path: outPath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Image adjustments (auto_levels, auto_contrast)
 ipcMain.handle('image-adjust', async (event, { imagePath, operation }) => {
   try {

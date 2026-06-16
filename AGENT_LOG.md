@@ -1,5 +1,20 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (feat — emissive : Fill emissive-aware + stockage fichier projet)
+
+User : (b) verifier que l'emissive est generee+stockee dans le dossier projet,
+(c) les outils paint doivent marcher pour emissive.
+- (c) Les pinceaux (pen/spray/ink/smudge/eraser) passaient deja par onPaint->
+  _paintStroke (emissive-aware). Le trou = FILL : _paintFloodFill recoit un
+  outCtx optionnel -> detecte la region sur l'image mais peint sur l'overlay
+  emissive. Le re-fill live (sliders) gere aussi l'emissive (fillEmissive flag).
+- (b) Avant : emissive juste en localStorage (dataURL), PAS de fichier, PAS
+  passe a la 3D. Ajout IPC save-emissive-file -> ecrit images/<proj>/_emissive/
+  <base>.png (sous-dossier non liste dans la gallery). Appele a la sauvegarde
+  paint. (Reste a brancher sur la gen 3D comme emissive map -> a faire.)
+main.js+preload -> restart Electron.
+
+
 ## 2026-06-16 (fix — images grises = VAE SDXL fp16 instable (NaN), upcast fp32)
 
 User : changer le slider qualite donne des images toutes grises. Diagnostic :

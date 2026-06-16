@@ -6502,10 +6502,16 @@ function _paintSmudgeDab(ctx, x, y, r) {
 }
 
 // --- Flood fill (paint bucket) ---
-function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
+// `outCtx` (optional): detect the region on `ctx` (the underlying image) but
+// PAINT into a different canvas — used for emissive, so clicking a wall fills
+// that wall's region on the emissive overlay instead of the diffuse image.
+function _paintFloodFill(ctx, startX, startY, fillColor, tolerance, outCtx) {
   const w = _paintMgr.w, h = _paintMgr.h;
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
+  const sepOut = !!(outCtx && outCtx !== ctx);
+  const outImg = sepOut ? outCtx.getImageData(0, 0, w, h) : imgData;
+  const od = outImg.data;
   const idx = (startY * w + startX) * 4;
   const sr = data[idx], sg = data[idx+1], sb = data[idx+2], sa = data[idx+3];
   // Parse fill color
@@ -6513,8 +6519,8 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
   const tc = tmp.getContext('2d'); tc.fillStyle = fillColor; tc.fillRect(0, 0, 1, 1);
   const fc = tc.getImageData(0, 0, 1, 1).data;
   const fr = fc[0], fg = fc[1], fb = fc[2];
-  // Already same color?
-  if (Math.abs(sr - fr) + Math.abs(sg - fg) + Math.abs(sb - fb) < 3) return;
+  // Already same color? (only meaningful when painting back onto the same layer)
+  if (!sepOut && Math.abs(sr - fr) + Math.abs(sg - fg) + Math.abs(sb - fb) < 3) return;
   const tol = tolerance;
   function match(i) {
     return Math.abs(data[i] - sr) <= tol && Math.abs(data[i+1] - sg) <= tol && Math.abs(data[i+2] - sb) <= tol && Math.abs(data[i+3] - sa) <= tol;
@@ -6529,13 +6535,18 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
     const pi = ci * 4;
     if (!match(pi)) continue;
     visited[ci] = 1;
-    data[pi]   = Math.round(data[pi]   * (1 - alpha) + fr * alpha);
-    data[pi+1] = Math.round(data[pi+1] * (1 - alpha) + fg * alpha);
-    data[pi+2] = Math.round(data[pi+2] * (1 - alpha) + fb * alpha);
-    data[pi+3] = 255;
+    if (sepOut) {
+      // Paint the full colour at the chosen opacity onto the (transparent) layer.
+      od[pi] = fr; od[pi+1] = fg; od[pi+2] = fb; od[pi+3] = Math.round(alpha * 255);
+    } else {
+      od[pi]   = Math.round(od[pi]   * (1 - alpha) + fr * alpha);
+      od[pi+1] = Math.round(od[pi+1] * (1 - alpha) + fg * alpha);
+      od[pi+2] = Math.round(od[pi+2] * (1 - alpha) + fb * alpha);
+      od[pi+3] = 255;
+    }
     stack.push([cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]);
   }
-  ctx.putImageData(imgData, 0, 0);
+  (sepOut ? outCtx : ctx).putImageData(outImg, 0, 0);
 }
 
 // Re-apply the LAST fill with the CURRENT opacity / tolerance / colour. Used so
@@ -6545,8 +6556,10 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
 function _paintReapplyFill() {
   if (paintState.tool !== 'fill' || !paintState.fillLastPoint || !paintState.fillSnapshot || !_paintMgr) return;
   const ctx = _paintMgr.ctx;
-  try { ctx.putImageData(paintState.fillSnapshot, 0, 0); } catch (_) { return; }
-  _paintFloodFill(ctx, paintState.fillLastPoint.x, paintState.fillLastPoint.y, paintState.color, paintState.tolerance);
+  const outCtx = paintState.fillEmissive ? _paintGetEmissiveCtx(_paintMgr) : null;
+  const snapCtx = outCtx || ctx;
+  try { snapCtx.putImageData(paintState.fillSnapshot, 0, 0); } catch (_) { return; }
+  _paintFloodFill(ctx, paintState.fillLastPoint.x, paintState.fillLastPoint.y, paintState.color, paintState.tolerance, outCtx);
 }
 
 // --- Magic Wand is now in the selection system above (_paintWandSelect) ---
@@ -6589,12 +6602,16 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         }
         if (paintState.tool === 'fill') {
           mgr.pushUndo();
-          // Remember the pre-fill canvas + seed point so moving Opacity /
-          // Tolerance / Colour re-applies this SAME fill live (tune the last
-          // painted zone without re-clicking).
-          paintState.fillSnapshot = ctx.getImageData(0, 0, mgr.w, mgr.h);
+          // In emissive mode, detect the region on the image but paint into the
+          // emissive overlay (so Fill works for emissive too, not just the brush).
+          const outCtx = paintState.emissiveMode ? _paintGetEmissiveCtx(mgr) : null;
+          const snapCtx = outCtx || ctx;
+          // Snapshot the layer that actually changes, so the sliders re-apply
+          // this SAME fill live (tune the last painted zone without re-clicking).
+          paintState.fillSnapshot = snapCtx.getImageData(0, 0, mgr.w, mgr.h);
+          paintState.fillEmissive = !!outCtx;
           paintState.fillLastPoint = { x: Math.round(x), y: Math.round(y) };
-          _paintFloodFill(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance);
+          _paintFloodFill(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance, outCtx);
           return false;
         }
         if (paintState.tool === 'wand') {
@@ -6871,6 +6888,13 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
       const newPath = result.path || result.newPath || result.url;
       const srcLayer = _emissiveLayerGet(paintState.imgPath);
       if (srcLayer && newPath) _emissiveLayerSet(newPath, srcLayer);
+      // Also persist the emissive mask as a real file in the project folder
+      // (images/<project>/_emissive/<base>.png) — not just localStorage.
+      if (srcLayer && newPath && API.saveEmissiveFile) {
+        API.saveEmissiveFile({ imagePath: newPath, dataUrl: srcLayer })
+          .then(r => console.log('[emissive] file saved:', r && r.success ? r.path : (r && r.error)))
+          .catch(() => {});
+      }
       console.log('[emissive] carry: srcLayer=', !!srcLayer, 'newPath=', newPath, 'has(newPath)=', _emissiveLayerHas(newPath));
       if (state.currentProject) await reloadCurrentProject();
     } else {
