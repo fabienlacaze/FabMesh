@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (i18n : systeme de traduction + selecteur de langue, desktop+cloud)
+
+User veut pouvoir choisir la langue (tout est en anglais en dur). Choix : systeme i18n
+maison (pas de framework). Scaffold :
+- i18n.js (cloud/public/app/ + src/renderer/, identiques) : I18N = dict par langue
+  (anglais = source -> traduction). applyLang() parcourt le DOM (text nodes +
+  placeholder/title/aria-label), cache l'anglais original sur chaque node (__i18n) pour
+  pouvoir revenir a l'anglais, et swap. MutationObserver childList-only (debounce 250ms,
+  pas de boucle) re-traduit le contenu ajoute dynamiquement. t() pour les chaines JS.
+  Zero impact en anglais (default). Demarrage francais starter (~90 chaines des ecrans
+  principaux) ; les non-traduites restent en anglais (fallback) -> on complete le dict
+  incrementalement.
+- Selecteur <select id="lang-select"> (English/Francais) dans Settings, persiste
+  localStorage 'fabmesh.lang', auto-wire par i18n.js.
+- <script src="i18n.js"> charge avant index2.js dans les 2 index.html.
+Desktop : Ctrl+R. Cloud : build (copie i18n.js dans out/) + deploy.
+
 ## 2026-06-16 (Auto Inpaint : message 1ere detection + facturation de la detection cloud)
 
 - 1ERE DETECTION ~15s (cold-load CLIPSeg / cold-start GPU cloud) = NORMAL. Ajoute un
