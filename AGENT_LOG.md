@@ -1,5 +1,19 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Fix-all passe 2 + audit conformite : 13 fixes, 0 regression)
+
+Workflow fix-all + conformite (16 agents) sur branche fix/audit-remediation. 13 fixes, 0 REGRESSION,
+build PASS (wrangler dry-run). Applique :
+- MOD-03 hard-floor MINEURS non-contournable, evalue AVANT le mode unrestricted : cloud (nsfw_filter.ts)
+  + Modal (app.py). PIN parental : lockout + KDF sale avec grandfather (worker.ts). TOCTOU caps atomiques.
+- Marques retirees des prompts (index2.js cloud+desktop). DINOv3 conserve dans cloud-overrides pruneAboutModal.
+  CSP desktop durci (index2.html). Sections DMCA/DSA ajoutees a docs/terms.html.
+RESTE OUVERT (code-fixable -- passe 3) : MOD-03 DESKTOP (src/main/main.js:335 court-circuite encore en
+unrestricted -- fichier non assigne) ; page web /legal/licenses 404 ; DMCA/DSA pas porte dans la ToS OPERANTE
+cloud/src/app/legal/terms/page.tsx ; bouton Report UI absent ; URLs R2 publiques permanentes ; opt-out Sentry ;
+consentement signup ; adresse legale incoherente. RESTE USER : run migration SQL sur DB, rotation secrets,
+signer updater, Stripe Tax, compte Cloudflare CSAM, upgrade Electron. Rapport : audit/CONFORMITY_2026-06-16.md.
+
 ## 2026-06-16 (Remediation audit : 22 fixes auto-safe sur branche, NON deploye)
 
 Workflow de remediation (19 agents) : 35 findings analyses, 22 auto-safe APPLIQUES sur la branche

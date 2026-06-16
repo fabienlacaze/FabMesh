@@ -1047,15 +1047,19 @@
     // in the browser, so always "--". Just hide it.
     hideById('job-gpu-monitor');
 
-    // Slim the credit line down to just the studio name. The licence
-    // list + infra mention were too much detail for the contact panel
+    // Slim the credit line down to the studio name. The full licence
+    // list + Sentry mention were too much detail for the contact panel
     // and don't help end-users — keep that info for the legal pages.
+    // BUT the DINOv3 License REQUIRES the "Built with DINOv3" attribution
+    // (and we keep the Third-Party Licenses link it points to), so those
+    // must survive the rewrite. Use innerHTML to preserve the link.
     document.querySelectorAll('.about-card p').forEach((p) => {
       if (!p.textContent) return;
       if (p.textContent.includes('Crash reports sent anonymously via Sentry')
        || p.textContent.includes('OpenRAIL')
        || p.textContent.includes('MIT / Apache')) {
-        p.textContent = 'An Ayros Studio production.';
+        p.innerHTML = 'An Ayros Studio production · Built with DINOv3 · '
+          + 'see <a href="/legal/licenses">Third-Party Licenses</a>.';
       }
     });
   }

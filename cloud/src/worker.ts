@@ -226,23 +226,65 @@ async function readListingDownloads(env: Env, listingId: string): Promise<number
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Atomic compare-and-swap on a numeric R2 counter — same conditional-PUT
+ *  pattern as bumpListingDownloads. Reads the object with its etag, lets the
+ *  caller compute the new value (returning null to abort, e.g. cap exceeded),
+ *  then PUTs only if the etag still matches (or the object still doesn't
+ *  exist). On contention the loop re-reads and re-applies, so two concurrent
+ *  requests can NEVER both observe the pre-increment value and both pass the
+ *  cap — the loser of the CAS retries against the winner's new value.
+ *
+ *  Returns the committed numeric value on success, or null if `compute`
+ *  returned null (caller-decided abort) on a read that was NOT lost to a
+ *  race. Returns `null` after exhausting retries (treated as "over cap" by
+ *  the spend gates — fail closed rather than allow an unmetered call). */
+async function _r2CasNumber(
+  env: Env,
+  key: string,
+  parse: (raw: string | null) => number,
+  compute: (current: number) => number | null,
+): Promise<number | null> {
+  if (!env.MESHES) return null;
+  // A handful of attempts is plenty: contention on a single per-day key is
+  // low, and each loss costs only one extra read+put.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const existing = await env.MESHES.get(key);
+      const current = parse(existing ? await existing.text() : null);
+      const next = compute(current);
+      if (next === null) return null;
+      const res = existing
+        ? await env.MESHES.put(key, String(next), { onlyIf: { etagMatches: existing.etag } })
+        : await env.MESHES.put(key, String(next), { onlyIf: { etagDoesNotMatch: '*' } });
+      if (res) return next;
+      // Conditional PUT rejected (etag moved / object appeared) — retry.
+    } catch { /* transient R2 error — retry */ }
+  }
+  return null;
+}
+
+const _parseFloat0 = (raw: string | null): number => parseFloat(raw || '0') || 0;
+const _parseInt0 = (raw: string | null): number => parseInt(raw || '0', 10) || 0;
+
 /** Check the daily Replicate spend cap. Returns the remaining budget
- *  in USD, or null if the request would push us over. */
+ *  in USD, or null if the request would push us over. ATOMIC: the
+ *  read-check-increment is a single CAS so concurrent requests can't
+ *  both slip past the cap. */
 async function checkAndIncrementDailySpend(env: Env, estimatedUsd: number): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_SPEND_USD ?? '') || DEFAULT_MAX_DAILY_SPEND_USD;
   const key = `_meta/spend/${todayUTC()}`;
-  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-  if (cur + estimatedUsd > maxUsd) return null;
-  await env.MESHES.put(key, String(cur + estimatedUsd));
-  return maxUsd - cur - estimatedUsd;
+  const committed = await _r2CasNumber(env, key, _parseFloat0,
+    cur => (cur + estimatedUsd > maxUsd ? null : cur + estimatedUsd));
+  if (committed === null) return null;
+  return maxUsd - committed;
 }
 
 /** Refund the spend if the call ended up failing — keeps the budget
- *  accurate even when we abort. */
+ *  accurate even when we abort. ATOMIC so a refund racing a concurrent
+ *  increment doesn't clobber it. */
 async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
   const key = `_meta/spend/${todayUTC()}`;
-  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-  await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
+  await _r2CasNumber(env, key, _parseFloat0, cur => Math.max(0, cur - refundUsd));
 }
 
 /** Modal has its own budget counter (`_meta/modal_spend/<YYYY-MM-DD>`)
@@ -250,31 +292,30 @@ async function refundDailySpend(env: Env, refundUsd: number): Promise<void> {
  *  the cap would lock the user out of Modal as soon as the Replicate
  *  counter is exhausted, which is exactly the bug the user hit on
  *  2026-05-25. The default cap is MORE generous than Replicate ($2 vs
- *  $0.50) because Modal is ~5-10× cheaper per image. */
+ *  $0.50) because Modal is ~5-10× cheaper per image. ATOMIC (CAS). */
 async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Promise<number | null> {
   const maxUsd = parseFloat(env.MAX_DAILY_MODAL_SPEND_USD ?? '') || DEFAULT_MAX_MODAL_SPEND_USD;
   const key = `_meta/modal_spend/${todayUTC()}`;
-  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-  if (cur + estimatedUsd > maxUsd) return null;
-  await env.MESHES.put(key, String(cur + estimatedUsd));
-  return maxUsd - cur - estimatedUsd;
+  const committed = await _r2CasNumber(env, key, _parseFloat0,
+    cur => (cur + estimatedUsd > maxUsd ? null : cur + estimatedUsd));
+  if (committed === null) return null;
+  return maxUsd - committed;
 }
 
 async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
   const key = `_meta/modal_spend/${todayUTC()}`;
-  const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
-  await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
+  await _r2CasNumber(env, key, _parseFloat0, cur => Math.max(0, cur - refundUsd));
 }
 
 /** Check the per-user daily call cap. Increments on success.
- *  Returns the remaining call budget, or null if over. */
+ *  Returns the remaining call budget, or null if over. ATOMIC (CAS). */
 async function checkAndIncrementUserCalls(env: Env, userId: string): Promise<number | null> {
   const maxCalls = parseInt(env.MAX_USER_DAILY_CALLS ?? '', 10) || DEFAULT_MAX_USER_DAILY_CALLS;
   const key = `_meta/userdaily/${userId}/${todayUTC()}`;
-  const cur = parseInt((await r2GetText(env, key)) || '0', 10) || 0;
-  if (cur >= maxCalls) return null;
-  await env.MESHES.put(key, String(cur + 1));
-  return maxCalls - cur - 1;
+  const committed = await _r2CasNumber(env, key, _parseInt0,
+    cur => (cur >= maxCalls ? null : cur + 1));
+  if (committed === null) return null;
+  return maxCalls - committed;
 }
 
 /* ─────────────────────────── tiny helpers ──────────────────────────── */
@@ -7505,7 +7546,13 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
  *  _meta/parental/<userId>.json = { pin: '<sha256>', unrestricted: bool }
  * ───────────────────────────────────────────────────────────────── */
 interface ParentalState {
+  // When `salt` is present, `pinHash` = SHA-256(salt + ':' + pin) via
+  // _hashAdminPassword (salted KDF). When `salt` is ABSENT but `pinHash`
+  // is set, it is a legacy unsalted SHA-256(pin) — verified for backward
+  // compat, then transparently upgraded to the salted format on the next
+  // successful unlock/set (grandfathering: no existing user is locked out).
   pinHash?: string;
+  salt?: string;
   unrestricted: boolean;
 }
 
@@ -7529,6 +7576,82 @@ async function putParentalState(env: Env, userId: string, s: ParentalState): Pro
   if (!env.MESHES) return;
   await env.MESHES.put(`_meta/parental/${userId}.json`,
     JSON.stringify(s), { httpMetadata: { contentType: 'application/json' } });
+}
+
+/* ── Parental PIN brute-force lockout — mirrors the admin-login lockout
+ *  (_meta/admin_login_fails/<ip>.json). Keyed by USER id (not IP) because
+ *  the PIN is per-user, so the attacker is the account holder's own
+ *  session. After PARENTAL_PIN_MAX_FAILS wrong PINs we lock the account's
+ *  PIN entry for an exponentially-growing window (base PARENTAL_PIN_LOCK_MS,
+ *  doubling per additional fail, capped). Counters live in R2 so a Worker
+ *  restart doesn't reset them. A correct PIN clears the counter. ── */
+const PARENTAL_PIN_MAX_FAILS = 5;
+const PARENTAL_PIN_LOCK_BASE_MS = 30 * 1000;        // 30 s after the 5th fail
+const PARENTAL_PIN_LOCK_MAX_MS = 60 * 60 * 1000;    // capped at 1 h
+
+interface ParentalFailState { count: number; first_ts: number; last_ts: number; }
+
+function _parentalLockKey(userId: string): string {
+  // userId is a UUID from Supabase; sanitise defensively for the R2 key.
+  const safe = String(userId).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
+  return `_meta/parental_fails/${safe}.json`;
+}
+
+/** Returns the remaining lockout in ms (0 if not locked). */
+async function getParentalLockout(env: Env, userId: string): Promise<number> {
+  if (!env.MESHES) return 0;
+  let fails: ParentalFailState = { count: 0, first_ts: 0, last_ts: 0 };
+  try {
+    const obj = await env.MESHES.get(_parentalLockKey(userId));
+    if (obj) fails = await obj.json() as ParentalFailState;
+  } catch { return 0; }
+  if (fails.count < PARENTAL_PIN_MAX_FAILS) return 0;
+  // Exponential window: base * 2^(count - MAX), capped.
+  const over = fails.count - PARENTAL_PIN_MAX_FAILS;
+  const window = Math.min(PARENTAL_PIN_LOCK_BASE_MS * Math.pow(2, over), PARENTAL_PIN_LOCK_MAX_MS);
+  const remaining = (fails.last_ts + window) - Date.now();
+  return remaining > 0 ? remaining : 0;
+}
+
+async function recordParentalFail(env: Env, userId: string): Promise<void> {
+  if (!env.MESHES) return;
+  const key = _parentalLockKey(userId);
+  let fails: ParentalFailState = { count: 0, first_ts: 0, last_ts: 0 };
+  try {
+    const obj = await env.MESHES.get(key);
+    if (obj) fails = await obj.json() as ParentalFailState;
+  } catch {}
+  const now = Date.now();
+  if (fails.first_ts === 0) fails.first_ts = now;
+  fails.count += 1;
+  fails.last_ts = now;
+  try { await env.MESHES.put(key, JSON.stringify(fails)); } catch {}
+}
+
+async function clearParentalFails(env: Env, userId: string): Promise<void> {
+  if (!env.MESHES) return;
+  try { await env.MESHES.delete(_parentalLockKey(userId)); } catch {}
+}
+
+/** Verify a candidate PIN against stored state, handling BOTH the legacy
+ *  unsalted SHA-256(pin) format and the new salted format. */
+async function _verifyParentalPin(state: ParentalState, pin: string): Promise<boolean> {
+  if (!state.pinHash) return false;
+  if (state.salt) {
+    // New salted format — same KDF as the admin password.
+    return (await _hashAdminPassword(state.salt, pin)) === state.pinHash;
+  }
+  // Legacy unsalted SHA-256(pin) — grandfathered.
+  return (await _sha256(pin)) === state.pinHash;
+}
+
+/** Produce a fresh salted hash for a (re)set PIN, generating a random salt. */
+async function _makeSaltedPin(pin: string): Promise<{ salt: string; pinHash: string }> {
+  const saltBuf = new Uint8Array(16);
+  crypto.getRandomValues(saltBuf);
+  const salt = Array.from(saltBuf).map(b => b.toString(16).padStart(2, '0')).join('');
+  const pinHash = await _hashAdminPassword(salt, pin);
+  return { salt, pinHash };
 }
 
 /** GET /api/parental/status — current user state. */
@@ -7556,14 +7679,35 @@ async function handleParentalToggle(req: Request, env: Env): Promise<Response> {
   if (typeof pin !== 'string' || pin.length < 4) {
     return err(400, 'PIN must be ≥ 4 chars');
   }
+  // Brute-force lockout — check BEFORE doing any PIN comparison.
+  const lockMs = await getParentalLockout(env, user.id);
+  if (lockMs > 0) {
+    const secs = Math.ceil(lockMs / 1000);
+    return err(429, `too many wrong PIN attempts; try again in ${secs}s`);
+  }
   const cur = await getParentalState(env, user.id);
-  const inHash = await _sha256(pin);
   if (cur.pinHash) {
-    // PIN already set — validate.
-    if (inHash !== cur.pinHash) return err(403, 'PIN mismatch');
+    // PIN already set — validate (handles legacy unsalted + salted).
+    const okPin = await _verifyParentalPin(cur, pin);
+    if (!okPin) {
+      await recordParentalFail(env, user.id);
+      return err(403, 'PIN mismatch');
+    }
+    // Correct PIN — clear the failure counter.
+    await clearParentalFails(env, user.id);
+    // Grandfather upgrade: if the stored hash is still the legacy unsalted
+    // format, transparently re-store it salted now that we have the PIN.
+    if (!cur.salt) {
+      const upgraded = await _makeSaltedPin(pin);
+      cur.salt = upgraded.salt;
+      cur.pinHash = upgraded.pinHash;
+    }
   } else {
-    // First-time set.
-    cur.pinHash = inHash;
+    // First-time set — store salted from the start.
+    const fresh = await _makeSaltedPin(pin);
+    cur.salt = fresh.salt;
+    cur.pinHash = fresh.pinHash;
+    await clearParentalFails(env, user.id);
   }
   cur.unrestricted = enable !== false;
   await putParentalState(env, user.id, cur);

@@ -68,6 +68,29 @@ const NSFW_KEYWORDS: string[] = [
 ];
 
 interface Combo { a: string[]; b: string[] }
+
+// --- HARD FLOOR (minors / CSAM) -------------------------------------------
+// These checks protect minors and are NON-BYPASSABLE: they are evaluated
+// BEFORE any `unrestricted`/parental-PIN short-circuit. The `unrestricted`
+// mode may relax ADULT nudity ONLY — it can NEVER relax anything involving
+// minors. Keep this list in sync with the minors section of NSFW_KEYWORDS
+// and the child×(sexual|violence) combos in NSFW_COMBOS.
+const HARD_FLOOR_KEYWORDS: string[] = [
+  // Children / minors — single keywords that always block
+  'child abuse', 'pedophil', 'paedophil', 'underage', 'minor',
+  'loli', 'shota', 'preteen', 'toddler abuse', 'infant abuse',
+  'enfant', 'mineur',
+];
+
+const HARD_FLOOR_COMBOS: Combo[] = [
+  // Children + nudity/sexual
+  { a: ['child', 'children', 'kid', 'kids', 'boy', 'girl', 'teen', 'teenager', 'young', 'infant', 'baby', 'toddler', 'minor', 'preteen', 'schoolgirl', 'schoolboy', 'enfant', 'fille', 'garcon', 'jeune', 'ado', 'adolescent', 'gamin', 'gamine', 'bebe'],
+    b: ['without clothes', 'no clothes', 'unclothed', 'undressed', 'disrobed', 'bare', 'exposed', 'revealing', 'intimate', 'sensual', 'seductive', 'provocative', 'suggestive', 'sexy', 'hot', 'bath', 'shower', 'bedroom', 'bed', 'lingerie', 'underwear', 'panties', 'bra', 'bikini', 'swimsuit', 'diaper only', 'sans vetement', 'sans habit', 'deshabill', 'nu ', 'nue ', 'nus ', 'nues'] },
+  // Violence + children
+  { a: ['child', 'children', 'kid', 'kids', 'baby', 'infant', 'toddler', 'enfant', 'bebe'],
+    b: ['hurt', 'hit', 'beat', 'punch', 'slap', 'abuse', 'attack', 'weapon', 'knife', 'gun', 'shoot', 'bleed', 'cry', 'scream', 'pain', 'suffer', 'frapper', 'battre', 'blesser'] },
+];
+
 const NSFW_COMBOS: Combo[] = [
   // Children + nudity/sexual
   { a: ['child', 'children', 'kid', 'kids', 'boy', 'girl', 'teen', 'teenager', 'young', 'infant', 'baby', 'toddler', 'minor', 'preteen', 'schoolgirl', 'schoolboy', 'enfant', 'fille', 'garcon', 'jeune', 'ado', 'adolescent', 'gamin', 'gamine', 'bebe'],
@@ -97,12 +120,39 @@ export interface PromptSafetyResult {
   reason?: string;
 }
 
+/**
+ * Minors / CSAM HARD FLOOR. Evaluated FIRST and unconditionally — BEFORE any
+ * `unrestricted`/PIN short-circuit. Returns a blocking result on any minor
+ * keyword, child×sexual combo, or child×violence combo. NEVER bypassable.
+ */
+function checkHardFloor(lower: string): PromptSafetyResult {
+  for (const kw of HARD_FLOOR_KEYWORDS) {
+    if (_matchesKeyword(lower, kw)) {
+      return { safe: false, blocked: kw,
+        reason: `Content filter: "${kw}" is blocked. Content involving minors is never permitted and this cannot be overridden.` };
+    }
+  }
+  for (const combo of HARD_FLOOR_COMBOS) {
+    const hitA = combo.a.find(w => _matchesKeyword(lower, w));
+    const hitB = combo.b.find(w => _matchesKeyword(lower, w));
+    if (hitA && hitB) {
+      return { safe: false, blocked: `${hitA} + ${hitB}`,
+        reason: `Content filter: combination "${hitA}" + "${hitB}" is blocked. Content involving minors is never permitted and this cannot be overridden.` };
+    }
+  }
+  return { safe: true };
+}
+
 export function checkPromptSafety(
   prompt: string | null | undefined,
   unrestricted = false,
 ): PromptSafetyResult {
-  if (unrestricted) return { safe: true };
   const lower = (prompt || '').toLowerCase();
+  // HARD FLOOR first — minors/CSAM block unconditionally, even when
+  // `unrestricted` is set. `unrestricted` may only relax adult nudity below.
+  const hardFloor = checkHardFloor(lower);
+  if (!hardFloor.safe) return hardFloor;
+  if (unrestricted) return { safe: true };
   for (const kw of NSFW_KEYWORDS) {
     if (_matchesKeyword(lower, kw)) {
       return { safe: false, blocked: kw,

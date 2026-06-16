@@ -107,6 +107,95 @@ def _fetch_image(url: str, mode: str = "RGB"):
     with urllib.request.urlopen(req, timeout=30) as r:
         return Image.open(io.BytesIO(r.read())).convert(mode)
 
+
+# ---------------------------------------------------------------------------
+# MOD-03 — minors / child hard-floor (Modal-side mirror of the Worker's
+# checkPromptSafety combos in cloud/src/nsfw_filter.ts).
+#
+# The `unrestricted` / FABMESH_UNRESTRICTED bypass is allowed to relax ADULT
+# nudity, NEVER child-sexual or child-violence content. So this floor is
+# evaluated BEFORE any unrestricted short-circuit, on EVERY image route, and
+# blocks with HTTPException 400. It is intentionally a cheap, dependency-free
+# string match (no model load, no GPU) so it adds ~µs of latency and cannot
+# crash the app at import time.
+#
+# This is NOT a CSAM detector — real hash-matching / age classification stays
+# a documented TODO (see audit MOD-04). It is a last-line keyword/combo floor
+# mirroring the Worker so the Modal endpoints don't become an unfiltered
+# back door when `unrestricted` is forwarded.
+# ---------------------------------------------------------------------------
+# Tokens that, on their own, indicate sexualised-minor content → always block.
+_MINORS_HARD_KEYWORDS = (
+    "child abuse", "childabuse", "pedophil", "paedophil", "underage",
+    "loli", "lolicon", "shota", "shotacon", "preteen", "pre-teen",
+    "toddler abuse", "infant abuse", "cp porn", "child porn", "childporn",
+    "pedo", "minor sex", "sexual minor", "sexualized child", "sexualised child",
+)
+# Combo floor: (minor token) × (sexual OR violent token) → block.
+_MINORS_GROUP = (
+    "child", "children", "kid", "kids", "toddler", "infant", "baby", "babies",
+    "preteen", "preteens", "minor", "minors", "schoolgirl", "schoolboy",
+    "underage", "little girl", "little boy", "young girl", "young boy",
+    "enfant", "enfants", "fillette", "garconnet", "bambin", "bebe",
+    "mineur", "mineure", "adolescent", "adolescente",
+)
+# NOTE: ultra-short ambiguous substrings (nu/ado/etc.) are intentionally
+# omitted — this floor uses plain `in` substring matching (no word-boundary
+# logic), so short tokens would false-positive on legit words (manual, shadow).
+# The Worker's checkPromptSafety does the boundary-aware first pass upstream;
+# this is a last-line minor-specific floor that must not nuke valid prompts.
+_SEXUAL_GROUP = (
+    "nude", "naked", "nsfw", "porn", "sexual", "sexy", "erotic",
+    "lewd", "topless", "bottomless", "lingerie", "underwear", "panties",
+    "bikini", "swimsuit", "undress", "unclothed", "no clothes",
+    "without clothes", "exposed", "sensual", "seductive",
+    "provocative", "suggestive", "fetish", "genital", "explicit",
+    "sexe", "sexuel", "erotique", "deshabill",
+    "sans vetement", "sans habit",
+)
+_VIOLENT_GROUP = (
+    "abuse", "abused", "rape", "raped", "molest", "assault", "hurt", "beaten",
+    "torture", "tortured", "mutilat", "kill", "killed", "murder", "blood",
+    "gore", "frapper", "battre", "blesser", "viol", "violer",
+)
+
+
+def _minors_hard_floor(*texts) -> None:
+    """Raise HTTPException 400 if any provided text trips the minors floor.
+
+    Called BEFORE the unrestricted bypass on every image route. Mirrors the
+    Worker's child×sexual / child×violence combos + standalone minor-sexual
+    keywords (cloud/src/nsfw_filter.ts). Pure string match — no model, no GPU.
+    """
+    from fastapi import HTTPException
+    blob = " ".join(t for t in texts if t).lower()
+    if not blob.strip():
+        return
+    for kw in _MINORS_HARD_KEYWORDS:
+        if kw in blob:
+            print(f"[minors-floor] BLOCKED keyword={kw!r}", flush=True)
+            raise HTTPException(status_code=400, detail="content blocked")
+    has_minor = any(m in blob for m in _MINORS_GROUP)
+    if has_minor and (
+        any(s in blob for s in _SEXUAL_GROUP)
+        or any(v in blob for v in _VIOLENT_GROUP)
+    ):
+        print("[minors-floor] BLOCKED minor+unsafe combo", flush=True)
+        raise HTTPException(status_code=400, detail="content blocked")
+
+
+def _has_minor_context(*texts) -> bool:
+    """True if any text references a minor. Used to FORCE the output NSFW
+    scan even when `unrestricted` is set, so the combo floor's blind spots
+    (a minor with no sexual keyword) can't slip an unsafe render through.
+    The hard-floor (above) already blocks the explicit combos outright; this
+    just prevents `unrestricted` from skipping MOD-02 on minor-context prompts.
+    """
+    blob = " ".join(t for t in texts if t).lower()
+    return any(m in blob for m in _MINORS_GROUP) or any(
+        kw in blob for kw in _MINORS_HARD_KEYWORDS)
+
+
 # ---------------------------------------------------------------------------
 # Image: CUDA 12.4 + torch 2.4 (same stack as the desktop & the Cog) so
 # diffusers loads identical weights and produces byte-identical output
@@ -469,6 +558,11 @@ class MyFabmeshPredictor:
         from modal_app._realvis import generate
         from modal_app._nsfw import is_safe, make_blocked_placeholder
 
+        # MOD-03: minors hard-floor BEFORE the unrestricted bypass and before
+        # we burn a generation. unrestricted can relax adult nudity, never
+        # child-sexual / child-violence content.
+        _minors_hard_floor(prompt, asset_style)
+
         t0 = time.time()
         enriched = build_enriched_prompt(prompt, asset_type, asset_style)
         if not seed:
@@ -487,7 +581,11 @@ class MyFabmeshPredictor:
         #    (user toggled parental lock off via PIN in the UI)
         # Pass asset_type so the skin-ratio fallback is skipped for
         # animals/creatures/vehicles (false-positives on lion fur etc.).
-        if not unrestricted and os.environ.get("FABMESH_UNRESTRICTED") != "1":
+        # MOD-03: the bypass NEVER applies when the prompt references a minor —
+        # the output scan stays on so an unrestricted user can't slip a minor
+        # render past the (keyword-only) hard-floor above.
+        _bypass = unrestricted or os.environ.get("FABMESH_UNRESTRICTED") == "1"
+        if not _bypass or _has_minor_context(prompt, asset_style):
             safe, nsfw_score = is_safe(img, self.nsfw_clf1, self.nsfw_clf2,
                                         asset_type=asset_type)
             if not safe:
@@ -714,7 +812,15 @@ class MyFabmeshBackview:
         false-positived.
         """
         from modal_app._nsfw import is_safe, make_blocked_placeholder
-        if payload.get("unrestricted") or os.environ.get("FABMESH_UNRESTRICTED") == "1":
+        # MOD-03: the unrestricted bypass NEVER applies when any prompt field
+        # references a minor — the output scan stays on so an unrestricted user
+        # can't slip a minor render past the (keyword-only) hard-floor that the
+        # routes evaluate before generation.
+        _bypass = payload.get("unrestricted") or os.environ.get("FABMESH_UNRESTRICTED") == "1"
+        _minor_ctx = _has_minor_context(
+            payload.get("prompt"), payload.get("prompt_hint"),
+            payload.get("target_text"), payload.get("asset_style"))
+        if _bypass and not _minor_ctx:
             return img
         safe, nsfw_score = is_safe(img, self.nsfw_clf1, self.nsfw_clf2,
                                    asset_type=asset_type)
@@ -736,6 +842,8 @@ class MyFabmeshBackview:
         from modal_app._backview import generate
 
         _check_auth(payload)
+        # MOD-03: minors hard-floor BEFORE generation / unrestricted bypass.
+        _minors_hard_floor(payload.get("prompt_hint"), payload.get("asset_style"))
         front_url = (payload.get("front_image_url") or "").strip()
         if not front_url:
             raise HTTPException(status_code=400, detail="front_image_url required")
@@ -783,6 +891,8 @@ class MyFabmeshBackview:
         from modal_app._tpose import generate as tpose_generate
 
         _check_auth(payload)
+        # MOD-03: minors hard-floor BEFORE generation / unrestricted bypass.
+        _minors_hard_floor(payload.get("prompt"), payload.get("asset_style"))
 
         prompt = (payload.get("prompt") or "").strip()
         ref_url = (payload.get("ref_image_url") or "").strip()
@@ -838,6 +948,8 @@ class MyFabmeshBackview:
         from modal_app._rectify import generate as rectify_generate
 
         _check_auth(payload)
+        # MOD-03: minors hard-floor BEFORE generation / unrestricted bypass.
+        _minors_hard_floor(payload.get("prompt"), payload.get("asset_style"))
 
         prompt = (payload.get("prompt") or "").strip()
         ref_url = (payload.get("ref_image_url") or "").strip()
@@ -929,6 +1041,9 @@ class MyFabmeshBackview:
         from fastapi.responses import Response
 
         _check_auth(payload)
+        # MOD-03: minors hard-floor BEFORE generation / unrestricted bypass.
+        _minors_hard_floor(payload.get("prompt"), payload.get("target_text"),
+                           payload.get("asset_style"))
 
         op        = (payload.get("op") or "").strip()
         image_url = (payload.get("image_url") or "").strip()
@@ -1079,6 +1194,8 @@ class MyFabmeshBackview:
         from modal_app._sheet import generate as sheet_generate
 
         _check_auth(payload)
+        # MOD-03: minors hard-floor BEFORE generation / unrestricted bypass.
+        _minors_hard_floor(payload.get("prompt_hint"), payload.get("asset_style"))
 
         front_url = (payload.get("front_image_url") or "").strip()
         if not front_url:
