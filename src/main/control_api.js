@@ -56,18 +56,27 @@ function _initAuthToken() {
   } catch (_) {}
   console.log('[test_api] auth token written to', tokenFile);
 }
+function _tokenEquals(t) {
+  // Constant-time comparison to avoid leaking the token via timing.
+  // timingSafeEqual throws on unequal lengths, so guard first.
+  if (typeof t !== 'string' || !_authToken) return false;
+  const a = Buffer.from(t);
+  const b = Buffer.from(_authToken);
+  if (a.length !== b.length) return false;
+  try { return crypto.timingSafeEqual(a, b); } catch (_) { return false; }
+}
 function _checkAuth(req) {
   if (!_authToken) return false;
   // Header form: Authorization: Bearer <token>
   const auth = req.headers['authorization'] || '';
   if (auth.startsWith('Bearer ')) {
     const t = auth.slice(7).trim();
-    if (t === _authToken) return true;
+    if (_tokenEquals(t)) return true;
   }
   // Query string fallback: ?token=...
   try {
     const u = new URL(req.url, 'http://' + HOST + ':' + PORT);
-    if (u.searchParams.get('token') === _authToken) return true;
+    if (_tokenEquals(u.searchParams.get('token'))) return true;
   } catch (_) {}
   return false;
 }
@@ -185,8 +194,7 @@ function sendJson(res, code, payload) {
     const body = JSON.stringify(payload);
     res.writeHead(code, {
       'Content-Type': 'application/json; charset=utf-8',
-      'Content-Length': Buffer.byteLength(body),
-      'Access-Control-Allow-Origin': '*'
+      'Content-Length': Buffer.byteLength(body)
     });
     res.end(body);
   } catch (e) { try { res.end(); } catch (_) {} }
@@ -331,8 +339,7 @@ function startControlApi(mainWindow, opts = {}) {
         const png = img.toPNG();
         res.writeHead(200, {
           'Content-Type': 'image/png',
-          'Content-Length': png.length,
-          'Access-Control-Allow-Origin': '*'
+          'Content-Length': png.length
         });
         res.end(png);
       } catch (e) { sendErr(res, e); }
@@ -359,7 +366,6 @@ function startControlApi(mainWindow, opts = {}) {
         res.writeHead(200, {
           'Content-Type': mime,
           'Content-Length': data.length,
-          'Access-Control-Allow-Origin': '*',
         });
         res.end(data);
       } catch (e) { sendErr(res, e); }
@@ -550,7 +556,6 @@ function startControlApi(mainWindow, opts = {}) {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
               'Connection': 'keep-alive',
-              'Access-Control-Allow-Origin': '*',
             });
             res.write(': fabmesh log stream started\n\n');
 
@@ -879,6 +884,14 @@ function startControlApi(mainWindow, opts = {}) {
     try {
       const url = new URL(req.url, 'http://' + HOST + ':' + PORT);
       const key = req.method + ' ' + url.pathname;
+      // Host/Origin guard (DNS-rebinding / CSRF defence). Only loopback
+      // hostnames are accepted, and any request carrying an Origin header
+      // (i.e. a cross-origin browser caller) is rejected outright — the
+      // token-bearing CLI/script clients never send one.
+      const _host = (req.headers.host || '').split(':')[0];
+      if (_host && _host !== '127.0.0.1' && _host !== 'localhost') { res.writeHead(403); res.end('forbidden host'); _recordRequest(req, 403); return; }
+      const _origin = req.headers.origin;
+      if (_origin) { res.writeHead(403); res.end('forbidden origin'); _recordRequest(req, 403); return; }
       // Auth check on EVERY endpoint (no exceptions)
       if (!_checkAuth(req)) {
         res.writeHead(401, { 'Content-Type': 'application/json' });

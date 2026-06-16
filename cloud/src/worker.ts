@@ -1428,6 +1428,42 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, success: true, id, attachments: attachments.length });
 }
 
+// POST /api/market/report — abuse/DMCA report intake. Technical half of
+// the takedown flow: persists a report next to the listing storage in R2.
+// Accepts an authenticated reporter or an anonymous one (with email),
+// mirroring handleContactSubmit's unauth tolerance.
+//
+// NOTE (separate needs-user-action, NOT code): the legal layer this
+// enables — designating a DMCA agent with the US Copyright Office,
+// publishing a DSA Art.16 point of contact, and defining the
+// notice-and-takedown SLA — must be done by the dev outside this code.
+async function handleMarketReport(req: Request, env: Env): Promise<Response> {
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { listing_id?: string; reason?: string; reporter_email?: string } | null = null;
+  try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
+  const listing_id = (body?.listing_id || '').trim();
+  if (!listing_id) return err(400, 'listing_id required');
+  let user: { id: string } | null = null;
+  try { user = await getSessionUser(req, env); } catch {}
+  const reporter_email = body?.reporter_email ?? null;
+  try {
+    await env.MESHES.put(
+      `_market/reports/${listing_id}/${crypto.randomUUID()}.json`,
+      JSON.stringify({
+        listing_id,
+        reason: (body?.reason || '').slice(0, 5000),
+        reporter: user?.id ?? null,
+        reporter_email,
+        ts: Date.now(),
+      }),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+  } catch (e) {
+    return err(502, `report write failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return json({ ok: true });
+}
+
 function _safeId(s: string): string {
   // Collapse anything that isn't [a-z0-9._-] to underscore for use in
   // R2 key segments (IPs contain ':' for IPv6 etc.).
@@ -2037,7 +2073,10 @@ async function handleMarketPublish(req: Request, env: Env): Promise<Response> {
     job_id: jobId,
     user_id: user.id,
     author_email: user.email ?? null,
-    author_display: user.email ? user.email.split('@')[0] : 'anonymous',
+    // Public display name must NOT be derived from the email local-part
+    // (that leaks PII on public market listings). Default to a neutral
+    // value; author_email above is still kept for internal/admin use.
+    author_display: 'anonymous',
     title,
     description,
     price_cents,
@@ -3375,6 +3414,30 @@ async function handleCheckout(req: Request, env: Env): Promise<Response> {
   return json({ url: session.url });
 }
 
+// Stripe Customer Portal session — backs the "Cancel anytime from your
+// Stripe customer portal" promise on /buy. No stripe_customer_id is
+// persisted anywhere in the repo, so resolve the customer by email.
+// NOTE (one-time dev action): the Stripe Dashboard > Settings > Billing >
+// Customer portal must be activated once for billingPortal.sessions.create
+// to succeed; the code below is correct regardless of that toggle.
+async function handleBillingPortal(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.STRIPE_SECRET_KEY) return err(500, 'STRIPE_SECRET_KEY not set');
+
+  const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2025-02-24.acacia' as Stripe.LatestApiVersion });
+  const list = await stripe.customers.list({ email: user.email ?? '', limit: 1 });
+  const customer = list.data[0];
+  if (!customer) return err(404, 'no Stripe customer for this account');
+
+  const SITE = siteUrl(env, 'http://localhost:3030');
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customer.id,
+    return_url: `${SITE}/account`,
+  });
+  return json({ url: session.url });
+}
+
 async function handleStripeWebhook(req: Request, env: Env): Promise<Response> {
   const sig = req.headers.get('stripe-signature') ?? '';
   const secret = env.STRIPE_WEBHOOK_SECRET ?? '';
@@ -4025,13 +4088,20 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     return json({ status: 'processing' });
   }
 
+  // Owner-scope every real (non-mock) job poll. Without this any caller
+  // who knows/guesses a job id could read another user's mesh_url+status
+  // and trigger refund/persist transitions (IDOR). The renderer always
+  // polls while authenticated, so legitimate polling is unaffected.
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+
   // Modal-backed mesh jobs use a `modal_<uuid>` id and are polled
   // through callModalMeshStatus instead of Replicate. Once the GLB
   // is ready we persist it to R2 (so the renderer gets a stable URL
   // not the inline base64) and flip the Supabase row to succeeded.
   if (id.startsWith('modal_')) {
     const sbm = supabaseAdmin(env);
-    const { data: job } = await sbm.from('jobs').select('*').eq('id', id).maybeSingle();
+    const { data: job } = await sbm.from('jobs').select('*').eq('id', id).eq('user_id', user.id).maybeSingle();
     if (!job) return json({ status: 'failed', error: 'job not found' });
     if (job.status === 'succeeded' && job.mesh_url) {
       const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
@@ -4050,13 +4120,19 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     try {
       const status = await callModalMeshStatus(env, id);
       if (status.error) {
-        await sbm.from('jobs')
+        // Atomic terminal latch: only the poll that actually transitions
+        // the row from a non-terminal state to 'failed' refunds. Concurrent
+        // polls match 0 rows and skip the refund (no double-refund).
+        const { data: flipped } = await sbm.from('jobs')
           .update({ status: 'failed', error: status.error.slice(0, 500),
                     finished_at: new Date().toISOString() })
-          .eq('id', id);
-        // Refund credits on failure (same policy as Replicate).
-        if (typeof job.user_id === 'string' && typeof job.credit_cost === 'number') {
-          await addCredits(env, job.user_id, job.credit_cost);
+          .eq('id', id)
+          .not('status', 'in', '(succeeded,failed,canceled)')
+          .select('user_id,credit_cost');
+        if (flipped && flipped.length
+            && typeof flipped[0].user_id === 'string'
+            && typeof flipped[0].credit_cost === 'number') {
+          await addCredits(env, flipped[0].user_id, flipped[0].credit_cost);
         }
         return json({ status: 'failed', error: status.error });
       }
@@ -4079,7 +4155,7 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
   }
 
   const sb = supabaseAdmin(env);
-  const { data: job } = await sb.from('jobs').select('*').eq('id', id).maybeSingle();
+  const { data: job } = await sb.from('jobs').select('*').eq('id', id).eq('user_id', user.id).maybeSingle();
   // Short-circuit on terminal Supabase status (admin cancel writes
   // status='canceled' with error='admin canceled'). Replicate's own
   // cancel propagates eventually but the row is the source of truth,
@@ -4088,6 +4164,9 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     return json({ status: job.status as string,
                   error: (job.error as string) || 'cancelled' });
   }
+  // Owner-scoped lookup above: a foreign or unknown id yields a null job.
+  // Stop here rather than leaking another user's Replicate prediction.
+  if (!job) return json({ status: 'failed', error: 'job not found' });
   const prediction = await replicateClient(env).predictions.get(id);
 
   const extractGlb = (output: unknown): string | null => {
@@ -4123,11 +4202,16 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
   }
 
   if (prediction.status === 'failed' || prediction.status === 'canceled') {
-    if (job && job.status !== prediction.status) {
-      await addCredits(env, job.user_id as string, job.credit_cost as number);
-      await sb.from('jobs')
-        .update({ status: prediction.status, error: prediction.error || null, finished_at: new Date().toISOString() })
-        .eq('id', id);
+    // Atomic terminal latch (see modal_ branch): the conditional update
+    // only matches a not-yet-terminal row, so exactly one concurrent poll
+    // wins the transition and refunds; losers match 0 rows and skip it.
+    const { data: flipped } = await sb.from('jobs')
+      .update({ status: prediction.status, error: prediction.error || null, finished_at: new Date().toISOString() })
+      .eq('id', id)
+      .not('status', 'in', '(succeeded,failed,canceled)')
+      .select('user_id,credit_cost');
+    if (flipped && flipped.length) {
+      await addCredits(env, flipped[0].user_id as string, flipped[0].credit_cost as number);
     }
     return json({ status: prediction.status, error: prediction.error || 'unknown error' });
   }
@@ -10705,6 +10789,20 @@ export default {
     const { pathname } = url;
     const method = req.method.toUpperCase();
 
+    // ── Sanctions/embargo geoblock (OFAC/EU floor) ────────────────────
+    // Cloudflare populates req.cf.country at the edge for the deployed
+    // Worker. It is undefined under local `wrangler dev` (no --remote),
+    // hence the `country &&` guard so dev is unaffected. Country-level is
+    // the safe floor; occupied-region screening (cf.region) is out of scope.
+    const country = (req as unknown as { cf?: { country?: string } }).cf?.country;
+    const SANCTIONED = new Set(['IR', 'KP', 'CU', 'SY', 'RU', 'BY']);
+    if (country && SANCTIONED.has(country)) {
+      return new Response('Service not available in your region.', {
+        status: 451,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      });
+    }
+
     try {
       // ── /auth/callback ──
       // Handled by a client-side Next.js page (src/app/auth/callback/page.tsx)
@@ -10785,6 +10883,7 @@ export default {
         if (pathname === '/api/admin/market/list'           && method === 'GET')  return await handleAdminMarketList(req, env);
         if (pathname === '/api/admin/market/killswitch'     && method === 'GET')  return await handleAdminMarketKillSwitchGet(req, env);
         if (pathname === '/api/admin/market/killswitch'     && method === 'POST') return await handleAdminMarketKillSwitchSet(req, env);
+        if (pathname === '/api/market/report'               && method === 'POST') return await handleMarketReport(req, env);
         {
           const m = pathname.match(/^\/api\/market\/download\/([A-Za-z0-9_]+)$/);
           if (m && method === 'GET') return await handleMarketDownload(req, env, m[1]);
@@ -10856,6 +10955,7 @@ export default {
         if (pathname === '/api/me/delete'             && method === 'POST') return await handleMeDelete(req, env);
         if (pathname === '/api/debug-auth'            && method === 'GET')  return await handleDebugAuth(req, env);
         if (pathname === '/api/checkout'              && method === 'POST') return await handleCheckout(req, env);
+        if (pathname === '/api/billing-portal'        && method === 'POST') return await handleBillingPortal(req, env);
         if (pathname === '/api/pricing/availability'  && method === 'GET')  return await handlePricingAvailability(req, env);
         if (pathname === '/api/stripe-webhook'        && method === 'POST') return await handleStripeWebhook(req, env);
         if (pathname === '/api/generate'              && method === 'POST') return await handleGenerate(req, env);

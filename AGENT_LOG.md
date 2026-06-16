@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Remediation audit : 22 fixes auto-safe sur branche, NON deploye)
+
+Workflow de remediation (19 agents) : 35 findings analyses, 22 auto-safe APPLIQUES sur la branche
+`fix/audit-remediation-2026-06-16` (NON deploye, NON merge, NON pousse -- a relire avant). Build worker
+PASS (wrangler dry-run exit 0). Rapport local : audit/REMEDIATION_2026-06-16.md.
+- Applique : worker.ts (IDOR /api/jobs owner-scope, double-refund latch atomique, geoblock 451 sanctions
+  IR/KP/CU/SY/RU/BY, /api/billing-portal, /api/market/report stub, author_display anonymise) ; main.js
+  (path-guards IPC save-buffer/read-mesh/get-mesh-*, setWindowOpenHandler deny, anti-SSRF download-to-temp,
+  scrubber Sentry IP/home-dir) ; control_api.js (guard Host/Origin, suppression CORS *, timingSafeEqual) ;
+  index2.js (escapeHtml anti-XSS) ; index.html/index2.html/docs (claims licences corriges + "Built with
+  DINOv3") ; package.json (packaging THIRD_PARTY_LICENSES) ; .gitignore (scratch rokoko/_b64) ; app.py
+  (MOD-02 scan NSFW de sortie sur toutes les routes image -- A TESTER sur Modal, +350MB classifieurs) ;
+  + NOUVEAU cloud/sql/2026-06-16_revoke_rpc_from_public.sql (P0 RPC credits -- A RUN sur la DB live).
+- NON applique (decision/action user) : MOD-03 unrestricted court-circuite le garde-fou minors (P0 LIVE ->
+  decision hard-floor vs remove) ; marques dans prompts (Ghibli/Pixar/Minecraft) ; signer l'updater avant
+  verifyUpdateCodeSignature:true ; rotation secrets ; Stripe Tax/portal ; CSAM detection ; DMCA/DSA ; Electron EOL.
+- A corriger : cloud-overrides.js pruneAboutModal reecrit le About et efface "Built with DINOv3".
+
 ## 2026-06-16 (Drop-to-create: popup nom + Unlock NSFW ; audit legal+securite)
 
 - Bug "dossier bitch" (DESKTOP) : drop d'une image sur le grid -> importDroppedFile

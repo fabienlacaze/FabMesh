@@ -41,6 +41,9 @@
       "scripts/**/*.png",
       "icon.png",
       "icon.ico",
+      "THIRD_PARTY_LICENSES.txt",
+      "LICENSE.txt",
+      "EULA.txt",
       "!**/__pycache__",
       "!**/.venv",
       "!**/*.pyc",
@@ -74,6 +77,10 @@
       {
         "from": "build/sentry-dsn.txt",
         "to": "sentry-dsn.txt"
+      },
+      {
+        "from": "THIRD_PARTY_LICENSES.txt",
+        "to": "THIRD_PARTY_LICENSES.txt"
       }
     ],
     "win": {

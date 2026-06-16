@@ -1057,7 +1057,7 @@ async function renderProjectsGrid() {
       <button class="card-delete-btn" title="Delete project">&#10005;</button>
       <div class="project-card-thumb">
         ${p.thumb
-          ? `<img src="${_toFileUrl(p.thumb)}" alt="${p.name}">`
+          ? `<img src="${_toFileUrl(p.thumb)}" alt="${escapeHtml(p.name)}">`
           : `<span class="project-card-thumb-empty">No image</span>`}
       </div>
       <div class="project-card-body">
@@ -2157,7 +2157,7 @@ async function renderImageVersions(p) {
     const _thumbSrc = _imgSrc(img.path);
     const _thumbUrl = /^(blob|data):/i.test(img.path) ? _thumbSrc : `${_thumbSrc}?t=${_cb}`;
     t.innerHTML = `
-      <img src="${_thumbUrl}">
+      <img src="${escapeHtml(_thumbUrl)}">
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${images.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this version">&#10005;</button>
@@ -3639,11 +3639,11 @@ async function renderViewerInfo(targetEl, filePath, extras) {
     if (Array.isArray(extras)) {
       for (const e of extras) {
         if (e && e.label && (e.value !== undefined && e.value !== null && e.value !== '')) {
-          rows.push(`<span class="vi-row"><b>${e.label}:</b> ${e.value}</span>`);
+          rows.push(`<span class="vi-row"><b>${escapeHtml(e.label)}:</b> ${escapeHtml(e.value)}</span>`);
         }
       }
     }
-    targetEl.innerHTML = `<span class="vi-title">${info.filename}</span>` + rows.join('');
+    targetEl.innerHTML = `<span class="vi-title">${escapeHtml(info.filename)}</span>` + rows.join('');
   } catch (e) {
     console.warn('renderViewerInfo failed', e);
     targetEl.innerHTML = '';
@@ -7452,7 +7452,7 @@ async function renderMeshVersions(p) {
       ? '<span class="v-emissive-badge" title="This mesh was generated from an image with an emissive layer painted on it" style="position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,0.7); border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:11px; line-height:1; box-shadow:0 0 0 1px rgba(255, 224, 102, 0.85);">💡</span>'
       : '';
     t.innerHTML = `
-      ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
+      ${thumbSrc ? `<img src="${escapeHtml(thumbSrc)}" alt="">` : ''}
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${meshes.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this mesh">&#10005;</button>
@@ -13693,7 +13693,7 @@ function renderRigVersions(p) {
       thumbSrc = _toFileUrl(p.thumb);
     }
     t.innerHTML = `
-      ${thumbSrc ? `<img src="${thumbSrc}" alt="">` : ''}
+      ${thumbSrc ? `<img src="${escapeHtml(thumbSrc)}" alt="">` : ''}
       <span class="v-used-badge" title="Used for next step">&#10003;</span>
       <span class="v-label">v${p.rigs.length - 1 - i}</span>
       <button class="version-delete-btn" title="Delete this rig">&#10005;</button>

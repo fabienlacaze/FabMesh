@@ -662,6 +662,24 @@ class MyFabmeshBackview:
         # FRONT instead of arms-extended T-pose BACK.
         self.skel_front = Image.open("/opt/front_tpose_skeleton.png").convert("RGB")
 
+        # NSFW classifiers — same pair the predictor loads (Falconsai +
+        # AdamCodd, ~350MB total, Apache 2.0, CPU-only). Loaded here so the
+        # output NSFW scan is consistent across ALL back-view-family routes
+        # (back_view / tpose / rectify / image_op / sheet), not just
+        # text2image. Captured by the memory snapshot.
+        from transformers import pipeline as _hfpipeline
+        print("[backview/snap] loading NSFW classifiers (Falconsai + AdamCodd)…", flush=True)
+        self.nsfw_clf1 = _hfpipeline(
+            "image-classification",
+            model="Falconsai/nsfw_image_detection",
+            device="cpu",
+        )
+        self.nsfw_clf2 = _hfpipeline(
+            "image-classification",
+            model="AdamCodd/vit-base-nsfw-detector",
+            device="cpu",
+        )
+
         print(f"[backview/snap] CPU load done in {time.time() - t0:.1f}s", flush=True)
 
     @modal.enter(snap=False)
@@ -684,6 +702,26 @@ class MyFabmeshBackview:
         except Exception as e:
             print(f"[backview/ready] xformers skipped: {e}", flush=True)
         print(f"[backview/ready] GPU move done in {time.time() - t0:.1f}s", flush=True)
+
+    def _scan_or_block(self, img, payload: dict, asset_type: str = "character"):
+        """Run the same NSFW output scan as the predictor's text2image path.
+
+        Returns the original image if safe (or if a bypass is active),
+        otherwise a red 'NSFW' blocked placeholder. Bypass paths mirror
+        _generate_png: the server-wide FABMESH_UNRESTRICTED env var and the
+        per-user `unrestricted` flag forwarded from the Worker. asset_type
+        drives the skin-ratio fallback so animals/creatures/vehicles aren't
+        false-positived.
+        """
+        from modal_app._nsfw import is_safe, make_blocked_placeholder
+        if payload.get("unrestricted") or os.environ.get("FABMESH_UNRESTRICTED") == "1":
+            return img
+        safe, nsfw_score = is_safe(img, self.nsfw_clf1, self.nsfw_clf2,
+                                   asset_type=asset_type)
+        if not safe:
+            print(f"[backview] BLOCKED nsfw={nsfw_score:.2f} asset={asset_type}", flush=True)
+            img = make_blocked_placeholder(img.size)
+        return img
 
     def _route_back_view(self, payload: dict):
         """Back-view generation core — called from the ASGI router below.
@@ -719,6 +757,8 @@ class MyFabmeshBackview:
             seed=int(payload.get("seed") or 424242),
             n_candidates=int(payload.get("n_candidates") or 4),
         )
+        img = self._scan_or_block(img, payload,
+                                  asset_type=payload.get("asset_type") or "character")
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)
         png = buf.getvalue()
@@ -741,7 +781,6 @@ class MyFabmeshBackview:
         from fastapi import HTTPException
         from fastapi.responses import Response
         from modal_app._tpose import generate as tpose_generate
-        from modal_app._nsfw import is_safe, make_blocked_placeholder
 
         _check_auth(payload)
 
@@ -774,11 +813,8 @@ class MyFabmeshBackview:
         )
 
         # Parental control — image NSFW scan, same as text2image path.
-        if os.environ.get("FABMESH_UNRESTRICTED") != "1":
-            # Reuse Falconsai+AdamCodd if available; otherwise skip (the
-            # backview class doesn't carry them — would be redundant since
-            # the Worker pre-filters the prompt already via nsfw_filter.ts).
-            pass
+        img = self._scan_or_block(img, payload,
+                                  asset_type=payload.get("asset_type") or "character")
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)
@@ -834,6 +870,8 @@ class MyFabmeshBackview:
             ip_scale=float(payload.get("ip_scale") or 0.7),
         )
 
+        img = self._scan_or_block(img, payload,
+                                  asset_type=payload.get("asset_type") or "character")
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)
         png = buf.getvalue()
@@ -1011,6 +1049,11 @@ class MyFabmeshBackview:
             )
             tag = "upscale"
 
+        # NSFW output scan — same as text2image. Skip op=='segment', which
+        # returns a CLIPSeg mask (white-on-black), not rendered content.
+        if tag != "segment":
+            img = self._scan_or_block(img, payload,
+                                      asset_type=payload.get("asset_type") or "character")
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=False)
         png = buf.getvalue()
@@ -1059,6 +1102,8 @@ class MyFabmeshBackview:
         if back_img is None:
             raise HTTPException(status_code=500, detail="sheet split missing back cell")
 
+        back_img = self._scan_or_block(back_img, payload,
+                                       asset_type=payload.get("asset_type") or "character")
         buf = io.BytesIO()
         back_img.save(buf, format="PNG", optimize=False)
         png = buf.getvalue()

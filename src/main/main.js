@@ -90,6 +90,8 @@ _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion 
 // without access don't accidentally send their own crashes. Falls
 // back to a no-op transport in dev when the file is missing.
 (function _initSentry() {
+  const os = require('os');
+  const _home = os.homedir();
   let dsn = process.env.SENTRY_DSN || '';
   // Look in two places: the packaged location (resources/sentry-dsn.txt
   // copied by electron-builder's extraResources) and the dev box
@@ -122,8 +124,35 @@ _log('boot', 'electron required OK, app.getVersion()=' + (app && app.getVersion 
       tracesSampleRate: 0.0,
       // Strip the user's machine name + Windows username from breadcrumbs.
       beforeSend(event) {
-        if (event.user) delete event.user.username;
-        if (event.server_name) delete event.server_name;
+        const HOME = _home;
+        const USER = require('path').basename(HOME || '');
+        const redact = (s) => {
+          if (typeof s !== 'string') return s;
+          let out = s;
+          if (HOME) out = out.split(HOME).join('<HOME>');
+          if (USER) out = out.replace(new RegExp('([\\\\/])Users([\\\\/])' + USER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '$1Users$2<USER>');
+          return out;
+        };
+        try {
+          if (event.user) { delete event.user.username; event.user.ip_address = null; }
+          if (event.server_name) delete event.server_name;
+          // exception frames + messages
+          const vals = event.exception && event.exception.values;
+          if (Array.isArray(vals)) for (const v of vals) {
+            if (v.value) v.value = redact(v.value);
+            const frames = v.stacktrace && v.stacktrace.frames;
+            if (Array.isArray(frames)) for (const f of frames) {
+              if (f.filename) f.filename = redact(f.filename);
+              if (f.abs_path) f.abs_path = redact(f.abs_path);
+              if (f.module) f.module = redact(f.module);
+            }
+          }
+          if (event.message) event.message = redact(event.message);
+          if (Array.isArray(event.breadcrumbs)) for (const b of event.breadcrumbs) {
+            if (b.message) b.message = redact(b.message);
+          }
+          if (event.request && event.request.url) event.request.url = redact(event.request.url);
+        } catch (_) {}
         return event;
       },
     });
@@ -947,6 +976,20 @@ function createWindow() {
       mainWindow.webContents.toggleDevTools();
       event.preventDefault();
     }
+  });
+
+  // Security: deny popups/new windows and block navigation away from the
+  // bundled local pages. The app only ever renders local renderer/*.html;
+  // any window.open or attempted navigation to a remote/file origin is an
+  // injection/exfil vector, so deny by default.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try { require('electron').shell.openExternal(url); } catch (_) {}
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const cur = mainWindow.webContents.getURL() || '';
+    // Allow only same-document / local-file navigations among our own pages.
+    if (!url.startsWith('file://')) { event.preventDefault(); }
   });
 
   // ----------------------------------------------------------
@@ -3624,10 +3667,34 @@ ipcMain.handle('download-to-temp', async (event, url) => {
       const os = require('os');
       const tmpDir = path.join(os.tmpdir(), 'fabmesh_dl');
       try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (_) {}
+      const dns = require('dns');
+      const net = require('net');
+      function _isBlockedIp(ip) {
+        if (net.isIPv4(ip)) {
+          const o = ip.split('.').map(Number);
+          if (o[0] === 10) return true;                       // 10/8
+          if (o[0] === 127) return true;                      // loopback
+          if (o[0] === 169 && o[1] === 254) return true;      // link-local/metadata
+          if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // 172.16/12
+          if (o[0] === 192 && o[1] === 168) return true;      // 192.168/16
+          if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // CGNAT 100.64/10
+          if (o[0] === 0) return true;                        // 0.0.0.0/8
+          return false;
+        }
+        const lc = String(ip).toLowerCase();
+        if (lc === '::1' || lc.startsWith('fe80') || lc.startsWith('fc') || lc.startsWith('fd')) return true; // loopback / link-local / ULA
+        if (lc.startsWith('::ffff:')) return _isBlockedIp(lc.slice(7)); // IPv4-mapped
+        return false;
+      }
       const doGet = (u, redirects) => {
         let mod;
         try { mod = u.startsWith('https') ? require('https') : require('http'); }
         catch (_) { return resolve({ success: false, error: 'no http module' }); }
+        let _host; try { _host = new URL(u).hostname; } catch (_) { return resolve({ success: false, error: 'bad url' }); }
+        if (net.isIP(_host) && _isBlockedIp(_host)) return resolve({ success: false, error: 'blocked host' });
+        dns.lookup(_host, { all: true }, (err, addrs) => {
+        if (err) return resolve({ success: false, error: 'dns: ' + err.message });
+        if (addrs.some(a => _isBlockedIp(a.address))) return resolve({ success: false, error: 'blocked host' });
         const req = mod.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 FabMesh/1.0' }, timeout: 20000 }, (res) => {
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 5) {
             res.resume();
@@ -3657,6 +3724,7 @@ ipcMain.handle('download-to-temp', async (event, url) => {
         });
         req.on('error', (e) => resolve({ success: false, error: e.message }));
         req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve({ success: false, error: 'timeout' }); });
+        });
       };
       doGet(url, 0);
     } catch (e) { resolve({ success: false, error: e.message }); }
@@ -5745,6 +5813,7 @@ ipcMain.on('wizard-log', (_event, payload) => {
 // --- Save Buffer IPC (for GLTFExporter output) ---
 ipcMain.handle('save-buffer', async (_event, { path: filePath, buffer, base64 }) => {
   try {
+    if (!filePath || !isPathAllowed(path.resolve(filePath))) return { success: false, error: 'Path not allowed' };
     if (base64) {
       fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
     } else {
@@ -6738,7 +6807,9 @@ ipcMain.handle('list-meshes', async () => {
 });
 
 ipcMain.handle('get-mesh-path', (event, filename) => {
-  return path.join(MESHES_DIR, filename);
+  const safe = path.basename(String(filename || ''));
+  const p = path.join(MESHES_DIR, safe);
+  return isPathAllowed(p) ? p : null;
 });
 
 // 2026-06-13: list everything in meshes/animated/ so the renderer can
@@ -7023,12 +7094,14 @@ ipcMain.handle('list-image-folders', () => {
 });
 
 ipcMain.handle('get-mesh-local-url', (event, filePath) => {
+  if (!filePath || !isPathAllowed(path.resolve(filePath))) return null;
   if (!fs.existsSync(filePath)) return null;
   // Return file:// URL for direct loading by Three.js loaders
   return 'file:///' + filePath.replace(/\\/g, '/');
 });
 
 ipcMain.handle('read-mesh-file', (event, filePath) => {
+  if (!filePath || !isPathAllowed(path.resolve(filePath))) return null;
   if (!fs.existsSync(filePath)) return null;
   const buffer = fs.readFileSync(filePath);
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);

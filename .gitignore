@@ -116,3 +116,17 @@ external/Puppeteer/
 
 # Local-only security/legal audit reports (must NOT be published to the public repo)
 audit/
+
+# Scratch / scraped artefacts (never commit).
+# Covers the ~13 untracked scratch files (rokoko license/readme scrapes,
+# base64 dumps, and the "c<U+F03A>tmp..." mojibake filenames). Gitignore
+# only prevents future `git add .` leaks — delete the on-disk files manually.
+rokoko*
+*_b64.txt
+*_lic_raw.json
+*_license_b64.txt
+*_retarget_*_b64.txt
+c*tmp*
+**/c*tmp*
+*secret*
+*token*
