@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (cloud : retrait du bouton "Preview mask" de l'Auto Inpaint)
+
+User : le bouton detect/Preview cloud (mon ajout) ne semble jamais detecter (proba
+cold start GPU "Server warming up") + n'existe pas sur desktop -> "le retirer (comme
+desktop)". Retire l'UI (bouton ai-preview-btn + overlay ai-mask-overlay + handler +
+_aiHideMaskOverlay) de cloud index2.js/index.html. La detection reste DANS Apply
+(CLIPSeg + inpaint en 1 etape, comme desktop). Backend laisse dormant : l'op "segment"
+(app.py), la route /api/segment-preview (worker) et le shim segmentMask restent en
+place mais plus appeles (pas de redeploy Modal/worker necessaire pour le retrait UI).
+A FAIRE : user doit tester APPLY pour confirmer que la detection CLIPSeg marche
+vraiment (vs juste cold start). Prochain chantier : ameliorer le Paint desktop
+(calques + pinceaux + outils de selection).
+
 ## 2026-06-16 (parite cloud finitions : engine caches + variant refondu en 1 panneau)
 
 User a repere 2 ecarts visuels cloud vs desktop sur captures :
