@@ -417,6 +417,13 @@ class MyFabmeshPredictor:
         self.pipe.vae.to(torch.float16)
         self.pipe.text_encoder.to(torch.float16)
         self.pipe.text_encoder_2.to(torch.float16)
+        # Upcast VAE to fp32 — SDXL's fp16 VAE NaNs to a flat grey image.
+        try:
+            self.pipe.upcast_vae()
+        except Exception as _e:
+            try: self.pipe.vae.to(torch.float32)
+            except Exception: pass
+            print(f"[snap] upcast_vae fallback ({_e})", flush=True)
 
         # NSFW classifiers — small (~350MB total) and CPU-only, so we
         # also load them under the snapshot. Both are Apache 2.0.
@@ -622,6 +629,13 @@ class MyFabmeshBackview:
         self.pipe.text_encoder.to(torch.float16)
         self.pipe.text_encoder_2.to(torch.float16)
         self.pipe.controlnet.to(torch.float16)
+        # Upcast VAE to fp32 — SDXL's fp16 VAE NaNs to a flat grey image.
+        try:
+            self.pipe.upcast_vae()
+        except Exception as _e:
+            try: self.pipe.vae.to(torch.float32)
+            except Exception: pass
+            print(f"[snap] upcast_vae fallback ({_e})", flush=True)
 
         # Florence-2 — pinned revision + eager attn (sdpa missing in this rev).
         self.florence_proc = AutoProcessor.from_pretrained(
@@ -1176,6 +1190,13 @@ class MyFabmeshMesh:
         pipe.vae.to(torch.float16)
         pipe.text_encoder.to(torch.float16)
         pipe.text_encoder_2.to(torch.float16)
+        # Upcast VAE to fp32 — SDXL's fp16 VAE NaNs to a flat grey image.
+        try:
+            pipe.upcast_vae()
+        except Exception as _e:
+            try: pipe.vae.to(torch.float32)
+            except Exception: pass
+            print(f"LOCAL_REALVIS: upcast_vae fallback ({_e})", flush=True)
         # CPU offload — keeps VRAM headroom for the TRELLIS-2 pipeline
         # that's already on GPU. Same trade-off the desktop makes.
         pipe.enable_model_cpu_offload()
