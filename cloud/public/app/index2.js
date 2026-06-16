@@ -4289,7 +4289,7 @@ if (qualityEl && qualityLabel) {
 //  3. Negative prompt (local_juggernaut_bridge.py) blocks grid layouts.
 const ASSET_TYPE_PROMPTS = {
   character: 'single isolated 3D character, one character only, full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, RTS unit game asset, plain white background, even studio lighting, no shadows, no other characters, centered, clean silhouette, no text, no UI',
-  building: 'ONE building only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, isometric angle, clean silhouette, no text, no UI, no duplicate, no second building',
+  building: 'ONE building only, single instance, isolated, full structure, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second building, not a village, not a town',
   vehicle: 'ONE car only, single vehicle, only one instance, isolated, complete vehicle, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, facing camera, clean silhouette, no text, no UI, no duplicate, no second car, no twin, no rear view inset',
   weapon: 'ONE weapon only, single instance, isolated, full weapon, plain white background, even studio lighting, no shadows, centered, side profile, clean silhouette, no text, no UI, no duplicate',
   prop: 'ONE prop only, single instance, isolated, full item, plain white background, even studio lighting, no shadows, no characters, centered, strict front view, clean silhouette, no text, no UI, no duplicate',

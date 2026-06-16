@@ -306,6 +306,20 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
                 "body cut off, cropped, out of frame, "
                 "blurry, deformed, bad anatomy"
             )
+        elif _asset_type in ('building', 'environment'):
+            # Buildings/structures: SDXL's isometric-architecture prior loves
+            # to tile a whole VILLAGE/town into one frame (the "house for orc"
+            # -> 30-house diorama bug). The generic anti-doubling block below
+            # only kills 2-up product shots, not a cluster, so buildings get a
+            # dedicated anti-cluster negative. Kept < 77 CLIP tokens.
+            negative_prompt = (
+                "blurry, low quality, text, watermark, deformed, cropped, "
+                "village, town, city, cityscape, suburb, neighborhood, "
+                "multiple buildings, rows of houses, many houses, "
+                "housing development, street, aerial view, bird's eye view, "
+                "isometric city, tiled, repeated pattern, duplicate, "
+                "two buildings, collage, grid layout, diorama"
+            )
         else:
             negative_prompt = (
                 "blurry, low quality, text, watermark, signature, deformed, "

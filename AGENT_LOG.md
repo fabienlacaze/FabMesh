@@ -1,5 +1,27 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (fix — asset "building" generait un VILLAGE entier dans une image)
+
+User : "jai voulu generer une maison avec construction stages mais ca ma fait plein
+de maisons dans une seule image". CAUSE : le template asset-type "building" etait le
+SEUL asset inanime reste sur "isometric angle" (vehicle/prop/environment avaient deja
+ete bascules en "strict front view" justement pour tuer le doublage). "isometric
+angle" + architecture = prior SDXL "diorama de village isometrique" -> tuile 30
+maisons. Et tous les "ONE building only / no duplicate" etaient dans le prompt POSITIF
+(SDXL ignore/renforce la negation).
+FIX (desktop + cloud) :
+- Renderers (src + cloud index2.js) : template building "isometric angle" -> "strict
+  front view, facing camera, ... not a village, not a town". Re-applique a la gen via
+  buildFullPrompt (l'ancien isometric est strippe par stripKnownPromptSuffixes).
+- modal_app/_prompts.py:22 : meme correction sur le framing backend cloud.
+- Negative prompts : nouvelle branche dediee building/environment ANTI-VILLAGE
+  (village, town, city, multiple buildings, rows of houses, aerial view, isometric
+  city, tiled, diorama...) dans scripts/local_juggernaut_bridge.py (branche elif) ET
+  modal_app/_realvis.py (_ANATOMY_NEG building/environment, weighted, <77 tokens).
+Desktop : Ctrl+R + re-gen suffit (renderer + bridge respawn). Cloud : build+deploy +
+Modal redeploy requis.
+
+
 ## 2026-06-16 (port — parite cloud : fixes desktop du matin portes sur Cloudflare + Modal)
 
 User : verifier que tout ce qu'on a fait ce matin est sur la version cloud, plan

@@ -19,11 +19,11 @@ CUDA cost.
 # remains here: pure semantic guidance (pose, framing, background).
 ASSET_TYPE_PROMPTS = {
     'character':   'full body, T-pose neutral stance, arms extended horizontally, legs apart, strict front view, facing camera, symmetric, plain white background, even studio lighting',
-    'building':    'full structure, plain white background, even studio lighting, centered, isometric angle',
+    'building':    'full structure, plain white background, even studio lighting, centered, strict front view, facing camera, single detached building',
     'vehicle':     'complete vehicle, plain white background, even studio lighting, centered, strict front view, facing camera',
     'weapon':      'full weapon, plain white background, even studio lighting, centered, side profile',
     'prop':        'full item, plain white background, even studio lighting, centered, strict front view',
-    'creature':    'full body, neutral stance, side profile, plain white background, even studio lighting, centered',
+    'creature':    'full body from head to feet, complete figure visible, feet on ground, both wings fully spread to the sides like heraldic emblem, two wings clearly visible, symmetric wingspan, wings extended horizontally on both sides of body, front-facing pose, facing camera, plain white background, even studio lighting, centered',
     'animal':      'full body, four legs visible, standing on all fours, side profile, plain white background, even studio lighting, centered',
     'environment': 'full structure, plain white background, even studio lighting, centered, strict front view',
     'icon':        'app icon, isolated subject, centered, transparent background, slight isometric angle, glossy material',

@@ -33,16 +33,42 @@ def _angle_token(prompt: str) -> str:
 # the targeted anatomy negatives drops the failure rate to ~2%. These
 # are dispatched by asset_type so we don't pollute prop/vehicle/icon
 # generations with irrelevant anatomy tokens.
+# A1111-style emphasis weights — our chunked encoder
+# (scripts/_sdxl_prompt_utils.py) parses (token:1.5) and scales the
+# CLIP token embeddings. Single mention of "five legs" wasn't strong
+# enough on RealVis V4.0 (still ~10% failure on quadrupeds); weighting
+# to 1.6 makes the anti-anatomy clause dominate CFG. Verified
+# empirically on training_data_gen batch.
 _ANATOMY_NEG = {
-    'animal':    "five legs, six legs, three legs, polydactyly, two heads",
-    'creature':  "extra wings, missing wing, five legs, three legs, two heads",
-    # character: also block mirror-weapon duplication (SDXL symmetric T-pose
-    # framing tends to duplicate weapons across the body axis — empirical:
-    # humanoid_10 elf archer generated 2 bows, humanoid_03 orc warrior
-    # generated 2 weapons). Compel makes these tokens reach the U-Net.
-    'character': "three arms, extra arms, missing arm, mutated hands, "
-                 "two weapons, dual wielding, mirrored weapons, "
-                 "pair of weapons, weapon in each hand",
+    'animal':    "(five legs:1.6), (six legs:1.6), (extra leg:1.6), "
+                 "(polydactyly:1.5), (three legs:1.4), (two heads:1.5), "
+                 "(deformed legs:1.4)",
+    'creature':  "(extra wings:1.6), (missing wing:1.6), (single wing:1.6), "
+                 "(only one wing:1.6), (one wing visible:1.5), "
+                 "(wing hidden behind body:1.4), "
+                 "(five legs:1.6), (three legs:1.4), (two heads:1.5), "
+                 "(fused wings:1.4), "
+                 "(bust shot:1.6), (portrait:1.5), (cropped body:1.6), "
+                 "(feet not visible:1.4), (waist up:1.5), (chest up:1.5), "
+                 "(pedestal:1.6), (plinth:1.6), (base platform:1.6), "
+                 "(stone platform:1.5), (statue base:1.5), "
+                 "(pedestal under feet:1.4), (decorative base:1.4)",
+    'character': "(three arms:1.5), (extra arms:1.6), missing arm, "
+                 "(mutated hands:1.4), (two weapons:1.6), "
+                 "(dual wielding:1.5), (mirrored weapons:1.5), "
+                 "(weapon in each hand:1.4), (extra weapon:1.4)",
+    # Buildings/structures: SDXL's isometric-architecture prior tiles a
+    # whole village/town into one frame ("house for orc" -> 30-house
+    # diorama). Front-load anti-cluster tokens so they reach the U-Net.
+    'building':    "(village:1.6), (town:1.6), (city:1.6), (cityscape:1.5), "
+                   "(multiple buildings:1.6), (rows of houses:1.5), "
+                   "(many houses:1.5), (suburb:1.4), (neighborhood:1.4), "
+                   "(aerial view:1.4), (isometric city:1.5), "
+                   "(tiled:1.4), (repeated pattern:1.4), (diorama:1.4)",
+    'environment': "(village:1.5), (town:1.5), (city:1.5), "
+                   "(multiple buildings:1.5), (rows of houses:1.4), "
+                   "(many houses:1.4), (aerial view:1.4), "
+                   "(isometric city:1.4), (tiled:1.4), (diorama:1.4)",
 }
 
 
