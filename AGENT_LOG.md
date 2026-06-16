@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (i18n : 6 langues + fix flicker + parité desktop)
+
+- **6 langues les plus parlées** : EN (source) + FR (inline dans i18n.js) + 4
+  fichiers auto-enregistrés `lang/{es,zh,hi,ar}.js` (Español, 简体中文, हिन्दी,
+  العربية). Chaque fichier = `FabI18n.register('<code>', {...})` (~440 paires
+  traduites des clés FR par 4 agents). Architecture "1 fichier/langue" = scalable
+  (ajouter une langue = 1 fichier + 1 <option> + 1 drapeau, pas de gros monofichier).
+- **Fix flicker EN<->FR pendant la génération** : l'observer re-traduisait via
+  setTimeout(250ms) -> l'anglais flashait à chaque re-render (renderJobs 1s).
+  Maintenant on traduit les sous-arbres AJOUTÉS *synchroniquement* dans le callback
+  de l'observer (avant le paint) -> plus de flash. Ciblé (pas tout document.body).
+- **Fix boutons à icône non traduits** ("💾 Export", "🪄 Modify", "⬡ Import",
+  "☐ Select all"...) : le nœud texte vaut "💾 Export" donc la clé "Export" ne
+  matchait pas. Fallback _translateNodeValue : si la clé complète n'existe pas,
+  on enlève le préfixe emoji/symbole et on traduit le reste, en gardant l'icône.
+- **Drapeaux SVG es/zh/hi/ar** + **RTL** : applyLang met dir=rtl quand ar actif.
+- **Clés FR manquantes** ajoutées (section Compte/Session cloud, toggle parental
+  Unrestricted/Lock, grille projets rendue par JS : No image / Create a new project).
+- **Parité desktop** : i18n.js + lang/*.js copiés dans src/renderer/, <option> +
+  <script> ajoutés dans index2.html. Tout fonctionne aussi sur desktop (Ctrl+R).
+
 ## 2026-06-16 (Auto-Inpaint cloud Preview fix + drapeau + i18n FR complet)
 
 - **Modal redeploy** (modal_app/app.py depuis la RACINE du repo, pas depuis modal_app/

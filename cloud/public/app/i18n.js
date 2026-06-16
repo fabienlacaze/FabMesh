@@ -656,6 +656,26 @@
       'Event details': "Détails de l'événement",
       'Loading…': 'Chargement…',
       'Detecting target…': 'Détection de la cible…',
+      // ---- Cloud account / auth / parental (some are JS-rendered) ----
+      'Account': 'Compte',
+      'Session': 'Session',
+      'Sign out': 'Se déconnecter',
+      'Sign out of MyFabmesh.AI Cloud on this device.': 'Se déconnecter de MyFabmesh.AI Cloud sur cet appareil.',
+      'Blocks NSFW, violent, and illegal content in prompts. Disable with a PIN code for unrestricted adult use.':
+        'Bloque les contenus NSFW, violents et illégaux dans les prompts. Désactivez avec un code PIN pour un usage adulte sans restriction.',
+      'Unrestricted': 'Sans restriction',
+      'Restricted (safe)': 'Restreint (sûr)',
+      'Unrestricted mode — click to lock': 'Mode sans restriction — cliquez pour verrouiller',
+      'Parental control active — click to unlock': 'Contrôle parental actif — cliquez pour déverrouiller',
+      'Lock': 'Verrouiller',
+      'Locked': 'Verrouillé',
+      'Unrestricted mode enabled.': 'Mode sans restriction activé.',
+      // ---- Projects grid (JS-rendered) ----
+      'No image': 'Aucune image',
+      'No images yet.': 'Aucune image pour le moment.',
+      'Create a new project': 'Créer un nouveau projet',
+      'Server warming up ({n} services)': 'Serveur en préchauffage ({n} services)',
+      'No generation in progress': 'Aucune génération en cours',
     },
   };
 
@@ -677,13 +697,27 @@
     const nodes = [];
     let n;
     while ((n = tw.nextNode())) nodes.push(n);
-    nodes.forEach((node) => {
-      if (node.__i18n === undefined) node.__i18n = node.nodeValue;  // cache original English
-      const orig = node.__i18n;
-      const key = orig.trim();
-      const translated = (dict && dict[key]) ? orig.replace(key, dict[key]) : orig;
-      if (node.nodeValue !== translated) node.nodeValue = translated;
-    });
+    nodes.forEach((node) => _translateNodeValue(node, dict));
+  }
+
+  // Translate a single text node, caching its original English on the node so
+  // switching back to English restores it. Fallback: if the full trimmed label
+  // has no entry, strip a leading icon/emoji run ("💾 Export" -> "💾 " + "Export")
+  // and translate the word remainder, so icon-prefixed buttons translate too.
+  function _translateNodeValue(node, dict) {
+    if (!dict) return;
+    if (node.__i18n === undefined) node.__i18n = node.nodeValue;
+    const orig = node.__i18n;
+    const key = orig.trim();
+    if (!key) return;
+    let translated = orig;
+    if (dict[key]) {
+      translated = orig.replace(key, dict[key]);
+    } else {
+      const m = key.match(/^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u);
+      if (m && dict[m[2]]) translated = orig.replace(key, m[1] + dict[m[2]]);
+    }
+    if (node.nodeValue !== translated) node.nodeValue = translated;
   }
 
   function _translateAttrs(root, dict) {
@@ -703,6 +737,10 @@
   const _FLAG_SVG = {
     en: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 30'><clipPath id='ujs'><path d='M0,0 v30 h60 v-30 z'/></clipPath><clipPath id='ujt'><path d='M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z'/></clipPath><g clip-path='url(#ujs)'><path d='M0,0 v30 h60 v-30 z' fill='#012169'/><path d='M0,0 L60,30 M60,0 L0,30' stroke='#fff' stroke-width='6'/><path d='M0,0 L60,30 M60,0 L0,30' clip-path='url(#ujt)' stroke='#C8102E' stroke-width='4'/><path d='M30,0 v30 M0,15 h60' stroke='#fff' stroke-width='10'/><path d='M30,0 v30 M0,15 h60' stroke='#C8102E' stroke-width='6'/></g></svg>",
     fr: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'><rect width='3' height='2' fill='#fff'/><rect width='1' height='2' fill='#002654'/><rect x='2' width='1' height='2' fill='#CE1126'/></svg>",
+    es: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'><rect width='3' height='2' fill='#AA151B'/><rect y='0.5' width='3' height='1' fill='#F1BF00'/></svg>",
+    zh: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 20'><rect width='30' height='20' fill='#DE2910'/><path d='M5 2.6 6.12 6.05 9.75 6.05 6.81 8.18 7.94 11.63 5 9.5 2.06 11.63 3.19 8.18 0.25 6.05 3.88 6.05 Z' fill='#FFDE00'/></svg>",
+    hi: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6'><rect width='9' height='6' fill='#fff'/><rect width='9' height='2' fill='#FF9933'/><rect y='4' width='9' height='2' fill='#138808'/><circle cx='4.5' cy='3' r='0.9' fill='none' stroke='#000080' stroke-width='0.16'/><circle cx='4.5' cy='3' r='0.12' fill='#000080'/></svg>",
+    ar: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 16'><rect width='24' height='16' fill='#006C35'/><rect x='3' y='10.4' width='15' height='1.1' rx='0.5' fill='#fff'/><path d='M18 11 L21 10.2 L21 11.8 Z' fill='#fff'/></svg>",
   };
   function _updateFlag(lang) {
     const f = document.getElementById('lang-flag');
@@ -721,6 +759,7 @@
       _translateAttrs(document.body, dict);
     } catch (e) { try { console.warn('[i18n]', e); } catch (_) {} }
     document.documentElement.setAttribute('lang', _lang);
+    document.documentElement.setAttribute('dir', _lang === 'ar' ? 'rtl' : 'ltr');
     const sel = document.getElementById('lang-select');
     if (sel && sel.value !== _lang) sel.value = _lang;
     _updateFlag(_lang);
@@ -732,14 +771,27 @@
     return (dict && dict[s]) || s;
   }
 
-  // Re-translate dynamically-added content. childList only (NOT characterData)
-  // so our own nodeValue swaps never re-trigger us -> no loop. Debounced.
-  let _moTimer = null;
+  // Re-translate dynamically-added content SYNCHRONOUSLY (inside the observer
+  // callback, before the browser paints) so freshly-rendered English never
+  // flashes on screen — fixes the EN<->FR flicker when panels re-render every
+  // second during generation. We only walk the newly-added subtrees (not the
+  // whole body), so it stays cheap. childList only (NOT characterData) so our
+  // own nodeValue swaps never re-trigger us -> no loop.
   const _mo = new MutationObserver((muts) => {
     if (_lang === 'en') return;
-    if (!muts.some((m) => m.addedNodes && m.addedNodes.length)) return;
-    clearTimeout(_moTimer);
-    _moTimer = setTimeout(() => applyLang(_lang), 250);
+    const dict = _dict();
+    if (!dict) return;
+    for (const mut of muts) {
+      if (!mut.addedNodes) continue;
+      mut.addedNodes.forEach((node) => {
+        if (node.nodeType === 3) {                                   // text node
+          _translateNodeValue(node, dict);
+        } else if (node.nodeType === 1 && !SKIP_TAGS.has(node.nodeName)) {  // element subtree
+          _translateText(node, dict);
+          _translateAttrs(node, dict);
+        }
+      });
+    }
   });
 
   window.FabI18n = {
