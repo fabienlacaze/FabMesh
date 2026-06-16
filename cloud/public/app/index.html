@@ -1102,8 +1102,10 @@
           <button id="np-enhance-prompt" class="ghost-btn" style="font-size:11px; padding:2px 8px;" title="Enhance the prompt with style and quality keywords">&#10024; Enhance</button>
         </div>
         <textarea id="np-prompt" rows="3" placeholder="An orc warrior with leather armor, full-body pose..."></textarea>
+        <div id="np-block-msg" class="hidden" style="margin-top:10px; padding:10px 12px; background:rgba(220,40,45,0.12); border:1px solid rgba(220,40,45,0.5); border-radius:6px; color:#f0a; font-size:12px; line-height:1.4;"></div>
         <div class="modal-actions">
           <button class="ghost-btn" id="np-cancel">Cancel</button>
+          <button class="primary-btn" id="np-unlock" style="display:none; background:linear-gradient(135deg,#f59e0b,#f97316);">&#128275; Unlock</button>
           <button class="primary-btn" id="np-create">Create project</button>
         </div>
       </div>
@@ -1302,6 +1304,7 @@
             <input type="text" id="ai-replace" placeholder="leather helmet, plain background..." />
             <label>Detection padding <span id="ai-dilate-val" class="slider-val">15px</span></label>
             <input type="range" id="ai-dilate" min="0" max="40" value="15" />
+            <small id="ai-dilate-hint" class="modal-subtitle" style="display:block; margin-top:5px; font-size:11px; line-height:1.3;">How far to expand the detected mask around the target. 0px = tight to the object; higher widens it to cover edges, shadows or halos. ~15px recommended.</small>
           </div>
         </div>
         <div class="modal-actions">

@@ -1207,6 +1207,8 @@ function renderProjectsBulkBar() {
 function openNewProjectModal() {
   document.getElementById('np-name').value = '';
   document.getElementById('np-prompt').value = '';
+  document.getElementById('np-block-msg')?.classList.add('hidden');
+  const _npu = document.getElementById('np-unlock'); if (_npu) _npu.style.display = 'none';
   document.getElementById('modal-new-project').classList.remove('hidden');
   setTimeout(() => document.getElementById('np-name').focus(), 50);
 }
@@ -1218,6 +1220,19 @@ function closeNewProjectModal() {
   if (window.__pendingDroppedFile) window.__pendingDroppedFile = null;
 }
 document.getElementById('btn-new-project').addEventListener('click', openNewProjectModal);
+// Unlock from the New Project popup: run the parental toggle (PIN flow),
+// then if the user is now unrestricted, retry creating the project.
+document.getElementById('np-unlock')?.addEventListener('click', async () => {
+  try { await toggleParentalControl(); } catch (_) {}
+  try {
+    const status = API.getParentalStatus ? await API.getParentalStatus() : null;
+    if (status && status.unrestricted) {
+      document.getElementById('np-block-msg')?.classList.add('hidden');
+      const _u = document.getElementById('np-unlock'); if (_u) _u.style.display = 'none';
+      document.getElementById('np-create')?.click();  // retry now that it's unlocked
+    }
+  } catch (_) {}
+});
 document.getElementById('project-search')?.addEventListener('input', () => renderProjectsGrid());
 document.getElementById('np-cancel').addEventListener('click', closeNewProjectModal);
 document.getElementById('np-create').addEventListener('click', async () => {
@@ -1245,10 +1260,20 @@ document.getElementById('np-create').addEventListener('click', async () => {
       return new RegExp('\\b' + escaped + '\\b').test(text);
     });
     if (blocked) {
-      showToast(`Blocked: "${blocked}" is not allowed with parental control active.`, 'error', 5000);
+      // Show the block INSIDE the popup (not a toast) + an Unlock shortcut.
+      const _msg = document.getElementById('np-block-msg');
+      if (_msg) {
+        _msg.textContent = `Blocked: "${blocked}" is not allowed with parental control active. Unlock to disable the content filter.`;
+        _msg.classList.remove('hidden');
+      }
+      const _ub = document.getElementById('np-unlock');
+      if (_ub) _ub.style.display = '';
       return;
     }
   }
+  // Passed the filter (or unrestricted) — clear any prior block UI.
+  document.getElementById('np-block-msg')?.classList.add('hidden');
+  const _ub2 = document.getElementById('np-unlock'); if (_ub2) _ub2.style.display = 'none';
 
   closeNewProjectModal();
   // Create an empty project shell and open it
@@ -6930,6 +6955,7 @@ document.getElementById('paint-brush-size')?.addEventListener('input', (e) => {
 document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
   paintState.opacity = parseInt(e.target.value);
   document.getElementById('paint-opacity-val').textContent = e.target.value + '%';
+  _paintLiveRefillIfFill();
 });
 
 // Restore the snapshot we took before the last flood-fill and re-run
@@ -7054,7 +7080,7 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
         const ctx = overlay.getContext('2d');
         const samp = ctx.getImageData(0, 0, overlay.width, overlay.height).data;
         let hasInk = false;
-        for (let i = 3; i < samp.length; i += 4 * 64) {
+        for (let i = 3; i < samp.length; i += 4) {
           if (samp[i] > 0) { hasInk = true; break; }
         }
         if (hasInk) {
@@ -11446,7 +11472,7 @@ async function _pmApplyOnDevice() {
           const eL = entryAll.emissive;
           if (!eL) return;
           const samp = eL.ctx.getImageData(0, 0, eL.w, eL.h).data;
-          for (let i = 0; i < samp.length; i += 4 * 64) {
+          for (let i = 0; i < samp.length; i += 4) {
             if (samp[i] || samp[i+1] || samp[i+2]) { emissivePainted = true; break; }
           }
         });
@@ -15219,7 +15245,7 @@ function _jobStepIndex(j) {
   // 2026-06-02 add: re-roll / variant patterns. Previously the
   // resumed "Re-roll variant: orc rose" job missed every regex and
   // fell to 0 → no Go-to button, no per-step widget.
-  if (/^(generate images?|generating (back|6) views|generate back views|multi[- ]?views|modify|inpaint|face[- ]?fix|remove[- ]?bg|rectif|upscal|back[- ]?view|t[- ]?pose|re[- ]?roll|variant|img2img|sdxl|flux)/i.test(n)) return 1;
+  if (/^(generate images?|generating (back|6) views|generate back views|multi[- ]?views|auto[- ]?inpaint|modify|inpaint|face[- ]?fix|remove[- ]?bg|rectif|upscal|back[- ]?view|t[- ]?pose|re[- ]?roll|variant|img2img|sdxl|flux)/i.test(n)) return 1;
   if (/^(generate 3d|mesh op|fill[- ]?holes|smooth|material[- ]?adjust|generate mesh|texture|pbr)/i.test(n)) return 2;
   if (/(rig|skeleton)/i.test(n)) return 3;
   if (/^(animate|animation)/i.test(n)) return 4;

@@ -1,5 +1,32 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (port — parite cloud : fixes desktop du matin portes sur Cloudflare + Modal)
+
+User : verifier que tout ce qu'on a fait ce matin est sur la version cloud, plan
+d'action, puis "Tout (backend + UI)". Audit de parite -> 2 bugs backend + 4 fixes UI.
+BACKEND (modal_app) :
+- app.py : upcast_vae() apres les casts fp16 sur les 3 pipelines RealVis/ControlNet
+  (lignes ~419, ~624, ~1178) -> corrige les images grises (VAE SDXL fp16 NaN), meme
+  bug que le desktop. Caste au snapshot (CPU) ; .to("cuda") sans dtype preserve fp32.
+- _nsfw.py : make_blocked_placeholder passe du placeholder gris muet au tampon rouge
+  NSFW (fond sombre + bordures rouges + gros "NSFW" + sous-titre). Cascade de polices
+  DejaVu(/usr/share/fonts) -> arialbd -> load_default(size) scalable -> bitmap. Pas
+  de .ttf a bundler.
+UI (cloud/public/app) :
+- index2.js : stride emissive 4*64 -> 4 (2 endroits : badge ampoule + emissivePainted)
+  pour ne plus rater les traits fins ; regex _jobStepIndex + auto[- ]?inpaint (etape
+  visible pendant la gen) ; handler Opacity rappelle _paintLiveRefillIfFill (refill
+  live de la derniere zone Fill) ; New Project = blocage in-popup (np-block-msg) +
+  bouton Unlock (toggleParentalControl puis retry np-create) au lieu d'un toast.
+- index.html : ajout np-block-msg + bouton np-unlock dans la modale New Project ;
+  ai-dilate-hint sous le slider Detection padding (auto inpaint).
+DEPLOY : cloud build + wrangler deploy OK (live sur myfabmesh-cloud). Modal redeploy
+BLOQUE : "Workspace billing cycle spend limit reached" -> backend pas encore live,
+a relancer (modal deploy modal_app/app.py) quand la limite est relevee.
+NOTE : app.py laisse non-committe (porte du WIP pre-existant inference_bytes pour le
+batch AnyTop) ; seul _nsfw.py est committe cote backend.
+
+
 ## 2026-06-16 (feat — tampon NSFW rouge sur les images bloquees)
 
 User : si une image est grisee a cause du NSFW, mettre un tampon rouge NSFW.
