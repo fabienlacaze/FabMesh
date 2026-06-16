@@ -6841,9 +6841,13 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
         const ctx = overlay.getContext('2d');
         const samp = ctx.getImageData(0, 0, overlay.width, overlay.height).data;
         let hasInk = false;
-        for (let i = 3; i < samp.length; i += 4 * 64) {
+        // Scan EVERY pixel's alpha (breaks on first hit). The old i += 4*64
+        // stride sampled only 1 pixel in 64 and could miss a thin emissive
+        // stroke entirely → the layer was never saved → no 💡 badge.
+        for (let i = 3; i < samp.length; i += 4) {
           if (samp[i] > 0) { hasInk = true; break; }
         }
+        console.log('[emissive] save: hasInk=', hasInk, 'imgPath=', paintState.imgPath);
         if (hasInk) {
           _emissiveLayerSet(paintState.imgPath, overlay.toDataURL('image/png'));
         }
@@ -6867,6 +6871,7 @@ document.getElementById('paint-save')?.addEventListener('click', async () => {
       const newPath = result.path || result.newPath || result.url;
       const srcLayer = _emissiveLayerGet(paintState.imgPath);
       if (srcLayer && newPath) _emissiveLayerSet(newPath, srcLayer);
+      console.log('[emissive] carry: srcLayer=', !!srcLayer, 'newPath=', newPath, 'has(newPath)=', _emissiveLayerHas(newPath));
       if (state.currentProject) await reloadCurrentProject();
     } else {
       const msg = (result && result.error) || 'unknown';
