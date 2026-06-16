@@ -641,12 +641,22 @@ def do_segment(input_path, target_text, output_path, dilate=15):
     state.last_use['inpaint'] = time.time()
     with state.inference_lock:
         try:
+            # Put the inputs on the SAME device as CLIPSeg — model_cpu_offload on
+            # the other pipelines can leave CLIPSeg on CPU, and forcing inputs to
+            # cuda then crashed ("Input cuda vs weight cpu"). Re-pin to GPU when
+            # available, then follow whatever device the model is actually on.
+            try:
+                if torch.cuda.is_available():
+                    state.clipseg_model.to('cuda')
+            except Exception:
+                pass
+            _dev = next(state.clipseg_model.parameters()).device
             img = Image.open(input_path).convert("RGB")
             img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
             inputs = state.clipseg_processor(
                 text=[target_text.strip()], images=[img_work],
                 padding=True, return_tensors="pt")
-            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+            inputs = {k: v.to(_dev) for k, v in inputs.items()}
             with torch.inference_mode():
                 seg_out = state.clipseg_model(**inputs)
             mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
