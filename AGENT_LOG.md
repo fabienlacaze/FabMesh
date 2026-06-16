@@ -1,6 +1,16 @@
 # FabMesh Agent Log
 
-## 2026-06-16 (feat — Paint Fill : sliders re-remplissent la dernière zone live)
+## 2026-06-16 (fix — badge emissive 💡 (clé chemin) + masquer champ ENGINE)
+
+1. BADGE EMISSIVE invisible après paint : _emissiveLayerSet/Get/Has utilisaient
+   String(imgPath) brut comme clé du Map. result.path (sauvegarde, backslashes)
+   et img.path (liste projet) pouvaient différer (slash/casse) -> has() ratait ->
+   pas de badge 💡 sur la version peinte. FIX : _emKey() normalise (\\ -> /,
+   lowercase) pour set/get/has -> match fiable.
+2. CHAMP ENGINE masqué : chaque étape a un seul moteur, l'user ne le change pas.
+   IIFE _hideFixedEngineFields cache la form-row (Image/3D/Rig) ou le label+static
+   (Modify modal) tout en gardant le <select> caché (les générateurs lisent
+   toujours .value). Renderer -> Ctrl+R.
 
 User : "déplacer les sliders devrait mettre à jour la dernière zone peinte".
 Pour l'outil Fill : au clic, on stocke paintState.fillSnapshot (canvas pré-fill)

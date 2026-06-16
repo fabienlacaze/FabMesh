@@ -1587,6 +1587,23 @@ function _applyAssetOptionsProfile(assetType) {
   _applyAssetOptionsProfile(sel.value || 'character');
 })();
 
+// Each step has a single fixed engine, so don't show the ENGINE field at all —
+// the user never changes it. We KEEP the hidden <select> in the DOM (the
+// generators still read its .value) and just hide the label + static display.
+(function _hideFixedEngineFields() {
+  ['ws-engine', 'ws-3d-engine', 'ws-rig-engine', 'mod-engine'].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const row = sel.closest('.form-row');
+    if (row) { row.style.display = 'none'; return; }
+    // Modal case (no .form-row): hide the static box + the label right before it.
+    const stat = sel.previousElementSibling;
+    if (stat && stat.classList && stat.classList.contains('engine-static')) stat.style.display = 'none';
+    const lbl = stat ? stat.previousElementSibling : null;
+    if (lbl && lbl.tagName === 'LABEL') lbl.style.display = 'none';
+  });
+})();
+
 // Show/hide "Construction stages" checkbox based on asset type —
 // hidden for living subjects (character, creature) where 3-stage
 // progressive build doesn't make sense. Visible for buildings,
@@ -6184,9 +6201,14 @@ function _saveEmissiveCache() {
     console.warn('[emissive] localStorage save failed:', e?.message || e);
   }
 }
-function _emissiveLayerSet(imgPath, dataUrl) { _emissiveLayerCache.set(String(imgPath), dataUrl); _saveEmissiveCache(); }
-function _emissiveLayerGet(imgPath) { return _emissiveLayerCache.get(String(imgPath)) || null; }
-function _emissiveLayerHas(imgPath) { return _emissiveLayerCache.has(String(imgPath)); }
+// Normalise the cache key so a path saved with backslashes (result.path from
+// main) matches the same image listed with any slash direction / case when the
+// badge is rendered. Without this, set(newPath) and has(img.path) could miss
+// each other → the 💡 emissive badge never appeared on the painted version.
+function _emKey(p) { return String(p == null ? '' : p).replace(/\\/g, '/').toLowerCase(); }
+function _emissiveLayerSet(imgPath, dataUrl) { _emissiveLayerCache.set(_emKey(imgPath), dataUrl); _saveEmissiveCache(); }
+function _emissiveLayerGet(imgPath) { return _emissiveLayerCache.get(_emKey(imgPath)) || null; }
+function _emissiveLayerHas(imgPath) { return _emissiveLayerCache.has(_emKey(imgPath)); }
 
 function _paintGetEmissiveCtx(mgr) {
   const overlay = document.getElementById('paint-emissive-overlay');
