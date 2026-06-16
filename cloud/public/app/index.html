@@ -1738,10 +1738,13 @@
         <div class="settings-box">
           <div style="display:flex; gap:10px; align-items:center;">
             <label for="lang-select" style="font-size:13px;">Interface language</label>
-            <select id="lang-select" style="margin-left:auto; padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px;">
-              <option value="en">English</option>
-              <option value="fr">Français</option>
-            </select>
+            <span style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+              <img id="lang-flag" alt="" style="width:24px; height:16px; border-radius:2px; object-fit:cover; box-shadow:0 0 0 1px rgba(255,255,255,0.15);" />
+              <select id="lang-select" style="padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px;">
+                <option value="en">English</option>
+                <option value="fr">Français</option>
+              </select>
+            </span>
           </div>
         </div>
 

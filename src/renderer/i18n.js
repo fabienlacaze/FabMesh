@@ -162,6 +162,20 @@
     });
   }
 
+  // Small country flags next to the selector. Windows doesn't render flag
+  // EMOJI (shows "FR"/"GB" letters), so we use inline SVG images instead.
+  const _FLAG_SVG = {
+    en: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 30'><clipPath id='ujs'><path d='M0,0 v30 h60 v-30 z'/></clipPath><clipPath id='ujt'><path d='M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z'/></clipPath><g clip-path='url(#ujs)'><path d='M0,0 v30 h60 v-30 z' fill='#012169'/><path d='M0,0 L60,30 M60,0 L0,30' stroke='#fff' stroke-width='6'/><path d='M0,0 L60,30 M60,0 L0,30' clip-path='url(#ujt)' stroke='#C8102E' stroke-width='4'/><path d='M30,0 v30 M0,15 h60' stroke='#fff' stroke-width='10'/><path d='M30,0 v30 M0,15 h60' stroke='#C8102E' stroke-width='6'/></g></svg>",
+    fr: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'><rect width='3' height='2' fill='#fff'/><rect width='1' height='2' fill='#002654'/><rect x='2' width='1' height='2' fill='#CE1126'/></svg>",
+  };
+  function _updateFlag(lang) {
+    const f = document.getElementById('lang-flag');
+    if (!f) return;
+    const svg = _FLAG_SVG[lang];
+    if (svg) { f.src = 'data:image/svg+xml,' + encodeURIComponent(svg); f.style.display = ''; }
+    else f.style.display = 'none';
+  }
+
   function applyLang(lang) {
     _lang = lang || 'en';
     try { localStorage.setItem('fabmesh.lang', _lang); } catch (_) {}
@@ -173,6 +187,7 @@
     document.documentElement.setAttribute('lang', _lang);
     const sel = document.getElementById('lang-select');
     if (sel && sel.value !== _lang) sel.value = _lang;
+    _updateFlag(_lang);
   }
 
   // t(): translate a single string (for JS-built / dynamic UI text).
