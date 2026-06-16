@@ -806,6 +806,11 @@
       'No mesh available — generate or pick one first.': 'Aucun maillage disponible — générez-en un ou choisissez-en un d\'abord.',
       'Rigging bridge not available.': 'Le pont de rigging n\'est pas disponible.',
       'I understand and accept responsibility': 'Je comprends et j\'accepte la responsabilité',
+      // ---- Converted from FR-hardcoded source ----
+      'Filter disabled — re-running the action…': 'Filtre désactivé — relance de l\'action…',
+      'The job will start automatically once the limits are met.': 'Le job sera lancé automatiquement quand les limites seront satisfaites.',
+      'You can adjust the sliders in Settings.': 'Vous pouvez ajuster les sliders dans Settings.',
+      'Job queued': 'Job mis en file d\'attente',
     },
   };
 

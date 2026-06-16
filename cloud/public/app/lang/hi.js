@@ -760,7 +760,11 @@
     'Re-skin': 'री-स्किन',
     'No mesh available — generate or pick one first.': 'कोई मेश उपलब्ध नहीं — पहले एक बनाएँ या चुनें।',
     'Rigging bridge not available.': 'रिगिंग ब्रिज उपलब्ध नहीं है।',
-    'I understand and accept responsibility': 'मैं समझता हूँ और ज़िम्मेदारी स्वीकार करता हूँ'
+    'I understand and accept responsibility': 'मैं समझता हूँ और ज़िम्मेदारी स्वीकार करता हूँ',
+    'Filter disabled — re-running the action…': 'फ़िल्टर अक्षम — कार्रवाई फिर से चलाई जा रही है…',
+    'The job will start automatically once the limits are met.': 'सीमाएँ पूरी होने पर कार्य स्वतः शुरू हो जाएगा।',
+    'You can adjust the sliders in Settings.': 'आप सेटिंग्स में स्लाइडर समायोजित कर सकते हैं।',
+    'Job queued': 'कार्य कतार में'
   };
   if (window.FabI18n) {
     window.FabI18n.register('hi', dict);

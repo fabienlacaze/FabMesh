@@ -760,7 +760,11 @@
       'Re-skin': '重新蒙皮',
       'No mesh available — generate or pick one first.': '没有可用的网格——请先生成或选择一个。',
       'Rigging bridge not available.': '骨骼绑定桥接不可用。',
-      'I understand and accept responsibility': '我理解并承担相应责任'
+      'I understand and accept responsibility': '我理解并承担相应责任',
+      'Filter disabled — re-running the action…': '过滤器已禁用——正在重新执行操作…',
+      'The job will start automatically once the limits are met.': '满足上限后任务将自动开始。',
+      'You can adjust the sliders in Settings.': '你可以在设置中调整滑块。',
+      'Job queued': '任务已排队'
   };
   if (window.FabI18n) {
     window.FabI18n.register('zh', dict);

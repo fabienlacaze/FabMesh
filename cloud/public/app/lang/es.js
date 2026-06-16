@@ -761,7 +761,11 @@
       'Re-skin': 'Reasignar piel',
       'No mesh available — generate or pick one first.': 'No hay malla disponible: genera o elige una primero.',
       'Rigging bridge not available.': 'El puente de rigging no está disponible.',
-      'I understand and accept responsibility': 'Entiendo y acepto la responsabilidad'
+      'I understand and accept responsibility': 'Entiendo y acepto la responsabilidad',
+      'Filter disabled — re-running the action…': 'Filtro desactivado — reejecutando la acción…',
+      'The job will start automatically once the limits are met.': 'La tarea se iniciará automáticamente cuando se cumplan los límites.',
+      'You can adjust the sliders in Settings.': 'Puedes ajustar los controles en Ajustes.',
+      'Job queued': 'Tarea en cola'
   };
   if (window.FabI18n) {
     window.FabI18n.register('es', dict);

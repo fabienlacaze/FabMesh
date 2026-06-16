@@ -7544,7 +7544,7 @@ async function _unlockThenRetry() {
   try {
     const status = API.getParentalStatus ? await API.getParentalStatus() : null;
     if (status && status.unrestricted && retry && typeof retry.runFn === 'function') {
-      showToast('Filtre désactivé — relance de l\'action…', 'info', 2500);
+      showToast(FabI18n.t('Filter disabled — re-running the action…'), 'info', 2500);
       gatedRun(retry.kind, retry.displayName, retry.runFn);
     }
   } catch (_) {}
@@ -14439,9 +14439,9 @@ async function enqueueJob(kind, displayName, runFn) {
   // Show a popup so the user knows WHY the job didn't start immediately
   try {
     if (typeof customError === 'function') {
-      customError(reason + '\n\nLe job sera lancé automatiquement quand les limites seront satisfaites.\nVous pouvez ajuster les sliders dans Settings.', 'Job mis en file d\'attente');
+      customError(reason + '\n\n' + FabI18n.t('The job will start automatically once the limits are met.') + '\n' + FabI18n.t('You can adjust the sliders in Settings.'), FabI18n.t('Job queued'));
     } else {
-      alert(`Job mis en file d'attente: ${reason}`);
+      alert(FabI18n.t('Job queued') + ': ' + reason);
     }
   } catch (e) {}
   processQueue();

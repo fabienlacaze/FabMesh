@@ -760,7 +760,11 @@
       'Re-skin': 'إعادة الكسوة',
       'No mesh available — generate or pick one first.': 'لا توجد شبكة متاحة — ولّد واحدة أو اخترها أولاً.',
       'Rigging bridge not available.': 'جسر إنشاء الهيكل غير متاح.',
-      'I understand and accept responsibility': 'أفهم وأتحمّل المسؤولية'
+      'I understand and accept responsibility': 'أفهم وأتحمّل المسؤولية',
+      'Filter disabled — re-running the action…': 'تم تعطيل المرشّح — جارٍ إعادة تنفيذ الإجراء…',
+      'The job will start automatically once the limits are met.': 'ستبدأ المهمة تلقائياً عند استيفاء الحدود.',
+      'You can adjust the sliders in Settings.': 'يمكنك ضبط أشرطة التمرير في الإعدادات.',
+      'Job queued': 'المهمة في الطابور'
   };
   if (window.FabI18n) {
     window.FabI18n.register('ar', dict);
