@@ -191,14 +191,43 @@
                     </optgroup>
                     <optgroup label="Stylized">
                       <option value="stylized">Stylized (mid-poly)</option>
+                      <option value="stylized-pbr">Stylized PBR</option>
+                      <option value="hand-painted">Hand-painted</option>
                       <option value="cartoon">Cartoon</option>
                       <option value="anime">Anime</option>
                       <option value="painterly">Painterly</option>
+                      <option value="comic">Comic book</option>
+                      <option value="ghibli">Ghibli</option>
+                      <option value="pixar">Pixar 3D</option>
+                      <option value="concept">Concept art</option>
+                    </optgroup>
+                    <optgroup label="Genre">
+                      <option value="dark-fantasy">Dark Fantasy</option>
+                      <option value="cyberpunk">Cyberpunk</option>
+                      <option value="steampunk">Steampunk</option>
+                      <option value="synthwave">Synthwave</option>
+                      <option value="horror">Horror</option>
                     </optgroup>
                     <optgroup label="Retro">
                       <option value="lowpoly">Low-poly</option>
                       <option value="pixelart">Pixel art</option>
                       <option value="voxel">Voxel</option>
+                      <option value="minecraft">Minecraft</option>
+                    </optgroup>
+                    <optgroup label="Material">
+                      <option value="chrome">Chrome</option>
+                      <option value="marble">Marble</option>
+                      <option value="carved-wood">Carved wood</option>
+                      <option value="stained-glass">Stained glass</option>
+                      <option value="holographic">Holographic</option>
+                      <option value="figurine">Figurine</option>
+                    </optgroup>
+                    <optgroup label="Artistic">
+                      <option value="watercolor">Watercolor</option>
+                      <option value="sketch">Sketch</option>
+                      <option value="claymation">Claymation</option>
+                      <option value="graffiti">Graffiti</option>
+                      <option value="art-deco">Art deco</option>
                     </optgroup>
                     <optgroup label="Other">
                       <option value="custom">Custom (no preset)</option>
@@ -350,37 +379,38 @@
                             <span style="opacity:0.6;">&#9662;</span>
                           </button>
                           <div id="ws-style-menu" class="hidden" style="position:absolute; top:100%; left:0; right:0; margin-top:4px; background:#000; border:1px solid var(--border); border-radius:var(--radius-sm); z-index:1000; max-height:320px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.6);">
-                            <div class="style-option" data-value="anime style, cel shading, vibrant colors">Anime</div>
-                            <div class="style-option" data-value="cartoon style, bold outlines, flat colors">Cartoon</div>
-                            <div class="style-option" data-value="low-poly 3D art, flat shaded, geometric">Low-poly</div>
-                            <div class="style-option" data-value="pixel art, 16-bit retro, limited palette">Pixel art</div>
-                            <div class="style-option" data-value="painterly, brushstrokes, oil painting">Painterly</div>
-                            <div class="style-option" data-value="PBR materials, ultra detailed, 8k textures">PBR HD</div>
-                            <div class="style-option" data-value="voxel art, blocky 3D, cubic geometry">Voxel</div>
-                            <div class="style-option" data-value="realistic style, photorealistic, sharp details">Realistic</div>
-                            <div class="style-option" data-value="stylized PBR, Overwatch Fortnite style, hand-painted shading, clean game asset">Stylized PBR</div>
-                            <div class="style-option" data-value="hand-painted texture, WoW-style stylized, painterly diffuse, no PBR maps">Hand-painted</div>
-                            <div class="style-option" data-value="dark fantasy, gothic grimdark, dramatic lighting, weathered ornate detail">Dark Fantasy</div>
-                            <div class="style-option" data-value="cyberpunk sci-fi, neon accents, futuristic mechanical detail">Cyberpunk</div>
-                            <div class="style-option" data-value="steampunk, brass copper rivets, victorian mechanical">Steampunk</div>
-                            <div class="style-option" data-value="comic book style, ink outlines, halftone shading, bold colors">Comic book</div>
-                            <div class="style-option" data-value="watercolor, soft pigment washes, paper texture">Watercolor</div>
-                            <div class="style-option" data-value="concept art, rough painterly, dramatic lighting, production design">Concept art</div>
-                            <div class="style-option" data-value="Studio Ghibli style, soft anime, gentle palette, hand-drawn warmth">Ghibli</div>
-                            <div class="style-option" data-value="Pixar 3D animated movie, clean stylized, family-friendly polish">Pixar 3D</div>
-                            <div class="style-option" data-value="pencil sketch, line art, graphite shading, minimal color">Sketch</div>
-                            <div class="style-option" data-value="claymation, plasticine, soft stop-motion model surface">Claymation</div>
-                            <div class="style-option" data-value="Minecraft blocky, low-fi cubic geometry, pixelated texture">Minecraft</div>
+                            <div class="style-option" data-value="realistic style, photorealistic, sharp details, detailed materials">Realistic</div>
+                            <div class="style-option" data-value="PBR materials, ultra detailed, 8k textures, high-poly cinematic quality, film-grade lighting">PBR (high detail)</div>
+                            <div class="style-option" data-value="stylized art, mid-poly game asset, hand-painted textures, fantasy game style">Stylized (mid-poly)</div>
+                            <div class="style-option" data-value="stylized PBR, Overwatch and Fortnite style, hand-painted shading on PBR maps, clean game asset">Stylized PBR</div>
+                            <div class="style-option" data-value="hand-painted texture, WoW-style stylized, painterly diffuse, no realistic PBR maps, vibrant">Hand-painted</div>
+                            <div class="style-option" data-value="cartoon style, bold outlines, cel-shading, vibrant flat colors, expressive shapes">Cartoon</div>
+                            <div class="style-option" data-value="anime style, soft cel-shading, expressive features, japanese animation aesthetic">Anime</div>
+                            <div class="style-option" data-value="painterly style, brushstroke textures, hand-painted concept art look">Painterly</div>
+                            <div class="style-option" data-value="comic book style, ink outlines, halftone shading, bold saturated colors, dynamic poses">Comic book</div>
+                            <div class="style-option" data-value="Studio Ghibli style, soft anime, gentle warm palette, hand-drawn animation, expressive nature">Ghibli</div>
+                            <div class="style-option" data-value="Pixar 3D animated movie, clean stylized 3D, family-friendly polish, expressive characters">Pixar 3D</div>
+                            <div class="style-option" data-value="concept art, rough painterly, dramatic lighting, production design, key art quality">Concept art</div>
+                            <div class="style-option" data-value="dark fantasy, gothic grimdark, dramatic chiaroscuro lighting, weathered ornate detail, brooding">Dark Fantasy</div>
+                            <div class="style-option" data-value="cyberpunk sci-fi, neon accents, futuristic mechanical detail, gritty urban">Cyberpunk</div>
+                            <div class="style-option" data-value="steampunk, brass copper rivets, victorian mechanical, leather and gears, ornate clockwork">Steampunk</div>
                             <div class="style-option" data-value="synthwave vaporwave, retro 80s neon, purple and cyan gradients, chrome grid glow">Synthwave</div>
                             <div class="style-option" data-value="horror creepy, dark unsettling atmosphere, eerie grim, weathered decay">Horror</div>
+                            <div class="style-option" data-value="low-poly 3D art, flat-shaded, faceted geometry, minimalist, geometric shapes, vibrant colors">Low-poly</div>
+                            <div class="style-option" data-value="pixel art style, 16-bit retro game aesthetic, limited palette, sharp pixel edges">Pixel art</div>
+                            <div class="style-option" data-value="voxel art, minecraft-inspired blocky 3D style, cubic geometry, clean voxels">Voxel</div>
+                            <div class="style-option" data-value="Minecraft blocky low-fi, cubic geometry, pixelated 16x16 texture, voxel inspired">Minecraft</div>
                             <div class="style-option" data-value="polished chrome metal, mirror reflections, liquid metal surface, glossy">Chrome</div>
                             <div class="style-option" data-value="marble statue, carved stone sculpture, veined polished white marble">Marble</div>
                             <div class="style-option" data-value="carved wood, natural wood grain, hand-carved artisan woodwork">Carved wood</div>
                             <div class="style-option" data-value="stained glass, colored glass panels, dark lead outlines, luminous backlit">Stained glass</div>
-                            <div class="style-option" data-value="graffiti street art, spray paint, vibrant urban colors, bold outlines">Graffiti</div>
                             <div class="style-option" data-value="holographic iridescent, rainbow sheen, pearlescent shimmer, prismatic">Holographic</div>
-                            <div class="style-option" data-value="art deco, geometric gold ornament, elegant symmetrical 1920s luxury">Art deco</div>
                             <div class="style-option" data-value="toy figurine, glossy molded plastic, collectible model, smooth vinyl">Figurine</div>
+                            <div class="style-option" data-value="watercolor painting, soft pigment washes, paper texture, gentle bleeding edges">Watercolor</div>
+                            <div class="style-option" data-value="pencil sketch, line art, graphite shading, minimal color, hand-drawn">Sketch</div>
+                            <div class="style-option" data-value="claymation, plasticine model, soft stop-motion surface, Aardman style, handmade charm">Claymation</div>
+                            <div class="style-option" data-value="graffiti street art, spray paint, vibrant urban colors, bold outlines">Graffiti</div>
+                            <div class="style-option" data-value="art deco, geometric gold ornament, elegant symmetrical 1920s luxury">Art deco</div>
                           </div>
                         </div>
                         <button id="ws-facefix-btn" class="ghost-btn tool-btn">&#128566; Face Fix</button>
@@ -998,19 +1028,22 @@
               </optgroup>
               <optgroup label="Stylized">
                 <option value="stylized">Stylized (mid-poly)</option>
+                <option value="stylized-pbr">Stylized PBR</option>
+                <option value="hand-painted">Hand-painted</option>
                 <option value="cartoon">Cartoon</option>
                 <option value="anime">Anime</option>
                 <option value="painterly">Painterly</option>
-                <option value="stylized-pbr">Stylized PBR</option>
-                <option value="hand-painted">Hand-painted</option>
+                <option value="comic">Comic book</option>
                 <option value="ghibli">Ghibli</option>
                 <option value="pixar">Pixar 3D</option>
-                <option value="comic">Comic book</option>
+                <option value="concept">Concept art</option>
               </optgroup>
               <optgroup label="Genre">
                 <option value="dark-fantasy">Dark Fantasy</option>
                 <option value="cyberpunk">Cyberpunk</option>
                 <option value="steampunk">Steampunk</option>
+                <option value="synthwave">Synthwave</option>
+                <option value="horror">Horror</option>
               </optgroup>
               <optgroup label="Retro">
                 <option value="lowpoly">Low-poly</option>
@@ -1018,11 +1051,22 @@
                 <option value="voxel">Voxel</option>
                 <option value="minecraft">Minecraft</option>
               </optgroup>
-              <optgroup label="Other">
+              <optgroup label="Material">
+                <option value="chrome">Chrome</option>
+                <option value="marble">Marble</option>
+                <option value="carved-wood">Carved wood</option>
+                <option value="stained-glass">Stained glass</option>
+                <option value="holographic">Holographic</option>
+                <option value="figurine">Figurine</option>
+              </optgroup>
+              <optgroup label="Artistic">
                 <option value="watercolor">Watercolor</option>
-                <option value="concept">Concept art</option>
                 <option value="sketch">Sketch</option>
                 <option value="claymation">Claymation</option>
+                <option value="graffiti">Graffiti</option>
+                <option value="art-deco">Art deco</option>
+              </optgroup>
+              <optgroup label="Other">
                 <option value="custom">Custom (no preset)</option>
               </optgroup>
             </select>

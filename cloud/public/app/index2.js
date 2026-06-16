@@ -4325,6 +4325,16 @@ const ASSET_STYLE_PROMPTS = {
   concept:      'concept art, rough painterly, dramatic lighting, production design, key art quality',
   sketch:       'pencil sketch, line art, graphite shading, minimal color, hand-drawn',
   claymation:   'claymation, plasticine model, soft stop-motion surface, Aardman style, handmade charm',
+  synthwave:     'synthwave vaporwave, retro 80s neon, purple and cyan gradients, chrome grid glow',
+  horror:        'horror creepy, dark unsettling atmosphere, eerie grim, weathered decay',
+  chrome:        'polished chrome metal, mirror reflections, liquid metal surface, glossy',
+  marble:        'marble statue, carved stone sculpture, veined polished white marble',
+  'carved-wood':   'carved wood, natural wood grain, hand-carved artisan woodwork',
+  'stained-glass': 'stained glass, colored glass panels, dark lead outlines, luminous backlit',
+  holographic:   'holographic iridescent, rainbow sheen, pearlescent shimmer, prismatic',
+  figurine:      'toy figurine, glossy molded plastic, collectible model, smooth vinyl',
+  graffiti:      'graffiti street art, spray paint, vibrant urban colors, bold outlines',
+  'art-deco':      'art deco, geometric gold ornament, elegant symmetrical 1920s luxury',
   custom:       '',
 };
 
@@ -6031,10 +6041,10 @@ document.getElementById('ws-style-menu')?.addEventListener('click', async (e) =>
     try {
       const r = await API.img2img({ imagePath: tgt, prompt: style, strength: 0.6, engine: 'local-sdxl' });
       if (r?.success) {
-        // Remember which style was applied to this new image version
+        // Remember which style was applied to this new image version.
+        // Deliberately do NOT tag the source image — that would overwrite
+        // the source version's own dropdown selection (desktop f37af87).
         if (r.newPath) _saveImageStyle(r.newPath, style);
-        // Also tag the source image with its style (it was the input)
-        _saveImageStyle(tgt, style);
         completeJob(job.id, true);
         await reloadCurrentProject();
         showToast('Style applied!', 'success');
@@ -6365,7 +6375,7 @@ const _EMISSIVE_LS_KEY = 'fabmesh.emissiveLayers';
     if (!raw) return;
     const obj = JSON.parse(raw);
     if (obj && typeof obj === 'object') {
-      Object.entries(obj).forEach(([k, v]) => _emissiveLayerCache.set(k, String(v)));
+      Object.entries(obj).forEach(([k, v]) => _emissiveLayerCache.set(_emKey(k), String(v)));
     }
   } catch {}
 })();
@@ -6378,12 +6388,15 @@ function _saveEmissiveCache() {
     console.warn('[emissive] localStorage save failed:', e?.message || e);
   }
 }
+// Normalize path keys (backslash->slash + lowercase) so the 💡 badge matches
+// across renamed / case-differing / R2-URL paths (desktop 9797d93).
+function _emKey(p) { return String(p == null ? '' : p).replace(/\\/g, '/').toLowerCase(); }
 function _emissiveLayerSet(imgPath, dataUrl) {
-  _emissiveLayerCache.set(String(imgPath), dataUrl);
+  _emissiveLayerCache.set(_emKey(imgPath), dataUrl);
   _saveEmissiveCache();
 }
 function _emissiveLayerGet(imgPath) {
-  return _emissiveLayerCache.get(String(imgPath)) || null;
+  return _emissiveLayerCache.get(_emKey(imgPath)) || null;
 }
 
 // Parallel cache for MESHES that received emissive paint via the 3D
@@ -6411,7 +6424,7 @@ function _meshEmissiveMark(meshPath) {
 }
 function _meshEmissiveHas(meshPath) { return _meshEmissivePaintedSet.has(String(meshPath)); }
 function _emissiveLayerHas(imgPath) {
-  return _emissiveLayerCache.has(String(imgPath));
+  return _emissiveLayerCache.has(_emKey(imgPath));
 }
 
 // Sync the emissive overlay canvas size to match the main paint
@@ -15502,7 +15515,7 @@ function renderJobs() {
         <div class="job-item-2-bar">
           <div class="job-item-2-bar-fill queued-fill" style="width:0%"></div>
         </div>
-        <div class="job-item-2-pct" style="color:var(--text-2);">queued</div>
+        <div class="job-item-2-pct" style="color:var(--warning, #f59e0b); font-weight:600;">queued</div>
       </div>
     `).join('');
   }

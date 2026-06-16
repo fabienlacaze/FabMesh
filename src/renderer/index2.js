@@ -4254,6 +4254,16 @@ const ASSET_STYLE_PROMPTS = {
   concept:      'concept art, rough painterly, dramatic lighting, production design, key art quality',
   sketch:       'pencil sketch, line art, graphite shading, minimal color, hand-drawn',
   claymation:   'claymation, plasticine model, soft stop-motion surface, Aardman style, handmade charm',
+  synthwave:     'synthwave vaporwave, retro 80s neon, purple and cyan gradients, chrome grid glow',
+  horror:        'horror creepy, dark unsettling atmosphere, eerie grim, weathered decay',
+  chrome:        'polished chrome metal, mirror reflections, liquid metal surface, glossy',
+  marble:        'marble statue, carved stone sculpture, veined polished white marble',
+  'carved-wood':   'carved wood, natural wood grain, hand-carved artisan woodwork',
+  'stained-glass': 'stained glass, colored glass panels, dark lead outlines, luminous backlit',
+  holographic:   'holographic iridescent, rainbow sheen, pearlescent shimmer, prismatic',
+  figurine:      'toy figurine, glossy molded plastic, collectible model, smooth vinyl',
+  graffiti:      'graffiti street art, spray paint, vibrant urban colors, bold outlines',
+  'art-deco':      'art deco, geometric gold ornament, elegant symmetrical 1920s luxury',
   custom:       '',
 };
 

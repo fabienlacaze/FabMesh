@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (parite cloud vague 1 + harmonisation des styles)
+
+Suite a la verif de parite (workflow 43 agents) : 11 features du matin en retard sur
+cloud. User : "Tout (les 11)". Vague 1 :
+- queued-orange : label "queued" passe en orange (cloud index2.js).
+- style-no-overwrite : deriver une version ne re-tague plus le style de la source
+  (cloud index2.js, suppr. _saveImageStyle(tgt,style), parite f37af87).
+- emissive _emKey : normalisation des cles (backslash->slash + lowercase) du cache
+  emissive cloud (parite 9797d93) -> le badge ampoule matche sur URLs R2.
+- STYLES HARMONISES (au-dela de la demande initiale) : User a signale que le dropdown
+  STYLE de generation etait bien plus pauvre que le menu de re-stylisation. Cree un
+  CATALOGUE CANONIQUE de 32 styles (+ Custom) via script generateur, applique aux 3
+  pickers (ws-asset-style, np-asset-style, ws-style-menu) sur desktop ET cloud. Ajout
+  des 10 cles manquantes (synthwave, horror, chrome, marble, carved-wood, stained-
+  glass, holographic, figurine, graffiti, art-deco) dans ASSET_STYLE_PROMPTS des 2
+  renderers. Desktop : Ctrl+R. Cloud : build+deploy.
+
+
 ## 2026-06-16 (fix — asset "building" generait un VILLAGE entier dans une image)
 
 User : "jai voulu generer une maison avec construction stages mais ca ma fait plein
