@@ -1,5 +1,24 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Auto Inpaint : 3 fixes via workflow diagnostic — vitesse, precision, removal)
+
+User : detection ~10s, masque pas assez precis, "laisser vide" regenere une porte au
+lieu de la supprimer. + il veut le live-auto cloud (pas de bouton, comme desktop).
+Workflow de diagnostic (3 agents) -> causes + fixes :
+- CLOUD live-auto : retire le bouton Preview, detection auto debouncee (_aiSchedule
+  Preview/_aiUpdateMaskPreview sur target/dilate) + spinner, comme desktop.
+- VITESSE (10s = cold-load CLIPSeg au 1er appel) : preload CLIPSeg dans preload_models()
+  (sdxl_server) AVANT "MODELS READY" -> 1ere detection = warm.
+- PRECISION (CLIPSeg tourne en 352px par defaut -> logits blobby upscales 3x) : passe
+  l'input a 512px (clipseg_processor.image_processor.size) dans sdxl_server.load_clipseg
+  + modal_app/app.py (_get_auto_inpaint_models). + do_inpaint BILINEAR->LANCZOS.
+- REMOVAL (trou en forme d'objet + prompt faible + strength 0.99 -> SDXL redessine
+  l'objet) : prompt removal concret "solid plain wall, no door, no opening" + negative
+  renforce (door/opening/hole/window/frame...) + strength 0.85 (vs 0.99). sdxl_server
+  do_inpaint + modal_app/_auto_inpaint.generate.
+Desktop : restart sdxl_server. Cloud : Modal redeploy + build/deploy (live-auto deja
+deploye). Tout desktop+cloud.
+
 ## 2026-06-16 (cloud : re-ajout aperçu masque (bouton) lisse + spinner ; page GPU non-NVIDIA)
 
 User "fais tout" apres avoir clarifie qu'il veut l'apercu masque aussi sur cloud (option

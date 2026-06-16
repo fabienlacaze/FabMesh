@@ -855,6 +855,11 @@ class MyFabmeshBackview:
         from diffusers import StableDiffusionXLInpaintPipeline
         self._ai_seg_processor = CLIPSegProcessor.from_pretrained(
             'CIDAS/clipseg-rd64-refined')
+        # Raise CLIPSeg input resolution 352 -> 512 for a ~2x sharper mask.
+        try:
+            self._ai_seg_processor.image_processor.size = {'height': 512, 'width': 512}
+        except Exception:
+            pass
         self._ai_seg_model = CLIPSegForImageSegmentation.from_pretrained(
             'CIDAS/clipseg-rd64-refined').to('cuda').eval()
         # SDXL inpainting model — different from RealVisXL; it's the

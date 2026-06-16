@@ -211,6 +211,12 @@ def load_clipseg():
             from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
             t0 = time.time()
             state.clipseg_processor = CLIPSegProcessor.from_pretrained(CLIPSEG_MODEL)
+            # Raise CLIPSeg input resolution 352 -> 512 for a ~2x sharper mask
+            # (default ViT input is 352px -> blobby logits upscaled 3x).
+            try:
+                state.clipseg_processor.image_processor.size = {'height': 512, 'width': 512}
+            except Exception as _e:
+                log(f"CLIPSeg res override skipped: {_e}", 'warn')
             state.clipseg_model = CLIPSegForImageSegmentation.from_pretrained(CLIPSEG_MODEL)
             state.clipseg_model.to("cuda")
             state.clipseg_model.eval()
@@ -564,7 +570,7 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             mask_prob = 1 / (1 + np.exp(-mask_logits))  # sigmoid
             mask_uint8 = (mask_prob * 255).astype(np.uint8)
 
-            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.BILINEAR)
+            mask_img = Image.fromarray(mask_uint8).resize((work_w, work_h), Image.LANCZOS)
             mask_arr = np.array(mask_img)
             binary = (mask_arr > 60).astype(np.uint8) * 255   # assouplir (was 100)
             mask_binary = Image.fromarray(binary, mode="L")
@@ -589,10 +595,15 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             is_removal = inpaint_prompt.lower() in removal_keywords
 
             if is_removal:
-                inpaint_prompt = "continuation of the surrounding area, same background, seamless"
-                negative_prompt = f"{target_text}, any object, duplicate, artifact, blurry, distorted, deformed"
+                # Give CFG a concrete surface to paint TOWARD + forbid the object
+                # shape, else the object-shaped hole gets re-filled with the object.
+                inpaint_prompt = "solid plain wall, flat continuous surface, smooth uniform facade, seamless background, empty space, no door, no opening"
+                negative_prompt = f"{target_text}, door, opening, hole, gap, window, frame, jamb, panel, object, furniture, item, duplicate, deformed, blurry, distorted, artifact"
             else:
                 negative_prompt = f"blurry, distorted, duplicate, deformed, low quality, {target_text}"
+            # Removal leans on the surrounding (now wall-coloured) pixels; full
+            # 0.99 regen from noise tends to redraw the object.
+            _inpaint_strength = 0.85 if is_removal else 0.99
 
             with torch.inference_mode():
                 result = pipe(
@@ -602,7 +613,7 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
                     mask_image=mask_binary,
                     num_inference_steps=40,
                     guidance_scale=8.5,
-                    strength=0.99,
+                    strength=_inpaint_strength,
                     height=work_h,
                     width=work_w,
                 ).images[0]
@@ -1095,11 +1106,13 @@ class Handler(BaseHTTPRequestHandler):
 
 # ========== STARTUP ==========
 def preload_models():
-    """Preload only img2img model (most common). Inpaint loads on demand."""
+    """Preload img2img + CLIPSeg (tiny ~400MB). Inpaint loads on demand."""
     try:
+        log("Preloading CLIPSeg (mask detection)...")
+        load_clipseg()   # so the FIRST Auto-Inpaint detection is a warm GPU call (~10s cold-load gone)
         log("Preloading RealVis XL img2img...")
         load_img2img()
-        log("MODELS READY - img2img loaded (inpaint on first use)")
+        log("MODELS READY - img2img + CLIPSeg loaded (inpaint on first use)")
     except Exception as e:
         log(f"Preload failed: {e}", 'err')
         traceback.print_exc()

@@ -32,7 +32,7 @@ def _segment(seg_processor, seg_model, image: Image.Image, target_text: str,
         out = seg_model(**inputs)
     mask = torch.sigmoid(out.logits).squeeze().cpu().numpy()
     mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize(
-        (work_w, work_h), Image.BILINEAR)
+        (work_w, work_h), Image.LANCZOS)
     arr = np.array(mask_img)
     binary = (arr > 60).astype(np.uint8) * 255   # assouplir (was 100): detect fainter CLIPSeg responses
     m = Image.fromarray(binary, mode='L')
@@ -82,12 +82,16 @@ def generate(
     p = (prompt or '').strip()
     is_removal = p.lower() in ('', 'remove', 'delete', 'none', 'nothing', 'empty', 'gone')
     if is_removal:
-        final_prompt = ('continuation of the surrounding area, same '
-                        'background, nothing here, seamless')
-        negative = f'{target_text}, any object, duplicate, artifact, blurry, distorted'
+        final_prompt = ('solid plain wall, flat continuous surface, smooth '
+                        'uniform facade, seamless background, empty space, '
+                        'no door, no opening')
+        negative = (f'{target_text}, door, opening, hole, gap, window, frame, '
+                    'jamb, panel, object, furniture, item, duplicate, deformed, '
+                    'blurry, distorted, artifact')
     else:
         final_prompt = p
         negative = f'blurry, distorted, duplicate, {target_text}'
+    _strength = 0.85 if is_removal else 0.99
 
     result = inpaint_pipe(
         prompt=final_prompt,
@@ -96,7 +100,7 @@ def generate(
         mask_image=mask,
         num_inference_steps=40,
         guidance_scale=8.5,
-        strength=0.99,
+        strength=_strength,
         height=work_h, width=work_w,
     ).images[0]
 
