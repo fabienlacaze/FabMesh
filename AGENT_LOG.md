@@ -1,5 +1,16 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (fix v2 — op image réutilisant SDXL : bypass total du gate VRAM)
+
+Le fix v1 (soustraire la VRAM du moteur) ne suffisait pas : (14.0 − 6.6) + 8 =
+15.4 GB = 97% > limite VRAM 90% -> toujours queué. La vraie nature : une op
+image qui réutilise le serveur SDXL déjà chargé ne fait que SWAPPER son pipeline
+sur l'allocation EXISTANTE (pas de nouvelle alloc carte), et le serveur s'auto-
+limite via son cap VRAM fraction. Donc elle ne doit PAS passer le gate de
+stacking. FIX v2 : pour image/img2img/inpaint, si l'AI engine est déjà chargé
+(API.listProcesses isAiEngine) -> return ok:true direct. Sinon (moteur non chargé
+ou kind non-réutilisant) -> projection normale used+cost. Renderer -> Ctrl+R.
+
 ## 2026-06-16 (fix — op image après une gen faussement bloquée (VRAM SDXL))
 
 User : "après une génération le AI module consomme bcp de VRAM (6.6 GB), les

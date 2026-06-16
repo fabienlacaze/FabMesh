@@ -13969,23 +13969,27 @@ async function hasVramHeadroomFor(kind) {
       return { ok: false, reason: `GPU utilisé à ${gpu.gpuUtil}% (> limite ${gpuLimits.util}%). Le job attendra.` };
     }
 
-    // Predicted VRAM after the job allocates its pipeline.
-    // The SDXL server SWAPS its pipeline (frees the loaded one, loads the new)
-    // for image/img2img/inpaint — so a follow-up image op REUSES the VRAM the
-    // engine already holds instead of stacking on top. We subtract the LIVE
-    // AI-engine VRAM before adding this job's cost. Without this, a 2nd image
-    // op right after a gen was falsely queued (projected = 12.9 + 8 > 16 GB) and
-    // waited up to 90s for the idle timer to free SDXL — then reloaded it — when
-    // it could have just reused the loaded model instantly.
-    let reusableGB = 0;
-    if ((kind === 'image' || kind === 'img2img' || kind === 'inpaint') && API.listProcesses) {
-      try {
-        const pl = await API.listProcesses();
-        const eng = ((pl && pl.procs) || []).find(p => p.isAiEngine && p.vramMb != null);
-        if (eng) reusableGB = eng.vramMb / 1024;
-      } catch (_) {}
+    // SDXL-reusing op (image/img2img/inpaint): if the image engine is ALREADY
+    // loaded, the op just SWAPS the server's pipeline on its EXISTING allocation
+    // — no new card allocation — and the server self-limits via its own VRAM
+    // fraction cap. So it must NOT be gated on card VRAM: otherwise a follow-up
+    // image op right after a gen (14 GB used incl. 6.6 GB engine → projected 97%
+    // > 90% limit) gets queued, waits up to 90s for the idle timer, then RELOADS
+    // the model — instead of just reusing it instantly. The stacking gate is for
+    // NEW heavy allocations, which reusing the loaded server is not.
+    if (kind === 'image' || kind === 'img2img' || kind === 'inpaint') {
+      let engineLoaded = false;
+      if (API.listProcesses) {
+        try {
+          const pl = await API.listProcesses();
+          engineLoaded = ((pl && pl.procs) || []).some(p => p.isAiEngine);
+        } catch (_) {}
+      }
+      if (engineLoaded) return { ok: true };
     }
-    const projectedUsedGB = Math.max(0, gpu.usedGB - reusableGB) + cost;
+    // Otherwise (engine not loaded, or a non-reusing kind): predict the VRAM the
+    // job's pipeline will allocate and compare against the slider limit.
+    const projectedUsedGB = gpu.usedGB + cost;
     const projectedPct = (projectedUsedGB / gpu.totalGB) * 100;
     if (projectedPct > gpuLimits.vram) {
       return {
@@ -13994,13 +13998,12 @@ async function hasVramHeadroomFor(kind) {
       };
     }
     // Also check absolute free headroom: even below the slider, refuse to start
-    // if there's genuinely not enough free VRAM. The engine's VRAM is reclaimable
-    // for reusing kinds, so count it as available.
-    const freeGB = (gpu.totalGB - gpu.usedGB) + reusableGB;
+    // if there's genuinely not enough free VRAM on the card.
+    const freeGB = gpu.totalGB - gpu.usedGB;
     if (freeGB < cost) {
       return {
         ok: false,
-        reason: `VRAM libre insuffisante: ${(gpu.totalGB - gpu.usedGB).toFixed(1)} GB disponibles, ce job a besoin de ~${cost} GB. Le job attendra.`
+        reason: `VRAM libre insuffisante: ${freeGB.toFixed(1)} GB disponibles, ce job a besoin de ~${cost} GB. Le job attendra.`
       };
     }
   } catch (e) {
