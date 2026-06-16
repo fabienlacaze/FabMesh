@@ -1,6 +1,14 @@
 # FabMesh Agent Log
 
-## 2026-06-16 (fix — Symmetrize cassé (Missing args) + axe visible + erase mask)
+## 2026-06-16 (feat — Paint Fill : sliders re-remplissent la dernière zone live)
+
+User : "déplacer les sliders devrait mettre à jour la dernière zone peinte".
+Pour l'outil Fill : au clic, on stocke paintState.fillSnapshot (canvas pré-fill)
++ fillLastPoint (point seed). _paintReapplyFill() restaure le snapshot puis
+re-flood-fill depuis le seed avec opacity/tolerance/colour courants (pas de
+nouvel undo : le pushUndo du clic reste l'unique point). Branché sur les sliders
+opacity + tolerance + le color picker. fillLastPoint vidé au changement d'outil
+(stale). Renderer -> Ctrl+R.
 
 3 bugs Symmetrize signalés :
 1. APPLY CASSÉ ("Task failed: Missing args") : sym-apply envoyait

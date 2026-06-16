@@ -6516,6 +6516,17 @@ function _paintFloodFill(ctx, startX, startY, fillColor, tolerance) {
   ctx.putImageData(imgData, 0, 0);
 }
 
+// Re-apply the LAST fill with the CURRENT opacity / tolerance / colour. Used so
+// dragging those sliders updates the last painted zone live: restore the
+// pre-fill canvas, then flood-fill again from the same seed. No new undo entry —
+// the original fill-click's pushUndo stays the single undo point.
+function _paintReapplyFill() {
+  if (paintState.tool !== 'fill' || !paintState.fillLastPoint || !paintState.fillSnapshot || !_paintMgr) return;
+  const ctx = _paintMgr.ctx;
+  try { ctx.putImageData(paintState.fillSnapshot, 0, 0); } catch (_) { return; }
+  _paintFloodFill(ctx, paintState.fillLastPoint.x, paintState.fillLastPoint.y, paintState.color, paintState.tolerance);
+}
+
 // --- Magic Wand is now in the selection system above (_paintWandSelect) ---
 
 function _closePaint() {
@@ -6556,6 +6567,11 @@ document.getElementById('ws-paint-btn')?.addEventListener('click', () => {
         }
         if (paintState.tool === 'fill') {
           mgr.pushUndo();
+          // Remember the pre-fill canvas + seed point so moving Opacity /
+          // Tolerance / Colour re-applies this SAME fill live (tune the last
+          // painted zone without re-clicking).
+          paintState.fillSnapshot = ctx.getImageData(0, 0, mgr.w, mgr.h);
+          paintState.fillLastPoint = { x: Math.round(x), y: Math.round(y) };
           _paintFloodFill(ctx, Math.round(x), Math.round(y), paintState.color, paintState.tolerance);
           return false;
         }
@@ -6677,6 +6693,7 @@ const _selectionTools = ['sel-rect', 'sel-lasso', 'wand'];
 _paintTools.forEach(tool => {
   document.getElementById('paint-tool-' + tool)?.addEventListener('click', () => {
     paintState.tool = tool;
+    paintState.fillLastPoint = null;  // last-fill is stale once the tool changes
     _paintTools.forEach(t => {
       document.getElementById('paint-tool-' + t)?.classList.toggle('tool-active', t === tool);
     });
@@ -6699,21 +6716,25 @@ document.getElementById('paint-brush-size')?.addEventListener('input', (e) => {
 document.getElementById('paint-opacity')?.addEventListener('input', (e) => {
   paintState.opacity = parseInt(e.target.value);
   document.getElementById('paint-opacity-val').textContent = e.target.value + '%';
+  _paintReapplyFill();  // live-update the last fill
 });
 
-// Tolerance (for Fill / Wand) — re-run wand selection live
+// Tolerance (for Fill / Wand) — re-run the live selection/fill
 document.getElementById('paint-tolerance')?.addEventListener('input', (e) => {
   paintState.tolerance = parseInt(e.target.value);
   document.getElementById('paint-tolerance-val').textContent = e.target.value;
   if (paintState.tool === 'wand' && paintState.wandLastPoint && _paintMgr) {
     _paintWandSelect(_paintMgr.ctx, paintState.wandLastPoint.x, paintState.wandLastPoint.y, paintState.tolerance);
     _paintShowSelection();
+  } else {
+    _paintReapplyFill();  // live-update the last fill
   }
 });
 
 // Color picker
 document.getElementById('paint-color')?.addEventListener('input', (e) => {
   paintState.color = e.target.value;
+  _paintReapplyFill();  // recolour the last fill live
 });
 
 // Eyedropper (pick from image)
