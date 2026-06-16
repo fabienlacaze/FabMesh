@@ -2833,6 +2833,11 @@ _ws3dEngineSync();
   const syncStrength = () => { strengthVal.textContent = Number(strengthSlider.value).toFixed(2); };
   strengthSlider?.addEventListener('input', syncStrength);
   syncStrength();
+  const strengthCountSlider = document.getElementById('var-strength-count');
+  const strengthCountVal    = document.getElementById('var-strength-count-val');
+  const syncStrengthCount = () => { if (strengthCountVal && strengthCountSlider) strengthCountVal.textContent = strengthCountSlider.value; };
+  strengthCountSlider?.addEventListener('input', syncStrengthCount);
+  syncStrengthCount();
   // Apply — dispatch to the active tab.
   document.getElementById('var-apply')?.addEventListener('click', async () => {
     const p = state.currentProject;
@@ -2894,25 +2899,31 @@ _ws3dEngineSync();
       }
     } else {
       // Img2img — keep the current image as a starting frame, render
-      // a varied version with the given strength + optional hint.
+      // N varied versions at the given strength + optional hint. Looping
+      // img2img (the backend picks a fresh seed per call) yields several
+      // distinct takes at the SAME strength — combining variation-amount
+      // AND count in one panel (parity with desktop modal-variant).
       const strength = Number(document.getElementById('var-strength').value) || 0.4;
+      const n = Number(document.getElementById('var-strength-count')?.value) || 1;
       const hint = document.getElementById('var-strength-hint').value.trim();
       const basePrompt = p.prompt || p.initialPrompt || '';
       const prompt = hint ? (basePrompt + ', ' + hint) : (basePrompt || 'variation');
       const variantSource = p.selectedImagePath;
       const job = (typeof pushJob === 'function')
-        ? pushJob(`Img2img variant: ${p.name}`, null, { Strength: strength.toFixed(2), Hint: hint || '(none)' }, 30_000, undefined, {
+        ? pushJob(`Img2img variant${n > 1 ? 's' : ''}: ${p.name}`, null, { Variants: n, Strength: strength.toFixed(2), Hint: hint || '(none)' }, 30_000 * n, undefined, {
             sourceImageUrl: variantSource, projectName: p.name,
           })
         : null;
       try {
-        const r = await window.meshyAPI?.img2img({
-          imagePath: p.selectedImagePath, prompt, strength,
-        });
-        if (!r?.success) throw new Error(r?.error || 'img2img failed');
+        for (let i = 0; i < n; i++) {
+          const r = await window.meshyAPI?.img2img({
+            imagePath: p.selectedImagePath, prompt, strength,
+          });
+          if (!r?.success) throw new Error(r?.error || 'img2img failed');
+        }
         if (job && typeof completeJob === 'function') completeJob(job.id, true);
         if (typeof reloadCurrentProject === 'function') await reloadCurrentProject();
-        showToast('✓ Variant generated.', 'success');
+        showToast(`✓ ${n} variant${n > 1 ? 's' : ''} generated.`, 'success');
       } catch (e) {
         if (job && typeof completeJob === 'function') completeJob(job.id, false, e?.message || String(e));
         showToast('Variant failed: ' + (e?.message || e), 'error', 5000);

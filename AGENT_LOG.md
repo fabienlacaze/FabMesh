@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (parite cloud vague 3 : variant-modal ; inpaint-preview = decision design)
+
+- variant-modal : le tab img2img/strength cloud ne faisait qu'1 image. Ajout d'un
+  slider "Number of variants" (var-strength-count) + boucle N x img2img au strength
+  choisi (le backend prend un seed frais par appel) -> combine variation-amount ET
+  count comme le modal-variant desktop. cloud index2.js + index.html.
+- inpaint-preview (live CLIPSeg mask preview) : NON porte tel quel. L'op _segment
+  existe deja (modal_app/_auto_inpaint.py:24) mais un preview LIVE a chaque frappe =
+  une invocation GPU Modal par changement (cold start minutes, coute cher) -> inadapte
+  au serverless. La bonne version cloud = un bouton "Preview mask" explicite (1 appel
+  a la demande), pas du live-on-keystroke. A confirmer avec le user avant de coder
+  (op segment dans app.py + worker route + segmentMask API + overlay renderer).
+
 ## 2026-06-16 (parite cloud vague 2 : emissive-fill, symmetrize-erase, strength-hint, unlock x2)
 
 Suite vague 1. Ports cloud (cloud/public/app/index2.js + index.html) :
