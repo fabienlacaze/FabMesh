@@ -617,7 +617,21 @@
       'Duration': 'Duración',
       'Credits': 'Créditos',
       'Event details': 'Detalles del evento',
-      'Loading…': 'Cargando…'
+      'Loading…': 'Cargando…',
+      // ---- Cloud account / auth / parental + projects grid ----
+      'Account': 'Cuenta',
+      'Session': 'Sesión',
+      'Sign out': 'Cerrar sesión',
+      'Sign out of MyFabmesh.AI Cloud on this device.': 'Cerrar sesión de MyFabmesh.AI Cloud en este dispositivo.',
+      'Blocks NSFW, violent, and illegal content in prompts. Disable with a PIN code for unrestricted adult use.':
+        'Bloquea contenido NSFW, violento e ilegal en los prompts. Desactívalo con un código PIN para uso adulto sin restricciones.',
+      'Unrestricted': 'Sin restricciones',
+      'Restricted (safe)': 'Restringido (seguro)',
+      'Lock': 'Bloquear',
+      'No image': 'Sin imagen',
+      'No images yet.': 'Aún no hay imágenes.',
+      'Create a new project': 'Crear un nuevo proyecto',
+      'No generation in progress': 'Ninguna generación en curso'
   };
   if (window.FabI18n) {
     window.FabI18n.register('es', dict);
