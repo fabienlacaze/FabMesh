@@ -3735,3 +3735,17 @@ details.stage-generating > summary .stage-icon-gear {
   }
   .step-tools-scroll, .stage-edit-side, #ws-rig-versions { max-width: 100%; min-width: 0; }
 }
+
+/* Mobile vertical scroll: #app2 is a fixed 100vh flex column (overflow:hidden) —
+   the desktop pattern. On phones, keep #topbar fixed at the top and let the
+   ACTIVE .page scroll vertically with touch momentum. 100dvh accounts for the
+   mobile browser address bar. */
+@media (max-width: 768px) {
+  #app2 { height: 100vh !important; height: 100dvh !important; }
+  .page {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
