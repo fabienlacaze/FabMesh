@@ -9143,6 +9143,22 @@ async function _requireAdmin(req: Request, env: Env)
  *  cookie. Body: { password: string }. The cookie is httpOnly + Secure
  *  + SameSite=Strict and TTL 4h. Rate-limited by Cloudflare's default
  *  burst protection (no extra logic needed at this scale). */
+/** Verify a provided admin password against the SAME source as /api/admin/login:
+ *  the R2 reset hash (_meta/admin_password.json) if present, else env.ADMIN_PASSWORD.
+ *  Used as the second-factor check by every sensitive admin action so a
+ *  forgot-password reset is honoured everywhere (not just at login). */
+async function _verifyAdminPassword(env: Env, provided: string): Promise<boolean> {
+  const src = await _getAdminPasswordSource(env);
+  if (src.mode === 'none') return false;
+  let expected: string, actual: string;
+  if (src.mode === 'r2') { expected = src.hash; actual = await _hashAdminPassword(src.salt, provided); }
+  else { expected = src.literal; actual = provided; }
+  if (actual.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < actual.length; i++) diff |= actual.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
+
 async function handleAdminLogin(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user || !user.email || !ADMIN_EMAILS.has(user.email.toLowerCase())) {
@@ -10164,12 +10180,8 @@ async function handleAdminTotpDisable(req: Request, env: Env): Promise<Response>
   if (guard instanceof Response) return guard;
   let body: { password?: string; code?: string };
   try { body = await req.json() as { password?: string; code?: string }; } catch { return err(400, 'bad json'); }
-  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
   const pw = String(body.password || '');
-  if (pw.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
-  let d = 0;
-  for (let i = 0; i < pw.length; i++) d |= pw.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
-  if (d !== 0) return err(401, 'invalid password');
+  if (!(await _verifyAdminPassword(env, pw))) return err(401, 'invalid password');
   const cur = await _getAdminTotpSecret(env);
   if (cur) {
     const code = String(body.code || '').trim();
@@ -10190,12 +10202,8 @@ async function handleAdminForceLogoutAll(req: Request, env: Env): Promise<Respon
   if (guard instanceof Response) return guard;
   let body: { password?: string } | null = null;
   try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
-  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
   const pw = String(body?.password || '');
-  if (pw.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
-  let diff = 0;
-  for (let i = 0; i < pw.length; i++) diff |= pw.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
-  if (diff !== 0) return err(401, 'invalid password');
+  if (!(await _verifyAdminPassword(env, pw))) return err(401, 'invalid password');
   const iat = Math.floor(Date.now() / 1000);
   await env.MESHES.put(MIN_SESSION_IAT_KEY, JSON.stringify({
     iat, stamped_by: guard.email, stamped_at: new Date().toISOString(),
@@ -10245,13 +10253,7 @@ async function handleAdminSetPricing(req: Request, env: Env): Promise<Response> 
   try { body = await req.json() as typeof body; } catch { return err(400, 'body required'); }
   const prices = body?.prices;
   const password = String(body?.password || '');
-  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
-  if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
-  let diff = 0;
-  for (let i = 0; i < password.length; i++) {
-    diff |= password.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
-  }
-  if (diff !== 0) return err(401, 'invalid password');
+  if (!(await _verifyAdminPassword(env, password))) return err(401, 'invalid password');
   if (!prices || typeof prices !== 'object') return err(400, 'prices object required');
   // Only persist keys we know about — silently drop unknown keys.
   const sanitized: Record<string, number> = {};
@@ -10299,14 +10301,7 @@ async function handleAdminServicesToggle(req: Request, env: Env): Promise<Respon
   if (!['modal', 'site', 'stripe', 'all'].includes(service)) {
     return err(400, 'service must be modal|site|stripe|all');
   }
-  if (!env.ADMIN_PASSWORD) return err(500, 'ADMIN_PASSWORD not configured');
-  // Constant-time compare.
-  if (password.length !== env.ADMIN_PASSWORD.length) return err(401, 'invalid password');
-  let diff = 0;
-  for (let i = 0; i < password.length; i++) {
-    diff |= password.charCodeAt(i) ^ env.ADMIN_PASSWORD.charCodeAt(i);
-  }
-  if (diff !== 0) return err(401, 'invalid password');
+  if (!(await _verifyAdminPassword(env, password))) return err(401, 'invalid password');
 
   let current: Partial<ServiceFlags> = {};
   try {
