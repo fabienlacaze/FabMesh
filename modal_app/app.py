@@ -293,6 +293,10 @@ mesh_image = (
         "CUDA_HOME": "/usr/local/cuda",
         "TORCH_CUDA_ARCH_LIST": "8.0;8.9;9.0+PTX",
         "FORCE_CUDA": "1",
+        # COMMERCIAL build: use the kaolin (Apache-2.0) rasterizer shim
+        # instead of nvdiffrast (NVIDIA non-commercial). The TRELLIS-2
+        # texturing pipeline reads this at import time.
+        "TRELLIS2_USE_KAOLIN_RASTER": "1",
     })
     # Ship the DESKTOP fork of TRELLIS-2 directly into the image
     # (≈40 MB of pure source — no precompiled .so/.pyd, all the .cu/.cpp
@@ -324,9 +328,16 @@ mesh_image = (
         "python -c \"import transformers; "
         "print('transformers', transformers.__version__, transformers.__file__); "
         "from transformers import DINOv3ViTModel; print('DINOv3ViTModel OK')\"",
-        # nvdiffrast v0.4.0 (rendering backend used by trellis2).
-        "git clone --depth 1 -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/nvdiffrast "
-        "&& pip install /tmp/nvdiffrast --no-build-isolation",
+        # Kaolin (Apache-2.0) rasterizer — REPLACES nvdiffrast (NVIDIA
+        # Source Code License = non-commercial, a hard blocker for a paid
+        # product). The TRELLIS-2 texturing pipeline + o-voxel use the
+        # `nvdiffrast_kaolin_compat` shim (backed by kaolin.render.mesh.
+        # rasterize) when TRELLIS2_USE_KAOLIN_RASTER=1 (default). Prebuilt
+        # wheel for torch 2.4.1 + cu124 + cp311 from NVIDIA's kaolin index.
+        # We use ONLY kaolin CORE (render.mesh) — never kaolin/non_commercial.
+        # nvdiffrast is NO LONGER installed in the commercial image.
+        "pip install --no-deps kaolin==0.17.0 "
+        "-f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.1_cu124.html",
         # The desktop fork's `o-voxel/third_party/eigen/` is an empty
         # submodule placeholder — Modal's add_local_dir skips empty
         # dirs so we mkdir + populate from libeigen3-dev so the
@@ -337,6 +348,15 @@ mesh_image = (
         # cannot quietly pull in a transformers pin that downgrades the
         # 4.56 we just installed above.
         "pip install /opt/trellis2_local/o-voxel --no-build-isolation --no-deps",
+        # nvdiffrast (NC) is NOT installed at all. o-voxel's postprocess.py is
+        # the only hard importer of `nvdiffrast.torch` — repoint that ONE import
+        # directly at the kaolin (Apache-2.0) shim. (We must NOT create a fake
+        # `nvdiffrast` package: kaolin itself imports nvdiffrast.torch to probe
+        # availability, and a fake that re-imports kaolin causes a circular
+        # import. With nvdiffrast simply absent, kaolin's nvdiffrast_is_available
+        # detector falls back to its CUDA backend cleanly.) Patch the INSTALLED
+        # copy via find_spec (string lookup, no module execution).
+        "python -c \"import importlib.util,os; s=importlib.util.find_spec('o_voxel'); p=os.path.join(os.path.dirname(s.origin),'postprocess.py'); src=open(p,encoding='utf-8').read(); out=src.replace('import nvdiffrast.torch as dr','from trellis2.renderers import nvdiffrast_kaolin_compat as dr'); open(p,'w',encoding='utf-8').write(out); print('o_voxel patched' if out!=src else 'o_voxel NO-CHANGE')\"",
         # cumesh — `import cumesh` is needed by
         # trellis2/representations/mesh/base.py:4. The desktop fork has
         # cumesh only in its Windows .venv (no source), so we clone the
@@ -381,7 +401,7 @@ mesh_image = (
         "python -c \"import torch, triton; "
         "print('torch', torch.__version__, 'triton', triton.__version__)\"",
         "python -c \"import importlib.util; "
-        "missing = [p for p in ['cumesh','o_voxel','flex_gemm','transformers'] "
+        "missing = [p for p in ['cumesh','o_voxel','flex_gemm','transformers','kaolin'] "
         "if importlib.util.find_spec(p) is None]; "
         "assert not missing, f'missing packages: {missing}'; "
         "print('all required packages located')\"",
@@ -394,6 +414,32 @@ mesh_image = (
         "pip install --force-reinstall --no-deps "
         "torch==2.4.1 torchvision==0.19.1 "
         "--index-url https://download.pytorch.org/whl/cu124",
+        # Pull kaolin's FULL pure-python dependency set in one shot (pygltflib,
+        # usd-core, dataclasses-json, marshmallow, scipy, ...). The cached
+        # kaolin install used --no-deps to protect the torch/CUDA pins, leaving
+        # its import-time deps missing. kaolin + torch are already satisfied so
+        # this only adds the missing pure-python deps (no CUDA rebuild).
+        "pip install kaolin==0.17.0 pygltflib usd-core "
+        "-f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.1_cu124.html",
+        # Re-pin numpy<2 AFTER the above (some dep may pull numpy 2.x): kaolin
+        # 0.17.0's numpy-C-API Cython ext (triangle_hash) was built against
+        # numpy 1.x and crashes on numpy 2.x ("numpy.dtype size changed").
+        # torch / o-voxel / cumesh are torch exts (numpy-agnostic) -> safe.
+        "pip install --force-reinstall --no-deps 'numpy<2'",
+        # kaolin does a bare `import nvdiffrast` to probe backend availability,
+        # and that import is NOT exception-guarded on the path the texturing/
+        # o-voxel shim takes. Provide a LAZY proxy package: it imports kaolin/
+        # trellis2 only when a function is CALLED, never at module load, so
+        # `import nvdiffrast` always succeeds WITHOUT the circular import a
+        # normal re-export causes (kaolin imports nvdiffrast -> nvdiffrast
+        # imports kaolin). The no-op context needs nothing; rasterize/
+        # interpolate delegate to the kaolin (Apache-2.0) shim. Real nvdiffrast
+        # (NC) is never installed.
+        "python -c \"import site,os; d=os.path.join(site.getsitepackages()[0],'nvdiffrast'); os.makedirs(d,exist_ok=True); open(os.path.join(d,'__init__.py'),'w').close(); L=['class RasterizeCudaContext:', '    def __init__(self,*a,**k): pass', 'def rasterize(*a,**k):', '    from trellis2.renderers import nvdiffrast_kaolin_compat as _k', '    return _k.rasterize(*a,**k)', 'def interpolate(*a,**k):', '    from trellis2.renderers import nvdiffrast_kaolin_compat as _k', '    return _k.interpolate(*a,**k)']; open(os.path.join(d,'torch.py'),'w').write(chr(10).join(L)+chr(10)); print('lazy nvdiffrast proxy ->',d)\"",
+        # BUILD GUARD replaying the EXACT mesh-runtime import path (trellis2 on
+        # sys.path -> shim -> kaolin -> import nvdiffrast proxy): catches the
+        # nvdiffrast/numpy break at BUILD, not at mesh-gen runtime.
+        "python -c \"import sys; sys.path.insert(0,'/opt/trellis2_local'); import kaolin, numpy, nvdiffrast.torch; from trellis2.renderers.nvdiffrast_kaolin_compat import rasterize; print('kaolin', kaolin.__version__, 'numpy', numpy.__version__, 'shim+nvdiffrast-proxy OK')\"",
         # FINAL GUARD — torch --force-reinstall + the o-voxel install
         # above are the steps most likely to clobber transformers.
         # Re-verify the import works at the END of all build steps so

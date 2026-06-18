@@ -1,5 +1,26 @@
 # FabMesh Agent Log
 
+## 2026-06-18 (#1 BLOCKER LEVÉ : nvdiffrast (NC) → kaolin sur le mesh_image Modal — VALIDÉ)
+
+Le mesh cloud (Modal mesh_image) installait + shippait nvdiffrast (NVIDIA Source Code
+License = NON-COMMERCIAL) via le chemin de texturing TRELLIS-2 → bloqueur commercial dur.
+Le desktop était déjà remédié (shim Kaolin), mais PAS le cloud. Porté sur Modal :
+- `-nvdiffrast` (retiré le git clone + pip install nvdiffrast v0.4.0).
+- `+kaolin==0.17.0` (wheel cp311/torch-2.4.1/cu124, Apache-2.0 ; SEUL render.mesh utilisé,
+  jamais kaolin/non_commercial).
+- ENV TRELLIS2_USE_KAOLIN_RASTER=1 (le texturing patché utilise le shim par défaut).
+- o_voxel/postprocess.py (2e importeur) patché vers le shim.
+Galère résolue en 3 itérations (un échec ≠ casse prod, l'ancienne image reste live) :
+1. ABI numpy : kaolin 0.17 a un ext Cython numpy-1.x → pin numpy<2 (1.26.4). torch/o_voxel/
+   cumesh sont des ext torch (numpy-agnostic) → safe.
+2. deps kaolin manquantes (pygltflib/usd-core/dataclasses-json...) à cause de --no-deps →
+   `pip install kaolin pygltflib usd-core` (avec deps) puis re-pin numpy<2.
+3. circular import : kaolin fait `import nvdiffrast` non protégé → faux paquet nvdiffrast
+   LAZY (importe le shim seulement à l'APPEL, jamais au load) → pas de circular.
+Build guard rejoue le chemin runtime (trellis2 sur path) ; smoke-test GPU :
+rast (1,64,64,4) + interp (1,64,64,3) + 788 px → **PASS**. DÉPLOYÉ.
+Backups : backup-nvdiffrast-modal-20260618-213847, backup-finish-rest-20260618-223647.
+
 ## 2026-06-18 (SÉCURITÉ CRITIQUE : hard-floor CSAM non contournable — desktop+cloud+Modal)
 
 Audit (workflow marketplace) + traçage code : le mode `unrestricted` (parental off)
