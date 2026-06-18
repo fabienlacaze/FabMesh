@@ -6748,10 +6748,17 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
   if (!isTrustedAssetHost(env, src)) return err(400, 'imageUrl host not allowed');
   if (!maskDataUrl) return err(400, 'maskDataUrl required');
   const rawPrompt = (prompt ?? '').toString().trim();
-  if (!rawPrompt) return err(400, 'prompt required');
+  // Empty prompt = "just remove" (the UI hint "empty = just remove"). Inpaint
+  // the masked region with surrounding background (object removal) instead of
+  // requiring a replacement description.
+  const isRemoval = !rawPrompt;
+  const effectivePrompt = isRemoval
+    ? 'clean empty background, seamless fill matching the surroundings, photorealistic, no object'
+    : rawPrompt;
 
-  // NSFW pre-filter on prompt.
-  {
+  // NSFW pre-filter — only on a real user prompt (the removal prompt is our own
+  // fixed, safe string).
+  if (!isRemoval) {
     const envUnrestricted = env.FABMESH_UNRESTRICTED === '1';
     const userState = await getParentalState(env, user.id);
     const unrestricted = envUnrestricted || userState.unrestricted;
@@ -6812,7 +6819,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
       op: 'mask_inpaint',
       imageUrl: src,
       maskUrl,
-      prompt: rawPrompt,
+      prompt: effectivePrompt,
     }, 'inpaint');
     if ('maskEmpty' in result) {
       // mask_inpaint never returns mask_empty (caller-supplied mask).
