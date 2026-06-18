@@ -2619,6 +2619,68 @@ async function handleMarketRate(req: Request, env: Env, id: string): Promise<Res
   });
 }
 
+/** POST /api/market/report  body { listing_id, reason } — authed.
+ *  EU DSA notice-and-action: any signed-in user can flag an approved listing
+ *  as illegal/infringing. Stores one report per user (overwrite), emails the
+ *  admin, and AUTO-HIDES the listing once distinct reports cross a threshold so
+ *  suspected-illegal content is taken down expeditiously pending review. */
+async function handleMarketReport(req: Request, env: Env): Promise<Response> {
+  const user = await getSessionUser(req, env);
+  if (!user) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { listing_id?: string; reason?: string };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const listingId = String(body?.listing_id || '').trim();
+  const reason = String(body?.reason || '').trim().slice(0, 2000);
+  if (!listingId) return err(400, 'listing_id required');
+  if (reason.length < 3) return err(400, 'a reason is required');
+
+  const lkey = `_market/listings/${listingId}.json`;
+  const ltxt = await r2GetText(env, lkey);
+  if (!ltxt) return err(404, 'listing not found');
+  let listing: MarketListing;
+  try { listing = JSON.parse(ltxt) as MarketListing; }
+  catch (e) { return err(500, e instanceof Error ? e.message : String(e)); }
+
+  const now = new Date().toISOString();
+  // One report per user per listing (overwrite) — a single user can't inflate
+  // the auto-hide threshold.
+  await env.MESHES.put(`_market/reports/${listingId}/${user.id}.json`, JSON.stringify({
+    listing_id: listingId, listing_title: listing.title ?? '', reporter: user.id,
+    reason, created_at: now,
+  }), { httpMetadata: { contentType: 'application/json' } });
+
+  let reportCount = 0;
+  try {
+    const page = await env.MESHES.list({ prefix: `_market/reports/${listingId}/` });
+    reportCount = page.objects.length;
+  } catch {}
+
+  // DSA expeditious takedown: auto-hide at >= 3 distinct reporters, pending
+  // admin review (the author gets a statement of reasons via the admin flow).
+  const AUTO_HIDE_THRESHOLD = 3;
+  let autoHidden = false;
+  if (listing.status === 'approved' && reportCount >= AUTO_HIDE_THRESHOLD) {
+    listing.status = 'rejected';
+    (listing as MarketListing & { moderation_note?: string }).moderation_note =
+      `auto-hidden after ${reportCount} reports — pending admin review`;
+    await env.MESHES.put(lkey, JSON.stringify(listing), { httpMetadata: { contentType: 'application/json' } });
+    autoHidden = true;
+  }
+
+  // Notify the admin (best-effort; no-op if RESEND_API_KEY is unset).
+  try {
+    await _sendAdminAlertEmail(env,
+      `Marketplace report: "${listing.title ?? listingId}"`,
+      `A marketplace listing was reported as illegal/infringing.\n\n` +
+      `Listing: ${listingId} ("${listing.title ?? ''}")\nReporter: ${user.id}\n` +
+      `Reason: ${reason}\nTotal distinct reports: ${reportCount}\n` +
+      `Auto-hidden: ${autoHidden ? 'YES' : 'no'}\n\nReview in /admin.`);
+  } catch {}
+
+  return json({ ok: true, success: true, reported: true, report_count: reportCount, auto_hidden: autoHidden });
+}
+
 /** GET /api/market/author/<userId> — PUBLIC. Aggregated public profile:
  *  approved listings (with rating stats), sales totals per currency,
  *  member_since (earliest listing). */
@@ -11167,6 +11229,7 @@ export default {
         // ── Marketplace ──
         if (pathname === '/api/market/list'                 && method === 'GET')  return await handleMarketList(req, env);
         if (pathname === '/api/market/publish'              && method === 'POST') return await handleMarketPublish(req, env);
+        if (pathname === '/api/market/report'               && method === 'POST') return await handleMarketReport(req, env);
         if (pathname === '/api/market/checkout'             && method === 'POST') return await handleMarketCheckout(req, env);
         if (pathname === '/api/market/owned'                && method === 'GET')  return await handleMarketOwned(req, env);
         if (pathname === '/api/market/seller/onboard'       && method === 'POST') return await handleMarketSellerOnboard(req, env);

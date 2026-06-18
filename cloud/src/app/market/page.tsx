@@ -333,6 +333,26 @@ function MarketPageInner() {
   }, [listings, search, tab, kindFilter]);
 
   const inCart = (id: string) => cart.includes(id);
+  const reportListing = async (id: string) => {
+    if (!meUserId) { alert('Please sign in to report a listing.'); return; }
+    const reason = window.prompt('Why are you reporting this listing? (illegal content, copyright / IP infringement, etc.)');
+    if (!reason || reason.trim().length < 3) return;
+    try {
+      const r = await fetch('/api/market/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ listing_id: id, reason: reason.trim() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert('Report failed: ' + ((j as { error?: string }).error || r.status)); return; }
+      alert((j as { auto_hidden?: boolean }).auto_hidden
+        ? 'Thank you. This listing has been hidden pending moderator review.'
+        : 'Thank you. Your report has been sent to our moderators.');
+    } catch (e) {
+      alert('Report failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
   const addToCart = (id: string) => {
     if (inCart(id)) return;
     // Defensive: refuse to add one's own listing to the cart. The UI
@@ -896,6 +916,13 @@ function MarketPageInner() {
                 </button>
               )}
             </div>
+            <button
+              onClick={() => reportListing(selected.id)}
+              title="Report this listing as illegal or infringing"
+              style={{ marginTop: 14, background: 'transparent', border: 'none',
+                       color: 'var(--text-3)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
+              ⚑ Report this listing
+            </button>
           </div>
         </div>
       )}
