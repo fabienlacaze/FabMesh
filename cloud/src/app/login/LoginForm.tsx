@@ -61,7 +61,9 @@ export function LoginForm() {
   }
 
   function navigateAfterAuth() {
-    const next = new URLSearchParams(window.location.search).get('next') || '/account';
+    // Land in the app on the projects listing (nicer than the bare /account
+    // page), unless an explicit ?next= was provided.
+    const next = new URLSearchParams(window.location.search).get('next') || '/app/#/projects';
     window.location.href = next;
   }
 
