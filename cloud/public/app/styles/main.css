@@ -3382,3 +3382,19 @@ body:not(.advanced-mode) .gallery-children {
   /* Horizontal button/tab strips become swipeable instead of clipped. */
   .toolbar, .tabs, .tab-bar, .view-tabs, .project-toolbar { overflow-x: auto; flex-wrap: nowrap; }
 }
+
+/* ── Mobile pass v2: target the ACTUAL containers (the app header is a <header>
+   element, the home screen is a .page / #page-projects, not #main-layout). ── */
+@media (max-width: 768px) {
+  html, body { overflow-x: hidden !important; max-width: 100vw; }
+  header { flex-wrap: wrap !important; row-gap: 6px; }
+  .header-left, .header-right { flex-wrap: wrap !important; min-width: 0; }
+  .page { padding-left: 12px !important; padding-right: 12px !important;
+          overflow-x: hidden !important; max-width: 100vw; }
+  .page-header { flex-wrap: wrap !important; }
+  .page-header > div { flex-wrap: wrap !important; min-width: 0; justify-content: flex-start !important; }
+  #home-view-toggle { max-width: 100% !important; overflow-x: auto; }
+  #projects-grid { grid-template-columns: 1fr !important; }
+  #page-projects, #projects-grid, .project-card, .step, .step-card,
+  .gen-step, .wizard-step { max-width: 100% !important; }
+}
