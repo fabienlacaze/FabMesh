@@ -3363,38 +3363,36 @@ body:not(.advanced-mode) .gallery-children {
 
 
 
-/* ── Mobile usability pass (the SPA is the desktop UI reused on web). Scoped to
-   max-width:768px so desktop is untouched. A polished phone UX is the dedicated
-   mobile build; this stops the header/side-panels from being clipped off-screen
-   and lets the page scroll instead of truncating. ── */
+/* ── Mobile/tablet modal pass. The mesh-tool / material modals use the generic
+   .modal + .modal-content classes defined in THIS file, several with inline
+   min-width:600px that forces horizontal overflow on phones. We relax those
+   widths and let inner two-column bodies stack. The rest of the responsive
+   layout (topbar, .page-header, grids, workspace stages) lives in index2.css.
+   Scoped to <=768px (phone) / 769-1024px (tablet) so desktop is untouched. ── */
 @media (max-width: 768px) {
-  html, body { overflow-x: hidden; max-width: 100vw; }
-  /* Header wraps so the credits / marketplace pills aren't cut off. */
-  #header { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
-  .header-left, .header-right { flex-wrap: wrap; min-width: 0; }
-  /* Side-by-side panels stack vertically and go full width + scrollable. */
-  #main-layout { flex-direction: column; overflow-y: auto; overflow-x: hidden; }
-  #gallery-panel {
-    width: 100% !important; max-width: 100% !important; min-width: 0 !important;
-    border-right: none; border-bottom: 1px solid var(--border);
+  /* Generic modals: shrink to the viewport instead of a fixed 400/600px min. */
+  .modal { padding: 0; }
+  .modal-content {
+    min-width: 0 !important;
+    max-width: 96vw !important;
+    width: 96vw;
+    max-height: 92vh;
+    overflow-y: auto;
   }
-  .resize-handle-right, .resize-handle-left { display: none; }
-  /* Horizontal button/tab strips become swipeable instead of clipped. */
-  .toolbar, .tabs, .tab-bar, .view-tabs, .project-toolbar { overflow-x: auto; flex-wrap: nowrap; }
+  /* Mesh-tool modal body (inline-styled flex: 250px params + 3D viewport).
+     Stack vertically so neither column is clipped, and give the viewport a
+     usable height on a phone. */
+  #modal-mesh-tool .modal-content { min-width: 0 !important; }
+  #modal-mesh-tool .modal-content > div[style*="flex:1 1 0"],
+  #modal-mesh-tool .modal-content > div[style*="flex: 1 1 0"] {
+    flex-direction: column !important;
+    min-height: 0 !important;
+  }
+  #mt-body { width: 100% !important; }
+  #mt-viewport { width: 100% !important; min-height: 260px !important; }
 }
 
-/* ── Mobile pass v2: target the ACTUAL containers (the app header is a <header>
-   element, the home screen is a .page / #page-projects, not #main-layout). ── */
-@media (max-width: 768px) {
-  html, body { overflow-x: hidden !important; max-width: 100vw; }
-  header { flex-wrap: wrap !important; row-gap: 6px; }
-  .header-left, .header-right { flex-wrap: wrap !important; min-width: 0; }
-  .page { padding-left: 12px !important; padding-right: 12px !important;
-          overflow-x: hidden !important; max-width: 100vw; }
-  .page-header { flex-wrap: wrap !important; }
-  .page-header > div { flex-wrap: wrap !important; min-width: 0; justify-content: flex-start !important; }
-  #home-view-toggle { max-width: 100% !important; overflow-x: auto; }
-  #projects-grid { grid-template-columns: 1fr !important; }
-  #page-projects, #projects-grid, .project-card, .step, .step-card,
-  .gen-step, .wizard-step { max-width: 100% !important; }
+@media (min-width: 769px) and (max-width: 1024px) {
+  .modal-content { max-width: 92vw !important; }
+  #modal-mesh-tool .modal-content { min-width: 0 !important; }
 }
