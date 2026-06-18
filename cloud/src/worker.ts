@@ -128,6 +128,14 @@ export interface Env {
 
   // Optional R2 S3 endpoint (kept for parity; native R2 binding is preferred).
   R2_PUBLIC_URL?: string;
+
+  // HMAC secret used to mint signed, expiring /r2/<key>?exp&sig URLs so the
+  // R2 bucket (incl. user face photos) is no longer reachable at permanent,
+  // guessable, unauthenticated r2.dev URLs. Set as a Cloudflare Worker SECRET
+  // (`npx wrangler secret put R2_URL_SIGNING_SECRET`), NEVER as a plaintext
+  // var in wrangler.toml. When UNSET, signedR2Url() falls back to the raw
+  // R2_PUBLIC_URL form (non-breaking) and the /r2/ route returns 404.
+  R2_URL_SIGNING_SECRET?: string;
 }
 
 /** Minimal R2Bucket type (avoid pulling @cloudflare/workers-types). */
@@ -383,6 +391,137 @@ const isMock = (env: Env): boolean => env.MOCK === '1' || env.NEXT_PUBLIC_MOCK =
 const siteUrl = (env: Env, fallback: string): string =>
   env.NEXT_PUBLIC_SITE_URL ?? fallback;
 
+/* ───────────────────────── signed R2 URLs ──────────────────────────
+ * P1 remediation: R2 objects (incl. user face photos) must NOT be reachable
+ * at permanent, guessable, unauthenticated r2.dev URLs. We mint short-lived
+ * HMAC-signed URLs served from the worker's OWN origin (/r2/<key>?exp&sig)
+ * and stream the bytes from the native MESHES binding after verifying the
+ * MAC. URLs are self-origin so the existing CSP (`connect-src 'self'`,
+ * `img-src 'self'`) already covers them — no new origin, no proxy hop.
+ *
+ * Canonical signing string: "v1:" + <decoded key> + "\n" + <exp unix-sec>.
+ * MAC = HMAC-SHA256(R2_URL_SIGNING_SECRET, str) rendered lowercase hex (64
+ * chars), matching the Stripe hex convention so timingSafeEqualHex applies.
+ *
+ * NON-BREAKING: when R2_URL_SIGNING_SECRET is unset, signedR2Url() falls
+ * back to the raw `${R2_PUBLIC_URL}/${key}` form (current behavior) and the
+ * /r2/ route 404s — so deploying the call-site switch with no secret set is
+ * a no-op. Signing flips on the moment the secret is added (no redeploy).
+ * ──────────────────────────────────────────────────────────────────── */
+
+const R2_TTL_IMAGE_SEC  = 86400;    // 24h  — renders, photos, masks, thumbs
+const R2_TTL_MESH_SEC   = 604800;   // 7d   — GLB/FBX meshes & animations
+const R2_TTL_EXPORT_SEC = 2592000;  // 30d  — CSV/XLSX/GDPR exports that leave the system
+
+type R2UrlKind = 'image' | 'mesh' | 'export';
+
+function r2TtlFor(kind: R2UrlKind): number {
+  return kind === 'mesh' ? R2_TTL_MESH_SEC
+       : kind === 'export' ? R2_TTL_EXPORT_SEC
+       : R2_TTL_IMAGE_SEC;
+}
+
+let _r2SignWarned = false;
+
+/** Compute the lowercase-hex HMAC-SHA256 of the canonical signing string. */
+async function r2SignHex(secret: string, canonical: string): Promise<string> {
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, enc.encode(canonical));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Mint a signed, expiring URL for an R2 object key. `key` is the raw R2
+ * object key (e.g. `uid/source/123.png`), WITHOUT a leading slash. The MAC
+ * is computed over the DECODED key so transport encoding never changes it.
+ *
+ * Already-full `https://` values (legacy persisted rows) are passed through
+ * unchanged so old data doesn't 404 during the migration window.
+ */
+async function signedR2Url(env: Env, key: string, kind: R2UrlKind = 'image'): Promise<string> {
+  if (!key) return key;
+  // Legacy pass-through: persisted rows may already hold a full URL.
+  if (/^https?:\/\//i.test(key)) return key;
+  const clean = key.replace(/^\/+/, '');
+  const base = siteUrl(env, 'http://localhost:3030').replace(/\/+$/, '');
+  if (!env.R2_URL_SIGNING_SECRET) {
+    if (!_r2SignWarned) {
+      _r2SignWarned = true;
+      console.warn('[r2] R2_URL_SIGNING_SECRET unset — falling back to public R2_PUBLIC_URL (objects remain publicly reachable). Set the secret to enable signed URLs.');
+    }
+    return `${(env.R2_PUBLIC_URL || '').replace(/\/+$/, '')}/${clean}`;
+  }
+  const exp = Math.floor(Date.now() / 1000) + r2TtlFor(kind);
+  const sig = await r2SignHex(env.R2_URL_SIGNING_SECRET, `v1:${clean}\n${exp}`);
+  const encodedPath = clean.split('/').map(encodeURIComponent).join('/');
+  return `${base}/r2/${encodedPath}?exp=${exp}&sig=${sig}`;
+}
+
+/** Map an R2 key extension to a response content-type. */
+function r2ContentType(key: string): string {
+  const ext = (key.split('.').pop() || '').toLowerCase();
+  switch (ext) {
+    case 'glb':  return 'model/gltf-binary';
+    case 'gltf': return 'model/gltf+json';
+    case 'png':  return 'image/png';
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg';
+    case 'webp': return 'image/webp';
+    case 'gif':  return 'image/gif';
+    case 'fbx':  return 'application/octet-stream';
+    case 'json': return 'application/json';
+    default:     return 'application/octet-stream';
+  }
+}
+
+/**
+ * GET /r2/<encoded-key>?exp=<unix>&sig=<hex> — verify the signature + expiry
+ * then stream the object from the MESHES binding. Possession of a valid
+ * signed URL IS the authorization, so ACAO:* is set to allow canvas /
+ * model-viewer cross-fetch without the /api/proxy-image hop.
+ */
+async function handleSignedR2(req: Request, env: Env): Promise<Response> {
+  const url = new URL(req.url);
+  // Decode each path segment after '/r2/' and rejoin = the logical key.
+  const raw = url.pathname.slice('/r2/'.length);
+  let key: string;
+  try {
+    key = raw.split('/').map(decodeURIComponent).join('/');
+  } catch {
+    return err(400, 'bad key');
+  }
+  // Path-traversal / spoofing guard (defense-in-depth; the MAC already
+  // binds the exact key so a key can't be forged without a signature).
+  if (!key || key.includes('..') || key.startsWith('/')) return err(403, 'forbidden');
+
+  // Route is only meaningful when signing is enabled.
+  if (!env.R2_URL_SIGNING_SECRET) return err(404, 'not found');
+  if (!env.MESHES) return err(404, 'not found');
+
+  const exp = parseInt(url.searchParams.get('exp') || '', 10);
+  const sig = url.searchParams.get('sig') || '';
+  if (!Number.isFinite(exp) || !sig) return err(403, 'forbidden');
+  const now = Math.floor(Date.now() / 1000);
+  if (exp < now) return err(403, 'expired');
+
+  const expected = await r2SignHex(env.R2_URL_SIGNING_SECRET, `v1:${key}\n${exp}`);
+  if (!timingSafeEqualHex(sig.toLowerCase(), expected)) return err(403, 'forbidden');
+
+  const obj = await env.MESHES.get(key);
+  if (!obj) return err(404, 'not found');
+
+  return new Response((obj as { body: ReadableStream }).body, {
+    headers: {
+      'content-type': r2ContentType(key),
+      'cache-control': `private, max-age=${Math.max(0, exp - now)}`,
+      'content-disposition': 'inline',
+      'access-control-allow-origin': '*',
+      'x-content-type-options': 'nosniff',
+    },
+  });
+}
+
 function parseCookies(req: Request): Record<string, string> {
   const out: Record<string, string> = {};
   const raw = req.headers.get('cookie') ?? '';
@@ -491,14 +630,26 @@ async function insertUserAsset(
   }
 }
 
-/** Convenience: extract the R2 path from a public URL the worker
- *  already returned (e.g. https://pub-xxx.r2.dev/<uid>/front/<file>.png).
- *  Returns null if the URL doesn't match our bucket. */
+/** Convenience: extract the R2 object KEY from a URL the worker already
+ *  returned — handles BOTH the legacy public form
+ *  (https://pub-xxx.r2.dev/<uid>/front/<file>.png) AND the new signed form
+ *  (<SITE>/r2/<url-encoded-key>?exp&sig). Returns null if neither matches
+ *  (callers then treat the input as a raw key via `?? url`). */
 function r2PathFromPublicUrl(env: Env, url: string): string | null {
   if (!url) return null;
+  // New signed form: <SITE>/r2/<encoded-key>?exp=...&sig=... — the key is the
+  // path right after the host's /r2/ segment, percent-decoded per segment.
+  // (Anchored to the host so a legacy key that merely contains "/r2/" can't
+  // false-match.)
+  const signed = url.match(/^https?:\/\/[^/]+\/r2\/([^?#]+)/);
+  if (signed) {
+    try { return signed[1].split('/').map(decodeURIComponent).join('/'); }
+    catch { return signed[1]; }
+  }
+  // Legacy public form: <R2_PUBLIC_URL>/<key>
   const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '') + '/';
-  if (!prefix || !url.startsWith(prefix)) return null;
-  return url.slice(prefix.length);
+  if (prefix.length > 1 && url.startsWith(prefix)) return url.slice(prefix.length);
+  return null;
 }
 
 /* ───── MOCK in-memory store (Worker-instance scoped, ephemeral) ─────
@@ -1130,7 +1281,7 @@ async function uploadGlbToR2(env: Env, sourceUrl: string, key: string): Promise<
   if (!res.ok) throw new Error(`source fetch failed: ${res.status}`);
   const body = await res.arrayBuffer();
   await env.MESHES.put(key, body, { httpMetadata: { contentType: 'model/gltf-binary' } });
-  return `${env.R2_PUBLIC_URL}/${key}`;
+  return await signedR2Url(env, key, 'mesh');
 }
 
 /* ───────────────────── stripe webhook signature ────────────────────── */
@@ -1189,14 +1340,19 @@ async function handleMeExport(req: Request, env: Env): Promise<Response> {
     sb.from('jobs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5000),
     sb.from('payments').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5000),
   ]);
-  const r2Keys: Array<{ key: string; size: number; uploaded: string }> = [];
+  const r2Keys: Array<{ key: string; size: number; uploaded: string; download_url: string }> = [];
   if (env.MESHES) {
     let cursor: string | undefined;
     let pages = 0;
     do {
       const list = await env.MESHES.list({ prefix: `${user.id}/`, cursor, limit: 1000 });
       for (const obj of list.objects) {
-        r2Keys.push({ key: obj.key, size: obj.size, uploaded: obj.uploaded.toISOString() });
+        // Re-sign with the long 'export' TTL (30d) since the JSON leaves the
+        // system; the raw `key` is kept so a stale link can be refreshed.
+        r2Keys.push({
+          key: obj.key, size: obj.size, uploaded: obj.uploaded.toISOString(),
+          download_url: await signedR2Url(env, obj.key, 'export'),
+        });
       }
       cursor = list.truncated ? list.cursor : undefined;
       pages++;
@@ -1204,6 +1360,7 @@ async function handleMeExport(req: Request, env: Env): Promise<Response> {
   }
   const body = {
     exported_at: new Date().toISOString(),
+    export_links_note: 'download_url values are signed and expire ~30 days after export. The raw key can be used to request a fresh link.',
     user: { id: user.id, email: user.email },
     profile: profile.data ?? null,
     jobs: jobs.data ?? [],
@@ -1474,7 +1631,7 @@ async function handleContactSubmit(req: Request, env: Env): Promise<Response> {
         httpMetadata: { contentType: s.mime },
         customMetadata: { original_name: s.name.slice(0, 100) },
       });
-      const url = `${(env.R2_PUBLIC_URL || '').replace(/\/+$/, '')}/${key}`;
+      const url = await signedR2Url(env, key, 'image');
       attachments.push({ key, url, mime: s.mime, size: s.bytes.length, name: s.name });
     }
   } catch (e) {
@@ -3285,8 +3442,21 @@ async function handleMarketDownload(req: Request, env: Env, listingId: string): 
   const url = listing.asset_url || listing.mesh_url;
   if (!url) return err(404, 'asset URL missing');
 
-  const upstream = await fetch(url);
-  if (!upstream.ok || !upstream.body) return err(502, 'asset fetch failed');
+  // Resolve to an R2 KEY when the asset lives in our bucket, so we stream
+  // from the MESHES binding directly — robust to the r2.dev public bucket
+  // being disabled AND to a signed /r2/ URL's TTL expiring. Only fall back
+  // to an outbound fetch for genuinely external hosts (legacy replicate URLs).
+  let r2Key: string | null = null;
+  try {
+    const u = new URL(url);
+    const siteHost = new URL(siteUrl(env, 'http://localhost:3030')).host;
+    if (u.pathname.startsWith('/r2/') && u.host === siteHost) {
+      r2Key = u.pathname.slice('/r2/'.length).split('/').map(decodeURIComponent).join('/');
+    } else if (env.R2_PUBLIC_URL && u.host === new URL(env.R2_PUBLIC_URL).host) {
+      r2Key = decodeURIComponent(u.pathname.replace(/^\/+/, ''));
+    }
+  } catch {}
+  if (r2Key && (r2Key.includes('..') || r2Key.startsWith('/'))) r2Key = null;
 
   // Safe filename: alphanumerics + dash + underscore from the title,
   // plus the extension lifted off the asset URL pathname.
@@ -3299,17 +3469,29 @@ async function handleMarketDownload(req: Request, env: Env, listingId: string): 
   const filename = safeTitle + ext;
 
   const headers = new Headers();
-  const upCT = upstream.headers.get('Content-Type');
-  if (upCT) headers.set('Content-Type', upCT);
-  const upCL = upstream.headers.get('Content-Length');
-  if (upCL) headers.set('Content-Length', upCL);
   headers.set('Content-Disposition', `attachment; filename="${filename}"`);
   headers.set('Cache-Control', 'private, max-age=60');
+
+  let bodyStream: ReadableStream;
+  if (r2Key) {
+    const obj = await env.MESHES.get(r2Key);
+    if (!obj) return err(404, 'asset not found in storage');
+    bodyStream = (obj as { body: ReadableStream }).body;
+    headers.set('Content-Type', r2ContentType(r2Key));
+  } else {
+    const upstream = await fetch(url);
+    if (!upstream.ok || !upstream.body) return err(502, 'asset fetch failed');
+    bodyStream = upstream.body;
+    const upCT = upstream.headers.get('Content-Type');
+    if (upCT) headers.set('Content-Type', upCT);
+    const upCL = upstream.headers.get('Content-Length');
+    if (upCL) headers.set('Content-Length', upCL);
+  }
 
   // Best-effort downloads counter — atomic CAS on a separate R2 key.
   await bumpListingDownloads(env, listingId);
 
-  return new Response(upstream.body, { status: 200, headers });
+  return new Response(bodyStream, { status: 200, headers });
 }
 
 /** DELETE /api/admin/market/<id> — ADMIN. Hard-remove a listing. */
@@ -3837,6 +4019,11 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
     // If the client only sent a File and no URL, mirror the bytes to
     // R2 first so we can give Modal a stable URL.
     let frontUrl = imageHttpsUrl;
+    // When we upload the user's source photo to R2 we persist its raw KEY
+    // (not the signed URL) so handleCloudProjects/handleListMeshes can
+    // re-sign it on read with a fresh TTL. For caller-supplied https URLs
+    // there is no key — we persist the URL itself (legacy pass-through).
+    let sourceImageStore: string | undefined = imageHttpsUrl;
     if (!frontUrl) {
       if (!env.MESHES || !env.R2_PUBLIC_URL) {
         await addCredits(env, user.id, cost);
@@ -3848,7 +4035,9 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
       await env.MESHES.put(key, fileBytes, {
         httpMetadata: { contentType: input.image.type || 'image/png' },
       });
-      frontUrl = `${env.R2_PUBLIC_URL}/${key}`;
+      // CRITICAL PRIVACY: the user face photo must be signed, not public.
+      frontUrl = await signedR2Url(env, key, 'image');
+      sourceImageStore = key;
     }
 
     const isOrganic = input.asset_type === 'character'
@@ -4003,7 +4192,7 @@ async function handleGenerate(req: Request, env: Env): Promise<Response> {
         // 2026-06-01: store the source image URL so handleListMeshes
         // can show it as the mesh thumbnail (each mesh version gets
         // the image it was generated FROM, not the project's default).
-        sourceImage: frontUrl,
+        sourceImage: sourceImageStore,
       },
       created_at: new Date().toISOString(),
     });
@@ -4161,8 +4350,10 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
         return json({ status: 'processing' });
       }
       const stableUrl = await persistModalGlb(env, id, status.glb_base64);
+      // Persist the raw KEY (not the expiring signed URL) so reads re-sign
+      // with a fresh TTL. persistModalGlb writes mesh/<id>.glb.
       await sbm.from('jobs')
-        .update({ status: 'succeeded', mesh_url: stableUrl,
+        .update({ status: 'succeeded', mesh_url: `mesh/${id}.glb`,
                   finished_at: new Date().toISOString() })
         .eq('id', id);
       const start = job.created_at ? new Date(job.created_at as string).getTime() : Date.now();
@@ -4202,19 +4393,28 @@ async function handleJob(req: Request, env: Env, id: string): Promise<Response> 
     const replicateUrl = extractGlb(prediction.output);
     let stableUrl: string | null = (job?.mesh_url as string | null) ?? null;
     if (replicateUrl && !stableUrl && job) {
+      const meshKey = `${job.user_id}/${id}.glb`;
+      // Persist the raw KEY so reads re-sign with a fresh TTL; only fall
+      // back to the (expiring) replicate URL if the R2 mirror failed.
+      let persisted: string;
       try {
-        stableUrl = await uploadGlbToR2(env, replicateUrl, `${job.user_id}/${id}.glb`);
+        stableUrl = await uploadGlbToR2(env, replicateUrl, meshKey);
+        persisted = meshKey;
       } catch (e) {
         console.error('R2 upload failed, falling back to replicate URL:', e);
         stableUrl = replicateUrl;
+        persisted = replicateUrl;
       }
       await sb.from('jobs')
-        .update({ status: 'succeeded', mesh_url: stableUrl, finished_at: new Date().toISOString() })
+        .update({ status: 'succeeded', mesh_url: persisted, finished_at: new Date().toISOString() })
         .eq('id', id);
     }
     const start = job?.created_at ? new Date(job.created_at as string).getTime() : Date.now();
+    // Re-sign on read: stableUrl may be a raw KEY persisted on a prior poll;
+    // signedR2Url passes through full https URLs (signed/replicate) unchanged.
+    const respUrl = stableUrl ? await signedR2Url(env, stableUrl, 'mesh') : replicateUrl;
     return json({
-      status: 'succeeded', url: stableUrl ?? replicateUrl,
+      status: 'succeeded', url: respUrl,
       duration_s: (Date.now() - start) / 1000,
     });
   }
@@ -4236,28 +4436,32 @@ async function handleProjects(req: Request, env: Env): Promise<Response> {
   if (!user) return err(401, 'unauthorized');
 
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const toProject = (j: {
+  const toProject = async (j: {
     id: string; asset_type: string; mode: string; status: string;
     mesh_url: string | null; created_at: string; options?: Record<string, unknown>;
-  }) => ({
-    id: j.id,
-    name: `${cap(j.asset_type)} ${j.mode} · ${j.id.slice(-6)}`,
-    asset_type: j.asset_type, mode: j.mode, status: j.status,
-    createdAt: j.created_at, updatedAt: j.created_at,
-    mesh_url: j.mesh_url, meshUrl: j.mesh_url,
-    thumbnail: null, images: [],
-    meshes: j.mesh_url ? [{ url: j.mesh_url, name: 'output.glb' }] : [],
-    options: j.options ?? {},
-  });
+  }) => {
+    // Re-sign on read: mesh_url stores the raw KEY (legacy → full URL passthrough).
+    const meshSigned = j.mesh_url ? await signedR2Url(env, j.mesh_url, 'mesh') : null;
+    return ({
+      id: j.id,
+      name: `${cap(j.asset_type)} ${j.mode} · ${j.id.slice(-6)}`,
+      asset_type: j.asset_type, mode: j.mode, status: j.status,
+      createdAt: j.created_at, updatedAt: j.created_at,
+      mesh_url: meshSigned, meshUrl: meshSigned,
+      thumbnail: null, images: [] as string[],
+      meshes: meshSigned ? [{ url: meshSigned, name: 'output.glb' }] : [],
+      options: j.options ?? {},
+    });
+  };
 
   if (isMock(env)) {
     const jobs = mock.listJobs(user.id);
-    return json({ projects: jobs.map(toProject) });
+    return json({ projects: await Promise.all(jobs.map(toProject)) });
   }
   const { data } = await supabaseAdmin(env).from('jobs')
     .select('*').eq('user_id', user.id)
     .order('created_at', { ascending: false }).limit(100);
-  const projects = ((data ?? []) as Parameters<typeof toProject>[0][]).map(toProject);
+  const projects = await Promise.all(((data ?? []) as Parameters<typeof toProject>[0][]).map(toProject));
 
   // Merge rigged GLBs from R2 (uploaded by handleAutoRigStatus) into the
   // most recent project's meshes[] so the client picks them up as p.rigs
@@ -4268,7 +4472,7 @@ async function handleProjects(req: Request, env: Env): Promise<Response> {
     console.log(`[handleProjects] user=${user.id} rigged listed=${listed.objects.length} projects=${projects.length}`);
     for (const obj of listed.objects) {
       const filename = obj.key.split('/').pop() || '';
-      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const url = await signedR2Url(env, obj.key, 'mesh');
       // Append to the most recent project that doesn't already have it.
       // Cheap heuristic — the renderer just needs ONE project to expose it.
       if (projects.length > 0) {
@@ -4294,7 +4498,7 @@ async function handleProjects(req: Request, env: Env): Promise<Response> {
       const parts = obj.key.split('/');
       const projectSlug = parts.length >= 4 ? parts[2] : null;
       if (!projectSlug) continue; // legacy key with no project tag → ignore
-      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const url = await signedR2Url(env, obj.key, 'mesh');
       const target = projectBySlug.get(projectSlug);
       if (!target) continue; // slug doesn't match any project
       if (!target.meshes.some((m: { url?: string }) => m.url === url)) {
@@ -4451,10 +4655,16 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
     if (!map.has(name)) map.set(name, emptyProj(name));
     const p = map.get(name)!;
     if (j.mesh_url && j.status === 'succeeded') {
+      // Re-sign on read: mesh_url now stores the raw R2 KEY (legacy rows
+      // hold a full URL → passed through unchanged). sourceImage likewise
+      // stores the source-photo KEY (legacy: full URL).
+      const meshSigned = await signedR2Url(env, j.mesh_url, 'mesh');
+      const srcKey = (j.options?.sourceImage as string | undefined) ?? null;
+      const srcSigned = srcKey ? await signedR2Url(env, srcKey, 'image') : null;
       p.meshes.push({
-        filename: `${j.id}.glb`, path: j.mesh_url, url: j.mesh_url,
+        filename: `${j.id}.glb`, path: meshSigned, url: meshSigned,
         created: j.created_at, format: 'GLB',
-        sourceImage: (j.options?.sourceImage as string | undefined) ?? null,
+        sourceImage: srcSigned,
         // C7: align with handleListMeshes so renderer always has a
         // real uuid for delete (filename slug never matches .eq('id')).
         id: j.id, jobId: j.id,
@@ -4467,7 +4677,6 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
   // Merge user_assets images into the project map. The renderer
   // expects p.images = string[] of public URLs (front-images
   // primarily; back-images are in p.backPhotos as a front→back map).
-  const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
   const assets = (assetsRes.data ?? []) as Array<{
     project: string; kind: string; r2_path: string;
     parent_path: string | null; meta: Record<string, unknown> | null;
@@ -4477,7 +4686,9 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
     if (!a.project) continue;
     if (!map.has(a.project)) map.set(a.project, emptyProj(a.project));
     const p = map.get(a.project)!;
-    const url = `${prefix}/${a.r2_path}`;
+    // Re-sign on read from the stored r2_path KEY (legacy full URL → passthrough).
+    const isMeshKind = a.kind.startsWith('mesh') || a.kind.includes('rig') || a.kind.includes('anim');
+    const url = await signedR2Url(env, a.r2_path, isMeshKind ? 'mesh' : 'image');
     if (a.kind === 'image-front' || a.kind === 'image-tpose' || a.kind === 'image-modified' ||
         a.kind === 'image-removebg' || a.kind === 'image-rectified' || a.kind === 'image-upscaled' ||
         a.kind === 'image-inpainted' || a.kind === 'image-facefixed') {
@@ -4493,7 +4704,7 @@ async function handleCloudProjects(req: Request, env: Env): Promise<Response> {
         if (promptFromMeta) p.prompt = promptFromMeta;
       }
     } else if (a.kind === 'image-back' && a.parent_path) {
-      const parentUrl = a.parent_path.startsWith('http') ? a.parent_path : `${prefix}/${a.parent_path}`;
+      const parentUrl = await signedR2Url(env, a.parent_path, 'image');
       p.backPhotos[parentUrl] = url;
     }
     if (a.created_at > p.created) p.created = a.created_at;
@@ -4554,26 +4765,30 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     .limit(500);
   if (error) return err(500, error.message);
 
-  const meshes = ((data ?? []) as CloudJobRow[]).map(j => {
+  const meshes = await Promise.all(((data ?? []) as CloudJobRow[]).map(async j => {
     // C7: name meshes like the desktop convention so meshProject()
     // strips down to the project name. Format:
     //   <safe_project>_trellis2_<timestamp_10digits>.glb
     const safeName = (j.project_name || (j.options?.project_name as string | undefined) || 'untitled')
                       .replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 32);
     const stem = `${safeName}_trellis2_${j.id.slice(-10)}`;
+    // Re-sign on read from the stored KEY (legacy full URL → passthrough).
+    const meshSigned = await signedR2Url(env, j.mesh_url!, 'mesh');
+    const srcKey = (j.options?.sourceImage as string | undefined) ?? null;
+    const srcSigned = srcKey ? await signedR2Url(env, srcKey, 'image') : null;
     return ({
     filename: `${stem}.glb`,
-    path: j.mesh_url!,
-    url: j.mesh_url!,
+    path: meshSigned,
+    url: meshSigned,
     size: 0,
     created: j.created_at,
     format: 'GLB',
     thumb: null,
-    sourceImage: (j.options?.sourceImage as string | undefined) ?? null,
+    sourceImage: srcSigned,
     asset_type: j.asset_type,
     projectName: j.project_name ?? (j.options?.project_name as string | undefined) ?? null,
     id: j.id,
-  });});
+  });}));
 
   // Append rigged GLBs from R2 (uploaded by handleAutoRigStatus). The
   // client regex /_rigged_/i on m.filename will pick them up and push
@@ -4584,7 +4799,7 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     console.log(`[handleListMeshes] user=${user.id} rigged_count=${listed.objects.length} mesh_count=${meshes.length}`);
     for (const obj of listed.objects) {
       const filename = obj.key.split('/').pop() || 'rigged.glb';
-      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const url = await signedR2Url(env, obj.key, 'mesh');
       // Extract the modal job ID from the rigged filename to find the
       // matching source mesh and inherit its projectName.
       // Filename pattern: modal_<hex32>_rigged_puppeteer_<ts>.glb
@@ -4648,7 +4863,7 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
       const parts = obj.key.split('/');
       const projectSlug = parts.length >= 4 ? parts[2] : null;
       if (!projectSlug) continue;
-      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const url = await signedR2Url(env, obj.key, 'mesh');
       const inheritedProject = projectBySlug.get(projectSlug);
       if (!inheritedProject) continue; // slug doesn't match any project
       // Detect op type from filename for the asset_type field. Defaults
@@ -4682,7 +4897,7 @@ async function handleListMeshes(req: Request, env: Env): Promise<Response> {
     console.log(`[handleListMeshes] user=${user.id} anim_count=${listed.objects.length}`);
     for (const obj of listed.objects) {
       const filename = obj.key.split('/').pop() || 'anim.glb';
-      const url = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${obj.key}`;
+      const url = await signedR2Url(env, obj.key, 'mesh');
       // Anim filename pattern (worker.ts handleAutoAnimStatus):
       //   <baseName>_<animType>_<batchId>_<timestamp>.glb   (post-batch)
       //   <baseName>_<animType>_<timestamp>.glb             (legacy)
@@ -4906,12 +5121,14 @@ async function handleMeshesDelete(req: Request, env: Env): Promise<Response> {
   // the legacy layout. delete() never throws on a missing key.
   if (env.MESHES) {
     let r2Key: string | null = null;
-    const pub = env.R2_PUBLIC_URL;
-    if (job.mesh_url && pub && job.mesh_url.startsWith(pub)) {
+    // mesh_url now stores the raw R2 KEY; legacy rows stored a full URL.
+    if (job.mesh_url && /^https?:\/\//i.test(job.mesh_url)) {
       try {
         const u = new URL(job.mesh_url);
-        r2Key = u.pathname.replace(/^\/+/, '');
+        r2Key = decodeURIComponent(u.pathname.replace(/^\/+/, ''));
       } catch (_) { /* fall through */ }
+    } else if (job.mesh_url) {
+      r2Key = (job.mesh_url as string).replace(/^\/+/, '');
     }
     if (!r2Key) r2Key = `${user.id}/${realId}.glb`;
     try { await env.MESHES.delete(r2Key); } catch (_) { /* ignore */ }
@@ -5166,7 +5383,7 @@ async function handleRemoveBackground(req: Request, env: Env): Promise<Response>
           _assertImageBytes(buf, 'remove-bg');
           const key = `${user.id}/removebg/${Date.now()}_${Math.floor(Math.random() * 1e9)}_nobg.png`;
           await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-          url = `${env.R2_PUBLIC_URL}/${key}`;
+          url = await signedR2Url(env, key, 'image');
         } else {
           console.warn('[remove-bg] upstream fetch failed, returning raw Replicate URL', upstream.status);
         }
@@ -5300,7 +5517,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
     const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return `${env.R2_PUBLIC_URL}/${key}`;
+    return await signedR2Url(env, key, 'image');
   }
   // Without R2 we can't return a stable URL — failure is preferable
   // to handing the client a one-shot data URL.
@@ -5400,7 +5617,7 @@ async function callModalBackView(env: Env, userId: string, input: {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
     const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return `${env.R2_PUBLIC_URL}/${key}`;
+    return await signedR2Url(env, key, 'image');
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal back-view output');
 }
@@ -5529,7 +5746,7 @@ async function callModalTpose(env: Env, userId: string, input: {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
     const key = `${userId}/${folder}/${Date.now()}_${seed}_tpose.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return `${env.R2_PUBLIC_URL}/${key}`;
+    return await signedR2Url(env, key, 'image');
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal tpose output');
 }
@@ -5636,7 +5853,7 @@ async function callModalImageOp(env: Env, userId: string, input: {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
     const key = `${userId}/${folder}/${Date.now()}_${seed}_${tag}.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return { url: `${env.R2_PUBLIC_URL}/${key}` };
+    return { url: await signedR2Url(env, key, 'image') };
   }
   throw new Error('R2 bucket unavailable; cannot persist image_op output');
 }
@@ -5686,7 +5903,7 @@ async function callModalSheet(env: Env, userId: string, input: {
     const seed = input.seed ?? Math.floor(Math.random() * 1e9);
     const key = `${userId}/${folder}/${Date.now()}_${seed}_sheet_back.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return `${env.R2_PUBLIC_URL}/${key}`;
+    return await signedR2Url(env, key, 'image');
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal sheet output');
 }
@@ -5738,7 +5955,7 @@ async function callModalRectify(env: Env, userId: string, input: {
   if (env.MESHES && env.R2_PUBLIC_URL) {
     const key = `${userId}/${folder}/${Date.now()}_rectified.png`;
     await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-    return `${env.R2_PUBLIC_URL}/${key}`;
+    return await signedR2Url(env, key, 'image');
   }
   throw new Error('R2 bucket unavailable; cannot persist Modal rectify output');
 }
@@ -5854,7 +6071,7 @@ async function persistModalGlb(env: Env, jobId: string, glbBase64: string): Prom
   });
   // Tag the mesh container as warm.
   _writeLastWarmMs(env, '_meta/last_warm_mesh.txt').catch(() => {});
-  return `${env.R2_PUBLIC_URL}/${key}`;
+  return await signedR2Url(env, key, 'mesh');
 }
 
 async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folder: string): Promise<string> {
@@ -5966,7 +6183,7 @@ async function callMyfabmeshCog(env: Env, userId: string, input: CogInput, folde
         const seed = input.seed ?? Math.floor(Math.random() * 1e9);
         const key = `${userId}/${folder}/${Date.now()}_${seed}.png`;
         await env.MESHES.put(key, buf, { httpMetadata: { contentType: 'image/png' } });
-        return `${env.R2_PUBLIC_URL}/${key}`;
+        return await signedR2Url(env, key, 'image');
       }
     } catch { /* fall back to raw Replicate URL */ }
   }
@@ -6501,7 +6718,7 @@ async function handleMaskInpaint(req: Request, env: Env): Promise<Response> {
     await env.MESHES.put(key, bytes, {
       httpMetadata: { contentType: `image/${m[1]}` },
     });
-    maskUrl = `${env.R2_PUBLIC_URL}/${key}`;
+    maskUrl = await signedR2Url(env, key, 'image');
   } catch (e) {
     return err(400, `mask decode failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -6727,7 +6944,7 @@ async function handleMeshOp(req: Request, env: Env): Promise<Response> {
     if (!env.MESHES || !env.R2_PUBLIC_URL) throw new Error('R2 binding required');
     const key = `${user.id}/mesh-op/${projectSlug}/${Date.now()}_${op}.glb`;
     await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
-    const url = `${env.R2_PUBLIC_URL}/${key}`;
+    const url = await signedR2Url(env, key, 'mesh');
     // Forward fill_holes verdict + delta-faces into telemetry so we can
     // measure the diagnostic-first rollout via Supabase SELECT later.
     const logCtx: Record<string, unknown> = { op_type: op, mesh_url_in: finalUrl };
@@ -6807,7 +7024,7 @@ async function handleMeshOpClientResult(req: Request, env: Env): Promise<Respons
   try {
     const key = `${user.id}/mesh-op/${Date.now()}_${op}_client.glb`;
     await env.MESHES.put(key, bytes, { httpMetadata: { contentType: 'model/gltf-binary' } });
-    const url = `${env.R2_PUBLIC_URL}/${key}`;
+    const url = await signedR2Url(env, key, 'mesh');
     await logOperation(env, user.id, 'mesh' as keyof typeof MODAL_COST_USD,
                        0, opStart, Date.now(), 'succeeded',
                        { op_type: op, client_side: true, size_bytes: bytes.length });
@@ -7005,7 +7222,7 @@ async function handleUploadImage(req: Request, env: Env): Promise<Response> {
     console.error('[upload-image]', e instanceof Error ? e.message : String(e), e);
     return err(502, 'R2 upload failed');
   }
-  return json({ ok: true, success: true, path: `${env.R2_PUBLIC_URL}/${key}` });
+  return json({ ok: true, success: true, path: await signedR2Url(env, key, 'image') });
 }
 
 /** POST /api/upload-mesh — accept a client-side sculpted/edited GLB and
@@ -7090,7 +7307,7 @@ async function handleUploadMesh(req: Request, env: Env): Promise<Response> {
       { status: 500, headers: { 'content-type': 'application/json' } },
     );
   }
-  return json({ success: true, path: key, url: `${env.R2_PUBLIC_URL}/${key}` });
+  return json({ success: true, path: key, url: await signedR2Url(env, key, 'mesh') });
 }
 
 /** Flat per-rig cost. Same order of magnitude as the existing mesh ops
@@ -7480,15 +7697,16 @@ async function handleAutoRigStatus(req: Request, env: Env): Promise<Response> {
     }
 
     await deleteRigJobRecord(env, jobId).catch(() => {});
-    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    const publicUrl = await signedR2Url(env, key, 'mesh');
     console.log(`[auto-rig-status] job_id=${jobId} DONE expected_bytes=${expectedBytes} url=${publicUrl}`);
     // Tag the rig container as warm so /api/modal-status shows the
     // right pill (added 2026-06-02 alongside anim + mvadapter tracking).
     _writeLastWarmMs(env, '_meta/last_warm_rig.txt').catch(() => {});
     // Mark the jobs row succeeded so it shows up correctly in history.
+    // Persist the raw KEY (not the expiring signed URL); reads re-sign.
     try {
       await supabaseAdmin(env).from('jobs')
-        .update({ status: 'succeeded', mesh_url: publicUrl, finished_at: new Date().toISOString() })
+        .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
         .eq('id', jobId).eq('user_id', user.id);
     } catch (e) { console.warn('[auto-rig-status] jobs.update failed', e); }
     return json({
@@ -7931,8 +8149,7 @@ async function handleThumbsUpload(req: Request, env: Env): Promise<Response> {
   await env.MESHES.put(key, bytes, {
     httpMetadata: { contentType: mime, cacheControl: 'public, max-age=31536000, immutable' },
   });
-  const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
-  const url = `${prefix}/${key}`;
+  const url = await signedR2Url(env, key, 'image');
   // Record in user_assets so handleCloudProjects can return it.
   // No project here — we look up the mesh's project via the meshes
   // table. For simplicity we record under a synthetic project '_thumbs'
@@ -8133,7 +8350,7 @@ async function handleAnimUpload(req: Request, env: Env): Promise<Response> {
     } catch (e) {
       return err(500, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    const publicUrl = await signedR2Url(env, key, 'mesh');
     return json({
       ok: true, url: publicUrl, key,
       kind: 'reference_anim',
@@ -8164,7 +8381,7 @@ async function handleAnimUpload(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     return err(500, `R2 upload failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+  const publicUrl = await signedR2Url(env, key, 'mesh');
   return json({ ok: true, url: publicUrl, key, animType, batchId });
 }
 
@@ -8183,13 +8400,25 @@ async function handleAnimCopy(req: Request, env: Env): Promise<Response> {
   const sourceUrl = body.sourceUrl;
   if (!sourceUrl) return err(400, 'sourceUrl required');
   // Parse the source key from the URL and validate it belongs to this user.
+  // Accepts three forms: (1) a signed /r2/<key>?exp&sig URL on the site
+  // origin, (2) a raw r2.dev public URL (legacy), (3) a bare R2 key.
   let sourceKey: string;
-  try {
-    const u = new URL(sourceUrl);
-    if (u.host !== new URL(env.R2_PUBLIC_URL).host) return err(400, 'sourceUrl host not allowed');
-    sourceKey = u.pathname.replace(/^\/+/, '');
-  } catch { return err(400, 'invalid sourceUrl'); }
-  if (!sourceKey.startsWith(`${user.id}/animations/`)) {
+  if (/^https?:\/\//i.test(sourceUrl)) {
+    try {
+      const u = new URL(sourceUrl);
+      const siteHost = new URL(siteUrl(env, 'http://localhost:3030')).host;
+      if (u.pathname.startsWith('/r2/') && u.host === siteHost) {
+        sourceKey = u.pathname.slice('/r2/'.length).split('/').map(decodeURIComponent).join('/');
+      } else if (env.R2_PUBLIC_URL && u.host === new URL(env.R2_PUBLIC_URL).host) {
+        sourceKey = decodeURIComponent(u.pathname.replace(/^\/+/, ''));
+      } else {
+        return err(400, 'sourceUrl host not allowed');
+      }
+    } catch { return err(400, 'invalid sourceUrl'); }
+  } else {
+    sourceKey = sourceUrl.replace(/^\/+/, '');
+  }
+  if (sourceKey.includes('..') || !sourceKey.startsWith(`${user.id}/animations/`)) {
     return err(403, 'can only copy your own animation files');
   }
   // Read the source body from R2 and stream into the new key.
@@ -8215,7 +8444,7 @@ async function handleAnimCopy(req: Request, env: Env): Promise<Response> {
   } catch (e) {
     return err(500, `R2 copy failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return json({ ok: true, url: `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`, key });
+  return json({ ok: true, url: await signedR2Url(env, key, 'mesh'), key });
 }
 
 
@@ -8236,13 +8465,22 @@ async function handleAnimDelete(req: Request, env: Env): Promise<Response> {
   const { url } = await req.json() as { url?: string };
   if (!url) return err(400, 'url required');
   let key: string | null = null;
-  try {
-    const u = new URL(url);
-    const expectedHost = new URL(env.R2_PUBLIC_URL).host;
-    if (u.host !== expectedHost) return err(400, 'url host not allowed');
-    key = u.pathname.replace(/^\/+/, '');
-  } catch { return err(400, 'invalid url'); }
-  if (!key || !key.startsWith(`${user.id}/animations/`)) {
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      const u = new URL(url);
+      const siteHost = new URL(siteUrl(env, 'http://localhost:3030')).host;
+      if (u.pathname.startsWith('/r2/') && u.host === siteHost) {
+        key = u.pathname.slice('/r2/'.length).split('/').map(decodeURIComponent).join('/');
+      } else if (env.R2_PUBLIC_URL && u.host === new URL(env.R2_PUBLIC_URL).host) {
+        key = decodeURIComponent(u.pathname.replace(/^\/+/, ''));
+      } else {
+        return err(400, 'url host not allowed');
+      }
+    } catch { return err(400, 'invalid url'); }
+  } else {
+    key = url.replace(/^\/+/, '');
+  }
+  if (!key || key.includes('..') || !key.startsWith(`${user.id}/animations/`)) {
     return err(403, 'can only delete your own animation files');
   }
   try { await env.MESHES.delete(key); } catch (e) {
@@ -8252,12 +8490,14 @@ async function handleAnimDelete(req: Request, env: Env): Promise<Response> {
   // handleListMeshes' Supabase query doesn't keep resurrecting the
   // vignette on every page refresh.
   try {
+    // mesh_url now stores the raw KEY (legacy rows stored the full URL),
+    // so match on either to cover both old and new rows.
     const { error, count } = await supabaseAdmin(env)
       .from('jobs')
       .delete({ count: 'exact' })
       .eq('user_id', user.id)
       .eq('asset_type', 'animation')
-      .eq('mesh_url', url);
+      .or(`mesh_url.eq.${key},mesh_url.eq.${url}`);
     if (error) console.warn('[animations/delete] jobs delete failed:', error.message);
     else console.log(`[animations/delete] jobs row(s) deleted: ${count ?? 'n/a'} for key=${key}`);
   } catch (e) {
@@ -8490,14 +8730,15 @@ async function handleAutoAnimStatus(req: Request, env: Env): Promise<Response> {
       return json({ status: 'failed', error: 'animation storage failed (credits refunded)' });
     }
     await deleteAnimJobRecord(env, jobId).catch(() => {});
-    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    const publicUrl = await signedR2Url(env, key, 'mesh');
     console.log(`[animate-status] job_id=${jobId} DONE url=${publicUrl}`);
     // Tag the anim container as warm — added 2026-06-02.
     _writeLastWarmMs(env, '_meta/last_warm_anim.txt').catch(() => {});
-    // Mark the jobs row succeeded so history shows the right state.
+    // Mark the jobs row succeeded so history shows the right state. Persist
+    // the raw KEY (not the expiring signed URL) so reads re-sign with TTL.
     try {
       await supabaseAdmin(env).from('jobs')
-        .update({ status: 'succeeded', mesh_url: publicUrl, finished_at: new Date().toISOString() })
+        .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
         .eq('id', jobId).eq('user_id', user.id);
     } catch (e) { console.warn('[animate-status] jobs.update failed', e); }
     return json({
@@ -8754,11 +8995,12 @@ async function handleAnimateFromReferenceStatus(req: Request, env: Env): Promise
       return json({ status: 'failed', error: 'animation storage failed (credits refunded)' });
     }
     await deleteAnimJobRecord(env, jobId).catch(() => {});
-    const publicUrl = `${env.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
+    const publicUrl = await signedR2Url(env, key, 'mesh');
     console.log(`[animate-from-reference-status] job_id=${jobId} DONE url=${publicUrl}`);
+    // Persist the raw KEY (not the expiring signed URL); reads re-sign.
     try {
       await supabaseAdmin(env).from('jobs')
-        .update({ status: 'succeeded', mesh_url: publicUrl, finished_at: new Date().toISOString() })
+        .update({ status: 'succeeded', mesh_url: key, finished_at: new Date().toISOString() })
         .eq('id', jobId).eq('user_id', user.id);
     } catch (e) { console.warn('[animate-from-reference-status] jobs.update failed', e); }
     return json({
@@ -8796,6 +9038,17 @@ async function handleProxyImage(req: Request, env: Env): Promise<Response> {
   let parsed: URL;
   try { parsed = new URL(target); } catch { return err(400, 'invalid url'); }
   if (parsed.protocol !== 'https:') return err(400, 'https:// only');
+
+  // Signed self-origin /r2/ URL: the signature IS the auth, and the route
+  // already returns ACAO:* — verify + stream from MESHES directly instead
+  // of an outbound fetch (avoids a self-subrequest and works after the
+  // r2.dev public bucket is disabled).
+  try {
+    const siteHost = new URL(siteUrl(env, 'http://localhost:3030')).host;
+    if (parsed.host === siteHost && parsed.pathname.startsWith('/r2/')) {
+      return await handleSignedR2(new Request(parsed.toString(), { method: 'GET' }), env);
+    }
+  } catch { /* fall through to host allow-list */ }
 
   // Allow R2 public buckets + a few known image-serving hosts. Add to
   // this list as new generation backends are wired in.
@@ -9407,7 +9660,7 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
   const header = [
     'date_iso', 'user_email', 'type', 'status', 'duration_s', 'credits',
     'cost_usd', 'cost_eur', 'revenue_eur', 'margin_eur',
-    'project', 'asset_type', 'mode', 'mesh_url'
+    'project', 'asset_type', 'mode', 'mesh_key', 'mesh_url'
   ];
   const lines: string[] = [header.join(',')];
 
@@ -9417,7 +9670,14 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
     created_at: string; finished_at: string | null;
     project_name: string | null; mesh_url: string | null;
   };
-  for (const j of ((data ?? []) as J[])) {
+  const rows = (data ?? []) as J[];
+  // Pre-sign the persisted mesh keys with the long 'export' TTL (30d); the
+  // raw key is also emitted (mesh_key) so a stale export can be refreshed.
+  const meshUrlSigned = await Promise.all(rows.map(j =>
+    j.mesh_url ? signedR2Url(env, j.mesh_url, 'export') : Promise.resolve('')));
+  let _rowIdx = 0;
+  for (const j of rows) {
+    const _signedMeshUrl = meshUrlSigned[_rowIdx++];
     const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const costUsd = Number(j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
@@ -9447,6 +9707,7 @@ async function handleAdminHistoryCsv(req: Request, env: Env): Promise<Response> 
       _csvEsc(j.asset_type ?? ''),
       _csvEsc(j.mode ?? ''),
       _csvEsc(j.mesh_url ?? ''),
+      _csvEsc(_signedMeshUrl),
     ].join(','));
   }
 
@@ -9929,14 +10190,14 @@ async function handleHistoryDetail(req: Request, env: Env, id: string): Promise<
       .lte('created_at', end)
       .order('created_at', { ascending: true })
       .limit(20);
-    const prefix = (env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
-    assets = (a ?? []).map(x => ({
+    assets = await Promise.all((a ?? []).map(async x => ({
       kind: x.kind as string,
       project: x.project as string,
       r2_path: x.r2_path as string,
-      url: `${prefix}/${x.r2_path}`,
+      url: await signedR2Url(env, x.r2_path as string,
+        ((x.kind as string) || '').match(/mesh|rig|anim/) ? 'mesh' : 'image'),
       created_at: x.created_at as string,
-    }));
+    })));
   } catch (_) { /* best effort */ }
   return json({ job: data, assets });
 }
@@ -10404,7 +10665,7 @@ async function handleAdminUserImages(req: Request, env: Env, userId: string): Pr
       if (!/\.(png|jpg|jpeg|webp)$/i.test(obj.key)) continue;
       out.push({
         key: obj.key,
-        url: `${env.R2_PUBLIC_URL}/${obj.key}`,
+        url: await signedR2Url(env, obj.key, 'image'),
         size: obj.size,
         uploaded: obj.uploaded.toISOString(),
       });
@@ -10528,7 +10789,6 @@ async function handleAdminUserRigs(req: Request, env: Env, userId: string): Prom
   if (guard instanceof Response) return guard;
   if (!env.MESHES || !env.R2_PUBLIC_URL) return err(500, 'R2 binding required');
   const prefix = `${userId}/rigged/`;
-  const base = env.R2_PUBLIC_URL.replace(/\/$/, '');
   const rigs: Array<{ id: string; key: string; mesh_url: string; size: number; created_at: string; project_name: string | null }> = [];
   try {
     const page = await env.MESHES.list({ prefix, limit: 200 });
@@ -10541,7 +10801,7 @@ async function handleAdminUserRigs(req: Request, env: Env, userId: string): Prom
       rigs.push({
         id: obj.key,
         key: obj.key,
-        mesh_url: `${base}/${obj.key}`,
+        mesh_url: await signedR2Url(env, obj.key, 'mesh'),
         size: obj.size,
         created_at: obj.uploaded?.toISOString() || new Date(0).toISOString(),
         project_name: projectGuess || null,
@@ -10592,7 +10852,9 @@ async function handleAdminDeleteImage(req: Request, env: Env): Promise<Response>
         const txt = await r2GetText(env, obj.key);
         if (!txt) continue;
         const parsed = JSON.parse(txt);
-        const url = String(parsed?.asset_url || parsed?.mesh_url || '');
+        const rawUrl = String(parsed?.asset_url || parsed?.mesh_url || '');
+        // Strip any ?exp&sig query so signed /r2/ URLs still match by key.
+        const url = rawUrl.split('?')[0];
         if (url && url.endsWith('/' + key)) await env.MESHES.delete(obj.key);
       } catch {}
     }
@@ -10661,7 +10923,7 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
   const headers = [
     'Date', 'User email', 'Type', 'Status', 'Duration (s)', 'Credits',
     'Cost USD', 'Cost EUR', 'Revenue EUR', 'Margin EUR',
-    'Project', 'Asset type', 'Mode', 'Mesh URL'
+    'Project', 'Asset type', 'Mode', 'Mesh key', 'Mesh URL (30d)'
   ];
   type J = {
     user_id: string; asset_type: string; mode: string; status: string;
@@ -10670,7 +10932,12 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
     project_name: string | null; mesh_url: string | null;
   };
   let totalMargin = 0;
-  const rows: Array<Array<string | number>> = ((data ?? []) as J[]).map(j => {
+  const jrows = (data ?? []) as J[];
+  // Pre-sign persisted mesh keys with the long 'export' TTL (30d). The raw
+  // key column lets a stale export be refreshed.
+  const meshUrlSigned = await Promise.all(jrows.map(j =>
+    j.mesh_url ? signedR2Url(env, j.mesh_url, 'export') : Promise.resolve('')));
+  const rows: Array<Array<string | number>> = jrows.map((j, idx) => {
     const opType = String(j.options?.operation_type ?? j.asset_type ?? 'mesh');
     const costUsd = Number(j.options?.cost_usd
                           ?? MODAL_COST_USD[opType as keyof typeof MODAL_COST_USD]
@@ -10700,11 +10967,12 @@ async function handleAdminHistoryXls(req: Request, env: Env): Promise<Response> 
       j.asset_type ?? '',
       j.mode ?? '',
       j.mesh_url ?? '',
+      meshUrlSigned[idx],
     ];
   });
   // Append a TOTAL row.
   rows.push([
-    '', '', '', '', '', '', '', '', 'TOTAL margin (EUR)', Number(totalMargin.toFixed(4)), '', '', '', '',
+    '', '', '', '', '', '', '', '', 'TOTAL margin (EUR)', Number(totalMargin.toFixed(4)), '', '', '', '', '',
   ]);
   const stamp = new Date().toISOString().slice(0, 10);
   return _xlsxResponse(`admin-history-${stamp}.xlsx`, headers, rows);
@@ -10825,6 +11093,15 @@ export default {
       // localStorage at sign-in time is reused on exchange. The Worker
       // can't do this because it doesn't have access to that verifier.
       // Fall through to env.ASSETS.fetch(req) at the bottom of fetch().
+
+      // ── signed R2 object serving ──────────────────────────────
+      // GET /r2/<key>?exp&sig — verify HMAC + expiry, stream from the
+      // MESHES binding. Placed BEFORE the kill switches (like static
+      // assets) so an open viewer keeps working during maintenance,
+      // and is not under /api/ so it bypasses the /api/* router below.
+      if (pathname.startsWith('/r2/') && method === 'GET') {
+        return await handleSignedR2(req, env);
+      }
 
       // ── kill switches ──────────────────────────────────────────
       // Two nested levels:

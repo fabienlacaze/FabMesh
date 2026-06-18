@@ -87,6 +87,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOi
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_51TEArR3uvj2cFz0krEmYFCk7Pfj3wnWboyu9dwEWxpBSTxelTH6Q80KLLBOjTrxXO4kxbt2Q05TSAt1Y3nUQSdA700OL4r1KcL"
 REPLICATE_MODEL = "fishwowater/trellis2"
 R2_PUBLIC_URL = "https://pub-ca633fb6a3334d0ea29be5fe5eb47228.r2.dev"
+# R2_URL_SIGNING_SECRET is a Worker SECRET, NOT a [vars] entry. Never put it
+# here. Set it with: openssl rand -hex 32 | npx wrangler secret put R2_URL_SIGNING_SECRET
+# While unset, signedR2Url() falls back to the public R2_PUBLIC_URL (non-breaking).
 
 # Hard budget safeguards — the Worker refuses any Replicate call if
 # the cumulative daily spend (across ALL users) would exceed

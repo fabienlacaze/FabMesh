@@ -348,3 +348,42 @@ Une fois tout up :
 - [ ] (optional) Sentry project created + DSN in env
 - [ ] Update site button "Open Cloud" to point to live URL
 - [ ] Announce launch on Twitter/Reddit/LinkedIn (cf `build/marketing/LAUNCH_POSTS.md`)
+
+## 🔐 R2 signed URLs (P1 — face photos must not be public)
+
+The worker mints short-lived HMAC-signed URLs (`/r2/<key>?exp&sig`) served
+from its own origin and streamed from the `MESHES` binding. This closes the
+P1 finding that R2 objects (incl. user face photos) were reachable at
+permanent, guessable, unauthenticated `r2.dev` URLs.
+
+Rollout (NON-breaking — do the steps in order):
+
+1. Deploy the worker (`cd cloud && npm run build && npx wrangler deploy`).
+   With **no** secret set, `signedR2Url()` falls back to the old public
+   `R2_PUBLIC_URL` form and the `/r2/` route 404s → byte-for-byte current
+   behavior. Full rollback safety.
+2. Generate + set the secret (no redeploy needed; effective next request):
+   ```bash
+   openssl rand -hex 32 | npx wrangler secret put R2_URL_SIGNING_SECRET
+   ```
+   API responses now mint signed `/r2/...?exp=<unix>&sig=<hex>` URLs.
+   TTLs: images 24h, meshes 7d, exports (CSV/XLSX/GDPR) 30d.
+3. Verify in the live app: a fresh image renders via `/r2/` (200), a tampered
+   or expired `sig` → 403, a mesh loads in model-viewer, admin listing +
+   marketplace download work, cache-bust `?t=` coexists with `exp`+`sig`.
+4. **ONLY AFTER step 3 passes:** Cloudflare dashboard → R2 → `myfabmesh-meshes`
+   → Settings → Public Access (R2.dev subdomain) → **Disallow**. After this,
+   `pub-*.r2.dev/<key>` returns 401/404 for everyone; the in-app signed URLs
+   still 200 (the `MESHES` binding is unaffected by disabling the public
+   subdomain). P1 closed.
+5. (Optional hardening) remove `https://*.r2.dev` from the CSP once nothing
+   references r2.dev, then redeploy.
+
+Notes:
+- `R2_URL_SIGNING_SECRET` is a **Worker SECRET** — never in `wrangler.toml`.
+- Rotating the secret invalidates every outstanding signed URL (all 403).
+  The `v1:` prefix in the signing string allows a future dual-secret rotation.
+- Persisted columns (`jobs.mesh_url`, `user_assets.r2_path`,
+  `jobs.options.sourceImage`) store the raw R2 KEY and are re-signed on read,
+  so links never go permanently stale. Legacy rows holding a full r2.dev URL
+  are passed through unchanged but those specific links die when step 4 runs.
