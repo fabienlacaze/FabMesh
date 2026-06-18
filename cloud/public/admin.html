@@ -429,17 +429,17 @@
           <button class="btn" onclick="loadModalCredits()">🔄 Refresh</button>
         </div>
         <div id="modal-credits-grid" class="grid grid-4" style="margin-top:10px;">
-          <div class="metric-card"><div class="metric-label">Total budget</div><div class="metric-value" id="mc-total">—</div></div>
+          <div class="metric-card"><div class="metric-label">Limite Modal</div><div class="metric-value" id="mc-total">—</div></div>
           <div class="metric-card"><div class="metric-label">Total spent</div><div class="metric-value" id="mc-spent">—</div></div>
           <div class="metric-card"><div class="metric-label">Remaining</div><div class="metric-value" id="mc-remaining">—</div></div>
           <div class="metric-card"><div class="metric-label">Today</div><div class="metric-value" id="mc-today">—</div></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;">
-          <label style="font-size:12px; color:var(--text-2);">Update total budget ($):</label>
+          <label style="font-size:12px; color:var(--text-2);">Limite d'usage Modal ($):</label>
           <input type="number" id="mc-budget-input" step="0.01" min="0"
                  style="width:140px; padding:6px 10px; background:var(--bg-2); color:var(--text-0); border:1px solid var(--border); border-radius:6px; font-size:12px;" />
           <button class="btn" onclick="saveModalBudget()">Save</button>
-          <span style="font-size:11px; color:var(--text-2);">Set this to your current Modal workspace balance after a top-up; remaining is computed as budget − cumulative spend.</span>
+          <span style="font-size:11px; color:var(--text-2);">Mets ta limite Modal (le « budget » de ton dashboard Modal, ex. $65). L'alerte (bannière + email) se déclenche quand la conso réelle approche (≤15 % restant) ou atteint cette limite.</span>
         </div>
       </div>
       <div class="grid grid-4" id="cards-finance"></div>

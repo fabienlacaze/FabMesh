@@ -1956,10 +1956,12 @@ async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Respon
   const n = Number(body?.total);
   if (!Number.isFinite(n) || n < 0) return err(400, 'total must be a non-negative number');
   await env.MESHES.put('_meta/modal_budget_total.txt', String(n));
-  // A top-up resets the since-top-up spend counter and clears any active alert,
-  // so `remaining` reflects the fresh balance and the alert can fire again later.
-  try { await env.MESHES.put('_meta/modal_spend_total.txt', '0'); } catch {}
+  // Setting the Modal usage limit clears any active alert, then re-evaluates it
+  // immediately against the latest usage (real if fresh, else estimate) so the
+  // banner/email reflect the new limit right away instead of waiting for the
+  // next generation / poller push.
   try { await env.MESHES.delete('_meta/modal_alert.json'); } catch {}
+  await _maybeAlertModalBudget(env);
   return json({ ok: true, success: true, total: n });
 }
 
