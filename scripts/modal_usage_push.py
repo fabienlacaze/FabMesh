@@ -27,8 +27,8 @@ SECRET = os.environ.get("MODAL_USAGE_SECRET", "")
 PERIOD = os.environ.get("MODAL_BILLING_FOR", "this month")
 
 
-def modal_usage_usd() -> float:
-    """Sum the Cost column of `modal billing report --json` for the cycle."""
+def modal_usage():
+    """Return (total_usd, by_app) from `modal billing report --json` for the cycle."""
     proc = subprocess.run(
         [sys.executable, "-m", "modal", "billing", "report", "--for", PERIOD, "--json"],
         capture_output=True, text=True, timeout=180,
@@ -36,22 +36,28 @@ def modal_usage_usd() -> float:
     if proc.returncode != 0:
         raise SystemExit(f"`modal billing report` failed: {proc.stderr.strip()[:400]}")
     rows = json.loads(proc.stdout)
-    total = sum(float(r.get("Cost", 0) or 0) for r in rows)
-    return round(total, 6)
+    total = 0.0
+    by_app = {}
+    for r in rows:
+        c = float(r.get("Cost", 0) or 0)
+        total += c
+        app = str(r.get("Description") or r.get("Object ID") or "unknown")
+        by_app[app] = round(by_app.get(app, 0.0) + c, 6)
+    return round(total, 6), by_app
 
 
 def main() -> None:
     if not SECRET:
         raise SystemExit("Set MODAL_USAGE_SECRET (must match the Worker's MODAL_USAGE_SECRET).")
-    usage = modal_usage_usd()
-    payload = json.dumps({"usage": usage, "cycle": PERIOD}).encode("utf-8")
+    usage, by_app = modal_usage()
+    payload = json.dumps({"usage": usage, "by_app": by_app, "cycle": PERIOD}).encode("utf-8")
     req = urllib.request.Request(
         f"{WORKER}/api/admin/modal-usage", data=payload, method="POST",
         headers={"content-type": "application/json", "x-ingest-secret": SECRET.strip(),
                  "user-agent": "MyFabmesh-ModalPoller/1.0"},
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
-        print(f"pushed Modal usage ${usage:.4f} ({PERIOD}) -> HTTP {resp.status}: {resp.read(200).decode()}")
+        print(f"pushed Modal usage ${usage:.4f} across {len(by_app)} apps ({PERIOD}) -> HTTP {resp.status}: {resp.read(200).decode()}")
 
 
 if __name__ == "__main__":

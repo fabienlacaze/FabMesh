@@ -1919,8 +1919,8 @@ async function handleAdminModalCredits(req: Request, env: Env): Promise<Response
     const estSpent = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0;
     const todaySpent = parseFloat(await r2GetText(env, `_meta/modal_spend/${todayUTC()}`) || '0') || 0;
     const budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
-    let realUsage: number | null = null, realTs: string | null = null;
-    try { const rt = await r2GetText(env, '_meta/modal_real_usage.json'); const r = rt ? JSON.parse(rt) : null; if (r && typeof r.usage === 'number') { realUsage = r.usage; realTs = r.ts || null; } } catch {}
+    let realUsage: number | null = null, realTs: string | null = null, realByApp: Record<string, number> | null = null;
+    try { const rt = await r2GetText(env, '_meta/modal_real_usage.json'); const r = rt ? JSON.parse(rt) : null; if (r && typeof r.usage === 'number') { realUsage = r.usage; realTs = r.ts || null; realByApp = (r.by_app && typeof r.by_app === 'object') ? r.by_app : null; } } catch {}
     const fresh = realTs ? (Date.now() - Date.parse(realTs)) < 26 * 3600 * 1000 : false;
     const usage = (fresh && realUsage != null) ? realUsage : estSpent;
     let alert: unknown = null;
@@ -1934,6 +1934,7 @@ async function handleAdminModalCredits(req: Request, env: Env): Promise<Response
       real_usage: realUsage == null ? null : round(realUsage),
       real_usage_ts: realTs,
       real_usage_fresh: fresh,
+      real_usage_by_app: realByApp,
       estimate_spent: round(estSpent),
       today_spent: round(todaySpent),
       remaining: Math.max(0, round(budget - usage)),
@@ -1974,12 +1975,13 @@ async function handleAdminModalUsageIngest(req: Request, env: Env): Promise<Resp
   const provided = (req.headers.get('x-ingest-secret') || '').trim();
   if (!secret || provided !== secret) return err(401, 'unauthorized');
   if (!env.MESHES) return err(500, 'storage not configured');
-  let body: { usage?: number; cycle?: string };
+  let body: { usage?: number; cycle?: string; by_app?: Record<string, number> };
   try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
   const usage = Number(body?.usage);
   if (!Number.isFinite(usage) || usage < 0) return err(400, 'usage must be a non-negative number');
+  const byApp = (body?.by_app && typeof body.by_app === 'object') ? body.by_app : null;
   await env.MESHES.put('_meta/modal_real_usage.json', JSON.stringify({
-    usage: Math.round(usage * 10000) / 10000, cycle: String(body?.cycle || ''), ts: new Date().toISOString(),
+    usage: Math.round(usage * 10000) / 10000, by_app: byApp, cycle: String(body?.cycle || ''), ts: new Date().toISOString(),
   }));
   await _maybeAlertModalBudget(env);
   return json({ ok: true, success: true });
@@ -9584,6 +9586,21 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
   const sum7 = (k: keyof typeof series30[number]) =>
     last7.reduce((a, b) => a + (typeof b[k] === 'number' ? (b[k] as number) : 0), 0);
 
+  // REAL Modal cost from `modal billing report` (pushed by the billing poller) so
+  // the KPIs reflect the ACTUAL bill, not just the worker's per-op estimate.
+  let realUsageUsd: number | null = null, realUsageTs: string | null = null;
+  let realByApp: Record<string, number> | null = null;
+  try {
+    const rt = await r2GetText(env, '_meta/modal_real_usage.json');
+    const r = rt ? JSON.parse(rt) : null;
+    if (r && typeof r.usage === 'number') {
+      realUsageUsd = r.usage; realUsageTs = r.ts || null;
+      realByApp = (r.by_app && typeof r.by_app === 'object') ? r.by_app : null;
+    }
+  } catch {}
+  const realCostEur = realUsageUsd == null ? null : +(realUsageUsd * USD_TO_EUR).toFixed(2);
+  const realMarginEur = realCostEur == null ? null : +(totalRevenueEur - realCostEur).toFixed(2);
+
   return json({
     generated_at: new Date().toISOString(),
     users: {
@@ -9595,8 +9612,14 @@ async function handleAdminStats(req: Request, env: Env): Promise<Response> {
     revenue: {
       total_gross_eur:  +grossRevenueEur.toFixed(2),
       total_net_eur:    +totalRevenueEur.toFixed(2),   // sum of credit revenue, net of Stripe
-      total_cost_eur:   +totalCostEur.toFixed(2),
-      total_margin_eur: +(totalRevenueEur - totalCostEur).toFixed(2),
+      total_cost_eur:   +totalCostEur.toFixed(2),                       // worker per-op ESTIMATE
+      total_margin_eur: +(totalRevenueEur - totalCostEur).toFixed(2),   // estimate-based
+      // REAL Modal bill (via the `modal billing report` poller) — honest KPIs.
+      real_cost_eur:    realCostEur,
+      real_margin_eur:  realMarginEur,
+      real_usage_usd:   realUsageUsd,
+      real_usage_ts:    realUsageTs,
+      real_usage_by_app: realByApp,
       payments_count: paymentsCount,
     },
     last_7d: {

@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (KPI réels : coût Modal réel + marge réelle + ventilation par app — DEPLOYE)
+
+Les KPI admin (COST MODAL / MARGIN, marge "95%") utilisaient l'estimation par-op (fausse).
+Maintenant ils s'appuient sur la VRAIE facture Modal (poller modal billing report).
+- poller : pousse usage total + by_app (somme du Cost par Description d'app).
+- worker : handleAdminModalUsageIngest stocke by_app ; handleAdminStats lit
+  _meta/modal_real_usage.json -> real_cost_eur (usage x USD_TO_EUR), real_margin_eur
+  (= revenue net - real_cost), real_usage_by_app dans l'objet revenue ; /api/admin/modal-credits
+  renvoie aussi real_usage_by_app.
+- admin.html : Overview + Finance affichent "Marge RÉELLE" + "Coût Modal RÉEL" (+ % réel) a cote
+  des versions "estimée" ; la section Modal liste la conso PAR APP (pour distinguer ventes vs R&D).
+- Aussi : setBudget réévalue l'alerte immédiatement ; libellé "Limite d'usage Modal".
+- Seed : $58.07 sur 7 apps poussé. DEPLOYE Version 34c35e8f.
+NB : revenue net est déjà net de Stripe (comment worker.ts ~9597). Le gros du coût Modal réel
+vient de anim/rig/train-anytop (R&D AnyTop abandonnée), pas des générations payantes.
+
 ## 2026-06-16 (Modal: VRAIE conso via `modal billing report` + poller — DEPLOYE)
 
 L'estimation worker diverge trop du reel ($5.90 vs ~$58). Modal expose la vraie facturation :
