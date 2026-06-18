@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Mobile/tablet-first: device-width + cover the notch / safe areas. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f1a">
+  <meta name="color-scheme" content="dark">
+  <!-- CSP mirror of the desktop app shell (cloud/public/app/index.html) AND
+       the Worker's injected HTML CSP (src/worker.ts ~L11450). The Worker
+       sets a CSP HEADER on every HTML response which takes precedence over
+       this <meta>; we keep this in sync so behaviour matches if the page is
+       ever served without the header (e.g. local file preview). It allows:
+         - model-viewer from unpkg (script-src)
+         - same-origin /api/* + supabase + r2 + replicate (connect-src)
+         - signed R2 image/GLB URLs (img-src https:) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' blob: https://replicate.delivery https://*.replicate.delivery https://*.r2.cloudflarestorage.com https://*.r2.dev https://unpkg.com https://*.supabase.co; media-src 'self' blob: https:; frame-src 'self' blob:">
+  <title>MyFabmesh.AI — Mobile</title>
+  <link rel="stylesheet" href="mobile.css">
+  <!-- model-viewer: SAME unpkg URL the desktop app uses, so the existing
+       CSP (script-src https://unpkg.com) already covers it. -->
+  <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+</head>
+<body>
+  <!-- ===================== STICKY HEADER ===================== -->
+  <header id="app-header">
+    <div class="brand">MyFabmesh<span class="brand-ai">.AI</span></div>
+    <div class="header-right">
+      <a id="credits-pill" class="credits-pill" href="/buy" title="Buy more credits">
+        <span class="bolt">⚡</span><span id="credits-value">…</span>
+      </a>
+      <button id="btn-signout" class="icon-btn" title="Sign out" hidden>⎋</button>
+    </div>
+  </header>
+
+  <!-- ===================== MAIN ===================== -->
+  <main id="app-main">
+
+    <!-- AUTH GATE (shown when not logged in) -->
+    <section id="view-auth" class="view" hidden>
+      <div class="hero">
+        <div class="hero-logo">🧊</div>
+        <h1>MyFabmesh.AI</h1>
+        <p class="muted">Turn a text prompt into a textured 3D model, right from your phone.</p>
+        <a id="login-link" class="btn btn-primary btn-block" href="/login?next=/m/">Sign in to continue</a>
+        <p class="muted small">You'll come right back here after signing in.</p>
+      </div>
+    </section>
+
+    <!-- HOME (projects + meshes) -->
+    <section id="view-home" class="view" hidden>
+      <div class="section-row">
+        <h2>Your recent work</h2>
+        <button id="btn-refresh" class="icon-btn" title="Refresh">↻</button>
+      </div>
+      <div id="home-loading" class="loading-block">Loading…</div>
+      <div id="home-empty" class="empty-block" hidden>
+        <p>No meshes yet.</p>
+        <p class="muted">Tap <strong>New</strong> below to create your first 3D model.</p>
+      </div>
+      <div id="mesh-grid" class="card-grid"></div>
+    </section>
+
+    <!-- MESH DETAIL (model-viewer) -->
+    <section id="view-mesh" class="view" hidden>
+      <button class="link-back" data-nav="home">← Back</button>
+      <h2 id="mesh-detail-title">Mesh</h2>
+      <div class="viewer-wrap">
+        <model-viewer id="mesh-detail-viewer" camera-controls touch-action="pan-y"
+          shadow-intensity="1" exposure="1" ar disable-tap
+          environment-image="neutral" interaction-prompt="none"></model-viewer>
+      </div>
+      <a id="mesh-detail-download" class="btn btn-primary btn-block" download>⬇ Download GLB</a>
+    </section>
+
+    <!-- NEW FLOW -->
+    <section id="view-new" class="view" hidden>
+      <button class="link-back" data-nav="home">← Back</button>
+      <h2>New 3D model</h2>
+
+      <!-- Step 1: prompt -> image -->
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">1</span> Describe your asset</div>
+        <div class="field">
+          <label for="new-type">Type</label>
+          <select id="new-type">
+            <option value="character" selected>Character / Unit</option>
+            <option value="creature">Creature / Beast</option>
+            <option value="animal">Animal</option>
+            <option value="vehicle">Vehicle</option>
+            <option value="building">Building / Structure</option>
+            <option value="weapon">Weapon</option>
+            <option value="prop">Prop / Item</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="new-style">Style</label>
+          <select id="new-style">
+            <option value="realistic" selected>Realistic</option>
+            <option value="stylized">Stylized</option>
+            <option value="cartoon">Cartoon</option>
+            <option value="anime">Anime</option>
+            <option value="lowpoly">Low-poly</option>
+            <option value="pixar">Pixar 3D</option>
+            <option value="dark-fantasy">Dark Fantasy</option>
+            <option value="cyberpunk">Cyberpunk</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="new-prompt">Prompt</label>
+          <textarea id="new-prompt" rows="3" placeholder="An orc warrior with leather armor, standing T-pose…"></textarea>
+        </div>
+        <div id="image-progress" class="progress-block" hidden>
+          <div class="progress-label" id="image-progress-label">Generating image…</div>
+          <div class="progress-track"><div class="progress-bar" id="image-progress-bar"></div></div>
+        </div>
+        <div id="image-result" class="image-result" hidden>
+          <img id="image-result-img" alt="Generated image">
+        </div>
+        <button id="btn-generate-image" class="btn btn-primary btn-block">
+          Generate image <span class="cost">⚡<span id="cost-image">1</span></span>
+        </button>
+      </div>
+
+      <!-- Step 2: image -> mesh -->
+      <div class="step-card" id="step-mesh" hidden>
+        <div class="step-head"><span class="step-num">2</span> Convert to 3D</div>
+        <p class="muted small">Uses the generated image above as the front reference.</p>
+        <div id="mesh-progress" class="progress-block" hidden>
+          <div class="progress-label" id="mesh-progress-label">Building 3D mesh… (this can take ~2 min)</div>
+          <div class="progress-track"><div class="progress-bar indeterminate" id="mesh-progress-bar"></div></div>
+        </div>
+        <div id="mesh-result" class="viewer-wrap" hidden>
+          <model-viewer id="new-mesh-viewer" camera-controls touch-action="pan-y"
+            shadow-intensity="1" exposure="1" ar disable-tap
+            environment-image="neutral" interaction-prompt="none"></model-viewer>
+        </div>
+        <a id="new-mesh-download" class="btn btn-primary btn-block" download hidden>⬇ Download GLB</a>
+        <button id="btn-generate-mesh" class="btn btn-primary btn-block">
+          Convert to 3D <span class="cost">⚡<span id="cost-mesh">1</span></span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===================== BOTTOM NAV ===================== -->
+  <nav id="bottom-nav" hidden>
+    <button class="nav-btn active" data-nav="home"><span class="nav-ico">🏠</span><span>Home</span></button>
+    <button class="nav-btn nav-new" data-nav="new"><span class="nav-ico">＋</span><span>New</span></button>
+    <a class="nav-btn" href="/app/" title="Open the full desktop workspace"><span class="nav-ico">🖥</span><span>Full app</span></a>
+  </nav>
+
+  <!-- Toast host -->
+  <div id="toast-host"></div>
+
+  <script src="mobile.js"></script>
+</body>
+</html>
