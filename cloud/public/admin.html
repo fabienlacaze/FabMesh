@@ -2870,6 +2870,36 @@
       }, 60_000);
     });
 
+    // ── Modal-budget alert banner (fixed, visible on any tab) ──
+    function _ensureModalBanner() {
+      let b = document.getElementById('modal-alert-banner');
+      if (!b) {
+        b = document.createElement('div');
+        b.id = 'modal-alert-banner';
+        b.style.cssText = 'display:none; position:fixed; top:0; left:0; right:0; z-index:10001; padding:11px 16px; text-align:center; font-weight:700; font-size:14px; color:#0a0a0e; box-shadow:0 2px 12px rgba(0,0,0,0.45); cursor:pointer;';
+        b.title = 'Budget Modal — cliquez pour ouvrir l\'onglet Finance';
+        b.addEventListener('click', () => { const t = document.querySelector('.tab[data-tab="finance"]'); if (t) t.click(); });
+        document.body.appendChild(b);
+      }
+      return b;
+    }
+    function _updateModalBanner(alert) {
+      const b = _ensureModalBanner();
+      if (!alert || !alert.level) { b.style.display = 'none'; return; }
+      const empty = alert.level === 'empty';
+      b.style.background = empty ? '#ff4d4f' : '#ffb020';
+      b.textContent = (empty ? '🚨 Budget Modal ÉPUISÉ' : '⚠️ Budget Modal faible')
+        + ` — restant $${(Number(alert.remaining) || 0).toFixed(2)} / $${(Number(alert.budget) || 0).toFixed(2)}.`
+        + ' Rechargez Modal puis mettez à jour le budget (onglet Finance) pour réarmer l\'alerte.';
+      b.style.display = 'block';
+    }
+    async function checkModalAlert() {
+      try {
+        const r = await fetch('/api/admin/modal-credits', { credentials: 'include' });
+        if (!r.ok) return;
+        _updateModalBanner((await r.json()).alert);
+      } catch (_) {}
+    }
     async function loadModalCredits() {
       try {
         const r = await fetch('/api/admin/modal-credits', { credentials: 'include' });
@@ -2886,6 +2916,14 @@
         document.getElementById('mc-today').textContent     = fmt(j.today_spent);
         const input = document.getElementById('mc-budget-input');
         if (input && !input.value) input.value = (Number(j.total_budget) || 0).toFixed(2);
+        // Colour "remaining" by budget health + sync the global alert banner.
+        const remEl = document.getElementById('mc-remaining');
+        if (remEl) {
+          const b = Number(j.total_budget) || 0, rem = Number(j.remaining) || 0;
+          const pct = b > 0 ? rem / b : 1;
+          remEl.style.color = (rem <= 0) ? 'var(--err)' : (pct <= 0.15 ? 'var(--warn)' : '');
+        }
+        _updateModalBanner(j.alert);
       } catch (e) {
         // Replace the cryptic "!" with the real reason (HTTP code +
         // body snippet) so the admin can act on it (401 → log back in,
@@ -2925,6 +2963,9 @@
         const active = document.querySelector('.tab.active');
         if (active?.dataset?.tab === 'finance') loadModalCredits();
       }, 60_000);
+      // Global Modal-budget banner: check on load + every 5 min, on any tab.
+      checkModalAlert();
+      setInterval(checkModalAlert, 300_000);
     });
     /* ─── Debug logs tab (remote browser-console retrieval) ─── */
     let _debugLogCurrentText = '';

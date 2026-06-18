@@ -108,6 +108,8 @@ export interface Env {
   // Budget safeguards (override the defaults if set).
   MAX_DAILY_SPEND_USD?: string;       // Replicate-side cap (default $0.50)
   MAX_DAILY_MODAL_SPEND_USD?: string; // Modal-side cap   (default $2.00)
+  RESEND_API_KEY?: string;            // Resend key for admin alert emails (optional; no-op if unset)
+  ALERT_FROM_EMAIL?: string;          // From: for alert emails (Resend-verified domain; default onboarding@resend.dev)
   MAX_USER_DAILY_CALLS?: string;
 
   // NSFW filter bypass — set to "1" to disable the prompt pre-filter
@@ -257,6 +259,14 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Prom
   const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
   if (cur + estimatedUsd > maxUsd) return null;
   await env.MESHES.put(key, String(cur + estimatedUsd));
+  // Running cumulative spend since the last budget top-up (for the admin budget
+  // gauge + the low-budget alert). Best-effort — never blocks a paid call.
+  try {
+    const tk = '_meta/modal_spend_total.txt';
+    const total = (parseFloat((await r2GetText(env, tk)) || '0') || 0) + estimatedUsd;
+    await env.MESHES.put(tk, String(total));
+    await _maybeAlertModalBudget(env, total);
+  } catch (_) {}
   return maxUsd - cur - estimatedUsd;
 }
 
@@ -264,6 +274,59 @@ async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
   const key = `_meta/modal_spend/${todayUTC()}`;
   const cur = parseFloat((await r2GetText(env, key)) || '0') || 0;
   await env.MESHES.put(key, String(Math.max(0, cur - refundUsd)));
+  try {
+    const tk = '_meta/modal_spend_total.txt';
+    const t = parseFloat((await r2GetText(env, tk)) || '0') || 0;
+    await env.MESHES.put(tk, String(Math.max(0, t - refundUsd)));
+  } catch (_) {}
+}
+
+/** Fire an admin alert (banner via _meta/modal_alert.json + email) when the Modal
+ *  workspace budget runs low (<=15%) or is exhausted. Debounced: only re-alerts
+ *  when severity worsens; cleared when the admin tops up (handleAdminModalSetBudget). */
+async function _maybeAlertModalBudget(env: Env, totalSpent: number): Promise<void> {
+  if (!env.MESHES) return;
+  const budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
+  if (budget <= 0) return;
+  const remaining = budget - totalSpent;
+  const pct = remaining / budget;
+  let level: 'low' | 'empty' | null = null;
+  if (remaining <= 0) level = 'empty';
+  else if (pct <= 0.15) level = 'low';
+  if (!level) return;
+  let prevLevel: string | null = null;
+  try { prevLevel = JSON.parse(await r2GetText(env, '_meta/modal_alert.json') || '{}').level || null; } catch (_) {}
+  if (prevLevel === level) return;
+  if (prevLevel === 'empty' && level === 'low') return;
+  const round = (n: number) => Math.round(n * 100) / 100;
+  await env.MESHES.put('_meta/modal_alert.json', JSON.stringify({
+    level, remaining: round(remaining), budget: round(budget), total_spent: round(totalSpent), ts: new Date().toISOString(),
+  }));
+  const subject = level === 'empty'
+    ? '\u{1F6A8} MyFabmesh — Modal budget EXHAUSTED'
+    : '⚠️ MyFabmesh — Modal budget low';
+  const text = (level === 'empty'
+      ? 'Your Modal GPU workspace budget is EXHAUSTED — paid generations may start failing.'
+      : 'Your Modal GPU workspace budget is running low.')
+    + `\n\nRemaining: $${round(remaining).toFixed(2)} of $${round(budget).toFixed(2)} (${Math.round(pct * 100)}%)`
+    + `\nSpend since last top-up: $${round(totalSpent).toFixed(2)}`
+    + '\n\nTop up your Modal workspace, then update the budget in the admin Finance tab (that clears this alert).';
+  await _sendAdminAlertEmail(env, subject, text);
+}
+
+/** Plain-text alert email to ADMIN_EMAILS via Resend. No-op if RESEND_API_KEY unset. Never throws. */
+async function _sendAdminAlertEmail(env: Env, subject: string, text: string): Promise<void> {
+  if (!env.RESEND_API_KEY) return;
+  const to = [...ADMIN_EMAILS];
+  if (!to.length) return;
+  const from = env.ALERT_FROM_EMAIL || 'onboarding@resend.dev';
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from, to, subject, text }),
+    });
+  } catch (_) { /* best-effort */ }
 }
 
 /** Check the per-user daily call cap. Increments on success.
@@ -1843,32 +1906,20 @@ async function handleAdminModalCredits(req: Request, env: Env): Promise<Response
   if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   try {
-    let cursor: string | undefined = undefined;
-    let total = 0;
-    do {
-      const page = await env.MESHES.list({ prefix: '_meta/modal_spend/', limit: 1000, cursor });
-      for (const obj of page.objects) {
-        // Skip the optional running-total marker (we recompute every call).
-        if (obj.key.endsWith('/_total.txt')) continue;
-        try {
-          const txt = await r2GetText(env, obj.key);
-          const n = parseFloat(txt || '0');
-          if (Number.isFinite(n)) total += n;
-        } catch {}
-      }
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor);
-    const todayKey = `_meta/modal_spend/${todayUTC()}`;
-    const todayTxt = await r2GetText(env, todayKey);
-    const todaySpent = parseFloat(todayTxt || '0') || 0;
-    const budgetTxt = await r2GetText(env, '_meta/modal_budget_total.txt');
-    const budget = parseFloat(budgetTxt || '0') || 0;
+    // Spend since the last budget top-up (running counter, reset on top-up).
+    const totalSpent = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0;
+    const todaySpent = parseFloat(await r2GetText(env, `_meta/modal_spend/${todayUTC()}`) || '0') || 0;
+    const budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
+    let alert: unknown = null;
+    try { const a = await r2GetText(env, '_meta/modal_alert.json'); alert = a ? JSON.parse(a) : null; } catch {}
+    const round = (n: number) => Math.round(n * 10000) / 10000;
     return json({
       ok: true,
-      total_budget: budget,
-      total_spent: Math.round(total * 10000) / 10000,
-      today_spent: Math.round(todaySpent * 10000) / 10000,
-      remaining: Math.max(0, Math.round((budget - total) * 10000) / 10000),
+      total_budget: round(budget),
+      total_spent: round(totalSpent),
+      today_spent: round(todaySpent),
+      remaining: Math.max(0, round(budget - totalSpent)),
+      alert,
     });
   } catch (e) {
     return err(500, 'modal credits failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -1887,6 +1938,10 @@ async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Respon
   const n = Number(body?.total);
   if (!Number.isFinite(n) || n < 0) return err(400, 'total must be a non-negative number');
   await env.MESHES.put('_meta/modal_budget_total.txt', String(n));
+  // A top-up resets the since-top-up spend counter and clears any active alert,
+  // so `remaining` reflects the fresh balance and the alert can fire again later.
+  try { await env.MESHES.put('_meta/modal_spend_total.txt', '0'); } catch {}
+  try { await env.MESHES.delete('_meta/modal_alert.json'); } catch {}
   return json({ ok: true, success: true, total: n });
 }
 

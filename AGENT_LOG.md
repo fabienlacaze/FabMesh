@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Admin: alerte budget Modal + suivi conso — DEPLOYE master)
+
+Feature sur MASTER (deploye Version 50bc332f) : alerte quand le budget Modal s'epuise + suivi.
+- worker.ts : total cumule depuis la derniere recharge (_meta/modal_spend_total.txt), incremente dans
+  checkAndIncrementModalSpend (+ decremente au refund). _maybeAlertModalBudget detecte <=15% (low) /
+  <=0 (empty) -> ecrit _meta/modal_alert.json (debounce, jamais de downgrade) + EMAIL via Resend
+  (_sendAdminAlertEmail, no-op si RESEND_API_KEY absent). Reset (spend_total=0 + delete alert) quand
+  l'admin met a jour le budget. Endpoint /api/admin/modal-credits renvoie desormais
+  {total_budget, total_spent (since-topup), today_spent, remaining, alert}.
+- admin.html : banniere fixe GLOBALE (tous onglets) cliquable -> Finance ; "remaining" colore selon
+  sante ; checkModalAlert() au load + toutes les 5 min. (Le suivi conso Modal existait deja dans
+  l'onglet Finance, deja protege par mdp.)
+- ACTION USER pour l'email : `cd cloud && npx wrangler secret put RESEND_API_KEY`. Par defaut
+  ALERT_FROM_EMAIL = onboarding@resend.dev (ne livre qu'a l'email du compte Resend) ; pour un envoi
+  fiable, verifier un domaine dans Resend + `wrangler secret put ALERT_FROM_EMAIL`. Destinataire =
+  ADMIN_EMAILS (fabien65400@hotmail.fr).
+
 ## 2026-06-16 (Drop-to-create: popup nom + Unlock NSFW ; audit legal+securite)
 
 - Bug "dossier bitch" (DESKTOP) : drop d'une image sur le grid -> importDroppedFile
