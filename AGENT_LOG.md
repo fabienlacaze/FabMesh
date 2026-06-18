@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-16 (Modal: VRAIE conso via `modal billing report` + poller — DEPLOYE)
+
+L'estimation worker diverge trop du reel ($5.90 vs ~$58). Modal expose la vraie facturation :
+`modal billing report --for "this month" --json` (= API modal.billing.workspace_billing_report).
+Le Worker CF ne pouvant pas lancer le CLI Modal -> poller scripts/modal_usage_push.py : somme la
+conso reelle du cycle + POST /api/admin/modal-usage (auth header x-ingest-secret == MODAL_USAGE_SECRET,
+compare avec .trim() ; AJOUTER un user-agent sinon Cloudflare 403 sur Python-urllib).
+- worker.ts : handleAdminModalUsageIngest -> _meta/modal_real_usage.json ; _maybeAlertModalBudget +
+  endpoint /api/admin/modal-credits PREFERENT l'usage REEL (frais <26h) sinon l'estimation
+  (_meta/modal_spend_total.txt). Reponse: total_spent=usage best-available, usage_source,
+  real_usage(_ts/_fresh), estimate_spent, remaining, alert.
+- admin.html : note de source sous la grille (reel Modal vs estimation + age).
+- Seed valide : $58.07 pousse (= dashboard Modal). DEPLOYE Version d5958c42.
+- ACTIONS USER : `cd cloud && npx wrangler secret put MODAL_USAGE_SECRET` (ta valeur — j'ai mis un
+  secret TEMP pour le seed) ; planifier le poller (Task Scheduler horaire OU GitHub Action) avec
+  MODAL_USAGE_SECRET + FABMESH_WORKER_URL ; saisir le budget Modal ($65) dans admin Finance pour armer
+  l'alerte ; `wrangler secret put RESEND_API_KEY` pour l'email.
+
 ## 2026-06-16 (Admin: alerte budget Modal + suivi conso — DEPLOYE master)
 
 Feature sur MASTER (deploye Version 50bc332f) : alerte quand le budget Modal s'epuise + suivi.

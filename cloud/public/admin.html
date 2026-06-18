@@ -2923,6 +2923,25 @@
           const pct = b > 0 ? rem / b : 1;
           remEl.style.color = (rem <= 0) ? 'var(--err)' : (pct <= 0.15 ? 'var(--warn)' : '');
         }
+        // Show whether the figure is the REAL Modal usage (billing poller) or the estimate.
+        let note = document.getElementById('mc-source-note');
+        if (!note) {
+          note = document.createElement('div'); note.id = 'mc-source-note';
+          note.style.cssText = 'font-size:12px; margin-top:8px; line-height:1.5;';
+          const grid = document.getElementById('modal-credits-grid');
+          if (grid && grid.after) grid.after(note);
+        }
+        if (note) {
+          if (j.usage_source === 'real' && j.real_usage_ts) {
+            const ageMin = Math.round((Date.now() - Date.parse(j.real_usage_ts)) / 60000);
+            note.innerHTML = `✅ Conso <b>réelle Modal</b> (modal billing) — màj il y a ${ageMin} min · estimation worker $${(Number(j.estimate_spent) || 0).toFixed(2)}`
+              + (j.real_usage_fresh ? '' : ' · ⚠️ donnée ancienne (poller arrêté ?)');
+            note.style.color = j.real_usage_fresh ? 'var(--text-2)' : 'var(--warn)';
+          } else {
+            note.innerHTML = '⚠️ Conso = <b>estimation worker</b> (imprécise). Lancez <code>scripts/modal_usage_push.py</code> pour la vraie conso Modal.';
+            note.style.color = 'var(--warn)';
+          }
+        }
         _updateModalBanner(j.alert);
       } catch (e) {
         // Replace the cryptic "!" with the real reason (HTTP code +

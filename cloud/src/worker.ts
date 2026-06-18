@@ -110,6 +110,7 @@ export interface Env {
   MAX_DAILY_MODAL_SPEND_USD?: string; // Modal-side cap   (default $2.00)
   RESEND_API_KEY?: string;            // Resend key for admin alert emails (optional; no-op if unset)
   ALERT_FROM_EMAIL?: string;          // From: for alert emails (Resend-verified domain; default onboarding@resend.dev)
+  MODAL_USAGE_SECRET?: string;        // shared secret the modal-billing poller uses to push REAL usage
   MAX_USER_DAILY_CALLS?: string;
 
   // NSFW filter bypass — set to "1" to disable the prompt pre-filter
@@ -265,7 +266,7 @@ async function checkAndIncrementModalSpend(env: Env, estimatedUsd: number): Prom
     const tk = '_meta/modal_spend_total.txt';
     const total = (parseFloat((await r2GetText(env, tk)) || '0') || 0) + estimatedUsd;
     await env.MESHES.put(tk, String(total));
-    await _maybeAlertModalBudget(env, total);
+    await _maybeAlertModalBudget(env);
   } catch (_) {}
   return maxUsd - cur - estimatedUsd;
 }
@@ -284,11 +285,21 @@ async function refundModalSpend(env: Env, refundUsd: number): Promise<void> {
 /** Fire an admin alert (banner via _meta/modal_alert.json + email) when the Modal
  *  workspace budget runs low (<=15%) or is exhausted. Debounced: only re-alerts
  *  when severity worsens; cleared when the admin tops up (handleAdminModalSetBudget). */
-async function _maybeAlertModalBudget(env: Env, totalSpent: number): Promise<void> {
+async function _maybeAlertModalBudget(env: Env): Promise<void> {
   if (!env.MESHES) return;
   const budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
   if (budget <= 0) return;
-  const remaining = budget - totalSpent;
+  // Prefer the REAL Modal workspace usage pushed by the billing poller (fresh
+  // < 26h); otherwise fall back to the worker's own cost estimate.
+  let usage = 0; let source: 'real' | 'estimate' = 'estimate';
+  try {
+    const realTxt = await r2GetText(env, '_meta/modal_real_usage.json');
+    const real = realTxt ? JSON.parse(realTxt) : null;
+    const ageMs = real && real.ts ? (Date.now() - Date.parse(real.ts)) : Infinity;
+    if (real && typeof real.usage === 'number' && ageMs < 26 * 3600 * 1000) { usage = real.usage; source = 'real'; }
+    else usage = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0;
+  } catch (_) { usage = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0; }
+  const remaining = budget - usage;
   const pct = remaining / budget;
   let level: 'low' | 'empty' | null = null;
   if (remaining <= 0) level = 'empty';
@@ -300,17 +311,16 @@ async function _maybeAlertModalBudget(env: Env, totalSpent: number): Promise<voi
   if (prevLevel === 'empty' && level === 'low') return;
   const round = (n: number) => Math.round(n * 100) / 100;
   await env.MESHES.put('_meta/modal_alert.json', JSON.stringify({
-    level, remaining: round(remaining), budget: round(budget), total_spent: round(totalSpent), ts: new Date().toISOString(),
+    level, source, usage: round(usage), remaining: round(remaining), budget: round(budget), ts: new Date().toISOString(),
   }));
   const subject = level === 'empty'
     ? '\u{1F6A8} MyFabmesh — Modal budget EXHAUSTED'
     : '⚠️ MyFabmesh — Modal budget low';
   const text = (level === 'empty'
-      ? 'Your Modal GPU workspace budget is EXHAUSTED — paid generations may start failing.'
+      ? 'Your Modal GPU workspace budget is EXHAUSTED — Modal will stop running apps.'
       : 'Your Modal GPU workspace budget is running low.')
-    + `\n\nRemaining: $${round(remaining).toFixed(2)} of $${round(budget).toFixed(2)} (${Math.round(pct * 100)}%)`
-    + `\nSpend since last top-up: $${round(totalSpent).toFixed(2)}`
-    + '\n\nTop up your Modal workspace, then update the budget in the admin Finance tab (that clears this alert).';
+    + `\n\nUsage (${source}): $${round(usage).toFixed(2)} of $${round(budget).toFixed(2)} budget — remaining $${round(remaining).toFixed(2)} (${Math.round(pct * 100)}%)`
+    + '\n\nTop up / raise your Modal workspace budget, then update the limit in the admin Finance tab to re-arm the alert.';
   await _sendAdminAlertEmail(env, subject, text);
 }
 
@@ -1906,19 +1916,27 @@ async function handleAdminModalCredits(req: Request, env: Env): Promise<Response
   if (adminCheck instanceof Response) return adminCheck;
   if (!env.MESHES) return err(500, 'storage not configured');
   try {
-    // Spend since the last budget top-up (running counter, reset on top-up).
-    const totalSpent = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0;
+    const estSpent = parseFloat(await r2GetText(env, '_meta/modal_spend_total.txt') || '0') || 0;
     const todaySpent = parseFloat(await r2GetText(env, `_meta/modal_spend/${todayUTC()}`) || '0') || 0;
     const budget = parseFloat(await r2GetText(env, '_meta/modal_budget_total.txt') || '0') || 0;
+    let realUsage: number | null = null, realTs: string | null = null;
+    try { const rt = await r2GetText(env, '_meta/modal_real_usage.json'); const r = rt ? JSON.parse(rt) : null; if (r && typeof r.usage === 'number') { realUsage = r.usage; realTs = r.ts || null; } } catch {}
+    const fresh = realTs ? (Date.now() - Date.parse(realTs)) < 26 * 3600 * 1000 : false;
+    const usage = (fresh && realUsage != null) ? realUsage : estSpent;
     let alert: unknown = null;
     try { const a = await r2GetText(env, '_meta/modal_alert.json'); alert = a ? JSON.parse(a) : null; } catch {}
     const round = (n: number) => Math.round(n * 10000) / 10000;
     return json({
       ok: true,
       total_budget: round(budget),
-      total_spent: round(totalSpent),
+      total_spent: round(usage),
+      usage_source: (fresh && realUsage != null) ? 'real' : 'estimate',
+      real_usage: realUsage == null ? null : round(realUsage),
+      real_usage_ts: realTs,
+      real_usage_fresh: fresh,
+      estimate_spent: round(estSpent),
       today_spent: round(todaySpent),
-      remaining: Math.max(0, round(budget - totalSpent)),
+      remaining: Math.max(0, round(budget - usage)),
       alert,
     });
   } catch (e) {
@@ -1943,6 +1961,26 @@ async function handleAdminModalSetBudget(req: Request, env: Env): Promise<Respon
   try { await env.MESHES.put('_meta/modal_spend_total.txt', '0'); } catch {}
   try { await env.MESHES.delete('_meta/modal_alert.json'); } catch {}
   return json({ ok: true, success: true, total: n });
+}
+
+/** POST /api/admin/modal-usage  body { usage, cycle? } — the modal-billing
+ *  poller pushes the REAL workspace usage (sum of `modal billing report`).
+ *  Auth via x-ingest-secret == MODAL_USAGE_SECRET (the Worker can't run the
+ *  Modal CLI itself, so a small external poller feeds it the real number). */
+async function handleAdminModalUsageIngest(req: Request, env: Env): Promise<Response> {
+  const secret = (env.MODAL_USAGE_SECRET || '').trim();
+  const provided = (req.headers.get('x-ingest-secret') || '').trim();
+  if (!secret || provided !== secret) return err(401, 'unauthorized');
+  if (!env.MESHES) return err(500, 'storage not configured');
+  let body: { usage?: number; cycle?: string };
+  try { body = await req.json() as typeof body; } catch { return err(400, 'bad json'); }
+  const usage = Number(body?.usage);
+  if (!Number.isFinite(usage) || usage < 0) return err(400, 'usage must be a non-negative number');
+  await env.MESHES.put('_meta/modal_real_usage.json', JSON.stringify({
+    usage: Math.round(usage * 10000) / 10000, cycle: String(body?.cycle || ''), ts: new Date().toISOString(),
+  }));
+  await _maybeAlertModalBudget(env);
+  return json({ ok: true, success: true });
 }
 
 // =============================================================
@@ -10828,6 +10866,7 @@ export default {
         if (pathname === '/api/admin/contact-messages' && method === 'GET') return await handleAdminContactList(req, env);
         if (pathname === '/api/admin/modal-credits'         && method === 'GET')  return await handleAdminModalCredits(req, env);
         if (pathname === '/api/admin/modal-credits/total'   && method === 'POST') return await handleAdminModalSetBudget(req, env);
+        if (pathname === '/api/admin/modal-usage'           && method === 'POST') return await handleAdminModalUsageIngest(req, env);
         // ── Marketplace ──
         if (pathname === '/api/market/list'                 && method === 'GET')  return await handleMarketList(req, env);
         if (pathname === '/api/market/publish'              && method === 'POST') return await handleMarketPublish(req, env);
