@@ -3749,3 +3749,16 @@ details.stage-generating > summary .stage-icon-gear {
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* Mobile: image-tool modals (Modify image / Auto Inpaint / etc.) use a 2-column
+   .modal-with-image (image | controls) that clips off-screen on phones. Stack
+   the columns and fit the card to the viewport with internal scroll. */
+@media (max-width: 768px) {
+  .modal-card, .modal-card-wide {
+    width: 96vw !important; max-width: 96vw !important; min-width: 0 !important;
+    max-height: 92dvh !important; overflow-y: auto !important;
+  }
+  .modal-with-image { display: flex !important; flex-direction: column !important; gap: 12px; }
+  .modal-with-image > * { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+  .modal-image-side { width: 100% !important; max-width: 100% !important; }
+}
