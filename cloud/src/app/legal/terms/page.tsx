@@ -142,8 +142,84 @@ export default function TermsPage() {
         <li>Chargebacks initiated by buyers via their bank are handled by Stripe; the platform may withhold the disputed amount from the seller&apos;s pending balance until resolution.</li>
       </ul>
 
+      <h2>12. Copyright &amp; takedown (DMCA / EU)</h2>
+      <p>
+        We respect intellectual property and respond to valid notices of claimed
+        infringement under the U.S. DMCA (17 U.S.C. §512) and the EU Copyright
+        Directive / French LCEN.
+      </p>
+      <h3>12.1 Filing a notice</h3>
+      <p>
+        If you believe content on MyFabmesh.AI (a generated asset, a marketplace
+        listing, or an uploaded image) infringes your copyright, email{' '}
+        <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a> with the
+        subject &ldquo;Copyright notice&rdquo; and include: identification of the
+        copyrighted work and of the infringing material (with a URL or listing
+        ID); your contact details; a statement that you have a good-faith belief
+        the use is not authorised; a statement, under penalty of perjury, that the
+        information is accurate and that you are the rights holder or authorised to
+        act for them; and your physical or electronic signature. We will remove or
+        disable access to the reported material expeditiously and notify the
+        uploader.
+      </p>
+      <h3>12.2 Counter-notice</h3>
+      <p>
+        If your content was removed and you believe this was a mistake or
+        misidentification, send a counter-notice to the same address with the
+        identification of the removed material, your contact details, a statement
+        under penalty of perjury that the removal was a mistake, and your
+        signature. We may restore the material unless the original claimant
+        initiates legal action.
+      </p>
+      <h3>12.3 Repeat infringers</h3>
+      <p>
+        Accounts that repeatedly infringe third-party rights are suspended or
+        terminated.
+      </p>
+
+      <h2>13. Reporting illegal content (EU Digital Services Act)</h2>
+      <p>
+        Under the EU Digital Services Act (Regulation 2022/2065), anyone can
+        notify us of content they consider illegal.
+      </p>
+      <ul>
+        <li>
+          <strong>How to report:</strong> use the &ldquo;Report&rdquo; control on a
+          marketplace listing, or email{' '}
+          <a href="mailto:fabien65400@hotmail.fr">fabien65400@hotmail.fr</a> with
+          the subject &ldquo;Illegal content&rdquo;, an explanation of why the
+          content is illegal, and its location (URL or listing ID).
+        </li>
+        <li>
+          <strong>Point of contact:</strong> the address above is our single point
+          of contact for users and authorities (DSA Art. 11–12).
+        </li>
+        <li>
+          <strong>Our action:</strong> we review every notice, remove or disable
+          content that is illegal or breaches these terms, and inform the affected
+          user with a <em>statement of reasons</em> (DSA Art. 17).
+        </li>
+        <li>
+          <strong>Appeal:</strong> if your content or account is restricted, you
+          may contest the decision by replying to the statement of reasons; a
+          human re-examines the case.
+        </li>
+        <li>
+          <strong>Illegal content is never allowed</strong> — in particular CSAM,
+          terrorist content, and content infringing others&apos; rights. We
+          cooperate with the competent authorities and report offences where the
+          law requires it.
+        </li>
+      </ul>
+      <p style={{ fontSize: 12, color: 'var(--text-2)' }}>
+        The formal designation of a copyright agent and the published DSA contact
+        details will be finalised with our registered business identity at
+        commercial launch.
+      </p>
+
       <p style={{ marginTop: 32, fontSize: 13 }}>
         <a href="/legal/privacy">Privacy Policy</a> &middot;{' '}
+        <a href="/legal/licenses">Third-Party Licenses</a> &middot;{' '}
         <a href="/">Home</a>
       </p>
     </main>

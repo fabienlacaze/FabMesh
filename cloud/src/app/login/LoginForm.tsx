@@ -26,6 +26,7 @@ export function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);  // signup gate: ToS/Privacy + age
 
   function client() {
     return createBrowserClient(
@@ -95,10 +96,24 @@ export function LoginForm() {
       setError('Password must be at least 6 characters.');
       return;
     }
+    if (!consent) {
+      setBusy(false);
+      setError('Please confirm your age and accept the Terms and Privacy Policy.');
+      return;
+    }
     try {
       const { data, error } = await client().auth.signUp({
         email, password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          // GDPR: record the timestamped consent + age attestation on the user.
+          data: {
+            tos_accepted: true,
+            tos_version: 'v1',
+            tos_accepted_at: new Date().toISOString(),
+            age_confirmed_16: true,
+          },
+        },
       });
       if (error) throw error;
       // If email confirmation is required (default in Supabase), we don't
@@ -255,7 +270,20 @@ export function LoginForm() {
              autoComplete={isSignUp ? 'new-password' : 'current-password'}
              minLength={6}
              style={{ marginBottom: 14 }} />
-      <button type="submit" className="primary-btn" disabled={busy} style={{ width: '100%' }}>
+      {isSignUp && (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '4px 0 14px', fontSize: 12, color: 'var(--text-2)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)}
+                 style={{ marginTop: 2, flexShrink: 0 }} />
+          <span>
+            I confirm I am at least 16 years old (or have my guardian&apos;s consent)
+            and I accept the{' '}
+            <a href="/legal/terms" target="_blank" rel="noopener">Terms of Service</a>{' '}
+            and <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Policy</a>.
+          </span>
+        </label>
+      )}
+      <button type="submit" className="primary-btn"
+              disabled={busy || (isSignUp && !consent)} style={{ width: '100%' }}>
         {busy ? '…' : (isSignUp ? 'Create account' : 'Sign in')}
       </button>
 
