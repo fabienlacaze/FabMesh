@@ -302,8 +302,40 @@ function _matchesKeyword(text, kw) {
   return text.includes(kw);
 }
 
+// ── HARD FLOOR — illegal content (CSAM / child abuse) that NO setting,
+//    including unrestricted mode, may EVER bypass. Checked BEFORE the
+//    isUnrestrictedMode() short-circuit. NSFW_COMBOS[0]=child×sexual,
+//    NSFW_COMBOS[2]=child×violence are the illegal floor.
+const HARD_FLOOR_KEYWORDS = [
+  'pedophil', 'paedophil', 'pédophil', 'loli', 'shota', 'lolicon',
+  'shotacon', 'child abuse', 'toddler abuse', 'infant abuse',
+  'child porn', 'childporn',
+];
+const HARD_FLOOR_COMBOS = [NSFW_COMBOS[0], NSFW_COMBOS[2]];
+
+function checkHardFloor(prompt) {
+  const lower = (prompt || '').toLowerCase();
+  for (const kw of HARD_FLOOR_KEYWORDS) {
+    if (_matchesKeyword(lower, kw)) {
+      return { safe: false, blocked: kw, hardFloor: true,
+        reason: 'Blocked: this content is illegal and cannot be generated under any setting.' };
+    }
+  }
+  for (const combo of HARD_FLOOR_COMBOS) {
+    const hasA = combo.a.some(w => _matchesKeyword(lower, w));
+    const hasB = combo.b.some(w => _matchesKeyword(lower, w));
+    if (hasA && hasB) {
+      return { safe: false, blocked: 'minor-safety', hardFloor: true,
+        reason: 'Blocked: depicting minors in this context is illegal and cannot be generated under any setting.' };
+    }
+  }
+  return { safe: true };
+}
+
 function checkPromptSafety(prompt) {
-  if (isUnrestrictedMode()) return { safe: true };
+  const floor = checkHardFloor(prompt);
+  if (!floor.safe) return floor;            // illegal floor — never bypassable
+  if (isUnrestrictedMode()) return { safe: true };  // unrestricted relaxes SOFT filters only
   const lower = (prompt || '').toLowerCase();
 
   // Check individual keywords
@@ -330,6 +362,8 @@ function checkPromptSafety(prompt) {
 // Layer 3: AI text classifier (async, non-blocking)
 // michellejieli/NSFW_text_classifier — local, Apache 2.0, ~250 MB, no internet after first download
 async function checkPromptSafetyAI(prompt) {
+  const floor = checkHardFloor(prompt);
+  if (!floor.safe) return floor;            // illegal floor — never bypassable
   if (isUnrestrictedMode()) return { safe: true };
   return new Promise((resolve) => {
     execFile('python', ['-c', `

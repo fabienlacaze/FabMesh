@@ -1,5 +1,54 @@
 # FabMesh Agent Log
 
+## 2026-06-18 (SÉCURITÉ CRITIQUE : hard-floor CSAM non contournable — desktop+cloud+Modal)
+
+Audit (workflow marketplace) + traçage code : le mode `unrestricted` (parental off)
+court-circuitait TOUTE la modération — combos enfant×sexuel/violence inclus — sur les
+3 surfaces : desktop main.js:306/333, cloud nsfw_filter.ts:104, Modal app.py:490/777.
+=> un user en unrestricted pouvait générer du contenu enfant×sexuel (CSAM). Blocker pénal.
+FIX : `checkHardFloor()` (mots-clés toujours illégaux + combos mineur×sexuel/violence)
+exécuté AVANT tout bypass `unrestricted`, miroir exact sur les 3 surfaces :
+- desktop : checkHardFloor + appel dans checkPromptSafety ET checkPromptSafetyAI (restart requis).
+- cloud : checkHardFloor exporté + appel dans checkPromptSafety — PAS encore déployé
+  (worker.ts en cours d'édition par le workflow R2 ; partira avec le batch R2).
+- Modal : _prompt_hard_floor() dans text2image + tpose + backview, raise 403. **DÉPLOYÉ** (8s).
+Note : l'audit ne voyait que le desktop (P0-3) ; vrai périmètre = stack entière.
+P0-1 (crédits forgeables) re-vérifié FERMÉ sur DB live (anon → 401 permission denied).
+
+## 2026-06-18 (P1 sécurité : R2 signed URLs — objets privés/face photos plus publics — NON DEPLOYE)
+
+Les objets R2 (incl. photos de visage uploadées) étaient atteignables à des
+URLs `pub-*.r2.dev/<key>` permanentes, devinables et non authentifiées (P1).
+Correctif : le worker `cloud/src/worker.ts` génère désormais des URLs signées
+HMAC-SHA256 expirantes servies depuis sa propre origine.
+
+- Nouveau helper `signedR2Url(env, key, kind)` (kind=image 24h / mesh 7j /
+  export 30j) + `r2ContentType(key)` + route `GET /r2/<key>?exp&sig`
+  (`handleSignedR2`) qui vérifie sig+exp (timingSafeEqualHex, déjà constant-
+  time) puis stream `env.MESHES.get(key).body`. Chaîne signée = `v1:<key>\n<exp>`,
+  MAC hex minuscule (même convention que verifyStripeSignature).
+- NON-BREAKING : si `R2_URL_SIGNING_SECRET` (Worker SECRET) est non défini,
+  fallback sur l'ancienne URL `R2_PUBLIC_URL/<key>` + `console.warn` une fois ;
+  la route `/r2/` renvoie 404. Le signing s'active dès que le secret est posé
+  (`wrangler secret put`), sans redeploy.
+- 28+ générateurs d'URL R2 client-facing basculés sur `await signedR2Url(...)`
+  (uploadGlbToR2, persistModalGlb, callModal*, handleUpload*, handleListMeshes/
+  handleProjects/handleCloudProjects, anim/rig status, handleAdminUserImages/
+  Rigs, contact screenshot, mask inpaint, mesh-op…).
+- Re-sign-on-read : `jobs.mesh_url`, `user_assets.r2_path`,
+  `jobs.options.sourceImage` stockent maintenant la KEY brute (pass-through si
+  legacy full-URL) ; re-signées à la lecture → liens jamais périmés en base.
+- handleMarketDownload stream via `env.MESHES.get(key)` (robuste après
+  désactivation du bucket public) ; handleProxyImage court-circuite les URLs
+  `/r2/` self-origin ; handleAnimCopy/handleAnimDelete/meshes-delete parsent
+  les 3 formes (signée /r2/, r2.dev legacy, key brute).
+- Exports CSV/XLSX admin + GDPR JSON : colonnes `mesh_key`/`download_url` re-
+  signées TTL export 30j + note d'expiration.
+- Docs : `.env.example`, `wrangler.toml`, `DEPLOY_CLOUD_STEP_BY_STEP.md`.
+- ACTION USER (après deploy + secret + vérif live) : désactiver l'accès public
+  r2.dev sur le bucket dans le dashboard Cloudflare → ferme P1.
+- Bundle wrangler `--dry-run` OK. PAS déployé (le user déploie).
+
 ## 2026-06-16 (KPI réels : coût Modal réel + marge réelle + ventilation par app — DEPLOYE)
 
 Les KPI admin (COST MODAL / MARGIN, marge "95%") utilisaient l'estimation par-op (fausse).

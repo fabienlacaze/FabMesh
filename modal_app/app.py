@@ -34,6 +34,66 @@ import modal
 
 
 # ---------------------------------------------------------------------------
+# HARD FLOOR — illegal content (CSAM / child abuse) blocked on EVERY
+# generation, regardless of the `unrestricted` flag. Mirrors checkHardFloor
+# in src/main/main.js and cloud/src/nsfw_filter.ts. The Worker pre-filters
+# prompts too, but this is the unbypassable last line at the generator.
+# ---------------------------------------------------------------------------
+_HARD_FLOOR_KEYWORDS = (
+    "pedophil", "paedophil", "pédophil", "loli", "shota", "lolicon",
+    "shotacon", "child abuse", "toddler abuse", "infant abuse",
+    "child porn", "childporn",
+)
+_HF_MINOR = (
+    "child", "children", "kid", "kids", "boy", "girl", "teen", "teenager",
+    "young", "infant", "baby", "toddler", "minor", "preteen", "schoolgirl",
+    "schoolboy", "enfant", "fille", "garcon", "jeune", "ado", "adolescent",
+    "gamin", "gamine", "bebe",
+)
+_HF_SEXUAL = (
+    "without clothes", "no clothes", "unclothed", "undressed", "disrobed",
+    "bare", "exposed", "revealing", "intimate", "sensual", "seductive",
+    "provocative", "suggestive", "sexy", "lingerie", "underwear", "panties",
+    "bra", "bikini", "swimsuit", "naked", "nude", "nsfw", "sexual",
+    "erotic", "porn", "deshabill", "sans vetement", "sans habit",
+    "nu ", "nue ", "nus ", "nues",
+)
+_HF_VIOLENCE = (
+    "hurt", "hit", "beat", "punch", "slap", "abuse", "attack", "weapon",
+    "knife", "gun", "shoot", "bleed", "cry", "scream", "pain", "suffer",
+    "frapper", "battre", "blesser",
+)
+
+
+def _hf_match(text: str, kw: str) -> bool:
+    """Word-boundary match for short tokens (<=4), substring for longer —
+    mirrors _matchesKeyword in the JS filters (avoids 'menu' matching 'nu')."""
+    if len(kw) <= 4:
+        padded = " " + text + " "
+        for suf in (" ", ",", ".", "!", "?"):
+            if (" " + kw + suf) in padded:
+                return True
+        return text.startswith(kw + " ") or text.endswith(" " + kw)
+    return kw in text
+
+
+def _prompt_hard_floor(prompt: str):
+    """Return a block reason if `prompt` hits the illegal floor (minors x
+    sexual/violence, or always-illegal terms), else None. NEVER bypassed by
+    `unrestricted`."""
+    lower = (prompt or "").lower()
+    for kw in _HARD_FLOOR_KEYWORDS:
+        if _hf_match(lower, kw):
+            return f"illegal content blocked ({kw})"
+    has_minor = any(_hf_match(lower, m) for m in _HF_MINOR)
+    if has_minor and any(_hf_match(lower, s) for s in _HF_SEXUAL):
+        return "sexual content involving minors is illegal"
+    if has_minor and any(_hf_match(lower, v) for v in _HF_VIOLENCE):
+        return "abusive content involving minors is illegal"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # DRY helpers for the ASGI routers below. Each router (predictor / backview
 # / mesh) wraps multiple POST routes that share the SAME auth pattern, body
 # parsing and PNG encoding — we factor them once here so each route body
@@ -538,6 +598,9 @@ class MyFabmeshPredictor:
             prompt = (payload.get("prompt") or "").strip()
             if not prompt:
                 raise HTTPException(status_code=400, detail="prompt required")
+            _hf = _prompt_hard_floor(prompt)
+            if _hf:
+                raise HTTPException(status_code=403, detail=_hf)
             png = self._generate_png(
                 prompt=prompt,
                 asset_type=payload.get("asset_type") or "character",
@@ -749,6 +812,9 @@ class MyFabmeshBackview:
         ref_url = (payload.get("ref_image_url") or "").strip()
         if not prompt and not ref_url:
             raise HTTPException(status_code=400, detail="prompt or ref_image_url required")
+        _hf = _prompt_hard_floor(prompt)
+        if _hf:
+            raise HTTPException(status_code=403, detail=_hf)
 
         ref_img = None
         if ref_url:
@@ -807,6 +873,9 @@ class MyFabmeshBackview:
         ref_url = (payload.get("ref_image_url") or "").strip()
         if not prompt and not ref_url:
             raise HTTPException(status_code=400, detail="prompt or ref_image_url required")
+        _hf = _prompt_hard_floor(prompt)
+        if _hf:
+            raise HTTPException(status_code=403, detail=_hf)
 
         ref_img = None
         if ref_url:

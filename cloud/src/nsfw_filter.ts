@@ -97,11 +97,43 @@ export interface PromptSafetyResult {
   reason?: string;
 }
 
+// ── HARD FLOOR — illegal content (CSAM / child abuse) that NO setting,
+//    including `unrestricted`, may EVER bypass. Checked BEFORE the
+//    unrestricted short-circuit. NSFW_COMBOS[0]=child×sexual,
+//    NSFW_COMBOS[2]=child×violence are the illegal floor.
+const HARD_FLOOR_KEYWORDS: string[] = [
+  'pedophil', 'paedophil', 'pédophil', 'loli', 'shota', 'lolicon',
+  'shotacon', 'child abuse', 'toddler abuse', 'infant abuse',
+  'child porn', 'childporn',
+];
+const HARD_FLOOR_COMBOS: Combo[] = [NSFW_COMBOS[0], NSFW_COMBOS[2]];
+
+export function checkHardFloor(prompt: string | null | undefined): PromptSafetyResult {
+  const lower = (prompt || '').toLowerCase();
+  for (const kw of HARD_FLOOR_KEYWORDS) {
+    if (_matchesKeyword(lower, kw)) {
+      return { safe: false, blocked: kw,
+        reason: 'Blocked: this content is illegal and cannot be generated under any setting.' };
+    }
+  }
+  for (const combo of HARD_FLOOR_COMBOS) {
+    const hitA = combo.a.find(w => _matchesKeyword(lower, w));
+    const hitB = combo.b.find(w => _matchesKeyword(lower, w));
+    if (hitA && hitB) {
+      return { safe: false, blocked: 'minor-safety',
+        reason: 'Blocked: depicting minors in this context is illegal and cannot be generated under any setting.' };
+    }
+  }
+  return { safe: true };
+}
+
 export function checkPromptSafety(
   prompt: string | null | undefined,
   unrestricted = false,
 ): PromptSafetyResult {
-  if (unrestricted) return { safe: true };
+  const floor = checkHardFloor(prompt);
+  if (!floor.safe) return floor;            // illegal floor — never bypassable
+  if (unrestricted) return { safe: true };  // unrestricted relaxes SOFT filters only
   const lower = (prompt || '').toLowerCase();
   for (const kw of NSFW_KEYWORDS) {
     if (_matchesKeyword(lower, kw)) {
