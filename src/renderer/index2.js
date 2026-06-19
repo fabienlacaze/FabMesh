@@ -1459,6 +1459,15 @@ const ASSET_OPTIONS_PROFILE = {
     'ws-trellis2-ultra-hd':     true,
     'ws-trellis2-face-fix':     true,
   },
+  insect: {
+    'ws-trellis2-rectify':      true,
+    'ws-trellis2-smooth':       false,  // exoskeleton / chitin detail
+    'ws-trellis2-refine':       true,
+    'ws-trellis2-quality-plus': true,
+    'ws-trellis2-ultra-q':      false,  // no human face to gain from 1536
+    'ws-trellis2-ultra-hd':     true,
+    'ws-trellis2-face-fix':     null,   // insects have no human face
+  },
   vehicle: {
     'ws-trellis2-rectify':      true,   // 3/4 iso
     'ws-trellis2-smooth':       true,   // paint, chrome
@@ -4279,6 +4288,7 @@ const ASSET_TYPE_PROMPTS = {
   avion: 'ONE complete passenger aircraft only, single plane, only one instance, isolated, 3/4 isometric view, full body visible from nose to tail, both wings visible, tail fin visible, plain white background, even studio lighting, no shadows, no clouds, no horizon, no contrail, centered, clean silhouette, no text, no UI, no duplicate, no second plane, no formation',
   bateau: 'ONE complete boat only, single vessel, only one instance, isolated, 3/4 isometric view, full body visible from bow to stern, hull and superstructure visible, plain white background, even studio lighting, no shadows, no water, no wake, no horizon, centered, clean silhouette, no text, no UI, no duplicate, no second boat',
   animal: '3D game asset reference sheet, full body character reference, long shot, full figure shot, wide establishing shot, distant camera, entire animal visible from nose to tail to feet, body fills 60 percent of frame, ONE animal only, single creature with ONE single tail only, full body lateral profile, all four feet flat on the ground, body horizontal parallel to floor, belly close to ground, four legs supporting the body from below, plain white background, even studio lighting, no shadows, NEVER bipedal, NEVER upright, NEVER standing on hind legs, NEVER humanoid posture, NEVER T-pose, NEVER cartoon mascot stance, exactly one tail, no extra tails, no multiple tails, no extra limbs, no humanoid anthropomorphism, no second animal, no duplicate, no text, no UI, NOT a portrait, NOT a headshot, NOT a close-up, NOT a head shot, NOT a face shot, NOT a bust shot, NOT head and shoulders',
+  insect: '3D game asset reference sheet, full body reference, long shot, full figure shot, distant camera, entire insect visible, body fills 60 percent of frame, ONE insect only, single arthropod, isolated, six legs, segmented body, hard exoskeleton, antennae, full body view, plain white background, even studio lighting, no shadows, exactly six legs, NO tail, no fur, NOT a mammal, NOT a quadruped, NOT a cat, NOT a dog, no extra limbs, no humanoid posture, no second insect, no duplicate, no text, no UI, NOT a portrait, NOT a close-up, NOT a headshot',
   // Per-category "Other …" presets: keep the category's framing/staging but
   // drop the SPECIFIC-object bias, so e.g. a catapult under "Other vehicle"
   // stays a vehicle (not a car) instead of a random studio object. A fully
