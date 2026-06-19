@@ -1693,6 +1693,30 @@ function _applyAssetOptionsProfile(assetType) {
   });
 })();
 
+// Gate the HiDream-O1 image engine: keep it in the dropdown ONLY if THIS
+// machine can actually run it (CUDA GPU with ~12 GB+ VRAM + the runtime
+// installed). Otherwise remove the option and fall back to RealVisXL — the
+// always-available local engine. End-user GPUs vary; HiDream FP8 needs ~11 GB,
+// so weak/old/non-NVIDIA machines keep just RealVisXL instead of OOM-ing.
+(async function _gateHiDreamEngine() {
+  const removeHiDream = () => {
+    document.querySelectorAll('#ws-engine option[value="hidream"], #mod-engine option[value="hidream"]').forEach(o => o.remove());
+    const ws = document.getElementById('ws-engine');
+    if (ws && ws.value === 'hidream') ws.value = 'local-flux';
+  };
+  try {
+    const cap = await window.meshyAPI?.hidreamAvailable?.();
+    if (!cap || !cap.available) {
+      removeHiDream();
+      console.log('[engine] HiDream hidden —', cap ? cap.reason : 'capability check unavailable');
+    } else {
+      console.log('[engine] HiDream available on', cap.gpu, '(' + cap.vramGB + ' GB)');
+    }
+  } catch (e) {
+    removeHiDream();  // any failure → be safe, RealVisXL only
+  }
+})();
+
 // Show/hide "Construction stages" checkbox based on asset type —
 // hidden for living subjects (character, creature) where 3-stage
 // progressive build doesn't make sense. Visible for buildings,

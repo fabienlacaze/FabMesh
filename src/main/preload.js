@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('meshyAPI', {
   generateFromPrompt: (opts) => ipcRenderer.invoke('generate-from-prompt', opts),
   generateFromImage: (opts) => ipcRenderer.invoke('generate-from-image', opts),
   generateImages: (opts) => ipcRenderer.invoke('generate-images', opts),
+  hidreamAvailable: () => ipcRenderer.invoke('hidream-available'),
   generateBuildStages: (opts) => ipcRenderer.invoke('generate-build-stages', opts),
   imageToTrellis: (opts) => ipcRenderer.invoke('image-to-3d-trellis', opts),
   imageTo3D: (opts) => ipcRenderer.invoke('image-to-3d', opts),

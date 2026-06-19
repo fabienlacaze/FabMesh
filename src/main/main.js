@@ -4304,6 +4304,33 @@ ipcMain.handle('check-gpu', async () => {
   });
 });
 
+// Whether HiDream-O1 (the 2nd image engine) can run on THIS machine: it needs
+// a CUDA GPU with enough VRAM (FP8 peaks ~11 GB → require ~12 GB) AND the
+// isolated HiDream runtime present. The renderer uses this to hide the HiDream
+// dropdown option on machines that can't run it (they keep RealVisXL).
+ipcMain.handle('hidream-available', async () => {
+  const HIDREAM_PY = 'd:/ai_eval/HiDream/.venv/Scripts/python.exe';
+  const MIN_VRAM_MB = 12000;
+  let hasRuntime = false;
+  try { hasRuntime = fs.existsSync(HIDREAM_PY); } catch (_) {}
+  return new Promise((resolve) => {
+    execFile('nvidia-smi', ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
+      { timeout: 3000 }, (error, stdout) => {
+        if (error) { resolve({ available: false, reason: 'no NVIDIA GPU detected', hasRuntime }); return; }
+        const line = (stdout || '').split('\n').filter(l => l.trim())[0] || '';
+        const parts = line.split(',').map(s => s.trim());
+        const totalMB = parseFloat(parts[1] || '0');
+        const gpu = parts[0] || 'GPU';
+        const vramOk = totalMB >= MIN_VRAM_MB;
+        const available = vramOk && hasRuntime;
+        const reason = !hasRuntime ? 'HiDream runtime not installed on this machine'
+                     : !vramOk ? `HiDream needs ~12 GB VRAM (this GPU has ${(totalMB / 1024).toFixed(0)} GB)`
+                     : 'ok';
+        resolve({ available, reason, gpu, vramGB: +(totalMB / 1024).toFixed(1), hasRuntime });
+      });
+  });
+});
+
 // Set system RAM limit (called from renderer when user drags the RAM slider)
 ipcMain.handle('set-ram-limit', (event, limitPct) => {
   // Convert percentage to absolute MB based on total system RAM
