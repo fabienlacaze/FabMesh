@@ -2385,6 +2385,12 @@ button.tool-active {
 #step-card-rig        .step-badge { background: linear-gradient(135deg, #d97706, #ea580c); }
 #step-card-animation  .step-badge { background: linear-gradient(135deg, #16a34a, #15803d); }
 
+/* Hide the GENERATING section entirely when its step has no jobs/tiles
+   (the empty "No generation in progress" state). _toggleGeneratingStage
+   also sets this inline on each refresh tick; this :has() rule covers the
+   initial render before JS first runs, avoiding an empty-panel flash. */
+.stage-generating:not(:has(.step-progress-widget.has-jobs)) { display: none; }
+
 /* GENERATING stage — purple gradient summary + spinning gear icon. */
 details.stage-generating > summary {
   background: linear-gradient(90deg, rgba(124,58,237,0.15), rgba(168,85,247,0.08));

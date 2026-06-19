@@ -13196,7 +13196,13 @@ function _toggleGeneratingStage(stepIdx, hasRunning) {
   if (!card) return;
   const stage = card.querySelector('.stage-generating');
   if (!stage) return;
-  stage.style.display = '';  // always visible
+  // Hide the whole GENERATING section when this step has no jobs/tiles
+  // (the empty "No generation in progress" state). renderStepProgressWidgets
+  // sets the widget's .has-jobs class BEFORE calling us, so it is reliable;
+  // recently done/error tiles keep .has-jobs for a few seconds and stay
+  // visible — only the truly-idle panel is hidden.
+  const _pw = stage.querySelector('.step-progress-widget');
+  stage.style.display = (_pw && _pw.classList.contains('has-jobs')) ? '' : 'none';
   // Only force the open state on TRANSITION (running ↔ idle). User's
   // manual click between transitions is respected.
   const last = _stageGenLastRunning[stepIdx];

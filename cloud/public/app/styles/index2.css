@@ -2391,9 +2391,14 @@ button.tool-active {
   background: var(--bg-3);
   border: 1px solid var(--border);
 }
-/* GENERATING stage — its own colour stripe + spinning icon so the
-   user spots a live job at a glance. Stays visible at all times
-   per user request (just open/closed via stage.open).  */
+/* Hide the GENERATING section entirely when its step has no jobs/tiles
+   (the empty "No generation in progress" state). _toggleGeneratingStage also
+   sets this inline on each refresh tick; this :has() rule covers the initial
+   render before JS first runs, avoiding an empty-panel flash. */
+.stage-generating:not(:has(.step-progress-widget.has-jobs)) { display: none; }
+
+/* GENERATING stage — its own colour stripe + spinning icon so the user spots
+   a live job at a glance. Hidden when idle (no jobs); open/closed via stage.open. */
 details.stage-generating > summary {
   background: linear-gradient(90deg, rgba(124,58,237,0.15), rgba(168,85,247,0.08));
   border-left: 3px solid rgba(168,85,247,0.7);
