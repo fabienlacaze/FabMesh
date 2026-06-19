@@ -2835,6 +2835,10 @@ function _estimateImageMs() {
   let perImage;
   if (engine === 'pollinations') perImage = 5000;
   else if (engine === 'local-sd') perImage = steps * 200 + 1500;
+  // HiDream-O1 FP8: the 8.8 GB model load dominates the first run (cold ~3 min),
+  // ~1.5 s/step @ 2048 once warm. A flat ~1m45s estimate avoids the "stuck at
+  // 90%" look the old SDXL-tuned estimate (~23s) caused.
+  else if (engine === 'hidream') perImage = steps * 1500 + 60000;
   else perImage = steps * 600 + 5000;
   let total = count;
   if (multiView) total *= 3;
