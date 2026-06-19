@@ -4967,6 +4967,41 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
       return { success: true, images: result.images };
     }
 
+    // LOCAL GPU: HiDream-O1 FP8 (second image engine). Runs from its OWN
+    // isolated venv at d:/ai_eval/HiDream so we never touch the working
+    // RealVisXL / TRELLIS2 env. run_fp8.py produces ONE image per call →
+    // loop numImages with a varying seed. Model weights are cached on D:
+    // (C: is near-full) so we point HF_HOME there.
+    if (engine === 'hidream') {
+      const hiPython = 'd:/ai_eval/HiDream/.venv/Scripts/python.exe';
+      const hiScript = 'd:/ai_eval/HiDream/run_fp8.py';
+      const stepsClamped = Math.max(4, Math.min(60, parseInt(steps) || 28));
+      const hiEnv = { ...childEnv, HF_HOME: 'D:/hf_cache', HUGGINGFACE_HUB_CACHE: 'D:/hf_cache/hub' };
+      const ts = Date.now();
+      const images = [];
+      for (let i = 0; i < (numImages || 4); i++) {
+        const outPath = path.join(imagesDir, `ref_${ts}_${i}.png`);
+        try {
+          await new Promise((resolve, reject) => {
+            const proc = execFile(hiPython, [hiScript,
+              '--prompt', prompt, '--out', outPath,
+              '--steps', String(stepsClamped),
+              '--width', '1024', '--height', '1024',
+              '--seed', String(ts + i),
+            ], { cwd: 'd:/ai_eval/HiDream', timeout: 1800000, maxBuffer: 50 * 1024 * 1024, env: hiEnv },
+              (error) => { if (error) { reject({ error: error.message }); return; } resolve(); });
+            proc.stdout.on('data', d => { safeSend('ai3d-progress', d.toString()); });
+            proc.stderr?.on('data', d => { safeSend('ai3d-progress', '[stderr] ' + d.toString()); });
+          });
+          if (fs.existsSync(outPath)) images.push(outPath);
+        } catch (e) {
+          safeSend('ai3d-progress', '[hidream] error: ' + (e && e.error ? e.error : e));
+        }
+      }
+      if (!images.length) return { success: false, error: 'HiDream produced no images (see logs).' };
+      return { success: true, images };
+    }
+
     // LOCAL GPU: Stable Diffusion XL Turbo — REMOVED.
     // SDXL Turbo is distributed under the SAI Non-Commercial Research License,
     // which disqualifies it from our "free AND commercially sellable" rule.

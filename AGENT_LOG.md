@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-19 (HiDream-O1 = 2e moteur image local, validé + câblé desktop)
+
+HiDream-O1-Image (Qwen3-VL ~17B) tourne en local **FP8** sur la RTX 5080 via un venv
+isolé `d:/ai_eval/HiDream` (run_fp8.py — transformers/diffusers purs, SANS ComfyUI).
+Peak VRAM 10.995 GB, ~43 s / 28 steps @ 2048², qualité photoréaliste propre.
+- Loader fp8 : `from_pretrained` garde les tenseurs float8_e4m3fn ; un forward_pre_hook
+  déquantise fp8→bf16 par nn.Linear (équiv. manual_cast ComfyUI). 2 pièges résolus :
+  (1) recast embeddings/norms/lm_head en bf16 (sinon `torch.where(bf16, fp8)` crashe) ;
+  (2) scheduler "flash" + noise params pour le t2i (flow_match = scheduler d'édition →
+  laissait un bruit "neige" haute fréquence). Ce n'était PAS un défaut du fp8.
+- Câblé comme 2e moteur image SÉLECTIONNABLE (desktop P1) sans toucher l'env RealVisXL :
+  dropdown `ws-engine` ré-exposé (RealVisXL / HiDream-O1), `ENGINE_LABELS` +
+  `_hideFixedEngineFields` + branche `engine==='hidream'` dans main.js (spawn run_fp8.py
+  via SON venv, HF_HOME→D:, boucle numImages). Périmètre confirmé par mapping : seuls
+  text2image (✅) et Modify/edit (🟡) routables vers HiDream ; inpaint/back-view/
+  multi-view/ControlNet restent SDXL (structurel). Cloud (Modal bf16) = étape suivante.
+- Restart Electron requis (main.js modifié) pour tester le dropdown.
+
 ## 2026-06-18 (#1 BLOCKER LEVÉ : nvdiffrast (NC) → kaolin sur le mesh_image Modal — VALIDÉ)
 
 Le mesh cloud (Modal mesh_image) installait + shippait nvdiffrast (NVIDIA Source Code

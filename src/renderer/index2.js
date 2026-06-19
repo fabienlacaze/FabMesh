@@ -128,7 +128,8 @@ try {
 // saved projects but the wording reflects the actual fallback.
 const ENGINE_LABELS = {
   // Image engines
-  'local-flux':     'MyFabmesh.AI Image Engine (local)',
+  'local-flux':     'MyFabmesh.AI Image Engine (RealVisXL, local)',
+  'hidream':        'HiDream-O1 (local)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
   'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
@@ -1668,7 +1669,9 @@ function _applyAssetOptionsProfile(assetType) {
 // the user never changes it. We KEEP the hidden <select> in the DOM (the
 // generators still read its .value) and just hide the label + static display.
 (function _hideFixedEngineFields() {
-  ['ws-engine', 'ws-3d-engine', 'ws-rig-engine', 'mod-engine'].forEach((id) => {
+  // 'ws-engine' is intentionally NOT hidden: the image-gen step exposes a
+  // real engine dropdown (RealVisXL vs HiDream-O1). The others stay fixed.
+  ['ws-3d-engine', 'ws-rig-engine', 'mod-engine'].forEach((id) => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const row = sel.closest('.form-row');
