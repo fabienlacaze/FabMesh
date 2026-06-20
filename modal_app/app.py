@@ -816,6 +816,10 @@ class MyFabmeshBackview:
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"front download: {e}")
 
+        _hf = _prompt_hard_floor(payload.get("prompt_hint") or "")
+        if _hf:
+            raise HTTPException(status_code=403, detail=_hf)
+
         t0 = time.time()
         img = generate(
             self.pipe,
@@ -1026,6 +1030,9 @@ class MyFabmeshBackview:
             prompt = (payload.get("prompt") or "").strip()
             if not prompt:
                 raise HTTPException(status_code=400, detail="prompt required for modify")
+            _hf = _prompt_hard_floor(prompt)
+            if _hf:
+                raise HTTPException(status_code=403, detail=_hf)
             img = modify_generate(
                 self.pipe, src_img, prompt,
                 strength=float(payload.get("strength") or 0.55),
@@ -1038,6 +1045,9 @@ class MyFabmeshBackview:
             target_text = (payload.get("target_text") or "").strip()
             if not target_text:
                 raise HTTPException(status_code=400, detail="target_text required for auto_inpaint")
+            _hf = _prompt_hard_floor((target_text + " " + (payload.get("prompt") or "")).strip())
+            if _hf:
+                raise HTTPException(status_code=403, detail=_hf)
             seg_proc, seg_model, inpaint_pipe = self._get_auto_inpaint_models()
             try:
                 img = ai_generate(
@@ -1059,6 +1069,9 @@ class MyFabmeshBackview:
             prompt   = (payload.get("prompt") or "").strip()
             if not mask_url: raise HTTPException(status_code=400, detail="mask_url required for mask_inpaint")
             if not prompt:   raise HTTPException(status_code=400, detail="prompt required for mask_inpaint")
+            _hf = _prompt_hard_floor(prompt)
+            if _hf:
+                raise HTTPException(status_code=403, detail=_hf)
             try:
                 mask_img = _fetch_image(mask_url, mode="L")
             except Exception as e:
@@ -1160,6 +1173,10 @@ class MyFabmeshBackview:
             front_img = _fetch_image(front_url)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"front download: {e}")
+
+        _hf = _prompt_hard_floor(payload.get("prompt_hint") or "")
+        if _hf:
+            raise HTTPException(status_code=403, detail=_hf)
 
         t0 = time.time()
         views = sheet_generate(

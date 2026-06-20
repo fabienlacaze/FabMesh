@@ -1,5 +1,23 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (Audit sécu/RGPD/légal relancé + fix hard-floor CSAM sur 5 routes Modal)
+
+Workflow d'audit (cybersécurité + RGPD + licences) relancé après les ajouts
+récents (HiDream, traduction, insecte). Rapport complet confidentiel dans
+`audit/RELEASE_READINESS_2026-06-20.md` (gitignored). Verdict : **NON en l'état**,
+P0 bloquants (R2 bucket public exposant secrets admin + PII, image célébrité
+`logs/ip_sweep/_pamela_*` trackée sur repo public, marquage IA Act Art. 50 absent).
+- **Fix appliqué ici** : le hard-floor CSAM `_prompt_hard_floor()` (la « dernière
+  ligne au générateur ») manquait sur 4 routes Modal (back_view, image_op
+  `modify`/`mask_inpaint`, sheet) ; ajouté aussi sur `auto_inpaint`. Les 8 routes
+  free-text appellent désormais `_prompt_hard_floor()` → HTTP 403 (miroir de
+  text2image/tpose/rectify). Restaure l'invariant « unbypassable » annoncé dans
+  le code. **Nécessite un redeploy Modal pour effet en prod.**
+- Reste P0/P1 (à traiter avec le user) : poser `R2_URL_SIGNING_SECRET` + désactiver
+  l'accès public r2.dev + rotation admin pw/TOTP ; purge historique git Pamela +
+  force-push ; marquage IA Act ; entité légale/SIRET/DMCA/NCMEC ; rétention R2 ;
+  Sentry non déclaré ; page licences (HiDream/Argos manquants).
+
 ## 2026-06-19 (Auto-traduction des prompts FR/ES/ZH/HI/AR → anglais)
 
 L'appli gère 6 langues UI (en/zh/hi/es/fr/ar) mais SDXL/RealVisXL/HiDream veulent
