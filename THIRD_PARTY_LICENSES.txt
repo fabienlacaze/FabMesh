@@ -309,6 +309,31 @@ install Blender independently from https://www.blender.org/download/. Because
 Blender is not linked or bundled, the GPL does not propagate to FabMesh.
 
 --------------------------------------------------------------------------------
+ 31. HiDream-O1-Image-Dev (optional desktop image engine)
+--------------------------------------------------------------------------------
+License: MIT
+URL:     https://huggingface.co/HiDream-ai/HiDream-O1-Image-Dev
+HiDream-O1-Image-Dev is an optional second local image-generation engine in the
+desktop app (selectable alongside RealVisXL, hardware-gated to >=12 GB VRAM).
+FabMesh loads the FP8 repack drbaph/HiDream-O1-Image-Dev-FP8 (also MIT). The
+model uses a Qwen3-VL backbone (Apache-2.0), NOT the Llama-3.1 encoder of
+HiDream-I1, so no Llama Community License applies. Weights are downloaded on
+first run and not redistributed by FabMesh. MIT License — commercial use
+permitted. Full text:
+https://huggingface.co/HiDream-ai/HiDream-O1-Image-Dev/blob/main/LICENSE
+
+--------------------------------------------------------------------------------
+ 32. Argos Translate + language packages
+--------------------------------------------------------------------------------
+License: MIT (library) / CC0 + OPUS (language models)
+URL:     https://github.com/argosopentech/argos-translate
+FabMesh uses Argos Translate to translate the user's prompt into English offline
+(CPU) before applying the English asset-type templates. The library is dual
+MIT/CC0; the downloaded language packages are trained on OPUS/CC0 data.
+Commercial use permitted. Full text:
+https://github.com/argosopentech/argos-translate/blob/master/LICENSE
+
+--------------------------------------------------------------------------------
  Bundled rig templates
 --------------------------------------------------------------------------------
 All files under `scripts/rig_templates/skm/*.bones.json`,
