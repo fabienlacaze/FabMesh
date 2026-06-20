@@ -4472,6 +4472,49 @@ async function translateUserPrompt(text) {
   } catch (_) { return text; }
 }
 
+// Prompt language hint: tell users they can type in their chosen UI language —
+// it's auto-translated to English. Hidden for English (nothing to translate).
+const PROMPT_LANG_HINT = {
+  fr: "✍️ Tu peux écrire dans ta langue — c'est traduit automatiquement en anglais pour l'IA.",
+  es: "✍️ Puedes escribir en tu idioma — se traduce automáticamente al inglés.",
+  zh: "✍️ 你可以用自己的语言书写 — 会自动翻译成英文。",
+  hi: "✍️ आप अपनी भाषा में लिख सकते हैं — यह स्वतः अंग्रेज़ी में अनुवादित हो जाता है।",
+  ar: "✍️ يمكنك الكتابة بلغتك — تتم الترجمة تلقائيًا إلى الإنجليزية.",
+  en: "",
+};
+function _updatePromptLangHint() {
+  let lang = 'en';
+  try { lang = (document.getElementById('lang-select')?.value || localStorage.getItem('fabmesh.lang') || 'en').toLowerCase(); } catch (_) {}
+  const txt = PROMPT_LANG_HINT[lang] || '';
+  document.querySelectorAll('.prompt-lang-hint').forEach((el) => { el.textContent = txt; el.style.display = txt ? '' : 'none'; });
+}
+(function _initPromptLangHint() {
+  try { _updatePromptLangHint(); } catch (_) {}
+  try { document.getElementById('lang-select')?.addEventListener('change', () => setTimeout(() => { try { _updatePromptLangHint(); } catch (_) {} }, 30)); } catch (_) {}
+})();
+
+// Busy indicator for the prompt area: translation can take ~2-3 s on the first
+// call (Python + Argos cold start). Shows a mini spinner + a message in the
+// user's language; _clearPromptBusy reverts to the normal language hint.
+const TRANSLATING_MSG = {
+  fr: "Traduction de ta description en anglais…",
+  es: "Traduciendo tu descripción al inglés…",
+  zh: "正在将您的描述翻译成英文…",
+  hi: "आपके विवरण का अंग्रेज़ी में अनुवाद हो रहा है…",
+  ar: "جارٍ ترجمة وصفك إلى الإنجليزية…",
+  en: "Translating…",
+};
+function _setPromptBusy(msgMap) {
+  let lang = 'en';
+  try { lang = (document.getElementById('lang-select')?.value || localStorage.getItem('fabmesh.lang') || 'en').toLowerCase(); } catch (_) {}
+  const msg = (msgMap && (msgMap[lang] || msgMap.en)) || '';
+  document.querySelectorAll('.prompt-lang-hint').forEach((el) => {
+    el.innerHTML = '<span class="mini-spin"></span> ' + msg;
+    el.style.display = '';
+  });
+}
+function _clearPromptBusy() { try { _updatePromptLangHint(); } catch (_) {} }
+
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
   const stylePrefix = ASSET_STYLE_PROMPTS[assetStyle] || '';
@@ -4579,7 +4622,9 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', async ()
     showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
     return;
   }
+  _setPromptBusy(TRANSLATING_MSG);
   const englishRaw = await translateUserPrompt(raw);
+  _clearPromptBusy();
   textarea.value = buildFullPrompt(englishRaw, assetType, assetStyle);
   const btn = document.getElementById('np-enhance-prompt');
   if (btn) {
@@ -4605,7 +4650,9 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', async ()
   // Stash the original raw prompt so the back-view generator can use it
   // (clean subject description, no asset-style pollution).
   textarea.dataset.rawPrompt = raw;
+  _setPromptBusy(TRANSLATING_MSG);
   const englishRaw = await translateUserPrompt(raw);
+  _clearPromptBusy();
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
   textarea.value = enhanced;
   // Persist to localStorage
@@ -4643,7 +4690,9 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   _saveProjectMeta(p.name, { assetType, assetStyle });
   // Translate the user's text to English (unless it was already enhanced →
   // already English) before applying the English asset-type templates.
+  if (!wasEnhanced) _setPromptBusy(TRANSLATING_MSG);
   const englishUser = wasEnhanced ? userPrompt : await translateUserPrompt(userPrompt);
+  if (!wasEnhanced) _clearPromptBusy();
   const prompt = buildFullPrompt(englishUser, assetType, assetStyle);
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;

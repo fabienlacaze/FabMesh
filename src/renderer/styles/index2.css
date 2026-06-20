@@ -2420,6 +2420,18 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 .step-card.has-running details.stage-generating > summary .stage-gear .gear-glyph {
   animation: spin 2s linear infinite;
 }
+/* Small inline spinner for the prompt translation busy state. */
+.mini-spin {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  vertical-align: middle;
+  border: 2px solid var(--text-2);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 5px;
+}
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
