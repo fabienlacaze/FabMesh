@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (Purge Pamela COMPLÈTE — historique réécrit + repush cleaned)
+
+P0 « image de célébrité sur repo public » **RÉSOLU**. Étapes :
+- Bundle de sécurité complet `/d/fabmesh-pre-pamela-purge.bundle` (182 Mo — contient
+  ENCORE l'image, recovery only, à supprimer une fois certain que tout va bien).
+- 31 worktrees de workflows retirés + 30 branches `worktree-wf_*` supprimées (bloquaient
+  filter-repo).
+- `git filter-repo --invert-paths --path-glob '*pamela*'` → 1719 commits réécrits,
+  Pamela retirée de TOUTES les branches (master + feat + fix + 124 backups).
+- Fichiers physiques restants (untracked/ignorés) supprimés : `logs/ip_sweep/_pamela*`,
+  `images/pamela_anderson`, `meshes/pamela_anderson_*`, `logs/triposg_pamela.log` → 0 trace.
+- Force-push des **128 branches cleaned** sur origin (backup off-site conservé SANS l'image,
+  à la demande du user qui veut garder un backup GitHub si son PC crame).
+- **RESTE (action user obligatoire)** : contacter le **support GitHub** pour purger le blob
+  en cache — les vieux commits restent stockés côté GitHub par SHA jusqu'au GC. Sans ça,
+  l'image reste techniquement récupérable via l'ancien SHA.
+
 ## 2026-06-20 (Audit sécu/RGPD/légal relancé + fix hard-floor CSAM sur 5 routes Modal)
 
 Workflow d'audit (cybersécurité + RGPD + licences) relancé après les ajouts
