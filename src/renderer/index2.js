@@ -4497,8 +4497,15 @@ function _updatePromptLangHint() {
 // call (Python + Argos cold start). Shows a mini spinner + a message in the
 // user's language; _clearPromptBusy reverts to the normal language hint.
 const TRANSLATING_MSG = {
-  fr: "Traduction…", es: "Traduciendo…", zh: "翻译中…",
-  hi: "अनुवाद हो रहा है…", ar: "جارٍ الترجمة…", en: "Translating…",
+  fr: "Traduction de ta description…", es: "Traduciendo tu descripción…", zh: "正在翻译您的描述…",
+  hi: "आपके विवरण का अनुवाद हो रहा है…", ar: "جارٍ ترجمة وصفك…", en: "Translating your description…",
+};
+// Step 2 of Enhance — it does MORE than translate: it then applies the style +
+// asset-type templates to build the full English prompt.
+const BUILDING_MSG = {
+  fr: "Application du style et du type d'asset…", es: "Aplicando el estilo y el tipo de asset…",
+  zh: "正在应用风格和资产类型…", hi: "स्टाइल और एसेट प्रकार लागू हो रहा है…",
+  ar: "تطبيق النمط ونوع الأصل…", en: "Applying style + asset type…",
 };
 function _setPromptBusy(msgMap) {
   let lang = 'en';
@@ -4653,7 +4660,9 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', async ()
   }
   _promptShowLoading(textarea, TRANSLATING_MSG);
   const englishRaw = await translateUserPrompt(raw);
+  _promptShowLoading(textarea, BUILDING_MSG);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
+  await new Promise((r) => setTimeout(r, 280));
   textarea.value = enhanced;
   _promptShowEnhanced(textarea, enhanced, englishRaw);
   const btn = document.getElementById('np-enhance-prompt');
@@ -4682,7 +4691,9 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', async ()
   textarea.dataset.rawPrompt = raw;
   _promptShowLoading(textarea, TRANSLATING_MSG);
   const englishRaw = await translateUserPrompt(raw);
+  _promptShowLoading(textarea, BUILDING_MSG);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
+  await new Promise((r) => setTimeout(r, 280));
   textarea.value = enhanced;
   _promptShowEnhanced(textarea, enhanced, englishRaw);
   // Persist to localStorage
