@@ -2420,6 +2420,24 @@ details.stage-generating > summary .stage-gear .gear-glyph {
 .step-card.has-running details.stage-generating > summary .stage-gear .gear-glyph {
   animation: spin 2s linear infinite;
 }
+/* Prompt overlay: covers the textarea to show the translation loading state
+   and the enhanced prompt with the user's part highlighted (red/bold). */
+.prompt-wrap { position: relative; }
+.prompt-overlay {
+  position: absolute; inset: 0; box-sizing: border-box;
+  padding: 8px 10px; margin: 0;
+  font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.5;
+  background: var(--bg-2, #14161c);
+  border: 1px solid var(--accent, #7c3aed); border-radius: 8px;
+  color: var(--text-1, #cfd2da);
+  overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text;
+}
+.prompt-overlay.loading {
+  display: flex !important; align-items: center; justify-content: center;
+  gap: 8px; color: var(--text-2); cursor: default; font-family: inherit;
+}
+.prompt-overlay .uhl { color: #ff5b5b; font-weight: 700; }
+
 /* Small inline spinner for the prompt translation busy state. */
 .mini-spin {
   display: inline-block;

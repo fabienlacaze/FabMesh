@@ -4475,11 +4475,11 @@ async function translateUserPrompt(text) {
 // Prompt language hint: tell users they can type in their chosen UI language —
 // it's auto-translated to English. Hidden for English (nothing to translate).
 const PROMPT_LANG_HINT = {
-  fr: "✍️ Tu peux écrire dans ta langue — c'est traduit automatiquement en anglais pour l'IA.",
-  es: "✍️ Puedes escribir en tu idioma — se traduce automáticamente al inglés.",
-  zh: "✍️ 你可以用自己的语言书写 — 会自动翻译成英文。",
-  hi: "✍️ आप अपनी भाषा में लिख सकते हैं — यह स्वतः अंग्रेज़ी में अनुवादित हो जाता है।",
-  ar: "✍️ يمكنك الكتابة بلغتك — تتم الترجمة تلقائيًا إلى الإنجليزية.",
+  fr: "✍️ écris dans ta langue (traduit auto en anglais)",
+  es: "✍️ escribe en tu idioma (traducido auto)",
+  zh: "✍️ 用你的语言（自动翻译成英文）",
+  hi: "✍️ अपनी भाषा में (स्वतः अनुवादित)",
+  ar: "✍️ بلغتك (تُترجم تلقائيًا)",
   en: "",
 };
 function _updatePromptLangHint() {
@@ -4497,12 +4497,8 @@ function _updatePromptLangHint() {
 // call (Python + Argos cold start). Shows a mini spinner + a message in the
 // user's language; _clearPromptBusy reverts to the normal language hint.
 const TRANSLATING_MSG = {
-  fr: "Traduction de ta description en anglais…",
-  es: "Traduciendo tu descripción al inglés…",
-  zh: "正在将您的描述翻译成英文…",
-  hi: "आपके विवरण का अंग्रेज़ी में अनुवाद हो रहा है…",
-  ar: "جارٍ ترجمة وصفك إلى الإنجليزية…",
-  en: "Translating…",
+  fr: "Traduction…", es: "Traduciendo…", zh: "翻译中…",
+  hi: "अनुवाद हो रहा है…", ar: "جارٍ الترجمة…", en: "Translating…",
 };
 function _setPromptBusy(msgMap) {
   let lang = 'en';
@@ -4514,6 +4510,39 @@ function _setPromptBusy(msgMap) {
   });
 }
 function _clearPromptBusy() { try { _updatePromptLangHint(); } catch (_) {} }
+
+// --- Prompt overlay: covers the textarea to show (a) a loading spinner while
+// translating, and (b) the enhanced prompt with the user's part in red/bold.
+// Clicking the overlay reveals the textarea for editing. ---
+function _escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function _promptOverlay(ta) { const w = ta && ta.closest && ta.closest('.prompt-wrap'); return w ? w.querySelector('.prompt-overlay') : null; }
+function _promptShowLoading(ta, msgMap) {
+  const ov = _promptOverlay(ta); if (!ov) return;
+  let lang = 'en';
+  try { lang = (document.getElementById('lang-select')?.value || localStorage.getItem('fabmesh.lang') || 'en').toLowerCase(); } catch (_) {}
+  const msg = (msgMap && (msgMap[lang] || msgMap.en)) || '';
+  ov.className = 'prompt-overlay loading';
+  ov.innerHTML = '<span class="mini-spin"></span> ' + _escapeHtml(msg);
+  ov.style.display = '';
+}
+function _promptShowEnhanced(ta, fullPrompt, userPart) {
+  const ov = _promptOverlay(ta); if (!ov) return;
+  let html = _escapeHtml(fullPrompt);
+  const up = (userPart || '').trim();
+  if (up) { const esc = _escapeHtml(up); html = html.replace(esc, '<span class="uhl">' + esc + '</span>'); }
+  ov.className = 'prompt-overlay';
+  ov.innerHTML = html;
+  ov.style.display = '';
+}
+function _promptHideOverlay(ta) { const ov = _promptOverlay(ta); if (ov) ov.style.display = 'none'; }
+// Delegated: click the (non-loading) overlay -> hide it + focus the textarea to edit.
+document.addEventListener('click', (e) => {
+  const ov = e.target && e.target.closest && e.target.closest('.prompt-overlay');
+  if (!ov || ov.classList.contains('loading')) return;
+  ov.style.display = 'none';
+  const ta = ov.closest('.prompt-wrap')?.querySelector('textarea');
+  if (ta) ta.focus();
+});
 
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
@@ -4622,10 +4651,11 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', async ()
     showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
     return;
   }
-  _setPromptBusy(TRANSLATING_MSG);
+  _promptShowLoading(textarea, TRANSLATING_MSG);
   const englishRaw = await translateUserPrompt(raw);
-  _clearPromptBusy();
-  textarea.value = buildFullPrompt(englishRaw, assetType, assetStyle);
+  const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
+  textarea.value = enhanced;
+  _promptShowEnhanced(textarea, enhanced, englishRaw);
   const btn = document.getElementById('np-enhance-prompt');
   if (btn) {
     const orig = btn.innerHTML;
@@ -4650,11 +4680,11 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', async ()
   // Stash the original raw prompt so the back-view generator can use it
   // (clean subject description, no asset-style pollution).
   textarea.dataset.rawPrompt = raw;
-  _setPromptBusy(TRANSLATING_MSG);
+  _promptShowLoading(textarea, TRANSLATING_MSG);
   const englishRaw = await translateUserPrompt(raw);
-  _clearPromptBusy();
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
   textarea.value = enhanced;
+  _promptShowEnhanced(textarea, enhanced, englishRaw);
   // Persist to localStorage
   if (state.currentProject) {
     try { localStorage.setItem('fabmesh-prompt-' + state.currentProject.name, enhanced); } catch (e) {}
@@ -4690,9 +4720,10 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   _saveProjectMeta(p.name, { assetType, assetStyle });
   // Translate the user's text to English (unless it was already enhanced →
   // already English) before applying the English asset-type templates.
-  if (!wasEnhanced) _setPromptBusy(TRANSLATING_MSG);
+  const _wsTa = document.getElementById('ws-prompt');
+  if (!wasEnhanced) _promptShowLoading(_wsTa, TRANSLATING_MSG);
   const englishUser = wasEnhanced ? userPrompt : await translateUserPrompt(userPrompt);
-  if (!wasEnhanced) _clearPromptBusy();
+  if (!wasEnhanced) _promptHideOverlay(_wsTa);
   const prompt = buildFullPrompt(englishUser, assetType, assetStyle);
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
