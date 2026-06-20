@@ -4338,14 +4338,27 @@ ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   const src = (from || 'en').toLowerCase();
   if (src === 'en' || !text || !text.trim()) return { text: text || '' };
   const script = path.join(__dirname, '..', '..', 'scripts', 'translate_prompt.py');
-  return new Promise((resolve) => {
-    execFile('python', [script, '--text', text, '--from', src],
-      { timeout: 20000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
+  // End-users have no python on PATH → prefer the bundled embedded interpreter.
+  // If it lacks argostranslate (--strict → exit 3), fall back to system python
+  // (the dev box has argos there). Last resort: fail open with the original text.
+  const embedded = _embeddedPython();
+  const attempts = embedded === 'python'
+    ? [['python', false]]
+    : [[embedded, true], ['python', false]];
+  const tryRun = (py, strict) => new Promise((resolve) => {
+    const argv = [script, '--text', text, '--from', src];
+    if (strict) argv.push('--strict');
+    execFile(py, argv, { timeout: 20000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
       (error, stdout) => {
-        if (error || !stdout) { resolve({ text }); return; }  // fail open → original
-        resolve({ text: String(stdout).trim() || text });
+        if (error || !stdout || !String(stdout).trim()) { resolve(null); return; }
+        resolve(String(stdout).trim());
       });
   });
+  for (const [py, strict] of attempts) {
+    const out = await tryRun(py, strict);
+    if (out) return { text: out };
+  }
+  return { text };  // fail open → original
 });
 
 // Set system RAM limit (called from renderer when user drags the RAM slider)

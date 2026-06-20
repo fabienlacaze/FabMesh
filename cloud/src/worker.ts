@@ -11151,9 +11151,44 @@ async function handleHeartbeat(req: Request, env: Env): Promise<Response> {
 
 /* ────────────────────────── main fetch handler ─────────────────────── */
 
+// GDPR storage-limitation (Art. 5(1)(e)): transient user inputs — drawn masks
+// (<uid>/masks/) and uploaded canvas source images (<uid>/canvas/) — are deleted
+// 30 days after upload. Final meshes/images live under other prefixes and are
+// kept until the user deletes their account. Bounded to 1000 objects/run with a
+// rotating cursor so one cron invocation stays well within CPU limits.
+async function purgeTransientUploads(env: Env): Promise<void> {
+  if (!env.MESHES) return;
+  const MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+  const now = Date.now();
+  const cursorKey = '_meta/retention_cursor.txt';
+  let cursor: string | undefined;
+  try {
+    const c = await env.MESHES.get(cursorKey);
+    if (c) { const t = (await c.text()).trim(); cursor = t || undefined; }
+  } catch { /* ignore */ }
+  let listed;
+  try {
+    listed = await env.MESHES.list({ cursor, limit: 1000 });
+  } catch (e) {
+    console.log(`[retention] list failed: ${e instanceof Error ? e.message : String(e)}`);
+    return;
+  }
+  let deleted = 0;
+  for (const obj of listed.objects) {
+    if (!/\/(masks|canvas)\//.test(obj.key)) continue;
+    if (now - obj.uploaded.getTime() > MAX_AGE_MS) {
+      try { await env.MESHES.delete(obj.key); deleted++; } catch { /* keep going */ }
+    }
+  }
+  const nextCursor = listed.truncated ? listed.cursor : '';
+  try { await env.MESHES.put(cursorKey, nextCursor); } catch { /* ignore */ }
+  console.log(`[retention] scanned ${listed.objects.length}, deleted ${deleted} transient masks/canvas >30d, cursor=${nextCursor ? 'more' : 'reset'}`);
+}
+
 export default {
   async scheduled(_event: unknown, env: Env, ctx: { waitUntil: (p: Promise<unknown>) => void }): Promise<void> {
     ctx.waitUntil(preWarmCog(env));
+    ctx.waitUntil(purgeTransientUploads(env));
   },
 
   async fetch(req: Request, env: Env, _ctx: unknown): Promise<Response> {

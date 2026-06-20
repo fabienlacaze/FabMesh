@@ -25,16 +25,18 @@ except Exception:
 
 
 def translate_to_english(text, src):
+    """Return (text, ok). ok=False means Argos was unavailable or produced no
+    translation, so the caller may retry with another interpreter."""
     src = (src or "en").lower()
     if src == "en" or not text.strip():
-        return text
+        return text, True
     try:
         from argostranslate import translate as _t
         # Modern convenience API.
         try:
             out = _t.translate(text, src, "en")
             if out:
-                return out
+                return out, True
         except Exception:
             pass
         # Fallback to the language-objects API (older Argos).
@@ -42,18 +44,25 @@ def translate_to_english(text, src):
         from_lang = next((l for l in langs if l.code == src), None)
         to_lang = next((l for l in langs if l.code == "en"), None)
         if from_lang and to_lang:
-            return from_lang.get_translation(to_lang).translate(text) or text
+            out = from_lang.get_translation(to_lang).translate(text)
+            if out:
+                return out, True
     except Exception as e:
         sys.stderr.write(f"[translate] fallback (no translation for '{src}'): {e}\n")
-    return text
+    return text, False
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--text", required=True)
     ap.add_argument("--from", dest="src", default="en")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 3 if Argos is unavailable so the caller can fall back")
     args = ap.parse_args()
-    sys.stdout.write(translate_to_english(args.text, args.src))
+    out, ok = translate_to_english(args.text, args.src)
+    if args.strict and not ok:
+        sys.exit(3)  # signal 'translation unavailable' to the caller
+    sys.stdout.write(out)
 
 
 if __name__ == "__main__":

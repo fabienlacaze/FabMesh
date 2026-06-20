@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (P1 restants traités — rétention R2 + Sentry hardening + embedded python)
+
+- **Rétention R2** (GDPR Art. 5(1)(e)) : `purgeTransientUploads()` ajouté au cron
+  `scheduled()` du worker — supprime les inputs transients (`<uid>/masks/`,
+  `<uid>/canvas/`) > 30 jours, borné à 1000 objets/run avec curseur tournant
+  (`_meta/retention_cursor.txt`). Les meshes/images finaux (autres prefixes) sont
+  conservés jusqu'à suppression du compte.
+- **Sentry** : DSN absent en config (inactif → pas de fuite réelle). Durci quand même :
+  `sendDefaultPii:false` + scrub `ip_address` (nodejs + edge). Commentaire ajouté :
+  « si tu poses un DSN en prod → déclarer Sentry dans la privacy policy ». Pas ajouté
+  à la policy car le service est inactif (sinon déclaration inexacte).
+- **Embedded python (trad)** : `translate_prompt.py --strict` (exit 3 si argos
+  indisponible) + wrapper `translate-prompt` (main.js) qui essaie l'embedded python
+  d'abord puis fallback python système. Robuste en dev (argos système) ET en release
+  (embedded + argos bundlé une fois packagé). **Restart Electron requis.**
+- Déploiement worker : `cd cloud && npm run build && npx wrangler deploy`.
+
 ## 2026-06-20 (Fix code P1 de l'audit — SSRF, parental, REVOKE credits, licences)
 
 Remédiation des P1 corrigeables en code (le reste = ops user : R2, légal) :
