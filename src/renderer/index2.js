@@ -4542,6 +4542,32 @@ function _promptShowEnhanced(ta, fullPrompt, userPart) {
   ov.style.display = '';
 }
 function _promptHideOverlay(ta) { const ov = _promptOverlay(ta); if (ov) ov.style.display = 'none'; }
+// Cycling loading messages (translate -> reinforce -> style -> type -> finalize)
+// so the user sees progress, not a frozen 'Translating…'. Returns a stop fn.
+const ENHANCE_STEPS = {
+  fr: ["Traduction…", "Renforcement du prompt…", "Application du style…", "Type d'asset…", "Finalisation…"],
+  es: ["Traduciendo…", "Reforzando el prompt…", "Aplicando el estilo…", "Tipo de asset…", "Finalizando…"],
+  zh: ["翻译中…", "强化提示词…", "应用风格…", "资产类型…", "完成中…"],
+  hi: ["अनुवाद…", "प्रॉम्प्ट सुदृढ़ करना…", "स्टाइल लागू करना…", "एसेट प्रकार…", "अंतिम रूप…"],
+  ar: ["جارٍ الترجمة…", "تعزيز الموجّه…", "تطبيق النمط…", "نوع الأصل…", "اللمسات الأخيرة…"],
+  en: ["Translating…", "Reinforcing the prompt…", "Applying style…", "Asset type…", "Finalizing…"],
+};
+function _promptStartCycle(ta, stepsMap) {
+  let lang = 'en';
+  try { lang = (document.getElementById('lang-select')?.value || localStorage.getItem('fabmesh.lang') || 'en').toLowerCase(); } catch (_) {}
+  const steps = (stepsMap && (stepsMap[lang] || stepsMap.en)) || (stepsMap && stepsMap.en) || [];
+  const ov = _promptOverlay(ta);
+  let i = 0;
+  const render = () => {
+    if (!ov) return;
+    ov.className = 'prompt-overlay loading';
+    ov.innerHTML = '<span class="mini-spin"></span> ' + _escapeHtml(steps[i] || '');
+    ov.style.display = '';
+  };
+  render();
+  const id = setInterval(() => { if (i < steps.length - 1) { i++; render(); } }, 850);
+  return () => { try { clearInterval(id); } catch (_) {} };
+}
 // Delegated: click the (non-loading) overlay -> hide it + focus the textarea to edit.
 document.addEventListener('click', (e) => {
   const ov = e.target && e.target.closest && e.target.closest('.prompt-overlay');
@@ -4658,11 +4684,11 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', async ()
     showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
     return;
   }
-  _promptShowLoading(textarea, TRANSLATING_MSG);
+  const _stopCycle = _promptStartCycle(textarea, ENHANCE_STEPS);
   const englishRaw = await translateUserPrompt(raw);
-  _promptShowLoading(textarea, BUILDING_MSG);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
-  await new Promise((r) => setTimeout(r, 280));
+  await new Promise((r) => setTimeout(r, 500));
+  _stopCycle();
   textarea.value = enhanced;
   _promptShowEnhanced(textarea, enhanced, englishRaw);
   const btn = document.getElementById('np-enhance-prompt');
@@ -4689,11 +4715,11 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', async ()
   // Stash the original raw prompt so the back-view generator can use it
   // (clean subject description, no asset-style pollution).
   textarea.dataset.rawPrompt = raw;
-  _promptShowLoading(textarea, TRANSLATING_MSG);
+  const _stopCycle = _promptStartCycle(textarea, ENHANCE_STEPS);
   const englishRaw = await translateUserPrompt(raw);
-  _promptShowLoading(textarea, BUILDING_MSG);
   const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
-  await new Promise((r) => setTimeout(r, 280));
+  await new Promise((r) => setTimeout(r, 500));
+  _stopCycle();
   textarea.value = enhanced;
   _promptShowEnhanced(textarea, enhanced, englishRaw);
   // Persist to localStorage
