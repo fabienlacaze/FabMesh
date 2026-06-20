@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-19 (Auto-traduction des prompts FR/ES/ZH/HI/AR → anglais)
+
+L'appli gère 6 langues UI (en/zh/hi/es/fr/ar) mais SDXL/RealVisXL/HiDream veulent
+de l'anglais. Ajout d'une traduction auto **offline** de la saisie utilisateur vers
+l'anglais AVANT l'application des templates anglais de type d'asset.
+- Moteur : **Argos Translate** (licence **MIT**, commercial OK), CPU-only (marche
+  sur toute machine end-user, même sans GPU), ~150 Mo/langue, offline. Choisi vs
+  M2M-100 (MIT aussi mais ~1.9 Go + GPU) pour la déployabilité. NLLB écarté (CC-BY-NC).
+- `scripts/translate_prompt.py` : `--text --from <code>`, fail-open (si trad indispo →
+  passe le texte tel quel), stdout UTF-8 (ar/hi/zh). Testé : « fourmi géante rouge »→
+  « red giant ant », etc.
+- Câblage : IPC `translate-prompt` (main.js) + expose preload + `translateUserPrompt()`
+  (renderer, lit `localStorage 'fabmesh.lang'`, en = no-op). Branché aux 3 points :
+  np-enhance, ws-enhance, et la génération (avec garde `wasEnhanced` pour ne pas
+  re-traduire un prompt déjà enrichi/anglais). Reste : portage cloud (endpoint serveur)
+  + bundling des packages Argos à l'empaquetage. Restart Electron requis (main/preload).
+
 ## 2026-06-19 (HiDream-O1 = 2e moteur image local, validé + câblé desktop)
 
 HiDream-O1-Image (Qwen3-VL ~17B) tourne en local **FP8** sur la RTX 5080 via un venv

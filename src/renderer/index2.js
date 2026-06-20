@@ -4457,6 +4457,21 @@ document.getElementById('ws-rig-skeleton')?.addEventListener('change', (e) => {
   }
 });
 
+// Translate the user's raw prompt to English (Argos, offline) using the current
+// interface language as source. en / failure → unchanged. The asset-type
+// templates are English and the image models need English input. Call this on
+// the RAW user text BEFORE buildFullPrompt.
+async function translateUserPrompt(text) {
+  if (!text || !text.trim()) return text || '';
+  let lang = 'en';
+  try { lang = (localStorage.getItem('fabmesh.lang') || 'en').toLowerCase(); } catch (_) {}
+  if (lang === 'en') return text;
+  try {
+    const r = await window.meshyAPI?.translatePrompt?.({ text, from: lang });
+    return (r && r.text) ? r.text : text;
+  } catch (_) { return text; }
+}
+
 function buildFullPrompt(userPrompt, assetType, assetStyle) {
   const typeSuffix = ASSET_TYPE_PROMPTS[assetType] || '';
   const stylePrefix = ASSET_STYLE_PROMPTS[assetStyle] || '';
@@ -4553,7 +4568,7 @@ document.getElementById('ws-copy-prompt')?.addEventListener('click', () => {
 
 // Enhance prompt in the "New project" modal (same logic as the one in the
 // workspace, using np-* inputs instead of ws-* inputs).
-document.getElementById('np-enhance-prompt')?.addEventListener('click', () => {
+document.getElementById('np-enhance-prompt')?.addEventListener('click', async () => {
   const textarea = document.getElementById('np-prompt');
   const raw = textarea.value.trim();
   if (!raw) { showToast('Type a description first.', 'error'); return; }
@@ -4564,7 +4579,8 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', () => {
     showToast('Prompt already enhanced. Edit manually or clear it.', 'info');
     return;
   }
-  textarea.value = buildFullPrompt(raw, assetType, assetStyle);
+  const englishRaw = await translateUserPrompt(raw);
+  textarea.value = buildFullPrompt(englishRaw, assetType, assetStyle);
   const btn = document.getElementById('np-enhance-prompt');
   if (btn) {
     const orig = btn.innerHTML;
@@ -4574,7 +4590,7 @@ document.getElementById('np-enhance-prompt')?.addEventListener('click', () => {
   }
 });
 
-document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
+document.getElementById('ws-enhance-prompt')?.addEventListener('click', async () => {
   const textarea = document.getElementById('ws-prompt');
   const raw = textarea.value.trim();
   if (!raw) { showToast('Type a description first.', 'error'); return; }
@@ -4589,7 +4605,8 @@ document.getElementById('ws-enhance-prompt')?.addEventListener('click', () => {
   // Stash the original raw prompt so the back-view generator can use it
   // (clean subject description, no asset-style pollution).
   textarea.dataset.rawPrompt = raw;
-  const enhanced = buildFullPrompt(raw, assetType, assetStyle);
+  const englishRaw = await translateUserPrompt(raw);
+  const enhanced = buildFullPrompt(englishRaw, assetType, assetStyle);
   textarea.value = enhanced;
   // Persist to localStorage
   if (state.currentProject) {
@@ -4616,6 +4633,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   // "angled side view" from an earlier session — without this strip,
   // the next gen would receive both that AND the new "strict front
   // view", triggering RealVis's 2-cars hallucination).
+  const wasEnhanced = /single isolated 3D|plain white background|sharp details|photorealistic/i.test(rawTextarea);
   const userPrompt = stripKnownPromptSuffixes(rawTextarea);
   const assetType = document.getElementById('ws-asset-type')?.value || 'character';
   const assetStyle = document.getElementById('ws-asset-style')?.value || 'realistic';
@@ -4623,7 +4641,10 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   // form with the asset type/style used here (avoid Creature project
   // silently falling back to Character on a follow-up gen).
   _saveProjectMeta(p.name, { assetType, assetStyle });
-  const prompt = buildFullPrompt(userPrompt, assetType, assetStyle);
+  // Translate the user's text to English (unless it was already enhanced →
+  // already English) before applying the English asset-type templates.
+  const englishUser = wasEnhanced ? userPrompt : await translateUserPrompt(userPrompt);
+  const prompt = buildFullPrompt(englishUser, assetType, assetStyle);
   const engine = document.getElementById('ws-engine').value;
   const count = parseInt(document.getElementById('ws-count').value) || 4;
   const steps = parseInt(document.getElementById('ws-quality').value) || 30;

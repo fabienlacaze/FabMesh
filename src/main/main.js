@@ -4331,6 +4331,23 @@ ipcMain.handle('hidream-available', async () => {
   });
 });
 
+// Translate a user's prompt to English (Argos Translate, offline, MIT) using
+// their interface language as the source. en / unknown / failure → passthrough
+// (fail open), so generation never breaks. SDXL/RealVisXL/HiDream need English.
+ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
+  const src = (from || 'en').toLowerCase();
+  if (src === 'en' || !text || !text.trim()) return { text: text || '' };
+  const script = path.join(__dirname, '..', '..', 'scripts', 'translate_prompt.py');
+  return new Promise((resolve) => {
+    execFile('python', [script, '--text', text, '--from', src],
+      { timeout: 20000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
+      (error, stdout) => {
+        if (error || !stdout) { resolve({ text }); return; }  // fail open → original
+        resolve({ text: String(stdout).trim() || text });
+      });
+  });
+});
+
 // Set system RAM limit (called from renderer when user drags the RAM slider)
 ipcMain.handle('set-ram-limit', (event, limitPct) => {
   // Convert percentage to absolute MB based on total system RAM
