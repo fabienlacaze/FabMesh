@@ -6349,6 +6349,9 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
     return json({ ok: false, success: false, error: `insufficient credits — image generation costs ${cost} credit${cost === 1 ? '' : 's'}` }, { status: 402 });
   }
 
+  if (useTpose && refImageUrl && !isTrustedAssetHost(env, refImageUrl)) {
+    return err(400, 'refImageUrl host not allowed');
+  }
   const paths: string[] = [];
   const seedBase = seed ?? Math.floor(Math.random() * 1e9);
   const opStart = Date.now();
@@ -6420,11 +6423,14 @@ async function handleGenerateBackView(req: Request, env: Env): Promise<Response>
     asset_type?: string;
   };
   if (!frontImageUrl) return err(400, 'frontImageUrl required for back-view generation');
+  if (!isTrustedAssetHost(env, frontImageUrl)) return err(400, 'frontImageUrl host not allowed');
   const hint = (prompt ?? promptHint ?? '').toString().slice(0, 400);
 
   // NSFW prompt pre-filter — same policy as text2image / desktop checkPromptSafety.
   {
-    const unrestricted = env.FABMESH_UNRESTRICTED === '1';
+    // Mirror text2image/modify: per-user parental state OR the env flag (not env only).
+    const userState = await getParentalState(env, user.id);
+    const unrestricted = (env.FABMESH_UNRESTRICTED === '1') || !!userState.unrestricted;
     const safety = checkPromptSafety(hint, unrestricted);
     if (!safety.safe) {
       return json({ ok: false, success: false,

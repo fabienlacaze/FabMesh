@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (Fix code P1 de l'audit — SSRF, parental, REVOKE credits, licences)
+
+Remédiation des P1 corrigeables en code (le reste = ops user : R2, légal) :
+- **SSRF** : `handleGenerateBackView` (frontImageUrl) et le chemin t-pose (refImageUrl)
+  forwardaient une URL arbitraire à Modal `_fetch_image` sans garde → ajout de
+  `isTrustedAssetHost(env, …)` (worker.ts). Bloque 169.254.169.254 / IP privées.
+- **Cohérence parentale** : back_view utilisait seulement `env.FABMESH_UNRESTRICTED`,
+  pas l'état par-utilisateur → aligné sur text2image (`|| userState.unrestricted`).
+- **REVOKE credits** : `add_credits`/`spend_credits` (security definer) n'étaient que
+  `grant ... to service_role` sans `revoke from public` → ajout du REVOKE (sql/schema.sql).
+  **Action user** : rejouer ces 2 lignes SQL sur Supabase (SQL editor).
+- **Licences** : ajout HiDream-O1-Image (MIT) + Argos Translate (MIT/CC0) à
+  THIRD_PARTY_LICENSES.txt (#31, #32). **Rebuild cloud requis** (`npm run build`) pour
+  régénérer la page out/.
+- Déploiement : worker.ts → `cd cloud && npm run build && npx wrangler deploy`.
+
 ## 2026-06-20 (Purge Pamela COMPLÈTE — historique réécrit + repush cleaned)
 
 P0 « image de célébrité sur repo public » **RÉSOLU**. Étapes :

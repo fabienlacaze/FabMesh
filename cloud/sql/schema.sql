@@ -67,6 +67,10 @@ begin
 end;
 $$;
 grant execute on function public.spend_credits(uuid, integer) to service_role;
+-- Lock down: only the service_role (server) may spend credits, never the anon/
+-- authenticated client keys (default PUBLIC grant on functions would otherwise
+-- let a forged client call it directly).
+revoke execute on function public.spend_credits(uuid, integer) from public, anon, authenticated;
 
 -- add_credits: returns new balance.
 create or replace function public.add_credits(p_user_id uuid, p_amount integer)
@@ -81,6 +85,9 @@ begin
 end;
 $$;
 grant execute on function public.add_credits(uuid, integer) to service_role;
+-- Lock down: only the service_role (server) may add credits — prevents a client
+-- with the anon/authenticated key from forging a balance top-up.
+revoke execute on function public.add_credits(uuid, integer) from public, anon, authenticated;
 
 -- 5. ROW LEVEL SECURITY --------------------------------------------------
 alter table public.profiles  enable row level security;
