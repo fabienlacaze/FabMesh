@@ -677,6 +677,192 @@ def do_inpaint(input_path, target_text, prompt, output_path, dilate=15):
             return {"ok": False, "error": str(e)}
 
 
+# ============================ RECOLOR =====================================
+# Bilingual (FR+EN) colour lexicon -> (hue 0-255 PIL scale, sat_boost, mode).
+# mode 'chroma' = tint to the hue keeping luminance; 'grey'/'black'/'white' =
+# special handling. Used by the deterministic HSV recolor (shape-preserving).
+_COLOR_LEXICON = {
+    'rouge': (0, 1.4, 'chroma'), 'red': (0, 1.4, 'chroma'),
+    'orange': (18, 1.4, 'chroma'),
+    'jaune': (35, 1.4, 'chroma'), 'yellow': (35, 1.4, 'chroma'),
+    'vert': (85, 1.3, 'chroma'), 'verte': (85, 1.3, 'chroma'), 'green': (85, 1.3, 'chroma'),
+    'cyan': (128, 1.3, 'chroma'), 'turquoise': (128, 1.3, 'chroma'),
+    'bleu': (156, 1.3, 'chroma'), 'bleue': (156, 1.3, 'chroma'), 'blue': (156, 1.3, 'chroma'),
+    'violet': (195, 1.3, 'chroma'), 'violette': (195, 1.3, 'chroma'),
+    'purple': (195, 1.3, 'chroma'), 'mauve': (200, 1.2, 'chroma'),
+    'rose': (227, 1.2, 'chroma'), 'pink': (227, 1.2, 'chroma'),
+    'marron': (14, 0.7, 'chroma'), 'brun': (14, 0.7, 'chroma'), 'brune': (14, 0.7, 'chroma'), 'brown': (14, 0.7, 'chroma'),
+    'dore': (32, 1.5, 'chroma'), 'dores': (32, 1.5, 'chroma'),
+    'doree': (32, 1.5, 'chroma'), 'gold': (32, 1.5, 'chroma'), 'golden': (32, 1.5, 'chroma'),
+    'argent': (0, 0.0, 'grey'), 'argente': (0, 0.0, 'grey'), 'argentee': (0, 0.0, 'grey'),
+    'silver': (0, 0.0, 'grey'), 'gris': (0, 0.0, 'grey'), 'grise': (0, 0.0, 'grey'),
+    'grey': (0, 0.0, 'grey'), 'gray': (0, 0.0, 'grey'),
+    'noir': (0, 0.0, 'black'), 'noire': (0, 0.0, 'black'), 'black': (0, 0.0, 'black'),
+    'blanc': (0, 0.0, 'white'), 'blanche': (0, 0.0, 'white'), 'white': (0, 0.0, 'white'),
+}
+
+
+def _strip_accents(s):
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+
+
+def parse_recolor_prompt(prompt):
+    """'cape rouge' -> ('cape', color_spec) ; color_spec is None when no known
+    colour word is present (-> ControlNet-Tile material fallback)."""
+    text = (prompt or '').strip()
+    color_spec = None
+    noun_words = []
+    for raw in text.split():
+        w = _strip_accents(raw.strip(".,;:!?\"'()").lower())
+        if w in _COLOR_LEXICON:
+            if color_spec is None:
+                hue, sat, mode = _COLOR_LEXICON[w]
+                color_spec = {'hue': hue, 'sat': sat, 'mode': mode, 'word': w}
+            # colour words are dropped from the CLIPSeg target either way
+        else:
+            noun_words.append(raw)
+    noun = ' '.join(noun_words).strip() or text
+    return noun, color_spec
+
+
+def recolor_hsv_masked(img_rgb, mask_soft, color_spec, strength=1.0):
+    """Shift HSV inside the masked region, preserving luminance (V) so folds and
+    shadows stay intact. Blends through the feathered mask * strength."""
+    hsv = np.array(img_rgb.convert('HSV')).astype(np.float32)  # H,S,V each 0-255
+    H, S, V = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    newH, newS, newV = H.copy(), S.copy(), V.copy()
+    mode = color_spec['mode']
+    if mode == 'chroma':
+        newH[:] = color_spec['hue']
+        # Saturation floor 110 so a GREY source (S~0) still takes a clearly visible
+        # tint (not a washed-out pastel); already-saturated pixels keep their level.
+        newS = np.clip(np.maximum(S * color_spec['sat'], 110.0), 0, 255)
+    elif mode == 'grey':
+        newS = S * 0.10
+    elif mode == 'black':
+        newS = S * 0.20
+        newV = V * 0.35
+    elif mode == 'white':
+        newS = S * 0.10
+        newV = np.clip(V * 1.15 + 60, 0, 255)
+    out_hsv = np.stack([np.clip(newH, 0, 255), np.clip(newS, 0, 255), np.clip(newV, 0, 255)], axis=-1).astype(np.uint8)
+    recolored = Image.fromarray(out_hsv, mode='HSV').convert('RGB')
+    m = (np.array(mask_soft).astype(np.float32) / 255.0) * float(max(0.0, min(1.0, strength)))
+    m = m[..., None]
+    base = np.array(img_rgb).astype(np.float32)
+    blended = base * (1 - m) + np.array(recolored).astype(np.float32) * m
+    return Image.fromarray(blended.clip(0, 255).astype(np.uint8), 'RGB')
+
+
+def _clipseg_mask(img_work, work_w, work_h, target_text, dilate):
+    """CLIPSeg text->mask, identical pipeline to do_inpaint. Returns a soft PIL 'L'."""
+    inputs = state.clipseg_processor(text=[target_text.strip()], images=[img_work], padding=True, return_tensors="pt")
+    inputs = {k: v.to("cuda") for k, v in inputs.items()}
+    with torch.inference_mode():
+        seg_out = state.clipseg_model(**inputs)
+    mask_logits = seg_out.logits.squeeze().detach().cpu().numpy()
+    mask_prob = 1 / (1 + np.exp(-mask_logits))
+    mask_img = Image.fromarray((mask_prob * 255).astype(np.uint8)).resize((work_w, work_h), Image.LANCZOS)
+    binary = (np.array(mask_img) > 60).astype(np.uint8) * 255
+    mask_binary = Image.fromarray(binary, mode="L")
+    d = max(0, int(dilate))
+    if d > 0:
+        mask_binary = mask_binary.filter(ImageFilter.MaxFilter(d * 2 + 1))
+    return mask_binary.filter(ImageFilter.GaussianBlur(3))
+
+
+def do_recolor(input_path, prompt, output_path, strength=1.0, dilate=15):
+    """Auto-recolour: detect the named part (CLIPSeg) and recolour ONLY it via a
+    luminance-preserving HSV shift (shape/folds intact). Falls back to
+    ControlNet-Tile when the prompt names a material rather than a colour."""
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    if not prompt or not prompt.strip():
+        return {"ok": False, "error": "prompt required (e.g. 'cape rouge')"}
+    noun, color_spec = parse_recolor_prompt(prompt)
+    if color_spec is None:
+        return do_recolor_tile(input_path, noun, prompt, output_path, dilate)
+    load_clipseg()
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            orig_size = img.size
+            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+            t0 = time.time()
+            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun, dilate)
+            coverage = (np.array(mask_soft) > 128).mean() * 100
+            if coverage < 0.2:
+                return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
+            if coverage > 80:
+                log(f"WARNING: recolor mask covers {coverage:.0f}%", 'warn')
+            save_debug_mask(output_path, mask_soft)
+            recolored = recolor_hsv_masked(img_work, mask_soft, color_spec, strength)
+            if (work_w, work_h) != orig_size:
+                recolored = recolored.resize(orig_size, Image.LANCZOS)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            recolored.save(output_path)
+            elapsed = time.time() - t0
+            log(f"recolor '{noun}'->{color_spec['word']} in {elapsed:.2f}s ({coverage:.0f}% mask)")
+            return {"ok": True, "output": output_path, "time": elapsed, "mask_coverage": round(coverage, 1)}
+        except Exception as e:
+            log(f"recolor error: {e}", 'err')
+            traceback.print_exc()
+            return {"ok": False, "error": str(e)}
+
+
+def do_recolor_tile(input_path, noun, full_prompt, output_path, dilate=15):
+    """ControlNet-Tile fallback for material/non-colour requests ('metal rouille',
+    'cuir vieilli'): low-denoise structure-preserving re-paint, composited through
+    the CLIPSeg mask so only the detected region changes."""
+    if not os.path.exists(input_path):
+        return {"ok": False, "error": f"Input not found: {input_path}"}
+    load_clipseg()
+    if state.img2img_pipe is not None:
+        unload_model('img2img')
+    pipe = load_controlnet_tile()
+    state.last_use['controlnet_tile'] = time.time()
+    with state.inference_lock:
+        try:
+            img = Image.open(input_path).convert("RGB")
+            orig_size = img.size
+            img_work, (work_w, work_h) = resize_for_sdxl(img, max_dim=1024)
+            t0 = time.time()
+            mask_soft = _clipseg_mask(img_work, work_w, work_h, noun or full_prompt, dilate)
+            coverage = (np.array(mask_soft) > 128).mean() * 100
+            if coverage < 0.2:
+                return {"ok": False, "error": f"'{noun}' not detected (coverage {coverage:.1f}%)"}
+            with torch.inference_mode():
+                result = pipe(
+                    prompt=f"{full_prompt}, same shape, preserve folds and details, photorealistic",
+                    negative_prompt="deformed, distorted, blurry, low quality, changed shape, extra parts",
+                    image=img_work,
+                    control_image=img_work,
+                    strength=0.18,
+                    num_inference_steps=20,
+                    guidance_scale=5.5,
+                    controlnet_conditioning_scale=0.65,
+                    generator=torch.Generator("cuda").manual_seed(42),
+                ).images[0]
+            if result.size != (work_w, work_h):
+                result = result.resize((work_w, work_h), Image.LANCZOS)
+            m = (np.array(mask_soft).astype(np.float32) / 255.0)[..., None]
+            out = np.array(img_work).astype(np.float32) * (1 - m) + np.array(result).astype(np.float32) * m
+            final = Image.fromarray(out.clip(0, 255).astype(np.uint8), 'RGB')
+            if (work_w, work_h) != orig_size:
+                final = final.resize(orig_size, Image.LANCZOS)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            final.save(output_path)
+            elapsed = time.time() - t0
+            log(f"recolor-tile '{noun}' in {elapsed:.1f}s ({coverage:.0f}% mask)")
+            return {"ok": True, "output": output_path, "time": elapsed, "mask_coverage": round(coverage, 1)}
+        except Exception as e:
+            log(f"recolor-tile error: {e}", 'err')
+            traceback.print_exc()
+            free_vram()
+            return {"ok": False, "error": str(e)}
+
+
 def do_segment(input_path, target_text, output_path, dilate=15):
     """CLIPSeg detection ONLY (no inpaint): save a red overlay of the detected
     mask so the user can preview LIVE what Auto Inpaint will repaint. Loads only
@@ -1103,6 +1289,19 @@ class Handler(BaseHTTPRequestHandler):
                     data['input'],
                     data['target'],
                     data['output'],
+                    data.get('dilate', 15),
+                )
+                self._json_response(200 if result.get('ok') else 500, result)
+
+            elif self.path == '/recolor':
+                if 'input' not in data or 'output' not in data or 'prompt' not in data:
+                    self._json_response(400, {"ok": False, "error": "missing input/output/prompt"})
+                    return
+                result = do_recolor(
+                    data['input'],
+                    data['prompt'],
+                    data['output'],
+                    data.get('strength', 1.0),
                     data.get('dilate', 15),
                 )
                 self._json_response(200 if result.get('ok') else 500, result)

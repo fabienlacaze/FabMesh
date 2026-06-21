@@ -1,5 +1,21 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Nouvel outil « Recolorier » — recolorisation auto par prompt, forme préservée)
+
+- User : « outil auto pour regénérer seulement les couleurs des habits via prompt
+  (cape rouge) ». Conçu via workflow `recolor-tool-design` (5 agents) puis implémenté.
+  Méthode : **recolorisation HSV déterministe** sur la zone détectée par CLIPSeg →
+  teinte la région en gardant la LUMINANCE (plis/ombres/forme intacts), instantané, pas
+  de régénération. Parse « cape rouge » → nom (`cape` pour CLIPSeg) + couleur (lexique
+  bilingue FR/EN → teinte HSV). **Fallback ControlNet-Tile** (strength 0.18) seulement
+  pour les matières sans mot-couleur (« métal rouillé »). Plancher de saturation 110
+  pour que les sources grises prennent une teinte nette.
+  Fichiers : `sdxl_server.py` (endpoint /recolor + parse_recolor_prompt/recolor_hsv_masked/
+  do_recolor/do_recolor_tile, réutilise le bloc CLIPSeg de do_inpaint), main.js (IPC recolor),
+  preload (recolor), index2.html (bouton ws-recolor-btn + modal-recolor miroir de l'inpaint
+  avec preview du masque), index2.js (TOOL_MAP + handlers + _stripColorWords). À PORTER au
+  cloud ensuite (endpoint + bouton).
+
 ## 2026-06-21 (Libération VRAM : décharger SDXL avant une gen GPU d'un autre type + idle translate)
 
 - User : le serveur image SDXL (7,2 Go VRAM) bloque la VRAM si on lance une gen

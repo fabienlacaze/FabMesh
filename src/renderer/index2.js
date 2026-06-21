@@ -4256,6 +4256,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     paint:       'ws-paint-btn',
     crop:        'ws-crop-btn',
     extend:      'ws-extend-btn',
+    recolor:     'ws-recolor-btn',
   };
   const box = document.getElementById('lb-toolbox');
   if (!box) return;
@@ -4271,7 +4272,7 @@ document.getElementById('lb-multiview-bar')?.addEventListener('click', (e) => {
     // open their own modal. The lightbox stays open in the background;
     // close it so the modal gets focus and isn't layered under.
     const OPENS_MODAL = ['modify', 'autoinpaint', 'mask', 'clone',
-                         'paint', 'crop', 'resolution'];
+                         'paint', 'crop', 'resolution', 'recolor'];
     if (OPENS_MODAL.includes(toolKey)) {
       closeLightbox();
     }
@@ -14237,6 +14238,110 @@ document.getElementById('ai-go')?.addEventListener('click', async () => {
     } catch (e) {
       completeJob(job.id, false);
       if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Auto inpaint error');
+    }
+  });
+});
+
+// ===== Recolorier: auto-detect a part (CLIPSeg) + recolor only it (shape kept) =====
+const _RC_COLOR_WORDS = new Set(['rouge','red','orange','jaune','yellow','vert','verte','green','cyan','turquoise','bleu','bleue','blue','violet','violette','purple','mauve','rose','pink','marron','brun','brune','brown','dore','doree','gold','golden','or','argent','argente','argentee','silver','gris','grise','grey','gray','noir','noire','black','blanc','blanche','white']);
+function _stripColorWords(text) {
+  const kept = String(text || '').split(/\s+/).filter((w) => {
+    const n = w.replace(/[.,;:!?"'()]/g, '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return n && !_RC_COLOR_WORDS.has(n);
+  });
+  return kept.join(' ').trim() || String(text || '').trim();
+}
+document.getElementById('ws-recolor-btn')?.addEventListener('click', () => {
+  const p = state.currentProject;
+  const target = editTarget(p);
+  if (!target) { showToast('Pick an image first.', 'error'); return; }
+  document.getElementById('rc-prompt').value = '';
+  const srcImg = document.getElementById('rc-source-img');
+  if (srcImg) { srcImg.src = 'file:///' + target.replace(/\\/g, '/') + '?t=' + Date.now(); srcImg.style.opacity = ''; }
+  _rcSrcPath = target;
+  document.getElementById('modal-recolor').classList.remove('hidden');
+});
+let _rcSrcPath = null;
+let _rcPreviewTimer = null;
+let _rcFirstDetectDone = false;
+async function _rcUpdateMaskPreview() {
+  const srcImg = document.getElementById('rc-source-img');
+  if (!srcImg || !_rcSrcPath) return;
+  const rawPrompt = (document.getElementById('rc-prompt').value || '').trim();
+  const dilate = parseInt(document.getElementById('rc-dilate').value) || 15;
+  const origUrl = 'file:///' + _rcSrcPath.replace(/\\/g, '/') + '?t=0';
+  const noun = _stripColorWords(rawPrompt);
+  if (!noun) { srcImg.src = origUrl; srcImg.style.opacity = ''; return; }
+  if (!API.segmentMask) return;
+  const spinner = document.getElementById('rc-detect-spinner');
+  const label = document.getElementById('rc-detect-label');
+  if (label) label.textContent = _rcFirstDetectDone ? 'Détection…' : "Préparation de l'IA… 1ʳᵉ détection ~15s, ensuite instantané.";
+  if (spinner) spinner.style.display = 'flex';
+  srcImg.style.opacity = '0.6';
+  try {
+    const target = await translateUserPrompt(noun);
+    const r = await API.segmentMask({ imagePath: _rcSrcPath, targetText: target, dilate });
+    if (((document.getElementById('rc-prompt').value || '').trim()) !== rawPrompt) return;
+    _rcFirstDetectDone = true;
+    srcImg.style.opacity = '';
+    if (spinner) spinner.style.display = 'none';
+    srcImg.src = (r && r.success && r.overlayPath)
+      ? 'file:///' + r.overlayPath.replace(/\\/g, '/') + '?t=' + Date.now()
+      : origUrl;
+  } catch (_) {
+    srcImg.style.opacity = '';
+    if (spinner) spinner.style.display = 'none';
+  }
+}
+function _rcSchedulePreview() {
+  if (_rcPreviewTimer) clearTimeout(_rcPreviewTimer);
+  _rcPreviewTimer = setTimeout(_rcUpdateMaskPreview, 300);
+}
+document.getElementById('rc-prompt')?.addEventListener('input', _rcSchedulePreview);
+const rcDilate = document.getElementById('rc-dilate');
+if (rcDilate) rcDilate.addEventListener('input', () => {
+  document.getElementById('rc-dilate-val').textContent = rcDilate.value + 'px';
+  _rcSchedulePreview();
+});
+const rcStrength = document.getElementById('rc-strength');
+if (rcStrength) rcStrength.addEventListener('input', () => {
+  document.getElementById('rc-strength-val').textContent = rcStrength.value + '%';
+});
+document.getElementById('rc-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-recolor').classList.add('hidden');
+});
+document.getElementById('rc-go')?.addEventListener('click', async () => {
+  const p = state.currentProject;
+  const imagePath = editTarget(p);
+  if (!imagePath) return;
+  const rawPrompt = document.getElementById('rc-prompt').value.trim();
+  if (!rawPrompt) {
+    showToast('Décrivez la couleur (ex: « cape rouge »)', 'error');
+    document.getElementById('rc-prompt')?.focus();
+    return;
+  }
+  const strength = (parseInt(document.getElementById('rc-strength').value) || 100) / 100;
+  const dilate = parseInt(document.getElementById('rc-dilate').value) || 15;
+  document.getElementById('modal-recolor').classList.add('hidden');
+  const prompt = await translateUserPrompt(rawPrompt);  // -> EN so CLIPSeg detects the part
+  gatedRun('img2img', `Recolor: ${p.name}`, async () => {
+    const job = pushJob(`Recolor: ${p.name}`, null, {
+      Prompt: rawPrompt,
+      'Intensité': Math.round(strength * 100) + '%',
+      Padding: dilate + 'px',
+    }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
+    try {
+      const r = await API.recolor({ imagePath, prompt, strength, dilate, jobId: job.id });
+      if (r?.success) {
+        completeJob(job.id, true);
+        await reloadCurrentProject();
+      } else {
+        completeJob(job.id, false);
+        if (!job.cancelled) customError(r?.error || 'unknown', 'Recolor failed');
+      }
+    } catch (e) {
+      completeJob(job.id, false);
+      if (!job.cancelled) customError(e?.error || e?.message || String(e), 'Recolor error');
     }
   });
 });

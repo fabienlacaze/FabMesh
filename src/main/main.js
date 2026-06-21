@@ -4000,6 +4000,29 @@ ipcMain.handle('segment-mask', async (event, { imagePath, targetText, dilate }) 
   }
 });
 
+// Recolor: auto-detect a part (CLIPSeg) and recolor ONLY it, shape preserved.
+ipcMain.handle('recolor', async (event, { imagePath, prompt, strength, dilate }) => {
+  try {
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath);
+    const base = safeBase(path.basename(imagePath, ext));
+    const newImagePath = path.join(dir, `${base}_recolor_${Date.now()}${ext}`);
+    await ensureSdxlServer();
+    if (!sdxlReady) return { success: false, error: 'SDXL server failed to start. Try again in a few seconds.' };
+    const r = await sdxlServerCall('/recolor', {
+      input: imagePath, prompt: prompt || '', output: newImagePath,
+      strength: (strength != null ? strength : 1.0), dilate: dilate || 15,
+    });
+    if (r.ok) {
+      _handleMultiviewInheritance(newImagePath).catch(() => {});
+      return { success: true, newPath: newImagePath };
+    }
+    return { success: false, error: r.error || 'recolor failed' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('auto-inpaint', async (event, { imagePath, targetText, prompt, dilate }) => {
   try {
     const dir = path.dirname(imagePath);
