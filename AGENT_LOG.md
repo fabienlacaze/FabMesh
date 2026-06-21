@@ -1,5 +1,18 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Worker de traduction persistant + fix flashing #2)
+
+- **Traduction instantanée** : le fix CPU-only laissait quand même ~5-6 s/appel
+  (argos se recharge à chaque spawn). Nouveau `scripts/translate_server.py` =
+  serveur HTTP localhost qui charge argos **une fois** et le garde chaud. main.js :
+  lifecycle léger (`ensureTranslateServer`/`translateServerCall`, port 5557, kill au
+  quit) + le handler `translate-prompt` route vers le worker avec **fallback per-call**.
+  Testé : trad froide 5,9 s, trad chaude **0,065 s**. (~150 Mo CPU, pas de GPU —
+  sans rapport avec le serveur image lourd abandonné.) Embedded double-spawn = 0,05 s
+  (négligeable, pas touché). Restart Electron requis.
+- **Flashing vert #2** : `renderStepProgressWidgets` (panneau « GÉNÉRATION ») rebuild
+  aussi tout son `innerHTML` à chaque tick → même fix update-ciblé que `renderJobs`.
+
 ## 2026-06-21 (Fixes test desktop : trad rapide + nudité + variantes)
 
 - **Traduction Argos 23 s → 4 s** : le package FR tire stanza→torch et l'init CUDA

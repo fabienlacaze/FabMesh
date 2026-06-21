@@ -1801,6 +1801,7 @@ function fullCleanup() {
   if (!_keepJobsOnQuit) {
     killAllActiveProcs();
     stopSdxlServer();
+    try { stopTranslateServer(); } catch (_) {}
     // WSL shutdown also kills any WSL-side work — skip when keeping jobs.
     try { execFile('wsl', ['--shutdown'], { timeout: 10000 }, () => {}); } catch(e) {}
   } else {
@@ -4357,11 +4358,74 @@ ipcMain.handle('hidream-available', async () => {
 // (fail open), so generation never breaks. SDXL/RealVisXL/HiDream need English.
 const _translateCache = new Map();  // `${from}|${text}` -> translated; avoids re-spawning Python on the Generate critical path
 let _translateWorkingPy = null;     // remember which interpreter has argostranslate (skip the failing embedded attempt next time)
+
+// Persistent translation server — loads Argos ONCE and keeps it warm, so each
+// translation is ~instant instead of re-importing argos (~5s) per spawn.
+// Lightweight (~150 MB CPU, no GPU). Lazy-started on first translate, killed on
+// quit. The translate-prompt handler falls back to a per-call spawn if it's down.
+let translateProc = null;
+let translateReady = false;
+const TRANSLATE_PORT = 5557;
+function startTranslateServer() {
+  if (translateProc) return;
+  const scriptT = path.join(__dirname, '..', '..', 'scripts', 'translate_server.py');
+  if (!fs.existsSync(scriptT)) return;
+  try {
+    translateProc = require('child_process').spawn('python', [scriptT], {
+      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      env: { ...process.env, CUDA_VISIBLE_DEVICES: '', CT2_FORCE_CPU: '1', FABMESH_TRANSLATE_PORT: String(TRANSLATE_PORT) },
+    });
+    translateProc.stdout.on('data', d => { if (String(d).includes('TRANSLATE READY')) translateReady = true; });
+    translateProc.stderr.on('data', () => {});
+    translateProc.on('exit', () => { translateProc = null; translateReady = false; });
+  } catch (_) { translateProc = null; }
+}
+function stopTranslateServer() {
+  if (!translateProc) return;
+  const pid = translateProc.pid;
+  try {
+    const req = require('http').request({ host: '127.0.0.1', port: TRANSLATE_PORT, path: '/shutdown', method: 'POST', timeout: 400 }, () => {});
+    req.on('error', () => {}); req.end();
+  } catch (_) {}
+  try {
+    if (process.platform === 'win32' && pid) require('child_process').execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    else translateProc.kill('SIGKILL');
+  } catch (_) {}
+  translateProc = null; translateReady = false;
+}
+async function ensureTranslateServer() {
+  if (translateReady) return true;
+  if (!translateProc) startTranslateServer();
+  for (let i = 0; i < 60 && !translateReady; i++) await new Promise(r => setTimeout(r, 200));
+  return translateReady;
+}
+function translateServerCall(text, from) {
+  return new Promise((resolve) => {
+    if (!translateReady) { resolve(null); return; }
+    const body = JSON.stringify({ text, from });
+    const req = require('http').request({ host: '127.0.0.1', port: TRANSLATE_PORT, path: '/translate', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 30000 },
+      (res) => { let buf = ''; res.on('data', c => buf += c); res.on('end', () => { try { const j = JSON.parse(buf); resolve(typeof j.text === 'string' ? j.text : null); } catch (_) { resolve(null); } }); });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve(null); });
+    req.write(body); req.end();
+  });
+}
 ipcMain.handle('translate-prompt', async (event, { text, from } = {}) => {
   const src = (from || 'en').toLowerCase();
   if (src === 'en' || !text || !text.trim()) return { text: text || '' };
   const _ck = src + '|' + text;
   if (_translateCache.has(_ck)) return { text: _translateCache.get(_ck) };
+  // Fast path: the persistent translate server (argos kept warm).
+  try {
+    await ensureTranslateServer();
+    const sv = await translateServerCall(text, src);
+    if (sv != null && sv !== '') {
+      if (_translateCache.size > 500) _translateCache.clear();
+      _translateCache.set(_ck, sv);
+      return { text: sv };
+    }
+  } catch (_) { /* fall through to per-call */ }
   const script = path.join(__dirname, '..', '..', 'scripts', 'translate_prompt.py');
   // End-users have no python on PATH → prefer the bundled embedded interpreter.
   // If it lacks argostranslate (--strict → exit 3), fall back to system python

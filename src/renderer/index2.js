@@ -13573,7 +13573,10 @@ function renderStepProgressWidgets() {
     });
     if (!matching.length) {
       widget.classList.remove('has-jobs');
-      widget.innerHTML = '<div class="step-progress-empty">No generation in progress</div>';
+      if (widget.dataset.sig !== '__empty__') {
+        widget.innerHTML = '<div class="step-progress-empty">No generation in progress</div>';
+        widget.dataset.sig = '__empty__';
+      }
       try { _toggleGeneratingStage(s, false); } catch (_) {}
       continue;
     }
@@ -13583,6 +13586,25 @@ function renderStepProgressWidgets() {
     // stops being "active" so we let the badge calm down.
     const hasRunning = matching.some(j => j.status === 'running');
     try { _toggleGeneratingStage(s, hasRunning); } catch (_) {}
+    // Targeted update: patch bars/% in place while the item SET is unchanged,
+    // instead of rebuilding innerHTML every tick (the violent green flicker).
+    const _sigW = matching.map(j => j.id + ':' + j.status).join(',');
+    if (widget.dataset.sig === _sigW) {
+      matching.forEach(j => {
+        const el = widget.querySelector(`.step-progress-item[data-job-id="${j.id}"]`);
+        if (!el) return;
+        const pct = Math.round(j.progress || 0);
+        const fill = el.querySelector('.step-progress-item-bar-fill');
+        if (fill) fill.style.width = pct + '%';
+        const pctEl = el.querySelector('.step-progress-item-pct');
+        if (pctEl) {
+          const elapsed = j.startedAt ? fmtDuration(Date.now() - j.startedAt) : '';
+          pctEl.innerHTML = (elapsed ? `<span style="color:var(--text-2); margin-right:8px; font-weight:normal;">${elapsed}</span>` : '') + pct + '%';
+        }
+      });
+      continue;
+    }
+    widget.dataset.sig = _sigW;
     widget.innerHTML = matching.map(j => {
       const pct = Math.round(j.progress || 0);
       const canCancel = j.status === 'running';
