@@ -50,7 +50,10 @@ const MOTION_THUMBS_DIR = path.join(CACHE_ROOT, 'motion_thumbs');
 const MOTION_INDEX_PATH = path.join(CACHE_ROOT, 'motion_index.json');
 
 // Modal cloud endpoint (set in config.json by the wizard)
-const CLOUD_RETARGET_URL = process.env.FABMESH_CLOUD_RETARGET_URL || '';
+// Read PER-INVOCATION (not frozen at module load, which the wizard's config
+// load never populated) so a URL configured after startup is honoured. Empty
+// until a Modal retarget endpoint is actually wired.
+function _cloudRetargetUrl() { return process.env.FABMESH_CLOUD_RETARGET_URL || ''; }
 
 // Cost model â€” keep in sync with modal_app/_realvis.py pricing column
 const CLOUD_COST_PER_RETARGET_USD = 0.012; // ~CPU container, < 30 s typical
@@ -202,8 +205,9 @@ function _spawnLocalRetarget({
 // Cloud retarget â€” POST to Modal endpoint, stream multipart, save GLB
 // -----------------------------------------------------------------------------
 async function _runCloudRetarget({ jobId, meshPath, motion, outGlb, BrowserWindow }) {
+  const CLOUD_RETARGET_URL = _cloudRetargetUrl();
   if (!CLOUD_RETARGET_URL) {
-    throw new Error('Cloud mode not configured (FABMESH_CLOUD_RETARGET_URL).');
+    throw new Error('Cloud retarget is not configured yet — use Local mode.');
   }
   _sendToAllWindows(BrowserWindow, 'anim:progress',
     { jobId, phase: 'upload', pct: 0 });
