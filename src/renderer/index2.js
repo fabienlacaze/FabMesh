@@ -14431,10 +14431,9 @@ document.getElementById('rc-go')?.addEventListener('click', async () => {
 });
 
 // ============================================================
-// AGE TOOL — younger / older. Uses img2img (NOT ControlNet-Tile: Tile preserves the
-// input too strongly to add wrinkles/grey hair — it gave "identical" output) with an
-// age-mapped prompt + a moderate denoise strength: low enough to keep the subject,
-// high enough to actually shift skin/hair/age. No backend change.
+// AGE TOOL — younger / older. Reuses the structure-preserving ControlNet-Tile
+// pipeline (texVariant) with an age-mapped prompt + strength, so the silhouette/pose
+// holds while skin/hair/wrinkles shift toward the chosen age. No backend change.
 // ============================================================
 let _ageSrcPath = null;
 function _ageLabel(v) {
@@ -14457,8 +14456,8 @@ function _ageBuildPrompt(v) {
   return 'a bit older, age 45, some wrinkles, slightly greying hair, mature';
 }
 function _ageStrength(v) {
-  const m = Math.abs(v) / 100;  // img2img denoise: keep subject (low) ... strong age (high)
-  return Math.max(0.42, Math.min(0.7, 0.42 + m * 0.28));
+  const m = Math.abs(v) / 100;
+  return Math.max(0.4, Math.min(0.78, 0.4 + m * 0.38));
 }
 document.getElementById('ws-age-btn')?.addEventListener('click', () => {
   const p = state.currentProject;
@@ -14486,7 +14485,7 @@ document.getElementById('age-go')?.addEventListener('click', async () => {
   const v = parseInt(document.getElementById('age-slider').value) || 0;
   if (v === 0) { showToast('Move the slider toward younger or older first', 'error'); return; }
   const guide = (document.getElementById('age-guide').value || '').trim();
-  let prompt = _ageBuildPrompt(v) + ', same character, same outfit, same pose, photorealistic, highly detailed';
+  let prompt = _ageBuildPrompt(v);
   if (guide) prompt = prompt + ', ' + (await translateUserPrompt(guide));
   const strength = _ageStrength(v);
   document.getElementById('modal-age').classList.add('hidden');
@@ -14496,7 +14495,7 @@ document.getElementById('age-go')?.addEventListener('click', async () => {
       Amount: Math.abs(v) + '%',
     }, 20000, { sourceImageUrl: imagePath, projectName: p.name });
     try {
-      const r = await API.img2img({ imagePath, prompt, strength, engine: 'local-sdxl', seed: 0 });
+      const r = await API.texVariant({ imagePath, prompt, strength, seed: 0 });
       if (r?.success) {
         completeJob(job.id, true);
         await reloadCurrentProject();
