@@ -5120,7 +5120,8 @@ function _offerMultiviewRegenerate() {
   modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:10000; display:flex; align-items:center; justify-content:center;';
   const isBack = info.viewKey === 'back';
   modal.innerHTML = `
-    <div style="background:#1a1a2a; border:1px solid #3a3a4d; border-radius:8px; padding:20px; max-width:480px;">
+    <div style="background:#1a1a2a; border:1px solid #3a3a4d; border-radius:8px; padding:20px; max-width:480px; position:relative;">
+      <button id="mv-regen-x" style="position:absolute; top:8px; right:10px; background:none; border:none; color:#999; font-size:22px; cursor:pointer; line-height:1;" title="Cancel">&times;</button>
       <h3 style="margin:0 0 8px; color:#fff;">Regenerate back view?</h3>
       <p style="color:#aaa; margin:0 0 16px; font-size:13px;">
         You edited the <b>${info.viewKey.toUpperCase()}</b> view.
@@ -5139,6 +5140,8 @@ function _offerMultiviewRegenerate() {
     </div>`;
   document.body.appendChild(modal);
   document.getElementById('mv-regen-keep').onclick = () => modal.remove();
+  document.getElementById('mv-regen-x').onclick = () => modal.remove();
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
   document.getElementById('mv-regen-do').onclick = async () => {
     modal.remove();
     const frontImg = p.previewImagePath || p.selectedImagePath;
@@ -5751,6 +5754,12 @@ document.getElementById('sym-reset')?.addEventListener('click', () => {
   symState.redoStack = [];
   _symUpdateUndoBtns();
   _symDrawPreview();
+});
+document.getElementById('sym-recenter')?.addEventListener('click', () => {
+  symState.zoom = 1;
+  symState.panX = 0;
+  symState.panY = 0;
+  _symApplyView();
 });
 
 // Close / Cancel
