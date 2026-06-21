@@ -3123,6 +3123,7 @@ ipcMain.handle('auto-rig-ai', async (event, { meshPath, engine, skeleton }) => {
   const rigSkeleton = (skeleton || 'orc_m1').replace(/[^a-z0-9_-]/gi, '');
   console.log(`[auto-rig-ai] START mesh=${meshPath} engine=${rigEngine} skeleton=${rigSkeleton} @${new Date(_t0).toISOString()}`);
   try {
+    if (rigEngine !== 'puppeteer') await _freeSdxlForHeavyOp('rigging IA');
     if (!meshPath || !fs.existsSync(meshPath)) {
       return { success: false, error: 'Mesh not found' };
     }
@@ -5886,8 +5887,21 @@ ipcMain.handle('image-to-3d', async (event, { imagePath: _imagePath, imagePathBa
 });
 
 // --- Legacy: TRELLIS only (kept for compatibility) ---
+// Free the persistent SDXL image server (7+ GB VRAM) before a heavy NON-image
+// GPU op (mesh/3D, multi-view, GPU rig) so the two don't fight over VRAM on a
+// 16 GB card. No-op if SDXL isn't loaded; it respawns on the next image op.
+async function _freeSdxlForHeavyOp(label) {
+  if (!sdxlProc) return;
+  try {
+    stopSdxlServer();
+    try { safeSend('ai3d-progress', `[main] SDXL libéré pour ${label} (rechargé au besoin)\n`); } catch (_) {}
+    await new Promise(r => setTimeout(r, 1200));   // let the OS reclaim the VRAM
+  } catch (_) {}
+}
+
 ipcMain.handle('image-to-3d-trellis', async (event, { imagePath, outputName, textureSize }) => {
   try {
+    await _freeSdxlForHeavyOp('mesh 3D');
     const safeName = outputName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
     const meshFilename = `${safeName}_${timestamp}.glb`;
@@ -5996,6 +6010,7 @@ ipcMain.handle('generate-multiview', async (_event, opts) => {
   // Per-call engine override: defaults to MV-Adapter (true ortho
   // azim 0/90/180/270, same SDXL base as RealVis so colours match).
   const script = _mvScriptForEngine(engineOverride);
+  await _freeSdxlForHeavyOp('multi-vues');
   // Multi-views are tied to the EXACT image version. Output dir derived
   // from the image file path:
   //   images/dog/ref_0.png        → images/dog/ref_0_multiview/

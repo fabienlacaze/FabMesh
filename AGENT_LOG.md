@@ -1,5 +1,14 @@
 # FabMesh Agent Log
 
+## 2026-06-21 (Libération VRAM : décharger SDXL avant une gen GPU d'un autre type + idle translate)
+
+- User : le serveur image SDXL (7,2 Go VRAM) bloque la VRAM si on lance une gen
+  mesh/3D (TRELLIS ~10 Go) avant les 90 s d'idle. `image-to-3d` le déchargeait déjà
+  (l.5433) ; ajouté le helper `_freeSdxlForHeavyOp(label)` (stop + 1,2 s, no-op si pas
+  chargé) appelé au début de `image-to-3d-trellis`, `generate-multiview`, et
+  `auto-rig-ai` (sauf puppeteer = CPU). SDXL respawn à la prochaine op image.
+- Worker de traduction : auto-déchargement après 5 min d'idle (libère ~1 Go RAM).
+
 ## 2026-06-21 (Fix bruit arc-en-ciel img2img — VAE fp16 overflow)
 
 - User : « j'ai demandé la modif "il doit etre obèse", l'image est vraiment dégradée »
