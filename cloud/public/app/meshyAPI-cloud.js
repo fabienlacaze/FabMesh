@@ -375,7 +375,7 @@
        Returns the EXACT shape the desktop IPC returns:
          { success: bool, images: [path, path, ...], error?: string }
        so the renderer's caller works unchanged. */
-    generateImages: async ({ prompt, userPrompt, projectName, numImages = 1, steps, jobId } = {}) => {
+    generateImages: async ({ prompt, userPrompt, projectName, numImages = 1, steps, jobId, engine } = {}) => {
       console.log('[generateImages] ENTER projectName=', projectName, 'numImages=', numImages);
       log(`generateImages via /api/generate-image (Cog myfabmesh-cloud) — ${numImages}× "${(userPrompt || prompt || '').slice(0, 60)}…"`);
       window.__meshyEmit('image-progress', { jobId, index: 0, total: numImages, status: 'fetching' });
@@ -392,6 +392,7 @@
             prompt,              // already-enriched fallback
             userPrompt,          // raw user text (Worker re-enriches)
             numImages, asset_type, asset_style, steps,
+            turbo: engine === 'local-lightning',  // SDXL-Lightning 4-step (Modal text2image)
             projectName,         // for user_assets row insertion
           }),
           credentials: 'include',

@@ -296,6 +296,7 @@ async function uploadClientMeshResult(bytes, opType, extra = {}) {
 const ENGINE_LABELS = {
   // Image engines
   'local-flux':     'MyFabmesh.AI Image Engine (local)',
+  'local-lightning':'SDXL-Lightning ⚡ turbo (4-step)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
   'sf3d':           'MyFabmesh.AI 3D Native (rerouted)',
@@ -4258,7 +4259,7 @@ const ASSET_STYLE_PROMPTS = {
 (function _hideFixedEngineFields() {
   // Same list as desktop _hideFixedEngineFields — NOT ws-anim-engine, which
   // has multiple (some disabled) options and stays a real dropdown.
-  ['ws-engine', 'ws-3d-engine', 'ws-rig-engine', 'mod-engine'].forEach((id) => {
+  ['ws-3d-engine', 'ws-rig-engine', 'mod-engine'].forEach((id) => {
     const sel = document.getElementById(id);
     if (!sel) return;
     if (sel.options && sel.options.length > 1) return;  // a real choice → keep it

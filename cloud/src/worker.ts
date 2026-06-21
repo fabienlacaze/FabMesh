@@ -5492,6 +5492,7 @@ interface CogInput {
   seed?: number;
   steps?: number;
   unrestricted?: boolean;
+  turbo?: boolean;
 }
 
 // Cached version id for fabienlacaze/myfabmesh-cloud. We resolve it
@@ -5557,6 +5558,7 @@ async function callModalText2Image(env: Env, userId: string, input: CogInput, fo
       seed: input.seed,
       steps: input.steps,
       unrestricted: !!input.unrestricted,
+      turbo: !!input.turbo,
     }),
     // Modal cold-start on the RealVis container can hit 90-120s when
     // the GPU snapshot is fully cold (first call of the day). Plus the
@@ -6256,9 +6258,10 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
   const user = await getSessionUser(req, env);
   if (!user) return err(401, 'unauthorized');
   const { prompt, numImages, seed, asset_type, asset_style, userPrompt, steps,
-          tpose, refImageUrl, cn_scale, ip_scale, projectName } = await req.json() as {
+          tpose, refImageUrl, cn_scale, ip_scale, projectName, turbo } = await req.json() as {
     prompt?: string;
     userPrompt?: string;
+    turbo?: boolean;   // SDXL-Lightning 4-step turbo (Modal text2image only)
     numImages?: number;
     seed?: number;
     asset_type?: string;
@@ -6377,6 +6380,7 @@ async function handleGenerateImage(req: Request, env: Env): Promise<Response> {
           unrestricted, // per-user parental state, forwarded to Modal
           seed: seedBase + i,
           steps: steps || 30,
+          turbo: !!turbo,  // SDXL-Lightning 4-step (Modal only; Cog ignores it)
         }, 'front'));
       }
     }

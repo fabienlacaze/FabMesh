@@ -1,5 +1,17 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (SDXL-Lightning turbo — parité cloud/Modal)
+
+Portage du turbo Lightning côté cloud (le desktop l'avait déjà). Modal : la LoRA
+4-step est chargée comme **adapter nommé désactivé** au boot (`move_to_gpu`),
+activée par-requête dans `_generate_png` si `turbo` (Modal = 1 input/conteneur →
+`set_adapters` sans race), avec scheduler Euler trailing + steps=4 + guidance=0
+(`_realvis.generate(turbo=)`), restauré en `finally`. Worker : `turbo` threadé
+(CogInput + body Modal + handler generate-image). Cloud UI : option « SDXL-Lightning
+⚡ » dans `ws-engine` (retiré de la liste hide = parité desktop) → `generateImages`
+envoie `turbo:true`. Le chemin Cog/Replicate ignore `turbo` (RealVis normal).
+Déploiement : **redeploy Modal** + `cd cloud && npm run build && npx wrangler deploy`.
+
 ## 2026-06-20 (SDXL-Lightning ⚡ turbo — 3e moteur image, ~15-40x plus rapide)
 
 Suite au workflow « générateur rapide », ajout de SDXL-Lightning. Fusionne la LoRA

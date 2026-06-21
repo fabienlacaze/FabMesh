@@ -126,7 +126,7 @@ def build_prompts(prompt: str, asset_type: str | None = None) -> tuple[str, str]
 
 
 def generate(pipe, prompt: str, seed: int, steps: int = 30,
-             asset_type: str | None = None) -> _PImage.Image:
+             asset_type: str | None = None, turbo: bool = False) -> _PImage.Image:
     """Run RealVisXL on the given pipeline. `pipe` must already be on
     GPU and configured (called by app.py after Memory Snapshot restore).
 
@@ -139,8 +139,8 @@ def generate(pipe, prompt: str, seed: int, steps: int = 30,
     """
     optimized, negative = build_prompts(prompt, asset_type=asset_type)
     base_kwargs = dict(
-        num_inference_steps=int(steps),
-        guidance_scale=9.5,
+        num_inference_steps=(4 if turbo else int(steps)),
+        guidance_scale=(0.0 if turbo else 9.5),
         height=1024,
         width=1024,
         generator=torch.Generator("cuda").manual_seed(int(seed)),

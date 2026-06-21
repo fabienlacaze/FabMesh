@@ -591,6 +591,24 @@ class MyFabmeshPredictor:
             print("[ready] xformers attention enabled", flush=True)
         except Exception as e:
             print(f"[ready] xformers skipped: {e}", flush=True)
+        # SDXL-Lightning turbo: load the 4-step LoRA as a DISABLED named adapter.
+        # Toggled per-request in _generate_png (Modal runs 1 input/container, so
+        # set_adapters has no concurrency race). Same licence as RealVisXL.
+        self._has_lightning = False
+        try:
+            from huggingface_hub import hf_hub_download
+            from diffusers import EulerDiscreteScheduler
+            _lora = hf_hub_download("ByteDance/SDXL-Lightning",
+                                    "sdxl_lightning_4step_lora.safetensors")
+            self.pipe.load_lora_weights(_lora, adapter_name="lightning")
+            self.pipe.set_adapters([])  # disabled -> normal RealVis by default
+            self._default_scheduler = self.pipe.scheduler
+            self._euler_trailing = EulerDiscreteScheduler.from_config(
+                self.pipe.scheduler.config, timestep_spacing="trailing")
+            self._has_lightning = True
+            print("[ready] SDXL-Lightning adapter loaded (disabled)", flush=True)
+        except Exception as e:
+            print(f"[ready] lightning adapter skipped: {e}", flush=True)
         print(f"[ready] GPU move done in {time.time() - t0:.1f}s", flush=True)
 
     def _generate_png(
@@ -601,6 +619,7 @@ class MyFabmeshPredictor:
         seed: int,
         steps: int,
         unrestricted: bool = False,
+        turbo: bool = False,
     ) -> bytes:
         """Internal: do the generation and return PNG bytes."""
         from modal_app._prompts import build_enriched_prompt
@@ -616,8 +635,17 @@ class MyFabmeshPredictor:
             f"seed={seed} steps={steps}",
             flush=True,
         )
-        img = generate(self.pipe, enriched, seed=seed, steps=steps,
-                       asset_type=asset_type)
+        _use_turbo = turbo and getattr(self, "_has_lightning", False)
+        if _use_turbo:
+            self.pipe.set_adapters(["lightning"])
+            self.pipe.scheduler = self._euler_trailing
+        try:
+            img = generate(self.pipe, enriched, seed=seed, steps=steps,
+                           asset_type=asset_type, turbo=_use_turbo)
+        finally:
+            if _use_turbo:
+                self.pipe.set_adapters([])
+                self.pipe.scheduler = self._default_scheduler
 
         # Parental control. Two bypass paths:
         #  - server-wide FABMESH_UNRESTRICTED env var (test environments)
@@ -686,6 +714,7 @@ class MyFabmeshPredictor:
                 seed=int(payload.get("seed") or 0),
                 steps=int(payload.get("steps") or 30),
                 unrestricted=bool(payload.get("unrestricted")),
+                turbo=bool(payload.get("turbo")),
             )
             return Response(content=png, media_type="image/png")
 
