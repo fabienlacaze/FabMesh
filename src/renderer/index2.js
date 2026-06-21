@@ -129,6 +129,7 @@ try {
 const ENGINE_LABELS = {
   // Image engines
   'local-flux':     'MyFabmesh.AI Image Engine (RealVisXL, local)',
+  'local-lightning':'SDXL-Lightning ⚡ turbo (RealVisXL, 4-step, local)',
   'hidream':        'HiDream-O1 (local)',
   // 3D engines — sf3d / local legacy IDs are silently rerouted to
   // the native engine at dispatch.
@@ -2868,6 +2869,7 @@ function _estimateImageMs() {
   let perImage;
   if (engine === 'pollinations') perImage = 5000;
   else if (engine === 'local-sd') perImage = steps * 200 + 1500;
+  else if (engine === 'local-lightning') perImage = 6000; // 4-step turbo (load-dominated per spawn)
   // HiDream-O1 FP8: the 8.8 GB model load dominates the first run (cold ~3 min),
   // ~1.5 s/step @ 2048 once warm. A flat ~1m45s estimate avoids the "stuck at
   // 90%" look the old SDXL-tuned estimate (~23s) caused.
@@ -4798,6 +4800,7 @@ document.getElementById('ws-generate-image').addEventListener('click', async () 
   let perImage;
   if (engine === 'pollinations') perImage = 5000;
   else if (engine === 'local-sd') perImage = steps * 200 + 1500;
+  else if (engine === 'local-lightning') perImage = 6000; // 4-step turbo
   else perImage = steps * 600 + 5000; // local-flux RealVisXL
   let totalImages = count;
   if (multiView) totalImages *= 3;

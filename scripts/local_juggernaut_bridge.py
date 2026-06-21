@@ -28,6 +28,11 @@ except Exception as _gt_err:
 
 def generate_images(prompt, output_dir, num_images=4, steps=30):
     from diffusers import StableDiffusionXLPipeline
+    # SDXL-Lightning "turbo": 4-step LoRA fused on RealVisXL. SAME licence
+    # (Open RAIL++-M), ~15-40x faster. Applied ONLY on the default RealVis path
+    # (not the ControlNet T-pose path); _lightning_on gates steps/guidance below.
+    _turbo = os.environ.get("FABMESH_TURBO") == "1"
+    _lightning_on = False
     # Compel helper bypasses SDXL's 77-token CLIP-L cap (workflow wb66mnlri).
     # If Compel is not installed we fall back to legacy pipe(prompt=...).
     try:
@@ -219,6 +224,22 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
             try: pipe.vae.to(torch.float32)
             except Exception: pass
             print(f"LOCAL_REALVIS: upcast_vae fallback ({_e})", flush=True)
+        # SDXL-Lightning turbo: fuse the 4-step LoRA + Euler 'trailing' scheduler
+        # BEFORE cpu-offload (load LoRA while weights are on-device).
+        if _turbo:
+            try:
+                from huggingface_hub import hf_hub_download
+                from diffusers import EulerDiscreteScheduler
+                _lora = hf_hub_download("ByteDance/SDXL-Lightning",
+                                        "sdxl_lightning_4step_lora.safetensors")
+                pipe.load_lora_weights(_lora)
+                pipe.fuse_lora()
+                pipe.scheduler = EulerDiscreteScheduler.from_config(
+                    pipe.scheduler.config, timestep_spacing="trailing")
+                _lightning_on = True
+                print("LOCAL_REALVIS: SDXL-Lightning 4-step turbo ENABLED", flush=True)
+            except Exception as _le:
+                print(f"LOCAL_REALVIS: turbo LoRA failed ({_le}); normal RealVis", flush=True)
         pipe.enable_model_cpu_offload()
         print("LOCAL_REALVIS: Loaded with fp32 VAE (no grey/NaN) + CPU offload")
         sys.stdout.flush()
@@ -363,8 +384,8 @@ def generate_images(prompt, output_dir, num_images=4, steps=30):
         # True, `pipe` IS `_ctrl_pipe` (see line ~175), and ControlNet
         # SDXL accepts the *_embeds kwargs since diffusers 0.24+.
         _pipe_kwargs = dict(
-            num_inference_steps=int(steps),
-            guidance_scale=_cfg,
+            num_inference_steps=(4 if _lightning_on else int(steps)),
+            guidance_scale=(0.0 if _lightning_on else _cfg),
             height=1024,
             width=1024,
             generator=torch.Generator("cuda").manual_seed(int(time.time()) + i),

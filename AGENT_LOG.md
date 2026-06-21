@@ -1,5 +1,22 @@
 # FabMesh Agent Log
 
+## 2026-06-20 (SDXL-Lightning ⚡ turbo — 3e moteur image, ~15-40x plus rapide)
+
+Suite au workflow « générateur rapide », ajout de SDXL-Lightning. Fusionne la LoRA
+4-step de `ByteDance/SDXL-Lightning` PAR-DESSUS RealVisXL_V4.0 → **même licence**
+(Open RAIL++-M, pas de plafond CA), même VRAM/stack cu128/sm_120, garde le style
+RealVis, passe de ~30 steps à 4 (~0,5-2 s de sampling vs ~15-40 s).
+- `local_juggernaut_bridge.py` : `FABMESH_TURBO=1` → `load_lora_weights` +
+  `fuse_lora` + `EulerDiscreteScheduler(timestep_spacing="trailing")`. Flag
+  `_lightning_on` force `steps=4` + `guidance=0` UNIQUEMENT sur le path RealVis par
+  défaut (jamais sur le path ControlNet T-pose, qui garderait 4 steps sans LoRA = cassé).
+- `main.js` : engine `local-lightning` → même bridge + `FABMESH_TURBO=1` + steps=4.
+- Dropdown `ws-engine` + `ENGINE_LABELS` + les 2 estimateurs ETA.
+- 1er run télécharge la LoRA (~400 Mo). **Limite perf** : le bridge respawn → recharge
+  RealVisXL (~7 Go) à CHAQUE appel ; le gain plein (<1 s) exige le serveur image
+  persistant (cf. workflow améliorations). **Restart Electron requis** (main.js).
+- À FAIRE : porter le turbo côté cloud/Modal (text2image) pour la parité.
+
 ## 2026-06-20 (Marquage IA Act Art. 50 — provenance machine-readable sur images générées)
 
 P0 de l'audit : aucune marque « IA » sur les images générées. Ajout d'un marquage

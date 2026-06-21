@@ -4997,9 +4997,10 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
     };
 
     // LOCAL GPU: Juggernaut XL v9 (recommended, photorealistic SDXL fine-tune)
-    if (engine === 'local-flux') {
+    if (engine === 'local-flux' || engine === 'local-lightning') {
+      const turbo = engine === 'local-lightning';
       const bridgeScript = path.join(__dirname, '..', '..', 'scripts', 'local_juggernaut_bridge.py');
-      const stepsClamped = Math.max(4, Math.min(60, parseInt(steps) || 30));
+      const stepsClamped = turbo ? 4 : Math.max(4, Math.min(60, parseInt(steps) || 30));
       // Snapshot the dir BEFORE the run so we only return the new images.
       const filesBefore = new Set(
         fs.existsSync(imagesDir)
@@ -5009,7 +5010,7 @@ ipcMain.handle('generate-images', async (event, { prompt, userPrompt, numImages,
       const result = await new Promise((resolve, reject) => {
         const proc = execFile('python', [bridgeScript, prompt, imagesDir, String(numImages || 4), String(stepsClamped)], {
           timeout: 1800000, maxBuffer: 50 * 1024 * 1024,
-          env: childEnv,
+          env: turbo ? { ...childEnv, FABMESH_TURBO: '1' } : childEnv,
         }, (error, stdout, stderr) => {
           if (error) { reject({ error: error.message, stdout, stderr }); return; }
           const imgs = fs.readdirSync(imagesDir)
